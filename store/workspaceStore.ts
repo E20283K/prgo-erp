@@ -3,7 +3,7 @@ import { create } from "zustand";
 export interface DocumentTab {
   id: string;
   title: string;
-  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "invoice";
+  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "invoice" | "client-order" | "sales-record";
   module: string;
   isUnsaved?: boolean;
   documentData?: any;
@@ -112,6 +112,7 @@ interface WorkspaceState {
   setSidebarWidth: (width: number) => void;
   login: (user?: Partial<UserProfile>) => void;
   logout: () => void;
+  switchTab: (direction?: "next" | "prev") => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
@@ -138,6 +139,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         unit: "pcs",
         status: "Active",
         priority: "High",
+        orderType: "Production",
+        linkedOrderId: "CO-00041",
         pressMachine: "Heidelberg Speedmaster XL 106",
         startDate: "2026-09-30",
         deadline: "2026-10-06",
@@ -147,6 +150,34 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         priceTotal: 14850.00,
         currency: "USD",
         responsible: "K. Anderson (Prepress Lead)",
+      },
+    },
+    {
+      id: "CO-00041",
+      title: "CO-00041: Alpha Media — Catalog",
+      type: "client-order",
+      module: "crm",
+      isUnsaved: false,
+      activeLevel3Tab: "overview",
+      documentData: {
+        docNo: "CO-00041",
+        customer: "Alpha Media Group LLC",
+        product: "A4 Hardcover Catalog 96p",
+        quantity: 5000,
+        unit: "pcs",
+        orderType: "Production",
+        approvalStatus: "Approved",
+        currency: "USD",
+        recipe: "OFFSET_STD_V1",
+        department: "Offset",
+        deadline: "2026-10-06",
+        responsible: "Elena Voronina",
+        linkedWoId: "WO-00351",
+        sampleDispatched: true,
+        sampleDispatchDate: "2026-09-27",
+        sampleCourier: "Company driver",
+        sampleRecipient: "John Smith",
+        sampleQty: 5,
       },
     },
   ],
@@ -329,6 +360,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   isAuthenticated: false,
   currentUser: DEMO_USERS.operator,
+
+  switchTab: (direction = "next") =>
+    set((state) => {
+      if (state.tabs.length <= 1) return state;
+      const currentIndex = state.tabs.findIndex((t) => t.id === state.activeTabId);
+      const step = direction === "prev" ? -1 : 1;
+      let nextIndex = 0;
+      if (currentIndex !== -1) {
+        nextIndex = (currentIndex + step + state.tabs.length) % state.tabs.length;
+      }
+      const nextTab = state.tabs[nextIndex];
+      if (!nextTab) return state;
+      return {
+        activeTabId: nextTab.id,
+      };
+    }),
+
 
   login: (user) => {
     set((state) => {

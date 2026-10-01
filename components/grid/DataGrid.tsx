@@ -597,8 +597,9 @@ export function DataGrid() {
 
               <Button 
                 onClick={() => {
-                  if (filteredRows.length > 0) {
-                    handleCellActivated([0, 0]);
+                  const selectedRowIdx = selection.rows.toArray()[0] ?? 0;
+                  if (filteredRows[selectedRowIdx]) {
+                    handleCellActivated([0, selectedRowIdx]);
                   }
                 }}
                 variant="outline" 

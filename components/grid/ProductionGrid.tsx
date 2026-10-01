@@ -34,7 +34,7 @@ interface ProductionGridProps {
 
 export function ProductionGrid({ type }: ProductionGridProps) {
   const tCommon = useTranslations("Common");
-  const { updateGridStats, theme, openTab } = useWorkspaceStore();
+  const { updateGridStats, theme, openTab, setCreateOrderOpen } = useWorkspaceStore();
   const isDark = theme === "dark";
 
   const handleCreateNew = () => {
@@ -55,32 +55,60 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           version: "1.0",
         }
       });
+    } else {
+      setCreateOrderOpen(true);
     }
   };
 
   const handleOpen = () => {
-    if (type === "bom" && selection.rows.length > 0) {
-      // Just take the first selected row for mock purposes
-      const rowIndex = selection.rows.toArray()[0];
-      const selectedRow = filteredRows[rowIndex];
-      if (selectedRow) {
-        openTab({
-          id: selectedRow.id,
-          title: selectedRow.id,
-          type: "product-spec",
-          module: "production",
-          isUnsaved: false,
-          activeLevel3Tab: "overview",
-          documentData: {
-            code: selectedRow.id,
-            name: selectedRow.productName,
-            department: "Offset", // mock
-            status: selectedRow.status,
-            version: selectedRow.version,
-            baseMaterial: selectedRow.baseMaterial,
-          }
-        });
-      }
+    if (selection.rows.length === 0) return;
+    const rowIndex = selection.rows.toArray()[0];
+    const selectedRow = filteredRows[rowIndex];
+    if (!selectedRow) return;
+
+    if (type === "bom") {
+      openTab({
+        id: selectedRow.id,
+        title: selectedRow.id,
+        type: "product-spec",
+        module: "production",
+        isUnsaved: false,
+        activeLevel3Tab: "overview",
+        documentData: {
+          code: selectedRow.id,
+          name: selectedRow.productName,
+          department: "Offset", // mock
+          status: selectedRow.status,
+          version: selectedRow.version,
+          baseMaterial: selectedRow.baseMaterial,
+        }
+      });
+    } else if (selectedRow.workOrder) {
+      openTab({
+        id: selectedRow.workOrder,
+        title: `${selectedRow.workOrder}: Production Order`,
+        type: "work-order",
+        module: "production",
+        isUnsaved: false,
+        activeLevel3Tab: "overview",
+        documentData: {
+          docNo: selectedRow.workOrder,
+          customer: "Alpha Media Group",
+          product: "A4 Hardcover Catalog 96p",
+          department: "Offset",
+          site: "Building 1",
+          quantity: 5000,
+          unit: "pcs",
+          status: "Active",
+          priority: "High",
+          pressMachine: selectedRow.machine || "Heidelberg Speedmaster XL 106",
+          startDate: "2026-09-30",
+          deadline: "2026-10-06",
+          priceTotal: 14850.00,
+          currency: "USD",
+          responsible: selectedRow.operator || "Alexey Kovalev",
+        }
+      });
     }
   };
 

@@ -152,6 +152,16 @@ export const MODULE_NAV: ModuleDef[] = [
           { id: "pipeline", label: "Pipeline", icon: GitFork },
         ],
       },
+      {
+        id: "orders",
+        label: "Orders",
+        icon: FileSignature,
+        defaultOpen: true,
+        items: [
+          { id: "client-orders", label: "Client Orders", icon: ClipboardList },
+          { id: "estimates", label: "Cost Estimates", icon: Calculator },
+        ],
+      },
     ],
   },
   {
@@ -161,14 +171,15 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "documents",
-        label: "Documents",
+        label: "Sales & Orders",
         icon: FileText,
         defaultOpen: true,
         items: [
           { id: "quotations", label: "Quotations", icon: FileSignature },
-          { id: "orders", label: "Sales Orders", icon: ShoppingBag },
+          { id: "orders", label: "Sales History", icon: History },
           { id: "invoices", label: "Invoices", icon: Receipt },
           { id: "returns", label: "Returns", icon: RotateCcw },
+          { id: "products", label: "Products", icon: Package },
         ],
       },
       {
@@ -177,8 +188,16 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Tag,
         items: [
           { id: "price-lists", label: "Price Lists", icon: BadgePercent },
-          { id: "products", label: "Products", icon: Package },
           { id: "discounts", label: "Discounts", icon: Percent },
+        ],
+      },
+      {
+        id: "retail",
+        label: "Retail & POS",
+        icon: ShoppingBag,
+        items: [
+          { id: "pos", label: "Point of Sale", icon: Calculator },
+          { id: "shifts", label: "Cashier Shifts", icon: History },
         ],
       },
     ],

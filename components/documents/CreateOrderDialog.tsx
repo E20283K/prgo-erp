@@ -52,6 +52,7 @@ const orderSchema = z.object({
   machine: z.string().min(1, "Machine is required"),
   deadline: z.string().min(1, "Deadline is required"),
   priority: z.enum(["Normal", "High", "Urgent"]),
+  orderType: z.enum(["Sample", "Production"]),
 });
 
 type OrderFormValues = z.infer<typeof orderSchema>;
@@ -165,13 +166,13 @@ export function CreateOrderDialog() {
   }, [watchRecipe, setValue]);
 
   const onSubmit = (data: OrderFormValues) => {
-    const newId = `WO-00${Math.floor(100 + Math.random() * 900)}`;
+    const newId = `CO-00${Math.floor(100 + Math.random() * 900)}`;
     
     openTab({
       id: newId,
       title: `${newId}: ${data.product}`,
-      type: "work-order",
-      module: "production",
+      type: "client-order",
+      module: "crm",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
@@ -183,16 +184,17 @@ export function CreateOrderDialog() {
         recipe: data.recipe,
         quantity: data.quantity,
         unit: data.unit,
-        status: "Draft",
+        status: "Calculating",
         priority: data.priority,
         pressMachine: data.machine,
         startDate: new Date().toISOString().split('T')[0],
         deadline: data.deadline,
-        priceTotal: 0,
         currency: "USD",
         responsible: currentUser?.name || "Unassigned",
         photoUrl: orderPhotoPreview,
         attachmentsCount: attachments.length,
+        orderType: data.orderType || "Production",
+        approvalStatus: "Pending",
       },
     });
 
@@ -216,7 +218,9 @@ export function CreateOrderDialog() {
       <SheetContent side="right" className="sm:max-w-[680px] w-full p-0 flex flex-col h-full bg-background border-l border-border">
         <SheetHeader className="px-6 py-4 border-b border-border shrink-0 bg-muted/20">
           <SheetTitle className="text-base font-semibold text-foreground">{t("title")}</SheetTitle>
-          <SheetDescription className="text-xs text-muted-foreground">{t("desc")}</SheetDescription>
+          <SheetDescription className="text-xs text-muted-foreground">
+            {t("desc")} After creation, calculate the cost and send a physical sample before pushing to Production.
+          </SheetDescription>
         </SheetHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -246,6 +250,19 @@ export function CreateOrderDialog() {
               <label className="text-xs font-medium">{t("quantity")} <span className="text-destructive">*</span></label>
               <Input type="number" {...register("quantity", { valueAsNumber: true })} className="h-8 text-xs" />
               {errors.quantity && <span className="text-[11px] text-destructive">{errors.quantity.message}</span>}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Order Type <span className="text-destructive">*</span></label>
+              <Select value={watch("orderType")} onValueChange={(val: any) => val && setValue("orderType", val)}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Sample">Sample Order</SelectItem>
+                  <SelectItem value="Production">Confirmed Production Order</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1.5">

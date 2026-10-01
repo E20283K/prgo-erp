@@ -34,7 +34,7 @@ interface CrmGridProps {
 
 export function CrmGrid({ type }: CrmGridProps) {
   const tCommon = useTranslations("Common");
-  const { updateGridStats, theme } = useWorkspaceStore();
+  const { updateGridStats, theme, setCreateOrderOpen, openTab } = useWorkspaceStore();
   const isDark = theme === "dark";
 
   const { columns, rows } = useMemo(() => {
@@ -89,6 +89,25 @@ export function CrmGrid({ type }: CrmGridProps) {
         source: ["Website", "Referral", "Cold Call", "Exhibition"][i % 4],
         status: ["New", "Contacted", "Qualified", "Lost"][i % 4],
         score: Math.floor(Math.random() * 100),
+      }));
+    } else if (type === "client-orders") {
+      cols = [
+        { id: "id", title: "Order ID", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "date", title: "Date", width: 120, icon: GridColumnIcon.HeaderDate },
+        { id: "customer", title: "Customer", width: 220, icon: GridColumnIcon.HeaderString },
+        { id: "product", title: "Product", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: "quantity", title: "Qty", width: 100, icon: GridColumnIcon.HeaderNumber },
+        { id: "orderType", title: "Type", width: 120, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+      mockRows = Array.from({ length: 50 }, (_, i) => ({
+        id: `CO-${String(41 + i).padStart(5, "0")}`,
+        date: `2026-10-${String((i % 30) + 1).padStart(2, "0")}`,
+        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging"][i % 4],
+        product: ["Offset Catalogs 100p", "Woven Labels 30x50", "Nylon Taffeta Roll", "Packaging Boxes"][i % 4],
+        quantity: [1000, 5000, 200, 10000][i % 4],
+        orderType: ["Sample", "Production", "Production", "Production"][i % 4],
+        status: ["Calculating", "Pending Approval", "In Production", "Completed"][i % 4],
       }));
     } else {
       // requests
@@ -199,6 +218,43 @@ export function CrmGrid({ type }: CrmGridProps) {
     return Array.from(statuses);
   }, [rows]);
 
+  const handleCreateNew = () => {
+    if (type === "client-orders") {
+      setCreateOrderOpen(true);
+    }
+  };
+
+  const handleOpenSelected = () => {
+    const indices = selection.rows.toArray();
+    if (indices.length > 0) {
+      handleOpenRow(indices[0]);
+    }
+  };
+
+  const handleOpenRow = (rowIndex: number) => {
+    if (type === "client-orders") {
+      const row = filteredRows[rowIndex];
+      if (row) {
+        openTab({
+          id: row.id,
+          title: `${row.id}: ${row.product}`,
+          type: "client-order",
+          module: "crm",
+          documentData: {
+            docNo: row.id,
+            customer: row.customer,
+            product: row.product,
+            quantity: row.quantity,
+            orderType: row.orderType,
+            status: row.status,
+            recipe: "OFFSET_STD_V1", // Mock default
+            deadline: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+          }
+        });
+      }
+    }
+  };
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -206,11 +262,11 @@ export function CrmGrid({ type }: CrmGridProps) {
           {/* Toolbar */}
           <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-1.5">
-              <Button size="sm" className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded">
+              <Button onClick={handleCreateNew} size="sm" className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded">
                 <Plus className="w-3.5 h-3.5" />
                 <span>Create New</span>
               </Button>
-              <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs font-medium gap-1 rounded">
+              <Button onClick={handleOpenSelected} variant="outline" size="sm" className="h-7 px-2.5 text-xs font-medium gap-1 rounded">
                 <ExternalLink className="w-3 h-3 text-muted-foreground" />
                 <span>Open</span>
               </Button>
@@ -272,6 +328,7 @@ export function CrmGrid({ type }: CrmGridProps) {
               height="100%"
               gridSelection={selection}
               onGridSelectionChange={setSelection}
+              onCellActivated={(cell) => handleOpenRow(cell[1])}
               headerHeight={28}
               rowHeight={32}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}

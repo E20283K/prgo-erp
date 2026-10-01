@@ -14,7 +14,9 @@ import { Toaster } from "@/components/ui/toast";
 
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const { setTheme, isCommandOpen, toggleCommand, sidebarWidth, setSidebarWidth } = useWorkspaceStore();
+  const { setTheme, isCommandOpen, toggleCommand, sidebarWidth, setSidebarWidth, activeTabId } = useWorkspaceStore();
+
+  const isPOSActive = activeTabId.includes("pos");
 
   useEffect(() => {
     try {
@@ -80,6 +82,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // 4. Ctrl+W / Cmd+W: Close active tab
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        e.stopPropagation();
+        const store = useWorkspaceStore.getState();
+        if (store.activeTabId) {
+          store.closeTab(store.activeTabId);
+        }
+        return;
+      }
+
+      // 5. Ctrl+Tab / Ctrl+Shift+Tab: Switch between tabs
+      if ((e.ctrlKey || e.metaKey) && (e.key === "Tab" || e.code === "Tab")) {
+        e.preventDefault();
+        e.stopPropagation();
+        useWorkspaceStore.getState().switchTab(e.shiftKey ? "prev" : "next");
+        return;
+      }
+
+
       // Allow standard text operations: Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+A, Ctrl+Z, Ctrl+J
       const allowedCtrlKeys = ['c', 'v', 'x', 'a', 'z', 'j'];
 
@@ -136,13 +158,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Main App Canvas */}
       <SidebarInset className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
         {/* Topbar with Trigger, Breadcrumbs, Search, User profile */}
-        <Topbar />
+        {!isPOSActive && <Topbar />}
 
         {/* VS Code + 1C Document Workspace */}
         <Workspace>{children}</Workspace>
 
         {/* High-Utility Data Table Status Bar */}
-        <StatusBar />
+        {!isPOSActive && <StatusBar />}
       </SidebarInset>
 
       {/* Global Command Palette (Ctrl+K or Esc) */}

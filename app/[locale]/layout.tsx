@@ -5,7 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
 import { notFound } from 'next/navigation';
-import { routing } from '@/i18n/routing';
+import { routing } from '@/i18n/routing';import QueryProvider from "@/components/providers/QueryProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -58,7 +58,9 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased bg-background text-foreground h-screen w-screen overflow-hidden`}
       >
         <NextIntlClientProvider messages={messages}>
-          <TooltipProvider>{children}</TooltipProvider>
+          <QueryProvider>
+            <TooltipProvider>{children}</TooltipProvider>
+          </QueryProvider>
         </NextIntlClientProvider>
         <div id="portal" />
       </body>

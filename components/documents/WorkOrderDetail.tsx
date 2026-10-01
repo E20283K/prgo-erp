@@ -27,7 +27,9 @@ import {
   Download,
   Image as ImageIcon,
   Maximize2,
-  ChevronsUpDown
+  ChevronsUpDown,
+  Building2,
+  Cpu
 } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
@@ -293,11 +295,224 @@ const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   },
 ];
 
+interface SiteOption {
+  id: string;
+  name: string;
+  label: string;
+  location: string;
+  facilities: string;
+  status: string;
+}
+
+const SITE_OPTIONS: SiteOption[] = [
+  {
+    id: "Building 1",
+    name: "Building 1 (HQ)",
+    label: "Main Press Plant & HQ",
+    location: "Campus North • 12,000 m²",
+    facilities: "Offset Sheetfed, Post-press, CTP Pre-press",
+    status: "Active (4 presses online)",
+  },
+  {
+    id: "Building 2",
+    name: "Building 2 (Annex)",
+    label: "Packaging & Flexo Facility",
+    location: "Campus South • 6,500 m²",
+    facilities: "Narrow Web Flexo, Jacquard Looms, Finishing",
+    status: "Active (6 lines online)",
+  },
+];
+
+interface TechOption {
+  id: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  name: string;
+  code: string;
+  description: string;
+  badgeClass: string;
+  equipmentCount: number;
+}
+
+const TECHNOLOGY_OPTIONS: TechOption[] = [
+  {
+    id: "Offset",
+    name: "Offset Sheetfed Printing",
+    code: "TECH-OFF",
+    description: "High-speed commercial sheetfed, brochures, catalogs & folding cartons",
+    badgeClass: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200",
+    equipmentCount: 3,
+  },
+  {
+    id: "Flexo",
+    name: "Flexographic Rotary Printing",
+    code: "TECH-FLX",
+    description: "Roll-to-roll narrow-web printing for self-adhesive labels & packaging tapes",
+    badgeClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200",
+    equipmentCount: 3,
+  },
+  {
+    id: "Jacquard",
+    name: "Jacquard Weaving Looms",
+    code: "TECH-JCQ",
+    description: "High-density micro-yarn damask, satin & taffeta woven brand labels",
+    badgeClass: "bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border-purple-200",
+    equipmentCount: 3,
+  },
+  {
+    id: "Post-press",
+    name: "Post-press & Assembly Lines",
+    code: "TECH-PST",
+    description: "Automated die-cutting, folding, gluing, foil stamping & case binding",
+    badgeClass: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200",
+    equipmentCount: 3,
+  },
+];
+
+interface MachineOption {
+  code: string;
+  name: string;
+  department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  speed: string;
+  format: string;
+  features: string;
+  status: string;
+  isAvailable: boolean;
+}
+
+const MACHINE_OPTIONS: MachineOption[] = [
+  // Offset
+  {
+    code: "M-OFF-106",
+    name: "Heidelberg Speedmaster XL 106",
+    department: "Offset",
+    speed: "18,000 sheets/hr",
+    format: "B1 (750 × 1050 mm)",
+    features: "6-Color + Inline Coater • Inpress Control 3",
+    status: "Ready for shift",
+    isAvailable: true,
+  },
+  {
+    code: "M-OFF-G40",
+    name: "Komori Lithrone G40",
+    department: "Offset",
+    speed: "16,500 sheets/hr",
+    format: "B1 (720 × 1030 mm)",
+    features: "5-Color + H-UV Curing • KHS-AI Automation",
+    status: "Busy (Job #WO-00278)",
+    isAvailable: true,
+  },
+  {
+    code: "M-OFF-SX74",
+    name: "Heidelberg Speedmaster SX 74",
+    department: "Offset",
+    speed: "15,000 sheets/hr",
+    format: "B2 (530 × 740 mm)",
+    features: "4-Color Perfector (2/2 or 4/0)",
+    status: "Available",
+    isAvailable: true,
+  },
+  // Flexo
+  {
+    code: "M-FLX-01",
+    name: "Mark Andy Performance P7",
+    department: "Flexo",
+    speed: "300 m/min",
+    format: "Web width 330 mm",
+    features: "8 UV Flexo Units + Cold Foil + Rotary Die",
+    status: "Available",
+    isAvailable: true,
+  },
+  {
+    code: "M-FLX-02",
+    name: "Nilpeter FA-Line",
+    department: "Flexo",
+    speed: "200 m/min",
+    format: "Web width 420 mm",
+    features: "Multi-substrate Sleeve Technology • 6-Color",
+    status: "Ready",
+    isAvailable: true,
+  },
+  {
+    code: "M-FLX-03",
+    name: "Gallus ECS 340",
+    department: "Flexo",
+    speed: "165 m/min",
+    format: "Web width 340 mm",
+    features: "Granite Core • 8-Color UV & LED Curing",
+    status: "Ready",
+    isAvailable: true,
+  },
+  // Jacquard
+  {
+    code: "M-JCQ-01",
+    name: "Staubli Jacquard Loom DX",
+    department: "Jacquard",
+    speed: "1,200 rpm",
+    format: "16 Harness Taffeta",
+    features: "Electronic Jacquard • 2,688 Hooks",
+    status: "Available",
+    isAvailable: true,
+  },
+  {
+    code: "M-JCQ-02",
+    name: "Muller Martini Loom",
+    department: "Jacquard",
+    speed: "950 rpm",
+    format: "Narrow Woven Ribbons",
+    features: "16 Shafts Needle Loom • Thermal Selvedge",
+    status: "Available",
+    isAvailable: true,
+  },
+  {
+    code: "M-JCQ-03",
+    name: "Dornier PTV Weaving Loom",
+    department: "Jacquard",
+    speed: "800 rpm",
+    format: "High-density Damask",
+    features: "Airjet Weft Insertion • Electronic Dobby",
+    status: "Available",
+    isAvailable: true,
+  },
+  // Post-press
+  {
+    code: "M-PST-01",
+    name: "Bobst Novacut 106 E",
+    department: "Post-press",
+    speed: "8,000 sheets/hr",
+    format: "B1 (760 × 1060 mm)",
+    features: "Autoplaten Die-cutter & Stripping station",
+    status: "Ready",
+    isAvailable: true,
+  },
+  {
+    code: "M-PST-02",
+    name: "Kolbus BF 513 Casing Line",
+    department: "Post-press",
+    speed: "30 cycles/min",
+    format: "Hardcover Book Binding",
+    features: "Rounding, Backing, Headbanding & Casing-in",
+    status: "Available",
+    isAvailable: true,
+  },
+  {
+    code: "M-PST-03",
+    name: "Bobst Visionfold 110",
+    department: "Post-press",
+    speed: "450 m/min",
+    format: "Carton folding & gluing",
+    features: "Straight-line, Crash-lock bottom & 4/6-corners",
+    status: "Available",
+    isAvailable: true,
+  },
+];
+
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
   const tCommon = useTranslations("Common");
   const { setTabUnsaved, closeTab, setLevel3Tab, theme, openTab } = useWorkspaceStore();
   const [isSpecComboboxOpen, setIsSpecComboboxOpen] = useState(false);
+  const [isSiteComboboxOpen, setIsSiteComboboxOpen] = useState(false);
+  const [isTechComboboxOpen, setIsTechComboboxOpen] = useState(false);
+  const [isMachineComboboxOpen, setIsMachineComboboxOpen] = useState(false);
   const isDark = theme === "dark";
   const data = tab.documentData || {};
   
@@ -337,6 +552,26 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const activeSpec = useMemo(
     () => MASTER_SPECIFICATIONS.find((s) => s.code === formData.recipe),
     [formData.recipe]
+  );
+
+  const activeSite = useMemo(
+    () => SITE_OPTIONS.find((s) => s.id === formData.site || s.name === formData.site) || SITE_OPTIONS[0],
+    [formData.site]
+  );
+
+  const activeTech = useMemo(
+    () => TECHNOLOGY_OPTIONS.find((t) => t.id === formData.department) || TECHNOLOGY_OPTIONS[0],
+    [formData.department]
+  );
+
+  const activeMachine = useMemo(
+    () => MACHINE_OPTIONS.find((m) => m.name === formData.pressMachine || m.code === formData.pressMachine),
+    [formData.pressMachine]
+  );
+
+  const currentDeptMachines = useMemo(
+    () => MACHINE_OPTIONS.filter((m) => m.department === formData.department),
+    [formData.department]
   );
 
   interface RouteStep {
@@ -696,6 +931,27 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   {formData.site}
                 </Badge>
               </div>
+
+              {data.orderType && (
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-500 font-medium">{tOrder("orderType") || "Type"}:</span>
+                  <Badge variant="outline" className={cn("h-6 text-[11px] font-semibold px-2.5", 
+                    data.orderType === "Sample" ? "bg-amber-50 text-amber-700 border-amber-300" :
+                    "bg-blue-50 text-blue-700 border-blue-300"
+                  )}>
+                    {data.orderType === "Sample" ? "SAMPLE ORDER" : "PRODUCTION ORDER"}
+                  </Badge>
+                </div>
+              )}
+              
+              {data.linkedOrderId && (
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-500 font-medium">{tOrder("linkedOrder") || "Linked CO"}:</span>
+                  <Badge variant="outline" className="h-6 text-[11px] font-semibold bg-violet-50 text-violet-700 border-violet-300 cursor-pointer hover:bg-violet-100">
+                    {data.linkedOrderId}
+                  </Badge>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-4 text-zinc-500 font-mono text-[11px]">
@@ -782,46 +1038,250 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
+                  {/* Production Site Combobox */}
                   <div>
-                    <label className="text-zinc-500 font-medium block mb-1">Production Site</label>
-                    <Select value={formData.site} onValueChange={(val: any) => val && handleFieldChange("site", val)}>
-                      <SelectTrigger className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Building 1">Building 1 (HQ)</SelectItem>
-                        <SelectItem value="Building 2">Building 2 (Annex)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <label className="text-zinc-600 dark:text-zinc-400 font-medium text-xs block mb-1">
+                      Production Site
+                    </label>
+                    <Popover open={isSiteComboboxOpen} onOpenChange={setIsSiteComboboxOpen}>
+                      <PopoverTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={isSiteComboboxOpen}
+                            className="w-full h-8 justify-between px-2.5 text-xs bg-zinc-50 dark:bg-zinc-950 font-normal shadow-none border-zinc-200 dark:border-zinc-800 hover:border-blue-400 transition-colors"
+                          />
+                        }
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1 text-left">
+                          <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">
+                            {activeSite.name}
+                          </span>
+                        </div>
+                        <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[320px] p-0 shadow-xl border border-zinc-200 dark:border-zinc-800" align="start">
+                        <Command className="w-full">
+                          <CommandInput placeholder="Search production site..." className="h-8 text-xs" />
+                          <CommandList className="max-h-60">
+                            <CommandEmpty className="py-3 text-center text-xs text-muted-foreground">No site found.</CommandEmpty>
+                            <CommandGroup heading="Manufacturing Facilities">
+                              {SITE_OPTIONS.map((site) => {
+                                const isSelected = formData.site === site.id || formData.site === site.name;
+                                return (
+                                  <CommandItem
+                                    key={site.id}
+                                    value={`${site.name} ${site.label} ${site.facilities}`}
+                                    onSelect={() => {
+                                      handleFieldChange("site", site.id);
+                                      setIsSiteComboboxOpen(false);
+                                    }}
+                                    className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2"
+                                  >
+                                    <Check className={cn("mt-0.5 h-4 w-4 text-blue-600 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
+                                    <div className="flex-1 min-w-0 space-y-0.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-medium text-foreground">{site.name}</span>
+                                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">● Online</span>
+                                      </div>
+                                      <p className="text-[11px] text-muted-foreground">{site.label}</p>
+                                      <p className="text-[10px] text-zinc-400">{site.location}</p>
+                                    </div>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
+
+                  {/* Technology Combobox */}
                   <div>
-                    <label className="text-zinc-500 font-medium block mb-1">Technology</label>
-                    <Select value={formData.department} onValueChange={(val: any) => val && handleDepartmentChange(val)}>
-                      <SelectTrigger className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-semibold text-blue-600 dark:text-blue-400">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Offset">Offset Printing</SelectItem>
-                        <SelectItem value="Flexo">Flexo Labeling</SelectItem>
-                        <SelectItem value="Jacquard">Jacquard Woven</SelectItem>
-                        <SelectItem value="Post-press">Post-press</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <label className="text-zinc-600 dark:text-zinc-400 font-medium text-xs block mb-1">
+                      Technology
+                    </label>
+                    <Popover open={isTechComboboxOpen} onOpenChange={setIsTechComboboxOpen}>
+                      <PopoverTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={isTechComboboxOpen}
+                            className="w-full h-8 justify-between px-2.5 text-xs bg-zinc-50 dark:bg-zinc-950 font-normal shadow-none border-zinc-200 dark:border-zinc-800 hover:border-blue-400 transition-colors"
+                          />
+                        }
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1 text-left">
+                          <Badge variant="outline" className={cn("text-[9px] px-1.5 py-0 font-medium shrink-0", activeTech.badgeClass)}>
+                            {activeTech.id}
+                          </Badge>
+                          <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">
+                            {activeTech.name}
+                          </span>
+                        </div>
+                        <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[360px] p-0 shadow-xl border border-zinc-200 dark:border-zinc-800" align="start">
+                        <Command className="w-full">
+                          <CommandInput placeholder="Search printing technology..." className="h-8 text-xs" />
+                          <CommandList className="max-h-64">
+                            <CommandEmpty className="py-3 text-center text-xs text-muted-foreground">No technology found.</CommandEmpty>
+                            <CommandGroup heading="Production Technologies">
+                              {TECHNOLOGY_OPTIONS.map((tech) => {
+                                const isSelected = formData.department === tech.id;
+                                return (
+                                  <CommandItem
+                                    key={tech.id}
+                                    value={`${tech.id} ${tech.name} ${tech.description}`}
+                                    onSelect={() => {
+                                      handleDepartmentChange(tech.id);
+                                      setIsTechComboboxOpen(false);
+                                    }}
+                                    className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2"
+                                  >
+                                    <Check className={cn("mt-0.5 h-4 w-4 text-blue-600 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
+                                    <div className="flex-1 min-w-0 space-y-0.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-semibold text-foreground">{tech.name}</span>
+                                        <Badge variant="outline" className={cn("text-[9px] px-1 py-0 font-normal", tech.badgeClass)}>
+                                          {tech.equipmentCount} lines
+                                        </Badge>
+                                      </div>
+                                      <p className="text-[11px] text-muted-foreground line-clamp-1">{tech.description}</p>
+                                    </div>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
 
+                {/* Assigned Press Machine Combobox */}
                 <div>
-                  <label className="text-zinc-500 font-medium block mb-1">{tOrder("machineLabel")}</label>
-                  <Select value={formData.pressMachine} onValueChange={(val: any) => val && handleFieldChange("pressMachine", val)}>
-                    <SelectTrigger className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableMachines.map((mach) => (
-                        <SelectItem key={mach} value={mach}>{mach}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-zinc-600 dark:text-zinc-400 font-medium text-xs">
+                      {tOrder("machineLabel")}
+                    </label>
+                    <span className="text-[10px] text-muted-foreground">Equipment line assignment</span>
+                  </div>
+                  <Popover open={isMachineComboboxOpen} onOpenChange={setIsMachineComboboxOpen}>
+                    <PopoverTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={isMachineComboboxOpen}
+                          className="w-full h-8 justify-between px-2.5 text-xs bg-zinc-50 dark:bg-zinc-950 font-normal shadow-none border-zinc-200 dark:border-zinc-800 hover:border-blue-400 transition-colors"
+                        />
+                      }
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1 text-left">
+                        <Cpu className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span className="truncate font-semibold text-zinc-900 dark:text-zinc-100">
+                          {activeMachine?.name || formData.pressMachine}
+                        </span>
+                        {activeMachine && (
+                          <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline font-normal">
+                            • {activeMachine.format} ({activeMachine.speed})
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 shadow-none font-normal">
+                          Ready
+                        </Badge>
+                        <ChevronsUpDown className="h-3 w-3 opacity-50" />
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[460px] p-0 shadow-xl border border-zinc-200 dark:border-zinc-800" align="start">
+                      <Command className="w-full">
+                        <CommandInput placeholder="Search machine name, model, speed, format..." className="h-8 text-xs" />
+                        <CommandList className="max-h-72">
+                          <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">No machine matching search.</CommandEmpty>
+                          
+                          {/* Active Technology Machines */}
+                          <CommandGroup heading={`${formData.department} Presses & Equipment`}>
+                            {currentDeptMachines.map((mach) => {
+                              const isSelected = formData.pressMachine === mach.name || formData.pressMachine === mach.code;
+                              return (
+                                <CommandItem
+                                  key={mach.code}
+                                  value={`${mach.code} ${mach.name} ${mach.department} ${mach.features} ${mach.format}`}
+                                  onSelect={() => {
+                                    handleFieldChange("pressMachine", mach.name);
+                                    setIsMachineComboboxOpen(false);
+                                  }}
+                                  className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5"
+                                >
+                                  <Check className={cn("mt-0.5 h-4 w-4 text-blue-600 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
+                                  <div className="flex-1 min-w-0 space-y-0.5">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-semibold text-foreground">{mach.name}</span>
+                                      <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400">{mach.code}</span>
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>
+                                    <div className="flex items-center gap-2 text-[10px] text-zinc-400 pt-0.5">
+                                      <span className="font-medium text-zinc-600 dark:text-zinc-300">{mach.format}</span>
+                                      <span>•</span>
+                                      <span>{mach.speed}</span>
+                                      <span>•</span>
+                                      <span className="text-emerald-600 dark:text-emerald-400 font-medium">● {mach.status}</span>
+                                    </div>
+                                  </div>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+
+                          {/* Other Department Machines */}
+                          {MACHINE_OPTIONS.filter((m) => m.department !== formData.department).length > 0 && (
+                            <CommandGroup heading="Other Departments Equipment">
+                              {MACHINE_OPTIONS.filter((m) => m.department !== formData.department).map((mach) => {
+                                const isSelected = formData.pressMachine === mach.name || formData.pressMachine === mach.code;
+                                return (
+                                  <CommandItem
+                                    key={mach.code}
+                                    value={`${mach.code} ${mach.name} ${mach.department} ${mach.features} ${mach.format}`}
+                                    onSelect={() => {
+                                      handleFieldChange("pressMachine", mach.name);
+                                      handleDepartmentChange(mach.department);
+                                      setIsMachineComboboxOpen(false);
+                                    }}
+                                    className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5 opacity-80 hover:opacity-100"
+                                  >
+                                    <Check className={cn("mt-0.5 h-4 w-4 text-blue-600 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
+                                    <div className="flex-1 min-w-0 space-y-0.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-medium text-foreground">{mach.name}</span>
+                                        <Badge variant="outline" className="text-[9px] px-1 py-0">{mach.department}</Badge>
+                                      </div>
+                                      <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>
+                                      <div className="flex items-center gap-2 text-[10px] text-zinc-400">
+                                        <span>{mach.format}</span>
+                                        <span>•</span>
+                                        <span>{mach.speed}</span>
+                                      </div>
+                                    </div>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          )}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
