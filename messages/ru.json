@@ -61,14 +61,16 @@
     "commands": "Команды",
     "commandsTitle": "Командная панель (Ctrl+K или Esc)",
     "toggleTheme": "Переключить тему оформления",
+    "switchToLight": "Светлая тема",
+    "switchToDark": "Тёмная тема",
     "syncData": "Обновить / Синхронизация (F5)",
     "syncingData": "Синхронизация данных...",
     "syncComplete": "Синхронизация завершена!",
     "syncToastTitle": "Синхронизация выполнена",
     "syncToastDesc": "Все реестры и документы рабочего стола актуализированы.",
-    "enterFullscreen": "Полноэкранный режим (F11)",
-    "exitFullscreen": "Выйти из полноэкранного режима (Esc / F11)",
-    "openAiCopilot": "PrintGoo ИИ-Ассистент (Ctrl+J)"
+    "enterFullscreen": "Полноэкранный режим",
+    "exitFullscreen": "Выйти из полноэкранного режима",
+    "openAiCopilot": "ИИ-Ассистент"
   },
   "Sidebar": {
     "erpModule": "Раздел ERP",

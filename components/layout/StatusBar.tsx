@@ -4,6 +4,7 @@ import React from "react";
 import { Table, CheckSquare, MousePointer, Info } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { Kbd } from "@/components/ui/kbd";
 
 export function StatusBar() {
   const t = useTranslations("StatusBar");
@@ -51,9 +52,9 @@ export function StatusBar() {
       {/* Right: Key Shortcuts & Hints */}
       <div className="flex items-center gap-2.5 text-[10px]">
         <div className="hidden md:flex items-center gap-2 text-muted-foreground/80">
-          <span><kbd className="px-1 py-0.5 rounded bg-muted text-foreground border border-border/60">Ins</kbd> {t("shortcutNew")}</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-muted text-foreground border border-border/60">F12</kbd> {t("shortcutOpen")}</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-muted text-foreground border border-border/60">Del</kbd> {t("shortcutDelete")}</span>
+          <span><Kbd>Ins</Kbd> {t("shortcutNew")}</span>
+          <span><Kbd>F12</Kbd> {t("shortcutOpen")}</span>
+          <span><Kbd>Del</Kbd> {t("shortcutDelete")}</span>
         </div>
         <span className="hidden md:inline text-border">|</span>
         <div className="flex items-center gap-1 text-muted-foreground/90">

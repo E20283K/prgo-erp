@@ -44,6 +44,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Kbd } from "@/components/ui/kbd";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -169,9 +170,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         {mod.id === activeModule && (
                           <Check className="size-3.5 text-primary shrink-0" />
                         )}
-                        <kbd className="ml-auto pointer-events-none inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-60">
+                        <Kbd className="ml-auto opacity-60 bg-muted border-muted-foreground/20">
                           <span className="text-[11px]">⌘</span>{index + 1}
-                        </kbd>
+                        </Kbd>
                       </DropdownMenuItem>
                     );
                   })}

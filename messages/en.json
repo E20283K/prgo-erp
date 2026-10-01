@@ -61,14 +61,16 @@
     "commands": "Commands",
     "commandsTitle": "Command Palette (Ctrl+K or Esc)",
     "toggleTheme": "Toggle Dark / Light mode",
+    "switchToLight": "Switch to Light Mode",
+    "switchToDark": "Switch to Dark Mode",
     "syncData": "Refresh / Sync (F5)",
     "syncingData": "Syncing data...",
     "syncComplete": "Sync complete!",
     "syncToastTitle": "Sync completed",
     "syncToastDesc": "All workspace registries and documents are up to date.",
-    "enterFullscreen": "Enter Fullscreen (F11)",
-    "exitFullscreen": "Exit Fullscreen (Esc / F11)",
-    "openAiCopilot": "PrintGoo AI Copilot (Ctrl+J)"
+    "enterFullscreen": "Enter Fullscreen",
+    "exitFullscreen": "Exit Fullscreen",
+    "openAiCopilot": "AI Copilot"
   },
   "Sidebar": {
     "erpModule": "ERP Module",

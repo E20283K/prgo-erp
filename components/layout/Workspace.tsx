@@ -21,6 +21,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { WorkOrderDetail } from "@/components/documents/WorkOrderDetail";
 import { CreateOrderDialog } from "@/components/documents/CreateOrderDialog";
+import { ProductSpecDetail } from "@/components/documents/ProductSpecDetail";
 
 export function Workspace({ children }: { children: React.ReactNode }) {
   const t = useTranslations("Workspace");
@@ -60,7 +61,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <TooltipProvider delay={300}>
       <div className="flex-1 flex flex-col min-w-0 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
         <CreateOrderDialog />
       
@@ -69,67 +70,67 @@ export function Workspace({ children }: { children: React.ReactNode }) {
         {tabs.map((tab, idx) => {
           const isActive = activeTabId === tab.id;
           const isRegistry = tab.type === "registry";
-          const nextTab = tabs[idx + 1];
-          const nextIsActive = nextTab ? activeTabId === nextTab.id : false;
-          const showSeparator = idx < tabs.length - 1 && !isActive && !nextIsActive;
+          const showSeparator = idx < tabs.length - 1;
 
           return (
             <React.Fragment key={tab.id}>
               <ContextMenu>
                 <Tooltip>
-                  <ContextMenuTrigger asChild>
-                    <TooltipTrigger asChild>
-                      <div
-                        onClick={() => setActiveTab(tab.id)}
-                        className={cn(
-                          "group flex items-center gap-1.5 px-2 h-8 w-[125px] rounded-t-md text-xs cursor-pointer select-none border-t border-x relative transition-all duration-150 ease-in-out",
-                          isActive
-                            ? "bg-white dark:bg-zinc-900 text-zinc-950 dark:text-zinc-100 border-zinc-300 dark:border-zinc-800 font-medium shadow-xs"
-                            : "bg-zinc-200/60 dark:bg-zinc-950/60 text-zinc-600 dark:text-zinc-400 border-transparent hover:bg-white/70 dark:hover:bg-zinc-900/70 hover:text-zinc-950 dark:hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-800/60 hover:shadow-xs"
-                        )}
-                      >
-                        {/* Top blue accent bar on active tab */}
-                        {isActive ? (
-                          <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-blue-600 dark:bg-blue-500 rounded-t-md pointer-events-none" />
-                        ) : (
-                          /* Subtle hover accent preview */
-                          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500/40 rounded-t-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                        )}
-
-                        {isRegistry ? (
-                          <Table className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                        ) : (
-                          <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                        )}
-
-                        <span className="truncate flex-1 text-xs leading-tight font-sans tracking-tight max-w-[10ch]">
-                          {getTabTitle(tab)}
-                        </span>
-
-                        {tab.isUnsaved && (
-                          <span 
-                            className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400 shrink-0" 
-                            title={t("unsavedChanges")} 
-                          />
-                        )}
-
-                        {/* Close Tab Button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            closeTab(tab.id);
-                          }}
+                  <TooltipTrigger
+                    render={
+                      <ContextMenuTrigger asChild>
+                        <div
+                          onClick={() => setActiveTab(tab.id)}
                           className={cn(
-                            "p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-750 text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors",
-                            isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                            "group flex items-center gap-1.5 px-2 h-8 w-[125px] rounded-t-md text-xs cursor-pointer select-none border-t border-x relative transition-all duration-150 ease-in-out",
+                            isActive
+                              ? "bg-white dark:bg-zinc-900 text-zinc-950 dark:text-zinc-100 border-zinc-300 dark:border-zinc-800 font-medium shadow-xs"
+                              : "bg-zinc-200/60 dark:bg-zinc-950/60 text-zinc-600 dark:text-zinc-400 border-transparent hover:bg-white/70 dark:hover:bg-zinc-900/70 hover:text-zinc-950 dark:hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-800/60 hover:shadow-xs"
                           )}
-                          title={`${t("close")} (Ctrl+W)`}
                         >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </TooltipTrigger>
-                  </ContextMenuTrigger>
+                          {/* Top blue accent bar on active tab */}
+                          {isActive ? (
+                            <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-blue-600 dark:bg-blue-500 rounded-t-md pointer-events-none" />
+                          ) : (
+                            /* Subtle hover accent preview */
+                            <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500/40 rounded-t-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                          )}
+
+                          {isRegistry ? (
+                            <Table className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                          ) : (
+                            <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                          )}
+
+                          <span className="truncate flex-1 text-xs leading-tight font-sans tracking-tight max-w-[10ch]">
+                            {getTabTitle(tab)}
+                          </span>
+
+                          {tab.isUnsaved && (
+                            <span 
+                              className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400 shrink-0" 
+                              title={t("unsavedChanges")} 
+                            />
+                          )}
+
+                          {/* Close Tab Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeTab(tab.id);
+                            }}
+                            className={cn(
+                              "p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-750 text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors",
+                              isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                            )}
+                            title={`${t("close")} (Ctrl+W)`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </ContextMenuTrigger>
+                    }
+                  />
                   <TooltipContent side="bottom" sideOffset={6} className="text-xs z-50">
                     {getTabTitle(tab)}
                   </TooltipContent>
@@ -176,6 +177,8 @@ export function Workspace({ children }: { children: React.ReactNode }) {
       <div className="flex-1 overflow-hidden relative">
         {activeTab && activeTab.type === "work-order" ? (
           <WorkOrderDetail key={activeTab.id} tab={activeTab} />
+        ) : activeTab && activeTab.type === "product-spec" ? (
+          <ProductSpecDetail key={activeTab.id} tab={activeTab} />
         ) : (
           children
         )}

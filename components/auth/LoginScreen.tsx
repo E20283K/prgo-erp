@@ -1,12 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { Printer, Sun, Moon, ArrowRight } from "lucide-react";
+import { Sun, Moon, ArrowRight } from "lucide-react";
 import { 
   Card, 
-  CardHeader, 
-  CardTitle, 
-  CardDescription, 
   CardContent, 
   CardFooter 
 } from "@/components/ui/card";
@@ -76,20 +73,8 @@ export function LoginScreen() {
       </div>
 
       {/* Simple Centered Card */}
-      <Card className="w-full max-w-sm sm:max-w-md shadow-lg border-border bg-card">
-        <CardHeader className="text-center pb-4">
-          <div className="mx-auto mb-3 size-11 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm">
-            <Printer className="size-6" />
-          </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">
-            {t("title")}
-          </CardTitle>
-          <CardDescription className="text-xs text-muted-foreground">
-            {t("description")}
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
+      <Card className="w-full max-w-sm sm:max-w-md shadow-lg border-border bg-card pt-2">
+        <CardContent className="space-y-4 pt-2">
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email Field */}
             <div className="space-y-1.5 text-left">

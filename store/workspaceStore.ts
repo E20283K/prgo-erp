@@ -3,7 +3,7 @@ import { create } from "zustand";
 export interface DocumentTab {
   id: string;
   title: string;
-  type: "registry" | "work-order" | "bom" | "customer" | "invoice";
+  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "invoice";
   module: string;
   isUnsaved?: boolean;
   documentData?: any;

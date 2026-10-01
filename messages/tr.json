@@ -61,14 +61,16 @@
     "commands": "Komutlar",
     "commandsTitle": "Komut Paleti (Ctrl+K veya Esc)",
     "toggleTheme": "Temayı Değiştir",
+    "switchToLight": "Açık Temaya Geç",
+    "switchToDark": "Koyu Temaya Geç",
     "syncData": "Yenile / Eşitle (F5)",
     "syncingData": "Veriler eşitleniyor...",
     "syncComplete": "Eşitleme tamamlandı!",
     "syncToastTitle": "Eşitleme Tamamlandı",
     "syncToastDesc": "Tüm çalışma alanı kayıtları ve belgeleri güncel.",
-    "enterFullscreen": "Tam Ekran (F11)",
-    "exitFullscreen": "Tam Ekrandan Çık (Esc / F11)",
-    "openAiCopilot": "PrintGoo Yapay Zeka Asistanı (Ctrl+J)"
+    "enterFullscreen": "Tam Ekran",
+    "exitFullscreen": "Tam Ekrandan Çık",
+    "openAiCopilot": "Yapay Zeka Asistanı"
   },
   "Sidebar": {
     "erpModule": "ERP Modülü",

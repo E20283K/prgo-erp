@@ -61,14 +61,16 @@
     "commands": "Buyruqlar",
     "commandsTitle": "Buyruqlar paneli (Ctrl+K yoki Esc)",
     "toggleTheme": "Mavzuni almashtirish",
+    "switchToLight": "Yorug' mavzuga o'tish",
+    "switchToDark": "Qorong'i mavzuga o'tish",
     "syncData": "Yangilash / Sinxronizatsiya (F5)",
     "syncingData": "Ma'lumotlar sinxronlanmoqda...",
     "syncComplete": "Sinxronizatsiya yakunlandi!",
     "syncToastTitle": "Sinxronizatsiya muvaffaqiyatli",
     "syncToastDesc": "Barcha reyestrlar va hujjatlar yangilandi.",
-    "enterFullscreen": "To'liq ekran (F11)",
-    "exitFullscreen": "To'liq ekrandan chiqish (Esc / F11)",
-    "openAiCopilot": "PrintGoo AI Yordamchi (Ctrl+J)"
+    "enterFullscreen": "To'liq ekran",
+    "exitFullscreen": "To'liq ekrandan chiqish",
+    "openAiCopilot": "AI Yordamchi"
   },
   "Sidebar": {
     "erpModule": "ERP Bo'limi",

@@ -106,10 +106,11 @@ export const GLIDE_DARK_THEME: Partial<Theme> = {
   headerFontStyle: "bold 11px sans-serif",
 };
 
-interface OrderRow {
+export interface OrderRow {
   id: string;
   preview: string[];
-  type: string;
+  department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  site: "Building 1" | "Building 2";
   customer: string;
   product: string;
   machine: string;
@@ -129,7 +130,8 @@ const REAL_PROOF_IMAGE = "/sample-proof.jpg";
 const INITIAL_COLUMNS: GridColumn[] = [
   { id: "id", title: "Doc No.", width: 120, icon: GridColumnIcon.HeaderReference, hasMenu: true },
   { id: "preview", title: "Proof Sample", width: 95, icon: GridColumnIcon.HeaderImage, hasMenu: true },
-  { id: "type", title: "Segment", width: 110, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
+  { id: "site", title: "Production Site", width: 140, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
+  { id: "department", title: "Technology", width: 130, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "customer", title: "Customer Organization", width: 220, icon: GridColumnIcon.HeaderString, hasMenu: true },
   { id: "product", title: "Product / Specification", width: 260, icon: GridColumnIcon.HeaderTextTemplate, hasMenu: true },
   { id: "machine", title: "Assigned Workstation", width: 190, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
@@ -147,21 +149,25 @@ const MOCK_CUSTOMERS = [
   "Global Apparel Brand", "Zenith Publishing", "Vanguard Fashion", "Metropolis Books"
 ];
 
-const MOCK_PRODUCTS = [
-  "Hardcover Catalog 96p", "A5 Booklet 32p (Wire-O)", "Offset Magazine (Gloss)", 
-  "Folding Carton Box 350g", "Embroidered Hoodie Batch 500", "Custom Luxury Bag", 
-  "Self-Adhesive Labels (Roll)", "Calendar 2027 Tri-fold"
-];
+const MACHINE_MAP: Record<string, string[]> = {
+  Offset: ["Heidelberg XL 106", "Komori Lithrone G40", "Heidelberg SX 74"],
+  Flexo: ["Mark Andy Performance", "Nilpeter FA-Line", "Gallus ECS 340"],
+  Jacquard: ["Staubli Jacquard Loom", "Muller Martini Loom", "Dornier PTV"],
+  "Post-press": ["Kolbus BF 513", "Bobst Novacut 106"]
+};
 
-const MOCK_MACHINES = [
-  "Heidelberg XL 106", "Heidelberg SX 74", "Komori Lithrone G40", "Kolbus BF 513", 
-  "Tajima 8-Head Embroidery", "Autobond Mini 76 UV", "Bobst Novacut 106"
-];
+const PRODUCT_MAP: Record<string, string[]> = {
+  Offset: ["Hardcover Catalog 96p", "Folding Carton Box 350g", "Glossy Paper Hangtags", "A5 Booklet 32p"],
+  Flexo: ["Satin Care Labels", "Nylon Wash Labels", "Self-Adhesive Roll Labels", "Tyvek Labels"],
+  Jacquard: ["Premium Woven Neck Labels", "Woven Patches", "Taffeta Side Labels", "Damask Woven Labels"],
+  "Post-press": ["Folding", "Die-cutting", "Laminating"]
+};
 
-function generateMockOrders(count: number): OrderRow[] {
+const DEPARTMENTS = ["Offset", "Flexo", "Jacquard", "Post-press"] as const;
+
+export function generateMockOrders(count: number): OrderRow[] {
   const statuses: OrderRow["status"][] = ["Active", "Completed", "Draft", "Cancelled"];
   const priorities: OrderRow["priority"][] = ["Normal", "High", "Urgent"];
-  const segments = ["Polygraph", "Packaging", "Sewing", "Post-press"];
 
   return Array.from({ length: count }, (_, i) => {
     const idNum = 350 + i;
@@ -170,22 +176,30 @@ function generateMockOrders(count: number): OrderRow[] {
     const unitPrice = [0.45, 1.20, 2.80, 4.50, 12.00][i % 5];
     const total = qty * unitPrice;
 
-    const prod = MOCK_PRODUCTS[i % MOCK_PRODUCTS.length];
+    const department = DEPARTMENTS[i % DEPARTMENTS.length];
+    const site = (department === "Offset" || department === "Post-press") ? "Building 1" : "Building 2";
+    
+    const prodList = PRODUCT_MAP[department];
+    const prod = prodList[i % prodList.length];
+    
+    const machList = MACHINE_MAP[department];
+    const mach = machList[i % machList.length];
 
     return {
       id: docNo,
       preview: [REAL_PROOF_IMAGE],
-      type: segments[i % segments.length],
+      department,
+      site,
       customer: MOCK_CUSTOMERS[i % MOCK_CUSTOMERS.length],
       product: prod,
-      machine: MOCK_MACHINES[i % MOCK_MACHINES.length],
+      machine: mach,
       qty,
-      unit: i % 4 === 2 ? "sets" : "pcs",
+      unit: department === "Jacquard" ? "pcs" : department === "Flexo" ? "rolls" : "sheets",
       priceTotal: total,
       status: statuses[i % statuses.length],
       priority: priorities[i % priorities.length],
-      startDate: "2026-09-30",
-      deadline: `2026-10-${String((i % 25) + 1).padStart(2, "0")}`,
+      startDate: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
+      deadline: `2026-10-${String((i % 28) + 1).padStart(2, "0")}`,
       responsible: ["K. Anderson", "M. Ivanova", "S. Petrov", "A. Becker"][i % 4],
     };
   });
@@ -370,12 +384,18 @@ export function DataGrid() {
           contentAlign: "center",
         };
 
-      case "type":
-
+      case "department":
         return {
           kind: GridCellKind.Text,
-          data: rowData.type,
-          displayData: rowData.type,
+          data: rowData.department,
+          displayData: rowData.department,
+          allowOverlay: false,
+        };
+      case "site":
+        return {
+          kind: GridCellKind.Text,
+          data: rowData.site,
+          displayData: rowData.site,
           allowOverlay: false,
         };
       case "customer":
@@ -503,6 +523,8 @@ export function DataGrid() {
           docNo: rowData.id,
           customer: rowData.customer,
           product: rowData.product,
+          department: rowData.department,
+          site: rowData.site,
           quantity: rowData.qty,
           unit: rowData.unit,
           status: rowData.status,

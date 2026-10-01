@@ -16,8 +16,13 @@ import "@glideapps/glide-data-grid/dist/index.css";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -36,13 +41,11 @@ import {
 import {
   Plus,
   Trash2,
-  Download,
-  Search,
   Copy,
   Boxes,
   FileSpreadsheet,
-  CheckCircle2,
   Layers,
+  ExternalLink,
 } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -62,108 +65,67 @@ export interface BomItem {
   availability: "In Stock" | "Reserved" | "Low Stock" | "On Order";
 }
 
-const DEFAULT_BOM_ITEMS: BomItem[] = [
-  {
-    id: "MAT-PAP-014",
-    name: "Galerie Art Silk Paper",
-    spec: "150 g/m², 700x1000mm",
-    qty: 12500,
-    unit: "Sheets",
-    unitPrice: 0.42,
-    totalPrice: 5250.00,
-    supplier: "Sappi Paper Mill",
-    availability: "In Stock",
-  },
-  {
-    id: "MAT-INK-CMYK",
-    name: "Hubergroup Eco-Offset Ink Set",
-    spec: "Process CMYK (4x2.5kg)",
-    qty: 36,
-    unit: "kg",
-    unitPrice: 24.00,
-    totalPrice: 864.00,
-    supplier: "Hubergroup Print",
-    availability: "In Stock",
-  },
-  {
-    id: "MAT-PLT-CTP",
-    name: "Agfa CTP Thermal Plates",
-    spec: "1030x790mm 0.3mm",
-    qty: 24,
-    unit: "pcs",
-    unitPrice: 18.50,
-    totalPrice: 444.00,
-    supplier: "Agfa Graphics",
-    availability: "In Stock",
-  },
-  {
-    id: "MAT-LAM-M01",
-    name: "Soft-Touch Matte Thermal Film",
-    spec: "BOPP 32 micron 700mm",
-    qty: 2400,
-    unit: "m",
-    unitPrice: 0.32,
-    totalPrice: 768.00,
-    supplier: "Dunmore Films",
-    availability: "In Stock",
-  },
-  {
-    id: "MAT-GLU-HOT",
-    name: "Henkel Technomelt Hotmelt Adhesive",
-    spec: "PUR binding polymer granulate",
-    qty: 15,
-    unit: "kg",
-    unitPrice: 32.00,
-    totalPrice: 480.00,
-    supplier: "Henkel Industrial",
-    availability: "In Stock",
-  },
-  {
-    id: "MAT-BOX-CRG",
-    name: "Corrugated Shipping Cartons",
-    spec: "Double-wall 400x300x250mm",
-    qty: 120,
-    unit: "pcs",
-    unitPrice: 1.45,
-    totalPrice: 174.00,
-    supplier: "Smurfit Kappa",
-    availability: "Reserved",
-  },
+const OFFSET_BOM_ITEMS: BomItem[] = [
+  { id: "MAT-PAP-014", name: "Galerie Art Silk Paper", spec: "150 g/m², 700x1000mm", qty: 12500, unit: "Sheets", unitPrice: 0.42, totalPrice: 5250.00, supplier: "Sappi Paper Mill", availability: "In Stock" },
+  { id: "MAT-INK-CMYK", name: "Hubergroup Eco-Offset Ink", spec: "Process CMYK", qty: 36, unit: "kg", unitPrice: 24.00, totalPrice: 864.00, supplier: "Hubergroup", availability: "In Stock" },
+  { id: "MAT-PLT-CTP", name: "Agfa CTP Thermal Plates", spec: "1030x790mm", qty: 24, unit: "pcs", unitPrice: 18.50, totalPrice: 444.00, supplier: "Agfa", availability: "In Stock" },
+  { id: "MAT-LAM-M01", name: "Soft-Touch Matte Film", spec: "BOPP 32 micron", qty: 2400, unit: "m", unitPrice: 0.32, totalPrice: 768.00, supplier: "Dunmore", availability: "In Stock" },
+];
+
+const FLEXO_BOM_ITEMS: BomItem[] = [
+  { id: "MAT-FLX-NYL", name: "Nylon Taffeta Tape Roll", spec: "30mm width, 200m", qty: 45, unit: "Rolls", unitPrice: 12.50, totalPrice: 562.50, supplier: "Avery Dennison", availability: "In Stock" },
+  { id: "MAT-FLX-INK", name: "Wash-Resistant Flexo Ink", spec: "Black, 5kg", qty: 2, unit: "kg", unitPrice: 45.00, totalPrice: 90.00, supplier: "Flint Group", availability: "Low Stock" },
+  { id: "MAT-FLX-PLT", name: "Photopolymer Flexo Plate", spec: "Digital Plate 1.14mm", qty: 1, unit: "pcs", unitPrice: 120.00, totalPrice: 120.00, supplier: "MacDermid", availability: "In Stock" },
+];
+
+const JACQUARD_BOM_ITEMS: BomItem[] = [
+  { id: "MAT-YRN-WARP", name: "Polyester Warp Yarn", spec: "Black, 50D", qty: 120, unit: "kg", unitPrice: 5.20, totalPrice: 624.00, supplier: "Shenghong Corp", availability: "In Stock" },
+  { id: "MAT-YRN-WEFT", name: "Polyester Weft Yarn", spec: "White, 75D", qty: 85, unit: "kg", unitPrice: 4.80, totalPrice: 408.00, supplier: "Shenghong Corp", availability: "In Stock" },
+  { id: "MAT-YRN-GLD", name: "Metallic Lurex Yarn", spec: "Gold, 30D", qty: 15, unit: "kg", unitPrice: 18.50, totalPrice: 277.50, supplier: "Lurex Co", availability: "Reserved" },
 ];
 
 interface BomMaterialsGridProps {
   tabId: string;
+  department?: string;
   initialItems?: BomItem[];
   onTotalCostChange?: (total: number) => void;
 }
 
 export function BomMaterialsGrid({
   tabId,
-  initialItems = DEFAULT_BOM_ITEMS,
+  department,
+  initialItems,
   onTotalCostChange,
 }: BomMaterialsGridProps) {
   const t = useTranslations("BOM");
   const { theme, setTabUnsaved, updateGridStats } = useWorkspaceStore();
   const isDark = theme === "dark";
 
-  const [items, setItems] = useState<BomItem[]>(initialItems);
-  const [searchQuery, setSearchQuery] = useState("");
+  const defaultItems = initialItems || (
+    department === "Flexo" ? FLEXO_BOM_ITEMS :
+    department === "Jacquard" ? JACQUARD_BOM_ITEMS :
+    OFFSET_BOM_ITEMS
+  );
+
+  const [items, setItems] = useState<BomItem[]>(defaultItems);
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   });
-  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  // New item form state
-  const [newItem, setNewItem] = useState({
+  // Add / Edit form state
+  const [formState, setFormState] = useState<BomItem>({
     id: `MAT-${Math.floor(100 + Math.random() * 900)}`,
     name: "",
     spec: "",
     qty: 100,
     unit: "pcs",
     unitPrice: 1.0,
+    totalPrice: 100,
     supplier: "Local Distributor",
-    availability: "In Stock" as BomItem["availability"],
+    availability: "In Stock",
   });
 
   const [columns, setColumns] = useState<GridColumn[]>([
@@ -193,18 +155,11 @@ export function BomMaterialsGrid({
     ]);
   }, [t]);
 
-  // Filtered rows
-  const filteredItems = useMemo(() => {
-    if (!searchQuery.trim()) return items;
-    const q = searchQuery.toLowerCase();
-    return items.filter(
-      (m) =>
-        m.id.toLowerCase().includes(q) ||
-        m.name.toLowerCase().includes(q) ||
-        m.spec.toLowerCase().includes(q) ||
-        m.supplier.toLowerCase().includes(q)
-    );
-  }, [items, searchQuery]);
+  // Active items list
+  const filteredItems = items;
+
+  const selectedRowIndex = selection.rows.toArray()[0];
+  const hasSelectedRow = selectedRowIndex !== undefined && items[selectedRowIndex] !== undefined;
 
   // Compute total BOM cost
   const totalBOMCost = useMemo(() => {
@@ -427,42 +382,70 @@ export function BomMaterialsGrid({
     [updateGridStats, filteredItems.length]
   );
 
-  // Add Material handler
-  const handleAddMaterial = () => {
-    if (!newItem.name.trim()) return;
-    const created: BomItem = {
-      id: newItem.id.trim() || `MAT-${Math.floor(100 + Math.random() * 900)}`,
-      name: newItem.name.trim(),
-      spec: newItem.spec.trim() || "Standard Industry Spec",
-      qty: Number(newItem.qty) || 1,
-      unit: newItem.unit.trim() || "pcs",
-      unitPrice: Number(newItem.unitPrice) || 0,
-      totalPrice: (Number(newItem.qty) || 1) * (Number(newItem.unitPrice) || 0),
-      supplier: newItem.supplier.trim() || "Approved Supplier",
-      availability: newItem.availability,
-    };
-
-    setItems((prev) => [...prev, created]);
-    if (tabId) setTabUnsaved(tabId, true);
-    setIsAddOpen(false);
-
-    // Reset new item template
-    setNewItem({
+  // Open Add Dialog
+  const handleOpenAdd = () => {
+    setEditingIndex(null);
+    setFormState({
       id: `MAT-${Math.floor(100 + Math.random() * 900)}`,
       name: "",
       spec: "",
       qty: 100,
       unit: "pcs",
       unitPrice: 1.0,
+      totalPrice: 100,
       supplier: "Local Distributor",
       availability: "In Stock",
     });
+    setIsDialogOpen(true);
+  };
 
-    toast.add({
-      title: t("addMaterial"),
-      description: t("toastAdded", { code: created.id }),
-      type: "success",
-    });
+  // Open Edit Dialog
+  const handleOpenEdit = (index: number) => {
+    const item = items[index];
+    if (!item) return;
+    setEditingIndex(index);
+    setFormState({ ...item });
+    setIsDialogOpen(true);
+  };
+
+  // Save Add/Edit Material handler
+  const handleSaveMaterial = () => {
+    if (!formState.name.trim()) return;
+
+    const qty = Number(formState.qty) || 0;
+    const unitPrice = Number(formState.unitPrice) || 0;
+    const itemToSave: BomItem = {
+      ...formState,
+      name: formState.name.trim(),
+      spec: formState.spec.trim() || "Standard Industry Spec",
+      qty,
+      unitPrice,
+      totalPrice: qty * unitPrice,
+      supplier: formState.supplier.trim() || "Approved Supplier",
+    };
+
+    if (editingIndex !== null) {
+      setItems((prev) => {
+        const next = [...prev];
+        next[editingIndex] = itemToSave;
+        return next;
+      });
+      toast.add({
+        title: "Material Updated",
+        description: `Updated ${itemToSave.id} (${itemToSave.name})`,
+        type: "success",
+      });
+    } else {
+      setItems((prev) => [...prev, itemToSave]);
+      toast.add({
+        title: t("addMaterial"),
+        description: t("toastAdded", { code: itemToSave.id }),
+        type: "success",
+      });
+    }
+
+    if (tabId) setTabUnsaved(tabId, true);
+    setIsDialogOpen(false);
   };
 
   // Delete Selected rows
@@ -569,79 +552,25 @@ export function BomMaterialsGrid({
 
   return (
     <div className="w-full h-full flex flex-col bg-background select-none overflow-hidden">
-      {/* 1C Enterprise Industrial Toolbar for BOM */}
-      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0 gap-2">
-        {/* Left Actions */}
-        <div className="flex items-center gap-1.5">
-          <Button
-            onClick={() => setIsAddOpen(true)}
-            size="sm"
-            className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{t("addMaterial")}</span>
-          </Button>
-
-          <Button
-            onClick={handleDeleteSelected}
-            disabled={selection.rows.length === 0}
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive hover:border-destructive/40 gap-1 rounded"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{t("deleteMaterial")}</span>
-          </Button>
-
-          <Button
-            onClick={handleExportCSV}
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 rounded"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{t("exportCsv")}</span>
-          </Button>
-        </div>
-
-        {/* Right Search & Summary KPI Badges */}
-        <div className="flex items-center gap-2">
-          <div className="relative w-44 md:w-56">
-            <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <Input
-              type="text"
-              placeholder={t("searchPlaceholder")}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-7 pl-7 text-xs bg-background/50 border-input"
-            />
-          </div>
-
-          <Separator orientation="vertical" className="h-4 hidden sm:block" />
-
-          <div className="hidden md:flex items-center gap-2">
-            <Badge
-              variant="outline"
-              className="h-6 px-2 text-[11px] font-mono font-medium bg-muted/40 text-foreground border-border/60"
-            >
-              <Boxes className="w-3 h-3 mr-1 text-blue-500" />
-              {t("totalItems", { count: items.length })}
-            </Badge>
-
-            <Badge
-              variant="outline"
-              className="h-6 px-2 text-[11px] font-mono font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800"
-            >
-              ${totalBOMCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
-            </Badge>
-          </div>
-        </div>
-      </div>
-
-      {/* Glide Data Grid wrapped in ContextMenu */}
+      {/* Full-bleed Glide Data Grid with ContextMenu */}
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="flex-1 w-full h-full relative" id="glide-bom-grid-root">
+          <div 
+            className="flex-1 w-full h-full relative" 
+            id="glide-bom-grid-root"
+            onKeyDown={(e) => {
+              if (e.key === "Insert") {
+                e.preventDefault();
+                handleOpenAdd();
+              } else if (e.key === "Delete" && hasSelectedRow) {
+                e.preventDefault();
+                handleDeleteSelected();
+              } else if (e.key === "Enter" && hasSelectedRow) {
+                e.preventDefault();
+                handleOpenEdit(selectedRowIndex);
+              }
+            }}
+          >
             <DataEditor
               getCellContent={getCellContent}
               columns={columns}
@@ -654,6 +583,17 @@ export function BomMaterialsGrid({
               height="100%"
               gridSelection={selection}
               onGridSelectionChange={handleSelectionChange}
+              onCellContextMenu={(cell) => {
+                const [, row] = cell;
+                setSelection({
+                  columns: CompactSelection.empty(),
+                  rows: CompactSelection.fromSingleSelection(row),
+                });
+              }}
+              onCellActivated={(cell) => {
+                const [, row] = cell;
+                handleOpenEdit(row);
+              }}
               onCellEdited={onCellEdited}
               onColumnResize={onColumnResize}
               headerHeight={28}
@@ -664,25 +604,37 @@ export function BomMaterialsGrid({
         </ContextMenuTrigger>
 
         <ContextMenuContent className="w-56 text-xs">
-          <ContextMenuItem onClick={() => setIsAddOpen(true)} className="gap-2 cursor-pointer">
+          <ContextMenuItem onClick={handleOpenAdd} className="gap-2 cursor-pointer">
             <Plus className="w-3.5 h-3.5 text-blue-500" />
             <span>{t("addMaterial")}</span>
             <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ins</span>
           </ContextMenuItem>
 
-          <ContextMenuItem onClick={handleDuplicateRow} className="gap-2 cursor-pointer">
-            <Layers className="w-3.5 h-3.5 text-indigo-500" />
-            <span>{t("duplicate")}</span>
-            <span className="ml-auto text-[10px] text-muted-foreground font-mono">F9</span>
-          </ContextMenuItem>
+          {hasSelectedRow && (
+            <ContextMenuItem onClick={() => handleOpenEdit(selectedRowIndex)} className="gap-2 cursor-pointer">
+              <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
+              <span>Edit Material Details</span>
+              <span className="ml-auto text-[10px] text-muted-foreground font-mono">Enter</span>
+            </ContextMenuItem>
+          )}
+
+          {hasSelectedRow && (
+            <ContextMenuItem onClick={handleDuplicateRow} className="gap-2 cursor-pointer">
+              <Layers className="w-3.5 h-3.5 text-indigo-500" />
+              <span>{t("duplicate")}</span>
+              <span className="ml-auto text-[10px] text-muted-foreground font-mono">F9</span>
+            </ContextMenuItem>
+          )}
 
           <ContextMenuSeparator />
 
-          <ContextMenuItem onClick={handleCopySelection} className="gap-2 cursor-pointer">
-            <Copy className="w-3.5 h-3.5" />
-            <span>{t("copy")}</span>
-            <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ctrl+C</span>
-          </ContextMenuItem>
+          {hasSelectedRow && (
+            <ContextMenuItem onClick={handleCopySelection} className="gap-2 cursor-pointer">
+              <Copy className="w-3.5 h-3.5" />
+              <span>{t("copy")}</span>
+              <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ctrl+C</span>
+            </ContextMenuItem>
+          )}
 
           <ContextMenuItem onClick={handleExportCSV} className="gap-2 cursor-pointer">
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
@@ -690,30 +642,32 @@ export function BomMaterialsGrid({
             <span className="ml-auto text-[10px] text-muted-foreground font-mono">F12</span>
           </ContextMenuItem>
 
-          <ContextMenuSeparator />
-
-          <ContextMenuItem
-            onClick={handleDeleteSelected}
-            disabled={selection.rows.length === 0}
-            className="gap-2 text-destructive focus:text-destructive cursor-pointer"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>{t("deleteMaterial")}</span>
-            <span className="ml-auto text-[10px] text-muted-foreground font-mono">Del</span>
-          </ContextMenuItem>
+          {hasSelectedRow && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={handleDeleteSelected}
+                className="gap-2 text-destructive focus:text-destructive cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{t("deleteMaterial")}</span>
+                <span className="ml-auto text-[10px] text-muted-foreground font-mono">Del</span>
+              </ContextMenuItem>
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
 
-      {/* Add New Material Dialog Modal */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-        <DialogContent className="sm:max-w-md">
+      {/* Add / Edit Material Dialog Modal */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-md text-xs">
           <DialogHeader>
-            <DialogTitle className="text-base font-semibold flex items-center gap-2">
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
               <Boxes className="w-4 h-4 text-blue-600" />
-              <span>{t("dialogAddTitle")}</span>
+              <span>{editingIndex !== null ? "Edit Material" : t("dialogAddTitle")}</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              {t("dialogAddDesc")}
+              {editingIndex !== null ? "Update item specification and consumption values." : t("dialogAddDesc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -723,8 +677,8 @@ export function BomMaterialsGrid({
                 {t("itemCode")}
               </label>
               <Input
-                value={newItem.id}
-                onChange={(e) => setNewItem((p) => ({ ...p, id: e.target.value }))}
+                value={formState.id}
+                onChange={(e) => setFormState((p) => ({ ...p, id: e.target.value }))}
                 className="h-8 text-xs font-mono"
               />
             </div>
@@ -734,8 +688,8 @@ export function BomMaterialsGrid({
                 {t("unit")}
               </label>
               <Input
-                value={newItem.unit}
-                onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value }))}
+                value={formState.unit}
+                onChange={(e) => setFormState((p) => ({ ...p, unit: e.target.value }))}
                 className="h-8 text-xs"
                 placeholder="Sheets, kg, pcs, m..."
               />
@@ -746,8 +700,8 @@ export function BomMaterialsGrid({
                 {t("materialName")} *
               </label>
               <Input
-                value={newItem.name}
-                onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))}
+                value={formState.name}
+                onChange={(e) => setFormState((p) => ({ ...p, name: e.target.value }))}
                 className="h-8 text-xs"
                 placeholder="e.g. Sappi Magno Gloss 130g"
                 autoFocus
@@ -759,8 +713,8 @@ export function BomMaterialsGrid({
                 {t("specification")}
               </label>
               <Input
-                value={newItem.spec}
-                onChange={(e) => setNewItem((p) => ({ ...p, spec: e.target.value }))}
+                value={formState.spec}
+                onChange={(e) => setFormState((p) => ({ ...p, spec: e.target.value }))}
                 className="h-8 text-xs"
                 placeholder="e.g. 700x1000mm, 2-sided coated"
               />
@@ -772,8 +726,8 @@ export function BomMaterialsGrid({
               </label>
               <Input
                 type="number"
-                value={newItem.qty}
-                onChange={(e) => setNewItem((p) => ({ ...p, qty: parseFloat(e.target.value) || 0 }))}
+                value={formState.qty}
+                onChange={(e) => setFormState((p) => ({ ...p, qty: parseFloat(e.target.value) || 0 }))}
                 className="h-8 text-xs font-mono"
               />
             </div>
@@ -785,8 +739,8 @@ export function BomMaterialsGrid({
               <Input
                 type="number"
                 step="0.01"
-                value={newItem.unitPrice}
-                onChange={(e) => setNewItem((p) => ({ ...p, unitPrice: parseFloat(e.target.value) || 0 }))}
+                value={formState.unitPrice}
+                onChange={(e) => setFormState((p) => ({ ...p, unitPrice: parseFloat(e.target.value) || 0 }))}
                 className="h-8 text-xs font-mono"
               />
             </div>
@@ -796,11 +750,31 @@ export function BomMaterialsGrid({
                 {t("supplier")}
               </label>
               <Input
-                value={newItem.supplier}
-                onChange={(e) => setNewItem((p) => ({ ...p, supplier: e.target.value }))}
+                value={formState.supplier}
+                onChange={(e) => setFormState((p) => ({ ...p, supplier: e.target.value }))}
                 className="h-8 text-xs"
                 placeholder="Vendor or manufacturer name"
               />
+            </div>
+
+            <div className="col-span-2">
+              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                {t("availability")}
+              </label>
+              <Select
+                value={formState.availability}
+                onValueChange={(val: any) => val && setFormState((p) => ({ ...p, availability: val }))}
+              >
+                <SelectTrigger className="h-8 text-xs bg-background">
+                  <SelectValue placeholder="Availability" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="In Stock">In Stock</SelectItem>
+                  <SelectItem value="Reserved">Reserved</SelectItem>
+                  <SelectItem value="Low Stock">Low Stock</SelectItem>
+                  <SelectItem value="On Order">On Order</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -808,18 +782,18 @@ export function BomMaterialsGrid({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsAddOpen(false)}
+              onClick={() => setIsDialogOpen(false)}
               className="text-xs h-8"
             >
               {t("cancel")}
             </Button>
             <Button
               size="sm"
-              onClick={handleAddMaterial}
-              disabled={!newItem.name.trim()}
+              onClick={handleSaveMaterial}
+              disabled={!formState.name.trim()}
               className="text-xs h-8 bg-blue-600 hover:bg-blue-700 text-white"
             >
-              {t("save")}
+              {editingIndex !== null ? "Save Changes" : t("save")}
             </Button>
           </DialogFooter>
         </DialogContent>
