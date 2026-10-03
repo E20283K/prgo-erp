@@ -263,7 +263,30 @@ export function SalesGrid({ type }: SalesGridProps) {
         module: "sales",
       });
     } else {
-      console.log("Create new", type);
+      const newDocNo = type === "quotations" ? `QT-${String(Math.floor(1000 + Math.random() * 9000))}` : `SO-${String(Math.floor(1000 + Math.random() * 9000))}`;
+      openTab({
+        id: newDocNo,
+        title: `${newDocNo}: New ${type === "quotations" ? "Quotation" : "Order"}`,
+        type: "client-order",
+        module: "sales",
+        isUnsaved: true,
+        activeLevel3Tab: "overview",
+        documentData: {
+          docNo: newDocNo,
+          customer: "",
+          product: "",
+          quantity: 1000,
+          unit: "pcs",
+          status: "Draft",
+          orderType: type === "quotations" ? "Sample" : "Production",
+          recipe: "OFFSET_STD_V1",
+          department: "Offset",
+          site: "Building 1",
+          deadline: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+          responsible: "Admin",
+          linkedWoId: "",
+        },
+      });
     }
   };
 

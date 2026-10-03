@@ -224,24 +224,24 @@ export function SalesRecordDetail({ tab }: SalesRecordDetailProps) {
         className="flex-1 flex flex-col overflow-hidden"
       >
         <div className="border-b border-border bg-muted/40 px-4 pt-1 shrink-0">
-          <TabsList className="h-8 bg-transparent p-0 gap-4">
+          <TabsList variant="line" className="h-8 gap-4 border-b-0">
             <TabsTrigger
               value="overview"
-              className="h-8 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:bg-transparent px-2 text-xs font-medium data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 shadow-none"
+              className="h-8 px-2 text-xs font-medium"
             >
               <Package className="w-3.5 h-3.5 mr-1.5" />
               {t("overview")}
             </TabsTrigger>
             <TabsTrigger
               value="payment"
-              className="h-8 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:bg-transparent px-2 text-xs font-medium data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 shadow-none"
+              className="h-8 px-2 text-xs font-medium"
             >
               <CreditCard className="w-3.5 h-3.5 mr-1.5" />
               {t("paymentDetails")}
             </TabsTrigger>
             <TabsTrigger
               value="receipt"
-              className="h-8 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:bg-transparent px-2 text-xs font-medium data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 shadow-none"
+              className="h-8 px-2 text-xs font-medium"
             >
               <Barcode className="w-3.5 h-3.5 mr-1.5" />
               {t("receiptPreview")}

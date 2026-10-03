@@ -443,5 +443,31 @@
     "close": "Yopish",
     "allPayments": "Barchasi",
     "searchPlaceholder": "Sotuvlar tarixidan qidirish..."
+  },
+  "FileViewer": {
+    "preview": "Ko'rish",
+    "download": "Yuklab olish",
+    "remove": "Ilovani o'chirish",
+    "openInNewTab": "Yangi oynada ochish",
+    "close": "Yopish",
+    "loading": "Hujjat yuklanmoqda…",
+    "loadError": "Hujjatni yuklab bo'lmadi",
+    "zoomIn": "Kattalashtirish",
+    "zoomOut": "Kichraytirish",
+    "fitWidth": "Kenglik bo'yicha",
+    "rotate": "Aylantirish",
+    "prevPage": "Oldingi sahifa",
+    "nextPage": "Keyingi sahifa",
+    "pageOf": "{page} / {total} sahifa",
+    "unsupportedTitle": "Ko'rish mavjud emas",
+    "unsupportedHint": "Bu turdagi faylni brauzerda ko'rib bo'lmaydi. Ilovada ochish uchun uni yuklab oling.",
+    "onlyofficeNotConfigured": "ONLYOFFICE Docs serveri sozlanmagan",
+    "onlyofficeHint": ".env.local faylida NEXT_PUBLIC_ONLYOFFICE_URL (ixtiyoriy ONLYOFFICE_JWT_SECRET, ONLYOFFICE_FILE_BASE_URL) ni belgilang va dev-serverni qayta ishga tushiring.",
+    "onlyofficeLocalFile": "Mahalliy yuklangan fayllarni ONLYOFFICE Docs'da ochish uchun avval serverga saqlash kerak.",
+    "onlyofficeLoadError": "ONLYOFFICE Docs serveriga ulanib bo'lmadi",
+    "sheets": "Varaqlar",
+    "readOnly": "Faqat o'qish",
+    "fullscreen": "To'liq ekran",
+    "exitFullscreen": "Kichik ekran"
   }
 }

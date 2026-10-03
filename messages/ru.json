@@ -443,5 +443,31 @@
     "close": "Закрыть",
     "allPayments": "Все",
     "searchPlaceholder": "Поиск по чекам и покупателям..."
+  },
+  "FileViewer": {
+    "preview": "Просмотр",
+    "download": "Скачать",
+    "remove": "Удалить вложение",
+    "openInNewTab": "Открыть в новой вкладке",
+    "close": "Закрыть",
+    "loading": "Загрузка документа…",
+    "loadError": "Не удалось загрузить документ",
+    "zoomIn": "Увеличить",
+    "zoomOut": "Уменьшить",
+    "fitWidth": "По ширине",
+    "rotate": "Повернуть",
+    "prevPage": "Предыдущая страница",
+    "nextPage": "Следующая страница",
+    "pageOf": "Стр. {page} из {total}",
+    "unsupportedTitle": "Просмотр недоступен",
+    "unsupportedHint": "Этот тип файла нельзя просмотреть в браузере. Скачайте файл, чтобы открыть его в приложении.",
+    "onlyofficeNotConfigured": "Сервер ONLYOFFICE Docs не настроен",
+    "onlyofficeHint": "Укажите NEXT_PUBLIC_ONLYOFFICE_URL (и при необходимости ONLYOFFICE_JWT_SECRET, ONLYOFFICE_FILE_BASE_URL) в .env.local и перезапустите dev-сервер.",
+    "onlyofficeLocalFile": "Локально загруженные файлы нужно сначала сохранить на сервере, чтобы открыть их в ONLYOFFICE Docs.",
+    "onlyofficeLoadError": "Не удалось подключиться к серверу ONLYOFFICE Docs",
+    "sheets": "Листы",
+    "readOnly": "Только чтение",
+    "fullscreen": "Во весь экран",
+    "exitFullscreen": "Обычный режим"
   }
 }

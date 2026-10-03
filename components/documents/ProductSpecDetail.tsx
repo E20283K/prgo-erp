@@ -363,14 +363,14 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
       <Tabs value={activeTab} onValueChange={(val) => setLevel3Tab(tab.id, val)} className="flex-1 flex flex-col overflow-hidden">
         {/* Unified Level 3 Tabs & Action Buttons Bar */}
         <div className="px-3 bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-center justify-between h-10 gap-2">
-          <TabsList className="bg-transparent h-10 p-0 gap-1.5 shrink-0">
-            <TabsTrigger value="overview" className="data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-950 data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-blue-600 text-muted-foreground hover:text-foreground hover:bg-white/60 dark:hover:bg-zinc-800/60 rounded-none h-10 text-xs px-3.5 font-medium gap-1.5 transition-all duration-150 cursor-pointer">
+          <TabsList variant="line" className="gap-2 overflow-x-auto overflow-y-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <TabsTrigger value="overview" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
               <FileText className="w-4 h-4" /> <span>General</span>
             </TabsTrigger>
-            <TabsTrigger value="materials" className="data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-950 data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-blue-600 text-muted-foreground hover:text-foreground hover:bg-white/60 dark:hover:bg-zinc-800/60 rounded-none h-10 text-xs px-3.5 font-medium gap-1.5 transition-all duration-150 cursor-pointer">
+            <TabsTrigger value="materials" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
               <Boxes className="w-4 h-4" /> <span>Bill of Materials (BOM)</span>
             </TabsTrigger>
-            <TabsTrigger value="operations" className="data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-950 data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-blue-600 text-muted-foreground hover:text-foreground hover:bg-white/60 dark:hover:bg-zinc-800/60 rounded-none h-10 text-xs px-3.5 font-medium gap-1.5 transition-all duration-150 cursor-pointer">
+            <TabsTrigger value="operations" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
               <Factory className="w-4 h-4" /> <span>Technological Route</span>
             </TabsTrigger>
           </TabsList>

@@ -443,5 +443,31 @@
     "close": "Kapat",
     "allPayments": "Tümü",
     "searchPlaceholder": "Satış geçmişinde ara..."
+  },
+  "FileViewer": {
+    "preview": "Önizleme",
+    "download": "İndir",
+    "remove": "Eki kaldır",
+    "openInNewTab": "Yeni sekmede aç",
+    "close": "Kapat",
+    "loading": "Belge yükleniyor…",
+    "loadError": "Belge yüklenemedi",
+    "zoomIn": "Yakınlaştır",
+    "zoomOut": "Uzaklaştır",
+    "fitWidth": "Genişliğe sığdır",
+    "rotate": "Döndür",
+    "prevPage": "Önceki sayfa",
+    "nextPage": "Sonraki sayfa",
+    "pageOf": "Sayfa {page} / {total}",
+    "unsupportedTitle": "Önizleme kullanılamıyor",
+    "unsupportedHint": "Bu dosya türü tarayıcıda önizlenemez. Yerel bir uygulamada açmak için indirin.",
+    "onlyofficeNotConfigured": "ONLYOFFICE Docs sunucusu yapılandırılmamış",
+    "onlyofficeHint": ".env.local dosyasında NEXT_PUBLIC_ONLYOFFICE_URL (isteğe bağlı ONLYOFFICE_JWT_SECRET, ONLYOFFICE_FILE_BASE_URL) ayarlayın ve dev sunucusunu yeniden başlatın.",
+    "onlyofficeLocalFile": "Yerel olarak yüklenen dosyalar ONLYOFFICE Docs'ta açılmadan önce sunucuya kaydedilmelidir.",
+    "onlyofficeLoadError": "ONLYOFFICE Docs sunucusuna bağlanılamadı",
+    "sheets": "Sayfalar",
+    "readOnly": "Salt okunur",
+    "fullscreen": "Tam ekran",
+    "exitFullscreen": "Tam ekrandan çık"
   }
 }

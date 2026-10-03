@@ -443,5 +443,31 @@
     "close": "Close",
     "allPayments": "ALL",
     "searchPlaceholder": "Search sales history..."
+  },
+  "FileViewer": {
+    "preview": "Preview",
+    "download": "Download",
+    "remove": "Remove attachment",
+    "openInNewTab": "Open in new tab",
+    "close": "Close",
+    "loading": "Loading document…",
+    "loadError": "Failed to load document",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "fitWidth": "Fit to width",
+    "rotate": "Rotate",
+    "prevPage": "Previous page",
+    "nextPage": "Next page",
+    "pageOf": "Page {page} of {total}",
+    "unsupportedTitle": "Preview not available",
+    "unsupportedHint": "This file type cannot be previewed in the browser. Download it to open in a native application.",
+    "onlyofficeNotConfigured": "ONLYOFFICE Docs server is not configured",
+    "onlyofficeHint": "Set NEXT_PUBLIC_ONLYOFFICE_URL (and optionally ONLYOFFICE_JWT_SECRET, ONLYOFFICE_FILE_BASE_URL) in .env.local, then restart the dev server.",
+    "onlyofficeLocalFile": "Locally uploaded files must be saved to the server before they can be opened in ONLYOFFICE Docs.",
+    "onlyofficeLoadError": "Could not connect to ONLYOFFICE Docs server",
+    "sheets": "Sheets",
+    "readOnly": "Read-only",
+    "fullscreen": "Fullscreen",
+    "exitFullscreen": "Exit fullscreen"
   }
 }

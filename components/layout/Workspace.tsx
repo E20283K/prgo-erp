@@ -19,10 +19,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { WorkOrderDetail } from "@/components/documents/WorkOrderDetail";
-import { CreateOrderDialog } from "@/components/documents/CreateOrderDialog";
+import { CreateWorkOrderPickerModal } from "@/components/documents/work-order/dialogs/CreateWorkOrderPickerModal";
 import { ProductSpecDetail } from "@/components/documents/ProductSpecDetail";
-import { ClientOrderDetail } from "@/components/documents/ClientOrderDetail";
+import { ClientOrderDetail } from "@/components/documents/client-order/ClientOrderDetail";
 import { SalesRecordDetail } from "@/components/documents/SalesRecordDetail";
 
 import { TabContentWrapper } from "./TabContentWrapper";
@@ -31,7 +32,17 @@ import { RegistryGridRenderer } from "./RegistryGridRenderer";
 export function Workspace({ children }: { children: React.ReactNode }) {
   const t = useTranslations("Workspace");
   const tMod = useTranslations("Modules");
-  const { tabs, activeTabId, setActiveTab, closeTab, openTab, setCreateOrderOpen } = useWorkspaceStore();
+  const {
+    tabs,
+    activeTabId,
+    setActiveTab,
+    closeTab,
+    openTab,
+    activeModule,
+    currentModule,
+    isCreateWorkOrderOpen,
+    setCreateWorkOrderOpen,
+  } = useWorkspaceStore();
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const isPOSActive = activeTabId.includes("pos");
 
@@ -74,7 +85,32 @@ export function Workspace({ children }: { children: React.ReactNode }) {
   };
 
   const handleNewQuickTab = () => {
-    setCreateOrderOpen(true);
+    const isProduction =
+      activeModule === "production" ||
+      currentModule === "production" ||
+      activeTab?.module === "production" ||
+      activeTab?.type === "work-order" ||
+      activeTab?.id.includes("work-orders");
+
+    if (isProduction) {
+      setCreateWorkOrderOpen(true);
+    } else {
+      const newId = `NEW-CO-${Math.floor(Math.random() * 1000)}`;
+      openTab({
+        id: newId,
+        title: "New Client Order",
+        type: "client-order",
+        module: "crm",
+        isUnsaved: true,
+        activeLevel3Tab: "overview",
+        documentData: {
+          docNo: newId,
+          status: "Draft",
+          quantity: 1000,
+          unit: "pcs",
+        },
+      });
+    }
   };
 
   const renderTabType = (tab: DocumentTab) => {
@@ -89,11 +125,20 @@ export function Workspace({ children }: { children: React.ReactNode }) {
   return (
     <TooltipProvider delay={300}>
       <div className="flex-1 flex flex-col min-w-0 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
-        <CreateOrderDialog />
+        <CreateWorkOrderPickerModal
+          isOpen={isCreateWorkOrderOpen}
+          onOpenChange={setCreateWorkOrderOpen}
+        />
       
       {/* VS Code + 1C Document Tab Bar */}
       {!isPOSActive && (
         <div className="flex items-end h-9 bg-zinc-200/90 dark:bg-zinc-950 px-1.5 gap-1 overflow-x-auto shrink-0 border-b border-zinc-300 dark:border-zinc-800 select-none [&::-webkit-scrollbar]:hidden">
+          {/* Sidebar Toggle Button */}
+          <div className="flex items-center self-center shrink-0 mr-1 gap-1">
+            <SidebarTrigger className="h-7 w-7 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-100 rounded-md hover:bg-zinc-300/80 dark:hover:bg-zinc-800 transition-colors" />
+            <Separator orientation="vertical" className="h-4 bg-zinc-300 dark:bg-zinc-800" />
+          </div>
+
           {tabs.map((tab, idx) => {
             const isActive = activeTabId === tab.id;
             const isRegistry = tab.type === "registry";

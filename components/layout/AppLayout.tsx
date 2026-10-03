@@ -3,7 +3,6 @@
 import React, { useEffect } from "react";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { Sidebar } from "./Sidebar";
-import { Topbar } from "./Topbar";
 import { Workspace } from "./Workspace";
 import { StatusBar } from "./StatusBar";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -157,9 +156,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main App Canvas */}
       <SidebarInset className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
-        {/* Topbar with Trigger, Breadcrumbs, Search, User profile */}
-        {!isPOSActive && <Topbar />}
-
         {/* VS Code + 1C Document Workspace */}
         <Workspace>{children}</Workspace>
 

@@ -211,7 +211,7 @@ export function DataGrid() {
   const tGrid = useTranslations("DataGrid");
   const tCommon = useTranslations("Common");
   const tWork = useTranslations("Workspace");
-  const { openTab, updateGridStats, theme, setCreateOrderOpen } = useWorkspaceStore();
+  const { openTab, updateGridStats, theme, setCreateWorkOrderOpen } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [columns, setColumns] = useState<GridColumn[]>(INITIAL_COLUMNS);
 
@@ -574,9 +574,21 @@ export function DataGrid() {
     );
   }, []);
 
-  const handleCreateNew = () => {
-    setCreateOrderOpen(true);
-  };
+  const handleCreateNew = useCallback(() => {
+    setCreateWorkOrderOpen(true);
+  }, [setCreateWorkOrderOpen]);
+
+  // 1C Industrial UX: Insert key triggers new document creation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Insert") {
+        e.preventDefault();
+        setCreateWorkOrderOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [setCreateWorkOrderOpen]);
 
   return (
     <ContextMenu>

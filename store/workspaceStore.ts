@@ -94,6 +94,8 @@ interface WorkspaceState {
   // ── Modals ───────────────────────────────────────────────────────────────
   isCreateOrderOpen: boolean;
   setCreateOrderOpen: (open: boolean) => void;
+  isCreateWorkOrderOpen: boolean;
+  setCreateWorkOrderOpen: (open: boolean) => void;
 
   // Actions
   openTab: (tab: DocumentTab) => void;
@@ -266,6 +268,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   isCreateOrderOpen: false,
   setCreateOrderOpen: (open) => set({ isCreateOrderOpen: open }),
+  isCreateWorkOrderOpen: false,
+  setCreateWorkOrderOpen: (open) => set({ isCreateWorkOrderOpen: open }),
 
   openTab: (tab) =>
     set((state) => {

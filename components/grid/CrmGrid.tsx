@@ -220,7 +220,30 @@ export function CrmGrid({ type }: CrmGridProps) {
 
   const handleCreateNew = () => {
     if (type === "client-orders") {
-      setCreateOrderOpen(true);
+      const newDocNo = `CO-${String(Math.floor(1000 + Math.random() * 9000))}`;
+      openTab({
+        id: newDocNo,
+        title: `${newDocNo}: New Client Order`,
+        type: "client-order",
+        module: "crm",
+        isUnsaved: true,
+        activeLevel3Tab: "overview",
+        documentData: {
+          docNo: newDocNo,
+          customer: "",
+          product: "",
+          quantity: 1000,
+          unit: "pcs",
+          status: "Draft",
+          orderType: "Production",
+          recipe: "OFFSET_STD_V1",
+          department: "Offset",
+          site: "Building 1",
+          deadline: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+          responsible: "Admin",
+          linkedWoId: "",
+        },
+      });
     }
   };
 

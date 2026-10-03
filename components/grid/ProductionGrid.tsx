@@ -26,7 +26,14 @@ import {
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
-import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu";
+import { CreateWorkOrderPickerModal } from "@/components/documents/work-order/dialogs/CreateWorkOrderPickerModal";
 
 interface ProductionGridProps {
   type: string; // "planning" | "history" | "machines" | "bom" | "materials"
@@ -34,10 +41,11 @@ interface ProductionGridProps {
 
 export function ProductionGrid({ type }: ProductionGridProps) {
   const tCommon = useTranslations("Common");
-  const { updateGridStats, theme, openTab, setCreateOrderOpen } = useWorkspaceStore();
+  const { updateGridStats, theme, openTab } = useWorkspaceStore();
   const isDark = theme === "dark";
+  const [isWorkOrderPickerOpen, setIsWorkOrderPickerOpen] = useState(false);
 
-  const handleCreateNew = () => {
+  const handleCreateNew = useCallback(() => {
     if (type === "bom") {
       const newId = `SPEC-00${Math.floor(100 + Math.random() * 900)}`;
       openTab({
@@ -56,9 +64,24 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         }
       });
     } else {
-      setCreateOrderOpen(true);
+      setIsWorkOrderPickerOpen(true);
     }
-  };
+  }, [type, openTab]);
+
+  // Keyboard shortcut: Ins to Create New
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "Insert" &&
+        !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)
+      ) {
+        e.preventDefault();
+        handleCreateNew();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleCreateNew]);
 
   const handleOpen = () => {
     if (selection.rows.length === 0) return;
@@ -283,7 +306,8 @@ export function ProductionGrid({ type }: ProductionGridProps) {
   }, [rows]);
 
   return (
-    <ContextMenu>
+    <>
+      <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className="w-full h-full bg-card flex flex-col select-none overflow-hidden">
           {/* Toolbar */}
@@ -371,6 +395,26 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           </div>
         </div>
       </ContextMenuTrigger>
+
+      <ContextMenuContent className="w-56 text-xs">
+        <ContextMenuItem onClick={handleCreateNew} className="gap-2 cursor-pointer">
+          <Plus className="w-3.5 h-3.5 text-blue-500" />
+          <span>New Production Order</span>
+          <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ins</span>
+        </ContextMenuItem>
+        <ContextMenuItem onClick={handleOpen} className="gap-2 cursor-pointer">
+          <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
+          <span>Open Selected</span>
+          <span className="ml-auto text-[10px] text-muted-foreground font-mono">Enter</span>
+        </ContextMenuItem>
+      </ContextMenuContent>
     </ContextMenu>
+
+    {/* Lightweight Picker for Production Work Orders */}
+    <CreateWorkOrderPickerModal
+      isOpen={isWorkOrderPickerOpen}
+      onOpenChange={setIsWorkOrderPickerOpen}
+    />
+  </>
   );
 }
