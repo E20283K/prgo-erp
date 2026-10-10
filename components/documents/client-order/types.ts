@@ -10,6 +10,7 @@ export interface ProductionMilestone {
   department: string;
   status: "Pending" | "In Progress" | "Done" | "Issue";
   assignedTo?: string;
+  dueDate?: string;
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -45,6 +46,7 @@ export interface ClientOrderFormData {
   priceTotal?: number;
   currency?: string;
   photoUrl?: string;
+  photoUrls?: string[];
   attachments?: OrderAttachment[];
   // Physical Item Specifications
   itemCategory?: "Label" | "Hangtag" | "Card" | "Sticker" | "Jacquard Ribbon" | "Carton" | "Other" | string;
@@ -55,6 +57,24 @@ export interface ClientOrderFormData {
   bleed?: number;
   milestones?: ProductionMilestone[];
   sizes?: SizeDistribution[];
+  // Flexo Specific Parameters
+  flexoMachineId?: string;
+  flexoMaterialId?: string;
+  flexoWebWidth?: number;
+  flexoCylinderTeeth?: number;
+  flexoGapX?: number;
+  flexoGapY?: number;
+  flexoColors?: number;
+  flexoPlateThickness?: number;
+  flexoOrientation?: "normal" | "rotated";
+}
+
+export interface AuditLogItem {
+  id: string;
+  action: string;
+  detail: string;
+  user: string;
+  timestamp: string;
 }
 
 export interface ClientOrderSampleData {
@@ -71,3 +91,17 @@ export interface ClientOrderSampleData {
   approvalStatus: string; // "Pending" | "Approved" | "Revision Requested"
   approvalNotes: string;
 }
+
+export const MOCK_CUSTOMERS = [
+  "Alpha Media Group",
+  "Nordic Print Co",
+  "Baltic Press LLC",
+  "Apex Packaging",
+  "Global Apparel Brand",
+  "Zenith Publishing",
+  "Vanguard Fashion",
+  "Metropolis Books",
+  "Urban Outfit Labels",
+  "Pacific Craft Goods",
+];
+

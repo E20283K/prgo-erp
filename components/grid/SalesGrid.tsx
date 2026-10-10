@@ -24,72 +24,49 @@ import {
 } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
-import { useSalesStore } from "@/store/salesStore";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 
 interface SalesGridProps {
-  type: string; // "quotations" | "orders" | "invoices" | "returns" | "price-lists" | "products" | "discounts"
+  type: string; // "client-orders" | "quotations" | "contracts" | "invoices" | "delivery-acts" | "returns" | "products" | "price-lists" | "discounts"
 }
 
 export function SalesGrid({ type }: SalesGridProps) {
   const tCommon = useTranslations("Common");
-  const tSalesHistory = useTranslations("SalesHistory");
   const { updateGridStats, theme, openTab } = useWorkspaceStore();
-  const { salesHistory } = useSalesStore();
   const isDark = theme === "dark";
 
   const { columns, rows } = useMemo(() => {
     let cols: GridColumn[] = [];
     let mockRows: any[] = [];
 
-    if (type === "orders") {
+    if (type === "client-orders") {
       cols = [
-        { id: "id", title: tSalesHistory("receiptId"), width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: tSalesHistory("date"), width: 140, icon: GridColumnIcon.HeaderDate },
-        { id: "customer", title: tSalesHistory("client"), width: 210, icon: GridColumnIcon.HeaderString },
-        { id: "product", title: tSalesHistory("products"), width: 260, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "quantity", title: tSalesHistory("totalQty"), width: 95, icon: GridColumnIcon.HeaderNumber },
-        { id: "paymentMethod", title: tSalesHistory("paymentMethod"), width: 120, icon: GridColumnIcon.HeaderSingleValue },
-        { id: "amount", title: `${tSalesHistory("total")} ($)`, width: 110, icon: GridColumnIcon.HeaderNumber },
-        { id: "status", title: tSalesHistory("status"), width: 110, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "id", title: "Order ID", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "date", title: "Date", width: 120, icon: GridColumnIcon.HeaderDate },
+        { id: "customer", title: "Customer", width: 220, icon: GridColumnIcon.HeaderString },
+        { id: "product", title: "Print Job Description", width: 260, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: "quantity", title: "Run Qty", width: 100, icon: GridColumnIcon.HeaderNumber },
+        { id: "orderType", title: "Type", width: 120, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
       ];
-
-      mockRows = salesHistory.map((sale) => {
-        const productDisplay = sale.items.length === 1
-          ? sale.items[0].name
-          : tSalesHistory("multipleProducts", { count: sale.items.length }) || `${sale.items.length} products`;
-        
-        const totalQty = sale.items.reduce((acc, item) => acc + item.qty, 0);
-        const clientDisplay = sale.clientName || tSalesHistory("walkIn");
-        const dateDisplay = new Date(sale.timestamp).toLocaleString(undefined, {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-
-        return {
-          id: sale.id,
-          date: dateDisplay,
-          customer: clientDisplay,
-          product: productDisplay,
-          quantity: totalQty,
-          paymentMethod: sale.paymentMethod,
-          amount: Number(sale.total.toFixed(2)),
-          status: sale.status || (sale.paymentMethod === "Debt" ? "Debt" : sale.paymentMethod === "Quote" ? "Quote" : "Completed"),
-          _original: sale,
-        };
-      });
+      mockRows = Array.from({ length: 50 }, (_, i) => ({
+        id: `CO-${String(41 + i).padStart(5, "0")}`,
+        date: `2026-10-${String((i % 30) + 1).padStart(2, "0")}`,
+        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging"][i % 4],
+        product: ["Offset Catalogs 100p (A4)", "Woven Satin Labels 30x50", "Nylon Taffeta Roll", "E-Flute Packaging Boxes"][i % 4],
+        quantity: [1000, 5000, 200, 10000][i % 4],
+        orderType: ["Sample", "Production", "Production", "Urgent Run"][i % 4],
+        status: ["Prepress", "Pending Approval", "In Production", "Completed"][i % 4],
+      }));
     } else if (type === "quotations") {
       cols = [
         { id: "id", title: "Quote ID", width: 110, icon: GridColumnIcon.HeaderReference },
         { id: "date", title: "Date", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "customer", title: "Prospect/Client", width: 220, icon: GridColumnIcon.HeaderString },
-        { id: "subject", title: "Subject", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "amount", title: "Est. Amount", width: 120, icon: GridColumnIcon.HeaderNumber },
+        { id: "customer", title: "Prospect / Client", width: 220, icon: GridColumnIcon.HeaderString },
+        { id: "subject", title: "Scope of Work", width: 260, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: "amount", title: "Est. Total ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
         { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
         { id: "validity", title: "Valid Until", width: 120, icon: GridColumnIcon.HeaderDate },
       ];
@@ -97,10 +74,29 @@ export function SalesGrid({ type }: SalesGridProps) {
         id: `QT-${String(501 + i).padStart(4, "0")}`,
         date: `2026-10-${String((i % 28) + 1).padStart(2, "0")}`,
         customer: ["Global Retailers Ltd", "Workwear Supply Co", "Hotel Chains Inc", "Uniforms Direct", "Boutique Threads"][i % 5],
-        subject: ["Bulk Polo Shirts Quote", "Winter Jackets Estimate", "Towel Replenishment", "Kitchen Staff Uniforms", "Custom Print T-Shirts"][i % 5],
-        amount: [8000, 45000, 5000, 32000, 12000][i % 5],
-        status: ["Draft", "Sent", "Accepted", "Rejected", "Expired"][i % 5],
+        subject: ["Annual Catalog Print 10k", "Corrugated Carton Run 50k", "Self-Adhesive Foil Labels", "Hardcover Restaurant Menus", "Custom Paper Bags 5k"][i % 5],
+        amount: [8500, 42000, 6200, 14500, 11800][i % 5],
+        status: ["Draft", "Sent", "Accepted", "Rejected", "Under Review"][i % 5],
         validity: `2026-11-${String((i % 28) + 1).padStart(2, "0")}`,
+      }));
+    } else if (type === "contracts") {
+      cols = [
+        { id: "id", title: "Contract No", width: 120, icon: GridColumnIcon.HeaderReference },
+        { id: "date", title: "Sign Date", width: 120, icon: GridColumnIcon.HeaderDate },
+        { id: "customer", title: "Organization", width: 220, icon: GridColumnIcon.HeaderString },
+        { id: "contractType", title: "Contract Type", width: 160, icon: GridColumnIcon.HeaderLookup },
+        { id: "creditTerms", title: "Payment Terms", width: 170, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "validUntil", title: "Valid Until", width: 120, icon: GridColumnIcon.HeaderDate },
+        { id: "status", title: "Status", width: 120, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+      mockRows = Array.from({ length: 40 }, (_, i) => ({
+        id: `CON-2026-${String(101 + i).padStart(3, "0")}`,
+        date: `2026-01-${String((i % 28) + 1).padStart(2, "0")}`,
+        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging", "City Publishing House"][i % 5],
+        contractType: ["Annual Framework", "High Volume Tier", "Agency Agreement", "One-Off Project"][i % 4],
+        creditTerms: ["50% Prepay / 50% Post", "14 Days Net", "100% Prepayment", "30 Days Net"][i % 4],
+        validUntil: `2026-12-31`,
+        status: ["Active", "Active", "Under Review", "Draft"][i % 4],
       }));
     } else if (type === "invoices") {
       cols = [
@@ -114,30 +110,78 @@ export function SalesGrid({ type }: SalesGridProps) {
       ];
       mockRows = Array.from({ length: 120 }, (_, i) => ({
         id: `INV-${String(2001 + i).padStart(5, "0")}`,
-        orderId: `SO-${String(1001 + i).padStart(5, "0")}`,
+        orderId: `CO-${String(1001 + i).padStart(5, "0")}`,
         date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
-        customer: ["Global Retailers Ltd", "Workwear Supply Co", "Hotel Chains Inc", "Uniforms Direct", "Boutique Threads"][i % 5],
+        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging", "City Publishing House"][i % 5],
         amount: [7500, 42000, 4500, 30000, 3000][i % 5],
-        status: ["Unpaid", "Paid", "Overdue", "Cancelled"][i % 4],
+        status: ["Unpaid", "Paid", "Overdue", "Pending Advance"][i % 4],
         dueDate: `2026-10-${String((i % 28) + 1).padStart(2, "0")}`,
+      }));
+    } else if (type === "delivery-acts") {
+      cols = [
+        { id: "id", title: "Act ID", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "date", title: "Delivery Date", width: 120, icon: GridColumnIcon.HeaderDate },
+        { id: "orderId", title: "Order Ref", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "customer", title: "Customer Organization", width: 220, icon: GridColumnIcon.HeaderString },
+        { id: "product", title: "Delivered Print Goods", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: "quantity", title: "Delivered Qty", width: 110, icon: GridColumnIcon.HeaderNumber },
+        { id: "carrier", title: "Carrier / Driver", width: 160, icon: GridColumnIcon.HeaderString },
+        { id: "status", title: "Status", width: 140, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+      mockRows = Array.from({ length: 60 }, (_, i) => ({
+        id: `ACT-${String(8001 + i).padStart(4, "0")}`,
+        date: `2026-10-${String((i % 25) + 1).padStart(2, "0")}`,
+        orderId: `CO-${String(41 + i).padStart(5, "0")}`,
+        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging"][i % 4],
+        product: ["Offset Catalogs 100p (A4)", "Woven Satin Labels 30x50", "Nylon Taffeta Roll", "E-Flute Packaging Boxes"][i % 4],
+        quantity: [1000, 5000, 200, 10000][i % 4],
+        carrier: ["PrintGoo Fleet #1", "Customer Pickup", "Express Courier", "PrintGoo Fleet #2"][i % 4],
+        status: ["Signed & Stamped", "Pending Signature", "Signed & Stamped", "Disputed"][i % 4],
+      }));
+    } else if (type === "returns") {
+      cols = [
+        { id: "id", title: "Claim ID", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "date", title: "Date Filed", width: 120, icon: GridColumnIcon.HeaderDate },
+        { id: "orderId", title: "Order Ref", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "customer", title: "Customer", width: 200, icon: GridColumnIcon.HeaderString },
+        { id: "defect", title: "Reported Defect", width: 240, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: "resolution", title: "Resolution", width: 160, icon: GridColumnIcon.HeaderLookup },
+        { id: "status", title: "Status", width: 140, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+      mockRows = Array.from({ length: 30 }, (_, i) => ({
+        id: `CLM-${String(101 + i).padStart(4, "0")}`,
+        date: `2026-10-${String((i % 20) + 1).padStart(2, "0")}`,
+        orderId: `CO-${String(30 + i).padStart(5, "0")}`,
+        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging"][i % 4],
+        defect: [
+          "Color Mismatch (Delta E > 4.5 on Cover)",
+          "Cut Misalignment (2.5mm shift on margins)",
+          "Lamination Peeling on spine crease",
+          "Paper Weight Error (115g instead of 130g)",
+          "Glue binding flaw on page block"
+        ][i % 5],
+        resolution: ["Free Reprint Authorized", "15% Credit Note", "Rework Binding", "Under Technical Review"][i % 4],
+        status: ["Approved for Reprint", "Investigating", "Settled", "Rejected"][i % 4],
       }));
     } else if (type === "products") {
       cols = [
-        { id: "id", title: "SKU", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "name", title: "Product Name", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "category", title: "Category", width: 150, icon: GridColumnIcon.HeaderString },
-        { id: "price", title: "Base Price ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
-        { id: "stock", title: "Available Qty", width: 120, icon: GridColumnIcon.HeaderNumber },
-        { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "id", title: "Template Code", width: 120, icon: GridColumnIcon.HeaderReference },
+        { id: "name", title: "Print Service / Template", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: "category", title: "Category", width: 160, icon: GridColumnIcon.HeaderLookup },
+        { id: "specs", title: "Default Specifications", width: 280, icon: GridColumnIcon.HeaderString },
+        { id: "basePrice", title: "Base / 1k ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
+        { id: "status", title: "Status", width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      mockRows = Array.from({ length: 200 }, (_, i) => ({
-        id: `SKU-${String(8001 + i).padStart(5, "0")}`,
-        name: ["Premium Cotton Polo (Navy)", "Industrial Work Jacket", "Luxury Hotel Towel Set", "Fleece Blanket (Queen)", "Chef Coat (White)", "Denim Apron", "Medical Scrubs (Blue)"][i % 7],
-        category: ["Apparel", "Workwear", "Hospitality", "Home Textile", "Hospitality", "Workwear", "Healthcare"][i % 7],
-        price: [15, 35, 15, 25, 20, 18, 22][i % 7],
-        stock: [1500, 400, 2500, 800, 600, 300, 1200][i % 7],
-        status: ["Active", "Active", "Out of Stock", "Discontinued"][i % 4],
-      }));
+      mockRows = [
+        { id: "PRN-CAT-01", name: "Offset Catalogs (A4)", category: "Commercial Print", specs: "A4, 16-128p, 115-150g Silk, Perfect/Saddle", basePrice: 1200, status: "Active" },
+        { id: "PRN-BOX-02", name: "Corrugated Carton Box", category: "Packaging", specs: "E-Flute, 4-color UV print + Matt Varnish", basePrice: 850, status: "Active" },
+        { id: "PRN-LBL-03", name: "Roll Labels (Waterproof)", category: "Labels & Tags", specs: "Gloss White PP, 76mm Core, Die-Cut", basePrice: 320, status: "Active" },
+        { id: "PRN-BOK-04", name: "Hardcover Book (A5)", category: "Publishing", specs: "Case Bound, 80g Book Offset, Foil Stamped", basePrice: 2400, status: "Active" },
+        { id: "PRN-BAG-05", name: "Kraft Paper Shopping Bag", category: "Packaging", specs: "170g Brown/White Kraft, Twisted Paper Handles", basePrice: 450, status: "Active" },
+        { id: "PRN-FLY-06", name: "Promotional Flyers (A6)", category: "Commercial Print", specs: "A6 Double-sided, 130g Gloss, 4/4 Color", basePrice: 85, status: "Active" },
+        { id: "PRN-FOL-07", name: "Presentation Folders (A4)", category: "Stationery", specs: "300g Coated Board, Die-Cut Pocket + Card Slot", basePrice: 550, status: "Active" },
+        { id: "PRN-TAG-08", name: "Garment Hang Tags", category: "Labels & Tags", specs: "350g Matt Board, Eyelet Punch, Matt Lamination", basePrice: 160, status: "Active" },
+      ];
     } else {
       cols = [
         { id: "id", title: "ID", width: 100, icon: GridColumnIcon.HeaderReference },
@@ -152,7 +196,7 @@ export function SalesGrid({ type }: SalesGridProps) {
     }
 
     return { columns: cols, rows: mockRows };
-  }, [type, salesHistory, tSalesHistory]);
+  }, [type]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -165,10 +209,10 @@ export function SalesGrid({ type }: SalesGridProps) {
     return rows.filter((r) => {
       const searchStr = Object.values(r).join(" ").toLowerCase();
       const matchesSearch = !searchFilter || searchStr.includes(searchFilter.toLowerCase());
-      const matchesStatus = statusFilter === "ALL" || r.status === statusFilter || (type === "orders" && r.paymentMethod === statusFilter);
+      const matchesStatus = statusFilter === "ALL" || r.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [rows, searchFilter, statusFilter, type]);
+  }, [rows, searchFilter, statusFilter]);
 
   // Keep Workspace Status Bar in sync
   useEffect(() => {
@@ -200,26 +244,11 @@ export function SalesGrid({ type }: SalesGridProps) {
          allowOverlay: false,
          themeOverride: {
            textDark: isDark 
-             ? (val === "Active" || val === "Delivered" || val === "Accepted" || val === "Paid" || val === "Completed" ? "#4ade80" : val === "Inactive" || val === "Cancelled" || val === "Rejected" || val === "Overdue" ? "#f87171" : "#facc15")
-             : (val === "Active" || val === "Delivered" || val === "Accepted" || val === "Paid" || val === "Completed" ? "#15803d" : val === "Inactive" || val === "Cancelled" || val === "Rejected" || val === "Overdue" ? "#b91c1c" : "#a16207"),
+             ? (val === "Active" || val === "Accepted" || val === "Paid" || val === "Completed" || val === "Signed & Stamped" || val === "Approved for Reprint" ? "#4ade80" : val === "Inactive" || val === "Cancelled" || val === "Rejected" || val === "Overdue" || val === "Disputed" ? "#f87171" : "#facc15")
+             : (val === "Active" || val === "Accepted" || val === "Paid" || val === "Completed" || val === "Signed & Stamped" || val === "Approved for Reprint" ? "#15803d" : val === "Inactive" || val === "Cancelled" || val === "Rejected" || val === "Overdue" || val === "Disputed" ? "#b91c1c" : "#a16207"),
            baseFontStyle: "600 12px sans-serif",
          }
        };
-    }
-
-    if (column.id === "paymentMethod") {
-      return {
-        kind: GridCellKind.Text,
-        data: String(val),
-        displayData: String(val),
-        allowOverlay: false,
-        themeOverride: {
-          textDark: isDark 
-            ? (val === "Cash" ? "#34d399" : val === "Debt" ? "#fbbf24" : "#60a5fa")
-            : (val === "Cash" ? "#059669" : val === "Debt" ? "#d97706" : "#2563eb"),
-          baseFontStyle: "600 12px sans-serif",
-        }
-      };
     }
 
     if (typeof val === "number") {
@@ -241,53 +270,49 @@ export function SalesGrid({ type }: SalesGridProps) {
     };
   }, [filteredRows, columns, isDark]);
 
-  // Unique statuses / payment methods for the filter
+  // Unique statuses for the filter
   const availableStatuses = useMemo(() => {
     const statuses = new Set<string>();
     rows.forEach(r => {
-      if (type === "orders") {
-        if (r.paymentMethod) statuses.add(r.paymentMethod);
-      } else {
-        if (r.status) statuses.add(r.status);
-      }
+      if (r.status) statuses.add(r.status);
     });
     return Array.from(statuses);
-  }, [rows, type]);
+  }, [rows]);
 
   const handleCreateNew = () => {
-    if (type === "orders") {
-      openTab({
-        id: "tab-sales-pos",
-        title: "Point of Sale",
-        type: "registry",
-        module: "sales",
-      });
-    } else {
-      const newDocNo = type === "quotations" ? `QT-${String(Math.floor(1000 + Math.random() * 9000))}` : `SO-${String(Math.floor(1000 + Math.random() * 9000))}`;
-      openTab({
-        id: newDocNo,
-        title: `${newDocNo}: New ${type === "quotations" ? "Quotation" : "Order"}`,
-        type: "client-order",
-        module: "sales",
-        isUnsaved: true,
-        activeLevel3Tab: "overview",
-        documentData: {
-          docNo: newDocNo,
-          customer: "",
-          product: "",
-          quantity: 1000,
-          unit: "pcs",
-          status: "Draft",
-          orderType: type === "quotations" ? "Sample" : "Production",
-          recipe: "OFFSET_STD_V1",
-          department: "Offset",
-          site: "Building 1",
-          deadline: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
-          responsible: "Admin",
-          linkedWoId: "",
-        },
-      });
-    }
+    let prefix = "DOC";
+    let titleSuffix = "Document";
+    if (type === "quotations") { prefix = "QT"; titleSuffix = "Quotation"; }
+    else if (type === "client-orders") { prefix = "CO"; titleSuffix = "Client Order"; }
+    else if (type === "contracts") { prefix = "CON"; titleSuffix = "Contract"; }
+    else if (type === "invoices") { prefix = "INV"; titleSuffix = "Invoice"; }
+    else if (type === "delivery-acts") { prefix = "ACT"; titleSuffix = "Delivery Act"; }
+    else if (type === "returns") { prefix = "CLM"; titleSuffix = "Customer Claim"; }
+    
+    const newDocNo = `${prefix}-${String(Math.floor(1000 + Math.random() * 9000))}`;
+    openTab({
+      id: newDocNo,
+      title: `${newDocNo}: New ${titleSuffix}`,
+      type: "client-order",
+      module: "sales",
+      isUnsaved: true,
+      activeLevel3Tab: "overview",
+      documentData: {
+        docNo: newDocNo,
+        customer: "",
+        product: "",
+        quantity: 1000,
+        unit: "pcs",
+        status: "Draft",
+        orderType: type === "quotations" ? "Sample" : "Production",
+        recipe: "OFFSET_STD_V1",
+        department: "Offset",
+        site: "Building 1",
+        deadline: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+        responsible: "Admin",
+        linkedWoId: "",
+      },
+    });
   };
 
   const handleOpenSelected = () => {
@@ -300,14 +325,31 @@ export function SalesGrid({ type }: SalesGridProps) {
   const handleOpenRow = (rowIndex: number) => {
     const row = filteredRows[rowIndex];
     if (row) {
-      if (type === "orders") {
-        const originalSale = row._original || row;
+      if (type === "client-orders") {
+        const isFlexoProduct = row.product?.includes("Satin") || row.product?.includes("Nylon") || row.product?.includes("Roll");
+        const dept = isFlexoProduct ? "Flexo" : "Offset";
+        const rec = row.product?.includes("Satin") ? "FLEXO_SATIN_V2" : row.product?.includes("Nylon") ? "FLEXO_NYLON_V1" : isFlexoProduct ? "FLEXO_SATIN_V2" : "OFFSET_STD_V1";
+        const pW = row.product?.includes("30x50") ? 30 : isFlexoProduct ? 35 : 50;
+        const pH = row.product?.includes("30x50") ? 50 : isFlexoProduct ? 65 : 90;
+
         openTab({
           id: row.id,
-          title: `${row.id} - ${row.customer}`,
-          type: "sales-record",
+          title: `${row.id}: ${row.product}`,
+          type: "client-order",
           module: "sales",
-          documentData: originalSale,
+          documentData: {
+            docNo: row.id,
+            customer: row.customer,
+            product: row.product,
+            quantity: row.quantity,
+            orderType: row.orderType,
+            status: row.status,
+            department: dept,
+            recipe: rec,
+            width: pW,
+            height: pH,
+            deadline: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+          }
         });
       } else {
         openTab({
@@ -329,7 +371,7 @@ export function SalesGrid({ type }: SalesGridProps) {
             <div className="flex items-center gap-1.5">
               <Button onClick={handleCreateNew} size="sm" className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded">
                 <Plus className="w-3.5 h-3.5" />
-                <span>{type === "orders" ? "New POS Sale" : "Create New"}</span>
+                <span>Create New</span>
               </Button>
               <Button onClick={handleOpenSelected} variant="outline" size="sm" className="h-7 px-2.5 text-xs font-medium gap-1 rounded">
                 <ExternalLink className="w-3 h-3 text-muted-foreground" />
@@ -337,7 +379,7 @@ export function SalesGrid({ type }: SalesGridProps) {
               </Button>
               <Separator orientation="vertical" className="h-4 mx-1" />
 
-              {/* Status / Payment Filters */}
+              {/* Status Filters */}
               {availableStatuses.length > 0 && (
                 <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
                   <button
@@ -365,7 +407,7 @@ export function SalesGrid({ type }: SalesGridProps) {
                 <Input
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
-                  placeholder={type === "orders" ? tSalesHistory("searchPlaceholder") : `Search ${type}...`}
+                  placeholder={`Search ${type}...`}
                   className="pl-7 h-7 text-xs bg-background border-input rounded"
                 />
               </div>

@@ -21,6 +21,8 @@ import {
   Printer, 
   Search, 
   ExternalLink,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -33,6 +35,13 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 import { CreateWorkOrderPickerModal } from "@/components/documents/work-order/dialogs/CreateWorkOrderPickerModal";
 
 interface ProductionGridProps {
@@ -142,22 +151,33 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     if (type === "planning") {
       cols = [
         { id: "id", title: "Schedule ID", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "workOrder", title: "Work Order", width: 120, icon: GridColumnIcon.HeaderString },
-        { id: "machine", title: "Machine", width: 220, icon: GridColumnIcon.HeaderLookup },
+        { id: "orderType", title: "Order Type", width: 130, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "workOrder", title: "Work Order", width: 130, icon: GridColumnIcon.HeaderString },
+        { id: "parentOrder", title: "Parent Order", width: 120, icon: GridColumnIcon.HeaderString },
+        { id: "machine", title: "Machine", width: 200, icon: GridColumnIcon.HeaderLookup },
         { id: "shift", title: "Shift", width: 100, icon: GridColumnIcon.HeaderString },
-        { id: "startTime", title: "Start Time", width: 150, icon: GridColumnIcon.HeaderDate },
-        { id: "endTime", title: "End Time", width: 150, icon: GridColumnIcon.HeaderDate },
-        { id: "status", title: "Status", width: 120, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "startTime", title: "Start Time", width: 140, icon: GridColumnIcon.HeaderDate },
+        { id: "endTime", title: "End Time", width: 140, icon: GridColumnIcon.HeaderDate },
+        { id: "status", title: "Status", width: 160, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      mockRows = Array.from({ length: 80 }, (_, i) => ({
-        id: `SCH-${String(1000 + i).padStart(4, "0")}`,
-        workOrder: `WO-${String(350 + (i % 20)).padStart(5, "0")}`,
-        machine: ["Heidelberg XL 106", "Komori Lithrone G40", "Kolbus BF 513", "Autobond Mini 76 UV"][i % 4],
-        shift: ["Day Shift", "Night Shift"][i % 2],
-        startTime: `2026-10-${String((i % 10) + 1).padStart(2, "0")} 08:00`,
-        endTime: `2026-10-${String((i % 10) + 1).padStart(2, "0")} 20:00`,
-        status: ["Scheduled", "Running", "Delayed"][i % 3],
-      }));
+      mockRows = Array.from({ length: 80 }, (_, i) => {
+        const isSample = i % 5 === 0;
+        return {
+          id: `SCH-${String(1000 + i).padStart(4, "0")}`,
+          orderType: isSample ? "Sample" : "Production",
+          workOrder: `WO-${String(350 + (i % 20)).padStart(5, "0")}${isSample ? "-SMP" : ""}`,
+          parentOrder: isSample ? `CO-${String(100 + (i % 20)).padStart(5, "0")}` : "—",
+          machine: isSample
+            ? ["Xerox Iridesse Digital", "Ricoh Pro C9200", "Epson SureColor Proofer"][i % 3]
+            : ["Heidelberg XL 106", "Komori Lithrone G40", "Kolbus BF 513", "Autobond Mini 76 UV"][i % 4],
+          shift: isSample ? "Express Run" : ["Day Shift", "Night Shift"][i % 2],
+          startTime: `2026-10-${String((i % 10) + 1).padStart(2, "0")} 08:00`,
+          endTime: `2026-10-${String((i % 10) + 1).padStart(2, "0")} ${isSample ? "10:30" : "20:00"}`,
+          status: isSample
+            ? ["Printing Sample", "Ready for Client", "Approved"][i % 3]
+            : (i % 7 === 1 ? "Awaiting Sample Approval" : ["Scheduled", "Running", "Delayed"][i % 3]),
+        };
+      });
     } else if (type === "history") {
       cols = [
         { id: "id", title: "Log ID", width: 100, icon: GridColumnIcon.HeaderReference },
@@ -236,6 +256,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [orderTypeFilter, setOrderTypeFilter] = useState<string>("ALL");
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
@@ -246,9 +267,10 @@ export function ProductionGrid({ type }: ProductionGridProps) {
       const searchStr = Object.values(r).join(" ").toLowerCase();
       const matchesSearch = !searchFilter || searchStr.includes(searchFilter.toLowerCase());
       const matchesStatus = statusFilter === "ALL" || r.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesOrderType = orderTypeFilter === "ALL" || !r.orderType || r.orderType === orderTypeFilter;
+      return matchesSearch && matchesStatus && matchesOrderType;
     });
-  }, [rows, searchFilter, statusFilter]);
+  }, [rows, searchFilter, statusFilter, orderTypeFilter]);
 
   // Keep Workspace Status Bar in sync
   useEffect(() => {
@@ -272,19 +294,48 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     const column = columns[col];
     const val = rowData[column.id as keyof typeof rowData];
 
+    if (column.id === "orderType") {
+      const isSample = val === "Sample";
+      return {
+        kind: GridCellKind.Text,
+        data: String(val),
+        displayData: isSample ? "🧪 Sample Proof" : "Production Run",
+        allowOverlay: false,
+        themeOverride: {
+          textDark: isDark ? (isSample ? "#fbbf24" : "#60a5fa") : (isSample ? "#b45309" : "#1d4ed8"),
+          baseFontStyle: "600 12px sans-serif",
+        },
+      };
+    }
+
     if (column.id === "status") {
-       return {
-         kind: GridCellKind.Text,
-         data: String(val),
-         displayData: String(val),
-         allowOverlay: false,
-         themeOverride: {
-           textDark: isDark 
-             ? (val === "Running" || val === "Active" || val === "In Stock" ? "#4ade80" : val === "Delayed" || val === "Maintenance" || val === "Out of Stock" || val === "Obsolete" ? "#f87171" : "#facc15")
-             : (val === "Running" || val === "Active" || val === "In Stock" ? "#15803d" : val === "Delayed" || val === "Maintenance" || val === "Out of Stock" || val === "Obsolete" ? "#b91c1c" : "#a16207"),
-           baseFontStyle: "600 12px sans-serif",
-         }
-       };
+      let colorDark = "#facc15";
+      let colorLight = "#a16207";
+
+      if (val === "Running" || val === "Active" || val === "In Stock" || val === "Approved") {
+        colorDark = "#4ade80";
+        colorLight = "#15803d";
+      } else if (val === "Delayed" || val === "Maintenance" || val === "Out of Stock" || val === "Obsolete") {
+        colorDark = "#f87171";
+        colorLight = "#b91c1c";
+      } else if (val === "Awaiting Sample Approval") {
+        colorDark = "#fb7185";
+        colorLight = "#be123c";
+      } else if (val === "Printing Sample" || val === "Ready for Client") {
+        colorDark = "#fbbf24";
+        colorLight = "#b45309";
+      }
+
+      return {
+        kind: GridCellKind.Text,
+        data: String(val),
+        displayData: String(val),
+        allowOverlay: false,
+        themeOverride: {
+          textDark: isDark ? colorDark : colorLight,
+          baseFontStyle: "600 12px sans-serif",
+        },
+      };
     }
 
     return {
@@ -305,6 +356,23 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     return Array.from(statuses);
   }, [rows]);
 
+  // Partition statuses: keep only the most necessary as direct pills, tuck remainder under dropdown
+  const { primaryStatuses, overflowStatuses } = useMemo(() => {
+    if (availableStatuses.length <= 4) {
+      return { primaryStatuses: availableStatuses, overflowStatuses: [] };
+    }
+
+    // High frequency primary statuses
+    const PRIORITY_ORDER = ["Scheduled", "Running", "Delayed", "Active", "In Stock"];
+    const prioritized = availableStatuses.filter((s) => PRIORITY_ORDER.includes(s));
+
+    // Pick top 3 for direct pills
+    const topPrimary = (prioritized.length > 0 ? prioritized : availableStatuses).slice(0, 3);
+    const overflow = availableStatuses.filter((s) => !topPrimary.includes(s));
+
+    return { primaryStatuses: topPrimary, overflowStatuses: overflow };
+  }, [availableStatuses]);
+
   return (
     <>
       <ContextMenu>
@@ -323,24 +391,100 @@ export function ProductionGrid({ type }: ProductionGridProps) {
               </Button>
               <Separator orientation="vertical" className="h-4 mx-1" />
 
-              {/* Status Filters */}
+              {/* Order Type Filter (Planning View) */}
+              {type === "planning" && (
+                <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium mr-1">
+                  <button
+                    onClick={() => setOrderTypeFilter("ALL")}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      orderTypeFilter === "ALL" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    All Types
+                  </button>
+                  <button
+                    onClick={() => setOrderTypeFilter("Production")}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      orderTypeFilter === "Production" ? "bg-background text-blue-600 font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Production
+                  </button>
+                  <button
+                    onClick={() => setOrderTypeFilter("Sample")}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      orderTypeFilter === "Sample" ? "bg-amber-500 text-white font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    🧪 Samples
+                  </button>
+                </div>
+              )}
+
+              {/* Status Filters (Most necessary as direct pills, remainder under compact dropdown) */}
               {availableStatuses.length > 0 && (
                 <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
                   <button
                     onClick={() => setStatusFilter("ALL")}
-                    className={`px-2 py-0.5 rounded transition-colors ${statusFilter === "ALL" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      statusFilter === "ALL"
+                        ? "bg-background text-foreground font-semibold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                   >
                     ALL
                   </button>
-                  {availableStatuses.map((status) => (
+                  {primaryStatuses.map((status) => (
                     <button
                       key={status}
                       onClick={() => setStatusFilter(status)}
-                      className={`px-2 py-0.5 rounded transition-colors ${statusFilter === status ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                      className={`px-2 py-0.5 rounded transition-colors ${
+                        statusFilter === status
+                          ? "bg-background text-foreground font-semibold shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
                     >
                       {status}
                     </button>
                   ))}
+
+                  {/* Overflow Dropdown for other statuses */}
+                  {overflowStatuses.length > 0 && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <button
+                            type="button"
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
+                              overflowStatuses.includes(statusFilter)
+                                ? "bg-background text-blue-600 dark:text-blue-400 font-semibold shadow-xs"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          />
+                        }
+                      >
+                        <span className="truncate max-w-[130px]">
+                          {overflowStatuses.includes(statusFilter) ? statusFilter : `More (${overflowStatuses.length})`}
+                        </span>
+                        <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-52 text-xs">
+                        <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
+                          Additional Statuses
+                        </DropdownMenuLabel>
+                        {overflowStatuses.map((status) => (
+                          <DropdownMenuItem
+                            key={status}
+                            onClick={() => setStatusFilter(status)}
+                            className="flex items-center justify-between text-xs cursor-pointer py-1.5"
+                          >
+                            <span>{status}</span>
+                            {statusFilter === status && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               )}
             </div>

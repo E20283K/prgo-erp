@@ -90,25 +90,6 @@ export function CrmGrid({ type }: CrmGridProps) {
         status: ["New", "Contacted", "Qualified", "Lost"][i % 4],
         score: Math.floor(Math.random() * 100),
       }));
-    } else if (type === "client-orders") {
-      cols = [
-        { id: "id", title: "Order ID", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: "Date", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "customer", title: "Customer", width: 220, icon: GridColumnIcon.HeaderString },
-        { id: "product", title: "Product", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "quantity", title: "Qty", width: 100, icon: GridColumnIcon.HeaderNumber },
-        { id: "orderType", title: "Type", width: 120, icon: GridColumnIcon.HeaderSingleValue },
-        { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
-      ];
-      mockRows = Array.from({ length: 50 }, (_, i) => ({
-        id: `CO-${String(41 + i).padStart(5, "0")}`,
-        date: `2026-10-${String((i % 30) + 1).padStart(2, "0")}`,
-        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging"][i % 4],
-        product: ["Offset Catalogs 100p", "Woven Labels 30x50", "Nylon Taffeta Roll", "Packaging Boxes"][i % 4],
-        quantity: [1000, 5000, 200, 10000][i % 4],
-        orderType: ["Sample", "Production", "Production", "Production"][i % 4],
-        status: ["Calculating", "Pending Approval", "In Production", "Completed"][i % 4],
-      }));
     } else {
       // requests
       cols = [
@@ -219,32 +200,7 @@ export function CrmGrid({ type }: CrmGridProps) {
   }, [rows]);
 
   const handleCreateNew = () => {
-    if (type === "client-orders") {
-      const newDocNo = `CO-${String(Math.floor(1000 + Math.random() * 9000))}`;
-      openTab({
-        id: newDocNo,
-        title: `${newDocNo}: New Client Order`,
-        type: "client-order",
-        module: "crm",
-        isUnsaved: true,
-        activeLevel3Tab: "overview",
-        documentData: {
-          docNo: newDocNo,
-          customer: "",
-          product: "",
-          quantity: 1000,
-          unit: "pcs",
-          status: "Draft",
-          orderType: "Production",
-          recipe: "OFFSET_STD_V1",
-          department: "Offset",
-          site: "Building 1",
-          deadline: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
-          responsible: "Admin",
-          linkedWoId: "",
-        },
-      });
-    }
+    // TODO: Implement for other CRM types
   };
 
   const handleOpenSelected = () => {
@@ -255,27 +211,7 @@ export function CrmGrid({ type }: CrmGridProps) {
   };
 
   const handleOpenRow = (rowIndex: number) => {
-    if (type === "client-orders") {
-      const row = filteredRows[rowIndex];
-      if (row) {
-        openTab({
-          id: row.id,
-          title: `${row.id}: ${row.product}`,
-          type: "client-order",
-          module: "crm",
-          documentData: {
-            docNo: row.id,
-            customer: row.customer,
-            product: row.product,
-            quantity: row.quantity,
-            orderType: row.orderType,
-            status: row.status,
-            recipe: "OFFSET_STD_V1", // Mock default
-            deadline: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-          }
-        });
-      }
-    }
+    // TODO: Implement for other CRM types
   };
 
   return (

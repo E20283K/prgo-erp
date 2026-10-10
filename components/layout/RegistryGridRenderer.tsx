@@ -9,17 +9,23 @@ const ProductionGrid = dynamic(() => import("@/components/grid/ProductionGrid").
 const WarehouseGrid = dynamic(() => import("@/components/grid/WarehouseGrid").then((mod) => mod.WarehouseGrid), { ssr: false });
 const SalesGrid = dynamic(() => import("@/components/grid/SalesGrid").then((mod) => mod.SalesGrid), { ssr: false });
 const SalesPOS = dynamic(() => import("@/components/documents/SalesPOS").then((mod) => mod.SalesPOS), { ssr: false });
+const TaskGrid = dynamic(() => import("@/components/grid/TaskGrid").then((mod) => mod.TaskGrid), { ssr: false });
 
 export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
+  if (tab.id.includes("tasks")) {
+    return <TaskGrid />;
+  }
+
   if (tab.module === "crm") {
     let crmType = "customers";
-    if (tab.id.includes("customers")) crmType = "customers";
+    if (tab.id.includes("tasks")) return <TaskGrid />;
+    else if (tab.id.includes("customers")) crmType = "customers";
     else if (tab.id.includes("contacts")) crmType = "contacts";
     else if (tab.id.includes("leads")) crmType = "leads";
     else if (tab.id.includes("requests")) crmType = "requests";
-    else if (tab.id.includes("client-orders")) crmType = "client-orders";
     return <CrmGrid type={crmType as any} />;
   } else if (tab.module === "production") {
+    if (tab.id.includes("tasks")) return <TaskGrid />;
     if (tab.id.includes("work-orders") || tab.id === "registry-work-orders") return <DataGrid />;
     if (tab.id.includes("planning")) return <ProductionGrid type="planning" />;
     if (tab.id.includes("history")) return <ProductionGrid type="history" />;
@@ -36,15 +42,17 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("locations")) return <WarehouseGrid type="locations" />;
     return <WarehouseGrid type="stock-balance" />;
   } else if (tab.module === "sales") {
-    if (tab.id.includes("pos")) return <SalesPOS />;
+    if (tab.id.includes("client-orders")) return <SalesGrid type="client-orders" />;
     if (tab.id.includes("quotations")) return <SalesGrid type="quotations" />;
-    if (tab.id.includes("orders")) return <SalesGrid type="orders" />;
+    if (tab.id.includes("contracts")) return <SalesGrid type="contracts" />;
     if (tab.id.includes("invoices")) return <SalesGrid type="invoices" />;
+    if (tab.id.includes("delivery-acts")) return <SalesGrid type="delivery-acts" />;
     if (tab.id.includes("returns")) return <SalesGrid type="returns" />;
-    if (tab.id.includes("price-lists")) return <SalesGrid type="price-lists" />;
     if (tab.id.includes("products")) return <SalesGrid type="products" />;
+    if (tab.id.includes("price-lists")) return <SalesGrid type="price-lists" />;
     if (tab.id.includes("discounts")) return <SalesGrid type="discounts" />;
-    return <SalesGrid type="orders" />;
+    if (tab.id.includes("orders")) return <SalesGrid type="client-orders" />;
+    return <SalesGrid type="client-orders" />;
   }
   return <DataGrid />;
 }

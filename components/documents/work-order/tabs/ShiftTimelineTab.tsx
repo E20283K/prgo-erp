@@ -276,16 +276,22 @@ export function ShiftTimelineTab({
                       ev.type === "Run" && "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-200",
                       ev.type === "Delay" && "bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200",
                       ev.type === "Maintenance" && "bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-400 border-orange-200",
-                      ev.type === "QC" && "bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400 border-purple-200"
+                      ev.type === "QC" && "bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400 border-purple-200",
+                      ev.type === "Waste" && "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-200 font-semibold"
                     )}
                   >
-                    {ev.type}
+                    {ev.type === "Waste" ? "Scrap / Waste" : ev.type}
                   </Badge>
                   <span className={cn(
                     "font-medium",
-                    ev.type === "Delay" ? "text-red-600 dark:text-red-400" : "text-zinc-700 dark:text-zinc-300"
+                    ev.type === "Delay" || ev.type === "Waste" ? "text-red-600 dark:text-red-400" : "text-zinc-700 dark:text-zinc-300"
                   )}>
                     {ev.note}
+                    {ev.wasteQty ? (
+                      <span className="ml-2 font-mono text-[10px] font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-900/50">
+                        {ev.wasteQty.toLocaleString()} units • {ev.wasteReason || "Defect"}
+                      </span>
+                    ) : null}
                   </span>
                 </div>
                 <span className="text-zinc-400 font-mono text-[10px]">{ev.operator}</span>

@@ -53,9 +53,11 @@ export interface ShiftEvent {
   id: string;
   opId: string;
   time: string;
-  type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC";
+  type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC" | "Waste";
   note: string;
   operator: string;
+  wasteQty?: number;
+  wasteReason?: string;
 }
 
 export interface OrderAttachment {
@@ -75,6 +77,7 @@ export interface ProductionMilestone {
   department: string;
   status: "Pending" | "In Progress" | "Done" | "Issue";
   assignedTo?: string;
+  dueDate?: string;
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -97,7 +100,16 @@ export interface WorkOrderFormData {
   priceTotal: number;
   currency: string;
   photoUrl: string;
+  photoUrls?: string[];
   milestones: ProductionMilestone[];
+  financials?: {
+    plannedMaterialCost: number;
+    actualMaterialCost: number;
+    plannedMachineCost: number;
+    actualMachineCost: number;
+    wasteCost: number;
+    margin: number;
+  };
   // Physical Item Specifications from planned Client Order
   itemCategory?: string;
   width?: number;

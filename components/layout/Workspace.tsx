@@ -100,7 +100,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
         id: newId,
         title: "New Client Order",
         type: "client-order",
-        module: "crm",
+        module: "sales",
         isUnsaved: true,
         activeLevel3Tab: "overview",
         documentData: {

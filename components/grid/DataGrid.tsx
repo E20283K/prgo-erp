@@ -51,12 +51,14 @@ import {
   Layers,
   FileSpreadsheet,
   FileText,
-  Image as ImageIcon
+  Image as ImageIcon,
+  CalendarDays,
+  Table as TableIcon,
 } from "lucide-react";
-
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useTranslations } from "next-intl";
+import { WorkOrderCalendarView } from "./WorkOrderCalendarView";
 
 export const GLIDE_LIGHT_THEME: Partial<Theme> = {
   accentColor: "#2563eb",
@@ -211,6 +213,7 @@ export function DataGrid() {
   const tGrid = useTranslations("DataGrid");
   const tCommon = useTranslations("Common");
   const tWork = useTranslations("Workspace");
+  const tTasks = useTranslations("Tasks");
   const { openTab, updateGridStats, theme, setCreateWorkOrderOpen } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [columns, setColumns] = useState<GridColumn[]>(INITIAL_COLUMNS);
@@ -237,6 +240,9 @@ export function DataGrid() {
   }, [columns, tGrid]);
 
   const [rows, setRows] = useState<OrderRow[]>(() => generateMockOrders(1250));
+  const [viewMode, setViewMode] = useState<"grid" | "calendar">("grid");
+  const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
+  const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [selection, setSelection] = useState<GridSelection>({
@@ -646,6 +652,32 @@ export function DataGrid() {
                   </button>
                 ))}
               </div>
+
+              {/* View mode toggle: Table vs Calendar */}
+              <div className="flex items-center bg-muted/60 p-0.5 rounded-md border border-border/60 ml-1">
+                <button
+                  title={tTasks("viewGrid")}
+                  onClick={() => setViewMode("grid")}
+                  className={`p-1 rounded transition-colors ${
+                    viewMode === "grid"
+                      ? "bg-background text-foreground shadow-2xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <TableIcon className="size-3.5" />
+                </button>
+                <button
+                  title={tTasks("viewCalendar")}
+                  onClick={() => setViewMode("calendar")}
+                  className={`p-1 rounded transition-colors ${
+                    viewMode === "calendar"
+                      ? "bg-background text-foreground shadow-2xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <CalendarDays className="size-3.5" />
+                </button>
+              </div>
             </div>
 
             {/* Right Search & Export Controls */}
@@ -671,19 +703,31 @@ export function DataGrid() {
             </div>
           </div>
 
-          {/* Glide Data Grid Container */}
-          <div 
-            className="flex-1 w-full h-full relative" 
-            id="glide-grid-root"
-            onMouseMove={(e) => {
-              mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
-              if (hoveredPreview) {
-                const { x, y } = getCursorCardPosition(e.clientX, e.clientY);
-                setHoveredPreview((prev) => (prev ? { ...prev, x, y } : null));
-              }
-            }}
-            onMouseLeave={() => setHoveredPreview(null)}
-          >
+          {/* View Container: Table (Glide Grid) or Calendar */}
+          {viewMode === "calendar" ? (
+            <div className="flex-1 w-full h-full relative overflow-hidden">
+              <WorkOrderCalendarView
+                orders={filteredRows}
+                onCreateNew={handleCreateNew}
+                currentDate={calendarDate}
+                onDateChange={setCalendarDate}
+                calendarMode={calendarSubMode}
+                onCalendarModeChange={setCalendarSubMode}
+              />
+            </div>
+          ) : (
+            <div 
+              className="flex-1 w-full h-full relative" 
+              id="glide-grid-root"
+              onMouseMove={(e) => {
+                mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
+                if (hoveredPreview) {
+                  const { x, y } = getCursorCardPosition(e.clientX, e.clientY);
+                  setHoveredPreview((prev) => (prev ? { ...prev, x, y } : null));
+                }
+              }}
+              onMouseLeave={() => setHoveredPreview(null)}
+            >
             <DataEditor
               getCellContent={getContent}
               columns={localizedColumns}
@@ -738,6 +782,7 @@ export function DataGrid() {
               </div>
             )}
           </div>
+        )}
         </div>
       </ContextMenuTrigger>
 

@@ -37,12 +37,15 @@ import { MaterialsTab } from "./tabs/MaterialsTab";
 import { OperationsTab } from "./tabs/OperationsTab";
 import { ShiftTimelineTab } from "./tabs/ShiftTimelineTab";
 import { HistoryTab } from "./tabs/HistoryTab";
+import { FinancialsTab } from "./tabs/FinancialsTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
+import { pdf } from "@react-pdf/renderer";
+import { WorkOrderSpecPDF } from "./WorkOrderSpecPDF";
 
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
-  const { setTabUnsaved, closeTab, setLevel3Tab, theme, openTab } = useWorkspaceStore();
+  const { setTabUnsaved, closeTab, setLevel3Tab, theme, openTab, addNotification } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
 
@@ -64,6 +67,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     priceTotal: data.priceTotal || 14850.0,
     currency: data.currency || "USD",
     photoUrl: data.photoUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
+    photoUrls: data.photoUrls || [
+      data.photoUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
+      "/sample-proof.jpg",
+      "/files_example/PrintGoo CMYK Label Logo.png"
+    ],
     itemCategory: data.itemCategory || "Hangtag",
     width: data.width || 50,
     height: data.height || 90,
@@ -76,11 +84,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       { id: "3", size: "L", quantity: 1500 },
     ],
     milestones: data.milestones || [
-      { id: "m1", name: "Preflight File", department: "Prepress", status: "Done", assignedTo: "Prepress Dept" },
-      { id: "m2", name: "Materials", department: "Warehouse", status: "Done", assignedTo: "Warehouse Dept" },
-      { id: "m3", name: "CTP Plates", department: "Prepress", status: "In Progress", assignedTo: "K. Anderson (Prepress)" },
-      { id: "m4", name: "Printing", department: "Offset", status: "Pending", assignedTo: "Press Dept" },
-      { id: "m5", name: "Post-press", department: "Finishing", status: "Pending", assignedTo: "Finishing Dept" }
+      { id: "m1", name: "Preflight File", department: "Prepress", status: "Done", assignedTo: "Prepress Dept", dueDate: "2026-10-01 10:00" },
+      { id: "m2", name: "Materials", department: "Warehouse", status: "Done", assignedTo: "Warehouse Dept", dueDate: "2026-10-02 14:00" },
+      { id: "m3", name: "CTP Plates", department: "Prepress", status: "In Progress", assignedTo: "K. Anderson (Prepress)", dueDate: "2026-10-05 16:30" },
+      { id: "m4", name: "Printing", department: "Offset", status: "Pending", assignedTo: "Press Dept", dueDate: "2026-10-06 11:30" },
+      { id: "m5", name: "Post-press", department: "Finishing", status: "Pending", assignedTo: "Finishing Dept", dueDate: "2026-10-06 18:00" }
     ],
   });
 
@@ -129,9 +137,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const [isLogEventDialogOpen, setIsLogEventDialogOpen] = useState(false);
   const [logEventForm, setLogEventForm] = useState<{
-    type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC";
+    type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC" | "Waste";
     note: string;
     time: string;
+    wasteQty?: number;
+    wasteReason?: string;
   }>({
     type: "Run",
     note: "",
@@ -210,6 +220,43 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     closeTab(tab.id);
   };
 
+  const handlePrintSpec = async () => {
+    try {
+      const docNo = data.docNo || tab.id;
+      const materials = RECIPE_MATERIALS[formData.recipe] || [];
+
+      const blob = await pdf(
+        <WorkOrderSpecPDF
+          docNo={docNo}
+          orderData={formData}
+          operations={operations}
+          materials={materials}
+          shiftEvents={shiftEvents}
+        />
+      ).toBlob();
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Work_Order_Spec_${docNo || "PRINTGOO"}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      addNotification({
+        title: "Work Order Spec Exported",
+        description: `Downloaded traveler spec for ${docNo}`,
+        severity: "success",
+      });
+    } catch (err) {
+      console.error("Failed to generate work order spec PDF", err);
+      if (typeof window !== "undefined") {
+        window.print();
+      }
+    }
+  };
+
   // Operation Dialog Handlers
   const handleOpenAddOperation = () => {
     setEditingOpIndex(null);
@@ -284,6 +331,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       type: "Run",
       note: "",
       time: `${hours}:${minutes}`,
+      wasteQty: undefined,
+      wasteReason: undefined,
     });
     setIsLogEventDialogOpen(true);
   };
@@ -297,6 +346,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       type: logEventForm.type,
       note: logEventForm.note.trim(),
       operator: selectedOp.operator,
+      wasteQty: logEventForm.wasteQty,
+      wasteReason: logEventForm.wasteReason,
     };
     setShiftEvents((prev) => [newEvent, ...prev]);
     setIsLogEventDialogOpen(false);
@@ -347,6 +398,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             </TabsTrigger>
 
             <TabsTrigger
+              value="financials"
+              className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0"
+            >
+              <History className="w-4 h-4" />
+              <span>Costing</span>
+            </TabsTrigger>
+
+            <TabsTrigger
               value="history"
               className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0"
             >
@@ -358,6 +417,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           {/* Right Action Buttons */}
           <div className="flex items-center gap-1.5 shrink-0">
             <Button
+              onClick={handlePrintSpec}
               variant="ghost"
               size="sm"
               className="h-7 text-xs font-medium gap-1.5 text-zinc-600 dark:text-zinc-300 rounded cursor-pointer"
@@ -436,7 +496,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           onOpenLogEvent={handleOpenLogEvent}
         />
 
-        {/* Tab 5: History */}
+        {/* Tab 5: Financials (New) */}
+        <FinancialsTab shiftEvents={shiftEvents} />
+
+        {/* Tab 6: History */}
         <HistoryTab />
       </Tabs>
 

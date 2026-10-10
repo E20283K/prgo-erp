@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
-import { Check, Clock, AlertTriangle, PlayCircle, Plus, Trash2, MoreVertical, GripVertical, ChevronsUpDown, X, User } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { Check, Clock, AlertTriangle, PlayCircle, Plus, Trash2, MoreVertical, GripVertical, ChevronsUpDown, X, User, CalendarDays, ListOrdered, ChevronLeft, ChevronRight } from "lucide-react";
+import { format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isToday } from "date-fns";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -197,11 +198,38 @@ export function VerticalTaskTracker({
   onReorder,
   readOnly = false,
 }: VerticalTaskTrackerProps) {
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
   const [isAddPopoverOpen, setIsAddPopoverOpen] = useState(false);
   const [newTaskName, setNewTaskName] = useState("");
   const [newTaskDept, setNewTaskDept] = useState("Prepress");
+  const [newTaskDueDate, setNewTaskDueDate] = useState("2026-10-06 14:00");
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  // Group milestones by date for calendar view
+  const milestonesByDate = useMemo(() => {
+    const map = new Map<string, ProductionMilestone[]>();
+    milestones.forEach((m, idx) => {
+      // If no explicit dueDate, assign to sequential dates around Oct 2026
+      const datePart = m.dueDate
+        ? m.dueDate.split(" ")[0]
+        : `2026-10-0${Math.min(idx + 1, 9)}`;
+      if (!map.has(datePart)) {
+        map.set(datePart, []);
+      }
+      map.get(datePart)!.push(m);
+    });
+    return map;
+  }, [milestones]);
+
+  const daysInMonthGrid = useMemo(() => {
+    const monthStart = startOfMonth(calendarDate);
+    const monthEnd = endOfMonth(monthStart);
+    const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+    return eachDayOfInterval({ start: gridStart, end: gridEnd });
+  }, [calendarDate]);
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -216,12 +244,152 @@ export function VerticalTaskTracker({
   if (!milestones) return null;
 
   return (
-    <div className="w-full flex flex-col gap-4">
-      <div className="relative pl-3">
-        {/* Vertical Track Line */}
-        <div className="absolute left-6 top-4 bottom-4 w-0.5 bg-zinc-200 dark:bg-zinc-800 -z-10" />
+    <div className="w-full flex flex-col gap-3">
+      {/* View Switcher Header */}
+      <div className="flex items-center justify-between pb-1">
+        <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+          {viewMode === "list" ? "Sequential Route" : format(calendarDate, "MMMM yyyy")}
+        </div>
 
-        <div className="space-y-4">
+        <div className="flex items-center gap-1">
+          {viewMode === "calendar" && (
+            <div className="flex items-center border border-border rounded bg-background shadow-2xs mr-1">
+              <button
+                type="button"
+                onClick={() => setCalendarDate((prev) => subMonths(prev, 1))}
+                className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground border-r border-border"
+              >
+                <ChevronLeft className="size-3" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendarDate(new Date(2026, 9, 6))}
+                className="px-1.5 py-0.5 text-[10px] font-medium hover:bg-muted"
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendarDate((prev) => addMonths(prev, 1))}
+                className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground border-l border-border"
+              >
+                <ChevronRight className="size-3" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center bg-muted/60 p-0.5 rounded-md border border-border/60">
+            <button
+              type="button"
+              title="Sequential List View"
+              onClick={() => setViewMode("list")}
+              className={`p-1 rounded transition-colors ${
+                viewMode === "list"
+                  ? "bg-background text-foreground shadow-2xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <ListOrdered className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              title="Route Calendar View"
+              onClick={() => setViewMode("calendar")}
+              className={`p-1 rounded transition-colors ${
+                viewMode === "calendar"
+                  ? "bg-background text-foreground shadow-2xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <CalendarDays className="size-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {viewMode === "calendar" ? (
+        /* Calendar View for Milestones */
+        <div className="border border-border/70 rounded-md overflow-hidden bg-card/60 flex flex-col">
+          {/* Calendar day names */}
+          <div className="grid grid-cols-7 border-b border-border bg-muted/50 text-center">
+            {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
+              <div key={i} className="py-1 text-[10px] font-semibold text-muted-foreground">
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {/* Grid cells */}
+          <div className="grid grid-cols-7 auto-rows-fr bg-muted/15">
+            {daysInMonthGrid.map((day, idx) => {
+              const dateKey = format(day, "yyyy-MM-dd");
+              const dayTasks = milestonesByDate.get(dateKey) || [];
+              const isCurrMonth = isSameMonth(day, calendarDate);
+              const isCurrDay = isToday(day);
+              const isRightEdge = (idx + 1) % 7 === 0;
+
+              return (
+                <div
+                  key={dateKey}
+                  className={`min-h-[64px] p-1 border-b border-border/50 ${
+                    !isRightEdge ? "border-r border-border/50" : ""
+                  } ${!isCurrMonth ? "bg-muted/30 text-muted-foreground/40" : "bg-card/40"} ${
+                    dayTasks.length > 0 ? "bg-accent/10" : ""
+                  } flex flex-col`}
+                >
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span
+                      className={`text-[10px] size-4 flex items-center justify-center rounded-full ${
+                        isCurrDay
+                          ? "bg-primary text-primary-foreground font-bold"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {format(day, "d")}
+                    </span>
+                    {dayTasks.length > 0 && (
+                      <span className="text-[9px] font-mono px-1 py-0 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-semibold">
+                        {dayTasks.length}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 flex flex-col gap-0.5 overflow-y-auto">
+                    {dayTasks.map((task) => {
+                      const config = statusConfig[task.status] || statusConfig["Pending"];
+                      const Icon = config.icon;
+
+                      return (
+                        <div
+                          key={task.id}
+                          className="px-1 py-0.5 rounded bg-background border border-border/60 text-[9px] leading-tight flex items-center gap-1 shadow-2xs hover:border-border transition-colors"
+                          title={`${task.name} (${task.department}) - ${task.status}`}
+                        >
+                          <Icon className={cn("size-2.5 shrink-0", config.colorClass)} />
+                          <span
+                            className={cn(
+                              "truncate font-medium flex-1 text-foreground",
+                              task.status === "Done" && "line-through text-muted-foreground"
+                            )}
+                          >
+                            {task.name}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* Sequential Tracker List */
+        <div className="relative pl-3">
+          {/* Vertical Track Line */}
+          <div className="absolute left-6 top-4 bottom-4 w-0.5 bg-zinc-200 dark:bg-zinc-800 -z-10" />
+
+          <div className="space-y-4">
           {milestones.map((milestone, idx) => {
             const config = statusConfig[milestone.status] || statusConfig["Pending"];
             const Icon = config.icon;
@@ -376,6 +544,7 @@ export function VerticalTaskTracker({
           })}
         </div>
       </div>
+      )}
 
       {!readOnly && (
         <div className="pl-10 pr-1">

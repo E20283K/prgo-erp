@@ -62,7 +62,7 @@ export default async function RootLayout({
             <TooltipProvider>{children}</TooltipProvider>
           </QueryProvider>
         </NextIntlClientProvider>
-        <div id="portal" />
+        <div id="portal" suppressHydrationWarning />
       </body>
     </html>
   );

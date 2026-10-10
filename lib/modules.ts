@@ -6,6 +6,8 @@ import {
   Package,
   Banknote,
   Settings2,
+  Briefcase,
+  FileCheck,
   // Production icons
   PlayCircle,
   ClipboardList,
@@ -100,6 +102,7 @@ export const MODULE_NAV: ModuleDef[] = [
         defaultOpen: true,
         items: [
           { id: "work-orders", label: "Work Orders", icon: ClipboardList },
+          { id: "tasks", label: "Tasks & Assignments", icon: ListTodo },
           { id: "planning", label: "Planning", icon: Calendar },
           { id: "history", label: "History", icon: History },
         ],
@@ -153,12 +156,11 @@ export const MODULE_NAV: ModuleDef[] = [
         ],
       },
       {
-        id: "orders",
-        label: "Orders",
+        id: "pre-sales",
+        label: "Pre-Sales",
         icon: FileSignature,
         defaultOpen: true,
         items: [
-          { id: "client-orders", label: "Client Orders", icon: ClipboardList },
           { id: "estimates", label: "Cost Estimates", icon: Calculator },
         ],
       },
@@ -166,38 +168,31 @@ export const MODULE_NAV: ModuleDef[] = [
   },
   {
     id: "sales",
-    label: "Sales",
-    icon: ShoppingCart,
+    label: "Commercial",
+    icon: Briefcase,
     sections: [
       {
         id: "documents",
-        label: "Sales & Orders",
+        label: "Commercial Documents",
         icon: FileText,
         defaultOpen: true,
         items: [
+          { id: "client-orders", label: "Client Orders", icon: ClipboardList },
           { id: "quotations", label: "Quotations", icon: FileSignature },
-          { id: "orders", label: "Sales History", icon: History },
+          { id: "contracts", label: "Contracts & Agreements", icon: FileCheck },
           { id: "invoices", label: "Invoices", icon: Receipt },
-          { id: "returns", label: "Returns", icon: RotateCcw },
-          { id: "products", label: "Products", icon: Package },
+          { id: "delivery-acts", label: "Delivery Acts", icon: Truck },
+          { id: "returns", label: "Customer Claims", icon: RotateCcw },
         ],
       },
       {
         id: "catalog",
-        label: "Catalog",
+        label: "Pricing & Tariffs",
         icon: Tag,
         items: [
+          { id: "products", label: "Print Services & Templates", icon: Layers },
           { id: "price-lists", label: "Price Lists", icon: BadgePercent },
           { id: "discounts", label: "Discounts", icon: Percent },
-        ],
-      },
-      {
-        id: "retail",
-        label: "Retail & POS",
-        icon: ShoppingBag,
-        items: [
-          { id: "pos", label: "Point of Sale", icon: Calculator },
-          { id: "shifts", label: "Cashier Shifts", icon: History },
         ],
       },
     ],

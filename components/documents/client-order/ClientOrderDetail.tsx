@@ -12,19 +12,25 @@ import {
   Save,
   Check,
   Printer,
-  LayoutTemplate
+  LayoutTemplate,
+  Disc,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
 
-import { ClientOrderFormData, ClientOrderSampleData, SizeDistribution, OrderAttachment } from "./types";
+import { ClientOrderFormData, ClientOrderSampleData, SizeDistribution, OrderAttachment, AuditLogItem } from "./types";
 import { EXAMPLE_ATTACHMENTS } from "@/components/file-viewer/file-utils";
 import { OverviewTab } from "./tabs/OverviewTab";
 import { CostCalcTab } from "./tabs/CostCalcTab";
 import { SampleTab } from "./tabs/SampleTab";
 import { AuditTab } from "./tabs/AuditTab";
 import { LayoutCalcTab } from "./tabs/LayoutCalcTab";
+import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
+import { calculateFlexoLayout } from "@/lib/flexo/calculator";
+import { exportFlexoPDF } from "@/lib/flexo/pdfExport";
+import { pdf } from "@react-pdf/renderer";
+import { OrderSpecificationPDF } from "./OrderSpecificationPDF";
 
 export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
   const t = useTranslations("ClientOrder");
@@ -60,6 +66,11 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
     priceTotal: data.priceTotal || 14850.0,
     currency: data.currency || "USD",
     photoUrl: data.photoUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
+    photoUrls: data.photoUrls || [
+      data.photoUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
+      "/sample-proof.jpg",
+      "/files_example/PrintGoo CMYK Label Logo.png"
+    ],
     milestones: data.milestones || [
       { id: "m1", name: "Preflight File", department: "Prepress", status: "Done", assignedTo: "Prepress Dept" },
       { id: "m2", name: "Materials", department: "Warehouse", status: "Done", assignedTo: "Warehouse Dept" },
@@ -94,12 +105,32 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
   });
 
   const [currency, setCurrency] = useState(data.currency || "USD");
-  
+  const [auditEvents, setAuditEvents] = useState<AuditLogItem[]>([]);
+
+  const isFlexo = formData.department === "Flexo" || (formData.recipe && formData.recipe.startsWith("FLEXO_"));
+  const isOffset = formData.department === "Offset" || (formData.recipe && formData.recipe.startsWith("OFFSET_"));
+  const effectiveActiveTab = activeTab === "layout" && isFlexo && !isOffset ? "flexo" : activeTab;
+
   // --- Handlers ---
-  const handleFieldChange = (field: keyof ClientOrderFormData, val: any) => {
-    setFormData((prev) => ({ ...prev, [field]: val }));
+  const handleAuditLog = useCallback((action: string, detail: string) => {
+    const newItem: AuditLogItem = {
+      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      action,
+      detail,
+      user: currentUser.name || "Operator",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    setAuditEvents((prev) => [newItem, ...prev]);
     setTabUnsaved(tab.id, true);
-  };
+  }, [currentUser.name, tab.id, setTabUnsaved]);
+
+  const handleFieldChange = useCallback((field: keyof ClientOrderFormData, val: any) => {
+    setFormData((prev) => {
+      if (prev[field] === val) return prev;
+      return { ...prev, [field]: val };
+    });
+    setTabUnsaved(tab.id, true);
+  }, [tab.id, setTabUnsaved]);
 
   const handleSampleChange = (field: keyof ClientOrderSampleData, val: any) => {
     setSampleData((prev) => ({ ...prev, [field]: val }));
@@ -121,6 +152,7 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
     if (formData.status === "Draft") {
       handleFieldChange("status", "Calculating");
     }
+    handleAuditLog("Document Saved", `Status: ${formData.status}`);
   };
 
   const handleSaveAndClose = () => {
@@ -128,10 +160,76 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
     closeTab(tab.id);
   };
 
+  const handlePrintSpec = async () => {
+    if (isFlexo) {
+      const inputs = {
+        machineId: formData.flexoMachineId || "JR-1521",
+        materialId: formData.flexoMaterialId || "satin-white",
+        webWidth: formData.flexoWebWidth || 35,
+        sideMarginLeft: 2.5,
+        sideMarginRight: 2.5,
+        productWidth: formData.width || 30,
+        productHeight: formData.height || 65,
+        orientation: (formData.flexoOrientation as any) || "normal",
+        bleedX: formData.bleed || 1.5,
+        bleedY: formData.bleed || 1.5,
+        gapX: formData.flexoGapX || 2,
+        gapY: formData.flexoGapY || 2.5,
+        cylinderTeeth: formData.flexoCylinderTeeth || 100,
+        plateThickness: formData.flexoPlateThickness || 1.7,
+        colors: formData.flexoColors || 4,
+        requiredQuantity: formData.quantity || 10000,
+        overproductionMode: "percent" as const,
+        overproductionValue: 5,
+      };
+      const result = calculateFlexoLayout(inputs);
+      exportFlexoPDF(result, {
+        docNo: data.docNo || tab.id,
+        orderName: formData.product,
+        customer: formData.customer,
+        productName: formData.product,
+      });
+      handleAuditLog("Exported Flexo Spec", `PDF generated for cylinder ${result.gearTeeth}T`);
+    } else {
+      try {
+        const docNo = data.docNo || tab.id;
+        const blob = await pdf(
+          <OrderSpecificationPDF
+            docNo={docNo}
+            orderData={formData}
+            sizes={sizes}
+            sampleData={sampleData}
+          />
+        ).toBlob();
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `Order_Spec_${docNo || "PRINTGOO"}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        handleAuditLog("Exported Order Spec", `Generated React-PDF spec for ${docNo}`);
+        addNotification({
+          title: "Specification Generated",
+          description: `Downloaded specification for ${docNo}`,
+          severity: "success",
+        });
+      } catch (err) {
+        console.error("Failed to generate order spec PDF", err);
+        if (typeof window !== "undefined") {
+          window.print();
+        }
+      }
+    }
+  };
+
   return (
     <div className="w-full h-full bg-zinc-50 dark:bg-zinc-950 flex flex-col overflow-hidden text-xs">
       <Tabs 
-        value={activeTab} 
+        value={effectiveActiveTab} 
         onValueChange={(val) => setLevel3Tab(tab.id, val)}
         className="flex-1 flex flex-col overflow-hidden"
       >
@@ -141,10 +239,18 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
               <FileText className="w-3.5 h-3.5" />
               <span>{t("tabOverview") || "Overview"}</span>
             </TabsTrigger>
-            <TabsTrigger value="layout" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
-              <LayoutTemplate className="w-3.5 h-3.5" />
-              <span>Layout</span>
-            </TabsTrigger>
+            {(!isFlexo || isOffset) && (
+              <TabsTrigger value="layout" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
+                <LayoutTemplate className="w-3.5 h-3.5" />
+                <span>{t("tabLayout") || "Layout"}</span>
+              </TabsTrigger>
+            )}
+            {isFlexo && (
+              <TabsTrigger value="flexo" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
+                <Disc className="w-3.5 h-3.5 text-blue-600" />
+                <span>{t("tabFlexo") || "Flexo"}</span>
+              </TabsTrigger>
+            )}
             <TabsTrigger value="costCalc" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
               <DollarSign className="w-3.5 h-3.5" />
               <span>{t("tabCostCalc") || "Costing"}</span>
@@ -160,7 +266,7 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
           </TabsList>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            <Button variant="ghost" size="sm" className="h-7 text-xs font-medium gap-1.5 text-zinc-600 dark:text-zinc-300">
+            <Button onClick={handlePrintSpec} variant="ghost" size="sm" className="h-7 text-xs font-medium gap-1.5 text-zinc-600 dark:text-zinc-300">
               <Printer className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">{t("printSpec") || "Print"}</span>
             </Button>
@@ -189,17 +295,47 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
           />
         </TabsContent>
         
-        <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          <LayoutCalcTab 
-            sizes={sizes}
-            defaultQuantity={formData.quantity}
-            docNo={data.docNo || tab.id}
-            orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
-            defaultProdW={formData.width}
-            defaultProdH={formData.height}
-            defaultBleed={formData.bleed}
-          />
-        </TabsContent>
+        {(!isFlexo || isOffset) && (
+          <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <LayoutCalcTab 
+              sizes={sizes}
+              defaultQuantity={formData.quantity}
+              docNo={data.docNo || tab.id}
+              orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
+              defaultProdW={formData.width}
+              defaultProdH={formData.height}
+              defaultBleed={formData.bleed}
+            />
+          </TabsContent>
+        )}
+
+        {isFlexo && (
+          <TabsContent value="flexo" className="flex-1 overflow-y-auto p-3 m-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <FlexoCalcTab 
+              defaultQuantity={formData.quantity}
+              docNo={data.docNo || tab.id}
+              orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
+              customer={formData.customer}
+              productName={formData.product}
+              defaultProdW={formData.width}
+              defaultProdH={formData.height}
+              defaultBleed={formData.bleed}
+              onAuditLog={handleAuditLog}
+              onFlexoSave={(res) => {
+                if (
+                  formData.flexoCylinderTeeth !== res.gearTeeth ||
+                  formData.flexoWebWidth !== res.webWidth
+                ) {
+                  setFormData((prev) => ({
+                    ...prev,
+                    flexoCylinderTeeth: res.gearTeeth,
+                    flexoWebWidth: res.webWidth,
+                  }));
+                }
+              }}
+            />
+          </TabsContent>
+        )}
 
         <TabsContent value="costCalc" className="flex-1 overflow-y-auto p-3 m-0 flex gap-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <CostCalcTab 
@@ -222,7 +358,7 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
         </TabsContent>
 
         <TabsContent value="audit" className="flex-1 overflow-y-auto p-3 m-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          <AuditTab />
+          <AuditTab events={auditEvents} />
         </TabsContent>
       </Tabs>
 
