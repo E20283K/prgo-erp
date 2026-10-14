@@ -62,6 +62,7 @@ import {
   Plug,
   Code,
   Coins,
+  Stamp,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -87,47 +88,9 @@ export interface ModuleDef {
   sections: NavSection[];
 }
 
-// ─── Module Registry ──────────────────────────────────────────────────────────
+// ─── Module Registry (Production-Ready Architecture) ──────────────────────────
 
 export const MODULE_NAV: ModuleDef[] = [
-  {
-    id: "production",
-    label: "Production",
-    icon: Factory,
-    sections: [
-      {
-        id: "operations",
-        label: "Operations",
-        icon: PlayCircle,
-        defaultOpen: true,
-        items: [
-          { id: "work-orders", label: "Work Orders", icon: ClipboardList },
-          { id: "tasks", label: "Tasks & Assignments", icon: ListTodo },
-          { id: "planning", label: "Planning", icon: Calendar },
-          { id: "history", label: "History", icon: History },
-        ],
-      },
-      {
-        id: "master-data",
-        label: "Master Data",
-        icon: Database,
-        items: [
-          { id: "machines", label: "Machines", icon: Cpu },
-          { id: "bom", label: "BOM & Spec", icon: Layers },
-          { id: "materials", label: "Materials", icon: Scroll },
-        ],
-      },
-      {
-        id: "quality",
-        label: "Quality",
-        icon: ShieldCheck,
-        items: [
-          { id: "qc-checks", label: "QC Checks", icon: BadgeCheck },
-          { id: "defects", label: "Defect Log", icon: AlertOctagon },
-        ],
-      },
-    ],
-  },
   {
     id: "crm",
     label: "CRM",
@@ -135,33 +98,21 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "contacts",
-        label: "Contacts",
+        label: "Counterparties",
         icon: Contact,
         defaultOpen: true,
         items: [
           { id: "customers", label: "Customers", icon: Building2 },
-          { id: "contacts", label: "Contacts", icon: Users },
-          { id: "leads", label: "Leads", icon: UserPlus },
+          { id: "leads", label: "Leads & Requests", icon: UserPlus },
         ],
       },
       {
         id: "activities",
         label: "Activities",
         icon: CheckSquare,
-        items: [
-          { id: "requests", label: "Requests", icon: ClipboardList },
-          { id: "tasks", label: "Tasks", icon: ListTodo },
-          { id: "calls", label: "Calls", icon: PhoneCall },
-          { id: "pipeline", label: "Pipeline", icon: GitFork },
-        ],
-      },
-      {
-        id: "pre-sales",
-        label: "Pre-Sales",
-        icon: FileSignature,
         defaultOpen: true,
         items: [
-          { id: "estimates", label: "Cost Estimates", icon: Calculator },
+          { id: "tasks", label: "Tasks & Assignments", icon: ListTodo },
         ],
       },
     ],
@@ -180,19 +131,45 @@ export const MODULE_NAV: ModuleDef[] = [
           { id: "client-orders", label: "Client Orders", icon: ClipboardList },
           { id: "quotations", label: "Quotations", icon: FileSignature },
           { id: "contracts", label: "Contracts & Agreements", icon: FileCheck },
-          { id: "invoices", label: "Invoices", icon: Receipt },
-          { id: "delivery-acts", label: "Delivery Acts", icon: Truck },
+          { id: "delivery-acts", label: "Schet-fakturas (Waybills)", icon: Truck },
           { id: "returns", label: "Customer Claims", icon: RotateCcw },
         ],
       },
       {
         id: "catalog",
-        label: "Pricing & Tariffs",
+        label: "Service Templates",
         icon: Tag,
+        defaultOpen: true,
         items: [
           { id: "products", label: "Print Services & Templates", icon: Layers },
-          { id: "price-lists", label: "Price Lists", icon: BadgePercent },
-          { id: "discounts", label: "Discounts", icon: Percent },
+        ],
+      },
+    ],
+  },
+  {
+    id: "production",
+    label: "Production",
+    icon: Factory,
+    sections: [
+      {
+        id: "operations",
+        label: "Operations",
+        icon: PlayCircle,
+        defaultOpen: true,
+        items: [
+          { id: "work-orders", label: "Work Orders", icon: ClipboardList },
+          { id: "planning", label: "Production Planning", icon: Calendar },
+        ],
+      },
+      {
+        id: "master-data",
+        label: "Master Data",
+        icon: Database,
+        defaultOpen: true,
+        items: [
+          { id: "machines", label: "Machines & Rates", icon: Cpu },
+          { id: "bom", label: "BOM & Recipes", icon: Layers },
+          { id: "tooling", label: "Dies & Tooling", icon: Stamp },
         ],
       },
     ],
@@ -204,12 +181,12 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "stock",
-        label: "Stock",
+        label: "Stock & Inventory",
         icon: Boxes,
         defaultOpen: true,
         items: [
           { id: "stock-balance", label: "Stock Balance", icon: Layers },
-          { id: "movements", label: "Movements", icon: ArrowLeftRight },
+          { id: "movements", label: "Movements & Write-offs", icon: ArrowLeftRight },
           { id: "inventory", label: "Inventory Count", icon: ClipboardCheck },
         ],
       },
@@ -217,10 +194,10 @@ export const MODULE_NAV: ModuleDef[] = [
         id: "logistics",
         label: "Logistics",
         icon: Truck,
+        defaultOpen: true,
         items: [
           { id: "receipts", label: "Receipts", icon: ArrowDownToLine },
           { id: "shipments", label: "Shipments", icon: Send },
-          { id: "locations", label: "Locations", icon: MapPin },
         ],
       },
     ],
@@ -232,23 +209,14 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "accounting",
-        label: "Accounting",
+        label: "Accounting & Settlements",
         icon: Calculator,
         defaultOpen: true,
         items: [
+          { id: "settlements", label: "Client Settlements (Akt sverka)", icon: Scale },
+          { id: "payments", label: "Payments & Cashflow", icon: CreditCard },
+          { id: "cost-analysis", label: "Order Cost & Margin", icon: TrendingUp },
           { id: "accounts", label: "Chart of Accounts", icon: BookOpen },
-          { id: "payments", label: "Payments", icon: CreditCard },
-          { id: "bank", label: "Bank Statements", icon: Landmark },
-        ],
-      },
-      {
-        id: "reporting",
-        label: "Reporting",
-        icon: BarChart3,
-        items: [
-          { id: "pnl", label: "P&L Report", icon: TrendingUp },
-          { id: "budget", label: "Budget", icon: PiggyBank },
-          { id: "cost-analysis", label: "Cost Analysis", icon: Scale },
         ],
       },
     ],
@@ -260,22 +228,13 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "system",
-        label: "System",
+        label: "Enterprise Configuration",
         icon: Sliders,
         defaultOpen: true,
         items: [
-          { id: "general", label: "General", icon: SlidersHorizontal },
+          { id: "plants", label: "Company & Branches", icon: Building },
           { id: "users", label: "Users & Roles", icon: Shield },
-          { id: "plants", label: "Plants & Branches", icon: Building },
-        ],
-      },
-      {
-        id: "integrations",
-        label: "Integrations",
-        icon: Plug,
-        items: [
-          { id: "api", label: "API & Webhooks", icon: Code },
-          { id: "billing", label: "Billing & License", icon: Coins },
+          { id: "tariffs", label: "Tariffs & Pricing Rules", icon: Coins },
         ],
       },
     ],

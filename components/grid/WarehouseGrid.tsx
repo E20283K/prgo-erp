@@ -346,7 +346,17 @@ interface WarehouseGridProps {
 
 export function WarehouseGrid({ type }: WarehouseGridProps) {
   const tCommon = useTranslations("Common");
-  const { updateGridStats, theme } = useWorkspaceStore();
+  const {
+    updateGridStats,
+    theme,
+    warehouseShipments,
+    warehouseStock,
+    upsertWarehouseStock,
+    addWarehouseShipment,
+    updateWarehouseShipmentStatus,
+    deliveryActs,
+    openTab,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
 
   const [rowsData, setRowsData] = useState<any[]>([]);
@@ -383,6 +393,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     'shipments': {
       date: new Date().toISOString().split('T')[0],
       customer: '',
+      deliveryActId: 'SF-8001',
       workOrder: '',
       product: '',
       quantity: '',
@@ -416,8 +427,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     'stock-balance': {
       sku: '',
       name: '',
-      category: '',
-      location: '',
+      category: 'Paper & Board',
+      location: 'Rack A-01 (Main Paper Hall)',
       stockLevel: '',
       reserved: '0',
       available: '',
@@ -428,6 +439,23 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   };
 
   const handleCreateNew = () => {
+    if (type === "receipts") {
+      const newId = `RCV-${String(Date.now()).slice(-4)}`;
+      openTab({
+        id: newId,
+        title: `${newId}: Yangi Kirim Hujjati`,
+        type: "warehouse-receipt",
+        module: "warehouse",
+        isUnsaved: true,
+        documentData: {
+          id: newId,
+          date: new Date().toISOString().split("T")[0],
+          supplier: "Tashkent Paper Trade LLC",
+          status: "Draft",
+        },
+      });
+      return;
+    }
     const template = blankTemplates[type] ?? {};
     setFormData(template);
     setSelectedRecord(null);
@@ -437,18 +465,94 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const handleSave = () => {
     const prefixes: Record<string, string> = {
       movements: 'MOV', receipts: 'RCV', shipments: 'SHP',
-      inventory: 'IC', locations: 'LOC', 'stock-balance': 'STK',
+      inventory: 'IC', locations: 'LOC', 'stock-balance': 'MAT',
     };
     const prefix = prefixes[type] ?? 'REC';
-    const newId = `${prefix}-${String(Date.now()).slice(-5)}`;
+    const newId = `${prefix}-${String(Date.now()).slice(-4)}`;
     const newRow = { id: newId, ...formData };
-    setRowsData(prev => [newRow, ...prev]);
+    if (type === 'shipments') {
+      addWarehouseShipment({
+        id: newId,
+        date: formData.date || new Date().toISOString().split('T')[0],
+        customer: formData.customer || 'Alpha Media Group LLC',
+        deliveryActId: formData.deliveryActId || '—',
+        workOrder: formData.workOrder || '—',
+        product: formData.product || 'Printed Goods',
+        quantity: Number(formData.quantity) || 1000,
+        unit: formData.unit || 'pcs',
+        from: formData.from || 'Main Factory — Tashkent',
+        carrier: formData.carrier || 'Own Vehicle',
+        trackingNo: formData.trackingNo || '—',
+        status: 'Packed',
+      });
+    } else if (type === 'stock-balance') {
+      const stockNum = Number(formData.stockLevel) || 5000;
+      const resNum = Number(formData.reserved) || 0;
+      upsertWarehouseStock({
+        sku: formData.sku || newId,
+        name: formData.name || 'New Printing Substrate',
+        category: (formData.category as any) || 'Paper & Board',
+        unit: (formData.unit as any) || 'sheets',
+        location: formData.location || 'Rack A-01 (Main Paper Hall)',
+        stockLevel: stockNum,
+        reserved: resNum,
+        available: Math.max(0, stockNum - resNum),
+        reorder: 2000,
+        unitPriceUsd: 0.25,
+        lastReceived: formData.lastReceived || new Date().toISOString().split('T')[0],
+        status: 'In Stock',
+      });
+    } else if (type === 'receipts') {
+      setRowsData(prev => [newRow, ...prev]);
+      const rcvQty = Number(formData.quantity) || 0;
+      const matName = (formData.material || '').toLowerCase();
+      const existingStock = warehouseStock.find(
+        (s) => s.name.toLowerCase().includes(matName) || matName.includes(s.name.toLowerCase())
+      );
+      if (existingStock && rcvQty > 0) {
+        upsertWarehouseStock({
+          ...existingStock,
+          stockLevel: existingStock.stockLevel + rcvQty,
+          lastReceived: formData.date || new Date().toISOString().split('T')[0],
+        });
+      }
+    } else {
+      setRowsData(prev => [newRow, ...prev]);
+    }
     setSheetMode('view');
     setFormData({});
     setSelectedRecord(newRow);
   };
 
   const handleOpenSheet = (record: any) => {
+    if (type === "receipts") {
+      openTab({
+        id: record.id,
+        title: `${record.id}: ${record.supplier || "Ombor Kirimi"}`,
+        type: "warehouse-receipt",
+        module: "warehouse",
+        documentData: record,
+      });
+      return;
+    }
+    if (type === "shipments" && record.deliveryActId && String(record.deliveryActId).startsWith("SF-")) {
+      const act = deliveryActs.find((a) => a.id === record.deliveryActId);
+      openTab({
+        id: record.deliveryActId,
+        title: `${record.deliveryActId}: ${record.customer}`,
+        type: "delivery-act",
+        module: "sales",
+        activeLevel3Tab: "overview",
+        documentData: act || {
+          id: record.deliveryActId,
+          customer: record.customer,
+          product: record.product,
+          quantity: record.quantity,
+          workOrderId: record.workOrder,
+        },
+      });
+      return;
+    }
     setSheetMode('view');
     setSelectedRecord(record);
   };
@@ -459,12 +563,12 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     if (type === 'stock-balance') {
       cols = [
         { id: 'sku', title: 'SKU', width: 100, icon: GridColumnIcon.HeaderReference },
-        { id: 'name', title: 'Material Name', width: 300, icon: GridColumnIcon.HeaderString },
-        { id: 'category', title: 'Category', width: 120, icon: GridColumnIcon.HeaderLookup },
+        { id: 'name', title: 'Material Name', width: 280, icon: GridColumnIcon.HeaderString },
+        { id: 'category', title: 'Category', width: 145, icon: GridColumnIcon.HeaderLookup },
         { id: 'location', title: 'Location', width: 220, icon: GridColumnIcon.HeaderString },
         { id: 'stockLevel', title: 'Total Stock', width: 110, icon: GridColumnIcon.HeaderNumber },
-        { id: 'reserved', title: 'Reserved', width: 100, icon: GridColumnIcon.HeaderNumber },
-        { id: 'available', title: 'Available', width: 100, icon: GridColumnIcon.HeaderNumber },
+        { id: 'reserved', title: 'Reserved (WO)', width: 115, icon: GridColumnIcon.HeaderNumber },
+        { id: 'available', title: 'Available', width: 110, icon: GridColumnIcon.HeaderNumber },
         { id: 'unit', title: 'Unit', width: 80, icon: GridColumnIcon.HeaderString },
         { id: 'lastReceived', title: 'Last Received', width: 120, icon: GridColumnIcon.HeaderDate },
         { id: 'status', title: 'Stock Status', width: 110, icon: GridColumnIcon.HeaderSingleValue },
@@ -513,13 +617,14 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       cols = [
         { id: 'id', title: 'Shipment ID', width: 110, icon: GridColumnIcon.HeaderReference },
         { id: 'date', title: 'Date', width: 110, icon: GridColumnIcon.HeaderDate },
+        { id: 'deliveryActId', title: 'Schet-faktura №', width: 120, icon: GridColumnIcon.HeaderReference },
         { id: 'customer', title: 'Customer', width: 200, icon: GridColumnIcon.HeaderString },
-        { id: 'workOrder', title: 'Work Order', width: 120, icon: GridColumnIcon.HeaderReference },
-        { id: 'product', title: 'Product', width: 240, icon: GridColumnIcon.HeaderString },
-        { id: 'quantity', title: 'Qty', width: 90, icon: GridColumnIcon.HeaderNumber },
-        { id: 'from', title: 'Ship From', width: 220, icon: GridColumnIcon.HeaderString },
-        { id: 'carrier', title: 'Carrier', width: 160, icon: GridColumnIcon.HeaderString },
-        { id: 'trackingNo', title: 'Tracking No', width: 140, icon: GridColumnIcon.HeaderString },
+        { id: 'workOrder', title: 'Work Order', width: 115, icon: GridColumnIcon.HeaderReference },
+        { id: 'product', title: 'Product', width: 230, icon: GridColumnIcon.HeaderString },
+        { id: 'quantity', title: 'Qty (No Price)', width: 110, icon: GridColumnIcon.HeaderNumber },
+        { id: 'from', title: 'Ship From', width: 200, icon: GridColumnIcon.HeaderString },
+        { id: 'carrier', title: 'Carrier', width: 150, icon: GridColumnIcon.HeaderString },
+        { id: 'trackingNo', title: 'Tracking No', width: 130, icon: GridColumnIcon.HeaderString },
         { id: 'status', title: 'Status', width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
     } else {
@@ -539,15 +644,21 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   }, [type]);
 
   useEffect(() => {
+    if (type === 'shipments') {
+      setRowsData(warehouseShipments);
+      return;
+    }
+    if (type === 'stock-balance') {
+      setRowsData(warehouseStock);
+      return;
+    }
     let mockRows = [];
-    if (type === 'stock-balance') mockRows = generateStockBalance();
-    else if (type === 'movements') mockRows = generateMovements();
+    if (type === 'movements') mockRows = generateMovements();
     else if (type === 'inventory') mockRows = generateInventoryCounts();
     else if (type === 'receipts') mockRows = generateReceipts();
-    else if (type === 'shipments') mockRows = generateShipments();
     else mockRows = generateLocations();
     setRowsData(mockRows);
-  }, [type]);
+  }, [type, warehouseShipments, warehouseStock]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -601,19 +712,24 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
   const handleConfirm = () => {
     if (!selectedRecord) return;
+    const targetStatus = type === 'shipments' ? 'Delivered' : 'Completed';
+
+    if (type === 'shipments') {
+      updateWarehouseShipmentStatus(selectedRecord.id, 'Delivered');
+    } else {
+      setRowsData(prev => prev.map(r => {
+        if (r.id === selectedRecord.id) {
+          return {
+            ...r,
+            status: targetStatus,
+            receivedQty: r.quantity !== undefined ? r.quantity : r.receivedQty,
+          };
+        }
+        return r;
+      }));
+    }
     
-    setRowsData(prev => prev.map(r => {
-      if (r.id === selectedRecord.id) {
-        return {
-          ...r,
-          status: 'Completed',
-          receivedQty: r.quantity !== undefined ? r.quantity : r.receivedQty,
-        };
-      }
-      return r;
-    }));
-    
-    setSelectedRecord((prev: any) => prev ? { ...prev, status: 'Completed', receivedQty: prev.quantity !== undefined ? prev.quantity : prev.receivedQty } : null);
+    setSelectedRecord((prev: any) => prev ? { ...prev, status: targetStatus, receivedQty: prev.quantity !== undefined ? prev.quantity : prev.receivedQty } : null);
     setIsConfirmAlertOpen(false);
   };
 
@@ -871,7 +987,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
           {/* ── VIEW MODE ───────────────────────────────────── */}
           {sheetMode === 'view' && selectedRecord && (() => {
-            const isPending = selectedRecord.status === 'Pending' || selectedRecord.status === 'In Transit' || selectedRecord.status === 'Inspecting' || selectedRecord.status === 'Received';
+            const isPending = selectedRecord.status === 'Pending' || selectedRecord.status === 'In Transit' || selectedRecord.status === 'Inspecting' || selectedRecord.status === 'Received' || selectedRecord.status === 'Packed' || selectedRecord.status === 'Dispatched';
             const isLocked = selectedRecord.status === 'Completed' || selectedRecord.status === 'Accepted' || selectedRecord.status === 'Delivered';
             return (
               <>
@@ -919,6 +1035,34 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>
+                    )}
+                    {selectedRecord.deliveryActId && selectedRecord.deliveryActId.startsWith("SF-") && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const act = deliveryActs.find((a) => a.id === selectedRecord.deliveryActId);
+                          setSelectedRecord(null);
+                          openTab({
+                            id: selectedRecord.deliveryActId,
+                            title: `${selectedRecord.deliveryActId}: ${selectedRecord.customer}`,
+                            type: "delivery-act",
+                            module: "sales",
+                            activeLevel3Tab: "overview",
+                            documentData: act || {
+                              id: selectedRecord.deliveryActId,
+                              customer: selectedRecord.customer,
+                              product: selectedRecord.product,
+                              quantity: selectedRecord.quantity,
+                              workOrderId: selectedRecord.workOrder,
+                            },
+                          });
+                        }}
+                        className="flex-1 gap-1.5"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-primary" />
+                        <span>{selectedRecord.deliveryActId}</span>
+                      </Button>
                     )}
                     <Button size="sm" variant="outline" className={`${isPending ? 'flex-1' : 'w-full'} gap-1.5`}>
                       <Printer className="w-3.5 h-3.5" />

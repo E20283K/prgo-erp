@@ -106,6 +106,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   } = useWorkspaceStore();
 
   const [isFullscreen, setIsFullscreen] = React.useState(false);
+  const [isMac, setIsMac] = React.useState(false);
+  const [moduleMenuOpen, setModuleMenuOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    setIsMac(typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
+  }, []);
 
   React.useEffect(() => {
     const handleUpdate = () => {
@@ -148,6 +154,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const activeModLabel = tMod.has(activeMod.id) ? tMod(activeMod.id) : activeMod.label;
 
   const handleModuleSelect = (modId: string) => {
+    setModuleMenuOpen(false);
     const mod = MODULE_NAV.find((m) => m.id === modId);
     const firstItem = mod?.sections[0]?.items[0];
     const modLabel = tMod.has(modId) ? tMod(modId) : (mod?.label ?? modId);
@@ -194,7 +201,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </button>
           </SidebarMenuItem>
           <SidebarMenuItem className="mt-1">
-            <DropdownMenu>
+            <DropdownMenu open={moduleMenuOpen} onOpenChange={setModuleMenuOpen}>
               <DropdownMenuTrigger
                 render={
                   <SidebarMenuButton
@@ -217,7 +224,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <ChevronsUpDown className="ml-auto size-4 text-muted-foreground group-data-[collapsible=icon]:hidden" />
               </DropdownMenuTrigger>
 
-              <DropdownMenuContent className="w-64 rounded-lg" side="right" align="start" sideOffset={8}>
+              <DropdownMenuContent
+                className="w-64 rounded-lg"
+                side="right"
+                align="start"
+                sideOffset={8}
+                onKeyDown={(e) => {
+                  const codeMatch = e.code.match(/^(?:Digit|Numpad)([1-6])$/);
+                  const keyMatch = e.key.match(/^[1-6]$/);
+                  const digit = codeMatch ? parseInt(codeMatch[1], 10) : (keyMatch ? parseInt(keyMatch[0], 10) : null);
+                  if (digit !== null && digit >= 1 && digit <= MODULE_NAV.length) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleModuleSelect(MODULE_NAV[digit - 1].id);
+                  }
+                }}
+              >
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
                     {tSide("modules")}
@@ -241,8 +263,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         {mod.id === activeModule && (
                           <Check className="size-3.5 text-primary shrink-0" />
                         )}
-                        <Kbd className="ml-auto opacity-60 bg-muted border-muted-foreground/20">
-                          <span className="text-[11px]">⌘</span>{index + 1}
+                        <Kbd className="ml-auto opacity-75 bg-muted border-muted-foreground/20 text-[10px]">
+                          {isMac ? `⌥${index + 1}` : `Alt+${index + 1}`}
                         </Kbd>
                       </DropdownMenuItem>
                     );
@@ -257,7 +279,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       {/* ── Content: Active module nav — changes when module is switched ── */}
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs font-medium text-muted-foreground px-2">
+          <SidebarGroupLabel className="text-xs font-medium text-muted-foreground px-2 truncate" title={activeModLabel}>
             {activeModLabel}
           </SidebarGroupLabel>
           <SidebarMenu>
@@ -280,8 +302,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       }
                     >
                       {SectionIcon && <SectionIcon className="size-4 shrink-0 text-muted-foreground" />}
-                      <span className="font-medium">{sectionName}</span>
-                      <ChevronRight className="ml-auto size-4 transition-transform duration-200 group-data-[open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
+                      <span className="flex-1 min-w-0 truncate text-left font-medium" title={sectionName}>
+                        {sectionName}
+                      </span>
+                      <ChevronRight className="ml-auto size-4 shrink-0 transition-transform duration-200 group-data-[open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                       <SidebarMenuSub>
@@ -289,15 +313,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                           const ItemIcon = item.icon;
                           const itemName = tMod.has(item.id) ? tMod(item.id) : item.label;
                           return (
-                            <SidebarMenuSubItem key={item.id}>
+                            <SidebarMenuSubItem key={item.id} className="w-full min-w-0">
                               <SidebarMenuSubButton
                                 render={<button type="button" />}
                                 isActive={currentSubModule === item.id}
                                 onClick={() => handleSubItemClick(item.id, item.label)}
-                                className="cursor-pointer"
+                                className="w-full cursor-pointer"
+                                title={itemName}
                               >
                                 {ItemIcon && <ItemIcon className="size-3.5 shrink-0" />}
-                                <span>{itemName}</span>
+                                <span className="flex-1 min-w-0 truncate text-left">{itemName}</span>
                               </SidebarMenuSubButton>
                             </SidebarMenuSubItem>
                           );
@@ -437,13 +462,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
                   {/* Account & Logout */}
                   <DropdownMenuGroup>
-                    <DropdownMenuItem className="gap-2.5 cursor-pointer">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setActiveModule("settings");
+                        handleSubItemClick("users", "Users & Roles");
+                      }}
+                      className="gap-2.5 cursor-pointer"
+                    >
                       <BadgeCheck className="size-4 text-muted-foreground" />
                       <span>{tSide("accountDetails")}</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem className="gap-2.5 cursor-pointer">
+                    <DropdownMenuItem
+                      onClick={() => handleModuleSelect("settings")}
+                      className="gap-2.5 cursor-pointer"
+                    >
                       <Settings2 className="size-4 text-muted-foreground" />
-                      <span>Settings</span>
+                      <span>{tMod("settings")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem 

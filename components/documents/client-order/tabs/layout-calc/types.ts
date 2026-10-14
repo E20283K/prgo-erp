@@ -1,4 +1,9 @@
-import { SizeDistribution } from "../../types";
+import {
+  SizeDistribution,
+  KashirovkaMode,
+  KashirovkaImpositionStrategy,
+  SubstrateLayer,
+} from "../../types";
 
 export interface LayoutCalcTabProps {
   sizes?: SizeDistribution[];
@@ -8,6 +13,34 @@ export interface LayoutCalcTabProps {
   defaultProdW?: number;
   defaultProdH?: number;
   defaultBleed?: number;
+  kashirovkaMode?: KashirovkaMode;
+  kashirovkaStrategy?: KashirovkaImpositionStrategy;
+  kashirovkaLayers?: SubstrateLayer[];
+  kashirovkaGlueGsm?: number;
+  kashirovkaMakeReadySheets?: number;
+  onKashirovkaChange?: (patch: {
+    kashirovkaMode?: KashirovkaMode;
+    kashirovkaStrategy?: KashirovkaImpositionStrategy;
+    kashirovkaMakeReadySheets?: number;
+  }) => void;
+}
+
+export interface KashirovkaSummary {
+  enabled: boolean;
+  mode: KashirovkaMode;
+  strategy: KashirovkaImpositionStrategy;
+  netPaperGsm: number;
+  totalMountedGsm: number;
+  estimatedCaliperMm: number;
+  effectiveCardsPerPressSheet: number;
+  mountedSheetsRequired: number;
+  makeReadySheets: number;
+  rawPrintedLinerSheets: number;
+  rawCoreSheets: number;
+  totalRawBoardSheets: number;
+  totalCtpPlates: number;
+  glueKgRequired: number;
+  splitCutAxisX?: number;
 }
 
 export interface SlotAssignment {
@@ -57,6 +90,7 @@ export interface GridCell {
   label: string;
   color: string;
   sizeId: string;
+  sideBadge?: "FRONT" | "BACK";
 }
 
 export interface TrimMarkSegment {

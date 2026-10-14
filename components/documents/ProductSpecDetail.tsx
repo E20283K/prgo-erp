@@ -16,6 +16,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Dialog, 
@@ -362,37 +367,45 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     <div className="w-full h-full bg-zinc-50 dark:bg-zinc-950 flex flex-col overflow-hidden text-xs">
       <Tabs value={activeTab} onValueChange={(val) => setLevel3Tab(tab.id, val)} className="flex-1 flex flex-col overflow-hidden">
         {/* Unified Level 3 Tabs & Action Buttons Bar */}
-        <div className="px-3 bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-center justify-between h-10 gap-2">
-          <TabsList variant="line" className="gap-2 overflow-x-auto overflow-y-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            <TabsTrigger value="overview" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
-              <FileText className="w-4 h-4" /> <span>General</span>
+        <div className="px-3 bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-center justify-between h-9 gap-2">
+          <TabsList variant="line" className="gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-w-0">
+            <TabsTrigger value="overview" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
+              <FileText className="w-3.5 h-3.5" /> <span>General</span>
             </TabsTrigger>
-            <TabsTrigger value="materials" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
-              <Boxes className="w-4 h-4" /> <span>Bill of Materials (BOM)</span>
+            <TabsTrigger value="materials" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
+              <Boxes className="w-3.5 h-3.5" /> <span>Materials (BOM)</span>
             </TabsTrigger>
-            <TabsTrigger value="operations" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
-              <Factory className="w-4 h-4" /> <span>Technological Route</span>
+            <TabsTrigger value="operations" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
+              <Factory className="w-3.5 h-3.5" /> <span>Routing</span>
             </TabsTrigger>
           </TabsList>
 
           {/* Right Action Buttons */}
-          <div className="flex items-center gap-2 shrink-0">
-            <Badge variant="outline" className="font-mono text-[10px] hidden sm:inline-flex">
+          <div className="flex items-center gap-1 shrink-0">
+            <Badge variant="outline" className="font-mono text-[10px] hidden sm:inline-flex mr-1">
               Master Data Template
             </Badge>
-            <Button 
-              onClick={() => setTabUnsaved(tab.id, false)} 
-              variant="outline" 
-              size="sm" 
-              className="h-7 border-zinc-300 dark:border-zinc-700 text-xs font-medium gap-1.5 rounded cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-              <span>Save</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    onClick={() => setTabUnsaved(tab.id, false)}
+                    variant="outline"
+                    size="icon-sm"
+                    className="h-7 w-7 border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+                Save (Ctrl+S)
+              </TooltipContent>
+            </Tooltip>
             <Button 
               onClick={handleSaveAndClose} 
               size="sm" 
-              className="h-7 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1.5 shadow-none rounded cursor-pointer"
+              className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1.5 shadow-none rounded cursor-pointer"
             >
               <Check className="w-3.5 h-3.5" />
               <span>Save & Close</span>

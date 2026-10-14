@@ -320,6 +320,14 @@ export const OrderSpecificationPDF: React.FC<OrderSpecPdfProps> = ({
               <Text style={styles.paramLabel}>Paper / Substrate:</Text>
               <Text style={styles.paramValue}>{orderData.paperStock || "Standard Stock"}</Text>
             </View>
+            {orderData.kashirovkaMode && orderData.kashirovkaMode !== "none" && (
+              <View style={styles.paramRow}>
+                <Text style={styles.paramLabel}>Kashirovka Structure:</Text>
+                <Text style={styles.paramValue}>
+                  {orderData.kashirovkaMode.toUpperCase()} ({orderData.kashirovkaStrategy === "split_half_sheet" ? "1-CTP Split-Mount" : "2-CTP Sheet-to-Sheet"})
+                </Text>
+              </View>
+            )}
             <View style={styles.paramRow}>
               <Text style={styles.paramLabel}>Surface Finishing:</Text>
               <Text style={styles.paramValue}>{orderData.coating || "None"}</Text>

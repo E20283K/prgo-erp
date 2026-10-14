@@ -14,9 +14,15 @@ import {
   Printer,
   LayoutTemplate,
   Disc,
+  Receipt,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
 
 import { ClientOrderFormData, ClientOrderSampleData, SizeDistribution, OrderAttachment, AuditLogItem } from "./types";
@@ -34,7 +40,8 @@ import { OrderSpecificationPDF } from "./OrderSpecificationPDF";
 
 export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
   const t = useTranslations("ClientOrder");
-  const { setTabUnsaved, closeTab, setLevel3Tab, theme, openTab, addNotification, currentUser } = useWorkspaceStore();
+  const tAct = useTranslations("DeliveryAct");
+  const { setTabUnsaved, closeTab, setLevel3Tab, theme, openTab, addNotification, currentUser, createDeliveryActFromOrder } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
 
@@ -233,55 +240,125 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
         onValueChange={(val) => setLevel3Tab(tab.id, val)}
         className="flex-1 flex flex-col overflow-hidden"
       >
-        <div className="px-3 bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-center justify-between h-10 gap-2">
-          <TabsList variant="line" className="gap-2 overflow-x-auto overflow-y-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            <TabsTrigger value="overview" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
+        <div className="px-3 bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-center justify-between h-9 gap-2">
+          <TabsList variant="line" className="gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-w-0">
+            <TabsTrigger value="overview" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
               <FileText className="w-3.5 h-3.5" />
               <span>{t("tabOverview") || "Overview"}</span>
             </TabsTrigger>
             {(!isFlexo || isOffset) && (
-              <TabsTrigger value="layout" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
+              <TabsTrigger value="layout" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
                 <LayoutTemplate className="w-3.5 h-3.5" />
                 <span>{t("tabLayout") || "Layout"}</span>
               </TabsTrigger>
             )}
             {isFlexo && (
-              <TabsTrigger value="flexo" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
+              <TabsTrigger value="flexo" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
                 <Disc className="w-3.5 h-3.5 text-blue-600" />
                 <span>{t("tabFlexo") || "Flexo"}</span>
               </TabsTrigger>
             )}
-            <TabsTrigger value="costCalc" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
+            <TabsTrigger value="costCalc" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
               <DollarSign className="w-3.5 h-3.5" />
               <span>{t("tabCostCalc") || "Costing"}</span>
             </TabsTrigger>
-            <TabsTrigger value="sample" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
+            <TabsTrigger value="sample" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
               <Package className="w-3.5 h-3.5" />
               <span>{t("tabSample") || "Sample"}</span>
             </TabsTrigger>
-            <TabsTrigger value="audit" className="h-9 text-xs px-3 font-medium gap-1.5 shrink-0">
+            <TabsTrigger value="audit" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
               <History className="w-3.5 h-3.5" />
               <span>{t("tabAudit") || "History"}</span>
             </TabsTrigger>
           </TabsList>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button onClick={handlePrintSpec} variant="ghost" size="sm" className="h-7 text-xs font-medium gap-1.5 text-zinc-600 dark:text-zinc-300">
-              <Printer className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t("printSpec") || "Print"}</span>
-            </Button>
-            <Button onClick={handleSave} variant="outline" size="sm" className="h-7 text-xs font-medium gap-1.5 border-zinc-300 dark:border-zinc-700">
-              <Save className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-              <span>{t("save") || "Save"}</span>
-            </Button>
-            <Button onClick={handleSaveAndClose} size="sm" className="h-7 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1.5 shadow-none">
+          <div className="flex items-center gap-1 shrink-0">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    onClick={() => {
+                      const newAct = createDeliveryActFromOrder({
+                        orderId: data.docNo || tab.id,
+                        workOrderId: formData.linkedWoId || "WO-00351",
+                        customer: formData.customer || "Alpha Media Group LLC",
+                        product: formData.product || "Printed Catalog / Packaging",
+                        quantity: formData.quantity || 1000,
+                        unit: formData.unit || "pcs",
+                        priceTotal: formData.priceTotal || 14850,
+                        currency: formData.currency || "USD",
+                      });
+                      openTab({
+                        id: newAct.id,
+                        title: `${newAct.id}: ${newAct.customer}`,
+                        type: "delivery-act",
+                        module: "sales",
+                        isUnsaved: true,
+                        activeLevel3Tab: "overview",
+                        documentData: newAct,
+                      });
+                    }}
+                    variant="outline"
+                    size="icon-sm"
+                    className="h-7 w-7 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer"
+                  >
+                    <Receipt className="w-3.5 h-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+                {tAct("createFromOrder")}
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    onClick={handlePrintSpec}
+                    variant="outline"
+                    size="icon-sm"
+                    className="h-7 w-7 border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+                {t("printSpec") || "Print"}
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    onClick={handleSave}
+                    variant="outline"
+                    size="icon-sm"
+                    className="h-7 w-7 border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+                {t("save") || "Save"} (Ctrl+S)
+              </TooltipContent>
+            </Tooltip>
+
+            <Button
+              onClick={handleSaveAndClose}
+              size="sm"
+              className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1.5 shadow-none cursor-pointer"
+            >
               <Check className="w-3.5 h-3.5" />
               <span>{t("postAndClose") || "Close"}</span>
             </Button>
           </div>
         </div>
 
-        <TabsContent value="overview" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <TabsContent value="overview" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
           <OverviewTab 
             formData={formData}
             handleFieldChange={handleFieldChange}
@@ -296,7 +373,7 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
         </TabsContent>
         
         {(!isFlexo || isOffset) && (
-          <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
             <LayoutCalcTab 
               sizes={sizes}
               defaultQuantity={formData.quantity}
@@ -305,12 +382,28 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
               defaultProdW={formData.width}
               defaultProdH={formData.height}
               defaultBleed={formData.bleed}
+              kashirovkaMode={formData.kashirovkaMode}
+              kashirovkaStrategy={formData.kashirovkaStrategy}
+              kashirovkaLayers={formData.kashirovkaLayers}
+              kashirovkaGlueGsm={formData.kashirovkaGlueGsm}
+              kashirovkaMakeReadySheets={formData.kashirovkaMakeReadySheets}
+              onKashirovkaChange={(patch) => {
+                if (patch.kashirovkaMode !== undefined) {
+                  handleFieldChange("kashirovkaMode", patch.kashirovkaMode);
+                }
+                if (patch.kashirovkaStrategy !== undefined) {
+                  handleFieldChange("kashirovkaStrategy", patch.kashirovkaStrategy);
+                }
+                if (patch.kashirovkaMakeReadySheets !== undefined) {
+                  handleFieldChange("kashirovkaMakeReadySheets", patch.kashirovkaMakeReadySheets);
+                }
+              }}
             />
           </TabsContent>
         )}
 
         {isFlexo && (
-          <TabsContent value="flexo" className="flex-1 overflow-y-auto p-3 m-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <TabsContent value="flexo" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
             <FlexoCalcTab 
               defaultQuantity={formData.quantity}
               docNo={data.docNo || tab.id}
@@ -337,17 +430,18 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
           </TabsContent>
         )}
 
-        <TabsContent value="costCalc" className="flex-1 overflow-y-auto p-3 m-0 flex gap-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <TabsContent value="costCalc" className="flex-1 overflow-y-auto p-3 m-0 flex gap-3 no-scrollbar">
           <CostCalcTab 
             recipe={formData.recipe}
             quantity={formData.quantity}
             currency={currency}
             setCurrency={setCurrency}
             isDark={isDark}
+            formData={formData}
           />
         </TabsContent>
 
-        <TabsContent value="sample" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <TabsContent value="sample" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
           <SampleTab 
             formData={formData}
             sampleData={sampleData}
@@ -357,7 +451,7 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
           />
         </TabsContent>
 
-        <TabsContent value="audit" className="flex-1 overflow-y-auto p-3 m-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <TabsContent value="audit" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
           <AuditTab events={auditEvents} />
         </TabsContent>
       </Tabs>

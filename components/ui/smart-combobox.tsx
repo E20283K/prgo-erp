@@ -25,6 +25,7 @@ export interface ComboboxItem {
 interface SmartComboboxProps {
   value?: string;
   onChange: (value: string) => void;
+  onAddNew?: (newValue: string) => void;
   options: (ComboboxItem | string)[];
   placeholder?: string;
   searchPlaceholder?: string;
@@ -36,6 +37,7 @@ interface SmartComboboxProps {
 export function SmartCombobox({
   value,
   onChange,
+  onAddNew,
   options,
   placeholder = "Select or type...",
   searchPlaceholder = "Search...",
@@ -106,7 +108,9 @@ export function SmartCombobox({
                 <button
                   type="button"
                   onClick={() => {
-                    onChange(searchValue.trim());
+                    const clean = searchValue.trim();
+                    onChange(clean);
+                    onAddNew?.(clean);
                     setOpen(false);
                     setSearchValue("");
                   }}
@@ -165,7 +169,9 @@ export function SmartCombobox({
                 <CommandItem
                   value={searchValue.trim()}
                   onSelect={() => {
-                    onChange(searchValue.trim());
+                    const clean = searchValue.trim();
+                    onChange(clean);
+                    onAddNew?.(clean);
                     setOpen(false);
                     setSearchValue("");
                   }}

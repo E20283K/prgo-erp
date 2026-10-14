@@ -56,7 +56,7 @@ export function LayoutCell({
         width={pW}
         height={pH}
         fill="none"
-        stroke="#3b82f6"
+        stroke={cellData.sideBadge === "BACK" ? "#7c3aed" : "#3b82f6"}
         strokeWidth="0.5"
         strokeDasharray="2 2"
       />
@@ -70,12 +70,14 @@ export function LayoutCell({
                 x={x + itemW / 2}
                 y={y + itemH / 2 - labelFontSize * 0.75}
                 fontSize={slotNumFontSize}
-                fill="#6b7280"
+                fill={cellData.sideBadge === "BACK" ? "#6d28d9" : "#6b7280"}
                 textAnchor="middle"
                 alignmentBaseline="middle"
                 fontWeight="600"
               >
-                {`#${index + 1}`}
+                {cellData.sideBadge
+                  ? `#${index + 1} · ${cellData.sideBadge}`
+                  : `#${index + 1}`}
               </text>
               <text
                 x={x + itemW / 2}
@@ -109,7 +111,9 @@ export function LayoutCell({
               alignmentBaseline="middle"
               fontWeight="bold"
             >
-              {`#${index + 1} ${cellData.label}`}
+              {cellData.sideBadge
+                ? `#${index + 1} [${cellData.sideBadge}] ${cellData.label}`
+                : `#${index + 1} ${cellData.label}`}
             </text>
           )}
         </g>

@@ -323,9 +323,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   }
 
   const handleDoubleClick = () => {
-    setSidebarWidth(280)
+    setSidebarWidth(300)
     try {
-      localStorage.setItem("printgoo_sidebar_width", "280")
+      localStorage.setItem("printgoo_sidebar_width", "300")
     } catch (err) {}
   }
 
@@ -350,7 +350,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       title={
         state === "collapsed"
           ? "Click to expand sidebar"
-          : "Drag to resize sidebar (Double-click to reset 280px)"
+          : "Drag to resize sidebar (Double-click to reset 300px)"
       }
       className={cn(
         "absolute inset-y-0 z-20 hidden w-3 transition-all ease-linear group-data-[side=left]:-right-1.5 group-data-[side=right]:left-0 sm:flex items-center justify-center cursor-col-resize select-none",
@@ -710,7 +710,7 @@ function SidebarMenuSub({ className, ...props }: React.ComponentProps<"ul">) {
       data-slot="sidebar-menu-sub"
       data-sidebar="menu-sub"
       className={cn(
-        "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l border-sidebar-border px-2.5 py-0.5 group-data-[collapsible=icon]:hidden",
+        "ml-3.5 mr-1.5 flex min-w-0 translate-x-px flex-col gap-1 border-l border-sidebar-border pl-2.5 pr-1 py-0.5 group-data-[collapsible=icon]:hidden",
         className
       )}
       {...props}
@@ -726,7 +726,7 @@ function SidebarMenuSubItem({
     <li
       data-slot="sidebar-menu-sub-item"
       data-sidebar="menu-sub-item"
-      className={cn("group/menu-sub-item relative", className)}
+      className={cn("group/menu-sub-item relative w-full min-w-0", className)}
       {...props}
     />
   )
@@ -748,7 +748,7 @@ function SidebarMenuSubButton({
     props: mergeProps<"a">(
       {
         className: cn(
-          "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground ring-sidebar-ring outline-hidden group-data-[collapsible=icon]:hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[size=md]:text-sm data-[size=sm]:text-xs data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
+          "flex h-7 w-full min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground ring-sidebar-ring outline-hidden group-data-[collapsible=icon]:hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[size=md]:text-sm data-[size=sm]:text-xs data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
           className
         ),
       },

@@ -16,6 +16,12 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import {
+  ClientOrderFormData,
+  getDefaultKashirovkaLayers,
+  calculateKashirovkaTotals,
+} from "../types";
 
 interface Props {
   recipe: string;
@@ -23,6 +29,7 @@ interface Props {
   currency: string;
   setCurrency: (c: string) => void;
   isDark: boolean;
+  formData?: ClientOrderFormData;
 }
 
 const RECIPE_MATERIALS: Record<string, { name: string; req: number; unit: string; price: number }[]> = {
@@ -30,6 +37,19 @@ const RECIPE_MATERIALS: Record<string, { name: string; req: number; unit: string
     { name: "Galerie Art Silk Paper 150g", req: 12500, unit: "Sheets", price: 0.12 },
     { name: "Hubergroup CMYK Ink", req: 36, unit: "kg", price: 15.50 },
     { name: "Agfa CTP Plates", req: 24, unit: "pcs", price: 8.00 },
+  ],
+  "OFFSET_KASHIROVKA_V1": [
+    { name: "Layer 1: Coated Cardboard 300g/m² (Face 4+0)", req: 1100, unit: "Sheets", price: 0.24 },
+    { name: "Layer 2: Coated Cardboard 300g/m² (Back 4+0)", req: 1100, unit: "Sheets", price: 0.24 },
+    { name: "PVA Dispersion Mounting Glue (25g/m²)", req: 19.25, unit: "kg", price: 4.80 },
+    { name: "Soft-Touch Matte Lamination Film", req: 1540, unit: "m²", price: 0.14 },
+    { name: "Hubergroup CMYK Ink", req: 6.5, unit: "kg", price: 15.50 },
+    { name: "Agfa CTP Plates (Split-Mount Set)", req: 4, unit: "pcs", price: 8.00 },
+  ],
+  "OFFSET_PREM_V2": [
+    { name: "LumiForte Premium 250g", req: 5000, unit: "Sheets", price: 0.22 },
+    { name: "Spot UV Varnish", req: 15, unit: "kg", price: 18.50 },
+    { name: "Agfa CTP Plates", req: 8, unit: "pcs", price: 8.00 },
   ],
   "FLEXO_NYLON_V1": [
     { name: "Nylon Taffeta Tape 30mm", req: 45, unit: "Rolls", price: 12.00 },
@@ -41,14 +61,29 @@ const RECIPE_MATERIALS: Record<string, { name: string; req: number; unit: string
   ],
 };
 
-export function CostCalcTab({ recipe, quantity, currency, setCurrency, isDark }: Props) {
+export function CostCalcTab({ recipe, quantity, currency, setCurrency, isDark, formData }: Props) {
   const t = useTranslations("ClientOrder");
   const [calcMode, setCalcMode] = useState<"Auto" | "Manual">("Auto");
-  
+
+  const kashMode = formData?.kashirovkaMode || (recipe === "OFFSET_KASHIROVKA_V1" ? "duplex" : "none");
+  const kashStrategy = formData?.kashirovkaStrategy || "split_half_sheet";
+  const kashLayers = useMemo(() => {
+    if (kashMode === "none") return [];
+    if (formData?.kashirovkaLayers && formData.kashirovkaLayers.length > 0) {
+      return formData.kashirovkaLayers;
+    }
+    return getDefaultKashirovkaLayers(kashMode, formData?.paperStock, formData?.coating);
+  }, [kashMode, formData?.kashirovkaLayers, formData?.paperStock, formData?.coating]);
+
+  const kashTotals = useMemo(
+    () => calculateKashirovkaTotals(kashMode, kashLayers, formData?.kashirovkaGlueGsm ?? 25),
+    [kashMode, kashLayers, formData?.kashirovkaGlueGsm]
+  );
+
   const [materials, setMaterials] = useState(
     RECIPE_MATERIALS[recipe]?.map((m, i) => ({ id: `m-${i}`, ...m })) || []
   );
-  
+
   const [services, setServices] = useState([
     { id: "s-1", name: "Machine Setup Fee", qty: 1, unit: "lump", price: 150 },
     { id: "s-2", name: "Press Run", qty: 8, unit: "hrs", price: 85 },
@@ -64,9 +99,112 @@ export function CostCalcTab({ recipe, quantity, currency, setCurrency, isDark }:
   });
 
   React.useEffect(() => {
-    // When recipe changes, reset materials
+    if (kashMode !== "none" && kashLayers.length > 0) {
+      // Dynamic multi-layer Kashirovka BOM calculation
+      const prodW = formData?.width || 50;
+      const prodH = formData?.height || 90;
+      const cardsPerFullSheet = Math.max(4, Math.floor((960 / (prodW + 6)) * (670 / (prodH + 6))));
+      const effectiveCardsPerSheet =
+        kashStrategy === "split_half_sheet"
+          ? Math.max(2, Math.floor(cardsPerFullSheet / 2))
+          : cardsPerFullSheet;
+      const makeReady = formData?.kashirovkaMakeReadySheets ?? 50;
+      const baseSheets = Math.ceil((quantity * 1.05) / effectiveCardsPerSheet) + makeReady;
+
+      const sheetAreaM2 = 0.7; // 1000x700mm = 0.7 m²
+      const mountedAreaM2 =
+        kashStrategy === "split_half_sheet" ? baseSheets * sheetAreaM2 * 0.5 : baseSheets * sheetAreaM2;
+      const glueBonds = kashMode === "triplex" ? 2 : 1;
+      const glueGsm = formData?.kashirovkaGlueGsm ?? 25;
+      const glueKg = Number(((mountedAreaM2 * glueBonds * glueGsm) / 1000).toFixed(2));
+      const ctpPlates = kashStrategy === "split_half_sheet" ? 4 : 8;
+
+      const layerMatItems = kashLayers.map((layer, idx) => {
+        const sheetsForLayer =
+          kashStrategy === "split_half_sheet"
+            ? layer.role === "core_board"
+              ? Math.ceil(baseSheets / 2)
+              : Math.ceil(baseSheets / 2)
+            : baseSheets;
+        const unitPrice = layer.grammage >= 300 ? 0.24 : layer.grammage >= 250 ? 0.20 : 0.14;
+        return {
+          id: `m-layer-${idx}`,
+          name: `Layer ${idx + 1}: ${layer.paperStock} (${layer.colors})`,
+          req: sheetsForLayer,
+          unit: "Sheets",
+          price: unitPrice,
+        };
+      });
+
+      setMaterials([
+        ...layerMatItems,
+        {
+          id: "m-glue",
+          name: `PVA Dispersion Mounting Glue (${glueGsm}g/m²)`,
+          req: Math.max(1, glueKg),
+          unit: "kg",
+          price: 4.8,
+        },
+        {
+          id: "m-lam",
+          name: `Surface Lamination (${formData?.coating || "Matte 1S"})`,
+          req: Math.ceil(baseSheets * sheetAreaM2),
+          unit: "m²",
+          price: 0.14,
+        },
+        {
+          id: "m-ctp",
+          name:
+            kashStrategy === "split_half_sheet"
+              ? "Agfa CTP Plates (1 Split-Mount Set)"
+              : "Agfa CTP Plates (2 Sets Front+Back)",
+          req: ctpPlates,
+          unit: "pcs",
+          price: 8.0,
+        },
+      ]);
+
+      setServices([
+        { id: "s-1", name: "Offset Press Setup & Run (300g Liners)", qty: 4, unit: "hrs", price: 85 },
+        {
+          id: "s-2",
+          name: `Kashirovka Sheet-to-Sheet Mounting (${kashTotals.totalMountedGsm}g/m²)`,
+          qty: baseSheets,
+          unit: "sheets",
+          price: 0.08,
+        },
+        {
+          id: "s-3",
+          name: `Hydraulic Press Curing (${formData?.kashirovkaCuringHours ?? 12}h) & Heavy Die-Cut`,
+          qty: 1,
+          unit: "lump",
+          price: 185,
+        },
+      ]);
+      return;
+    }
+
+    // Standard single-layer recipe
     setMaterials(RECIPE_MATERIALS[recipe]?.map((m, i) => ({ id: `m-${i}`, ...m })) || []);
-  }, [recipe]);
+    setServices([
+      { id: "s-1", name: "Machine Setup Fee", qty: 1, unit: "lump", price: 150 },
+      { id: "s-2", name: "Press Run", qty: 8, unit: "hrs", price: 85 },
+      { id: "s-3", name: "Pre-press / Plates", qty: 1, unit: "lump", price: 120 },
+    ]);
+  }, [
+    recipe,
+    kashMode,
+    kashStrategy,
+    kashLayers,
+    kashTotals.totalMountedGsm,
+    quantity,
+    formData?.width,
+    formData?.height,
+    formData?.kashirovkaMakeReadySheets,
+    formData?.kashirovkaGlueGsm,
+    formData?.kashirovkaCuringHours,
+    formData?.coating,
+  ]);
 
   const calcColumns = useMemo<GridColumn[]>(() => [
     { id: "name", title: t("materialName") || "Item Name", width: 260, icon: GridColumnIcon.HeaderString },
@@ -181,6 +319,14 @@ export function CostCalcTab({ recipe, quantity, currency, setCurrency, isDark }:
                 <SelectItem value="Manual">{t("calcModeManual") || "Manual"}</SelectItem>
               </SelectContent>
             </Select>
+            {kashMode !== "none" && (
+              <Badge
+                variant="outline"
+                className="font-mono text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300"
+              >
+                {kashMode.toUpperCase()} KASHIROVKA · {kashTotals.totalMountedGsm}g/m² ({kashLayers.length} layers)
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className="font-medium text-xs text-muted-foreground">{t("currency") || "Currency"}:</span>

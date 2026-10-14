@@ -10,6 +10,7 @@ import { toggleAppFullscreen } from "@/lib/fullscreen";
 import { CommandPalette } from "@/components/command/CommandPalette";
 import { AiChatSheet } from "./AiChatSheet";
 import { Toaster } from "@/components/ui/toast";
+import { MODULE_NAV } from "@/lib/modules";
 
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -30,7 +31,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       if (savedWidth) {
         const parsed = parseInt(savedWidth, 10);
         if (!isNaN(parsed) && parsed >= 200 && parsed <= 500) {
-          setSidebarWidth(parsed);
+          setSidebarWidth(parsed === 280 ? 300 : parsed);
         }
       }
     } catch (e) {}
@@ -101,6 +102,41 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       }
 
 
+      // 6. Switch ERP Module: Alt+1..6, Ctrl+Shift+1..6, or Ctrl/Cmd+1..6
+      const codeMatch = e.code.match(/^(?:Digit|Numpad)([1-6])$/);
+      const keyMatch = e.key.match(/^[1-6]$/);
+      const digit = codeMatch ? parseInt(codeMatch[1], 10) : (keyMatch ? parseInt(keyMatch[0], 10) : null);
+
+      if (digit !== null && digit >= 1 && digit <= MODULE_NAV.length) {
+        const isAlt = e.altKey && !e.ctrlKey && !e.metaKey;
+        const isCtrlShift = (e.ctrlKey || e.metaKey) && e.shiftKey;
+        const isCtrlCmd = (e.ctrlKey || e.metaKey) && !e.altKey;
+
+        if (isAlt || isCtrlShift || isCtrlCmd) {
+          e.preventDefault();
+          e.stopPropagation();
+          const targetMod = MODULE_NAV[digit - 1];
+          if (targetMod) {
+            const store = useWorkspaceStore.getState();
+            if (store.isCommandOpen) {
+              store.setCommandOpen(false);
+            }
+            const firstItem = targetMod.sections[0]?.items[0];
+            store.setActiveModule(targetMod.id);
+            if (firstItem) {
+              store.setModule(targetMod.id, firstItem.id);
+              store.openTab({
+                id: firstItem.id === "work-orders" ? "registry-work-orders" : `tab-${targetMod.id}-${firstItem.id}`,
+                title: firstItem.id === "work-orders" ? `${firstItem.label} (Registry)` : firstItem.label,
+                type: "registry",
+                module: targetMod.id,
+              });
+            }
+          }
+          return;
+        }
+      }
+
       // Allow standard text operations: Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+A, Ctrl+Z, Ctrl+J
       const allowedCtrlKeys = ['c', 'v', 'x', 'a', 'z', 'j'];
 
@@ -151,7 +187,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         } as React.CSSProperties
       }
     >
-      {/* 280px Enterprise 1C Collapsible Sidebar */}
+      {/* 300px Enterprise 1C Collapsible Sidebar */}
       <Sidebar />
 
       {/* Main App Canvas */}

@@ -7,7 +7,8 @@ import {
   TrimMarkSegment, 
   CalculatedPlate, 
   PlateConfig,
-  LayoutCalcMode 
+  LayoutCalcMode,
+  KashirovkaSummary,
 } from "../types";
 import { LayoutCell } from "./LayoutCell";
 
@@ -30,6 +31,7 @@ interface Props {
   layout: ImpositionLayout;
   gridCells: GridCell[];
   outerTrimMarks: TrimMarkSegment[];
+  kashirovkaSummary?: KashirovkaSummary;
 }
 
 export function SheetPreview({
@@ -51,6 +53,7 @@ export function SheetPreview({
   layout,
   gridCells,
   outerTrimMarks,
+  kashirovkaSummary,
 }: Props) {
   if (sheetW <= 0 || sheetH <= 0) {
     return (
@@ -224,14 +227,43 @@ export function SheetPreview({
           x={baseLeft}
           y={slugY}
           fontSize={slugFontSize}
-          fill={calcMode === "sample" ? "#b45309" : "#4b5563"}
+          fill={calcMode === "sample" ? "#b45309" : kashirovkaSummary?.enabled ? "#6d28d9" : "#4b5563"}
           fontWeight="bold"
           letterSpacing="0.3"
         >
           {calcMode === "sample"
             ? `[SAMPLE PROOF] ORDER: ${docNo} | ${orderName} | Sheet: ${sheetW}x${sheetH}mm | Run: ${activePlate.requiredSheets.toLocaleString()} sheets (Sample) | PRINTGOO PREPRESS`
-            : `ORDER: ${docNo} | ${orderName} | ${activePlate.name} (${activePlateIndex + 1}/${plates.length}) | Sheet: ${sheetW}x${sheetH}mm | Run: ${activePlate.requiredSheets.toLocaleString()} sheets | PRINTGOO PREPRESS`}
+            : kashirovkaSummary?.enabled
+              ? `[KASHIROVKA ${kashirovkaSummary.mode.toUpperCase()} ${kashirovkaSummary.totalMountedGsm}g/m²] ORDER: ${docNo} | ${kashirovkaSummary.strategy === "split_half_sheet" ? "1-CTP SPLIT-MOUNT (LEFT=FRONT / RIGHT=BACK)" : "2-CTP SHEET-TO-SHEET"} | Raw: ${kashirovkaSummary.totalRawBoardSheets.toLocaleString()} sh | Glue: ${kashirovkaSummary.glueKgRequired}kg`
+              : `ORDER: ${docNo} | ${orderName} | ${activePlate.name} (${activePlateIndex + 1}/${plates.length}) | Sheet: ${sheetW}x${sheetH}mm | Run: ${activePlate.requiredSheets.toLocaleString()} sheets | PRINTGOO PREPRESS`}
         </text>
+
+        {/* Kashirovka Stamp Watermark */}
+        {kashirovkaSummary?.enabled && calcMode !== "sample" && (
+          <g transform={`translate(${sheetW - Math.max(effMarginRight, 10) - 2}, ${gTop + 1.5})`}>
+            <rect
+              x="-88"
+              y="0"
+              width="88"
+              height="7.5"
+              rx="1.5"
+              fill="#f3e8ff"
+              stroke="#7c3aed"
+              strokeWidth="0.4"
+            />
+            <text
+              x="-44"
+              y="5.1"
+              fontSize="2.9"
+              fill="#6d28d9"
+              fontWeight="bold"
+              textAnchor="middle"
+              letterSpacing="0.3"
+            >
+              {`КАШИРОВКА ${kashirovkaSummary.netPaperGsm}g → ${kashirovkaSummary.totalMountedGsm}g/m² (${kashirovkaSummary.estimatedCaliperMm}mm)`}
+            </text>
+          </g>
+        )}
 
         {/* Sample Proof Stamp Watermark */}
         {calcMode === "sample" && (
@@ -293,6 +325,44 @@ export function SheetPreview({
             />
           );
         })}
+
+        {/* Kashirovka Split-Half Cut & Mount Axis Line */}
+        {kashirovkaSummary?.enabled &&
+          kashirovkaSummary.strategy === "split_half_sheet" &&
+          kashirovkaSummary.splitCutAxisX !== undefined && (
+            <g>
+              <line
+                x1={kashirovkaSummary.splitCutAxisX}
+                y1={Math.max(2, gTop + 2)}
+                x2={kashirovkaSummary.splitCutAxisX}
+                y2={sheetH - Math.max(2, gBottom + 2)}
+                stroke="#dc2626"
+                strokeWidth="1.2"
+                strokeDasharray="6 3"
+              />
+              <rect
+                x={kashirovkaSummary.splitCutAxisX - 46}
+                y={baseTop + 2}
+                width="92"
+                height="8"
+                rx="1.5"
+                fill="#fef2f2"
+                stroke="#dc2626"
+                strokeWidth="0.4"
+              />
+              <text
+                x={kashirovkaSummary.splitCutAxisX}
+                y={baseTop + 7.2}
+                fontSize="3.1"
+                fill="#b91c1c"
+                fontWeight="bold"
+                textAnchor="middle"
+                letterSpacing="0.3"
+              >
+                ✂ FRONT (LEFT) | CUT &amp; MOUNT | BACK (RIGHT)
+              </text>
+            </g>
+          )}
 
         {/* Outer Crop Marks (margin only, aligned to cut lines) */}
         <g stroke="#000" strokeWidth="0.4">

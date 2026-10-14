@@ -20,6 +20,7 @@ import {
   Boxes,
   ChevronLeft,
   ChevronRight,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
+import { Switch } from "@/components/ui/switch";
 import {
   Carousel,
   CarouselContent,
@@ -44,9 +46,22 @@ import {
   AttachmentActions,
   AttachmentAction,
 } from "@/components/ui/attachment";
-import { ClientOrderFormData, SizeDistribution, OrderAttachment, MOCK_CUSTOMERS } from "../types";
+import {
+  ClientOrderFormData,
+  SizeDistribution,
+  OrderAttachment,
+  MOCK_CUSTOMERS,
+  KashirovkaMode,
+  KashirovkaImpositionStrategy,
+  SubstrateLayer,
+  parseGrammageFromStock,
+  getDefaultKashirovkaLayers,
+  calculateKashirovkaTotals,
+} from "../types";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 import { cn } from "@/lib/utils";
-import { VerticalTaskTracker } from "@/components/ui/vertical-task-tracker";
+import { OrderReadinessRouteCard } from "@/components/documents/work-order/OrderReadinessRouteCard";
+import { DieLinePreview } from "@/components/documents/work-order/DieLinePreview";
 import { FilePreviewDialog } from "@/components/file-viewer/FilePreviewDialog";
 import { FILE_KIND_ICON, getFileKind, isPreviewable, downloadFile, fileToAttachment, ViewableFile } from "@/components/file-viewer/file-utils";
 
@@ -74,11 +89,49 @@ export function OverviewTab({
   onMarkUnsaved,
 }: Props) {
   const t = useTranslations("ClientOrder");
+  const { crmCustomers, warehouseStock, openTab, reserveStockForOrder } = useWorkspaceStore();
   const [newSize, setNewSize] = useState("");
   const [newSizeQty, setNewSizeQty] = useState("");
   const [previewFile, setPreviewFile] = useState<ViewableFile | null>(null);
   const [carouselApi, setCarouselApi] = useState<CarouselApi>();
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+
+  // Live customer options from CRM store + fallback
+  const customerComboboxOptions = React.useMemo<ComboboxItem[]>(() => {
+    const fromStore: ComboboxItem[] = crmCustomers.map((c) => ({
+      value: c.name,
+      label: c.name,
+      description: `STIR: ${c.tin} · ${c.contractNo} · ${c.paymentTerms}`,
+      badge: c.status,
+    }));
+    const existingNames = new Set(fromStore.map((i) => i.value.toLowerCase()));
+    MOCK_CUSTOMERS.forEach((mc) => {
+      if (!existingNames.has(mc.toLowerCase())) {
+        fromStore.push({
+          value: mc,
+          label: mc,
+          description: "Verified CRM Client Account",
+          badge: "Client",
+        });
+      }
+    });
+    return fromStore;
+  }, [crmCustomers]);
+
+  // Live warehouse stock lookup for currently selected substrate
+  const selectedMaterialStock = React.useMemo(() => {
+    const query = (
+      formData.kashirovkaMode && formData.kashirovkaMode !== "none"
+        ? formData.kashirovkaLayers?.[0]?.paperStock || "Coated Cardboard 300g/m²"
+        : formData.paperStock || "Galerie Art Silk 150g/m²"
+    ).toLowerCase();
+    return warehouseStock.find(
+      (item) =>
+        item.name.toLowerCase().includes(query) ||
+        query.includes(item.name.toLowerCase()) ||
+        (item.grammage && query.includes(`${item.grammage}g`))
+    );
+  }, [formData.paperStock, formData.kashirovkaMode, formData.kashirovkaLayers, warehouseStock]);
 
   // Array of proof photos
   const photos = React.useMemo(() => {
@@ -159,6 +212,121 @@ export function OverviewTab({
     handleFieldChange("milestones", newMilestones);
   };
 
+  const kashirovkaMode: KashirovkaMode = formData.kashirovkaMode || "none";
+  const kashirovkaStrategy: KashirovkaImpositionStrategy =
+    formData.kashirovkaStrategy || "split_half_sheet";
+  const kashirovkaLayers: SubstrateLayer[] = React.useMemo(() => {
+    if (kashirovkaMode === "none") return [];
+    if (formData.kashirovkaLayers && formData.kashirovkaLayers.length > 0) {
+      return formData.kashirovkaLayers;
+    }
+    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating);
+  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating]);
+
+  const kashirovkaTotals = React.useMemo(
+    () =>
+      calculateKashirovkaTotals(
+        kashirovkaMode,
+        kashirovkaLayers,
+        formData.kashirovkaGlueGsm ?? 25
+      ),
+    [kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm]
+  );
+
+  const handleKashirovkaModeChange = (mode: KashirovkaMode) => {
+    handleFieldChange("kashirovkaMode", mode);
+    if (mode === "none") {
+      handleFieldChange("kashirovkaLayers", []);
+      handleFieldChange("paperStock", "Coated Cardboard 300g/m²");
+      if (formData.recipe === "OFFSET_KASHIROVKA_V1") {
+        handleFieldChange("recipe", "OFFSET_STD_V1");
+      }
+    } else {
+      const nextLayers = getDefaultKashirovkaLayers(
+        mode,
+        "Coated Cardboard 300g/m²",
+        formData.coating
+      );
+      const totals = calculateKashirovkaTotals(
+        mode,
+        nextLayers,
+        formData.kashirovkaGlueGsm ?? 25
+      );
+      handleFieldChange("kashirovkaLayers", nextLayers);
+      if (!formData.kashirovkaStrategy) {
+        handleFieldChange("kashirovkaStrategy", "split_half_sheet");
+      }
+      if (formData.kashirovkaGlueGsm === undefined) {
+        handleFieldChange("kashirovkaGlueGsm", 25);
+      }
+      if (formData.kashirovkaMakeReadySheets === undefined) {
+        handleFieldChange("kashirovkaMakeReadySheets", 50);
+      }
+      if (formData.kashirovkaCuringHours === undefined) {
+        handleFieldChange("kashirovkaCuringHours", 12);
+      }
+      const layerGsmStr = nextLayers.map((l) => `${l.grammage}g`).join(" + ");
+      const labelPrefix = mode === "triplex" ? "Triplex Kashirovka" : "Duplex Kashirovka";
+      handleFieldChange(
+        "paperStock",
+        `${labelPrefix} ${totals.netPaperGsm}g/m² (${layerGsmStr} → ${totals.totalMountedGsm}g w/glue)`
+      );
+      handleFieldChange("recipe", "OFFSET_KASHIROVKA_V1");
+      handleFieldChange("department", "Offset");
+
+      // Ensure Kashirovka milestone exists in production tracker
+      const existing = formData.milestones || [];
+      const hasKash = existing.some((m) =>
+        m.name.toLowerCase().includes("kashirovka") || m.name.toLowerCase().includes("кашировка")
+      );
+      if (!hasKash) {
+        const nextMilestones = [...existing];
+        const postPressIdx = nextMilestones.findIndex((m) => m.name === "Post-press");
+        const kashMilestone = {
+          id: `m-kash-${Date.now()}`,
+          name: "Kashirovka & Press Curing (12h)",
+          department: "Finishing",
+          status: "Pending" as const,
+          assignedTo: "A. Becker (Lamination)",
+        };
+        if (postPressIdx >= 0) {
+          nextMilestones.splice(postPressIdx, 0, kashMilestone);
+        } else {
+          nextMilestones.push(kashMilestone);
+        }
+        handleFieldChange("milestones", nextMilestones);
+      }
+    }
+    onMarkUnsaved();
+  };
+
+  const handleUpdateKashirovkaLayer = (
+    layerId: string,
+    patch: Partial<SubstrateLayer>
+  ) => {
+    const updated = kashirovkaLayers.map((layer) => {
+      if (layer.id !== layerId) return layer;
+      const merged = { ...layer, ...patch };
+      if (patch.paperStock && patch.grammage === undefined) {
+        merged.grammage = parseGrammageFromStock(patch.paperStock, layer.grammage);
+      }
+      return merged;
+    });
+    handleFieldChange("kashirovkaLayers", updated);
+    const totals = calculateKashirovkaTotals(
+      kashirovkaMode,
+      updated,
+      formData.kashirovkaGlueGsm ?? 25
+    );
+    const layerGsmStr = updated.map((l) => `${l.grammage}g`).join(" + ");
+    const labelPrefix = kashirovkaMode === "triplex" ? "Triplex Kashirovka" : "Duplex Kashirovka";
+    handleFieldChange(
+      "paperStock",
+      `${labelPrefix} ${totals.netPaperGsm}g/m² (${layerGsmStr} → ${totals.totalMountedGsm}g w/glue)`
+    );
+    onMarkUnsaved();
+  };
+
   return (
     <>
       <FilePreviewDialog 
@@ -177,12 +345,112 @@ export function OverviewTab({
           {formData.linkedWoId ? (
             <div className="flex items-center gap-2">
               <span className="text-zinc-500 font-medium">Linked WO:</span>
-              <Badge variant="outline" className="h-6 text-[11px] font-semibold bg-blue-50 text-blue-700 border-blue-300 cursor-pointer hover:bg-blue-100">
-                {formData.linkedWoId}
+              <Badge
+                variant="outline"
+                onClick={() =>
+                  openTab({
+                    id: formData.linkedWoId!,
+                    title: `${formData.linkedWoId}: ${formData.product || "Work Order"}`,
+                    type: "work-order",
+                    module: "production",
+                    isUnsaved: false,
+                    activeLevel3Tab: "overview",
+                    documentData: {
+                      docNo: formData.linkedWoId,
+                      customer: formData.customer,
+                      product: formData.product,
+                      quantity: formData.quantity,
+                      unit: formData.unit,
+                      status: "Active",
+                      priority: formData.priority || "High",
+                      orderType: "Production",
+                      linkedOrderId: docNo,
+                      pressMachine:
+                        formData.department === "Flexo"
+                          ? "Flexo Label Master 4C"
+                          : "Heidelberg Speedmaster XL 106",
+                      deadline: formData.deadline,
+                      paperStock: formData.paperStock,
+                      coating: formData.coating,
+                      kashirovkaMode: formData.kashirovkaMode,
+                      kashirovkaStrategy: formData.kashirovkaStrategy,
+                      kashirovkaLayers: formData.kashirovkaLayers,
+                      kashirovkaGlueGsm: formData.kashirovkaGlueGsm,
+                      kashirovkaMakeReadySheets: formData.kashirovkaMakeReadySheets,
+                      kashirovkaCuringHours: formData.kashirovkaCuringHours,
+                      priceTotal: formData.priceTotal,
+                      currency: formData.currency,
+                      responsible: formData.responsible,
+                    },
+                  })
+                }
+                className="h-6 text-[11px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-300 dark:border-blue-800 cursor-pointer hover:bg-blue-100"
+              >
+                {formData.linkedWoId} ↗
               </Badge>
             </div>
           ) : (
-            <div className="text-zinc-400 italic text-[11px]">No Linked Work Order</div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const newWoId = `WO-00${Math.floor(358 + Math.random() * 140)}`;
+                handleFieldChange("linkedWoId", newWoId);
+                handleFieldChange("status", "In Production");
+                const estimatedSheets = Math.max(250, Math.ceil((formData.quantity || 1000) / 16) + 150);
+                const multiplier =
+                  formData.kashirovkaMode === "triplex"
+                    ? 3
+                    : formData.kashirovkaMode === "duplex"
+                    ? 2
+                    : 1;
+                const stockQuery =
+                  formData.kashirovkaMode && formData.kashirovkaMode !== "none"
+                    ? formData.kashirovkaLayers?.[0]?.paperStock || "Coated Cardboard 300g/m²"
+                    : formData.paperStock || "Galerie Art Silk 150g/m²";
+                reserveStockForOrder(stockQuery, estimatedSheets * multiplier, newWoId);
+                openTab({
+                  id: newWoId,
+                  title: `${newWoId}: ${formData.product || "Production Job"}`,
+                  type: "work-order",
+                  module: "production",
+                  isUnsaved: true,
+                  activeLevel3Tab: "overview",
+                  documentData: {
+                    docNo: newWoId,
+                    customer: formData.customer,
+                    product: formData.product,
+                    quantity: formData.quantity,
+                    unit: formData.unit,
+                    status: "Active",
+                    priority: formData.priority || "High",
+                    orderType: "Production",
+                    linkedOrderId: docNo,
+                    pressMachine:
+                      formData.department === "Flexo"
+                        ? "Flexo Label Master 4C"
+                        : "Heidelberg Speedmaster XL 106",
+                    deadline: formData.deadline,
+                    paperStock: formData.paperStock,
+                    coating: formData.coating,
+                    kashirovkaMode: formData.kashirovkaMode,
+                    kashirovkaStrategy: formData.kashirovkaStrategy,
+                    kashirovkaLayers: formData.kashirovkaLayers,
+                    kashirovkaGlueGsm: formData.kashirovkaGlueGsm,
+                    kashirovkaMakeReadySheets: formData.kashirovkaMakeReadySheets,
+                    kashirovkaCuringHours: formData.kashirovkaCuringHours,
+                    priceTotal: formData.priceTotal,
+                    currency: formData.currency,
+                    responsible: formData.responsible,
+                  },
+                });
+              }}
+              className="h-6 px-2 text-[11px] font-medium gap-1 border-blue-500/40 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 cursor-pointer"
+            >
+              <Factory className="w-3 h-3" />
+              <span>Create Work Order & Reserve Stock</span>
+            </Button>
           )}
         </div>
         <div className="flex items-center gap-4 text-zinc-500 font-mono text-[11px]">
@@ -192,160 +460,123 @@ export function OverviewTab({
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* LEFT COLUMN: Main Details */}
-        <div className={cn("space-y-4", formData.milestones && formData.milestones.length > 0 ? "md:col-span-2" : "md:col-span-3")}>
+        <div className="space-y-4 md:col-span-2">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Card 1: Order Photo & Sample Reference (Visual Standard first with Carousel) */}
-        <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md space-y-3 flex flex-col">
-          <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+        {/* Card 1: Order Photo & Sample Reference */}
+        <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md space-y-2.5 flex flex-col">
+          <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
             <div className="flex items-center gap-2">
-              <Camera className="w-4 h-4 text-blue-600" />
-              <span>Order Photo & Sample Proof</span>
+              <Camera className="w-3.5 h-3.5 text-zinc-400" />
+              <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">{t("sampleProofTitle")}</span>
               {photos.length > 0 && (
-                <Badge variant="secondary" className="text-[10px] h-4 px-1.5 font-mono">
-                  {photos.length} photos
-                </Badge>
+                <span className="text-[11px] font-mono text-zinc-400">
+                  {activePhotoIndex + 1}/{photos.length}
+                </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5">
-              <Badge variant="outline" className="text-[10px] font-mono bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200 shadow-none">
-                Visual Standard
-              </Badge>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="h-6 w-6 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-                title="Add photo"
-                onClick={() => document.getElementById("client-photo-add-input")?.click()}
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </Button>
-            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="h-6 w-6 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+              title={t("addPhoto")}
+              onClick={() => document.getElementById("client-photo-add-input")?.click()}
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </Button>
           </div>
 
-          <div className="flex-1 flex flex-col justify-between space-y-2.5">
+          <div className="flex-1 flex flex-col">
             {photos.length > 0 ? (
-              <div className="space-y-2">
-                {/* Carousel Container */}
-                <div className="relative group w-full h-44 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-zinc-950/5 dark:bg-zinc-950">
-                  <Carousel
-                    setApi={setCarouselApi}
-                    className="w-full h-full"
-                    opts={{ loop: true }}
-                  >
-                    <CarouselContent className="h-44 ml-0">
-                      {photos.map((src, index) => (
-                        <CarouselItem key={`${src}-${index}`} className="pl-0 h-44 relative flex items-center justify-center">
-                          <img
-                            src={src}
-                            alt={`Sample Proof ${index + 1}`}
-                            className="w-full h-full object-contain select-none"
-                          />
-                        </CarouselItem>
-                      ))}
-                    </CarouselContent>
-
-                    {/* Carousel Nav buttons */}
-                    {photos.length > 1 && (
-                      <>
-                        <CarouselPrevious
-                          variant="secondary"
-                          size="icon-xs"
-                          className="absolute left-2 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-background/80 hover:bg-background shadow-md border-border opacity-80 group-hover:opacity-100 transition-opacity"
+              <div className="relative group w-full flex-1 min-h-[156px] rounded overflow-hidden bg-zinc-50/70 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800/80">
+                <Carousel
+                  setApi={setCarouselApi}
+                  className="w-full h-full"
+                  opts={{ loop: true }}
+                >
+                  <CarouselContent className="h-40 ml-0">
+                    {photos.map((src, index) => (
+                      <CarouselItem key={`${src}-${index}`} className="pl-0 h-40 relative flex items-center justify-center">
+                        <img
+                          src={src}
+                          alt={`${t("sampleProofTitle")} ${index + 1}`}
+                          className="w-full h-full object-contain select-none p-1"
                         />
-                        <CarouselNext
-                          variant="secondary"
-                          size="icon-xs"
-                          className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-background/80 hover:bg-background shadow-md border-border opacity-80 group-hover:opacity-100 transition-opacity"
-                        />
-                      </>
-                    )}
-                  </Carousel>
+                      </CarouselItem>
+                    ))}
+                  </CarouselContent>
 
-                  {/* Overlay Action Bar */}
-                  <div className="absolute top-2 right-2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="secondary"
-                      className="h-6 w-6 rounded bg-background/90 hover:bg-background shadow-xs text-zinc-700 dark:text-zinc-300"
-                      title="Full Screen View"
-                      onClick={() => {
-                        handleFieldChange("photoUrl", photos[activePhotoIndex] || photos[0]);
-                        onOpenLightbox();
-                      }}
-                    >
-                      <Maximize2 className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="secondary"
-                      className="h-6 w-6 rounded bg-background/90 hover:bg-background shadow-xs text-red-600 hover:text-red-700"
-                      title="Remove Current Photo"
-                      onClick={() => handleRemovePhoto(activePhotoIndex)}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </div>
-
-                  {/* Slide Counter Indicator */}
                   {photos.length > 1 && (
-                    <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-xs text-white text-[10px] font-mono leading-none">
-                      {activePhotoIndex + 1} / {photos.length}
-                    </div>
+                    <>
+                      <CarouselPrevious
+                        variant="secondary"
+                        size="icon-xs"
+                        className="absolute left-1.5 top-1/2 -translate-y-1/2 h-6 w-6 rounded-full bg-background/90 hover:bg-background shadow-xs border-border opacity-0 group-hover:opacity-100 transition-opacity"
+                      />
+                      <CarouselNext
+                        variant="secondary"
+                        size="icon-xs"
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 rounded-full bg-background/90 hover:bg-background shadow-xs border-border opacity-0 group-hover:opacity-100 transition-opacity"
+                      />
+                    </>
                   )}
+                </Carousel>
+
+                {/* Hover Actions */}
+                <div className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="secondary"
+                    className="h-6 w-6 rounded bg-background/90 hover:bg-background shadow-xs text-zinc-600 dark:text-zinc-300"
+                    title={t("fullScreenView")}
+                    onClick={() => {
+                      handleFieldChange("photoUrl", photos[activePhotoIndex] || photos[0]);
+                      onOpenLightbox();
+                    }}
+                  >
+                    <Maximize2 className="w-3 h-3" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="secondary"
+                    className="h-6 w-6 rounded bg-background/90 hover:bg-background shadow-xs text-zinc-500 hover:text-red-600"
+                    title={t("removePhoto")}
+                    onClick={() => handleRemovePhoto(activePhotoIndex)}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
                 </div>
 
-                {/* Thumbnails row if multiple photos */}
+                {/* Minimalist Floating Thumbnails */}
                 {photos.length > 1 && (
-                  <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-h-11">
+                  <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-1 px-1 py-0.5 rounded bg-background/80 backdrop-blur-xs border border-border/60 shadow-2xs max-w-[90%] overflow-x-auto">
                     {photos.map((src, idx) => (
                       <button
                         type="button"
                         key={`thumb-client-${idx}`}
                         onClick={() => carouselApi?.scrollTo(idx)}
                         className={cn(
-                          "relative shrink-0 w-10 h-9 rounded overflow-hidden border transition-all cursor-pointer bg-muted/40",
+                          "relative shrink-0 w-6 h-6 rounded-[3px] overflow-hidden border transition-all cursor-pointer",
                           activePhotoIndex === idx
-                            ? "border-blue-600 ring-2 ring-blue-500/30"
-                            : "border-zinc-200 dark:border-zinc-800 opacity-60 hover:opacity-100"
+                            ? "border-blue-600 opacity-100"
+                            : "border-transparent opacity-50 hover:opacity-90"
                         )}
                       >
-                        <img src={src} alt="thumbnail" className="w-full h-full object-cover" />
+                        <img src={src} alt="" className="w-full h-full object-cover" />
                       </button>
                     ))}
-                    <button
-                      type="button"
-                      onClick={() => document.getElementById("client-photo-add-input")?.click()}
-                      className="shrink-0 w-9 h-9 rounded border border-dashed border-zinc-300 dark:border-zinc-700 flex items-center justify-center text-zinc-400 hover:text-blue-600 hover:border-blue-500 transition-colors"
-                      title="Add another proof photo"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
                   </div>
                 )}
-
-                <div className="flex items-center justify-between text-[11px] text-zinc-500 bg-zinc-50 dark:bg-zinc-950 p-2 rounded border border-zinc-200 dark:border-zinc-800">
-                  <div className="flex items-center gap-1.5">
-                    <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-600 border-emerald-200 font-medium">
-                      Approved Match Proof
-                    </Badge>
-                    <span className="text-[11px] text-zinc-600 dark:text-zinc-400">Color Reference Standard</span>
-                  </div>
-                  <span className="font-mono text-[10px]">Target: ISO 12647-2</span>
-                </div>
               </div>
             ) : (
               <div
-                className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500 rounded-md p-6 flex flex-col items-center justify-center text-center cursor-pointer bg-zinc-50/50 dark:bg-zinc-950/50 hover:bg-blue-50/30 dark:hover:bg-blue-950/20 transition-all flex-1 min-h-[140px]"
+                className="border border-dashed border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-700 rounded p-4 flex flex-col items-center justify-center text-center cursor-pointer bg-zinc-50/40 dark:bg-zinc-950/30 transition-colors flex-1 min-h-[156px]"
                 onClick={() => document.getElementById("client-photo-add-input")?.click()}
               >
-                <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-950/80 flex items-center justify-center text-blue-600 dark:text-blue-400 mb-2">
-                  <ImageIcon className="w-5 h-5" />
-                </div>
-                <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200">No Sample Photo Attached</p>
-                <p className="text-[11px] text-zinc-500 mt-0.5">Click to upload physical sample or packaging mockup</p>
+                <ImageIcon className="w-4 h-4 text-zinc-400 mb-1.5" />
+                <p className="text-xs text-zinc-500">{t("attachSamplePhoto")}</p>
               </div>
             )}
 
@@ -384,14 +615,9 @@ export function OverviewTab({
                 value={formData.customer}
                 onChange={(val) => handleFieldChange("customer", val)}
                 placeholder="Select or enter customer..."
-                searchPlaceholder="Search customer by name or CRM..."
+                searchPlaceholder="Search customer by name, STIR or Contract..."
                 allowCustom={true}
-                options={MOCK_CUSTOMERS.map((c) => ({
-                  value: c,
-                  label: c,
-                  description: "Verified CRM Client Account",
-                  badge: "Client"
-                }))}
+                options={customerComboboxOptions}
               />
             </div>
             <div>
@@ -441,10 +667,16 @@ export function OverviewTab({
               </div>
               <SmartCombobox
                 value={formData.recipe || "OFFSET_STD_V1"}
-                onChange={(val) => handleFieldChange("recipe", val)}
+                onChange={(val) => {
+                  handleFieldChange("recipe", val);
+                  if (val === "OFFSET_KASHIROVKA_V1" && kashirovkaMode === "none") {
+                    handleKashirovkaModeChange("duplex");
+                  }
+                }}
                 searchPlaceholder="Search recipe code, technology or product..."
                 options={[
                   { value: "OFFSET_STD_V1", label: "OFFSET_STD_V1 (Folding Carton)", description: "Coated board, 4-color offset, standard die-cut", badge: "Offset" },
+                  { value: "OFFSET_KASHIROVKA_V1", label: "OFFSET_KASHIROVKA_V1 (Duplex/Triplex 600g+ Card)", description: "Multi-layer 300g+300g printed & mounted (Кашировка)", badge: "Kashirovka" },
                   { value: "OFFSET_PREM_V2", label: "OFFSET_PREM_V2 (Premium Booklet)", description: "Silk paper, Spot UV, saddle stitch", badge: "Offset" },
                   { value: "FLEXO_NYLON_V1", label: "FLEXO_NYLON_V1 (Taffeta / Nylon Tape)", description: "High-density ribbon, thermal wash care", badge: "Flexo" },
                   { value: "FLEXO_SATIN_V2", label: "FLEXO_SATIN_V2 (Woven Edge Satin)", description: "Double-sided satin, ultrasonic cold cut", badge: "Flexo" },
@@ -481,6 +713,94 @@ export function OverviewTab({
           </div>
         </div>
 
+        {/* Card: Size / Variation Breakdown */}
+        <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              <Ruler className="w-4 h-4 text-blue-600" />
+              <span>Size Breakdown</span>
+            </h3>
+            <span className="text-[10px] text-muted-foreground font-normal">
+              For apparel, cards, stickers
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-2.5">
+            {/* Add Size Form */}
+            <div className="flex items-end gap-2 bg-zinc-50 dark:bg-zinc-950 p-2.5 rounded-md border border-zinc-200 dark:border-zinc-800">
+              <div className="flex-1">
+                <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Size / Variation</label>
+                <Input 
+                  value={newSize} 
+                  onChange={(e) => setNewSize(e.target.value)} 
+                  placeholder="e.g. S, M, XL, 42" 
+                  className="h-7 text-xs bg-white dark:bg-zinc-900"
+                  onKeyDown={(e) => e.key === 'Enter' && addSize()}
+                />
+              </div>
+              <div className="w-24">
+                <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Quantity</label>
+                <Input 
+                  type="number"
+                  value={newSizeQty} 
+                  onChange={(e) => setNewSizeQty(e.target.value)} 
+                  placeholder="0" 
+                  className="h-7 text-xs bg-white dark:bg-zinc-900"
+                  onKeyDown={(e) => e.key === 'Enter' && addSize()}
+                />
+              </div>
+              <Button onClick={addSize} type="button" size="sm" className="h-7 px-2.5 gap-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 shrink-0">
+                <Plus className="w-3.5 h-3.5" /> Add
+              </Button>
+            </div>
+
+            {/* Sizes List */}
+            {sizes.length > 0 ? (
+              <div className="border border-zinc-200 dark:border-zinc-800 rounded-md overflow-hidden max-h-[160px] overflow-y-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 sticky top-0">
+                    <tr>
+                      <th className="px-2.5 py-1.5 font-medium">Size</th>
+                      <th className="px-2.5 py-1.5 font-medium w-24 text-right">Quantity</th>
+                      <th className="px-2.5 py-1.5 w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sizes.map((item) => (
+                      <tr key={item.id} className="border-b border-zinc-100 dark:border-zinc-800/60 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
+                        <td className="px-2.5 py-1.5 font-medium">{item.size}</td>
+                        <td className="px-2.5 py-1.5 text-right font-mono">{item.quantity.toLocaleString()}</td>
+                        <td className="px-2.5 py-1.5 text-center">
+                          <button 
+                            type="button" 
+                            onClick={() => removeSize(item.id)}
+                            className="text-zinc-400 hover:text-red-500 p-0.5 rounded transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-zinc-50 dark:bg-zinc-900/30 border-t border-zinc-200 dark:border-zinc-800 font-semibold sticky bottom-0">
+                    <tr>
+                      <td className="px-2.5 py-1.5 text-right">Total:</td>
+                      <td className="px-2.5 py-1.5 text-right font-mono text-blue-600 dark:text-blue-400">
+                        {sizes.reduce((acc, s) => acc + s.quantity, 0).toLocaleString()}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-5 text-zinc-400 text-xs italic border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md">
+                No size breakdown specified. Using total order quantity.
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Card 3: Physical Item Specifications */}
         <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
@@ -488,13 +808,20 @@ export function OverviewTab({
               <Tag className="w-4 h-4 text-blue-600" />
               <span>Physical Specifications</span>
             </h3>
-            <Badge variant="outline" className="font-mono text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200 shadow-none">
-              {formData.width || 50} × {formData.height || 90} {formData.dimensionUnit || "mm"}
-            </Badge>
+            <div className="flex items-center gap-1.5">
+              {kashirovkaMode !== "none" && (
+                <Badge variant="outline" className="font-mono text-[10px] bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300 shadow-none">
+                  {kashirovkaTotals.netPaperGsm}g ({kashirovkaTotals.totalMountedGsm}g/m² · {kashirovkaTotals.estimatedCaliperMm}mm)
+                </Badge>
+              )}
+              <Badge variant="outline" className="font-mono text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200 shadow-none">
+                {formData.width || 50} × {formData.height || 90} {formData.dimensionUnit || "mm"}
+              </Badge>
+            </div>
           </div>
 
           <div className="space-y-2.5">
-            {/* Quick Format Presets in a clean, compact dropdown combobox */}
+              {/* Quick Format Presets in a clean, compact dropdown combobox */}
             <div className="flex items-center justify-between gap-2 p-1.5 rounded-md bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800">
               <div className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400 text-xs font-medium">
                 <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
@@ -626,25 +953,65 @@ export function OverviewTab({
               </div>
             </div>
 
-            {/* Paper Stock & Coating - Converted to Searchable SmartCombobox */}
+            {/* Paper Stock & Coating - Connected to Live Warehouse Stock */}
             <div className="grid grid-cols-2 gap-2 pt-0.5">
               <div>
-                <label className="text-zinc-500 font-medium block mb-1 text-xs">Paper / Substrate Stock</label>
-                <SmartCombobox
-                  value={formData.paperStock || "Galerie Art Silk 150g/m²"}
-                  onChange={(val) => handleFieldChange("paperStock", val)}
-                  searchPlaceholder="Search substrate or density..."
-                  allowCustom={true}
-                  options={[
-                    { value: "Galerie Art Silk 150g/m²", label: "Galerie Art Silk 150g/m²", description: "Premium coated semi-matte paper", badge: "Paper" },
-                    { value: "Coated Cardboard 300g/m²", label: "Coated Cardboard 300g/m²", description: "Solid bleached board (SBB/GZ)", badge: "Board" },
-                    { value: "Kraft Board Brown 280g/m²", label: "Kraft Board Brown 280g/m²", description: "Natural unbleached eco kraft paper", badge: "Kraft" },
-                    { value: "Offset Woodfree 80g/m²", label: "Offset Woodfree 80g/m²", description: "Standard uncoated office book paper", badge: "Paper" },
-                    { value: "White Satin Ribbon 60mm", label: "White Satin Ribbon 60mm", description: "Polyester woven edge soft satin", badge: "Flexo" },
-                    { value: "Nylon Taffeta Tape 50mm", label: "Nylon Taffeta Tape 50mm", description: "Tear-resistant heat sealable tape", badge: "Flexo" },
-                    { value: "Gloss Art Paper 130g/m²", label: "Gloss Art Paper 130g/m²", description: "High-gloss magazine/flyer paper", badge: "Paper" },
-                  ]}
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-zinc-500 font-medium text-xs">Paper / Substrate Stock</label>
+                  {selectedMaterialStock && (
+                    <span
+                      className={cn(
+                        "text-[10px] font-mono px-1.5 py-0.2 rounded border",
+                        selectedMaterialStock.status === "In Stock"
+                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                          : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                      )}
+                      title={`Ombor joylashuvi: ${selectedMaterialStock.location} | Band qilingan: ${selectedMaterialStock.reserved.toLocaleString()} ${selectedMaterialStock.unit}`}
+                    >
+                      Ombor: {selectedMaterialStock.available.toLocaleString()} {selectedMaterialStock.unit}
+                    </span>
+                  )}
+                </div>
+                {kashirovkaMode !== "none" ? (
+                  <div className="h-8 px-2.5 rounded-md border border-amber-300/70 dark:border-amber-800/70 bg-amber-50/60 dark:bg-amber-950/30 flex items-center justify-between gap-1.5 text-xs">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span className="font-mono font-semibold text-amber-900 dark:text-amber-200 truncate" title={t("kashirovkaManagedNotice")}>
+                        {kashirovkaMode === "triplex" ? "3-Ply Triplex" : "2-Ply Duplex"} · {kashirovkaTotals.netPaperGsm}g ({kashirovkaTotals.totalMountedGsm}g/m²)
+                      </span>
+                    </div>
+                    <Badge variant="outline" className="text-[9px] h-4 px-1 bg-background/80 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 shrink-0">
+                      ~{kashirovkaTotals.estimatedCaliperMm}mm
+                    </Badge>
+                  </div>
+                ) : (
+                  <SmartCombobox
+                    value={formData.paperStock || "Galerie Art Silk 150g/m²"}
+                    onChange={(val) => {
+                      if (val.startsWith("Duplex Kashirovka")) {
+                        handleKashirovkaModeChange("duplex");
+                      } else if (val.startsWith("Triplex Kashirovka")) {
+                        handleKashirovkaModeChange("triplex");
+                      } else {
+                        handleFieldChange("paperStock", val);
+                      }
+                    }}
+                    searchPlaceholder="Search substrate, density or warehouse stock..."
+                    allowCustom={true}
+                    options={[
+                      ...warehouseStock
+                        .filter((s) => s.category === "Paper & Board" || s.category === "Roll & Label")
+                        .map((s) => ({
+                          value: s.name,
+                          label: s.name,
+                          description: `Bo'sh qoldiq: ${s.available.toLocaleString()} ${s.unit} (Band: ${s.reserved.toLocaleString()}) · ${s.location}`,
+                          badge: `${s.available.toLocaleString()} ${s.unit}`,
+                        })),
+                      { value: "Duplex Kashirovka 600g/m² (300g + 300g)", label: "Duplex Kashirovka 600g/m² (2×300g)", description: "Front & Back printed separately & mounted", badge: "600g+" },
+                      { value: "Triplex Kashirovka 900g/m² (300g+300g+300g)", label: "Triplex Kashirovka 900g/m² (3×300g)", description: "3-layer sandwich board with colored core", badge: "900g+" },
+                    ]}
+                  />
+                )}
               </div>
               <div>
                 <label className="text-zinc-500 font-medium block mb-1 text-xs">Surface Coating / Finish</label>
@@ -669,96 +1036,409 @@ export function OverviewTab({
           </div>
         </div>
 
-        {/* Card 4: Size / Variation Breakdown */}
-        <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
-            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-              <Ruler className="w-4 h-4 text-blue-600" />
-              <span>Size Breakdown</span>
-            </h3>
-            <span className="text-[10px] text-muted-foreground font-normal">
-              For apparel, cards, stickers
-            </span>
-          </div>
+        {/* Standalone Card: 2D Die-Line & Dimension Inspector */}
+        <DieLinePreview
+          width={Number(formData.width) || 50}
+          height={Number(formData.height) || 90}
+          bleed={Number(formData.bleed) ?? 2}
+          dimensionUnit={formData.dimensionUnit || "mm"}
+          cornerType={formData.cornerType || "Square"}
+          itemCategory={formData.itemCategory || "Hangtag"}
+          onFlipOrientation={() => {
+            const currentW = formData.width || 50;
+            const currentH = formData.height || 90;
+            handleFieldChange("width", currentH);
+            handleFieldChange("height", currentW);
+          }}
+        />
 
-          <div className="flex flex-col gap-2.5">
-            {/* Add Size Form */}
-            <div className="flex items-end gap-2 bg-zinc-50 dark:bg-zinc-950 p-2.5 rounded-md border border-zinc-200 dark:border-zinc-800">
-              <div className="flex-1">
-                <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Size / Variation</label>
-                <Input 
-                  value={newSize} 
-                  onChange={(e) => setNewSize(e.target.value)} 
-                  placeholder="e.g. S, M, XL, 42" 
-                  className="h-7 text-xs bg-white dark:bg-zinc-900"
-                  onKeyDown={(e) => e.key === 'Enter' && addSize()}
-                />
+        {/* Dedicated Card: Multi-Layer Substrate & Kashirovka (Duplex / Triplex Mounting) */}
+        <div
+          className={cn(
+            "md:col-span-2 p-3 bg-white dark:bg-zinc-900 border rounded-md transition-colors",
+            kashirovkaMode !== "none"
+              ? "border-amber-300/80 dark:border-amber-800/70 space-y-3"
+              : "border-zinc-200 dark:border-zinc-800"
+          )}
+        >
+          {/* Card Header with Master Switch & Segmented Ply Selector */}
+          <div
+            className={cn(
+              "flex flex-wrap items-center justify-between gap-2",
+              kashirovkaMode !== "none" && "pb-2.5 border-b border-zinc-100 dark:border-zinc-800"
+            )}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div
+                className={cn(
+                  "w-7 h-7 rounded-md flex items-center justify-center shrink-0 border",
+                  kashirovkaMode !== "none"
+                    ? "bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400"
+                    : "bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700 text-zinc-400"
+                )}
+              >
+                <Layers className="w-4 h-4" />
               </div>
-              <div className="w-24">
-                <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Quantity</label>
-                <Input 
-                  type="number"
-                  value={newSizeQty} 
-                  onChange={(e) => setNewSizeQty(e.target.value)} 
-                  placeholder="0" 
-                  className="h-7 text-xs bg-white dark:bg-zinc-900"
-                  onKeyDown={(e) => e.key === 'Enter' && addSize()}
-                />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">
+                    {t("kashirovkaTitle")}
+                  </h3>
+                  {kashirovkaMode !== "none" && (
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-[10px] h-5 px-1.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 shadow-none"
+                    >
+                      {t("kashirovkaNetGsm")}: {kashirovkaTotals.netPaperGsm}g · {t("kashirovkaTotalGsm")}: {kashirovkaTotals.totalMountedGsm}g/m² (~{kashirovkaTotals.estimatedCaliperMm}mm)
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                  {t("kashirovkaCardDesc")}
+                </p>
               </div>
-              <Button onClick={addSize} type="button" size="sm" className="h-7 px-2.5 gap-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 shrink-0">
-                <Plus className="w-3.5 h-3.5" /> Add
-              </Button>
             </div>
 
-            {/* Sizes List */}
-            {sizes.length > 0 ? (
-              <div className="border border-zinc-200 dark:border-zinc-800 rounded-md overflow-hidden max-h-[160px] overflow-y-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 sticky top-0">
-                    <tr>
-                      <th className="px-2.5 py-1.5 font-medium">Size</th>
-                      <th className="px-2.5 py-1.5 font-medium w-24 text-right">Quantity</th>
-                      <th className="px-2.5 py-1.5 w-8"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sizes.map((item) => (
-                      <tr key={item.id} className="border-b border-zinc-100 dark:border-zinc-800/60 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
-                        <td className="px-2.5 py-1.5 font-medium">{item.size}</td>
-                        <td className="px-2.5 py-1.5 text-right font-mono">{item.quantity.toLocaleString()}</td>
-                        <td className="px-2.5 py-1.5 text-center">
-                          <button 
-                            type="button" 
-                            onClick={() => removeSize(item.id)}
-                            className="text-zinc-400 hover:text-red-500 p-0.5 rounded transition-colors"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-zinc-50 dark:bg-zinc-900/30 border-t border-zinc-200 dark:border-zinc-800 font-semibold sticky bottom-0">
-                    <tr>
-                      <td className="px-2.5 py-1.5 text-right">Total:</td>
-                      <td className="px-2.5 py-1.5 text-right font-mono text-blue-600 dark:text-blue-400">
-                        {sizes.reduce((acc, s) => acc + s.quantity, 0).toLocaleString()}
-                      </td>
-                      <td></td>
-                    </tr>
-                  </tfoot>
-                </table>
+            <div className="flex items-center gap-2.5 shrink-0">
+              {/* Subtle Segmented Control for 2-Ply vs 3-Ply (only visible when Kashirovka is ON) */}
+              {kashirovkaMode !== "none" && (
+                <div className="inline-flex items-center bg-zinc-100 dark:bg-zinc-800/90 p-0.5 rounded-md border border-zinc-200/80 dark:border-zinc-700/70">
+                  <button
+                    type="button"
+                    onClick={() => handleKashirovkaModeChange("duplex")}
+                    className={cn(
+                      "px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer",
+                      kashirovkaMode === "duplex"
+                        ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    )}
+                  >
+                    {t("kashirovkaDuplex")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKashirovkaModeChange("triplex")}
+                    className={cn(
+                      "px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer",
+                      kashirovkaMode === "triplex"
+                        ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    )}
+                  >
+                    {t("kashirovkaTriplex")}
+                  </button>
+                </div>
+              )}
+
+              {/* Primary Activation Switch */}
+              <div className="flex items-center gap-1.5 pl-1">
+                <Switch
+                  checked={kashirovkaMode !== "none"}
+                  onCheckedChange={(checked) =>
+                    handleKashirovkaModeChange(checked ? "duplex" : "none")
+                  }
+                />
               </div>
-            ) : (
-              <div className="text-center py-5 text-zinc-400 text-xs italic border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md">
-                No size breakdown specified. Using total order quantity.
-              </div>
-            )}
+            </div>
           </div>
+
+          {/* Expanded Workspace Body when Kashirovka is Active */}
+          {kashirovkaMode !== "none" && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 pt-0.5">
+              {/* LEFT SIDE (7 cols): Multi-Layer Sandwich Stack Builder */}
+              <div className="lg:col-span-7 space-y-1.5">
+                {kashirovkaLayers.map((layer, idx) => {
+                  const roleTitle =
+                    layer.role === "top_liner"
+                      ? t("kashirovkaLayerTop")
+                      : layer.role === "core_board"
+                        ? t("kashirovkaLayerCore")
+                        : `${idx + 1}. ${t("kashirovkaLayerBottom")}`;
+                  return (
+                    <React.Fragment key={layer.id}>
+                      {idx > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-0.5 text-[10px] font-mono text-amber-700 dark:text-amber-400">
+                          <div className="h-2.5 border-l-2 border-dashed border-amber-400 dark:border-amber-600 ml-1" />
+                          <span>+ PVA Glue ({formData.kashirovkaGlueGsm ?? 25} g/m²)</span>
+                        </div>
+                      )}
+                      <div className="p-2 rounded-md bg-zinc-50/80 dark:bg-zinc-950/60 border border-zinc-200/90 dark:border-zinc-800 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={cn(
+                                "w-4 h-4 rounded text-[10px] font-mono font-bold flex items-center justify-center",
+                                layer.role === "top_liner"
+                                  ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                  : layer.role === "core_board"
+                                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                                    : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300"
+                              )}
+                            >
+                              L{idx + 1}
+                            </span>
+                            <span className="text-[11px] font-semibold text-zinc-900 dark:text-zinc-100">
+                              {roleTitle}
+                            </span>
+                          </div>
+
+                          {/* Quick 1-Click Color Mode Pills (4+0 | 1+0 | 0+0) */}
+                          <div className="inline-flex items-center bg-zinc-200/70 dark:bg-zinc-900 p-0.5 rounded border border-zinc-300/60 dark:border-zinc-800">
+                            {(["4+0", "1+0", "0+0"] as const).map((colorMode) => (
+                              <button
+                                key={colorMode}
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateKashirovkaLayer(layer.id, {
+                                    colors: colorMode,
+                                  })
+                                }
+                                className={cn(
+                                  "px-1.5 py-0.5 rounded-[3px] text-[10px] font-mono transition-colors cursor-pointer",
+                                  layer.colors === colorMode
+                                    ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-semibold shadow-2xs"
+                                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                                )}
+                                title={
+                                  colorMode === "4+0"
+                                    ? "Full CMYK 4+0"
+                                    : colorMode === "1+0"
+                                      ? "1-Color / Pantone 1+0"
+                                      : "Unprinted 0+0"
+                                }
+                              >
+                                {colorMode}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-12 gap-1.5 items-center">
+                          <div className="col-span-9">
+                            <SmartCombobox
+                              value={layer.paperStock}
+                              onChange={(val) =>
+                                handleUpdateKashirovkaLayer(layer.id, {
+                                  paperStock: val,
+                                })
+                              }
+                              searchPlaceholder="Select layer board..."
+                              allowCustom={true}
+                              options={[
+                                {
+                                  value: "Coated Cardboard 300g/m²",
+                                  label: "Coated Cardboard 300g/m²",
+                                  description: "Max press board (SBB/GZ)",
+                                  badge: "300g",
+                                },
+                                {
+                                  value: "Coated Cardboard 250g/m²",
+                                  label: "Coated Cardboard 250g/m²",
+                                  description: "Medium coated board",
+                                  badge: "250g",
+                                },
+                                {
+                                  value: "Kraft Board Brown 280g/m²",
+                                  label: "Kraft Board Brown 280g/m²",
+                                  description: "Natural kraft liner",
+                                  badge: "280g",
+                                },
+                                {
+                                  value: "Colorplan Ebony Black Core 300g/m²",
+                                  label: "Colorplan Ebony 300g/m²",
+                                  description: "Dyed black seam filler board",
+                                  badge: "Core",
+                                },
+                                {
+                                  value: "Galerie Art Silk 150g/m²",
+                                  label: "Galerie Art Silk 150g/m²",
+                                  description: "Coated silk liner",
+                                  badge: "150g",
+                                },
+                              ]}
+                            />
+                          </div>
+                          <div className="col-span-3 relative">
+                            <Input
+                              type="number"
+                              value={layer.grammage}
+                              onChange={(e) =>
+                                handleUpdateKashirovkaLayer(layer.id, {
+                                  grammage: Number(e.target.value),
+                                })
+                              }
+                              className="h-8 pr-6 text-xs font-mono font-semibold bg-white dark:bg-zinc-900"
+                              title="Layer Grammage (g/m²)"
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono text-zinc-400 pointer-events-none">
+                              g
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* Quick Add / Remove 3rd Inner Core Layer Button */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleKashirovkaModeChange(
+                      kashirovkaMode === "duplex" ? "triplex" : "duplex"
+                    )
+                  }
+                  className="w-full py-1.5 px-2.5 rounded-md border border-dashed border-zinc-300 dark:border-zinc-700 hover:border-amber-400 dark:hover:border-amber-600 text-[11px] font-medium text-zinc-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {kashirovkaMode === "duplex" ? (
+                    <span>{t("kashirovkaAddCoreLayer")}</span>
+                  ) : (
+                    <span>{t("kashirovkaRemoveCoreLayer")}</span>
+                  )}
+                </button>
+              </div>
+
+              {/* RIGHT SIDE (5 cols): Imposition Strategy Cards & Technological Norms */}
+              <div className="lg:col-span-5 flex flex-col justify-between gap-2.5 bg-zinc-50/70 dark:bg-zinc-950/50 p-2.5 rounded-md border border-zinc-200/80 dark:border-zinc-800">
+                <div className="space-y-2">
+                  <label className="text-zinc-500 dark:text-zinc-400 font-semibold block text-[11px]">
+                    {t("kashirovkaStrategyLabel")}
+                  </label>
+
+                  {/* Interactive 2-Card Strategy Selector (replaces raw SelectValue) */}
+                  <div className="space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleFieldChange("kashirovkaStrategy", "split_half_sheet")
+                      }
+                      className={cn(
+                        "w-full text-left p-2 rounded-md border transition-all cursor-pointer flex items-start justify-between gap-2",
+                        kashirovkaStrategy === "split_half_sheet"
+                          ? "bg-white dark:bg-zinc-900 border-blue-500 dark:border-blue-500 ring-1 ring-blue-500/20"
+                          : "bg-white/60 dark:bg-zinc-900/40 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300"
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-zinc-900 dark:text-zinc-100">
+                          {t("kashirovkaStrategySplitShort")}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-snug mt-0.5">
+                          {t("kashirovkaStrategySplit")}
+                        </div>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "font-mono text-[9px] h-4 px-1 shrink-0",
+                          kashirovkaStrategy === "split_half_sheet"
+                            ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800"
+                            : "text-zinc-400"
+                        )}
+                      >
+                        1× CTP
+                      </Badge>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleFieldChange("kashirovkaStrategy", "separate_sheets")
+                      }
+                      className={cn(
+                        "w-full text-left p-2 rounded-md border transition-all cursor-pointer flex items-start justify-between gap-2",
+                        kashirovkaStrategy === "separate_sheets"
+                          ? "bg-white dark:bg-zinc-900 border-blue-500 dark:border-blue-500 ring-1 ring-blue-500/20"
+                          : "bg-white/60 dark:bg-zinc-900/40 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300"
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-zinc-900 dark:text-zinc-100">
+                          {t("kashirovkaStrategySeparateShort")}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-snug mt-0.5">
+                          {t("kashirovkaStrategySeparate")}
+                        </div>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "font-mono text-[9px] h-4 px-1 shrink-0",
+                          kashirovkaStrategy === "separate_sheets"
+                            ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800"
+                            : "text-zinc-400"
+                        )}
+                      >
+                        2× CTP
+                      </Badge>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Glue, Make-Ready & Curing Pause Inputs */}
+                <div className="space-y-2 pt-2 border-t border-zinc-200/80 dark:border-zinc-800">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] text-zinc-500 block mb-0.5 truncate" title={t("kashirovkaGlueLabel")}>
+                        {t("kashirovkaGlueLabel")}
+                      </label>
+                      <Input
+                        type="number"
+                        value={formData.kashirovkaGlueGsm ?? 25}
+                        onChange={(e) =>
+                          handleFieldChange("kashirovkaGlueGsm", Number(e.target.value))
+                        }
+                        className="h-7 text-xs font-mono bg-white dark:bg-zinc-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-500 block mb-0.5 truncate" title={t("kashirovkaMakeReadyLabel")}>
+                        {t("kashirovkaMakeReadyLabel")}
+                      </label>
+                      <Input
+                        type="number"
+                        value={formData.kashirovkaMakeReadySheets ?? 50}
+                        onChange={(e) =>
+                          handleFieldChange(
+                            "kashirovkaMakeReadySheets",
+                            Number(e.target.value)
+                          )
+                        }
+                        className="h-7 text-xs font-mono bg-white dark:bg-zinc-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-500 block mb-0.5 truncate" title={t("kashirovkaCuringLabel")}>
+                        {t("kashirovkaCuringLabel")}
+                      </label>
+                      <Input
+                        type="number"
+                        value={formData.kashirovkaCuringHours ?? 12}
+                        onChange={(e) =>
+                          handleFieldChange(
+                            "kashirovkaCuringHours",
+                            Number(e.target.value)
+                          )
+                        }
+                        className="h-7 text-xs font-mono bg-white dark:bg-zinc-900"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Technical Side-Lay Notice */}
+                  <div className="text-[10px] text-amber-800 dark:text-amber-300 bg-amber-100/70 dark:bg-amber-950/60 border border-amber-300/60 dark:border-amber-800/70 rounded px-2 py-1 leading-snug">
+                    {t("kashirovkaSideLayNotice")}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Card 6: Attached Files & Technical Documents */}
-        <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md space-y-3 flex flex-col">
+
+
+        {/* Card: Attached Files & Technical Documents */}
+        <div className="md:col-span-2 p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md space-y-3 flex flex-col">
           <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
             <div className="flex items-center gap-2">
               <Paperclip className="w-4 h-4 text-blue-600" />
@@ -878,32 +1558,19 @@ export function OverviewTab({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Route & Tasks Tracker (1/3 width) */}
-        {formData.milestones && formData.milestones.length > 0 && (
-          <div className="md:col-span-1 space-y-4">
-            <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-sm">
-              <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center justify-between mb-4 border-b border-zinc-100 dark:border-zinc-800 pb-3">
-                <span className="text-sm flex items-center gap-2">
-                  <Boxes className="w-4 h-4 text-blue-600" />
-                  Live Production Route
-                </span>
-                <Badge variant="outline" className="text-[10px] shadow-none bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:border-blue-900">
-                  {formData.linkedWoId ? `Linked to ${formData.linkedWoId}` : "Pre-production Route"}
-                </Badge>
-              </div>
-              <div className="pt-2">
-                <VerticalTaskTracker
-                  milestones={formData.milestones || []}
-                  onStatusChange={handleMilestoneStatusChange}
-                  onAssign={handleMilestoneAssign}
-                  onRemove={handleMilestoneRemove}
-                  onAdd={handleMilestoneAdd}
-                  onReorder={handleMilestonesReorder}
-                />
-              </div>
-            </div>
-          </div>
-        )}
+        {/* RIGHT COLUMN: Pre-Flight Readiness & Production Route Card */}
+        <div className="md:col-span-1 space-y-4">
+          <OrderReadinessRouteCard
+            workOrderId={formData.linkedWoId || docNo}
+            fallbackData={{
+              customer: formData.customer,
+              product: formData.product,
+              department: formData.department,
+              quantity: formData.quantity,
+              deadline: formData.deadline,
+            }}
+          />
+        </div>
       </div>
     </>
   );

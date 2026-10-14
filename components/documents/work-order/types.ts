@@ -82,6 +82,29 @@ export interface ProductionMilestone {
   updatedBy?: string;
 }
 
+export interface ShiftNote {
+  id: string;
+  author: string;
+  shift: string;
+  time: string;
+  text: string;
+}
+
+export interface SpotColorItem {
+  id: string;
+  name: string;
+  code: string;
+  hex: string;
+  side: "front" | "back" | "both";
+}
+
+export interface SideColorConfig {
+  c: boolean;
+  m: boolean;
+  y: boolean;
+  k: boolean;
+}
+
 export interface WorkOrderFormData {
   customer: string;
   product: string;
@@ -119,6 +142,15 @@ export interface WorkOrderFormData {
   bleed?: number;
   attachments?: OrderAttachment[];
   sizes?: { id: string; size: string; quantity: number }[];
+  colorsConfig?: string;
+  spotColors?: string[];
+  spotColorItems?: SpotColorItem[];
+  frontColors?: SideColorConfig;
+  backColors?: SideColorConfig;
+  holeSize?: number;
+  holePosition?: "top-center" | "top-left" | "top-right" | "left-center" | "right-center" | "none";
+  holeOffset?: number;
+  shiftNotes?: ShiftNote[];
 }
 
 export const FLOOR_OPERATORS = [
@@ -149,7 +181,7 @@ export const MACHINE_MAP: Record<string, string[]> = {
   Offset: ["Heidelberg XL 106", "Komori Lithrone G40", "Heidelberg SX 74"],
   Flexo: ["Mark Andy Performance", "Nilpeter FA-Line", "Gallus ECS 340"],
   Jacquard: ["Staubli Jacquard Loom", "Muller Martini Loom", "Dornier PTV"],
-  "Post-press": ["Kolbus BF 513", "Bobst Novacut 106"]
+  "Post-press": ["Meiguang Sheet Laminator (Кашировка)", "Kolbus BF 513", "Bobst Novacut 106"]
 };
 
 export const RECIPE_MATERIALS: Record<string, { name: string; req: number; unit: string; stock: number }[]> = {
@@ -157,6 +189,13 @@ export const RECIPE_MATERIALS: Record<string, { name: string; req: number; unit:
     { name: "Galerie Art Silk Paper 150g", req: 12500, unit: "Sheets", stock: 45000 },
     { name: "Hubergroup CMYK Ink", req: 36, unit: "kg", stock: 120 },
     { name: "Agfa CTP Plates", req: 24, unit: "pcs", stock: 8 },
+  ],
+  "OFFSET_KASHIROVKA_V1": [
+    { name: "Layer 1: Coated Cardboard 300g/m² (Face 4+0)", req: 1100, unit: "Sheets", stock: 18500 },
+    { name: "Layer 2: Coated Cardboard 300g/m² (Back 4+0)", req: 1100, unit: "Sheets", stock: 18500 },
+    { name: "PVA Dispersion Mounting Glue (25g/m²)", req: 19.25, unit: "kg", stock: 240 },
+    { name: "Soft-Touch Matte Lamination Film", req: 1540, unit: "m²", stock: 8000 },
+    { name: "Agfa CTP Plates (Split-Mount Set)", req: 4, unit: "pcs", stock: 64 },
   ],
   "OFFSET_PREM_V2": [
     { name: "LumiForte Premium 250g", req: 5000, unit: "Sheets", stock: 2000 },
@@ -188,6 +227,14 @@ export const RECIPE_ROUTES: Record<string, { name: string; machineStr: string }[
     { name: "Pre-press & CTP Plate Imaging", machineStr: "Screen PlateRite 8600" },
     { name: "4-Color Offset Printing", machineStr: "PRESS_MACHINE" },
     { name: "Die-cutting", machineStr: "Bobst Novacut 106" }
+  ],
+  "OFFSET_KASHIROVKA_V1": [
+    { name: "Pre-press & Mirror Side-Lay CTP Imaging", machineStr: "Screen PlateRite 8600" },
+    { name: "4+0 Offset Printing (Face & Back 300g Liners)", machineStr: "PRESS_MACHINE" },
+    { name: "1+0 Surface Thermal Lamination", machineStr: "Autobond Mini 76" },
+    { name: "Kashirovka (Sheet-to-Sheet Duplex Mounting)", machineStr: "Meiguang Sheet Laminator" },
+    { name: "Hydraulic Press Curing & Drying (12h Pause)", machineStr: "Hydraulic Pile Press" },
+    { name: "Heavy-Duty Die-Cutting (600g+ Board)", machineStr: "Bobst Novacut 106" }
   ],
   "OFFSET_PREM_V2": [
     { name: "Pre-press & CTP Plate Imaging", machineStr: "Screen PlateRite 8600" },
@@ -232,6 +279,16 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
     description: "4-color offset on 150g Art Silk paper with die-cutting",
     materialsCount: 3,
     estimatedCost: "$5,250",
+    unit: "pcs",
+  },
+  {
+    id: "SPEC-OFF-KASH",
+    code: "OFFSET_KASHIROVKA_V1",
+    name: "Duplex/Triplex Kashirovka 600g+ Heavy Card",
+    department: "Offset",
+    description: "2×300g coated board printed 4+0 separately, mounted (Кашировка) & heavy die-cut",
+    materialsCount: 5,
+    estimatedCost: "$2,480",
     unit: "pcs",
   },
   {
@@ -483,6 +540,16 @@ export const MACHINE_OPTIONS: MachineOption[] = [
     format: "Carton folding & gluing",
     features: "Straight-line, Crash-lock bottom & 4/6-corners",
     status: "Available",
+    isAvailable: true,
+  },
+  {
+    code: "M-PST-04",
+    name: "Meiguang Sheet Laminator (Кашировка)",
+    department: "Post-press",
+    speed: "4,500 sheets/hr",
+    format: "B1 (720 × 1040 mm)",
+    features: "Sheet-to-sheet duplex/triplex mounting & hydraulic pile press",
+    status: "Ready",
     isAvailable: true,
   },
 ];

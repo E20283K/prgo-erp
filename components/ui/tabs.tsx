@@ -28,7 +28,7 @@ const tabsListVariants = cva(
     variants: {
       variant: {
         default: "rounded-lg p-[3px] bg-muted group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col",
-        line: "gap-2 bg-transparent p-0 rounded-none h-auto border-b border-border/60 justify-start w-auto",
+        line: "gap-1 bg-transparent p-0 rounded-none h-auto border-b border-border/60 justify-start w-auto no-scrollbar",
       },
     },
     defaultVariants: {
@@ -62,7 +62,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
         "group-data-[variant=default]/tabs-list:rounded-md group-data-[variant=default]/tabs-list:px-2 group-data-[variant=default]/tabs-list:py-1 group-data-[variant=default]/tabs-list:h-[calc(100%-2px)]",
         "group-data-[variant=default]/tabs-list:data-active:bg-background group-data-[variant=default]/tabs-list:data-active:text-foreground dark:group-data-[variant=default]/tabs-list:data-active:bg-input/30 dark:group-data-[variant=default]/tabs-list:data-active:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-xs",
         // Line variant styles (Clean bottom-border line style, zero pill background)
-        "group-data-[variant=line]/tabs-list:rounded-none group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:px-3 group-data-[variant=line]/tabs-list:py-2 group-data-[variant=line]/tabs-list:border-b-2 group-data-[variant=line]/tabs-list:border-transparent",
+        "group-data-[variant=line]/tabs-list:rounded-none group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:px-2.5 group-data-[variant=line]/tabs-list:py-1.5 group-data-[variant=line]/tabs-list:border-b-2 group-data-[variant=line]/tabs-list:border-transparent",
         "group-data-[variant=line]/tabs-list:data-active:border-blue-600 dark:group-data-[variant=line]/tabs-list:data-active:border-blue-500 group-data-[variant=line]/tabs-list:data-active:text-foreground group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
         className
       )}

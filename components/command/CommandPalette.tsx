@@ -32,6 +32,12 @@ import {
 import { useTranslations } from "next-intl";
 
 export function CommandPalette() {
+  const [isMac, setIsMac] = React.useState(false);
+
+  React.useEffect(() => {
+    setIsMac(typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
+  }, []);
+
   const tCmd = useTranslations("CommandPalette");
   const tMod = useTranslations("Modules");
   const tCommon = useTranslations("Common");
@@ -56,7 +62,12 @@ export function CommandPalette() {
   } = useWorkspaceStore();
 
   const handleSelectModule = (modId: string) => {
+    const mod = MODULE_NAV.find((m) => m.id === modId);
+    const firstItem = mod?.sections[0]?.items[0];
     setActiveModule(modId);
+    if (firstItem) {
+      setModule(modId, firstItem.id);
+    }
     setCommandOpen(false);
   };
 
@@ -259,7 +270,7 @@ export function CommandPalette() {
                     Current
                   </span>
                 ) : (
-                  <CommandShortcut className="text-[10px]">⌘{index + 1}</CommandShortcut>
+                  <CommandShortcut className="text-[10px]">{isMac ? `⌥${index + 1}` : `Alt+${index + 1}`}</CommandShortcut>
                 )}
               </CommandItem>
             );

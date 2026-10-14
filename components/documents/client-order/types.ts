@@ -26,6 +26,94 @@ export interface OrderAttachment {
   url?: string;
 }
 
+export type KashirovkaMode = "none" | "duplex" | "triplex";
+export type KashirovkaImpositionStrategy = "split_half_sheet" | "separate_sheets";
+
+export interface SubstrateLayer {
+  id: string;
+  role: "top_liner" | "core_board" | "bottom_liner";
+  label: string;
+  paperStock: string;
+  grammage: number;
+  colors: "4+0" | "1+0" | "0+0" | "4+4";
+  coating: string;
+}
+
+export function parseGrammageFromStock(stock?: string, fallback = 300): number {
+  if (!stock) return fallback;
+  const match = stock.match(/(\d{2,4})\s*g/i);
+  return match ? Number(match[1]) : fallback;
+}
+
+export function getDefaultKashirovkaLayers(
+  mode: KashirovkaMode,
+  baseStock = "Coated Cardboard 300g/m²",
+  baseCoating = "Soft-Touch Matte + Spot UV"
+): SubstrateLayer[] {
+  if (mode === "none") return [];
+  const baseGsm = parseGrammageFromStock(baseStock, 300);
+  const topLayer: SubstrateLayer = {
+    id: "layer-top",
+    role: "top_liner",
+    label: "Face Liner (Front / Лицо)",
+    paperStock: baseGsm >= 250 ? baseStock : "Coated Cardboard 300g/m²",
+    grammage: baseGsm >= 250 ? baseGsm : 300,
+    colors: "4+0",
+    coating: baseCoating || "Matte Lamination (1S)",
+  };
+  const bottomLayer: SubstrateLayer = {
+    id: "layer-bottom",
+    role: "bottom_liner",
+    label: "Back Liner (Reverse / Оборот)",
+    paperStock: baseGsm >= 250 ? baseStock : "Coated Cardboard 300g/m²",
+    grammage: baseGsm >= 250 ? baseGsm : 300,
+    colors: "4+0",
+    coating: "Matte Lamination (1S)",
+  };
+  if (mode === "triplex") {
+    const coreLayer: SubstrateLayer = {
+      id: "layer-core",
+      role: "core_board",
+      label: "Inner Core Filler (Вставка)",
+      paperStock: "Colorplan Ebony Black Core 300g/m²",
+      grammage: 300,
+      colors: "0+0",
+      coating: "None / Uncoated",
+    };
+    return [topLayer, coreLayer, bottomLayer];
+  }
+  return [topLayer, bottomLayer];
+}
+
+export function calculateKashirovkaTotals(
+  mode: KashirovkaMode = "none",
+  layers: SubstrateLayer[] = [],
+  glueGsmPerBond = 25
+) {
+  if (mode === "none" || layers.length === 0) {
+    return {
+      netPaperGsm: 0,
+      glueBonds: 0,
+      totalGlueGsm: 0,
+      totalMountedGsm: 0,
+      estimatedCaliperMm: 0,
+    };
+  }
+  const netPaperGsm = layers.reduce((sum, l) => sum + (Number(l.grammage) || 0), 0);
+  const glueBonds = Math.max(0, layers.length - 1);
+  const totalGlueGsm = glueBonds * (Number(glueGsmPerBond) || 25);
+  const totalMountedGsm = netPaperGsm + totalGlueGsm;
+  // ~1.32 microns per gsm for coated board + glue bond film
+  const estimatedCaliperMm = Number(((totalMountedGsm * 1.32) / 1000).toFixed(2));
+  return {
+    netPaperGsm,
+    glueBonds,
+    totalGlueGsm,
+    totalMountedGsm,
+    estimatedCaliperMm,
+  };
+}
+
 export interface ClientOrderFormData {
   customer: string;
   product: string;
@@ -57,6 +145,13 @@ export interface ClientOrderFormData {
   bleed?: number;
   milestones?: ProductionMilestone[];
   sizes?: SizeDistribution[];
+  // Multi-Layer / Kashirovka (Duplex / Triplex Mounting)
+  kashirovkaMode?: KashirovkaMode;
+  kashirovkaStrategy?: KashirovkaImpositionStrategy;
+  kashirovkaLayers?: SubstrateLayer[];
+  kashirovkaGlueGsm?: number;
+  kashirovkaMakeReadySheets?: number;
+  kashirovkaCuringHours?: number;
   // Flexo Specific Parameters
   flexoMachineId?: string;
   flexoMaterialId?: string;

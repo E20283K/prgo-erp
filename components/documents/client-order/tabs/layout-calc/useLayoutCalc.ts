@@ -1,4 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import {
+  KashirovkaMode,
+  KashirovkaImpositionStrategy,
+  getDefaultKashirovkaLayers,
+  calculateKashirovkaTotals,
+} from "../../types";
 import { 
   LayoutCalcTabProps, 
   PlateConfig, 
@@ -10,7 +16,8 @@ import {
   SampleStockSource,
   PRECUT_STOCK_PRESETS,
   PrecutStockPreset,
-  ParentCutResult
+  ParentCutResult,
+  KashirovkaSummary,
 } from "./types";
 import { 
   calculatePrepressMargins, 
@@ -40,9 +47,48 @@ export function useLayoutCalc({
   defaultProdW,
   defaultProdH,
   defaultBleed,
+  kashirovkaMode: propKashMode = "none",
+  kashirovkaStrategy: propKashStrategy = "split_half_sheet",
+  kashirovkaLayers: propKashLayers,
+  kashirovkaGlueGsm = 25,
+  kashirovkaMakeReadySheets: propKashMakeReady = 50,
+  onKashirovkaChange,
 }: LayoutCalcTabProps) {
   // Mode: Production vs Sample
   const [calcMode, setCalcMode] = useState<LayoutCalcMode>("production");
+
+  // Kashirovka (Multi-Layer Mounting) state
+  const [kashMode, setKashModeState] = useState<KashirovkaMode>(propKashMode);
+  const [kashStrategy, setKashStrategyState] = useState<KashirovkaImpositionStrategy>(propKashStrategy);
+  const [kashMakeReady, setKashMakeReadyState] = useState<number>(propKashMakeReady);
+
+  useEffect(() => {
+    setKashModeState(propKashMode || "none");
+  }, [propKashMode]);
+
+  useEffect(() => {
+    if (propKashStrategy) setKashStrategyState(propKashStrategy);
+  }, [propKashStrategy]);
+
+  useEffect(() => {
+    if (propKashMakeReady !== undefined) setKashMakeReadyState(propKashMakeReady);
+  }, [propKashMakeReady]);
+
+  const setKashMode = (mode: KashirovkaMode) => {
+    setKashModeState(mode);
+    onKashirovkaChange?.({ kashirovkaMode: mode });
+  };
+
+  const setKashStrategy = (strategy: KashirovkaImpositionStrategy) => {
+    setKashStrategyState(strategy);
+    onKashirovkaChange?.({ kashirovkaStrategy: strategy });
+  };
+
+  const setKashMakeReady = (sheets: number) => {
+    const safe = Math.max(0, sheets);
+    setKashMakeReadyState(safe);
+    onKashirovkaChange?.({ kashirovkaMakeReadySheets: safe });
+  };
 
   // Production settings cache
   const [prodSheetW, setProdSheetW] = useState(1000);
@@ -264,15 +310,30 @@ export function useLayoutCalc({
     setOrientation((prev) => (prev === "A" ? "B" : "A"));
   };
 
+  const isKashirovkaEnabled = kashMode !== "none";
+  const isSplitHalfKashirovka =
+    isKashirovkaEnabled && kashStrategy === "split_half_sheet";
+
+  const halfCols = useMemo(() => {
+    if (!isSplitHalfKashirovka) return layout.cols;
+    return Math.floor(layout.cols / 2);
+  }, [isSplitHalfKashirovka, layout.cols]);
+
+  // Effective product slots per press sheet (for split-half kashirovka, Left half = Front, Right half = Back)
+  const effectivePieces = useMemo(() => {
+    if (!isSplitHalfKashirovka) return layout.pieces;
+    return Math.max(0, halfCols * layout.rows);
+  }, [isSplitHalfKashirovka, halfCols, layout.rows, layout.pieces]);
+
   // Plate distributions
   const plateCalculations = useMemo(() => {
     return calculatePlateDistribution(
-      layout.pieces,
+      effectivePieces,
       plates,
       adjustedSizes,
       adjustedGeneralQuantity
     );
-  }, [layout.pieces, plates, adjustedSizes, adjustedGeneralQuantity]);
+  }, [effectivePieces, plates, adjustedSizes, adjustedGeneralQuantity]);
 
   const activePlate = plateCalculations[activePlateIndex] || plateCalculations[0];
 
@@ -310,8 +371,8 @@ export function useLayoutCalc({
   };
 
   const handleAutoPartitionPlates = () => {
-    if (layout.pieces === 0 || adjustedSizes.length === 0) return;
-    const needed = Math.max(1, Math.ceil(adjustedSizes.length / layout.pieces));
+    if (effectivePieces === 0 || adjustedSizes.length === 0) return;
+    const needed = Math.max(1, Math.ceil(adjustedSizes.length / effectivePieces));
     const newPlatesList: PlateConfig[] = [];
     for (let i = 0; i < needed; i++) {
       newPlatesList.push({
@@ -343,8 +404,55 @@ export function useLayoutCalc({
   // Grid cells for SVG preview
   const gridCells = useMemo<GridCell[]>(() => {
     if (!activePlate) return [];
-    const cells: GridCell[] = [];
 
+    // When Split-Half Kashirovka is active, Left Half = FRONT, Right Half = BACK (Mirror)
+    if (isSplitHalfKashirovka && layout.cols >= 2) {
+      const halfPool: GridCell[] = [];
+      activePlate.assignments.forEach((assignment, index) => {
+        for (let i = 0; i < assignment.slots; i++) {
+          halfPool.push({
+            label: assignment.sizeLabel,
+            color: COLOR_PALETTE[index % COLOR_PALETTE.length],
+            sizeId: assignment.sizeId,
+          });
+        }
+      });
+      while (halfPool.length < effectivePieces) {
+        halfPool.push({ label: "Empty", color: "#f4f4f5", sizeId: "empty" });
+      }
+
+      const fullGrid: GridCell[] = [];
+      for (let r = 0; r < layout.rows; r++) {
+        for (let c = 0; c < layout.cols; c++) {
+          if (c < halfCols) {
+            const slotIdx = r * halfCols + c;
+            const base = halfPool[slotIdx] || { label: "Empty", color: "#f4f4f5", sizeId: "empty" };
+            fullGrid.push({ ...base, sideBadge: "FRONT" });
+          } else if (c >= layout.cols - halfCols) {
+            // Mirrored column index so Side Lay (Верный угол) matches when folded/mounted back-to-back
+            const rightLocalCol = c - (layout.cols - halfCols);
+            const mirroredCol = halfCols - 1 - rightLocalCol;
+            const slotIdx = r * halfCols + mirroredCol;
+            const base = halfPool[slotIdx] || { label: "Empty", color: "#f4f4f5", sizeId: "empty" };
+            fullGrid.push({
+              ...base,
+              color: base.sizeId === "empty" ? "#f4f4f5" : "#ede9fe",
+              sideBadge: "BACK",
+            });
+          } else {
+            // Odd middle column reserved for split cut trim
+            fullGrid.push({
+              label: "✂ SPLIT MARGIN",
+              color: "#fef3c7",
+              sizeId: "split-margin",
+            });
+          }
+        }
+      }
+      return fullGrid;
+    }
+
+    const cells: GridCell[] = [];
     activePlate.assignments.forEach((assignment, index) => {
       for (let i = 0; i < assignment.slots; i++) {
         cells.push({
@@ -360,11 +468,125 @@ export function useLayoutCalc({
     }
 
     return cells;
-  }, [activePlate, layout.pieces]);
+  }, [activePlate, layout.pieces, layout.cols, layout.rows, isSplitHalfKashirovka, halfCols, effectivePieces]);
 
   // Overall Statistics
-  const totalSheetsRun = plateCalculations.reduce((sum, p) => sum + p.requiredSheets, 0);
-  const totalCtpPlates = plates.length * cmykColors;
+  const baseSheetsRun = plateCalculations.reduce((sum, p) => sum + p.requiredSheets, 0);
+
+  const kashirovkaSummary = useMemo<KashirovkaSummary>(() => {
+    const resolvedLayers =
+      propKashLayers && propKashLayers.length > 0
+        ? propKashLayers
+        : getDefaultKashirovkaLayers(kashMode);
+    const totals = calculateKashirovkaTotals(kashMode, resolvedLayers, kashGlueGsmOrDefault(kashirovkaGlueGsm));
+
+    if (!isKashirovkaEnabled) {
+      return {
+        enabled: false,
+        mode: "none",
+        strategy: kashStrategy,
+        netPaperGsm: 300,
+        totalMountedGsm: 300,
+        estimatedCaliperMm: 0.4,
+        effectiveCardsPerPressSheet: layout.pieces,
+        mountedSheetsRequired: baseSheetsRun,
+        makeReadySheets: 0,
+        rawPrintedLinerSheets: baseSheetsRun,
+        rawCoreSheets: 0,
+        totalRawBoardSheets: baseSheetsRun,
+        totalCtpPlates: plates.length * cmykColors,
+        glueKgRequired: 0,
+      };
+    }
+
+    const makeReady = calcMode === "sample" ? 5 : kashMakeReady;
+    const mountedSheetsRequired = baseSheetsRun + makeReady;
+
+    // In split_half_sheet: 1 full press sheet is cut in half (Left=Front, Right=Back) and glued into 1 half-size mounted board
+    // In separate_sheets: 1 full Front sheet + 1 full Back sheet are glued into 1 full-size mounted board
+    const rawPrintedLinerSheets =
+      kashStrategy === "split_half_sheet"
+        ? mountedSheetsRequired
+        : mountedSheetsRequired * 2;
+
+    const rawCoreSheets =
+      kashMode === "triplex"
+        ? kashStrategy === "split_half_sheet"
+          ? Math.ceil(mountedSheetsRequired / 2)
+          : mountedSheetsRequired
+        : 0;
+
+    const totalRawBoardSheets = rawPrintedLinerSheets + rawCoreSheets;
+
+    const totalCtp =
+      kashStrategy === "split_half_sheet"
+        ? plates.length * cmykColors // 1 CTP set prints both Front (left) and Back (right)
+        : plates.length * cmykColors * 2; // 2 CTP sets (Front set + Back set)
+
+    const sheetAreaM2 = (sheetW / 1000) * (sheetH / 1000);
+    const singleMountedAreaM2 =
+      kashStrategy === "split_half_sheet" ? sheetAreaM2 * 0.5 : sheetAreaM2;
+    const glueBonds = kashMode === "triplex" ? 2 : 1;
+    const glueKgRequired = Number(
+      (
+        (mountedSheetsRequired *
+          singleMountedAreaM2 *
+          glueBonds *
+          kashGlueGsmOrDefault(kashirovkaGlueGsm)) /
+        1000
+      ).toFixed(2)
+    );
+
+    const gridLeft = prepressMargins.gridLeft + layout.offsetX;
+    const actualGridW =
+      layout.cols > 0 ? layout.cols * layout.itemW + (layout.cols - 1) * gap : 0;
+    const splitCutAxisX =
+      kashStrategy === "split_half_sheet" && layout.cols >= 2
+        ? gridLeft + actualGridW / 2
+        : undefined;
+
+    return {
+      enabled: true,
+      mode: kashMode,
+      strategy: kashStrategy,
+      netPaperGsm: totals.netPaperGsm,
+      totalMountedGsm: totals.totalMountedGsm,
+      estimatedCaliperMm: totals.estimatedCaliperMm,
+      effectiveCardsPerPressSheet: effectivePieces,
+      mountedSheetsRequired,
+      makeReadySheets: makeReady,
+      rawPrintedLinerSheets,
+      rawCoreSheets,
+      totalRawBoardSheets,
+      totalCtpPlates: totalCtp,
+      glueKgRequired,
+      splitCutAxisX,
+    };
+  }, [
+    propKashLayers,
+    kashMode,
+    kashStrategy,
+    kashMakeReady,
+    kashirovkaGlueGsm,
+    isKashirovkaEnabled,
+    layout,
+    baseSheetsRun,
+    plates.length,
+    cmykColors,
+    calcMode,
+    sheetW,
+    sheetH,
+    effectivePieces,
+    prepressMargins.gridLeft,
+    gap,
+  ]);
+
+  const totalSheetsRun = isKashirovkaEnabled
+    ? kashirovkaSummary.totalRawBoardSheets
+    : baseSheetsRun;
+  const totalCtpPlates = isKashirovkaEnabled
+    ? kashirovkaSummary.totalCtpPlates
+    : plates.length * cmykColors;
   const paperAreaWastePercent = Math.max(0, 100 - layout.utilization);
 
   // Outer crop marks
@@ -408,6 +630,16 @@ export function useLayoutCalc({
     // Mode
     calcMode,
     setCalcMode: handleModeSwitch,
+
+    // Kashirovka (Multi-Layer Mounting)
+    kashMode,
+    setKashMode,
+    kashStrategy,
+    setKashStrategy,
+    kashMakeReady,
+    setKashMakeReady,
+    kashirovkaSummary,
+    effectivePieces,
 
     // Inputs & Setters
     sheetW,
@@ -492,4 +724,8 @@ export function useLayoutCalc({
     handleExportSVG,
     handleExportPDF,
   };
+}
+
+function kashGlueGsmOrDefault(val?: number): number {
+  return val && val > 0 ? val : 25;
 }

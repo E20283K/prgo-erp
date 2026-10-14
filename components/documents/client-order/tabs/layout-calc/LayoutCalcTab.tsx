@@ -1,9 +1,12 @@
 "use client";
 
 import React from "react";
-import { Calculator, RotateCw, Sparkles, Factory, FlaskConical } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Calculator, RotateCw, Sparkles, Factory, FlaskConical, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { LayoutCalcTabProps } from "./types";
 import { useLayoutCalc } from "./useLayoutCalc";
 import { OverproductionSection } from "./panels/OverproductionSection";
@@ -16,6 +19,7 @@ import { PreviewToolbar } from "./preview/PreviewToolbar";
 import { SheetPreview } from "./preview/SheetPreview";
 
 export function LayoutCalcTab(props: LayoutCalcTabProps) {
+  const t = useTranslations("ClientOrder");
   const calc = useLayoutCalc(props);
 
   return (
@@ -161,13 +165,120 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
               {/* Slot Assignment for Sample */}
               <SlotAssignmentTable
                 activePlate={calc.activePlate}
-                layoutPieces={calc.layout.pieces}
+                layoutPieces={calc.effectivePieces}
                 onManualSlotChange={calc.handleManualSlotChange}
               />
             </div>
           ) : (
             /* ──── MASS PRODUCTION MODE CONTROLS ──── */
             <>
+              {/* Kashirovka (Multi-Layer Duplex / Triplex Mounting) Controls */}
+              <div className="bg-muted/40 p-2.5 rounded-md border border-border space-y-2">
+                <div className="flex items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground min-w-0">
+                    <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span className="truncate">{t("kashirovkaTitle")}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {calc.kashirovkaSummary.enabled && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-mono bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300 px-1.5 h-5"
+                      >
+                        {calc.kashirovkaSummary.totalMountedGsm}g/m²
+                      </Badge>
+                    )}
+                    <Switch
+                      size="sm"
+                      checked={calc.kashMode !== "none"}
+                      onCheckedChange={(checked) =>
+                        calc.setKashMode(checked ? "duplex" : "none")
+                      }
+                    />
+                  </div>
+                </div>
+
+                {calc.kashMode !== "none" && (
+                  <div className="space-y-2 pt-1.5 border-t border-border/60">
+                    {/* 2-Ply vs 3-Ply Segmented Pill */}
+                    <div className="grid grid-cols-2 gap-1 bg-zinc-200/70 dark:bg-zinc-900 p-0.5 rounded-md">
+                      <button
+                        type="button"
+                        onClick={() => calc.setKashMode("duplex")}
+                        className={`py-1 px-1.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
+                          calc.kashMode === "duplex"
+                            ? "bg-white dark:bg-zinc-800 text-foreground font-semibold shadow-2xs"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {t("kashirovkaDuplex")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => calc.setKashMode("triplex")}
+                        className={`py-1 px-1.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
+                          calc.kashMode === "triplex"
+                            ? "bg-white dark:bg-zinc-800 text-foreground font-semibold shadow-2xs"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {t("kashirovkaTriplex")}
+                      </button>
+                    </div>
+
+                    {/* Strategy Selector Cards */}
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">
+                        {t("kashirovkaStrategyLabel")}
+                      </label>
+                      <div className="grid grid-cols-2 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => calc.setKashStrategy("split_half_sheet")}
+                          className={`p-1.5 rounded border text-left transition-all cursor-pointer ${
+                            calc.kashStrategy === "split_half_sheet"
+                              ? "bg-background border-blue-500 text-foreground font-semibold"
+                              : "bg-background/50 border-border text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          <div className="text-[10px] leading-tight">
+                            {t("kashirovkaStrategySplitShort")}
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => calc.setKashStrategy("separate_sheets")}
+                          className={`p-1.5 rounded border text-left transition-all cursor-pointer ${
+                            calc.kashStrategy === "separate_sheets"
+                              ? "bg-background border-blue-500 text-foreground font-semibold"
+                              : "bg-background/50 border-border text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          <div className="text-[10px] leading-tight">
+                            {t("kashirovkaStrategySeparateShort")}
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
+                      <span>
+                        Yield:{" "}
+                        <strong className="font-mono text-foreground">
+                          {calc.effectivePieces} cards/sheet
+                        </strong>
+                      </span>
+                      <span>
+                        Glue:{" "}
+                        <strong className="font-mono text-emerald-700 dark:text-emerald-400">
+                          {calc.kashirovkaSummary.glueKgRequired} kg
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Overproduction Section */}
               <OverproductionSection
                 mode={calc.overproductionMode}
@@ -218,7 +329,7 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
               {/* Active Plate Slot Assignment Table */}
               <SlotAssignmentTable
                 activePlate={calc.activePlate}
-                layoutPieces={calc.layout.pieces}
+                layoutPieces={calc.effectivePieces}
                 onManualSlotChange={calc.handleManualSlotChange}
               />
             </>
@@ -257,6 +368,7 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
             cmykColors={calc.cmykColors}
             paperAreaWastePercent={calc.paperAreaWastePercent}
             utilization={calc.layout.utilization}
+            kashirovkaSummary={calc.kashirovkaSummary}
           />
         )}
       </div>
@@ -297,6 +409,7 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
           layout={calc.layout}
           gridCells={calc.gridCells}
           outerTrimMarks={calc.outerTrimMarks}
+          kashirovkaSummary={calc.kashirovkaSummary}
         />
       </div>
     </div>

@@ -34,7 +34,7 @@ interface SalesGridProps {
 
 export function SalesGrid({ type }: SalesGridProps) {
   const tCommon = useTranslations("Common");
-  const { updateGridStats, theme, openTab } = useWorkspaceStore();
+  const { updateGridStats, theme, openTab, deliveryActs, createDeliveryActFromOrder } = useWorkspaceStore();
   const isDark = theme === "dark";
 
   const { columns, rows } = useMemo(() => {
@@ -100,7 +100,7 @@ export function SalesGrid({ type }: SalesGridProps) {
       }));
     } else if (type === "invoices") {
       cols = [
-        { id: "id", title: "Invoice ID", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "id", title: "Proforma ID", width: 110, icon: GridColumnIcon.HeaderReference },
         { id: "orderId", title: "Order Ref", width: 110, icon: GridColumnIcon.HeaderReference },
         { id: "date", title: "Issue Date", width: 120, icon: GridColumnIcon.HeaderDate },
         { id: "customer", title: "B2B Client", width: 220, icon: GridColumnIcon.HeaderString },
@@ -119,24 +119,20 @@ export function SalesGrid({ type }: SalesGridProps) {
       }));
     } else if (type === "delivery-acts") {
       cols = [
-        { id: "id", title: "Act ID", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: "Delivery Date", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "orderId", title: "Order Ref", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "customer", title: "Customer Organization", width: 220, icon: GridColumnIcon.HeaderString },
-        { id: "product", title: "Delivered Print Goods", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: "id", title: "Schet-faktura №", width: 120, icon: GridColumnIcon.HeaderReference },
+        { id: "date", title: "Date", width: 110, icon: GridColumnIcon.HeaderDate },
+        { id: "orderId", title: "Order Ref", width: 105, icon: GridColumnIcon.HeaderReference },
+        { id: "workOrderId", title: "Work Order", width: 105, icon: GridColumnIcon.HeaderReference },
+        { id: "customer", title: "Customer Organization", width: 210, icon: GridColumnIcon.HeaderString },
+        { id: "product", title: "Delivered Print Goods", width: 230, icon: GridColumnIcon.HeaderTextTemplate },
         { id: "quantity", title: "Delivered Qty", width: 110, icon: GridColumnIcon.HeaderNumber },
-        { id: "carrier", title: "Carrier / Driver", width: 160, icon: GridColumnIcon.HeaderString },
-        { id: "status", title: "Status", width: 140, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "totalAmount", title: "Total w/ VAT ($)", width: 130, icon: GridColumnIcon.HeaderNumber },
+        { id: "linkedShipment", title: "Warehouse Ref", width: 120, icon: GridColumnIcon.HeaderReference },
+        { id: "status", title: "Status", width: 145, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      mockRows = Array.from({ length: 60 }, (_, i) => ({
-        id: `ACT-${String(8001 + i).padStart(4, "0")}`,
-        date: `2026-10-${String((i % 25) + 1).padStart(2, "0")}`,
-        orderId: `CO-${String(41 + i).padStart(5, "0")}`,
-        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging"][i % 4],
-        product: ["Offset Catalogs 100p (A4)", "Woven Satin Labels 30x50", "Nylon Taffeta Roll", "E-Flute Packaging Boxes"][i % 4],
-        quantity: [1000, 5000, 200, 10000][i % 4],
-        carrier: ["PrintGoo Fleet #1", "Customer Pickup", "Express Courier", "PrintGoo Fleet #2"][i % 4],
-        status: ["Signed & Stamped", "Pending Signature", "Signed & Stamped", "Disputed"][i % 4],
+      mockRows = deliveryActs.map((act) => ({
+        ...act,
+        linkedShipment: act.linkedShipmentId || "Pending Post",
       }));
     } else if (type === "returns") {
       cols = [
@@ -196,7 +192,7 @@ export function SalesGrid({ type }: SalesGridProps) {
     }
 
     return { columns: cols, rows: mockRows };
-  }, [type]);
+  }, [type, deliveryActs]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -280,13 +276,35 @@ export function SalesGrid({ type }: SalesGridProps) {
   }, [rows]);
 
   const handleCreateNew = () => {
+    if (type === "delivery-acts") {
+      const newAct = createDeliveryActFromOrder({
+        orderId: "CO-00041",
+        workOrderId: "WO-00351",
+        customer: "Alpha Media Group LLC",
+        product: "A4 Hardcover Catalog 96p",
+        quantity: 5000,
+        unit: "pcs",
+        priceTotal: 14850,
+        currency: "USD",
+      });
+      openTab({
+        id: newAct.id,
+        title: `${newAct.id}: ${newAct.customer}`,
+        type: "delivery-act",
+        module: "sales",
+        isUnsaved: true,
+        activeLevel3Tab: "overview",
+        documentData: newAct,
+      });
+      return;
+    }
+
     let prefix = "DOC";
     let titleSuffix = "Document";
     if (type === "quotations") { prefix = "QT"; titleSuffix = "Quotation"; }
     else if (type === "client-orders") { prefix = "CO"; titleSuffix = "Client Order"; }
     else if (type === "contracts") { prefix = "CON"; titleSuffix = "Contract"; }
     else if (type === "invoices") { prefix = "INV"; titleSuffix = "Invoice"; }
-    else if (type === "delivery-acts") { prefix = "ACT"; titleSuffix = "Delivery Act"; }
     else if (type === "returns") { prefix = "CLM"; titleSuffix = "Customer Claim"; }
     
     const newDocNo = `${prefix}-${String(Math.floor(1000 + Math.random() * 9000))}`;
@@ -325,7 +343,16 @@ export function SalesGrid({ type }: SalesGridProps) {
   const handleOpenRow = (rowIndex: number) => {
     const row = filteredRows[rowIndex];
     if (row) {
-      if (type === "client-orders") {
+      if (type === "delivery-acts") {
+        openTab({
+          id: row.id,
+          title: `${row.id}: ${row.customer}`,
+          type: "delivery-act",
+          module: "sales",
+          activeLevel3Tab: "overview",
+          documentData: row,
+        });
+      } else if (type === "client-orders") {
         const isFlexoProduct = row.product?.includes("Satin") || row.product?.includes("Nylon") || row.product?.includes("Roll");
         const dept = isFlexoProduct ? "Flexo" : "Offset";
         const rec = row.product?.includes("Satin") ? "FLEXO_SATIN_V2" : row.product?.includes("Nylon") ? "FLEXO_NYLON_V1" : isFlexoProduct ? "FLEXO_SATIN_V2" : "OFFSET_STD_V1";
