@@ -14,7 +14,16 @@ import { MODULE_NAV } from "@/lib/modules";
 
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const { setTheme, isCommandOpen, toggleCommand, sidebarWidth, setSidebarWidth, activeTabId } = useWorkspaceStore();
+  const { 
+    setTheme, 
+    isCommandOpen, 
+    toggleCommand, 
+    sidebarWidth, 
+    setSidebarWidth, 
+    activeTabId,
+    showStatusBar,
+    setShowStatusBar
+  } = useWorkspaceStore();
 
   const isPOSActive = activeTabId.includes("pos");
 
@@ -34,8 +43,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           setSidebarWidth(parsed === 280 ? 300 : parsed);
         }
       }
+
+      const savedStatusBar = localStorage.getItem("printgoo_show_status_bar");
+      if (savedStatusBar !== null) {
+        setShowStatusBar(savedStatusBar === "true");
+      }
     } catch (e) {}
-  }, [setTheme, setSidebarWidth]);
+  }, [setTheme, setSidebarWidth, setShowStatusBar]);
   useEffect(() => {
     // 1. Block the default right-click context menu
     const handleContextMenu = (e: MouseEvent) => {
@@ -195,8 +209,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {/* VS Code + 1C Document Workspace */}
         <Workspace>{children}</Workspace>
 
-        {/* High-Utility Data Table Status Bar */}
-        {!isPOSActive && <StatusBar />}
+        {/* High-Utility Developer Tools Status Bar */}
+        {!isPOSActive && showStatusBar && <StatusBar />}
       </SidebarInset>
 
       {/* Global Command Palette (Ctrl+K or Esc) */}

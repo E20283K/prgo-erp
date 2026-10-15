@@ -846,5 +846,29 @@
     "posLeftCenter": "Слева по центру",
     "posRightCenter": "Справа по центру",
     "posNone": "Без отверстия"
+  },
+  "DocumentShell": {
+    "sections": "Разделы",
+    "quantity": "Тираж",
+    "technology": "Технология",
+    "lamination": "Ламинация",
+    "none": "Нет",
+    "materialShortage": "Нехватка материалов",
+    "specsAndDrawing": "Спецификация и чертёж",
+    "filesAndDocs": "Документы и файлы",
+    "machineAndDeadline": "Оборудование и срок",
+    "machine": "Станок",
+    "deadline": "Срок",
+    "site": "Цех / Здание",
+    "totalAmount": "Итого",
+    "departmentType": "Отдел / Тип",
+    "responsibleAndDeadline": "Ответственный и срок",
+    "responsible": "Ответственный",
+    "linkedWo": "Связанный ЗН",
+    "production": "Производство",
+    "notLinked": "Не привязан",
+    "customerNotSet": "Клиент не указан",
+    "untitledOrder": "Заказ",
+    "createDeliveryAct": "Создать акт"
   }
 }

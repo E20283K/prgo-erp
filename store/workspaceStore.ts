@@ -230,6 +230,9 @@ interface WorkspaceState {
   theme: AppTheme;
   isCommandOpen: boolean;
   sidebarWidth: number;
+  showStatusBar: boolean;
+  setShowStatusBar: (show: boolean) => void;
+  toggleStatusBar: () => void;
   isAuthenticated: boolean;
   currentUser: UserProfile;
 
@@ -1370,6 +1373,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   theme: "dark",
   isCommandOpen: false,
   sidebarWidth: 300,
+  showStatusBar: true,
 
   // ── Cross-module ERP Records (Schet-faktura, Shipments, Settlements, Customers, Stock) ──
   deliveryActs: INITIAL_DELIVERY_ACTS,
@@ -2226,6 +2230,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setCommandOpen: (open) => set({ isCommandOpen: open }),
   toggleCommand: () => set((state) => ({ isCommandOpen: !state.isCommandOpen })),
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
+  setShowStatusBar: (show) => {
+    try {
+      localStorage.setItem("printgoo_show_status_bar", String(show));
+    } catch (e) {}
+    set({ showStatusBar: show });
+  },
+  toggleStatusBar: () => {
+    set((state) => {
+      const next = !state.showStatusBar;
+      try {
+        localStorage.setItem("printgoo_show_status_bar", String(next));
+      } catch (e) {}
+      return { showStatusBar: next };
+    });
+  },
 
   isAuthenticated: false,
   currentUser: DEMO_USERS.operator,

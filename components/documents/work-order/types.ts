@@ -120,6 +120,10 @@ export interface WorkOrderFormData {
   deadline: string;
   paperStock: string;
   coating: string;
+  lamination?: string;
+  laminationSides?: "1s" | "2s";
+  laminationMicron?: number;
+  embellishment?: string;
   priceTotal: number;
   currency: string;
   photoUrl: string;

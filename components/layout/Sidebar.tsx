@@ -5,42 +5,43 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Sparkles,
-  BadgeCheck,
-  CreditCard,
-  Bell,
-  LogOut,
   Check,
   Search,
   Sun,
   Moon,
   Maximize,
   Minimize,
-  Globe,
   Settings2,
+  Terminal,
+  Code2,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
-import { usePathname, useRouter } from "@/i18n/routing";
+import { useTranslations } from "next-intl";
 import { toggleAppFullscreen } from "@/lib/fullscreen";
 import { MODULE_NAV } from "@/lib/modules";
 import { useWorkspaceStore } from "@/store/workspaceStore";
-import { NotificationPanel } from "@/components/layout/NotificationPanel";
-import { Avatar, AvatarFallback, AvatarImage, AvatarBadge } from "@/components/ui/avatar";
+import { resolveActiveComponent } from "@/lib/dev/componentRegistry";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuCheckboxItem,
+  ContextMenuSeparator,
+  ContextMenuLabel,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
@@ -71,25 +72,11 @@ const MODULE_COLORS: Record<string, string> = {
   settings:   "bg-zinc-600",
 };
 
-const LANGUAGES = [
-  { code: "en", label: "English", short: "EN" },
-  { code: "ru", label: "Русский", short: "RU" },
-  { code: "uz", label: "O'zbekcha", short: "UZ" },
-  { code: "tr", label: "Türkçe", short: "TR" },
-] as const;
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const tSide = useTranslations("Sidebar");
   const tMod = useTranslations("Modules");
-  const tAuth = useTranslations("Auth");
-  const tTop = useTranslations("Topbar");
-  const tLang = useTranslations("LanguageSwitcher");
-
-  const locale = useLocale();
-  const router = useRouter();
-  const pathname = usePathname();
 
   const {
     activeModule,
@@ -97,13 +84,30 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     setActiveModule,
     setModule,
     openTab,
-    currentUser,
-    logout,
     setCommandOpen,
     theme,
     setTheme,
+    toggleTheme,
     setAiChatOpen,
+    showStatusBar,
+    setShowStatusBar,
+    tabs,
+    activeTabId,
   } = useWorkspaceStore();
+
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const resolvedComponent = resolveActiveComponent(activeTab, activeModule, currentSubModule);
+  const [copiedPath, setCopiedPath] = React.useState(false);
+
+  const handleCopyComponentPath = () => {
+    navigator.clipboard.writeText(resolvedComponent.relativePath);
+    setCopiedPath(true);
+    setTimeout(() => setCopiedPath(false), 2000);
+  };
+
+  const handleOpenInVsCode = () => {
+    window.open(resolvedComponent.vscodeUrl, "_blank");
+  };
 
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [isMac, setIsMac] = React.useState(false);
@@ -132,20 +136,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       window.removeEventListener("resize", handleUpdate);
     };
   }, []);
-
-  const handleLanguageSelect = (nextLocale: string) => {
-    if (nextLocale === locale) return;
-    router.replace(pathname, { locale: nextLocale });
-  };
-
-  const currentLang = LANGUAGES.find((l) => l.code === locale) || LANGUAGES[0];
-
-  const getRoleLabel = (role: string) => {
-    if (role === "Production Shift Lead" && tAuth.has("roleShiftLead")) return tAuth("roleShiftLead");
-    if (role === "Sales & Client Director" && tAuth.has("roleSalesDirector")) return tAuth("roleSalesDirector");
-    if (role === "System Administrator" && tAuth.has("roleSysAdmin")) return tAuth("roleSysAdmin");
-    return role;
-  };
 
   // Resolve the currently active module definition
   const activeMod = MODULE_NAV.find((m) => m.id === activeModule) ?? MODULE_NAV[0];
@@ -184,9 +174,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar select-none" {...props}>
-
-      {/* ── Header: Global Search & Module switcher ─────────────────────────── */}
-      <SidebarHeader>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="flex flex-col h-full w-full min-h-0">
+            {/* ── Header: Global Search & Module switcher ─────────────────────────── */}
+            <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <button 
@@ -336,164 +328,113 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
+    </div>
+  </ContextMenuTrigger>
 
-      {/* ── Footer: Notifications & User Menu ──────────────────────────────── */}
-      <SidebarFooter>
-        <SidebarMenu>
-          <div className="flex items-center group-data-[collapsible=icon]:flex-col gap-1 w-full">
-            <div className="group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:mb-2 group-data-[collapsible=icon]:mt-1 flex items-center justify-center shrink-0 h-8 w-8 rounded-md hover:bg-sidebar-accent transition-colors">
-              <NotificationPanel />
+        <ContextMenuContent className="w-64 text-xs font-sans">
+          <ContextMenuLabel className="font-semibold text-[11px] text-muted-foreground flex items-center justify-between py-1.5 px-2">
+            <span className="flex items-center gap-1.5">
+              <Terminal className="size-3.5 text-blue-500" />
+              <span>Developer & View Options</span>
+            </span>
+            <span className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-semibold">
+              HUD
+            </span>
+          </ContextMenuLabel>
+
+          <ContextMenuSeparator />
+
+          <ContextMenuCheckboxItem
+            checked={showStatusBar}
+            onCheckedChange={(checked) => setShowStatusBar(checked)}
+            className="cursor-pointer py-1.5"
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className="font-medium text-foreground">Developer Status Bar</span>
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {showStatusBar ? "Enabled" : "Disabled"}
+              </span>
             </div>
-            <div className="flex-1 min-w-0 w-full">
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuButton
-                      size="lg"
-                      className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                    />
-                  }
-                >
-                  <Avatar className="size-8">
-                    {currentUser.avatar && (
-                      <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
-                    )}
-                    <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
-                      {currentUser.initials}
-                    </AvatarFallback>
-                    <AvatarBadge className="bg-emerald-500" />
-                  </Avatar>
-                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate font-semibold text-sidebar-foreground">{currentUser.name}</span>
-                    <span className="truncate text-xs text-muted-foreground">{getRoleLabel(currentUser.role)}</span>
-                  </div>
-                  <ChevronsUpDown className="ml-auto size-4 text-muted-foreground group-data-[collapsible=icon]:hidden" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56 rounded-lg" align="end" side="top" sideOffset={4}>
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel className="p-0 font-normal">
-                      <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                        <Avatar className="size-8">
-                          {currentUser.avatar && (
-                            <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
-                          )}
-                          <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
-                            {currentUser.initials}
-                          </AvatarFallback>
-                          <AvatarBadge className="bg-emerald-500" />
-                        </Avatar>
-                        <div className="grid flex-1 text-left text-sm leading-tight">
-                          <span className="truncate font-semibold text-foreground">{currentUser.name}</span>
-                          <span className="truncate text-xs text-muted-foreground">{currentUser.email}</span>
-                        </div>
-                      </div>
-                    </DropdownMenuLabel>
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
+          </ContextMenuCheckboxItem>
 
-                  {/* Appearance & Preferences */}
-                  <DropdownMenuGroup>
-                    {/* Theme Toggle */}
-                    <DropdownMenuItem
-                      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                      className="gap-2.5 cursor-pointer"
-                    >
-                      {theme === "dark" ? (
-                        <Sun className="size-4 text-amber-500" />
-                      ) : (
-                        <Moon className="size-4 text-blue-500" />
-                      )}
-                      <span>{theme === "dark" ? (tTop.has("switchToLight") ? tTop("switchToLight") : "Switch to Light") : (tTop.has("switchToDark") ? tTop("switchToDark") : "Switch to Dark")}</span>
-                    </DropdownMenuItem>
+          <ContextMenuSeparator />
 
-                    {/* Language Sub-menu */}
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger className="gap-2.5 cursor-pointer">
-                        <Globe className="size-4 text-muted-foreground" />
-                        <span>{tLang.has("title") ? tLang("title") : "Language"}</span>
-                        <span className="ml-auto text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                          {currentLang.short}
-                        </span>
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent className="w-36">
-                        {LANGUAGES.map((lang) => (
-                          <DropdownMenuItem
-                            key={lang.code}
-                            onClick={() => handleLanguageSelect(lang.code)}
-                            className="flex items-center justify-between text-xs cursor-pointer"
-                          >
-                            <span>{tLang.has(lang.code as any) ? tLang(lang.code as any) : lang.label}</span>
-                            {locale === lang.code && <Check className="size-3.5 text-primary ml-auto" />}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
+          <ContextMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider py-0.5 px-2 font-mono">
+            Active Component Module (.tsx)
+          </ContextMenuLabel>
 
-                    {/* Fullscreen */}
-                    <DropdownMenuItem
-                      onClick={toggleAppFullscreen}
-                      className="gap-2.5 cursor-pointer"
-                    >
-                      {isFullscreen ? (
-                        <Minimize className="size-4 text-muted-foreground" />
-                      ) : (
-                        <Maximize className="size-4 text-muted-foreground" />
-                      )}
-                      <span>{isFullscreen ? (tTop.has("exitFullscreen") ? tTop("exitFullscreen") : "Exit Fullscreen") : (tTop.has("enterFullscreen") ? tTop("enterFullscreen") : "Enter Fullscreen")}</span>
-                      <Kbd className="ml-auto">F11</Kbd>
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-
-                  <DropdownMenuSeparator />
-
-                  {/* AI Copilot */}
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem
-                      onClick={() => setAiChatOpen(true)}
-                      className="gap-2.5 cursor-pointer"
-                    >
-                      <Sparkles className="size-4 text-purple-500" />
-                      <span>{tTop.has("openAiCopilot") ? tTop("openAiCopilot") : "AI Copilot"}</span>
-                      <Kbd className="ml-auto">⌘J</Kbd>
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-
-                  <DropdownMenuSeparator />
-
-                  {/* Account & Logout */}
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setActiveModule("settings");
-                        handleSubItemClick("users", "Users & Roles");
-                      }}
-                      className="gap-2.5 cursor-pointer"
-                    >
-                      <BadgeCheck className="size-4 text-muted-foreground" />
-                      <span>{tSide("accountDetails")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => handleModuleSelect("settings")}
-                      className="gap-2.5 cursor-pointer"
-                    >
-                      <Settings2 className="size-4 text-muted-foreground" />
-                      <span>{tMod("settings")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem 
-                      onClick={() => logout()}
-                      className="gap-2.5 text-destructive focus:text-destructive cursor-pointer"
-                    >
-                      <LogOut className="size-4" />
-                      <span>{tSide("logout")}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-            </DropdownMenu>
+          <ContextMenuItem
+            onClick={handleCopyComponentPath}
+            className="gap-2 cursor-pointer py-1.5"
+          >
+            {copiedPath ? (
+              <Check className="size-3.5 text-emerald-500 shrink-0" />
+            ) : (
+              <Copy className="size-3.5 text-emerald-500 shrink-0" />
+            )}
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="truncate font-mono text-[11px] font-semibold text-foreground">
+                {resolvedComponent.fileName}
+              </span>
+              <span className="text-[10px] text-muted-foreground font-mono">
+                {copiedPath
+                  ? "Copied to clipboard!"
+                  : `${resolvedComponent.linesOfCode.toLocaleString()} lines · Copy path`}
+              </span>
             </div>
-          </div>
-        </SidebarMenu>
-      </SidebarFooter>
+          </ContextMenuItem>
+
+          <ContextMenuItem
+            onClick={handleOpenInVsCode}
+            className="gap-2 cursor-pointer py-1.5"
+          >
+            <ExternalLink className="size-3.5 text-blue-500 shrink-0" />
+            <span className="flex-1">Open in VS Code</span>
+            <Kbd className="text-[9px]">vscode://</Kbd>
+          </ContextMenuItem>
+
+          <ContextMenuSeparator />
+
+          <ContextMenuItem
+            onClick={() => toggleTheme()}
+            className="gap-2 cursor-pointer py-1.5"
+          >
+            {theme === "dark" ? (
+              <Sun className="size-3.5 text-amber-500" />
+            ) : (
+              <Moon className="size-3.5 text-blue-400" />
+            )}
+            <span>{theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme"}</span>
+          </ContextMenuItem>
+
+          <ContextMenuItem
+            onClick={() => toggleAppFullscreen()}
+            className="gap-2 cursor-pointer py-1.5"
+          >
+            {isFullscreen ? <Minimize className="size-3.5" /> : <Maximize className="size-3.5" />}
+            <span>Toggle Fullscreen</span>
+            <Kbd className="ml-auto text-[9px]">F11</Kbd>
+          </ContextMenuItem>
+
+          <ContextMenuItem
+            onClick={() => setCommandOpen(true)}
+            className="gap-2 cursor-pointer py-1.5"
+          >
+            <Search className="size-3.5 text-muted-foreground" />
+            <span>Command Palette</span>
+            <Kbd className="ml-auto text-[9px]">⌘K</Kbd>
+          </ContextMenuItem>
+
+          <ContextMenuItem
+            onClick={() => setAiChatOpen(true)}
+            className="gap-2 cursor-pointer py-1.5"
+          >
+            <Sparkles className="size-3.5 text-purple-400" />
+            <span>AI Copilot Assistant</span>
+            <Kbd className="ml-auto text-[9px]">⌘J</Kbd>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       <SidebarRail />
     </Sidebar>

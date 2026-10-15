@@ -846,5 +846,29 @@
     "posLeftCenter": "Left Center",
     "posRightCenter": "Right Center",
     "posNone": "None (No Hole)"
+  },
+  "DocumentShell": {
+    "sections": "Sections",
+    "quantity": "Quantity",
+    "technology": "Technology",
+    "lamination": "Lamination",
+    "none": "None",
+    "materialShortage": "Material shortage",
+    "specsAndDrawing": "Specs & Drawing",
+    "filesAndDocs": "Files & Documents",
+    "machineAndDeadline": "Machine & Deadline",
+    "machine": "Machine",
+    "deadline": "Deadline",
+    "site": "Site",
+    "totalAmount": "Total",
+    "departmentType": "Dept. / Type",
+    "responsibleAndDeadline": "Owner & Deadline",
+    "responsible": "Responsible",
+    "linkedWo": "Linked WO",
+    "production": "Production",
+    "notLinked": "Not linked",
+    "customerNotSet": "No customer",
+    "untitledOrder": "Untitled order",
+    "createDeliveryAct": "Create delivery act"
   }
 }

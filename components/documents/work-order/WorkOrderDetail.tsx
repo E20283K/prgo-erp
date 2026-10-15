@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { cn } from "cn";
 import {
   FileText,
   Boxes,
@@ -12,14 +13,26 @@ import {
   Check,
   Receipt,
   DollarSign,
+  Building2,
+  Calendar,
+  AlertTriangle,
+  Cpu,
+  Layers,
+  Ruler,
+  Paperclip,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { Tabs } from "@/components/ui/tabs";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  DocumentHeader,
+  HeaderIconAction,
+  DocumentSidebar,
+  SidebarSummaryCard,
+  SidebarSectionTitle,
+  InfoRow,
+  formatMoney,
+} from "../common/DocumentShell";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
 import { useWorkspaceStore, DocumentTab } from "@/store/workspaceStore";
 import { useTranslations } from "next-intl";
@@ -40,11 +53,13 @@ import {
 } from "./types";
 import { EXAMPLE_ATTACHMENTS } from "@/components/file-viewer/file-utils";
 import { OverviewTab } from "./tabs/OverviewTab";
+import { SpecificationsTab } from "./tabs/SpecificationsTab";
 import { MaterialsTab } from "./tabs/MaterialsTab";
 import { OperationsTab } from "./tabs/OperationsTab";
 import { ShiftTimelineTab } from "./tabs/ShiftTimelineTab";
 import { HistoryTab } from "./tabs/HistoryTab";
 import { FinancialsTab } from "./tabs/FinancialsTab";
+import { FilesTab } from "../common/FilesTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { pdf } from "@react-pdf/renderer";
@@ -53,6 +68,7 @@ import { WorkOrderSpecPDF } from "./WorkOrderSpecPDF";
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
   const tAct = useTranslations("DeliveryAct");
+  const tShell = useTranslations("DocumentShell");
   const { setTabUnsaved, closeTab, setLevel3Tab, theme, openTab, addNotification, createDeliveryActFromOrder } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
@@ -72,6 +88,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     deadline: data.deadline || "2026-10-06",
     paperStock: data.paperStock || "Galerie Art Silk 150g/m²",
     coating: data.coating || "Soft-Touch Matte + Spot UV",
+    lamination: data.lamination || "Soft-Touch Matte",
+    laminationSides: data.laminationSides || "1s",
+    laminationMicron: data.laminationMicron || 28,
+    embellishment: data.embellishment || "Spot UV (3D)",
     priceTotal: data.priceTotal || 14850.0,
     currency: data.currency || "USD",
     photoUrl: data.photoUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
@@ -374,234 +394,251 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const activeTab = tab.activeLevel3Tab || "overview";
 
   return (
-    <div className="w-full h-full bg-zinc-50 dark:bg-zinc-950 flex flex-col overflow-hidden text-xs">
-      {/* Level 3 Tabs Navigation & Document Actions Bar */}
+    <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">
       <Tabs
         value={activeTab}
         onValueChange={(val) => setLevel3Tab(tab.id, val)}
         className="flex-1 flex flex-col overflow-hidden"
       >
-        <div className="px-3 bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-center justify-between h-9 gap-2">
-          <TabsList variant="line" className="gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-w-0">
-            <TabsTrigger
-              value="overview"
-              className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>{tOrder("tabOverview")}</span>
-            </TabsTrigger>
-
-            <TabsTrigger
-              value="materials"
-              className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-            >
-              <Boxes className="w-3.5 h-3.5" />
-              <span>{tOrder("tabMaterials")}</span>
-            </TabsTrigger>
-
-            <TabsTrigger
-              value="operations"
-              className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-            >
-              <Factory className="w-3.5 h-3.5" />
-              <span>{tOrder("tabOperations")}</span>
-            </TabsTrigger>
-
-            <TabsTrigger
-              value="timeline"
-              className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span>{tOrder("tabTimeline")}</span>
-            </TabsTrigger>
-
-            <TabsTrigger
-              value="financials"
-              className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-            >
-              <DollarSign className="w-3.5 h-3.5" />
-              <span>{tOrder("tabCosting")}</span>
-            </TabsTrigger>
-
-            <TabsTrigger
-              value="history"
-              className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-            >
-              <History className="w-3.5 h-3.5" />
-              <span>{tOrder("tabHistory")}</span>
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Right Action Buttons */}
-          <div className="flex items-center gap-1 shrink-0">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    onClick={() => {
-                      const newAct = createDeliveryActFromOrder({
-                        orderId: data.linkedOrderId || "CO-00041",
-                        workOrderId: data.docNo || tab.id,
-                        customer: formData.customer || "Alpha Media Group LLC",
-                        product: formData.product || "A4 Hardcover Catalog 96p",
-                        quantity: formData.quantity || 5000,
-                        unit: formData.unit || "pcs",
-                        priceTotal: formData.priceTotal || 14850,
-                        currency: formData.currency || "USD",
-                      });
-                      openTab({
-                        id: newAct.id,
-                        title: `${newAct.id}: ${newAct.customer}`,
-                        type: "delivery-act",
-                        module: "sales",
-                        isUnsaved: true,
-                        activeLevel3Tab: "overview",
-                        documentData: newAct,
-                      });
-                    }}
-                    variant="outline"
-                    size="icon-sm"
-                    className="h-7 w-7 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded cursor-pointer"
-                  >
-                    <Receipt className="w-3.5 h-3.5" />
-                  </Button>
-                }
+        {/* 1C Level-3 Document Workspace Header Bar */}
+        <DocumentHeader
+          icon={Factory}
+          title={formData.product}
+          docNo={data.docNo || tab.id}
+          status={formData.status}
+          priority={formData.priority}
+          actions={
+            <>
+              <HeaderIconAction
+                icon={Receipt}
+                label={tAct("createFromOrder")}
+                variant="outline"
+                className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                onClick={() => {
+                  const newAct = createDeliveryActFromOrder({
+                    orderId: data.linkedOrderId || "CO-00041",
+                    workOrderId: data.docNo || tab.id,
+                    customer: formData.customer || "Alpha Media Group LLC",
+                    product: formData.product || "A4 Hardcover Catalog 96p",
+                    quantity: formData.quantity || 5000,
+                    unit: formData.unit || "pcs",
+                    priceTotal: formData.priceTotal || 14850,
+                    currency: formData.currency || "USD",
+                  });
+                  openTab({
+                    id: newAct.id,
+                    title: `${newAct.id}: ${newAct.customer}`,
+                    type: "delivery-act",
+                    module: "sales",
+                    isUnsaved: true,
+                    activeLevel3Tab: "overview",
+                    documentData: newAct,
+                  });
+                }}
               />
-              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                {tAct("createFromOrder")}
-              </TooltipContent>
-            </Tooltip>
+              <HeaderIconAction icon={Printer} label={tOrder("printSpec")} onClick={handlePrintSpec} />
+              <Separator orientation="vertical" className="h-4 mx-0.5" />
+              <HeaderIconAction icon={Save} label={`${tOrder("save")} (Ctrl+S)`} variant="outline" onClick={handleSave} />
+              <Button
+                onClick={handleSaveAndClose}
+                size="sm"
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium shadow-none cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{tOrder("postAndClose")}</span>
+              </Button>
+            </>
+          }
+        />
 
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    onClick={handlePrintSpec}
-                    variant="outline"
-                    size="icon-sm"
-                    className="h-7 w-7 border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 rounded cursor-pointer"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                {tOrder("printSpec")}
-              </TooltipContent>
-            </Tooltip>
+        {/* Main Workspace Body: Left Sub-Sidebar + Right Content Viewport */}
+        <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
+          <DocumentSidebar
+            sectionsLabel={tShell("sections")}
+            activeId={activeTab}
+            onSelect={(id) => setLevel3Tab(tab.id, id)}
+            summary={
+              <SidebarSummaryCard
+                icon={Building2}
+                title={formData.customer}
+                subtitle={formData.recipe}
+              >
+                <InfoRow label={tShell("quantity")}>
+                  <span className="font-mono font-bold">
+                    {formData.quantity.toLocaleString()} {formData.unit}
+                  </span>
+                </InfoRow>
+                <InfoRow label={tShell("technology")}>{formData.department}</InfoRow>
+                <InfoRow label={tShell("lamination")}>
+                  {formData.lamination && formData.lamination.toLowerCase() !== "none" ? (
+                    <span className="text-blue-600 dark:text-blue-400">
+                      {formData.lamination.split(" ")[0]} ({(formData.laminationSides || "1s").toUpperCase()})
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic font-normal">{tShell("none")}</span>
+                  )}
+                </InfoRow>
+                {hasShortage && (
+                  <div className="flex items-center gap-1 pt-1 text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                    <span className="truncate">{tShell("materialShortage")}</span>
+                  </div>
+                )}
+              </SidebarSummaryCard>
+            }
+            items={[
+              { id: "overview", label: tOrder("tabOverview"), icon: FileText },
+              {
+                id: "specs",
+                label: tShell("specsAndDrawing"),
+                icon: Ruler,
+                badge: `${formData.width || 50}×${formData.height || 90}`,
+              },
+              {
+                id: "materials",
+                label: tOrder("tabMaterials"),
+                icon: Boxes,
+                badge: currentRecipeMaterials.length,
+                badgeClassName: hasShortage
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold"
+                  : undefined,
+              },
+              { id: "operations", label: tOrder("tabOperations"), icon: Factory, badge: operations.length },
+              { id: "timeline", label: tOrder("tabTimeline"), icon: Clock, badge: shiftEvents.length },
+              {
+                id: "financials",
+                label: tOrder("tabCosting"),
+                icon: DollarSign,
+                badge: formatMoney(formData.priceTotal, formData.currency, 0),
+              },
+              { id: "files", label: tShell("filesAndDocs"), icon: Paperclip, badge: orderAttachments.length || null },
+              { id: "history", label: tOrder("tabHistory"), icon: History },
+            ]}
+            footer={
+              <>
+                <SidebarSectionTitle label={tShell("machineAndDeadline")} icon={Cpu} />
+                <div>
+                  <InfoRow label={tShell("machine")} title={formData.pressMachine}>
+                    {formData.pressMachine}
+                  </InfoRow>
+                  <InfoRow label={tShell("deadline")}>
+                    <span className="font-mono">{formData.deadline}</span>
+                  </InfoRow>
+                  <InfoRow label={tShell("site")}>{formData.site}</InfoRow>
+                </div>
+              </>
+            }
+          />
 
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    onClick={handleSave}
-                    variant="outline"
-                    size="icon-sm"
-                    className="h-7 w-7 border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                {tOrder("save")} (Ctrl+S)
-              </TooltipContent>
-            </Tooltip>
+          {/* ── RIGHT MAIN VIEWPORT (flex-1) ── */}
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+            {/* Tab 1: Overview */}
+            <OverviewTab
+              formData={formData}
+              handleFieldChange={handleFieldChange}
+              handleDepartmentChange={handleDepartmentChange}
+              data={data}
+              tabId={tab.id}
+              activeSpec={activeSpec}
+              activeSite={activeSite}
+              activeTech={activeTech}
+              activeMachine={activeMachine}
+              currentDeptMachines={currentDeptMachines}
+              currentRecipeMaterials={currentRecipeMaterials}
+              hasShortage={hasShortage}
+              orderAttachments={orderAttachments}
+              setOrderAttachments={setOrderAttachments}
+              onOpenLightbox={() => setIsLightboxOpen(true)}
+              onOpenTab={openTab}
+              onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+              tOrder={tOrder}
+            />
 
-            <Button
-              onClick={handleSaveAndClose}
-              size="sm"
-              className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1.5 shadow-none rounded cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>{tOrder("postAndClose")}</span>
-            </Button>
+            {/* Tab 2: Specifications & Die-Line (Extracted & Enhanced) */}
+            <SpecificationsTab
+              formData={formData}
+              handleFieldChange={handleFieldChange}
+              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+              onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+            />
+
+            {/* Tab 3: Materials BOM */}
+            <MaterialsTab tabId={tab.id} department={formData.department} />
+
+            {/* Tab 4: Technological Route */}
+            <OperationsTab
+              operations={operations}
+              setOperations={setOperations}
+              opSelection={opSelection}
+              setOpSelection={setOpSelection}
+              onOpenAddOperation={handleOpenAddOperation}
+              onOpenEditOperation={handleOpenEditOperation}
+              onDeleteSelectedOperation={handleDeleteSelectedOperation}
+              isDark={isDark}
+              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+            />
+
+            {/* Tab 5: Shift Timeline & Notes */}
+            <ShiftTimelineTab
+              operations={operations}
+              selectedTimelineOpId={selectedTimelineOpId}
+              setSelectedTimelineOpId={setSelectedTimelineOpId}
+              selectedOp={selectedOp}
+              selectedOpEvents={selectedOpEvents}
+              onOpenLogEvent={handleOpenLogEvent}
+              onUpdateStepOutput={(opId, newCompleted, target, unitSuffix, logNote, wasteQty, wasteReason) => {
+                setOperations((prev) =>
+                  prev.map((op) => {
+                    if (op.id !== opId) return op;
+                    const formatted = `${newCompleted.toLocaleString()} / ${target.toLocaleString()}${unitSuffix}`;
+                    const nextStatus =
+                      newCompleted >= target ? "Finished" : newCompleted > 0 ? "In Progress" : "Queued";
+                    return {
+                      ...op,
+                      qtyCompleted: formatted,
+                      status: nextStatus,
+                    };
+                  })
+                );
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+                const newEvent: ShiftEvent = {
+                  id: "e_" + Date.now(),
+                  opId,
+                  time: timeStr,
+                  type: wasteQty && wasteQty > 0 ? "Waste" : "Run",
+                  note: logNote,
+                  operator: selectedOp.operator,
+                  wasteQty,
+                  wasteReason,
+                };
+                setShiftEvents((prev) => [newEvent, ...prev]);
+                setTabUnsaved(tab.id, true);
+              }}
+              shiftNotes={formData.shiftNotes || []}
+              onAddShiftNote={(note) => {
+                const currentNotes = formData.shiftNotes || [];
+                handleFieldChange("shiftNotes", [note, ...currentNotes]);
+                setTabUnsaved(tab.id, true);
+              }}
+            />
+
+            {/* Tab 6: Financials */}
+            <FinancialsTab shiftEvents={shiftEvents} />
+
+            {/* Tab 7: Files & Tech Documents */}
+            <FilesTab
+              orderAttachments={orderAttachments}
+              setOrderAttachments={setOrderAttachments}
+              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+              docNo={data.docNo || tab.id}
+            />
+
+            {/* Tab 8: History */}
+            <HistoryTab />
           </div>
         </div>
-
-        {/* Tab 1: Overview */}
-        <OverviewTab
-          formData={formData}
-          handleFieldChange={handleFieldChange}
-          handleDepartmentChange={handleDepartmentChange}
-          data={data}
-          tabId={tab.id}
-          activeSpec={activeSpec}
-          activeSite={activeSite}
-          activeTech={activeTech}
-          activeMachine={activeMachine}
-          currentDeptMachines={currentDeptMachines}
-          currentRecipeMaterials={currentRecipeMaterials}
-          hasShortage={hasShortage}
-          orderAttachments={orderAttachments}
-          setOrderAttachments={setOrderAttachments}
-          onOpenLightbox={() => setIsLightboxOpen(true)}
-          onOpenTab={openTab}
-          onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
-          onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-          tOrder={tOrder}
-        />
-
-        {/* Tab 2: Materials BOM */}
-        <MaterialsTab tabId={tab.id} department={formData.department} />
-
-        {/* Tab 3: Technological Route */}
-        <OperationsTab
-          operations={operations}
-          setOperations={setOperations}
-          opSelection={opSelection}
-          setOpSelection={setOpSelection}
-          onOpenAddOperation={handleOpenAddOperation}
-          onOpenEditOperation={handleOpenEditOperation}
-          onDeleteSelectedOperation={handleDeleteSelectedOperation}
-          isDark={isDark}
-          onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-        />
-
-        {/* Tab 4: Shift Timeline */}
-        <ShiftTimelineTab
-          operations={operations}
-          selectedTimelineOpId={selectedTimelineOpId}
-          setSelectedTimelineOpId={setSelectedTimelineOpId}
-          selectedOp={selectedOp}
-          selectedOpEvents={selectedOpEvents}
-          onOpenLogEvent={handleOpenLogEvent}
-          onUpdateStepOutput={(opId, newCompleted, target, unitSuffix, logNote, wasteQty, wasteReason) => {
-            setOperations((prev) =>
-              prev.map((op) => {
-                if (op.id !== opId) return op;
-                const formatted = `${newCompleted.toLocaleString()} / ${target.toLocaleString()}${unitSuffix}`;
-                const nextStatus =
-                  newCompleted >= target ? "Finished" : newCompleted > 0 ? "In Progress" : "Queued";
-                return {
-                  ...op,
-                  qtyCompleted: formatted,
-                  status: nextStatus,
-                };
-              })
-            );
-            const now = new Date();
-            const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-            const newEvent: ShiftEvent = {
-              id: "e_" + Date.now(),
-              opId,
-              time: timeStr,
-              type: wasteQty && wasteQty > 0 ? "Waste" : "Run",
-              note: logNote,
-              operator: selectedOp.operator,
-              wasteQty,
-              wasteReason,
-            };
-            setShiftEvents((prev) => [newEvent, ...prev]);
-            setTabUnsaved(tab.id, true);
-          }}
-        />
-
-        {/* Tab 5: Financials (New) */}
-        <FinancialsTab shiftEvents={shiftEvents} />
-
-        {/* Tab 6: History */}
-        <HistoryTab />
       </Tabs>
 
       {/* Dialog: Routing Operation */}

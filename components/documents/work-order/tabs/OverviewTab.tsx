@@ -30,6 +30,7 @@ import {
   Sparkles,
   Palette,
   CircleDot,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableFooter,
 } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -179,6 +181,7 @@ export function OverviewTab({
   const tEnhance = useTranslations("OverviewEnhancements");
 
   const [viewMode, setViewMode] = useState<"manager" | "operator">("manager");
+  const isOperator = viewMode === "operator";
   const [isJobTicketOpen, setIsJobTicketOpen] = useState(false);
   const [isPantoneModalOpen, setIsPantoneModalOpen] = useState(false);
 
@@ -398,7 +401,7 @@ export function OverviewTab({
   };
 
   return (
-    <TabsContent value="overview" className="flex-1 overflow-y-auto p-4 m-0 space-y-4">
+    <TabsContent value="overview" className="@container flex-1 overflow-y-auto p-4 m-0 space-y-4">
       <FilePreviewDialog 
         isOpen={!!previewFile} 
         onOpenChange={(open) => !open && setPreviewFile(null)} 
@@ -418,19 +421,24 @@ export function OverviewTab({
         onSelectColor={handleAddSpotStation}
       />
       {/* Document Status Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-2.5 px-3.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-2.5 px-3.5 bg-card border border-border rounded-lg shadow-2xs">
         <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
-          {/* Status selector */}
+          {/* Status selector (Disabled for Operator) */}
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground font-medium">{tOrder("status")}:</span>
-            <Select value={formData.status} onValueChange={(val: any) => val && handleFieldChange("status", val)}>
+            <Select 
+              value={formData.status} 
+              onValueChange={(val: any) => val && handleFieldChange("status", val)}
+              disabled={isOperator}
+            >
               <SelectTrigger
                 className={cn(
-                  "h-7 text-xs font-semibold rounded-full px-3 border shadow-2xs cursor-pointer transition-colors",
-                  formData.status === "Draft" && "bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700",
-                  (formData.status === "Active" || formData.status === "In Production") && "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800",
-                  formData.status === "Completed" && "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/60 dark:text-blue-400 dark:border-blue-800",
-                  formData.status === "Cancelled" && "bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-400 dark:border-rose-800"
+                  "h-7 text-xs font-semibold rounded-full px-3 border shadow-2xs transition-colors",
+                  isOperator ? "cursor-default opacity-85" : "cursor-pointer",
+                  formData.status === "Draft" && "bg-muted text-muted-foreground border-border",
+                  (formData.status === "Active" || formData.status === "In Production") && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+                  formData.status === "Completed" && "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30",
+                  formData.status === "Cancelled" && "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30"
                 )}
               >
                 <SelectValue />
@@ -445,16 +453,21 @@ export function OverviewTab({
             </Select>
           </div>
 
-          {/* Priority selector */}
+          {/* Priority selector (Disabled for Operator) */}
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground font-medium">{tOrder("priority")}:</span>
-            <Select value={formData.priority} onValueChange={(val: any) => val && handleFieldChange("priority", val)}>
+            <Select 
+              value={formData.priority} 
+              onValueChange={(val: any) => val && handleFieldChange("priority", val)}
+              disabled={isOperator}
+            >
               <SelectTrigger
                 className={cn(
-                  "h-7 text-xs font-semibold rounded-full px-3 border shadow-2xs cursor-pointer transition-colors",
-                  formData.priority === "Urgent" && "bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-400 dark:border-rose-800",
-                  formData.priority === "High" && "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/60 dark:text-amber-400 dark:border-amber-800",
-                  formData.priority === "Normal" && "bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700"
+                  "h-7 text-xs font-semibold rounded-full px-3 border shadow-2xs transition-colors",
+                  isOperator ? "cursor-default opacity-85" : "cursor-pointer",
+                  formData.priority === "Urgent" && "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30",
+                  formData.priority === "High" && "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+                  formData.priority === "Normal" && "bg-muted text-muted-foreground border-border"
                 )}
               >
                 <SelectValue />
@@ -467,20 +480,20 @@ export function OverviewTab({
             </Select>
           </div>
 
-          <div className="hidden sm:block h-4 w-px bg-zinc-200 dark:bg-zinc-800" />
+          <div className="hidden sm:block h-4 w-px bg-border" />
 
           {/* Site & Order Type (Clean text, no badge clutter) */}
           <div className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
             <span className="font-medium text-foreground">{formData.site || "Building 1"}</span>
-            <span className="text-zinc-300 dark:text-zinc-700 mx-0.5">•</span>
+            <span className="text-border mx-0.5">•</span>
             <span>{data.orderType === "Sample" ? "Sample Order" : "Production Order"}</span>
           </div>
 
           {/* Linked Order (Functional jump button) */}
           {data.linkedOrderId && (
             <>
-              <div className="hidden md:block h-4 w-px bg-zinc-200 dark:bg-zinc-800" />
+              <div className="hidden md:block h-4 w-px bg-border" />
               <button
                 type="button"
                 onClick={() => onOpenTab?.({ id: data.linkedOrderId, title: data.linkedOrderId, type: "client-order" })}
@@ -488,22 +501,22 @@ export function OverviewTab({
                 title="Open linked Client Order"
               >
                 <ExternalLink className="w-3 h-3 text-violet-500 shrink-0" />
-                <span>{data.linkedOrderId}</span>
+                <span className="font-mono">{data.linkedOrderId}</span>
               </button>
             </>
           )}
 
-          <div className="hidden md:block h-4 w-px bg-zinc-200 dark:bg-zinc-800" />
+          <div className="hidden md:block h-4 w-px bg-border" />
 
           {/* View Mode Switcher (👔 Manager View vs 👷 Operator View) */}
-          <div className="inline-flex items-center p-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shrink-0">
+          <div className="inline-flex items-center p-0.5 rounded-full bg-muted border border-border shrink-0">
             <button
               type="button"
               onClick={() => setViewMode("manager")}
               className={cn(
                 "px-2.5 py-0.5 text-[11px] font-semibold rounded-full transition-colors cursor-pointer flex items-center gap-1",
                 viewMode === "manager"
-                  ? "bg-white dark:bg-zinc-900 text-foreground shadow-xs"
+                  ? "bg-background text-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -539,42 +552,44 @@ export function OverviewTab({
         {/* Right Doc metadata */}
         <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono ml-auto">
           <span>{tOrder("docNo")}: <strong className="text-foreground">{data.docNo || tabId}</strong></span>
-          <span className="text-zinc-300 dark:text-zinc-700 hidden md:inline">•</span>
+          <span className="text-border hidden md:inline">•</span>
           <span className="hidden md:inline">{tOrder("created")}: 2026-09-29 14:20</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 @7xl:grid-cols-3 gap-4">
         {/* Left Column (2/3 width on xl screens) */}
-        <div className="xl:col-span-2 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="@container @7xl:col-span-2 space-y-4">
+          <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-4">
         {/* Card 1: Order Photo & Sample Reference */}
-        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-2.5 flex flex-col">
-          <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+        <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 flex flex-col">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
-              <Camera className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">{tOrder("sampleProofTitle")}</span>
+              <Camera className="w-4 h-4 text-primary shrink-0" />
+              <span className="font-semibold text-sm text-foreground truncate">{tOrder("sampleProofTitle")}</span>
               {photos.length > 0 && (
-                <span className="text-[11px] font-mono text-zinc-400">
+                <span className="text-[11px] font-mono text-muted-foreground">
                   {activePhotoIndex + 1}/{photos.length}
                 </span>
               )}
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
-              title={tOrder("addPhoto")}
-              onClick={() => document.getElementById("wo-photo-add-input")?.click()}
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </Button>
+            {!isOperator && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                title={tOrder("addPhoto")}
+                onClick={() => document.getElementById("wo-photo-add-input")?.click()}
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </Button>
+            )}
           </div>
 
           <div className="flex-1 flex flex-col">
             {photos.length > 0 ? (
-              <div className="relative group w-full flex-1 min-h-[156px] rounded overflow-hidden bg-zinc-50/70 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800/80">
+              <div className="relative group w-full flex-1 min-h-[156px] rounded overflow-hidden bg-muted/30 border border-border/80">
                 <Carousel
                   setApi={setCarouselApi}
                   className="w-full h-full"
@@ -614,7 +629,7 @@ export function OverviewTab({
                     type="button"
                     size="icon"
                     variant="secondary"
-                    className="h-6 w-6 rounded bg-background/90 hover:bg-background shadow-xs text-zinc-600 dark:text-zinc-300"
+                    className="h-6 w-6 rounded bg-background/90 hover:bg-background shadow-xs text-foreground"
                     title={tOrder("fullScreenView")}
                     onClick={() => {
                       handleFieldChange("photoUrl", photos[activePhotoIndex] || photos[0]);
@@ -623,16 +638,18 @@ export function OverviewTab({
                   >
                     <Maximize2 className="w-3 h-3" />
                   </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="secondary"
-                    className="h-6 w-6 rounded bg-background/90 hover:bg-background shadow-xs text-zinc-500 hover:text-red-600"
-                    title={tOrder("removePhoto")}
-                    onClick={() => handleRemovePhoto(activePhotoIndex)}
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
+                  {!isOperator && (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      className="h-6 w-6 rounded bg-background/90 hover:bg-background shadow-xs text-muted-foreground hover:text-destructive"
+                      title={tOrder("removePhoto")}
+                      onClick={() => handleRemovePhoto(activePhotoIndex)}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  )}
                 </div>
 
                 {/* Minimalist Floating Thumbnails */}
@@ -646,7 +663,7 @@ export function OverviewTab({
                         className={cn(
                           "relative shrink-0 w-6 h-6 rounded-[3px] overflow-hidden border transition-all cursor-pointer",
                           activePhotoIndex === idx
-                            ? "border-blue-600 opacity-100"
+                            ? "border-primary opacity-100"
                             : "border-transparent opacity-50 hover:opacity-90"
                         )}
                       >
@@ -658,88 +675,103 @@ export function OverviewTab({
               </div>
             ) : (
               <div
-                className="border border-dashed border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-700 rounded p-4 flex flex-col items-center justify-center text-center cursor-pointer bg-zinc-50/40 dark:bg-zinc-950/30 transition-colors flex-1 min-h-[156px]"
-                onClick={() => document.getElementById("wo-photo-add-input")?.click()}
+                className={cn(
+                  "border border-dashed border-border rounded p-4 flex flex-col items-center justify-center text-center bg-muted/20 transition-colors flex-1 min-h-[156px]",
+                  !isOperator && "hover:border-border/80 cursor-pointer"
+                )}
+                onClick={!isOperator ? () => document.getElementById("wo-photo-add-input")?.click() : undefined}
               >
-                <ImageIcon className="w-4 h-4 text-zinc-400 mb-1.5" />
-                <p className="text-xs text-zinc-500">{tOrder("attachSamplePhoto")}</p>
+                <ImageIcon className="w-4 h-4 text-muted-foreground mb-1.5" />
+                <p className="text-xs text-muted-foreground">{tOrder("attachSamplePhoto")}</p>
               </div>
             )}
 
-            <input
-              type="file"
-              id="wo-photo-add-input"
-              className="hidden"
-              accept="image/*"
-              multiple
-              onChange={(e) => {
-                const files = e.target.files;
-                if (files && files.length > 0) {
-                  const newUrls = Array.from(files).map((f) => URL.createObjectURL(f));
-                  const updatedPhotos = [...photos, ...newUrls];
-                  handleFieldChange("photoUrls", updatedPhotos);
-                  if (!formData.photoUrl && newUrls[0]) {
-                    handleFieldChange("photoUrl", newUrls[0]);
+            {!isOperator && (
+              <input
+                type="file"
+                id="wo-photo-add-input"
+                className="hidden"
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  const files = e.target.files;
+                  if (files && files.length > 0) {
+                    const newUrls = Array.from(files).map((f) => URL.createObjectURL(f));
+                    const updatedPhotos = [...photos, ...newUrls];
+                    handleFieldChange("photoUrls", updatedPhotos);
+                    if (!formData.photoUrl && newUrls[0]) {
+                      handleFieldChange("photoUrl", newUrls[0]);
+                    }
+                    onMarkUnsaved();
                   }
-                  onMarkUnsaved();
-                }
-              }}
-            />
+                }}
+              />
+            )}
           </div>
         </div>
 
         {/* Card 2: General Requisites & Customer */}
-        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3.5">
-          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+        <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
-              <Tag className="w-4 h-4 text-blue-600" />
-              <span>{tOrder("docRequisites")}</span>
+              <Tag className="w-4 h-4 text-primary shrink-0" />
+              <span className="font-semibold text-sm text-foreground truncate">{tOrder("docRequisites")}</span>
             </div>
+            {isOperator && (
+              <span className="text-[11px] font-mono text-muted-foreground">🔒 Read-only</span>
+            )}
           </div>
 
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">{tOrder("customerLabel")}</label>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("customerLabel")}</label>
               <FieldCombobox
                 value={formData.customer}
                 onChange={(val) => {
                   handleFieldChange("customer", val);
                   onMarkUnsaved();
                 }}
-                allowCustom={true}
+                disabled={isOperator}
+                allowCustom={!isOperator}
                 onAddNew={(newCust) => addCustomer(newCust)}
                 options={customers.map((c) => ({ value: c, label: c }))}
                 placeholder="Select customer..."
                 searchPlaceholder="Search or type new customer..."
-                className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950"
+                className="h-8 text-xs bg-muted/30"
                 popoverClassName="w-auto min-w-[280px]"
               />
             </div>
 
             <div>
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">{tOrder("productLabel")}</label>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("productLabel")}</label>
               <Input 
                 value={formData.product} 
                 onChange={(e) => handleFieldChange("product", e.target.value)}
-                className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-medium" 
+                disabled={isOperator}
+                className="h-8 text-xs bg-muted/30 font-medium disabled:opacity-85" 
                 placeholder="Product specification name"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">{tOrder("quantityLabel")}</label>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("quantityLabel")}</label>
                 <Input 
                   type="number"
                   value={formData.quantity} 
                   onChange={(e) => handleFieldChange("quantity", Number(e.target.value))}
-                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono font-semibold" 
+                  disabled={isOperator}
+                  className="h-8 text-xs bg-muted/30 font-mono font-semibold disabled:opacity-85" 
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">{tOrder("unitLabel")}</label>
-                <Select value={formData.unit} onValueChange={(val: any) => val && handleFieldChange("unit", val)}>
-                  <SelectTrigger className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono">
+                <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("unitLabel")}</label>
+                <Select 
+                  value={formData.unit} 
+                  onValueChange={(val: any) => val && handleFieldChange("unit", val)}
+                  disabled={isOperator}
+                >
+                  <SelectTrigger className="h-8 text-xs bg-muted/30 font-mono disabled:opacity-85">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -755,650 +787,203 @@ export function OverviewTab({
           </div>
         </div>
 
-        {/* Card 3: Planned Physical Specifications & Finishing */}
-        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3.5">
-          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+        {/* Card 3: High-Level Technical Specifications & CAD Snapshot */}
+        <div className="@container @3xl:col-span-2 p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
-              <Ruler className="w-4 h-4 text-blue-600" />
-              <span>Physical Specifications & Finishing</span>
+              <Ruler className="w-4 h-4 text-primary shrink-0" />
+              <span className="font-semibold text-sm text-foreground truncate">
+                Technical specs
+              </span>
             </div>
-            <span className="font-mono text-[11px] text-muted-foreground bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded">
-              {formData.width || 50} × {formData.height || 90} {formData.dimensionUnit || "mm"}
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="font-mono text-[10px]">
+                {formData.width || 50}×{formData.height || 90} {formData.dimensionUnit || "mm"}
+              </Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onSwitchTab("specs")}
+                className="h-6 px-2 text-[11px] text-primary hover:text-primary/90 hover:bg-primary/10 gap-1 cursor-pointer"
+              >
+                <span>Edit</span>
+                <ArrowRight className="w-3 h-3" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Quick Metrics Grid */}
+          <div className="grid grid-cols-2 @2xl:grid-cols-4 gap-2 text-xs">
+            {/* Dimensions */}
+            <div className="p-2.5 rounded-md bg-muted/30 border border-border space-y-1">
+              <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                Size
+              </span>
+              <p className="font-mono font-bold text-foreground text-sm">
+                {formData.width || 50} × {formData.height || 90} <span className="text-xs font-normal text-muted-foreground">{formData.dimensionUnit || "mm"}</span>
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                Bleed {formData.bleed || 2}mm · {formData.cornerType || "Square"}
+              </p>
+            </div>
+
+            {/* Substrate / Paper Stock */}
+            <div className="p-2.5 rounded-md bg-muted/30 border border-border space-y-1">
+              <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                Material
+              </span>
+              <p className="font-semibold text-foreground text-xs truncate" title={formData.paperStock}>
+                {formData.paperStock || "Galerie Art Silk 150g/m²"}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                {formData.department}
+              </p>
+            </div>
+
+            {/* Lamination & Surface Treatment */}
+            <div className="p-2.5 rounded-md bg-muted/30 border border-border space-y-1 min-w-0">
+              <span className="text-[10px] uppercase font-semibold text-muted-foreground flex items-center gap-1">
+                <Sparkles className="w-3 h-3 shrink-0" />
+                <span>Lamination</span>
+              </span>
+              <p className="font-semibold text-foreground text-xs truncate" title={formData.lamination}>
+                {formData.lamination && formData.lamination !== "none" ? formData.lamination : "None"}
+              </p>
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <Badge variant="secondary" className="h-4 px-1 text-[9px] font-mono">
+                  {formData.laminationSides ? formData.laminationSides.toUpperCase() : "1S"}
+                </Badge>
+                <span>{formData.laminationMicron || 28}µm</span>
+                {formData.embellishment && formData.embellishment !== "none" && (
+                  <span className="text-primary truncate font-medium">• {formData.embellishment}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Colors / Inks */}
+            <div className="p-2.5 rounded-md bg-muted/30 border border-border space-y-1">
+              <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                Colors
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono font-bold text-foreground text-sm">
+                  {dynamicColorNotation}
+                </span>
+                <div className="flex items-center gap-0.5">
+                  {frontColors.c && <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block shadow-2xs" title="Cyan" />}
+                  {frontColors.m && <span className="w-2 h-2 rounded-full bg-pink-500 inline-block shadow-2xs" title="Magenta" />}
+                  {frontColors.y && <span className="w-2 h-2 rounded-full bg-amber-400 inline-block shadow-2xs" title="Yellow" />}
+                  {frontColors.k && <span className="w-2 h-2 rounded-full bg-zinc-950 dark:bg-zinc-100 inline-block shadow-2xs" title="Black" />}
+                  {frontSpots.length > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shadow-2xs" title={`+${frontSpots.length} Spot`} />
+                  )}
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground truncate">
+                {frontSpots.length > 0 ? `+${frontSpots.length} Pantone` : "CMYK"}
+              </p>
+            </div>
+          </div>
+
+          {/* Sub-row: Holes & Quick Action */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md bg-muted/20 border border-border text-xs">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <CircleDot className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">Hole:</span>
+                <span className="font-medium text-foreground">
+                  {effectiveHolePos !== "none" && effectiveHoleSize > 0 ? (
+                    <Badge variant="outline" className="text-[10px] h-4.5 bg-background border-border">
+                      Ø{effectiveHoleSize}mm · {effectiveHolePos} · {effectiveHoleOffset}mm
+                    </Badge>
+                  ) : (
+                    <span className="text-muted-foreground">None</span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onSwitchTab("specs")}
+              className="h-7 text-xs gap-1.5 cursor-pointer text-primary border-primary/30 hover:bg-primary/10"
+            >
+              <Ruler className="w-3.5 h-3.5" />
+              <span>Open die-line</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Card 5: Production Equipment & Scheduling */}
+        <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
+            <div className="flex items-center gap-2">
+              <Factory className="w-4 h-4 text-primary shrink-0" />
+              <span className="font-semibold text-sm text-foreground truncate">Production</span>
+            </div>
+            <span className="font-mono text-[11px] text-muted-foreground">
+              {formData.department}
             </span>
           </div>
 
           <div className="space-y-3">
-            {/* Quick Size Preset Selector */}
-            <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 rounded border border-zinc-100 dark:border-zinc-800">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1.5 flex items-center justify-between">
-                <span>Quick Size & Format Presets</span>
-                <span className="text-[10px] text-zinc-400">Loads standard dimensions</span>
-              </label>
-              <SmartCombobox
-                placeholder="⚡ Choose standard preset (e.g. Hangtag, Care label, Card)..."
-                searchPlaceholder="Search or add format preset..."
-                onChange={(val) => {
-                  const p = sizePresets.find((sp) => sp.value === val);
-                  if (p) {
-                    if (p.width) handleFieldChange("width", p.width);
-                    if (p.height) handleFieldChange("height", p.height);
-                    if (p.category) handleFieldChange("itemCategory", p.category);
-                    onMarkUnsaved();
-                  }
-                }}
-                allowCustom={true}
-                onAddNew={(customStr) => {
-                  const match = customStr.match(/(\d+)\s*[x×*]\s*(\d+)/i);
-                  const w = match ? Number(match[1]) : formData.width || 50;
-                  const h = match ? Number(match[2]) : formData.height || 90;
-                  addSizePreset({
-                    value: customStr,
-                    label: `${customStr} (${w}×${h} mm)`,
-                    description: "Custom user-defined format preset",
-                    badge: "Custom",
-                    width: w,
-                    height: h,
-                    category: formData.itemCategory || "Custom",
-                  });
-                  handleFieldChange("width", w);
-                  handleFieldChange("height", h);
-                  onMarkUnsaved();
-                }}
-                options={sizePresets}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">Product Format</label>
-                <SmartCombobox
-                  value={formData.itemCategory || "Hangtag"}
-                  onChange={(val) => {
-                    handleFieldChange("itemCategory", val);
-                    onMarkUnsaved();
-                  }}
-                  onAddNew={(newFmt) => addFormat(newFmt)}
-                  searchPlaceholder="Search or type new format..."
-                  allowCustom={true}
-                  options={formats}
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">Cut / Finish</label>
-                <SmartCombobox
-                  value={formData.cornerType || "Square Cut"}
-                  onChange={(val) => {
-                    handleFieldChange("cornerType", val);
-                    onMarkUnsaved();
-                  }}
-                  onAddNew={(newCut) => addCornerType(newCut)}
-                  searchPlaceholder="Search or type new cut..."
-                  allowCustom={true}
-                  options={cornerTypes}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">Width ({formData.dimensionUnit || "mm"})</label>
-                <Input 
-                  type="number"
-                  value={formData.width ?? 50} 
-                  onChange={(e) => handleFieldChange("width", Number(e.target.value))}
-                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono font-semibold" 
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">Height ({formData.dimensionUnit || "mm"})</label>
-                <Input 
-                  type="number"
-                  value={formData.height ?? 90} 
-                  onChange={(e) => handleFieldChange("height", Number(e.target.value))}
-                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono font-semibold" 
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">Bleed (mm)</label>
-                <Input 
-                  type="number"
-                  value={formData.bleed ?? 2} 
-                  onChange={(e) => handleFieldChange("bleed", Number(e.target.value))}
-                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono font-semibold" 
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-0.5">
-              <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">Paper / Substrate Stock</label>
-                <SmartCombobox
-                  value={formData.paperStock || "Galerie Art Silk 150g/m²"}
-                  onChange={(val) => {
-                    handleFieldChange("paperStock", val);
-                    onMarkUnsaved();
-                  }}
-                  onAddNew={(newStock) => addPaperStock(newStock)}
-                  searchPlaceholder="Search or type new stock..."
-                  allowCustom={true}
-                  options={paperStocks}
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">Surface Coating / Finish</label>
-                <SmartCombobox
-                  value={formData.coating || "Soft-Touch Matte + Spot UV"}
-                  onChange={(val) => {
-                    handleFieldChange("coating", val);
-                    onMarkUnsaved();
-                  }}
-                  onAddNew={(newCoating) => addCoating(newCoating)}
-                  searchPlaceholder="Search or type new finish..."
-                  allowCustom={true}
-                  options={coatings}
-                />
-              </div>
-            </div>
-
-            {/* Drill Hole & Eyelet Punch Specifications */}
-            <div className="pt-2.5 space-y-2 border-t border-zinc-100 dark:border-zinc-800">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
-                  <CircleDot className="w-3.5 h-3.5 text-blue-600" />
-                  <span>{tEnhance("holeSpecsTitle")}</span>
-                </label>
-                {effectiveHoleSize > 0 && effectiveHolePos !== "none" ? (
-                  <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono font-medium text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
-                    Ø{effectiveHoleSize}mm • {effectiveHolePos} (+{effectiveHoleOffset}mm)
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono text-zinc-500">
-                    {tEnhance("posNone")}
-                  </Badge>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-medium text-zinc-500 block mb-1">
-                    {tEnhance("holeSize")} (mm)
-                  </label>
-                  <Select
-                    value={String(effectiveHoleSize)}
-                    onValueChange={(val) => {
-                      const sizeNum = Number(val);
-                      handleFieldChange("holeSize", sizeNum);
-                      if (sizeNum === 0) {
-                        handleFieldChange("holePosition", "none");
-                      } else if (effectiveHolePos === "none") {
-                        handleFieldChange("holePosition", "top-center");
-                      }
-                      onMarkUnsaved();
-                    }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">0 mm ({tEnhance("posNone")})</SelectItem>
-                      <SelectItem value="3">Ø3 mm (Cord)</SelectItem>
-                      <SelectItem value="4">Ø4 mm (Standard)</SelectItem>
-                      <SelectItem value="5">Ø5 mm (Heavy Cord)</SelectItem>
-                      <SelectItem value="6">Ø6 mm (Grommet)</SelectItem>
-                      <SelectItem value="8">Ø8 mm (Euro Slot)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-medium text-zinc-500 block mb-1">
-                    {tEnhance("holePosition")}
-                  </label>
-                  <Select
-                    value={effectiveHolePos}
-                    onValueChange={(val: any) => {
-                      handleFieldChange("holePosition", val);
-                      if (val !== "none" && effectiveHoleSize === 0) {
-                        handleFieldChange("holeSize", 4);
-                      }
-                      onMarkUnsaved();
-                    }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="top-center">{tEnhance("posTopCenter")}</SelectItem>
-                      <SelectItem value="top-left">{tEnhance("posTopLeft")}</SelectItem>
-                      <SelectItem value="top-right">{tEnhance("posTopRight")}</SelectItem>
-                      <SelectItem value="left-center">{tEnhance("posLeftCenter")}</SelectItem>
-                      <SelectItem value="right-center">{tEnhance("posRightCenter")}</SelectItem>
-                      <SelectItem value="none">{tEnhance("posNone")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-medium text-zinc-500 block mb-1">
-                    {tEnhance("holeOffset")} (mm)
-                  </label>
-                  <Input
-                    type="number"
-                    min={2}
-                    max={30}
-                    disabled={effectiveHolePos === "none" || effectiveHoleSize === 0}
-                    value={effectiveHoleOffset}
-                    onChange={(e) => {
-                      handleFieldChange("holeOffset", Number(e.target.value));
-                      onMarkUnsaved();
-                    }}
-                    className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono font-semibold"
-                  />
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* Card: Printing Inks & Colors Stations */}
-        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3.5">
-          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
-            <div className="flex items-center gap-2">
-              <Palette className="w-4 h-4 text-blue-600" />
-              <span>{tEnhance("colorStationsTitle")}</span>
-            </div>
-
-                {/* Dynamic Channel Dots & Notation */}
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800/80 px-2 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700/60 text-[11px] font-mono shadow-2xs">
-                    <span className="text-[10px] text-zinc-500 font-sans uppercase font-bold mr-0.5">F:</span>
-                    {frontColors.c && <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 inline-block shadow-2xs" title="Cyan (C) - Face" />}
-                    {frontColors.m && <span className="w-2.5 h-2.5 rounded-full bg-pink-500 inline-block shadow-2xs" title="Magenta (M) - Face" />}
-                    {frontColors.y && <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block shadow-2xs" title="Yellow (Y) - Face" />}
-                    {frontColors.k && <span className="w-2.5 h-2.5 rounded-full bg-zinc-950 dark:bg-zinc-100 border border-zinc-400 inline-block shadow-2xs" title="Key / Black (K) - Face" />}
-                    {frontSpots.map((spot) => (
-                      <span
-                        key={`dot-f-${spot.id}`}
-                        className="w-2.5 h-2.5 rounded-full inline-block shadow-2xs border border-white/50"
-                        style={{ backgroundColor: spot.hex }}
-                        title={`${spot.name} - Face`}
-                      />
-                    ))}
-                    {frontTotal === 0 && <span className="text-zinc-400 text-[10px]">0</span>}
-
-                    <span className="text-zinc-300 dark:text-zinc-600 mx-0.5 font-sans">/</span>
-
-                    <span className="text-[10px] text-zinc-500 font-sans uppercase font-bold mr-0.5">R:</span>
-                    {backColors.c && <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 inline-block shadow-2xs" title="Cyan (C) - Reverse" />}
-                    {backColors.m && <span className="w-2.5 h-2.5 rounded-full bg-pink-500 inline-block shadow-2xs" title="Magenta (M) - Reverse" />}
-                    {backColors.y && <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block shadow-2xs" title="Yellow (Y) - Reverse" />}
-                    {backColors.k && <span className="w-2.5 h-2.5 rounded-full bg-zinc-950 dark:bg-zinc-100 border border-zinc-400 inline-block shadow-2xs" title="Key / Black (K) - Reverse" />}
-                    {backSpots.map((spot) => (
-                      <span
-                        key={`dot-b-${spot.id}`}
-                        className="w-2.5 h-2.5 rounded-full inline-block shadow-2xs border border-white/50"
-                        style={{ backgroundColor: spot.hex }}
-                        title={`${spot.name} - Reverse`}
-                      />
-                    ))}
-                    {backTotal === 0 && <span className="text-zinc-400 text-[10px]">0</span>}
-                  </div>
-
-                  <Badge variant="outline" className="h-6 px-2 text-xs font-mono font-bold bg-blue-50/60 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
-                    {dynamicColorNotation}
-                  </Badge>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {/* Preset Selector + Add Spot Button Row */}
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-zinc-500 font-medium">Preset:</span>
-                  <div className="w-48">
-                    <Select
-                      value={
-                        dynamicColorNotation === "4+0" && spotColorItems.length === 0
-                          ? "4+0"
-                          : dynamicColorNotation === "4+4" && spotColorItems.length === 0
-                          ? "4+4"
-                          : dynamicColorNotation === "4+1" && spotColorItems.length === 0
-                          ? "4+1"
-                          : dynamicColorNotation === "1+0" && spotColorItems.length === 0
-                          ? "1+0"
-                          : dynamicColorNotation === "1+1" && spotColorItems.length === 0
-                          ? "1+1"
-                          : dynamicColorNotation === "5+0"
-                          ? "5+0"
-                          : "custom"
-                      }
-                      onValueChange={(val: any) => val && handleApplyColorPreset(val)}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono font-medium">
-                        <SelectValue placeholder="Preset" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="4+0">4+0 (CMYK Single-Side)</SelectItem>
-                        <SelectItem value="4+4">4+4 (CMYK Both Sides)</SelectItem>
-                        <SelectItem value="4+1">4+1 (CMYK Face / K Reverse)</SelectItem>
-                        <SelectItem value="1+0">1+0 (Monochrome Black)</SelectItem>
-                        <SelectItem value="1+1">1+1 (Black Both Sides)</SelectItem>
-                        <SelectItem value="5+0">5+0 (CMYK + 1 Spot)</SelectItem>
-                        <SelectItem value="custom">Custom Configuration</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsPantoneModalOpen(true)}
-                  className="h-8 px-2.5 text-xs text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer shadow-2xs"
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1 text-blue-600" />
-                  <span>{tEnhance("addSpotColor")}</span>
-                </Button>
-              </div>
-
-              {/* Side Channels & Spots Configuration */}
-              <div className="space-y-2 pt-1">
-                {/* Face (Front Side) */}
-                <div className="p-2.5 rounded-md bg-zinc-50/70 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                      <span>{tEnhance("frontSide")}</span>
-                      <span className="text-[11px] font-mono text-zinc-400 font-normal">({frontTotal} stations)</span>
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {/* Channel Toggles */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleFrontChannel("c")}
-                      className={cn(
-                        "w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer border shadow-2xs",
-                        frontColors.c
-                          ? "bg-cyan-500 text-white border-cyan-600"
-                          : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 line-through opacity-60"
-                      )}
-                      title="Toggle Cyan (Face)"
-                    >
-                      C
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleFrontChannel("m")}
-                      className={cn(
-                        "w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer border shadow-2xs",
-                        frontColors.m
-                          ? "bg-pink-500 text-white border-pink-600"
-                          : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 line-through opacity-60"
-                      )}
-                      title="Toggle Magenta (Face)"
-                    >
-                      M
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleFrontChannel("y")}
-                      className={cn(
-                        "w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer border shadow-2xs",
-                        frontColors.y
-                          ? "bg-amber-400 text-zinc-950 border-amber-500"
-                          : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 line-through opacity-60"
-                      )}
-                      title="Toggle Yellow (Face)"
-                    >
-                      Y
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleFrontChannel("k")}
-                      className={cn(
-                        "w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer border shadow-2xs",
-                        frontColors.k
-                          ? "bg-zinc-950 text-white dark:bg-zinc-100 dark:text-zinc-950 border-zinc-800 dark:border-zinc-300"
-                          : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 line-through opacity-60"
-                      )}
-                      title="Toggle Black (Face)"
-                    >
-                      K
-                    </button>
-
-                    {/* Front Spots */}
-                    {frontSpots.map((spot) => (
-                      <Badge
-                        key={`front-spot-${spot.id}`}
-                        variant="outline"
-                        className="h-7 px-2 text-xs font-mono font-medium bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-foreground gap-1.5 shadow-2xs"
-                      >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/20"
-                          style={{ backgroundColor: spot.hex }}
-                        />
-                        <span className="truncate max-w-[150px]">{spot.name}</span>
-                        {spot.side === "both" && (
-                          <span className="text-[10px] text-zinc-400 font-sans">(both)</span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveSpotStation(spot.id)}
-                          className="text-zinc-400 hover:text-red-500 cursor-pointer ml-0.5"
-                          title="Remove spot station"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Reverse (Back Side) */}
-                <div className="p-2.5 rounded-md bg-zinc-50/70 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                      <span>{tEnhance("backSide")}</span>
-                      <span className="text-[11px] font-mono text-zinc-400 font-normal">({backTotal} stations)</span>
-                    </span>
-
-                    {backTotal === 0 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          handleFieldChange("backColors", { c: false, m: false, y: false, k: true });
-                          onMarkUnsaved();
-                        }}
-                        className="h-5 text-[11px] px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer"
-                      >
-                        {tEnhance("addBackPrint")}
-                      </Button>
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {/* Channel Toggles */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleBackChannel("c")}
-                      className={cn(
-                        "w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer border shadow-2xs",
-                        backColors.c
-                          ? "bg-cyan-500 text-white border-cyan-600"
-                          : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 line-through opacity-60"
-                      )}
-                      title="Toggle Cyan (Reverse)"
-                    >
-                      C
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleBackChannel("m")}
-                      className={cn(
-                        "w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer border shadow-2xs",
-                        backColors.m
-                          ? "bg-pink-500 text-white border-pink-600"
-                          : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 line-through opacity-60"
-                      )}
-                      title="Toggle Magenta (Reverse)"
-                    >
-                      M
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleBackChannel("y")}
-                      className={cn(
-                        "w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer border shadow-2xs",
-                        backColors.y
-                          ? "bg-amber-400 text-zinc-950 border-amber-500"
-                          : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 line-through opacity-60"
-                      )}
-                      title="Toggle Yellow (Reverse)"
-                    >
-                      Y
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleBackChannel("k")}
-                      className={cn(
-                        "w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer border shadow-2xs",
-                        backColors.k
-                          ? "bg-zinc-950 text-white dark:bg-zinc-100 dark:text-zinc-950 border-zinc-800 dark:border-zinc-300"
-                          : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 line-through opacity-60"
-                      )}
-                      title="Toggle Black (Reverse)"
-                    >
-                      K
-                    </button>
-
-                    {/* Back Spots */}
-                    {backSpots.map((spot) => (
-                      <Badge
-                        key={`back-spot-${spot.id}`}
-                        variant="outline"
-                        className="h-7 px-2 text-xs font-mono font-medium bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-foreground gap-1.5 shadow-2xs"
-                      >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/20"
-                          style={{ backgroundColor: spot.hex }}
-                        />
-                        <span className="truncate max-w-[150px]">{spot.name}</span>
-                        {spot.side === "both" && (
-                          <span className="text-[10px] text-zinc-400 font-sans">(both)</span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveSpotStation(spot.id)}
-                          className="text-zinc-400 hover:text-red-500 cursor-pointer ml-0.5"
-                          title="Remove spot station"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </Badge>
-                    ))}
-
-                    {backTotal === 0 && (
-                      <span className="text-xs text-muted-foreground italic font-sans ml-2">
-                        {tEnhance("blankBack")}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        {/* Card 4: Standalone 2D Die-Line & Dimension Inspector */}
-        <DieLinePreview
-          width={Number(formData.width) || 50}
-          height={Number(formData.height) || 90}
-          bleed={Number(formData.bleed) ?? 2}
-          dimensionUnit={formData.dimensionUnit || "mm"}
-          cornerType={formData.cornerType || "Square Cut"}
-          itemCategory={formData.itemCategory || "Hangtag"}
-          totalQuantity={formData.quantity}
-          paperStock={formData.paperStock}
-          holeSize={effectiveHoleSize}
-          holePosition={effectiveHolePos}
-          holeOffset={effectiveHoleOffset}
-          onOpenLayoutTab={() => onSwitchTab("layout")}
-          onFlipOrientation={() => {
-            const currentW = formData.width || 50;
-            const currentH = formData.height || 90;
-            handleFieldChange("width", currentH);
-            handleFieldChange("height", currentW);
-            onMarkUnsaved();
-          }}
-        />
-
-        {/* Card 5: Production Equipment & Scheduling */}
-        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3.5">
-          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
-            <div className="flex items-center gap-2">
-              <Factory className="w-4 h-4 text-blue-600" />
-              <span>Technology & Facility Route</span>
-            </div>
-            <Badge variant="outline" className="text-[10px] font-mono text-blue-600 dark:text-blue-400">
-              {formData.department}
-            </Badge>
-          </div>
-
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
               {/* Production Site Combobox */}
               <div>
-                <label className="text-zinc-600 dark:text-zinc-400 font-medium text-xs block mb-1">
+                <label className="text-muted-foreground font-medium text-xs block mb-1">
                   Production Site
                 </label>
-                <Popover open={isSiteComboboxOpen} onOpenChange={setIsSiteComboboxOpen}>
+                <Popover open={!isOperator && isSiteComboboxOpen} onOpenChange={isOperator ? undefined : setIsSiteComboboxOpen}>
                   <PopoverTrigger
                     render={
                       <Button
                         type="button"
                         variant="outline"
                         role="combobox"
+                        disabled={isOperator}
                         aria-expanded={isSiteComboboxOpen}
-                        className="w-full h-8 justify-between px-2.5 text-xs bg-zinc-50 dark:bg-zinc-950 font-normal shadow-none border-zinc-200 dark:border-zinc-800 hover:border-blue-400 transition-colors"
+                        className={cn(
+                          "w-full h-8 justify-between px-2.5 text-xs bg-muted/30 font-normal shadow-none border-border transition-colors",
+                          isOperator ? "opacity-85 cursor-not-allowed" : "hover:border-primary/50"
+                        )}
                       />
                     }
                   >
                     <div className="flex items-center gap-1.5 min-w-0 flex-1 text-left">
-                      <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                      <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">
+                      <Building2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="truncate font-medium text-foreground">
                         {activeSite.name}
                       </span>
                     </div>
                     <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
                   </PopoverTrigger>
-                  <PopoverContent className="w-[320px] p-0 shadow-xl border border-zinc-200 dark:border-zinc-800" align="start">
+                  <PopoverContent className="w-[320px] p-0 shadow-xl border border-border bg-popover" align="start">
                     <Command className="w-full">
                       <CommandInput placeholder="Search production site..." className="h-8 text-xs" />
                       <CommandList className="max-h-60">
                         <CommandEmpty className="py-3 text-center text-xs text-muted-foreground flex flex-col items-center gap-1">
                           <span>No site found.</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newName = window.prompt("Enter new facility site name (e.g. Building 3 — Digital Lab):");
-                              if (newName && newName.trim()) {
-                                const created = addSite({ name: newName.trim() });
-                                handleFieldChange("site", created.id);
-                                setIsSiteComboboxOpen(false);
-                                onMarkUnsaved();
-                              }
-                            }}
-                            className="text-blue-600 hover:underline flex items-center gap-1 text-[11px] font-medium mt-1 cursor-pointer"
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Add new facility site</span>
-                          </button>
+                          {!isOperator && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newName = window.prompt("Enter new facility site name (e.g. Building 3 — Digital Lab):");
+                                if (newName && newName.trim()) {
+                                  const created = addSite({ name: newName.trim() });
+                                  handleFieldChange("site", created.id);
+                                  setIsSiteComboboxOpen(false);
+                                  onMarkUnsaved();
+                                }
+                              }}
+                              className="text-primary hover:underline flex items-center gap-1 text-[11px] font-medium mt-1 cursor-pointer"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Add new facility site</span>
+                            </button>
+                          )}
                         </CommandEmpty>
                         <CommandGroup heading="Manufacturing Facilities">
                           {sites.map((site) => {
@@ -1413,35 +998,37 @@ export function OverviewTab({
                                 }}
                                 className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2"
                               >
-                                <Check className={cn("mt-0.5 h-4 w-4 text-blue-600 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
+                                <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
                                 <div className="flex-1 min-w-0 space-y-0.5">
                                   <div className="flex items-center justify-between">
                                     <span className="font-medium text-foreground">{site.name}</span>
                                     <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">● Online</span>
                                   </div>
                                   <p className="text-[11px] text-muted-foreground">{site.label}</p>
-                                  <p className="text-[10px] text-zinc-400">{site.location}</p>
+                                  <p className="text-[10px] text-muted-foreground">{site.location}</p>
                                 </div>
                               </CommandItem>
                             );
                           })}
 
-                          <CommandItem
-                            value="__add_new_facility_site_action__"
-                            onSelect={() => {
-                              const newName = window.prompt("Enter new facility site name (e.g. Building 3 — Digital Lab):");
-                              if (newName && newName.trim()) {
-                                const created = addSite({ name: newName.trim() });
-                                handleFieldChange("site", created.id);
-                                setIsSiteComboboxOpen(false);
-                                onMarkUnsaved();
-                              }
-                            }}
-                            className="py-1.5 px-2.5 cursor-pointer text-xs flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-medium border-t border-zinc-100 dark:border-zinc-800 mt-1"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            <span>Add new facility site...</span>
-                          </CommandItem>
+                          {!isOperator && (
+                            <CommandItem
+                              value="__add_new_facility_site_action__"
+                              onSelect={() => {
+                                const newName = window.prompt("Enter new facility site name (e.g. Building 3 — Digital Lab):");
+                                if (newName && newName.trim()) {
+                                  const created = addSite({ name: newName.trim() });
+                                  handleFieldChange("site", created.id);
+                                  setIsSiteComboboxOpen(false);
+                                  onMarkUnsaved();
+                                }
+                              }}
+                              className="py-1.5 px-2.5 cursor-pointer text-xs flex items-center gap-1.5 text-primary font-medium border-t border-border mt-1"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>Add new facility site...</span>
+                            </CommandItem>
+                          )}
                         </CommandGroup>
                       </CommandList>
                     </Command>
@@ -1451,32 +1038,33 @@ export function OverviewTab({
 
               {/* Technology Combobox */}
               <div>
-                <label className="text-zinc-600 dark:text-zinc-400 font-medium text-xs block mb-1">
+                <label className="text-muted-foreground font-medium text-xs block mb-1">
                   Technology
                 </label>
-                <Popover open={isTechComboboxOpen} onOpenChange={setIsTechComboboxOpen}>
+                <Popover open={!isOperator && isTechComboboxOpen} onOpenChange={isOperator ? undefined : setIsTechComboboxOpen}>
                   <PopoverTrigger
                     render={
                       <Button
                         type="button"
                         variant="outline"
                         role="combobox"
+                        disabled={isOperator}
                         aria-expanded={isTechComboboxOpen}
-                        className="w-full h-8 justify-between px-2.5 text-xs bg-zinc-50 dark:bg-zinc-950 font-normal shadow-none border-zinc-200 dark:border-zinc-800 hover:border-blue-400 transition-colors"
+                        className={cn(
+                          "w-full h-8 justify-between px-2.5 text-xs bg-muted/30 font-normal shadow-none border-border transition-colors",
+                          isOperator ? "opacity-85 cursor-not-allowed" : "hover:border-primary/50"
+                        )}
                       />
                     }
                   >
                     <div className="flex items-center gap-1.5 min-w-0 flex-1 text-left">
-                      <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 font-medium shrink-0", activeTech.badgeClass)}>
-                        {activeTech.id}
-                      </Badge>
-                      <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">
+                      <span className="truncate font-medium text-foreground">
                         {activeTech.name}
                       </span>
                     </div>
                     <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
                   </PopoverTrigger>
-                  <PopoverContent className="w-[360px] p-0 shadow-xl border border-zinc-200 dark:border-zinc-800" align="start">
+                  <PopoverContent className="w-[360px] p-0 shadow-xl border border-border bg-popover" align="start">
                     <Command className="w-full">
                       <CommandInput placeholder="Search printing technology..." className="h-8 text-xs" />
                       <CommandList className="max-h-64">
@@ -1494,13 +1082,13 @@ export function OverviewTab({
                                 }}
                                 className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2"
                               >
-                                <Check className={cn("mt-0.5 h-4 w-4 text-blue-600 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
+                                <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
                                 <div className="flex-1 min-w-0 space-y-0.5">
                                   <div className="flex items-center justify-between">
                                     <span className="font-semibold text-foreground">{tech.name}</span>
-                                    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 font-normal", tech.badgeClass)}>
+                                    <span className="text-[10px] text-muted-foreground font-mono">
                                       {tech.equipmentCount} lines
-                                    </Badge>
+                                    </span>
                                   </div>
                                   <p className="text-[11px] text-muted-foreground line-clamp-1">{tech.description}</p>
                                 </div>
@@ -1518,30 +1106,34 @@ export function OverviewTab({
             {/* Assigned Press Machine Combobox */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-zinc-600 dark:text-zinc-400 font-medium text-xs">
+                <label className="text-muted-foreground font-medium text-xs">
                   {tOrder("machineLabel")}
                 </label>
-                <span className="text-[10px] text-muted-foreground">Equipment line assignment</span>
+                
               </div>
-              <Popover open={isMachineComboboxOpen} onOpenChange={setIsMachineComboboxOpen}>
+              <Popover open={!isOperator && isMachineComboboxOpen} onOpenChange={isOperator ? undefined : setIsMachineComboboxOpen}>
                 <PopoverTrigger
                   render={
                     <Button
                       type="button"
                       variant="outline"
                       role="combobox"
+                      disabled={isOperator}
                       aria-expanded={isMachineComboboxOpen}
-                      className="w-full h-8 justify-between px-2.5 text-xs bg-zinc-50 dark:bg-zinc-950 font-normal shadow-none border-zinc-200 dark:border-zinc-800 hover:border-blue-400 transition-colors"
+                      className={cn(
+                        "w-full h-8 justify-between px-2.5 text-xs bg-muted/30 font-normal shadow-none border-border transition-colors",
+                        isOperator ? "opacity-85 cursor-not-allowed" : "hover:border-primary/50"
+                      )}
                     />
                   }
                 >
                   <div className="flex items-center gap-2 min-w-0 flex-1 text-left">
-                    <Cpu className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                    <span className="truncate font-semibold text-zinc-900 dark:text-zinc-100">
+                    <Cpu className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <span className="truncate font-semibold text-foreground">
                       {activeMachine?.name || formData.pressMachine}
                     </span>
                     {activeMachine && (
-                      <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline font-normal">
+                      <span className="text-[11px] text-muted-foreground shrink-0 hidden @lg:inline font-mono">
                         • {activeMachine.format} ({activeMachine.speed})
                       </span>
                     )}
@@ -1554,7 +1146,7 @@ export function OverviewTab({
                     <ChevronsUpDown className="h-3 w-3 opacity-50" />
                   </div>
                 </PopoverTrigger>
-                <PopoverContent className="w-[460px] p-0 shadow-xl border border-zinc-200 dark:border-zinc-800" align="start">
+                <PopoverContent className="w-[460px] p-0 shadow-xl border border-border bg-popover" align="start">
                   <Command className="w-full">
                     <CommandInput placeholder="Search machine name, model, speed, format..." className="h-8 text-xs" />
                     <CommandList className="max-h-72">
@@ -1573,15 +1165,15 @@ export function OverviewTab({
                               }}
                               className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5"
                             >
-                              <Check className={cn("mt-0.5 h-4 w-4 text-blue-600 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
+                              <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
                               <div className="flex-1 min-w-0 space-y-0.5">
                                 <div className="flex items-center justify-between">
                                   <span className="font-semibold text-foreground">{mach.name}</span>
-                                  <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400">{mach.code}</span>
+                                  <span className="font-mono text-[10px] text-primary">{mach.code}</span>
                                 </div>
                                 <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>
-                                <div className="flex items-center gap-2 text-[10px] text-zinc-400 pt-0.5">
-                                  <span className="font-medium text-zinc-600 dark:text-zinc-300">{mach.format}</span>
+                                <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5">
+                                  <span className="font-medium text-foreground">{mach.format}</span>
                                   <span>•</span>
                                   <span>{mach.speed}</span>
                                   <span>•</span>
@@ -1608,14 +1200,14 @@ export function OverviewTab({
                                 }}
                                 className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5 opacity-80 hover:opacity-100"
                               >
-                                <Check className={cn("mt-0.5 h-4 w-4 text-blue-600 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
+                                <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
                                 <div className="flex-1 min-w-0 space-y-0.5">
                                   <div className="flex items-center justify-between">
                                     <span className="font-medium text-foreground">{mach.name}</span>
-                                    <Badge variant="outline" className="text-[10px] px-1 py-0">{mach.department}</Badge>
+                                    <span className="text-[10px] font-mono text-muted-foreground">{mach.department}</span>
                                   </div>
                                   <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>
-                                  <div className="flex items-center gap-2 text-[10px] text-zinc-400">
+                                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                                     <span>{mach.format}</span>
                                     <span>•</span>
                                     <span>{mach.speed}</span>
@@ -1632,21 +1224,23 @@ export function OverviewTab({
               </Popover>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">{tOrder("shiftStartLabel")}</label>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("shiftStartLabel")}</label>
                 <DatePicker 
                   value={formData.startDate} 
+                  disabled={isOperator}
                   onChange={(val) => handleFieldChange("startDate", val)}
-                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950" 
+                  className="h-8 text-xs bg-muted/30 disabled:opacity-85" 
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 block mb-1">{tOrder("deadlineLabel")}</label>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("deadlineLabel")}</label>
                 <DatePicker 
                   value={formData.deadline} 
+                  disabled={isOperator}
                   onChange={(val) => handleFieldChange("deadline", val)}
-                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950" 
+                  className="h-8 text-xs bg-muted/30 disabled:opacity-85" 
                 />
               </div>
             </div>
@@ -1655,180 +1249,60 @@ export function OverviewTab({
 
 
 
-        {/* Card: Planned Size & Variation Breakdown */}
-        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3.5">
-          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+        {/* Card 6: Quick Attached Files Snapshot */}
+        <div className="@container @3xl:col-span-2 p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
-              <Boxes className="w-4 h-4 text-blue-600" />
-              <span>Planned Size Breakdown</span>
+              <Paperclip className="w-4 h-4 text-primary shrink-0" />
+              <span className="font-semibold text-sm text-foreground truncate">
+                Files ({orderAttachments.length})
+              </span>
             </div>
-            <span className="text-[10px] text-muted-foreground font-mono">
-              Total: {formData.quantity.toLocaleString()} {formData.unit}
-            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onSwitchTab("files")}
+              className="h-6 px-2 text-[11px] text-primary hover:text-primary/90 hover:bg-primary/10 gap-1 cursor-pointer"
+            >
+              <span>View all</span>
+              <ArrowRight className="w-3 h-3" />
+            </Button>
           </div>
 
-          {formData.sizes && formData.sizes.length > 0 ? (
-            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md overflow-hidden max-h-[175px] overflow-y-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 sticky top-0">
-                  <tr>
-                    <th className="px-3 py-1.5 font-medium">Size / Variation</th>
-                    <th className="px-3 py-1.5 font-medium text-right">Target Quantity</th>
-                    <th className="px-3 py-1.5 font-medium text-right">Pack Allocation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {formData.sizes.map((s) => (
-                    <tr key={s.id} className="border-b border-zinc-100 dark:border-zinc-800/60 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
-                      <td className="px-3 py-1.5 font-semibold text-zinc-900 dark:text-zinc-100">{s.size}</td>
-                      <td className="px-3 py-1.5 text-right font-mono font-medium">{s.quantity.toLocaleString()} pcs</td>
-                      <td className="px-3 py-1.5 text-right font-mono text-zinc-500">
-                        {Math.round((s.quantity / formData.quantity) * 100)}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-zinc-50 dark:bg-zinc-900/40 border-t border-zinc-200 dark:border-zinc-800 font-semibold sticky bottom-0">
-                  <tr>
-                    <td className="px-3 py-1.5 text-zinc-600 dark:text-zinc-400">Total Planned:</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-blue-600 dark:text-blue-400">
-                      {formData.sizes.reduce((sum, s) => sum + s.quantity, 0).toLocaleString()} pcs
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-zinc-500">100%</td>
-                  </tr>
-                </tfoot>
-              </table>
+          {/* Quick file chips list */}
+          {orderAttachments.length > 0 ? (
+            <div className="grid grid-cols-1 @md:grid-cols-2 @2xl:grid-cols-3 gap-2">
+              {orderAttachments.slice(0, 3).map((file) => {
+                const fKind = getFileKind(file);
+                const fMeta = FILE_KIND_ICON[fKind];
+                const Icon = fMeta.icon;
+                return (
+                  <div
+                    key={file.id}
+                    onClick={() => onSwitchTab("files")}
+                    className="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs"
+                  >
+                    <div className="w-6 h-6 rounded bg-background border border-border flex items-center justify-center shrink-0">
+                      <Icon className={cn("w-3.5 h-3.5", fMeta.className)} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-foreground truncate text-[11px]">{file.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{file.size}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ) : (
-            <div className="text-center py-6 text-zinc-400 text-xs italic border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md">
-              Single standard size ({formData.quantity.toLocaleString()} {formData.unit})
-            </div>
+            <p className="text-xs text-muted-foreground italic">No files attached.</p>
           )}
-        </div>
-
-        {/* Card: Attached Files & Technical Documents */}
-        <div className="md:col-span-2 p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3.5 flex flex-col">
-          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
-            <div className="flex items-center gap-2">
-              <Paperclip className="w-4 h-4 text-blue-600" />
-              <span>Attached Files & Documents</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground font-mono">
-                ({orderAttachments.length})
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs px-2.5 gap-1.5 rounded cursor-pointer"
-                onClick={() => document.getElementById("wo-doc-upload-input")?.click()}
-              >
-                <Plus className="w-3.5 h-3.5 text-blue-600" />
-                <span>Attach</span>
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex-1 min-h-0 flex flex-col">
-            {orderAttachments.length > 0 ? (
-              <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 flex flex-col gap-1.5">
-                {orderAttachments.map((file) => {
-                  const fKind = getFileKind(file);
-                  const fMeta = FILE_KIND_ICON[fKind];
-                  const Icon = fMeta.icon;
-                  const isLinkable = isPreviewable(file);
-
-                  return (
-                    <Attachment 
-                      key={file.id} 
-                      size="sm" 
-                      className={cn(
-                        "w-full flex items-center justify-between p-2 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/60 hover:bg-zinc-100/80 dark:hover:bg-zinc-800/80 transition-colors shadow-none",
-                        isLinkable && "cursor-pointer"
-                      )}
-                      onClick={isLinkable ? () => setPreviewFile(file) : undefined}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <AttachmentMedia variant={file.isImage ? "image" : "icon"} className="w-7 h-7 rounded shrink-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-                          <Icon className={cn("w-3.5 h-3.5", fMeta.className)} />
-                        </AttachmentMedia>
-                        <AttachmentContent className="min-w-0 flex-1">
-                          <AttachmentTitle className={cn("text-xs font-medium truncate block text-zinc-900 dark:text-zinc-100", isLinkable && "hover:underline hover:text-blue-600 dark:hover:text-blue-400")}>{file.name}</AttachmentTitle>
-                          <AttachmentDescription className="text-[10px] text-zinc-500 block">
-                            {file.size} • {file.type} {file.date ? `• ${file.date}` : ""}
-                          </AttachmentDescription>
-                        </AttachmentContent>
-                      </div>
-                      <AttachmentActions className="shrink-0 ml-2 flex items-center gap-1.5">
-                        {file.url && (
-                          <AttachmentAction 
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              downloadFile(file);
-                            }}
-                            className="h-7 w-7 p-0 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded cursor-pointer"
-                            title="Download document"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </AttachmentAction>
-                        )}
-                        <AttachmentAction 
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOrderAttachments(prev => prev.filter(f => f.id !== file.id));
-                            onMarkUnsaved();
-                          }}
-                          className="h-7 w-7 p-0 hover:bg-destructive/10 hover:text-destructive text-zinc-400 rounded cursor-pointer"
-                          title="Remove attachment"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </AttachmentAction>
-                      </AttachmentActions>
-                    </Attachment>
-                  );
-                })}
-              </div>
-            ) : (
-              <div 
-                className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-blue-500 rounded-md p-6 text-center cursor-pointer bg-zinc-50/50 dark:bg-zinc-950/50 hover:bg-blue-50/30 transition-all flex-1 flex flex-col items-center justify-center min-h-[140px]"
-                onClick={() => document.getElementById("wo-doc-upload-input")?.click()}
-              >
-                <UploadCloud className="w-6 h-6 text-zinc-400 mb-1.5" />
-                <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">No attachments linked yet</p>
-                <p className="text-[10px] text-zinc-400 mt-0.5">Click to attach vector die-lines, contracts, or customer specifications</p>
-              </div>
-            )}
-
-            <input 
-              type="file" 
-              id="wo-doc-upload-input" 
-              className="hidden" 
-              multiple
-              onChange={(e) => {
-                if (e.target.files) {
-                  const newFiles = Array.from(e.target.files).map((f, i) => ({
-                    id: `att-new-${Date.now()}-${i}`,
-                    name: f.name,
-                    size: `${(f.size / 1024 / 1024).toFixed(2)} MB`,
-                    type: f.type || "Document",
-                    date: new Date().toISOString().slice(0, 16).replace("T", " "),
-                    isImage: f.type.startsWith("image/"),
-                  }));
-                  setOrderAttachments(prev => [...prev, ...newFiles]);
-                  onMarkUnsaved();
-                }
-              }} 
-            />
-          </div>
         </div>
           </div>
         </div>
 
         {/* Right Column (1/3 width on xl screens, stacks gracefully on smaller screens) */}
-        <div className="xl:col-span-1 space-y-4">
+        <div className="grid grid-cols-1 @3xl:grid-cols-2 @7xl:grid-cols-1 gap-4 content-start">
           {/* Pre-Flight Readiness & Production Route */}
           <OrderReadinessRouteCard
             workOrderId={data?.docNo || tabId}
@@ -1843,55 +1317,61 @@ export function OverviewTab({
           />
 
         {/* Card 3: Linked Recipe & Live Materials Availability */}
-        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3.5">
-          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+        <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
-              <Boxes className="w-4 h-4 text-blue-600" />
-              <span>Recipe Specification & Stock Availability</span>
+              <Boxes className="w-4 h-4 text-primary shrink-0" />
+              <span className="font-semibold text-sm text-foreground truncate">Materials</span>
             </div>
             {hasShortage ? (
-              <Badge variant="outline" className="text-[10px] bg-red-50 text-red-600 border-red-200 dark:bg-red-950/40 dark:border-red-900">
-                Stock Deficit
-              </Badge>
+              <div className="flex items-center gap-1.5 text-xs text-destructive font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-destructive animate-pulse" />
+                <span>Shortage</span>
+              </div>
             ) : (
-              <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-900">
-                All Materials In Stock
-              </Badge>
+              <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>In stock</span>
+              </div>
             )}
           </div>
 
           <div className="space-y-3">
             {/* Active BOM Recipe / Specification Combobox */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-zinc-600 dark:text-zinc-400 font-medium text-xs">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-muted-foreground font-medium text-xs">
                   Master BOM Specification
                 </label>
-                <span className="text-[10px] text-muted-foreground">Searchable recipe catalog</span>
+                
               </div>
 
               <div className="flex items-center gap-1.5 min-w-0 w-full">
-                <Popover open={isSpecComboboxOpen} onOpenChange={setIsSpecComboboxOpen}>
+                <Popover open={!isOperator && isSpecComboboxOpen} onOpenChange={isOperator ? undefined : setIsSpecComboboxOpen}>
                   <PopoverTrigger
                     render={
                       <Button
                         type="button"
                         variant="outline"
                         role="combobox"
+                        disabled={isOperator}
                         aria-expanded={isSpecComboboxOpen}
-                        className="flex-1 min-w-0 h-8 justify-between px-2.5 text-xs bg-zinc-50 dark:bg-zinc-950 font-normal shadow-none border-zinc-200 dark:border-zinc-800 hover:border-blue-400 transition-colors"
+                        className={cn(
+                          "flex-1 min-w-0 h-8 justify-between px-2.5 text-xs bg-muted/30 font-normal shadow-none border-border transition-colors",
+                          isOperator ? "opacity-85 cursor-not-allowed" : "hover:border-primary/50"
+                        )}
                       />
                     }
                   >
                     <div className="flex items-center gap-1.5 min-w-0 flex-1 text-left">
-                      <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200 shrink-0">
+                      <span className="font-mono text-[11px] font-semibold text-primary shrink-0">
                         {activeSpec?.code || formData.recipe}
-                      </Badge>
-                      <span className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-100 flex-1 min-w-0">
+                      </span>
+                      <span className="truncate text-xs font-medium text-foreground flex-1 min-w-0">
                         {activeSpec?.name || formData.recipe}
                       </span>
                       {activeSpec && (
-                        <span className="text-[10px] text-muted-foreground shrink-0 hidden xl:inline">
+                        <span className="text-[11px] text-muted-foreground shrink-0 hidden xl:inline font-mono">
                           ({activeSpec.materialsCount} mats)
                         </span>
                       )}
@@ -1899,7 +1379,7 @@ export function OverviewTab({
                     <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
                   </PopoverTrigger>
 
-                  <PopoverContent className="w-[380px] p-0 shadow-xl border border-zinc-200 dark:border-zinc-800" align="start">
+                  <PopoverContent className="w-[380px] p-0 shadow-xl border border-border bg-popover" align="start">
                     <Command className="w-full">
                       <CommandInput placeholder="Search code, name, technology, or materials..." className="h-8 text-xs" />
                       <CommandList className="max-h-72">
@@ -1927,11 +1407,11 @@ export function OverviewTab({
                                     className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5"
                                   >
                                     <div className="mt-0.5 shrink-0">
-                                      <Check className={cn("h-4 w-4 text-blue-600", isSelected ? "opacity-100" : "opacity-0")} />
+                                      <Check className={cn("h-4 w-4 text-primary", isSelected ? "opacity-100" : "opacity-0")} />
                                     </div>
                                     <div className="flex-1 min-w-0 space-y-0.5">
                                       <div className="flex items-center gap-2">
-                                        <span className="font-mono font-semibold text-[11px] text-blue-600 dark:text-blue-400">
+                                        <span className="font-mono font-semibold text-[11px] text-primary">
                                           {spec.code}
                                         </span>
                                         <span className="font-medium text-foreground truncate">
@@ -1944,10 +1424,10 @@ export function OverviewTab({
                                       <p className="text-[11px] text-muted-foreground line-clamp-1">
                                         {spec.description}
                                       </p>
-                                      <div className="flex items-center gap-2 text-[10px] text-zinc-400 pt-0.5">
+                                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5 font-mono">
                                         <span>{spec.materialsCount} raw materials</span>
                                         <span>•</span>
-                                        <span>{spec.estimatedCost} standard batch</span>
+                                        <span>{spec.estimatedCost} batch</span>
                                       </div>
                                     </div>
                                   </CommandItem>
@@ -1966,7 +1446,7 @@ export function OverviewTab({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 px-2.5 gap-1.5 text-xs shrink-0 border-zinc-200 dark:border-zinc-800 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-600 hover:border-blue-300 transition-colors cursor-pointer"
+                  className="h-8 px-2.5 gap-1.5 text-xs shrink-0 cursor-pointer"
                   title="Open Master Product Specification document"
                   onClick={() => {
                     const specToOpen = activeSpec || MASTER_SPECIFICATIONS[0];
@@ -1985,21 +1465,21 @@ export function OverviewTab({
                     });
                   }}
                 >
-                  <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
+                  <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="hidden sm:inline">Spec</span>
                 </Button>
               </div>
             </div>
 
-            {/* Materials Mini Table using official shadcn Table with horizontal scroll safety */}
-            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md overflow-x-auto bg-background">
+            {/* Materials Mini Table using official shadcn Table */}
+            <div className="border border-border rounded-md overflow-x-auto bg-card">
               <Table className="text-xs w-full min-w-[280px]">
-                <TableHeader className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
-                  <TableRow className="hover:bg-transparent border-b border-zinc-200 dark:border-zinc-800">
-                    <TableHead className="h-7 px-2 text-[11px] font-medium text-muted-foreground">Material</TableHead>
+                <TableHeader className="bg-muted/50 border-b border-border">
+                  <TableRow className="hover:bg-transparent border-b border-border">
+                    <TableHead className="h-7 px-2.5 text-[11px] font-medium text-muted-foreground">Material</TableHead>
                     <TableHead className="h-7 px-2 text-[11px] font-medium text-muted-foreground text-right">Required</TableHead>
                     <TableHead className="h-7 px-2 text-[11px] font-medium text-muted-foreground text-right">In Stock</TableHead>
-                    <TableHead className="h-7 px-2 text-[11px] font-medium text-muted-foreground text-right">Status</TableHead>
+                    <TableHead className="h-7 px-2.5 text-[11px] font-medium text-muted-foreground text-right">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2009,24 +1489,28 @@ export function OverviewTab({
                       <TableRow 
                         key={i} 
                         className={cn(
-                          "border-b border-zinc-100 dark:border-zinc-800/60 hover:bg-muted/40",
-                          isShortage && "bg-red-50/40 dark:bg-red-950/20"
+                          "border-b border-border/50 last:border-0 hover:bg-muted/40",
+                          isShortage && "bg-destructive/5"
                         )}
                       >
-                        <TableCell className="p-2 px-2 font-medium text-zinc-900 dark:text-zinc-100 truncate max-w-[150px]" title={mat.name}>
+                        <TableCell className="p-2 px-2.5 font-medium text-foreground truncate max-w-[140px]" title={mat.name}>
                           {mat.name}
                         </TableCell>
-                        <TableCell className="p-2 px-2 text-right text-zinc-600 dark:text-zinc-400 font-mono text-[10px] whitespace-nowrap">
+                        <TableCell className="p-2 px-2 text-right text-muted-foreground font-mono text-[11px] whitespace-nowrap">
                           {mat.req.toLocaleString()} {mat.unit}
                         </TableCell>
-                        <TableCell className="p-2 px-2 text-right text-zinc-600 dark:text-zinc-400 font-mono text-[10px] whitespace-nowrap">
+                        <TableCell className="p-2 px-2 text-right text-muted-foreground font-mono text-[11px] whitespace-nowrap">
                           {mat.stock.toLocaleString()} {mat.unit}
                         </TableCell>
-                        <TableCell className="p-2 px-2 text-right whitespace-nowrap">
+                        <TableCell className="p-2 px-2.5 text-right whitespace-nowrap">
                           {isShortage ? (
-                            <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 dark:bg-red-950/40 dark:border-red-900 text-[10px] px-1.5 py-0.5 shadow-none font-medium">Shortage</Badge>
+                            <span className="inline-flex items-center text-[10px] font-medium text-destructive">
+                              Shortage
+                            </span>
                           ) : (
-                            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-900 text-[10px] px-1.5 py-0.5 shadow-none font-medium">Available</Badge>
+                            <span className="inline-flex items-center text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                              Available
+                            </span>
                           )}
                         </TableCell>
                       </TableRow>
@@ -2041,105 +1525,121 @@ export function OverviewTab({
               variant="outline" 
               size="sm" 
               onClick={() => onSwitchTab("materials")}
-              className="w-full h-8 text-xs gap-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30 border-blue-200 dark:border-blue-900"
+              className="w-full h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span>Open Full Materials BOM & Stock Allocations</span>
+              <span>Full BOM & Stock Allocation</span>
             </Button>
           </div>
         </div>
 
-        {/* Card 4: Financial Calculation & Costing (Manager View) OR Operator Notice (Operator View) */}
-        {viewMode === "operator" ? (
-          <div className="p-4 bg-amber-500/10 border-2 border-amber-500/30 rounded-lg shadow-2xs space-y-3">
-            <div className="flex items-start gap-2.5">
-              <div className="p-2 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
-                <Sparkles className="w-5 h-5" />
+        {/* Card 4: Financial Calculation (Manager) OR Shift Production Target (Operator) */}
+        {isOperator ? (
+          <div className="p-3.5 bg-card border border-amber-500/30 rounded-lg shadow-2xs space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Factory className="w-4 h-4 text-amber-500 shrink-0" />
+                <span className="font-semibold text-sm text-foreground truncate">Shift Production Target</span>
               </div>
-              <div className="space-y-1">
-                <div className="font-bold text-sm text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                  <span>{tEnhance("operatorNotice")}</span>
-                  <Badge className="bg-amber-500 hover:bg-amber-500 text-white font-bold text-[10px]">OPERATOR MODE</Badge>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {tEnhance("operatorNoticeDesc")}
-                </p>
-              </div>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                Operator Mode
+              </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-amber-500/20 text-xs font-mono">
-              <div className="bg-white/60 dark:bg-zinc-900/60 p-2 rounded border border-amber-500/20">
-                <span className="text-[10px] text-muted-foreground block">Assigned Equipment</span>
-                <span className="font-bold text-foreground truncate block">{formData.pressMachine}</span>
+            <div className="space-y-2.5 text-xs">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {tEnhance("operatorNoticeDesc")}
+              </p>
+
+              <div className="grid grid-cols-2 gap-2 pt-1 font-mono">
+                <div className="bg-muted/30 p-2.5 rounded-md border border-border">
+                  <span className="text-[10px] text-muted-foreground block font-sans">Assigned Equipment</span>
+                  <span className="font-semibold text-foreground truncate block mt-0.5">{formData.pressMachine}</span>
+                </div>
+                <div className="bg-muted/30 p-2.5 rounded-md border border-border">
+                  <span className="text-[10px] text-muted-foreground block font-sans">Target Run Quantity</span>
+                  <span className="font-bold text-primary block mt-0.5">{formData.quantity.toLocaleString()} {formData.unit}</span>
+                </div>
               </div>
-              <div className="bg-white/60 dark:bg-zinc-900/60 p-2 rounded border border-amber-500/20">
-                <span className="text-[10px] text-muted-foreground block">Target Run Quantity</span>
-                <span className="font-bold text-blue-600 dark:text-blue-400 block">{formData.quantity.toLocaleString()} {formData.unit}</span>
+
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSwitchTab("operations")}
+                  className="w-full h-8 text-xs gap-1.5 border-amber-500/30 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Open Operations Log & Shift Tracker</span>
+                </Button>
               </div>
             </div>
           </div>
         ) : (
-          <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3.5">
-            <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+          <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
               <div className="flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-blue-600" />
-                <span>Cost Structure & Production Margin</span>
+                <DollarSign className="w-4 h-4 text-primary shrink-0" />
+                <span className="font-semibold text-sm text-foreground truncate">Cost Structure & Margin</span>
               </div>
-              <Badge variant="outline" className="text-[10px] font-mono text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30">
+              <span className="text-xs font-mono font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                 Margin: 38.4%
-              </Badge>
+              </span>
             </div>
 
-            <div className="space-y-3">
-              <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded border border-zinc-200 dark:border-zinc-800 font-mono text-xs space-y-1.5">
-                <div className="flex justify-between text-zinc-500">
-                  <span>Raw Materials Allocation:</span>
-                  <span className="text-zinc-800 dark:text-zinc-200 font-medium">$6,420.00</span>
+            <div className="space-y-2.5">
+              <div className="p-2.5 bg-muted/30 rounded-md border border-border font-mono text-xs space-y-1.5">
+                <div className="flex justify-between text-muted-foreground">
+                  <span className="font-sans">Raw Materials:</span>
+                  <span className="text-foreground font-medium">$6,420.00</span>
                 </div>
-                <div className="flex justify-between text-zinc-500">
-                  <span>Press Run & Machine Time:</span>
-                  <span className="text-zinc-800 dark:text-zinc-200 font-medium">$4,100.00</span>
+                <div className="flex justify-between text-muted-foreground">
+                  <span className="font-sans">Machine Run Time:</span>
+                  <span className="text-foreground font-medium">$4,100.00</span>
                 </div>
-                <div className="flex justify-between text-zinc-500">
-                  <span>Post-press & Finishing Operations:</span>
-                  <span className="text-zinc-800 dark:text-zinc-200 font-medium">$2,830.00</span>
+                <div className="flex justify-between text-muted-foreground">
+                  <span className="font-sans">Post-press & Finishing:</span>
+                  <span className="text-foreground font-medium">$2,830.00</span>
                 </div>
-                <div className="flex justify-between text-zinc-500">
-                  <span>Packaging & Multi-site Logistics:</span>
-                  <span className="text-zinc-800 dark:text-zinc-200 font-medium">$1,500.00</span>
+                <div className="flex justify-between text-muted-foreground">
+                  <span className="font-sans">Packaging & Logistics:</span>
+                  <span className="text-foreground font-medium">$1,500.00</span>
                 </div>
-                <Separator className="my-2" />
-                <div className="flex justify-between items-baseline font-bold text-sm">
-                  <span className="text-zinc-900 dark:text-zinc-100">Document Total:</span>
-                  <span className="text-blue-600 dark:text-blue-400 font-semibold text-base">${formData.priceTotal.toLocaleString("en-US")} {formData.currency}</span>
+                <Separator className="my-1.5" />
+                <div className="flex justify-between items-baseline font-bold">
+                  <span className="text-foreground font-sans">Document Total:</span>
+                  <span className="text-primary font-semibold text-sm font-mono">
+                    ${formData.priceTotal.toLocaleString("en-US")} {formData.currency}
+                  </span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-500 bg-zinc-100/60 dark:bg-zinc-900 p-2 rounded">
-                <div>Payment Terms: <span className="font-semibold text-zinc-700 dark:text-zinc-300">Net 30</span></div>
-                <div>Invoicing: <span className="font-semibold text-emerald-600">Pre-authorized</span></div>
+              <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground bg-muted/20 p-2 rounded-md border border-border">
+                <div>Terms: <span className="font-semibold text-foreground">Net 30</span></div>
+                <div>Billing: <span className="font-semibold text-emerald-600 dark:text-emerald-400">Pre-authorized</span></div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Card 5: Shift Handover Notes Log */}
-        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3 flex flex-col">
-          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+        {/* Card 5: Shift Handover Notes Log (Always active & editable for Operators and Managers) */}
+        <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 flex flex-col">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-blue-600" />
-              <span>{tEnhance("shiftNotesTitle")}</span>
+              <MessageSquare className="w-4 h-4 text-primary shrink-0" />
+              <span className="font-semibold text-sm text-foreground truncate">{tEnhance("shiftNotesTitle")}</span>
             </div>
-            <span className="text-[10px] text-muted-foreground font-mono">
+            <span className="text-[11px] text-muted-foreground font-mono">
               {((formData.shiftNotes && formData.shiftNotes.length > 0) ? formData.shiftNotes : defaultShiftNotes).length} notes
             </span>
           </div>
 
           {/* New note input form */}
-          <div className="space-y-2 bg-zinc-50 dark:bg-zinc-950 p-2.5 rounded border border-zinc-100 dark:border-zinc-800">
+          <div className="space-y-2 bg-muted/30 p-2.5 rounded-md border border-border">
             <div className="grid grid-cols-2 gap-2">
               <Select value={newShiftType} onValueChange={(val: any) => setNewShiftType(val)}>
-                <SelectTrigger className="h-7 text-xs bg-white dark:bg-zinc-900">
+                <SelectTrigger className="h-7 text-xs bg-background">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2153,7 +1653,7 @@ export function OverviewTab({
                 value={newNoteAuthor}
                 onChange={(e) => setNewNoteAuthor(e.target.value)}
                 placeholder={tEnhance("author")}
-                className="h-7 text-xs bg-white dark:bg-zinc-900"
+                className="h-7 text-xs bg-background"
               />
             </div>
 
@@ -2165,16 +1665,16 @@ export function OverviewTab({
                   if (e.key === "Enter") handleAddShiftNote();
                 }}
                 placeholder={tEnhance("notePlaceholder")}
-                className="h-7 text-xs bg-white dark:bg-zinc-900 flex-1"
+                className="h-7 text-xs bg-background flex-1"
               />
               <Button
                 type="button"
                 size="sm"
                 onClick={handleAddShiftNote}
                 disabled={!newNoteText.trim()}
-                className="h-7 px-2.5 text-xs bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shrink-0"
+                className="h-7 px-2.5 text-xs gap-1 cursor-pointer shrink-0"
               >
-                <Plus className="w-3.5 h-3.5 mr-1" />
+                <Plus className="w-3.5 h-3.5" />
                 <span>{tEnhance("addNote")}</span>
               </Button>
             </div>
@@ -2185,26 +1685,25 @@ export function OverviewTab({
             {((formData.shiftNotes && formData.shiftNotes.length > 0) ? formData.shiftNotes : defaultShiftNotes).map((note) => (
               <div
                 key={note.id}
-                className="p-2 rounded bg-zinc-50/70 dark:bg-zinc-950/50 border border-zinc-100 dark:border-zinc-800/80 text-xs space-y-1"
+                className="p-2 rounded-md bg-muted/20 border border-border text-xs space-y-1"
               >
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                   <div className="flex items-center gap-1.5">
-                    <Badge
-                      variant="outline"
+                    <span
                       className={cn(
-                        "px-1 py-0 text-[9.5px]",
-                        note.shift === "Morning" && "text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/40",
-                        note.shift === "Evening" && "text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-950/40",
-                        note.shift === "Night" && "text-purple-600 border-purple-300 bg-purple-50 dark:bg-purple-950/40"
+                        "px-1.5 py-0.2 rounded text-[10px] font-semibold border",
+                        note.shift === "Morning" && "text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10",
+                        note.shift === "Evening" && "text-blue-600 dark:text-blue-400 border-blue-500/30 bg-blue-500/10",
+                        note.shift === "Night" && "text-purple-600 dark:text-purple-400 border-purple-500/30 bg-purple-500/10"
                       )}
                     >
                       {note.shift}
-                    </Badge>
+                    </span>
                     <span className="font-semibold text-foreground">{note.author}</span>
                   </div>
-                  <span>{note.time}</span>
+                  <span className="font-mono text-[10px]">{note.time}</span>
                 </div>
-                <p className="text-zinc-700 dark:text-zinc-300 leading-snug">{note.text}</p>
+                <p className="text-foreground/90 leading-snug">{note.text}</p>
               </div>
             ))}
           </div>

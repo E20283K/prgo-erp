@@ -846,5 +846,29 @@
     "posLeftCenter": "Chapda o'rtada",
     "posRightCenter": "O'ngda o'rtada",
     "posNone": "Teshiksiz"
+  },
+  "DocumentShell": {
+    "sections": "Bo'limlar",
+    "quantity": "Tiraj / Hajm",
+    "technology": "Texnologiya",
+    "lamination": "Laminatsiya",
+    "none": "Yo'q",
+    "materialShortage": "Xomashyo yetishmovchiligi",
+    "specsAndDrawing": "Spetsifikatsiya & Chizma",
+    "filesAndDocs": "Hujjatlar & Fayllar",
+    "machineAndDeadline": "Uskuna va Muddat",
+    "machine": "Stanok",
+    "deadline": "Muddat",
+    "site": "Tsex / Bino",
+    "totalAmount": "Jami summa",
+    "departmentType": "Bo'lim / Turi",
+    "responsibleAndDeadline": "Mas'ul va Muddat",
+    "responsible": "Mas'ul",
+    "linkedWo": "Bog'langan WO",
+    "production": "Ishlab chiqarish",
+    "notLinked": "Biriktirilmagan",
+    "customerNotSet": "Mijoz ko'rsatilmagan",
+    "untitledOrder": "Buyurtma",
+    "createDeliveryAct": "Topshirish dalolatnomasi"
   }
 }

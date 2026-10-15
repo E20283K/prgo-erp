@@ -15,24 +15,37 @@ import {
   LayoutTemplate,
   Disc,
   Receipt,
+  Building2,
+  Calendar,
+  UserCheck,
+  ExternalLink,
+  Ruler,
+  Paperclip,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  DocumentHeader,
+  HeaderIconAction,
+  DocumentSidebar,
+  SidebarSummaryCard,
+  SidebarSectionTitle,
+  InfoRow,
+  formatMoney,
+} from "../common/DocumentShell";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
 
 import { ClientOrderFormData, ClientOrderSampleData, SizeDistribution, OrderAttachment, AuditLogItem } from "./types";
 import { EXAMPLE_ATTACHMENTS } from "@/components/file-viewer/file-utils";
 import { OverviewTab } from "./tabs/OverviewTab";
+import { SpecificationsTab } from "./tabs/SpecificationsTab";
 import { CostCalcTab } from "./tabs/CostCalcTab";
 import { SampleTab } from "./tabs/SampleTab";
 import { AuditTab } from "./tabs/AuditTab";
 import { LayoutCalcTab } from "./tabs/LayoutCalcTab";
 import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
+import { FilesTab } from "../common/FilesTab";
 import { calculateFlexoLayout } from "@/lib/flexo/calculator";
 import { exportFlexoPDF } from "@/lib/flexo/pdfExport";
 import { pdf } from "@react-pdf/renderer";
@@ -41,6 +54,7 @@ import { OrderSpecificationPDF } from "./OrderSpecificationPDF";
 export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
   const t = useTranslations("ClientOrder");
   const tAct = useTranslations("DeliveryAct");
+  const tShell = useTranslations("DocumentShell");
   const { setTabUnsaved, closeTab, setLevel3Tab, theme, openTab, addNotification, currentUser, createDeliveryActFromOrder } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
@@ -69,7 +83,27 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
     cornerType: data.cornerType || "Square",
     bleed: data.bleed || 2,
     paperStock: data.paperStock || "Galerie Art Silk 150g/m²",
+    lamination: data.lamination || "Soft-Touch Matte",
+    laminationSides: data.laminationSides || "1s",
+    laminationMicron: data.laminationMicron || 28,
+    embellishment: data.embellishment || "Spot UV (3D)",
     coating: data.coating || "Soft-Touch Matte + Spot UV",
+    colorsConfig: data.colorsConfig || "5+0 (CMYK + 1 Spot)",
+    spotColors: data.spotColors || ["PANTONE 021 C (Neon Orange)"],
+    spotColorItems: data.spotColorItems || [
+      {
+        id: "spot-1",
+        name: "PANTONE 021 C (Neon Orange)",
+        code: "021 C",
+        hex: "#fe5000",
+        side: "front",
+      },
+    ],
+    frontColors: data.frontColors || { c: true, m: true, y: true, k: true },
+    backColors: data.backColors || { c: false, m: false, y: false, k: false },
+    holeSize: data.holeSize !== undefined ? data.holeSize : 4,
+    holePosition: data.holePosition || "top-center",
+    holeOffset: data.holeOffset !== undefined ? data.holeOffset : 6,
     priceTotal: data.priceTotal || 14850.0,
     currency: data.currency || "USD",
     photoUrl: data.photoUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
@@ -234,226 +268,290 @@ export function ClientOrderDetail({ tab }: { tab: DocumentTab }) {
   };
 
   return (
-    <div className="w-full h-full bg-zinc-50 dark:bg-zinc-950 flex flex-col overflow-hidden text-xs">
+    <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">
       <Tabs 
         value={effectiveActiveTab} 
         onValueChange={(val) => setLevel3Tab(tab.id, val)}
         className="flex-1 flex flex-col overflow-hidden"
       >
-        <div className="px-3 bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-center justify-between h-9 gap-2">
-          <TabsList variant="line" className="gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-w-0">
-            <TabsTrigger value="overview" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
-              <FileText className="w-3.5 h-3.5" />
-              <span>{t("tabOverview") || "Overview"}</span>
-            </TabsTrigger>
+        {/* 1C Level-3 Document Workspace Header Bar */}
+        <DocumentHeader
+          icon={FileText}
+          title={formData.product || formData.customer || tShell("untitledOrder")}
+          docNo={data.docNo || tab.id}
+          status={formData.status}
+          priority={formData.priority}
+          actions={
+            <>
+              <HeaderIconAction
+                icon={Receipt}
+                label={tAct("createFromOrder")}
+                variant="outline"
+                className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                onClick={() => {
+                  const newAct = createDeliveryActFromOrder({
+                    orderId: data.docNo || tab.id,
+                    workOrderId: formData.linkedWoId || "WO-00351",
+                    customer: formData.customer || "Alpha Media Group LLC",
+                    product: formData.product || "Printed Catalog / Packaging",
+                    quantity: formData.quantity || 1000,
+                    unit: formData.unit || "pcs",
+                    priceTotal: formData.priceTotal || 14850,
+                    currency: formData.currency || "USD",
+                  });
+                  openTab({
+                    id: newAct.id,
+                    title: `${newAct.id}: ${newAct.customer}`,
+                    type: "delivery-act",
+                    module: "sales",
+                    isUnsaved: true,
+                    activeLevel3Tab: "overview",
+                    documentData: newAct,
+                  });
+                }}
+              />
+              <HeaderIconAction icon={Printer} label={t("printSpec")} onClick={handlePrintSpec} />
+              <Separator orientation="vertical" className="h-4 mx-0.5" />
+              <HeaderIconAction icon={Save} label={`${t("save")} (Ctrl+S)`} variant="outline" onClick={handleSave} />
+              <Button
+                onClick={handleSaveAndClose}
+                size="sm"
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium shadow-none cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{t("postAndClose")}</span>
+              </Button>
+            </>
+          }
+        />
+
+        {/* Main Workspace Body: Left Sub-Sidebar + Right Content Viewport */}
+        <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
+          <DocumentSidebar
+            sectionsLabel={tShell("sections")}
+            activeId={effectiveActiveTab}
+            onSelect={(id) => setLevel3Tab(tab.id, id)}
+            summary={
+              <SidebarSummaryCard
+                icon={Building2}
+                title={formData.customer || tShell("customerNotSet")}
+                subtitle={`${formData.department} · ${formData.orderType}`}
+              >
+                <InfoRow label={tShell("totalAmount")}>
+                  <span className="font-mono font-bold">{formatMoney(formData.priceTotal, currency)}</span>
+                </InfoRow>
+                <InfoRow label={tShell("quantity")}>
+                  <span className="font-mono">
+                    {(formData.quantity || 0).toLocaleString()} {formData.unit || "pcs"}
+                  </span>
+                </InfoRow>
+                {formData.lamination && formData.lamination.toLowerCase() !== "none" && (
+                  <InfoRow label={tShell("lamination")}>
+                    <span className="text-blue-600 dark:text-blue-400">
+                      {formData.lamination.split(" ")[0]} ({(formData.laminationSides || "1s").toUpperCase()})
+                    </span>
+                  </InfoRow>
+                )}
+              </SidebarSummaryCard>
+            }
+            items={[
+              { id: "overview", label: t("tabOverview"), icon: FileText },
+              {
+                id: "specs",
+                label: tShell("specsAndDrawing"),
+                icon: Ruler,
+                badge: `${formData.width || 50}×${formData.height || 90}`,
+              },
+              ...(!isFlexo || isOffset ? [{ id: "layout", label: t("tabLayout"), icon: LayoutTemplate }] : []),
+              ...(isFlexo ? [{ id: "flexo", label: t("tabFlexo"), icon: Disc }] : []),
+              {
+                id: "costCalc",
+                label: t("tabCostCalc"),
+                icon: DollarSign,
+                badge: formatMoney(formData.priceTotal, currency, 0),
+              },
+              {
+                id: "sample",
+                label: t("tabSample"),
+                icon: Package,
+                badge: sampleData.approvalStatus,
+                badgeClassName:
+                  sampleData.approvalStatus === "Approved"
+                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                    : sampleData.approvalStatus === "Revision"
+                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                    : undefined,
+              },
+              { id: "files", label: tShell("filesAndDocs"), icon: Paperclip, badge: orderAttachments.length || null },
+              { id: "audit", label: t("tabAudit"), icon: History, badge: auditEvents.length || null },
+            ]}
+            footer={
+              <>
+                <SidebarSectionTitle label={tShell("responsibleAndDeadline")} icon={UserCheck} />
+                <div>
+                  <InfoRow label={tShell("responsible")} title={formData.responsible}>
+                    {formData.responsible || "—"}
+                  </InfoRow>
+                  <InfoRow label={tShell("deadline")}>
+                    <span className="font-mono">{formData.deadline}</span>
+                  </InfoRow>
+                  {formData.linkedWoId ? (
+                    <InfoRow label={tShell("linkedWo")}>
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        onClick={() => {
+                          openTab({
+                            id: formData.linkedWoId,
+                            title: `${formData.linkedWoId}: ${formData.product || formData.customer}`,
+                            type: "work-order",
+                            module: "polygraph",
+                            documentData: {
+                              docNo: formData.linkedWoId,
+                              linkedOrderId: data.docNo || tab.id,
+                              customer: formData.customer,
+                              product: formData.product,
+                              quantity: formData.quantity,
+                              department: formData.department,
+                            },
+                          });
+                        }}
+                        className="h-auto p-0 font-mono text-[11px] font-semibold gap-1 cursor-pointer"
+                      >
+                        {formData.linkedWoId}
+                        <ExternalLink className="w-3 h-3" />
+                      </Button>
+                    </InfoRow>
+                  ) : (
+                    <InfoRow label={tShell("production")}>
+                      <span className="text-muted-foreground italic font-normal">{tShell("notLinked")}</span>
+                    </InfoRow>
+                  )}
+                </div>
+              </>
+            }
+          />
+
+          {/* ── RIGHT MAIN VIEWPORT (flex-1) ── */}
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+            <TabsContent value="overview" className="@container flex-1 overflow-y-auto p-4 m-0 space-y-4">
+              <OverviewTab 
+                formData={formData}
+                handleFieldChange={handleFieldChange}
+                sizes={sizes}
+                handleSizesChange={handleSizesChange}
+                docNo={data.docNo || tab.id}
+                orderAttachments={orderAttachments}
+                setOrderAttachments={setOrderAttachments}
+                onOpenLightbox={() => setIsLightboxOpen(true)}
+                onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+                onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+              />
+            </TabsContent>
+
+            {/* Tab: Specifications & Die-Line CAD */}
+            <SpecificationsTab
+              formData={formData}
+              handleFieldChange={handleFieldChange}
+              sizes={sizes}
+              handleSizesChange={handleSizesChange}
+              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+              onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+            />
+            
             {(!isFlexo || isOffset) && (
-              <TabsTrigger value="layout" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
-                <LayoutTemplate className="w-3.5 h-3.5" />
-                <span>{t("tabLayout") || "Layout"}</span>
-              </TabsTrigger>
+              <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
+                <LayoutCalcTab 
+                  sizes={sizes}
+                  defaultQuantity={formData.quantity}
+                  docNo={data.docNo || tab.id}
+                  orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
+                  defaultProdW={formData.width}
+                  defaultProdH={formData.height}
+                  defaultBleed={formData.bleed}
+                  kashirovkaMode={formData.kashirovkaMode}
+                  kashirovkaStrategy={formData.kashirovkaStrategy}
+                  kashirovkaLayers={formData.kashirovkaLayers}
+                  kashirovkaGlueGsm={formData.kashirovkaGlueGsm}
+                  kashirovkaMakeReadySheets={formData.kashirovkaMakeReadySheets}
+                  onKashirovkaChange={(patch) => {
+                    if (patch.kashirovkaMode !== undefined) {
+                      handleFieldChange("kashirovkaMode", patch.kashirovkaMode);
+                    }
+                    if (patch.kashirovkaStrategy !== undefined) {
+                      handleFieldChange("kashirovkaStrategy", patch.kashirovkaStrategy);
+                    }
+                    if (patch.kashirovkaMakeReadySheets !== undefined) {
+                      handleFieldChange("kashirovkaMakeReadySheets", patch.kashirovkaMakeReadySheets);
+                    }
+                  }}
+                />
+              </TabsContent>
             )}
+
             {isFlexo && (
-              <TabsTrigger value="flexo" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
-                <Disc className="w-3.5 h-3.5 text-blue-600" />
-                <span>{t("tabFlexo") || "Flexo"}</span>
-              </TabsTrigger>
+              <TabsContent value="flexo" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
+                <FlexoCalcTab 
+                  defaultQuantity={formData.quantity}
+                  docNo={data.docNo || tab.id}
+                  orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
+                  customer={formData.customer}
+                  productName={formData.product}
+                  defaultProdW={formData.width}
+                  defaultProdH={formData.height}
+                  defaultBleed={formData.bleed}
+                  onAuditLog={handleAuditLog}
+                  onFlexoSave={(res) => {
+                    if (
+                      formData.flexoCylinderTeeth !== res.gearTeeth ||
+                      formData.flexoWebWidth !== res.webWidth
+                    ) {
+                      setFormData((prev) => ({
+                        ...prev,
+                        flexoCylinderTeeth: res.gearTeeth,
+                        flexoWebWidth: res.webWidth,
+                      }));
+                    }
+                  }}
+                />
+              </TabsContent>
             )}
-            <TabsTrigger value="costCalc" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
-              <DollarSign className="w-3.5 h-3.5" />
-              <span>{t("tabCostCalc") || "Costing"}</span>
-            </TabsTrigger>
-            <TabsTrigger value="sample" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
-              <Package className="w-3.5 h-3.5" />
-              <span>{t("tabSample") || "Sample"}</span>
-            </TabsTrigger>
-            <TabsTrigger value="audit" className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0">
-              <History className="w-3.5 h-3.5" />
-              <span>{t("tabAudit") || "History"}</span>
-            </TabsTrigger>
-          </TabsList>
 
-          <div className="flex items-center gap-1 shrink-0">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    onClick={() => {
-                      const newAct = createDeliveryActFromOrder({
-                        orderId: data.docNo || tab.id,
-                        workOrderId: formData.linkedWoId || "WO-00351",
-                        customer: formData.customer || "Alpha Media Group LLC",
-                        product: formData.product || "Printed Catalog / Packaging",
-                        quantity: formData.quantity || 1000,
-                        unit: formData.unit || "pcs",
-                        priceTotal: formData.priceTotal || 14850,
-                        currency: formData.currency || "USD",
-                      });
-                      openTab({
-                        id: newAct.id,
-                        title: `${newAct.id}: ${newAct.customer}`,
-                        type: "delivery-act",
-                        module: "sales",
-                        isUnsaved: true,
-                        activeLevel3Tab: "overview",
-                        documentData: newAct,
-                      });
-                    }}
-                    variant="outline"
-                    size="icon-sm"
-                    className="h-7 w-7 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer"
-                  >
-                    <Receipt className="w-3.5 h-3.5" />
-                  </Button>
-                }
+            <TabsContent value="costCalc" className="flex-1 overflow-y-auto p-3 m-0 flex gap-3 no-scrollbar">
+              <CostCalcTab 
+                recipe={formData.recipe}
+                quantity={formData.quantity}
+                currency={currency}
+                setCurrency={setCurrency}
+                isDark={isDark}
+                formData={formData}
               />
-              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                {tAct("createFromOrder")}
-              </TooltipContent>
-            </Tooltip>
+            </TabsContent>
 
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    onClick={handlePrintSpec}
-                    variant="outline"
-                    size="icon-sm"
-                    className="h-7 w-7 border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 cursor-pointer"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                  </Button>
-                }
+            <TabsContent value="sample" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
+              <SampleTab 
+                formData={formData}
+                sampleData={sampleData}
+                handleSampleChange={handleSampleChange}
+                handleFieldChange={handleFieldChange}
+                tabId={tab.id}
               />
-              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                {t("printSpec") || "Print"}
-              </TooltipContent>
-            </Tooltip>
+            </TabsContent>
 
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    onClick={handleSave}
-                    variant="outline"
-                    size="icon-sm"
-                    className="h-7 w-7 border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                {t("save") || "Save"} (Ctrl+S)
-              </TooltipContent>
-            </Tooltip>
+            {/* Tab: Files & Attached Documents */}
+            <FilesTab
+              orderAttachments={orderAttachments}
+              setOrderAttachments={setOrderAttachments}
+              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+              docNo={data.docNo || tab.id}
+            />
 
-            <Button
-              onClick={handleSaveAndClose}
-              size="sm"
-              className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1.5 shadow-none cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>{t("postAndClose") || "Close"}</span>
-            </Button>
+            <TabsContent value="audit" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
+              <AuditTab events={auditEvents} />
+            </TabsContent>
           </div>
         </div>
-
-        <TabsContent value="overview" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
-          <OverviewTab 
-            formData={formData}
-            handleFieldChange={handleFieldChange}
-            sizes={sizes}
-            handleSizesChange={handleSizesChange}
-            docNo={data.docNo || tab.id}
-            orderAttachments={orderAttachments}
-            setOrderAttachments={setOrderAttachments}
-            onOpenLightbox={() => setIsLightboxOpen(true)}
-            onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-          />
-        </TabsContent>
-        
-        {(!isFlexo || isOffset) && (
-          <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
-            <LayoutCalcTab 
-              sizes={sizes}
-              defaultQuantity={formData.quantity}
-              docNo={data.docNo || tab.id}
-              orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
-              defaultProdW={formData.width}
-              defaultProdH={formData.height}
-              defaultBleed={formData.bleed}
-              kashirovkaMode={formData.kashirovkaMode}
-              kashirovkaStrategy={formData.kashirovkaStrategy}
-              kashirovkaLayers={formData.kashirovkaLayers}
-              kashirovkaGlueGsm={formData.kashirovkaGlueGsm}
-              kashirovkaMakeReadySheets={formData.kashirovkaMakeReadySheets}
-              onKashirovkaChange={(patch) => {
-                if (patch.kashirovkaMode !== undefined) {
-                  handleFieldChange("kashirovkaMode", patch.kashirovkaMode);
-                }
-                if (patch.kashirovkaStrategy !== undefined) {
-                  handleFieldChange("kashirovkaStrategy", patch.kashirovkaStrategy);
-                }
-                if (patch.kashirovkaMakeReadySheets !== undefined) {
-                  handleFieldChange("kashirovkaMakeReadySheets", patch.kashirovkaMakeReadySheets);
-                }
-              }}
-            />
-          </TabsContent>
-        )}
-
-        {isFlexo && (
-          <TabsContent value="flexo" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
-            <FlexoCalcTab 
-              defaultQuantity={formData.quantity}
-              docNo={data.docNo || tab.id}
-              orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
-              customer={formData.customer}
-              productName={formData.product}
-              defaultProdW={formData.width}
-              defaultProdH={formData.height}
-              defaultBleed={formData.bleed}
-              onAuditLog={handleAuditLog}
-              onFlexoSave={(res) => {
-                if (
-                  formData.flexoCylinderTeeth !== res.gearTeeth ||
-                  formData.flexoWebWidth !== res.webWidth
-                ) {
-                  setFormData((prev) => ({
-                    ...prev,
-                    flexoCylinderTeeth: res.gearTeeth,
-                    flexoWebWidth: res.webWidth,
-                  }));
-                }
-              }}
-            />
-          </TabsContent>
-        )}
-
-        <TabsContent value="costCalc" className="flex-1 overflow-y-auto p-3 m-0 flex gap-3 no-scrollbar">
-          <CostCalcTab 
-            recipe={formData.recipe}
-            quantity={formData.quantity}
-            currency={currency}
-            setCurrency={setCurrency}
-            isDark={isDark}
-            formData={formData}
-          />
-        </TabsContent>
-
-        <TabsContent value="sample" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
-          <SampleTab 
-            formData={formData}
-            sampleData={sampleData}
-            handleSampleChange={handleSampleChange}
-            handleFieldChange={handleFieldChange}
-            tabId={tab.id}
-          />
-        </TabsContent>
-
-        <TabsContent value="audit" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
-          <AuditTab events={auditEvents} />
-        </TabsContent>
       </Tabs>
 
       <ImageLightbox

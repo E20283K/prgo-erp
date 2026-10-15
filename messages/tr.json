@@ -846,5 +846,29 @@
     "posLeftCenter": "Sol Orta",
     "posRightCenter": "Sağ Orta",
     "posNone": "Deliksiz"
+  },
+  "DocumentShell": {
+    "sections": "Bölümler",
+    "quantity": "Miktar",
+    "technology": "Teknoloji",
+    "lamination": "Laminasyon",
+    "none": "Yok",
+    "materialShortage": "Malzeme eksikliği",
+    "specsAndDrawing": "Şartname & Çizim",
+    "filesAndDocs": "Dosyalar & Belgeler",
+    "machineAndDeadline": "Makine & Termin",
+    "machine": "Makine",
+    "deadline": "Termin",
+    "site": "Atölye / Bina",
+    "totalAmount": "Toplam",
+    "departmentType": "Bölüm / Tür",
+    "responsibleAndDeadline": "Sorumlu & Termin",
+    "responsible": "Sorumlu",
+    "linkedWo": "Bağlı İE",
+    "production": "Üretim",
+    "notLinked": "Bağlı değil",
+    "customerNotSet": "Müşteri yok",
+    "untitledOrder": "Sipariş",
+    "createDeliveryAct": "Teslim tutanağı oluştur"
   }
 }

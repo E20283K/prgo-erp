@@ -32,6 +32,7 @@ interface SmartComboboxProps {
   allowCustom?: boolean;
   className?: string;
   popoverWidth?: string;
+  disabled?: boolean;
 }
 
 export function SmartCombobox({
@@ -44,6 +45,7 @@ export function SmartCombobox({
   allowCustom = true,
   className,
   popoverWidth,
+  disabled = false,
 }: SmartComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
@@ -68,7 +70,7 @@ export function SmartCombobox({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open && !disabled} onOpenChange={disabled ? undefined : setOpen}>
       <PopoverTrigger
         render={
           <Button
@@ -76,9 +78,11 @@ export function SmartCombobox({
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            disabled={disabled}
             className={cn(
               "h-8 w-full justify-between px-2.5 font-normal text-xs bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 shadow-none hover:border-blue-400 dark:hover:border-blue-500 transition-colors",
               !value && "text-muted-foreground",
+              disabled && "opacity-75 cursor-not-allowed hover:border-zinc-200 dark:hover:border-zinc-800",
               className
             )}
           />

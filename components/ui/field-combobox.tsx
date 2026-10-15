@@ -30,6 +30,7 @@ interface FieldComboboxProps {
   emptyText?: string;
   className?: string;
   popoverClassName?: string;
+  disabled?: boolean;
 }
 
 export function FieldCombobox({
@@ -43,6 +44,7 @@ export function FieldCombobox({
   emptyText = "No results found.",
   className,
   popoverClassName,
+  disabled = false,
 }: FieldComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
@@ -64,16 +66,18 @@ export function FieldCombobox({
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open && !disabled} onOpenChange={disabled ? undefined : setOpen}>
       <PopoverTrigger
         render={
           <Button
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            disabled={disabled}
             className={cn(
               "h-9 w-full justify-between px-3 font-normal text-sm shadow-none",
               !value && "text-muted-foreground",
+              disabled && "opacity-75 cursor-not-allowed hover:border-border",
               className
             )}
           >

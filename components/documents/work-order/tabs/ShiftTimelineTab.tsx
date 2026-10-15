@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
-import { Clock, Factory, CheckCircle2, Layers, Calculator, Hash, ArrowRightLeft, Plus } from "lucide-react";
+import { Clock, Factory, CheckCircle2, Layers, Calculator, Hash, ArrowRightLeft, Plus, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import {
   FieldTitle,
   FieldDescription,
 } from "@/components/ui/field";
-import { RouteStep, ShiftEvent } from "../types";
+import { RouteStep, ShiftEvent, ShiftNote } from "../types";
 
 export function parseQtyString(qtyStr: string, fallbackTarget = 5000) {
   const parts = (qtyStr || "").split("/");
@@ -57,6 +57,8 @@ interface ShiftTimelineTabProps {
     wasteQty?: number,
     wasteReason?: string
   ) => void;
+  shiftNotes?: ShiftNote[];
+  onAddShiftNote?: (note: ShiftNote) => void;
 }
 
 export function ShiftTimelineTab({
@@ -67,7 +69,30 @@ export function ShiftTimelineTab({
   selectedOpEvents,
   onOpenLogEvent,
   onUpdateStepOutput,
+  shiftNotes = [],
+  onAddShiftNote,
 }: ShiftTimelineTabProps) {
+  const [newShiftType, setNewShiftType] = useState<string>("Morning");
+  const [newNoteAuthor, setNewNoteAuthor] = useState<string>("M. Ivanova");
+  const [newNoteText, setNewNoteText] = useState<string>("");
+
+  const handleAddNote = () => {
+    if (!newNoteText.trim()) return;
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const newNote: ShiftNote = {
+      id: `sn-${Date.now()}`,
+      author: newNoteAuthor.trim() || "Operator",
+      shift: newShiftType,
+      time: `Today ${timeStr}`,
+      text: newNoteText.trim(),
+    };
+    if (onAddShiftNote) {
+      onAddShiftNote(newNote);
+    }
+    setNewNoteText("");
+  };
+
   const { completed, target, unitSuffix, percent } = useMemo(
     () => parseQtyString(selectedOp.qtyCompleted),
     [selectedOp.qtyCompleted]
@@ -664,6 +689,97 @@ export function ShiftTimelineTab({
             ))}
           </div>
         )}
+          </div>
+
+          {/* Shift Handover Notes Log */}
+          <div className="p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3 flex flex-col">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-primary shrink-0" />
+                <span className="font-semibold text-xs text-foreground">Smena Qabul Qilish Eslatmalari (Shift Handover Notes)</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground font-mono">
+                {shiftNotes.length} ta eslatma
+              </span>
+            </div>
+
+            {/* New note input form */}
+            <div className="space-y-2 bg-muted/20 p-2.5 rounded-md border border-border">
+              <div className="grid grid-cols-2 gap-2">
+                <Select value={newShiftType} onValueChange={(val: any) => setNewShiftType(val)}>
+                  <SelectTrigger className="h-7 text-xs bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Morning">Ertalabki smena (Morning)</SelectItem>
+                    <SelectItem value="Evening">Kechki smena (Evening)</SelectItem>
+                    <SelectItem value="Night">Tungi smena (Night)</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Input
+                  value={newNoteAuthor}
+                  onChange={(e) => setNewNoteAuthor(e.target.value)}
+                  placeholder="Operator ismi"
+                  className="h-7 text-xs bg-background"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Input
+                  value={newNoteText}
+                  onChange={(e) => setNewNoteText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleAddNote();
+                  }}
+                  placeholder="Keyingi smena operatoriga muhim xabar yoki ko'rsatma yozing..."
+                  className="h-7 text-xs bg-background flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleAddNote}
+                  disabled={!newNoteText.trim()}
+                  className="h-7 px-2.5 text-xs gap-1 cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Qo&apos;shish</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Existing notes list */}
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              {shiftNotes.map((note) => (
+                <div
+                  key={note.id}
+                  className="p-2 rounded-md bg-muted/20 border border-border text-xs space-y-1"
+                >
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          "px-1.5 py-0.2 rounded text-[10px] font-semibold border",
+                          note.shift === "Morning" && "text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10",
+                          note.shift === "Evening" && "text-blue-600 dark:text-blue-400 border-blue-500/30 bg-blue-500/10",
+                          note.shift === "Night" && "text-purple-600 dark:text-purple-400 border-purple-500/30 bg-purple-500/10"
+                        )}
+                      >
+                        {note.shift}
+                      </span>
+                      <span className="font-semibold text-foreground">{note.author}</span>
+                    </div>
+                    <span className="font-mono text-[10px]">{note.time}</span>
+                  </div>
+                  <p className="text-foreground/90 leading-snug">{note.text}</p>
+                </div>
+              ))}
+              {shiftNotes.length === 0 && (
+                <div className="text-center py-4 text-muted-foreground text-[11px] italic">
+                  Hozircha smena eslatmalari yozilmagan.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

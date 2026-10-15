@@ -613,21 +613,6 @@ export function DataGrid() {
                 <span>{tGrid("createNew")}</span>
               </Button>
 
-              <Button 
-                onClick={() => {
-                  const selectedRowIdx = selection.rows.toArray()[0] ?? 0;
-                  if (filteredRows[selectedRowIdx]) {
-                    handleCellActivated([0, selectedRowIdx]);
-                  }
-                }}
-                variant="outline" 
-                size="sm" 
-                className="h-7 px-2.5 text-xs font-medium gap-1 rounded"
-              >
-                <ExternalLink className="w-3 h-3 text-muted-foreground" />
-                <span>{tGrid("contextOpen")}</span>
-              </Button>
-
               <Separator orientation="vertical" className="h-4 mx-1" />
 
               {/* Status Segment Filter Pills */}

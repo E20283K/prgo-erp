@@ -41,6 +41,8 @@ import { PlanningSlotDetail } from "@/components/documents/PlanningSlotDetail";
 
 import { TabContentWrapper } from "./TabContentWrapper";
 import { RegistryGridRenderer } from "./RegistryGridRenderer";
+import { NotificationPanel } from "./NotificationPanel";
+import { UserNav } from "./UserNav";
 
 export function Workspace({ children }: { children: React.ReactNode }) {
   const t = useTranslations("Workspace");
@@ -71,8 +73,8 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     const computeMaxTabs = () => {
       const width = el.clientWidth;
       if (width <= 0) return;
-      // Reserve ~116px for sidebar trigger + quick new tab button + overflow dropdown trigger
-      const availableForTabs = Math.max(200, width - 116);
+      // Reserve ~195px for sidebar trigger + quick new tab button + overflow dropdown trigger + notification + user avatar
+      const availableForTabs = Math.max(200, width - 195);
       const calculated = Math.max(2, Math.floor(availableForTabs / 118));
       setMaxVisibleTabs(calculated);
     };
@@ -455,6 +457,14 @@ export function Workspace({ children }: { children: React.ReactNode }) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+
+              <Separator orientation="vertical" className="h-4 mx-0.5 bg-zinc-300 dark:bg-zinc-800" />
+
+              {/* Notification System Popover */}
+              <NotificationPanel />
+
+              {/* User Avatar & Session Settings */}
+              <UserNav />
             </div>
           </div>
         )}

@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
+import { cn } from "cn";
 import {
   GridCell,
   GridCellKind,
@@ -627,39 +628,10 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
         {/* 1C Level-3 Document Workspace Header Bar */}
         <div className="px-3 bg-muted/60 border-b border-border shrink-0 flex items-center justify-between h-9 gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <TabsList
-              variant="line"
-              className="gap-1 overflow-x-auto overflow-y-hidden no-scrollbar min-w-0"
-            >
-              <TabsTrigger
-                value="overview"
-                className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-              >
-                <Building2 className="w-3.5 h-3.5" />
-                <span>Rekvizitlar va Shartnoma (360°)</span>
-              </TabsTrigger>
-              <TabsTrigger
-                value="settlements"
-                className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-              >
-                <Scale className="w-3.5 h-3.5" />
-                <span>Akt Sverka ({ledgerRows.length})</span>
-              </TabsTrigger>
-              <TabsTrigger
-                value="orders"
-                className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                <span>Buyurtmalar va SF ({customerOrders.length})</span>
-              </TabsTrigger>
-              <TabsTrigger
-                value="tooling"
-                className="h-8 text-xs px-2.5 font-medium gap-1.5 shrink-0"
-              >
-                <Stamp className="w-3.5 h-3.5" />
-                <span>Shtansformalar ({customerTooling.length})</span>
-              </TabsTrigger>
-            </TabsList>
+            <Building2 className="w-4 h-4 text-primary shrink-0" />
+            <span className="font-bold text-xs text-foreground truncate max-w-[200px] sm:max-w-[320px]">
+              {form.name}
+            </span>
 
             <Separator orientation="vertical" className="h-4 mx-1 shrink-0" />
 
@@ -732,6 +704,173 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
             </Button>
           </div>
         </div>
+
+        {/* Main Workspace Body: Left Sub-Sidebar + Right Content Viewport */}
+        <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
+          {/* ── LEFT CRM SUB-SIDEBAR (w-60) ── */}
+          <aside className="w-60 shrink-0 bg-card border-r border-border flex flex-col justify-between overflow-y-auto select-none">
+            <div className="p-3 space-y-3">
+              {/* Mini Profile Summary Card */}
+              <div className="p-2.5 rounded-lg bg-muted/50 border border-border/80 space-y-2">
+                <div className="flex items-start gap-2">
+                  <div className="w-7 h-7 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold">
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-xs text-foreground truncate" title={form.name}>
+                      {form.name}
+                    </h3>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="font-mono text-[10px] text-muted-foreground">INN: {form.tin}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Saldo / Debt Status Box */}
+                <div
+                  className={cn(
+                    "p-2 rounded-md border text-[11px] flex items-center justify-between",
+                    closingBalance > 0
+                      ? "bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-300"
+                      : closingBalance < 0
+                      ? "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-900 text-blue-800 dark:text-blue-300"
+                      : "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-300"
+                  )}
+                >
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[10px] font-medium opacity-80 truncate">
+                      {closingBalance > 0 ? "Qarzdorlik" : closingBalance < 0 ? "Ortiqcha to'lov" : "Hisob nol"}
+                    </span>
+                    <span className="font-mono font-bold text-xs mt-0.5">
+                      ${Math.abs(closingBalance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setLevel3Tab(tab.id, "settlements");
+                      setIsPaymentOpen(true);
+                    }}
+                    className="h-6 px-1.5 text-[10px] gap-1 bg-background hover:bg-muted text-foreground border-border shadow-xs shrink-0 cursor-pointer"
+                    title="To'lov kiritish (Kirim)"
+                  >
+                    <CreditCard className="w-3 h-3 text-emerald-600" />
+                    <span>+ To'lov</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Vertical Navigation Items */}
+              <div className="space-y-1">
+                <div className="px-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Bo&apos;limlar
+                </div>
+                {[
+                  {
+                    id: "overview",
+                    label: "Rekvizitlar va Shartnoma",
+                    icon: Building2,
+                    count: null,
+                  },
+                  {
+                    id: "settlements",
+                    label: "Akt Sverka",
+                    icon: Scale,
+                    count: ledgerRows.length,
+                    badgeColor: closingBalance > 0 ? "text-rose-600" : undefined,
+                  },
+                  {
+                    id: "orders",
+                    label: "Buyurtmalar va SF",
+                    icon: ClipboardList,
+                    count: customerOrders.length,
+                  },
+                  {
+                    id: "tooling",
+                    label: "Shtansformalar",
+                    icon: Stamp,
+                    count: customerTooling.length,
+                  },
+                ].map((item) => {
+                  const isActive = activeTab === item.id;
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setLevel3Tab(tab.id, item.id)}
+                      className={cn(
+                        "w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs font-medium transition-all text-left group cursor-pointer",
+                        isActive
+                          ? "bg-primary text-primary-foreground shadow-xs font-semibold"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <Icon
+                          className={cn(
+                            "w-4 h-4 shrink-0",
+                            isActive
+                              ? "text-primary-foreground"
+                              : "text-muted-foreground group-hover:text-foreground"
+                          )}
+                        />
+                        <span className="truncate">{item.label}</span>
+                      </div>
+                      {item.count !== null && (
+                        <Badge
+                          variant={isActive ? "outline" : "secondary"}
+                          className={cn(
+                            "text-[10px] h-4.5 px-1.5 font-mono shrink-0 ml-1.5",
+                            isActive
+                              ? "bg-primary-foreground/20 text-primary-foreground border-transparent"
+                              : item.badgeColor || "text-muted-foreground"
+                          )}
+                        >
+                          {item.count}
+                        </Badge>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Bottom Quick Contacts Card */}
+            <div className="p-3 border-t border-border bg-muted/20 space-y-2">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                <span>Biriktirilgan shaxs</span>
+                <UserCheck className="w-3 h-3 text-primary" />
+              </div>
+
+              <div className="space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Menejer:</span>
+                  <span className="font-medium text-foreground truncate ml-1">{form.manager}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Kontakt:</span>
+                  <span className="font-medium text-foreground truncate ml-1">{form.contactPerson}</span>
+                </div>
+                {form.phone && (
+                  <div className="flex items-center gap-1.5 text-muted-foreground pt-0.5">
+                    <Phone className="w-3 h-3 shrink-0 text-emerald-600" />
+                    <span className="font-mono text-[10px] text-foreground">{form.phone}</span>
+                  </div>
+                )}
+                {form.email && (
+                  <div className="flex items-center gap-1.5 text-muted-foreground truncate">
+                    <Mail className="w-3 h-3 shrink-0 text-blue-600" />
+                    <span className="font-mono text-[10px] text-foreground truncate">{form.email}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
+
+          {/* ── RIGHT MAIN VIEWPORT (flex-1) ── */}
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
 
         {/* ── TAB 1: OVERVIEW (360° Requisites, Contracts & Balance Summary) ── */}
         <TabsContent
@@ -1223,6 +1362,8 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
             />
           </div>
         </TabsContent>
+          </div>
+        </div>
       </Tabs>
     </div>
   );

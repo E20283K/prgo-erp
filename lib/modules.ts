@@ -7,7 +7,6 @@ import {
   Banknote,
   Settings2,
   Briefcase,
-  FileCheck,
   // Production icons
   PlayCircle,
   ClipboardList,
@@ -30,24 +29,20 @@ import {
   GitFork,
   // Sales icons
   FileText,
-  FileSignature,
   ShoppingBag,
   Receipt,
-  RotateCcw,
   Tag,
   BadgePercent,
   Percent,
   // Warehouse icons
   Boxes,
   ArrowLeftRight,
-  ClipboardCheck,
   Truck,
   ArrowDownToLine,
   Send,
   MapPin,
   // Finance icons
   Calculator,
-  BookOpen,
   CreditCard,
   Landmark,
   BarChart3,
@@ -106,15 +101,6 @@ export const MODULE_NAV: ModuleDef[] = [
           { id: "leads", label: "Leads & Requests", icon: UserPlus },
         ],
       },
-      {
-        id: "activities",
-        label: "Activities",
-        icon: CheckSquare,
-        defaultOpen: true,
-        items: [
-          { id: "tasks", label: "Tasks & Assignments", icon: ListTodo },
-        ],
-      },
     ],
   },
   {
@@ -129,10 +115,7 @@ export const MODULE_NAV: ModuleDef[] = [
         defaultOpen: true,
         items: [
           { id: "client-orders", label: "Client Orders", icon: ClipboardList },
-          { id: "quotations", label: "Quotations", icon: FileSignature },
-          { id: "contracts", label: "Contracts & Agreements", icon: FileCheck },
           { id: "delivery-acts", label: "Schet-fakturas (Waybills)", icon: Truck },
-          { id: "returns", label: "Customer Claims", icon: RotateCcw },
         ],
       },
       {
@@ -186,8 +169,7 @@ export const MODULE_NAV: ModuleDef[] = [
         defaultOpen: true,
         items: [
           { id: "stock-balance", label: "Stock Balance", icon: Layers },
-          { id: "movements", label: "Movements & Write-offs", icon: ArrowLeftRight },
-          { id: "inventory", label: "Inventory Count", icon: ClipboardCheck },
+          { id: "movements", label: "Movements & Transfers", icon: ArrowLeftRight },
         ],
       },
       {
@@ -216,7 +198,6 @@ export const MODULE_NAV: ModuleDef[] = [
           { id: "settlements", label: "Client Settlements (Akt sverka)", icon: Scale },
           { id: "payments", label: "Payments & Cashflow", icon: CreditCard },
           { id: "cost-analysis", label: "Order Cost & Margin", icon: TrendingUp },
-          { id: "accounts", label: "Chart of Accounts", icon: BookOpen },
         ],
       },
     ],

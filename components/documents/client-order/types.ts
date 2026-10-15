@@ -114,6 +114,21 @@ export function calculateKashirovkaTotals(
   };
 }
 
+export interface SideColorConfig {
+  c: boolean;
+  m: boolean;
+  y: boolean;
+  k: boolean;
+}
+
+export interface SpotColorItem {
+  id: string;
+  name: string;
+  code: string;
+  hex: string;
+  side: "front" | "back" | "both";
+}
+
 export interface ClientOrderFormData {
   customer: string;
   product: string;
@@ -131,6 +146,10 @@ export interface ClientOrderFormData {
   pressMachine?: string;
   paperStock?: string;
   coating?: string;
+  lamination?: string;
+  laminationSides?: "1s" | "2s";
+  laminationMicron?: number;
+  embellishment?: string;
   priceTotal?: number;
   currency?: string;
   photoUrl?: string;
@@ -145,6 +164,16 @@ export interface ClientOrderFormData {
   bleed?: number;
   milestones?: ProductionMilestone[];
   sizes?: SizeDistribution[];
+  // Color Stations & Inks
+  colorsConfig?: string;
+  spotColors?: string[];
+  spotColorItems?: SpotColorItem[];
+  frontColors?: SideColorConfig;
+  backColors?: SideColorConfig;
+  // Finishing & Drill Hole
+  holeSize?: number;
+  holePosition?: "top-center" | "top-left" | "top-right" | "left-center" | "right-center" | "none";
+  holeOffset?: number;
   // Multi-Layer / Kashirovka (Duplex / Triplex Mounting)
   kashirovkaMode?: KashirovkaMode;
   kashirovkaStrategy?: KashirovkaImpositionStrategy;
