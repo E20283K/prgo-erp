@@ -338,12 +338,12 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
 
   const handleCreateClientOrder = () => {
     upsertCustomer(form);
-    const newId = `CO-${String(Math.floor(100 + Math.random() * 899)).padStart(5, "0")}`;
+    const newId = `WO-${String(Math.floor(100 + Math.random() * 899)).padStart(5, "0")}`;
     openTab({
       id: newId,
       title: `${newId}: ${form.name}`,
-      type: "client-order",
-      module: "sales",
+      type: "work-order",
+      module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
@@ -463,7 +463,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
           id: entry.docNo,
           title: `${entry.docNo}: ${form.name}`,
           type: "delivery-act",
-          module: "sales",
+          module: "finance",
           activeLevel3Tab: "overview",
           documentData: act || {
             id: entry.docNo,
@@ -541,7 +541,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
           id: item.docId,
           title: `${item.docId}: ${form.name}`,
           type: "delivery-act",
-          module: "sales",
+          module: "finance",
           activeLevel3Tab: "overview",
           documentData: act || {
             id: item.docId,
@@ -555,8 +555,8 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
         openTab({
           id: item.docId,
           title: `${item.docId}: ${item.product}`,
-          type: "client-order",
-          module: "sales",
+          type: "work-order",
+          module: "production",
           activeLevel3Tab: "overview",
           documentData: {
             docNo: item.docId,

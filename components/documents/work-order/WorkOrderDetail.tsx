@@ -20,10 +20,21 @@ import {
   Layers,
   Ruler,
   Paperclip,
+  LayoutTemplate,
+  Disc,
+  Package,
+  ChevronDown,
+  ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Tabs } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   DocumentHeader,
   HeaderIconAction,
@@ -60,18 +71,39 @@ import { ShiftTimelineTab } from "./tabs/ShiftTimelineTab";
 import { HistoryTab } from "./tabs/HistoryTab";
 import { FinancialsTab } from "./tabs/FinancialsTab";
 import { FilesTab } from "../common/FilesTab";
+import { LayoutCalcTab } from "./tabs/LayoutCalcTab";
+import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
+import { SampleTab } from "./tabs/SampleTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { pdf } from "@react-pdf/renderer";
 import { WorkOrderSpecPDF } from "./WorkOrderSpecPDF";
+import { OrderSpecificationPDF } from "./OrderSpecificationPDF";
+import { calculateFlexoLayout } from "@/lib/flexo/calculator";
+import { exportFlexoPDF } from "@/lib/flexo/pdfExport";
 
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
   const tAct = useTranslations("DeliveryAct");
   const tShell = useTranslations("DocumentShell");
-  const { setTabUnsaved, closeTab, setLevel3Tab, theme, openTab, addNotification, createDeliveryActFromOrder } = useWorkspaceStore();
+  const {
+    currentUser,
+    setTabUnsaved,
+    closeTab,
+    setLevel3Tab,
+    theme,
+    openTab,
+    addNotification,
+    createDeliveryActFromOrder,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
+
+  const isOperator =
+    Boolean(currentUser?.role) &&
+    (currentUser.role.toLowerCase().includes("shift lead") ||
+      currentUser.role.toLowerCase().includes("operator") ||
+      currentUser.role.toLowerCase().includes("pressman"));
 
   const [formData, setFormData] = useState<WorkOrderFormData>({
     customer: data.customer || "Alpha Media Group",
@@ -121,6 +153,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       { id: "2", size: "M", quantity: 2000 },
       { id: "3", size: "L", quantity: 1500 },
     ],
+    kashirovkaMode: data.kashirovkaMode || "none",
+    kashirovkaStrategy: data.kashirovkaStrategy || "split_half_sheet",
+    kashirovkaLayers: data.kashirovkaLayers || [],
+    kashirovkaGlueGsm: data.kashirovkaGlueGsm ?? 25,
+    kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets ?? 50,
+    kashirovkaCuringHours: data.kashirovkaCuringHours ?? 12,
     milestones: data.milestones || [
       { id: "m1", name: "Preflight File", department: "Prepress", status: "Done", assignedTo: "Prepress Dept", dueDate: "2026-10-01 10:00" },
       { id: "m2", name: "Materials", department: "Warehouse", status: "Done", assignedTo: "Warehouse Dept", dueDate: "2026-10-02 14:00" },
@@ -133,6 +171,26 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(
     data.attachments || EXAMPLE_ATTACHMENTS
   );
+
+  const [sampleData, setSampleData] = useState({
+    dispatchDate: data.sampleDispatchDate || new Date().toISOString().split("T")[0],
+    deliveryMethod: data.sampleDeliveryMethod || "Courier service",
+    courierName: data.sampleCourier || "",
+    recipientName: data.sampleRecipient || "",
+    recipientPhone: data.samplePhone || "",
+    deliveryAddress: data.sampleAddress || "",
+    trackingNumber: data.sampleTracking || "",
+    sampleQty: data.sampleQty || 5,
+    packingNotes: data.sampleNotes || "",
+    isDispatched: data.sampleDispatched || false,
+    approvalStatus: data.approvalStatus || "Pending",
+    approvalNotes: data.approvalNotes || "",
+  });
+
+  const handleSampleChange = (field: string, val: any) => {
+    setSampleData((prev: any) => ({ ...prev, [field]: val }));
+    setTabUnsaved(tab.id, true);
+  };
 
   // Operations Route State
   const [operations, setOperations] = useState<RouteStep[]>(
@@ -236,6 +294,16 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
+  const handleSizesChange = (newSizes: { id: string; size: string; quantity: number }[]) => {
+    const total = newSizes.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+    setFormData((prev) => ({
+      ...prev,
+      sizes: newSizes,
+      ...(newSizes.length > 0 ? { quantity: total } : {}),
+    }));
+    setTabUnsaved(tab.id, true);
+  };
+
   const handleDepartmentChange = (newDept: string) => {
     const defaultRecipe = newDept === "Flexo" ? "FLEXO_NYLON_V1" : newDept === "Jacquard" ? "JACQ_WOVEN_V1" : newDept === "Post-press" ? "POST_GENERIC_V1" : "OFFSET_STD_V1";
     const available = MACHINE_MAP[newDept] || [];
@@ -258,7 +326,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     closeTab(tab.id);
   };
 
-  const handlePrintSpec = async () => {
+  const handlePrintTraveler = async () => {
     try {
       const docNo = data.docNo || tab.id;
       const materials = RECIPE_MATERIALS[formData.recipe] || [];
@@ -276,22 +344,95 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `Work_Order_Spec_${docNo || "PRINTGOO"}.pdf`;
+      link.download = `Work_Order_Traveler_${docNo || "PRINTGOO"}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
       addNotification({
-        title: "Work Order Spec Exported",
+        title: "Production Traveler Exported",
         description: `Downloaded traveler spec for ${docNo}`,
         severity: "success",
       });
     } catch (err) {
-      console.error("Failed to generate work order spec PDF", err);
+      console.error("Failed to generate work order traveler PDF", err);
       if (typeof window !== "undefined") {
         window.print();
       }
+    }
+  };
+
+  const handlePrintClientSpec = async () => {
+    try {
+      const docNo = data.docNo || tab.id;
+      const blob = await pdf(
+        <OrderSpecificationPDF
+          docNo={docNo}
+          orderData={formData as any}
+          sizes={formData.sizes || []}
+          sampleData={sampleData as any}
+        />
+      ).toBlob();
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Order_Spec_${docNo || "PRINTGOO"}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      addNotification({
+        title: "Client Specification Exported",
+        description: `Downloaded specification for ${docNo}`,
+        severity: "success",
+      });
+    } catch (err) {
+      console.error("Failed to generate client spec PDF", err);
+      if (typeof window !== "undefined") {
+        window.print();
+      }
+    }
+  };
+
+  const handlePrintFlexoSpec = () => {
+    try {
+      const inputs = {
+        machineId: formData.flexoMachineId || "JR-1521",
+        materialId: formData.flexoMaterialId || "satin-white",
+        webWidth: formData.flexoWebWidth || 35,
+        sideMarginLeft: 2.5,
+        sideMarginRight: 2.5,
+        productWidth: formData.width || 30,
+        productHeight: formData.height || 65,
+        orientation: (formData.flexoOrientation as any) || "normal",
+        bleedX: formData.bleed || 1.5,
+        bleedY: formData.bleed || 1.5,
+        gapX: formData.flexoGapX || 2,
+        gapY: formData.flexoGapY || 2.5,
+        cylinderTeeth: formData.flexoCylinderTeeth || 100,
+        plateThickness: formData.flexoPlateThickness || 1.7,
+        colors: formData.flexoColors || 4,
+        requiredQuantity: formData.quantity || 10000,
+        overproductionMode: "percent" as const,
+        overproductionValue: 5,
+      };
+      const result = calculateFlexoLayout(inputs);
+      exportFlexoPDF(result, {
+        docNo: data.docNo || tab.id,
+        orderName: formData.product,
+        customer: formData.customer,
+        productName: formData.product,
+      });
+      addNotification({
+        title: "Flexo Spec Exported",
+        description: `Exported cylinder repeat spec (${result.gearTeeth}T)`,
+        severity: "success",
+      });
+    } catch (err) {
+      console.error("Failed to generate flexo PDF", err);
     }
   };
 
@@ -391,7 +532,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setIsLogEventDialogOpen(false);
   };
 
-  const activeTab = tab.activeLevel3Tab || "overview";
+  const isFlexo = formData.department === "Flexo" || (formData.recipe && formData.recipe.startsWith("FLEXO_"));
+  const isOffset = formData.department === "Offset" || (formData.recipe && formData.recipe.startsWith("OFFSET_"));
+
+  const rawActiveTab = tab.activeLevel3Tab || "overview";
+  const activeTab = (isOperator && (rawActiveTab === "financials" || rawActiveTab === "sample")) ? "overview" : rawActiveTab;
 
   return (
     <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">
@@ -409,34 +554,73 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           priority={formData.priority}
           actions={
             <>
-              <HeaderIconAction
-                icon={Receipt}
-                label={tAct("createFromOrder")}
-                variant="outline"
-                className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                onClick={() => {
-                  const newAct = createDeliveryActFromOrder({
-                    orderId: data.linkedOrderId || "CO-00041",
-                    workOrderId: data.docNo || tab.id,
-                    customer: formData.customer || "Alpha Media Group LLC",
-                    product: formData.product || "A4 Hardcover Catalog 96p",
-                    quantity: formData.quantity || 5000,
-                    unit: formData.unit || "pcs",
-                    priceTotal: formData.priceTotal || 14850,
-                    currency: formData.currency || "USD",
-                  });
-                  openTab({
-                    id: newAct.id,
-                    title: `${newAct.id}: ${newAct.customer}`,
-                    type: "delivery-act",
-                    module: "sales",
-                    isUnsaved: true,
-                    activeLevel3Tab: "overview",
-                    documentData: newAct,
-                  });
-                }}
-              />
-              <HeaderIconAction icon={Printer} label={tOrder("printSpec")} onClick={handlePrintSpec} />
+              {!isOperator && (
+                <HeaderIconAction
+                  icon={Receipt}
+                  label={tAct("createFromOrder")}
+                  variant="outline"
+                  className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                  onClick={() => {
+                    const newAct = createDeliveryActFromOrder({
+                      orderId: data.linkedOrderId || data.docNo || tab.id,
+                      workOrderId: data.docNo || tab.id,
+                      customer: formData.customer || "Alpha Media Group LLC",
+                      product: formData.product || "A4 Hardcover Catalog 96p",
+                      quantity: formData.quantity || 5000,
+                      unit: formData.unit || "pcs",
+                      priceTotal: formData.priceTotal || 14850,
+                      currency: formData.currency || "USD",
+                    });
+                    openTab({
+                      id: newAct.id,
+                      title: `${newAct.id}: ${newAct.customer}`,
+                      type: "delivery-act",
+                      module: "finance",
+                      isUnsaved: true,
+                      activeLevel3Tab: "overview",
+                      documentData: newAct,
+                    });
+                  }}
+                />
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs gap-1.5 cursor-pointer">
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>{tOrder("printSpec")}</span>
+                      <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="w-60 text-xs">
+                  <DropdownMenuItem onClick={handlePrintTraveler} className="cursor-pointer gap-2 py-1.5">
+                    <Factory className="w-4 h-4 text-blue-500 shrink-0" />
+                    <div className="flex flex-col">
+                      <span className="font-medium">Production Traveler (Техкарта)</span>
+                      <span className="text-[10px] text-muted-foreground">Shop-floor route & materials</span>
+                    </div>
+                  </DropdownMenuItem>
+                  {!isOperator && (
+                    <DropdownMenuItem onClick={handlePrintClientSpec} className="cursor-pointer gap-2 py-1.5">
+                      <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="font-medium">Client Order Spec (PDF)</span>
+                        <span className="text-[10px] text-muted-foreground">Commercial spec & sample approval</span>
+                      </div>
+                    </DropdownMenuItem>
+                  )}
+                  {isFlexo && (
+                    <DropdownMenuItem onClick={handlePrintFlexoSpec} className="cursor-pointer gap-2 py-1.5">
+                      <Disc className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="font-medium">Flexo Cylinder Spec (PDF)</span>
+                        <span className="text-[10px] text-muted-foreground">Teeth count & repeat layout</span>
+                      </div>
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Separator orientation="vertical" className="h-4 mx-0.5" />
               <HeaderIconAction icon={Save} label={`${tOrder("save")} (Ctrl+S)`} variant="outline" onClick={handleSave} />
               <Button
@@ -463,6 +647,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 title={formData.customer}
                 subtitle={formData.recipe}
               >
+                {isOperator && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-500/10 border border-amber-500/30 rounded text-[10px] text-amber-700 dark:text-amber-400 font-semibold mb-2">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Floor Mode · Specs Locked</span>
+                  </div>
+                )}
+                {!isOperator && (
+                  <InfoRow label={tShell("totalAmount")}>
+                    <span className="font-mono font-bold">{formatMoney(formData.priceTotal, formData.currency)}</span>
+                  </InfoRow>
+                )}
                 <InfoRow label={tShell("quantity")}>
                   <span className="font-mono font-bold">
                     {formData.quantity.toLocaleString()} {formData.unit}
@@ -494,6 +689,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 icon: Ruler,
                 badge: `${formData.width || 50}×${formData.height || 90}`,
               },
+              ...(!isFlexo || isOffset ? [{ id: "layout", label: "Imposition (Layout)", icon: LayoutTemplate }] : []),
+              ...(isFlexo ? [{ id: "flexo", label: "Flexo Imposition", icon: Disc }] : []),
               {
                 id: "materials",
                 label: tOrder("tabMaterials"),
@@ -505,12 +702,28 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               },
               { id: "operations", label: tOrder("tabOperations"), icon: Factory, badge: operations.length },
               { id: "timeline", label: tOrder("tabTimeline"), icon: Clock, badge: shiftEvents.length },
-              {
-                id: "financials",
-                label: tOrder("tabCosting"),
-                icon: DollarSign,
-                badge: formatMoney(formData.priceTotal, formData.currency, 0),
-              },
+              ...(!isOperator
+                ? [
+                    {
+                      id: "sample",
+                      label: "Sample Proof",
+                      icon: Package,
+                      badge: sampleData.approvalStatus,
+                      badgeClassName:
+                        sampleData.approvalStatus === "Approved"
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                          : sampleData.approvalStatus === "Revision"
+                          ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                          : undefined,
+                    },
+                    {
+                      id: "financials",
+                      label: tOrder("tabCosting"),
+                      icon: DollarSign,
+                      badge: formatMoney(formData.priceTotal, formData.currency, 0),
+                    },
+                  ]
+                : []),
               { id: "files", label: tShell("filesAndDocs"), icon: Paperclip, badge: orderAttachments.length || null },
               { id: "history", label: tOrder("tabHistory"), icon: History },
             ]}
@@ -536,6 +749,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             <OverviewTab
               formData={formData}
               handleFieldChange={handleFieldChange}
+              handleSizesChange={handleSizesChange}
               handleDepartmentChange={handleDepartmentChange}
               data={data}
               tabId={tab.id}
@@ -552,6 +766,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               onOpenTab={openTab}
               onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
               onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+              isOperator={isOperator}
               tOrder={tOrder}
             />
 
@@ -559,9 +774,71 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             <SpecificationsTab
               formData={formData}
               handleFieldChange={handleFieldChange}
+              handleSizesChange={handleSizesChange}
               onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
               onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+              isOperator={isOperator}
             />
+
+            {/* Tab: Imposition / Layout for Offset */}
+            {(!isFlexo || isOffset) && (
+              <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
+                <LayoutCalcTab
+                  sizes={formData.sizes || []}
+                  defaultQuantity={formData.quantity}
+                  docNo={data.docNo || tab.id}
+                  orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
+                  defaultProdW={formData.width}
+                  defaultProdH={formData.height}
+                  defaultBleed={formData.bleed}
+                  kashirovkaMode={formData.kashirovkaMode}
+                  kashirovkaStrategy={formData.kashirovkaStrategy}
+                  kashirovkaLayers={formData.kashirovkaLayers}
+                  kashirovkaGlueGsm={formData.kashirovkaGlueGsm}
+                  kashirovkaMakeReadySheets={formData.kashirovkaMakeReadySheets}
+                  onKashirovkaChange={(patch) => {
+                    if (patch.kashirovkaMode !== undefined) {
+                      handleFieldChange("kashirovkaMode", patch.kashirovkaMode);
+                    }
+                    if (patch.kashirovkaStrategy !== undefined) {
+                      handleFieldChange("kashirovkaStrategy", patch.kashirovkaStrategy);
+                    }
+                    if (patch.kashirovkaMakeReadySheets !== undefined) {
+                      handleFieldChange("kashirovkaMakeReadySheets", patch.kashirovkaMakeReadySheets);
+                    }
+                  }}
+                />
+              </TabsContent>
+            )}
+
+            {/* Tab: Flexo Imposition & Cylinder Repeat */}
+            {isFlexo && (
+              <TabsContent value="flexo" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
+                <FlexoCalcTab
+                  defaultQuantity={formData.quantity}
+                  docNo={data.docNo || tab.id}
+                  orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
+                  customer={formData.customer}
+                  productName={formData.product}
+                  defaultProdW={formData.width}
+                  defaultProdH={formData.height}
+                  defaultBleed={formData.bleed}
+                  onAuditLog={() => {}}
+                  onFlexoSave={(res) => {
+                    if (
+                      formData.flexoCylinderTeeth !== res.gearTeeth ||
+                      formData.flexoWebWidth !== res.webWidth
+                    ) {
+                      setFormData((prev) => ({
+                        ...prev,
+                        flexoCylinderTeeth: res.gearTeeth,
+                        flexoWebWidth: res.webWidth,
+                      }));
+                    }
+                  }}
+                />
+              </TabsContent>
+            )}
 
             {/* Tab 3: Materials BOM */}
             <MaterialsTab tabId={tab.id} department={formData.department} />
@@ -624,8 +901,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               }}
             />
 
-            {/* Tab 6: Financials */}
-            <FinancialsTab shiftEvents={shiftEvents} />
+            {/* Tab: Physical Sample (Hidden for Operators) */}
+            {!isOperator && (
+              <TabsContent value="sample" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
+                <SampleTab
+                  formData={formData as any}
+                  sampleData={sampleData as any}
+                  handleSampleChange={handleSampleChange as any}
+                  handleFieldChange={handleFieldChange as any}
+                  tabId={tab.id}
+                />
+              </TabsContent>
+            )}
+
+            {/* Tab 6: Financials (Hidden for Operators) */}
+            {!isOperator && (
+              <FinancialsTab shiftEvents={shiftEvents} />
+            )}
 
             {/* Tab 7: Files & Tech Documents */}
             <FilesTab

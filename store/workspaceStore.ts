@@ -203,9 +203,9 @@ export const DEMO_USERS: Record<string, UserProfile> = {
   sales: {
     name: "Elena Voronina",
     email: "e.voronina@printgoo.com",
-    role: "Sales & Client Director",
+    role: "Commercial & Order Manager",
     initials: "EV",
-    defaultModule: "sales",
+    defaultModule: "production",
     avatar: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
   },
   admin: {
@@ -2013,7 +2013,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       severity: "success",
       timestamp: Date.now() - 1000 * 60 * 60 * 2,
       read: false,
-      link: { module: "sales", subModule: "delivery-acts" },
+      link: { module: "finance", subModule: "delivery-acts" },
     },
     {
       id: "notif-4",
@@ -2064,19 +2064,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   openTab: (tab) =>
     set((state) => {
+      // Normalize tab if referencing removed sales module
+      const normalizedModule =
+        tab.module === "sales"
+          ? tab.type === "delivery-act"
+            ? "finance"
+            : "production"
+          : tab.module;
+      const normalizedTab = { ...tab, module: normalizedModule };
+
       // 1. Single Registry Tab Slot: Replace the existing registry tab in-place at index 0
-      if (tab.type === "registry") {
+      if (normalizedTab.type === "registry") {
         const docTabs = state.tabs.filter((t) => t.type !== "registry");
         return {
-          tabs: [tab, ...docTabs],
-          activeTabId: tab.id,
+          tabs: [normalizedTab, ...docTabs],
+          activeTabId: normalizedTab.id,
         };
       }
 
       // 2. If document tab already exists, activate it
-      const exists = state.tabs.find((t) => t.id === tab.id);
+      const exists = state.tabs.find((t) => t.id === normalizedTab.id);
       if (exists) {
-        return { activeTabId: tab.id };
+        return { activeTabId: normalizedTab.id };
       }
 
       // 3. Smart Tab Limit: Auto-evict the oldest saved document tab when full
@@ -2093,8 +2102,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
 
       return {
-        tabs: [...nextTabs, tab],
-        activeTabId: tab.id,
+        tabs: [...nextTabs, normalizedTab],
+        activeTabId: normalizedTab.id,
       };
     }),
 
@@ -2272,7 +2281,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const targetMod = updatedUser.defaultModule || state.activeModule || "production";
       const defaultSubMap: Record<string, string> = {
         production: "work-orders",
-        sales: "client-orders",
         warehouse: "stock-balance",
         crm: "customers",
         finance: "settlements",

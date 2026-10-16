@@ -201,8 +201,8 @@ export function PlanningSlotDetail({ tab }: { tab: DocumentTab }) {
     openTab({
       id: form.parentOrder,
       title: `${form.parentOrder}: ${form.customer}`,
-      type: "client-order",
-      module: "sales",
+      type: "work-order",
+      module: "production",
       activeLevel3Tab: "overview",
       documentData: {
         docNo: form.parentOrder,

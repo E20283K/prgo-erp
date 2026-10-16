@@ -157,9 +157,9 @@ export function TaskDetailDialog() {
     } else if (task.relatedType === "client-order" || task.relatedId.startsWith("CO-")) {
       openTab({
         id: task.relatedId,
-        title: `${task.relatedId}: ${task.relatedName || "Client Order"}`,
-        type: "client-order",
-        module: "sales",
+        title: `${task.relatedId}: ${task.relatedName || "Order"}`,
+        type: "work-order",
+        module: "production",
         isUnsaved: false,
         activeLevel3Tab: "overview",
         documentData: {

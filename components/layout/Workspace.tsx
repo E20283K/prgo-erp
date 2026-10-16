@@ -32,7 +32,6 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { WorkOrderDetail } from "@/components/documents/WorkOrderDetail";
 import { CreateWorkOrderPickerModal } from "@/components/documents/work-order/dialogs/CreateWorkOrderPickerModal";
 import { ProductSpecDetail } from "@/components/documents/ProductSpecDetail";
-import { ClientOrderDetail } from "@/components/documents/client-order/ClientOrderDetail";
 import { SalesRecordDetail } from "@/components/documents/SalesRecordDetail";
 import { DeliveryActDetail } from "@/components/documents/DeliveryActDetail";
 import { CustomerDetail } from "@/components/documents/CustomerDetail";
@@ -138,38 +137,12 @@ export function Workspace({ children }: { children: React.ReactNode }) {
   };
 
   const handleNewQuickTab = () => {
-    const isProduction =
-      activeModule === "production" ||
-      currentModule === "production" ||
-      activeTab?.module === "production" ||
-      activeTab?.type === "work-order" ||
-      activeTab?.id.includes("work-orders");
-
-    if (isProduction) {
-      setCreateWorkOrderOpen(true);
-    } else {
-      const newId = `NEW-CO-${Math.floor(Math.random() * 1000)}`;
-      openTab({
-        id: newId,
-        title: "New Client Order",
-        type: "client-order",
-        module: "sales",
-        isUnsaved: true,
-        activeLevel3Tab: "overview",
-        documentData: {
-          docNo: newId,
-          status: "Draft",
-          quantity: 1000,
-          unit: "pcs",
-        },
-      });
-    }
+    setCreateWorkOrderOpen(true);
   };
 
   const renderTabType = (tab: DocumentTab) => {
-    if (tab.type === "work-order") return <WorkOrderDetail tab={tab} />;
+    if (tab.type === "work-order" || tab.type === "client-order") return <WorkOrderDetail tab={tab} />;
     if (tab.type === "product-spec") return <ProductSpecDetail tab={tab} />;
-    if (tab.type === "client-order") return <ClientOrderDetail tab={tab} />;
     if (tab.type === "sales-record") return <SalesRecordDetail tab={tab} />;
     if (tab.type === "delivery-act") return <DeliveryActDetail tab={tab} />;
     if (tab.type === "customer") return <CustomerDetail tab={tab} />;

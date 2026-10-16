@@ -14,13 +14,23 @@ import {
   ShieldCheck,
   Check,
   Boxes,
+  X,
 } from "lucide-react";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { TabsContent } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -32,11 +42,19 @@ import { SmartCombobox } from "@/components/ui/smart-combobox";
 import { DieLinePreview } from "../DieLinePreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
 import { useLookupStore } from "@/store/lookupStore";
-import { WorkOrderFormData, SpotColorItem } from "../types";
+import {
+  WorkOrderFormData,
+  SpotColorItem,
+  KashirovkaMode,
+  SubstrateLayer,
+  getDefaultKashirovkaLayers,
+  calculateKashirovkaTotals,
+} from "../types";
 
 interface SpecificationsTabProps {
   formData: WorkOrderFormData;
   handleFieldChange: (field: string, val: any) => void;
+  handleSizesChange?: (newSizes: { id: string; size: string; quantity: number }[]) => void;
   onMarkUnsaved: () => void;
   isOperator?: boolean;
   onSwitchTab?: (tabKey: string) => void;
@@ -45,6 +63,7 @@ interface SpecificationsTabProps {
 export function SpecificationsTab({
   formData,
   handleFieldChange,
+  handleSizesChange,
   onMarkUnsaved,
   isOperator = false,
   onSwitchTab,
@@ -115,6 +134,86 @@ export function SpecificationsTab({
     onMarkUnsaved();
   };
 
+  // Kashirovka Mounting state and calculations
+  const kashirovkaMode: KashirovkaMode = formData.kashirovkaMode || "none";
+  const kashirovkaLayers: SubstrateLayer[] = useMemo(() => {
+    if (kashirovkaMode === "none") return [];
+    if (formData.kashirovkaLayers && formData.kashirovkaLayers.length > 0) {
+      return formData.kashirovkaLayers;
+    }
+    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating);
+  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating]);
+
+  const kashirovkaTotals = useMemo(
+    () => calculateKashirovkaTotals(kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm ?? 25),
+    [kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm]
+  );
+
+  const handleKashirovkaModeChange = (mode: KashirovkaMode) => {
+    if (isOperator) return;
+    handleFieldChange("kashirovkaMode", mode);
+    if (mode === "none") {
+      handleFieldChange("kashirovkaLayers", []);
+    } else {
+      const nextLayers = getDefaultKashirovkaLayers(mode, formData.paperStock, formData.coating);
+      handleFieldChange("kashirovkaLayers", nextLayers);
+      if (!formData.kashirovkaStrategy) {
+        handleFieldChange("kashirovkaStrategy", "split_half_sheet");
+      }
+      if (formData.kashirovkaGlueGsm === undefined) {
+        handleFieldChange("kashirovkaGlueGsm", 25);
+      }
+      if (formData.kashirovkaMakeReadySheets === undefined) {
+        handleFieldChange("kashirovkaMakeReadySheets", 50);
+      }
+      if (formData.kashirovkaCuringHours === undefined) {
+        handleFieldChange("kashirovkaCuringHours", 12);
+      }
+    }
+    onMarkUnsaved();
+  };
+
+  // Size Breakdown state and handlers
+  const sizes = formData.sizes || [];
+  const [newSize, setNewSize] = useState("");
+  const [newSizeQty, setNewSizeQty] = useState("");
+
+  const addSize = () => {
+    if (isOperator || !newSize.trim() || !newSizeQty.trim()) return;
+    const qty = parseInt(newSizeQty, 10);
+    if (isNaN(qty) || qty <= 0) return;
+
+    const newItems = [
+      ...sizes,
+      { id: `size-${Date.now()}`, size: newSize.trim(), quantity: qty },
+    ];
+    if (handleSizesChange) {
+      handleSizesChange(newItems);
+    } else {
+      handleFieldChange("sizes", newItems);
+      const total = newItems.reduce((acc, s) => acc + (s.quantity || 0), 0);
+      handleFieldChange("quantity", total);
+    }
+    setNewSize("");
+    setNewSizeQty("");
+    onMarkUnsaved();
+  };
+
+  const removeSize = (id: string) => {
+    if (isOperator) return;
+    const updated = sizes.filter((s) => s.id !== id);
+    if (handleSizesChange) {
+      handleSizesChange(updated);
+    } else {
+      handleFieldChange("sizes", updated);
+      const total = updated.reduce((acc, s) => acc + (s.quantity || 0), 0);
+      if (updated.length > 0) {
+        handleFieldChange("quantity", total);
+      }
+    }
+    onMarkUnsaved();
+  };
+
   return (
     <TabsContent value="specs" className="@container flex-1 overflow-y-auto p-4 m-0 space-y-4">
       {/* Pantone Modal */}
@@ -164,12 +263,10 @@ export function SpecificationsTab({
         )}
       </div>
 
-      {/* Main Grid: Left 2 Cols (Specs + Finishing + Colors) & Right 1 Col (Interactive 2D Die-Line) */}
-      <div className="grid grid-cols-1 @5xl:grid-cols-12 gap-4 items-start">
-        {/* Left Column (7 cols): Form Sections */}
-        <div className="@container @5xl:col-span-7 space-y-4 min-w-0">
-          {/* Card 1: Geometry & Dimensions */}
-          <div className="p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3">
+      {/* Technical Specifications Cards Stream */}
+      <div className="space-y-4">
+        {/* Card 1: Geometry & Dimensions */}
+        <div className="p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-border">
               <div className="flex items-center gap-2">
                 <Ruler className="w-4 h-4 text-primary shrink-0" />
@@ -361,7 +458,29 @@ export function SpecificationsTab({
             </div>
           </div>
 
-          {/* Card 2: Substrate & Dedicated Lamination / Finishing */}
+          {/* Card 2: 2D Die-Line & Contour Inspector (Simple Card) */}
+          <DieLinePreview
+            width={formData.width ?? 50}
+            height={formData.height ?? 90}
+            bleed={formData.bleed ?? 2}
+            dimensionUnit={formData.dimensionUnit || "mm"}
+            cornerType={formData.cornerType || "Square"}
+            itemCategory={formData.itemCategory || "Hangtag"}
+            totalQuantity={formData.quantity || 5000}
+            paperStock={formData.paperStock || "Galerie Art Silk 150g/m²"}
+            holeSize={effectiveHoleSize}
+            holePosition={effectiveHolePos}
+            holeOffset={effectiveHoleOffset}
+            onFlipOrientation={!isOperator ? () => {
+              const currentW = formData.width ?? 50;
+              const currentH = formData.height ?? 90;
+              handleFieldChange("width", currentH);
+              handleFieldChange("height", currentW);
+              onMarkUnsaved();
+            } : undefined}
+          />
+
+          {/* Card 3: Substrate & Dedicated Lamination / Finishing */}
           <div className="p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-border">
               <div className="flex items-center gap-2">
@@ -679,69 +798,213 @@ export function SpecificationsTab({
               )}
             </div>
           </div>
-        </div>
 
-        {/* Right Column (5 cols): Interactive 2D Die-Line & Dimensions Inspector */}
-        <div className="@container @5xl:col-span-5 space-y-4 min-w-0 @5xl:sticky @5xl:top-0">
-          <div className="p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3 sticky top-4">
+          {/* Card 4: Multi-Layer Substrate & Kashirovka (Duplex / Triplex) */}
+          <div className="p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-border">
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-primary shrink-0" />
                 <span className="font-semibold text-xs text-foreground">
-                  Die-line preview
+                  Multi-layer mounting (Кашировка)
                 </span>
               </div>
-              <Badge variant="outline" className="text-[10px] font-mono">
-                SVG Live Inspector
-              </Badge>
+              <div className="flex items-center gap-2">
+                {kashirovkaMode !== "none" && (
+                  <Badge variant="outline" className="font-mono text-[10px] text-amber-600 dark:text-amber-400 border-amber-300">
+                    {kashirovkaMode === "triplex" ? "3-Ply Triplex" : "2-Ply Duplex"} · {kashirovkaTotals.totalMountedGsm}g/m²
+                  </Badge>
+                )}
+                <Switch
+                  checked={kashirovkaMode !== "none"}
+                  disabled={isOperator}
+                  onCheckedChange={(checked) => {
+                    handleKashirovkaModeChange(checked ? "duplex" : "none");
+                  }}
+                />
+              </div>
             </div>
 
-            {/* Interactive DieLine Preview */}
-            <div className="rounded-lg border border-border overflow-hidden bg-background">
-              <DieLinePreview
-                width={formData.width ?? 50}
-                height={formData.height ?? 90}
-                bleed={formData.bleed ?? 2}
-                dimensionUnit={formData.dimensionUnit || "mm"}
-                cornerType={formData.cornerType || "Square"}
-                itemCategory={formData.itemCategory || "Hangtag"}
-                totalQuantity={formData.quantity || 5000}
-                paperStock={formData.paperStock || "Galerie Art Silk 150g/m²"}
-                holeSize={effectiveHoleSize}
-                holePosition={effectiveHolePos}
-                holeOffset={effectiveHoleOffset}
-                onOpenLayoutTab={() => onSwitchTab && onSwitchTab("layout")}
-              />
+            {kashirovkaMode !== "none" ? (
+              <div className="space-y-3 bg-muted/20 p-3 rounded-lg border border-border text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground font-medium">Mounting Type:</span>
+                  <div className="inline-flex items-center bg-muted p-0.5 rounded-full border border-border">
+                    <button
+                      type="button"
+                      disabled={isOperator}
+                      onClick={() => handleKashirovkaModeChange("duplex")}
+                      className={cn(
+                        "px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer",
+                        kashirovkaMode === "duplex"
+                          ? "bg-background text-foreground shadow-xs font-bold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Duplex (2-Ply)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isOperator}
+                      onClick={() => handleKashirovkaModeChange("triplex")}
+                      className={cn(
+                        "px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer",
+                        kashirovkaMode === "triplex"
+                          ? "bg-background text-foreground shadow-xs font-bold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Triplex (3-Ply Sandwich)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50 text-[11px]">
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Net Paper Stock:</span>
+                    <span className="font-mono font-bold text-foreground">{kashirovkaTotals.netPaperGsm} gsm</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Adhesive Bond:</span>
+                    <span className="font-mono font-bold text-foreground">+{kashirovkaTotals.totalGlueGsm} gsm</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Total Caliper:</span>
+                    <span className="font-mono font-bold text-primary">~{kashirovkaTotals.estimatedCaliperMm} mm</span>
+                  </div>
+                </div>
+
+                {/* Substrate Layers Breakdown */}
+                <div className="pt-2 border-t border-border/50 space-y-1.5">
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                    Mounted Layers Composition:
+                  </span>
+                  <div className="space-y-1">
+                    {kashirovkaLayers.map((layer, idx) => (
+                      <div
+                        key={layer.id || idx}
+                        className="flex items-center justify-between p-1.5 rounded bg-background border border-border text-[11px]"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Badge variant="secondary" className="h-4 px-1 text-[9px] font-mono shrink-0">
+                            L{idx + 1}
+                          </Badge>
+                          <span className="font-medium truncate text-foreground">{layer.label}</span>
+                        </div>
+                        <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground shrink-0">
+                          <span>{layer.grammage} gsm</span>
+                          <span className="text-border">|</span>
+                          <Badge variant="outline" className="h-3.5 px-1 text-[9px]">
+                            {layer.colors}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-[11px] text-muted-foreground italic bg-muted/10 p-2.5 rounded border border-dashed border-border text-center">
+                Standard single-ply substrate (No mounting/lamination onto secondary carrier).
+              </div>
+            )}
+          </div>
+
+          {/* Card 5: Size Breakdown Table */}
+          <div className="p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-primary shrink-0" />
+                <span className="font-semibold text-xs text-foreground">
+                  Size breakdown
+                </span>
+              </div>
+              <span className="text-[11px] text-muted-foreground font-mono">
+                Total: {sizes.reduce((acc, s) => acc + (s.quantity || 0), 0).toLocaleString()} {formData.unit || "pcs"}
+              </span>
             </div>
 
-            {/* Die & Cut Specs Summary Pill */}
-            <div className="p-2.5 rounded-md border border-border bg-muted/20 space-y-1.5 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Net size:</span>
-                <span className="font-mono font-bold text-foreground">
-                  {formData.width ?? 50} × {formData.height ?? 90} mm
-                </span>
+            {!isOperator && (
+              <div className="flex items-end gap-2 bg-muted/20 p-2.5 rounded-md border border-border">
+                <div className="flex-1">
+                  <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">
+                    Size / SKU
+                  </label>
+                  <Input
+                    value={newSize}
+                    onChange={(e) => setNewSize(e.target.value)}
+                    placeholder="e.g. S, M, L, XL, 42"
+                    className="h-7 text-xs bg-background"
+                    onKeyDown={(e) => e.key === "Enter" && addSize()}
+                  />
+                </div>
+                <div className="w-28">
+                  <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">
+                    Qty
+                  </label>
+                  <Input
+                    type="number"
+                    value={newSizeQty}
+                    onChange={(e) => setNewSizeQty(e.target.value)}
+                    placeholder="0"
+                    className="h-7 text-xs bg-background font-mono"
+                    onKeyDown={(e) => e.key === "Enter" && addSize()}
+                  />
+                </div>
+                <Button onClick={addSize} type="button" size="sm" className="h-7 px-2.5 gap-1 cursor-pointer shrink-0">
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add</span>
+                </Button>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Chiqish chegarasi (Gross):</span>
-                <span className="font-mono text-foreground">
-                  {(formData.width ?? 50) + (formData.bleed ?? 2) * 2} × {(formData.height ?? 90) + (formData.bleed ?? 2) * 2} mm
-                </span>
+            )}
+
+            {sizes.length > 0 ? (
+              <div className="border border-border rounded-md overflow-hidden max-h-[200px] overflow-y-auto bg-card">
+                <Table className="w-full text-xs">
+                  <TableHeader className="bg-muted/50 border-b border-border sticky top-0">
+                    <TableRow className="hover:bg-transparent border-b border-border">
+                      <TableHead className="h-7 px-2.5 font-medium text-[11px] text-muted-foreground">Size / SKU</TableHead>
+                      <TableHead className="h-7 px-2.5 font-medium text-[11px] text-muted-foreground text-right w-28">Quantity</TableHead>
+                      <TableHead className="h-7 px-2.5 font-medium text-[11px] text-muted-foreground text-right w-16">Share</TableHead>
+                      {!isOperator && <TableHead className="h-7 px-2 w-8"></TableHead>}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sizes.map((item) => {
+                      const totalBatch = sizes.reduce((acc, s) => acc + (s.quantity || 0), 0);
+                      const sharePct = totalBatch > 0 ? Math.round(((item.quantity || 0) / totalBatch) * 100) : 0;
+                      return (
+                        <TableRow key={item.id} className="border-b border-border/50 last:border-0 hover:bg-muted/40">
+                          <TableCell className="px-2.5 py-1.5 font-semibold text-foreground">{item.size}</TableCell>
+                          <TableCell className="px-2.5 py-1.5 text-right font-mono font-medium text-foreground">
+                            {item.quantity.toLocaleString()} {formData.unit || "pcs"}
+                          </TableCell>
+                          <TableCell className="px-2.5 py-1.5 text-right font-mono text-[10px] text-muted-foreground">
+                            {sharePct}%
+                          </TableCell>
+                          {!isOperator && (
+                            <TableCell className="px-2 py-1.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => removeSize(item.id)}
+                                className="text-muted-foreground hover:text-destructive p-0.5 rounded transition-colors cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Burchak & Qolip:</span>
-                <span className="font-medium text-foreground">{formData.cornerType || "Square"}</span>
+            ) : (
+              <div className="text-[11px] text-muted-foreground italic bg-muted/10 p-2.5 rounded border border-dashed border-border text-center">
+                Single batch without size breakdown ({formData.quantity.toLocaleString()} {formData.unit || "pcs"}).
               </div>
-              <div className="flex items-center justify-between pt-1 border-t border-border/50">
-                <span className="text-muted-foreground">Laminatsiya plyonkasi:</span>
-                <span className="font-medium text-primary">
-                  {isLaminationActive ? `${currentLamination} (${laminationSides.toUpperCase()})` : "Yo'q"}
-                </span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
-      </div>
     </TabsContent>
   );
 }

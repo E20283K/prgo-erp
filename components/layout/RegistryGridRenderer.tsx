@@ -29,6 +29,7 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("machines")) return <ProductionGrid type="machines" />;
     if (tab.id.includes("bom")) return <ProductionGrid type="bom" />;
     if (tab.id.includes("tooling")) return <ProductionGrid type="tooling" />;
+    if (tab.id.includes("products")) return <SalesGrid type="products" />;
     return <DataGrid />;
   } else if (tab.module === "warehouse") {
     if (tab.id.includes("stock-balance")) return <WarehouseGrid type="stock-balance" />;
@@ -37,15 +38,8 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("receipts")) return <WarehouseGrid type="receipts" />;
     if (tab.id.includes("shipments")) return <WarehouseGrid type="shipments" />;
     return <WarehouseGrid type="stock-balance" />;
-  } else if (tab.module === "sales") {
-    if (tab.id.includes("client-orders")) return <SalesGrid type="client-orders" />;
-    if (tab.id.includes("quotations")) return <SalesGrid type="quotations" />;
-    if (tab.id.includes("contracts")) return <SalesGrid type="contracts" />;
-    if (tab.id.includes("delivery-acts")) return <SalesGrid type="delivery-acts" />;
-    if (tab.id.includes("returns")) return <SalesGrid type="returns" />;
-    if (tab.id.includes("products")) return <SalesGrid type="products" />;
-    return <SalesGrid type="client-orders" />;
   } else if (tab.module === "finance") {
+    if (tab.id.includes("delivery-acts")) return <SalesGrid type="delivery-acts" />;
     if (tab.id.includes("settlements")) return <FinanceGrid type="settlements" />;
     if (tab.id.includes("payments")) return <FinanceGrid type="payments" />;
     if (tab.id.includes("cost-analysis")) return <FinanceGrid type="cost-analysis" />;

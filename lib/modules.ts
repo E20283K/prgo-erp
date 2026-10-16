@@ -104,32 +104,6 @@ export const MODULE_NAV: ModuleDef[] = [
     ],
   },
   {
-    id: "sales",
-    label: "Commercial",
-    icon: Briefcase,
-    sections: [
-      {
-        id: "documents",
-        label: "Commercial Documents",
-        icon: FileText,
-        defaultOpen: true,
-        items: [
-          { id: "client-orders", label: "Client Orders", icon: ClipboardList },
-          { id: "delivery-acts", label: "Schet-fakturas (Waybills)", icon: Truck },
-        ],
-      },
-      {
-        id: "catalog",
-        label: "Service Templates",
-        icon: Tag,
-        defaultOpen: true,
-        items: [
-          { id: "products", label: "Print Services & Templates", icon: Layers },
-        ],
-      },
-    ],
-  },
-  {
     id: "production",
     label: "Production",
     icon: Factory,
@@ -150,6 +124,7 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Database,
         defaultOpen: true,
         items: [
+          { id: "products", label: "Print Services & Templates", icon: Layers },
           { id: "machines", label: "Machines & Rates", icon: Cpu },
           { id: "bom", label: "BOM & Recipes", icon: Layers },
           { id: "tooling", label: "Dies & Tooling", icon: Stamp },
@@ -195,6 +170,7 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Calculator,
         defaultOpen: true,
         items: [
+          { id: "delivery-acts", label: "Schet-fakturas (Waybills)", icon: Truck },
           { id: "settlements", label: "Client Settlements (Akt sverka)", icon: Scale },
           { id: "payments", label: "Payments & Cashflow", icon: CreditCard },
           { id: "cost-analysis", label: "Order Cost & Margin", icon: TrendingUp },

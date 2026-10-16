@@ -443,8 +443,8 @@ export function CrmGrid({ type }: CrmGridProps) {
     openTab({
       id: newOrderNo,
       title: `${newOrderNo}: ${cust.name}`,
-      type: "client-order",
-      module: "sales",
+      type: "work-order",
+      module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
@@ -500,8 +500,8 @@ export function CrmGrid({ type }: CrmGridProps) {
     openTab({
       id: newOrderNo,
       title: `${newOrderNo}: ${newCust.name}`,
-      type: "client-order",
-      module: "sales",
+      type: "work-order",
+      module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
@@ -623,6 +623,8 @@ export function CrmGrid({ type }: CrmGridProps) {
                 columns={columns}
                 rows={filteredRows.length}
                 rowMarkers="both"
+                width="100%"
+                height="100%"
                 smoothScrollX={true}
                 smoothScrollY={true}
                 gridSelection={selection}

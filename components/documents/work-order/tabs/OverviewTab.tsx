@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import {
   Tag,
   Factory,
   Boxes,
+  Layers,
   DollarSign,
   Camera,
   Paperclip,
@@ -99,11 +100,14 @@ import {
   TECHNOLOGY_OPTIONS,
   MACHINE_OPTIONS,
   MASTER_SPECIFICATIONS,
+  calculateKashirovkaTotals,
+  getDefaultKashirovkaLayers,
 } from "../types";
 
 interface OverviewTabProps {
   formData: WorkOrderFormData;
   handleFieldChange: (field: string, val: any) => void;
+  handleSizesChange?: (newSizes: { id: string; size: string; quantity: number }[]) => void;
   handleDepartmentChange: (dept: string) => void;
   data: any;
   tabId: string;
@@ -120,11 +124,11 @@ interface OverviewTabProps {
   onOpenTab: (tab: any) => void;
   onSwitchTab: (tabKey: string) => void;
   onMarkUnsaved: () => void;
+  isOperator?: boolean;
   tOrder: (key: string) => string;
 }
 
 import { OrderReadinessRouteCard } from "../OrderReadinessRouteCard";
-import { DieLinePreview } from "../DieLinePreview";
 import { JobTicketDialog } from "../dialogs/JobTicketDialog";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
 import { FilePreviewDialog } from "@/components/file-viewer/FilePreviewDialog";
@@ -134,6 +138,7 @@ import { useLookupStore } from "@/store/lookupStore";
 export function OverviewTab({
   formData,
   handleFieldChange,
+  handleSizesChange,
   handleDepartmentChange,
   data,
   tabId,
@@ -150,6 +155,7 @@ export function OverviewTab({
   onOpenTab,
   onSwitchTab,
   onMarkUnsaved,
+  isOperator: initialIsOperator,
   tOrder,
 }: OverviewTabProps) {
   const {
@@ -180,8 +186,10 @@ export function OverviewTab({
   const tJobTicket = useTranslations("JobTicket");
   const tEnhance = useTranslations("OverviewEnhancements");
 
-  const [viewMode, setViewMode] = useState<"manager" | "operator">("manager");
-  const isOperator = viewMode === "operator";
+  const [viewMode, setViewMode] = useState<"manager" | "operator">(
+    initialIsOperator ? "operator" : "manager"
+  );
+  const isOperator = initialIsOperator ?? (viewMode === "operator");
   const [isJobTicketOpen, setIsJobTicketOpen] = useState(false);
   const [isPantoneModalOpen, setIsPantoneModalOpen] = useState(false);
 
@@ -301,6 +309,25 @@ export function OverviewTab({
     : (formData.itemCategory === "Hangtag" ? 4 : 0);
   const effectiveHolePos = (formData.holePosition || (formData.itemCategory === "Hangtag" ? "top-center" : "none")) as "top-center" | "top-left" | "top-right" | "left-center" | "right-center" | "none";
   const effectiveHoleOffset = formData.holeOffset ?? 6;
+
+  // Multi-Layer Mounting (Kashirovka) Calculations
+  const kashirovkaMode = formData.kashirovkaMode || "none";
+  const kashirovkaLayers = useMemo(() => {
+    if (kashirovkaMode === "none") return [];
+    if (formData.kashirovkaLayers && formData.kashirovkaLayers.length > 0) {
+      return formData.kashirovkaLayers;
+    }
+    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating);
+  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating]);
+
+  const kashirovkaTotals = useMemo(
+    () => calculateKashirovkaTotals(kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm ?? 25),
+    [kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm]
+  );
+
+  // Size Breakdown Calculations
+  const hasSizes = Boolean(formData.sizes && formData.sizes.length > 0);
+  const totalSizesQty = formData.sizes?.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0) ?? 0;
 
   const defaultShiftNotes: ShiftNote[] = React.useMemo(() => [
     {
@@ -496,9 +523,9 @@ export function OverviewTab({
               <div className="hidden md:block h-4 w-px bg-border" />
               <button
                 type="button"
-                onClick={() => onOpenTab?.({ id: data.linkedOrderId, title: data.linkedOrderId, type: "client-order" })}
+                onClick={() => onOpenTab?.({ id: data.linkedOrderId, title: data.linkedOrderId, type: "work-order", module: "production" })}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/50 hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors cursor-pointer border border-violet-200 dark:border-violet-800"
-                title="Open linked Client Order"
+                title="Open linked Work Order"
               >
                 <ExternalLink className="w-3 h-3 text-violet-500 shrink-0" />
                 <span className="font-mono">{data.linkedOrderId}</span>
@@ -761,6 +788,8 @@ export function OverviewTab({
                   value={formData.quantity} 
                   onChange={(e) => handleFieldChange("quantity", Number(e.target.value))}
                   disabled={isOperator}
+                  readOnly={hasSizes}
+                  title={hasSizes ? "Calculated from Size Breakdown" : ""}
                   className="h-8 text-xs bg-muted/30 font-mono font-semibold disabled:opacity-85" 
                 />
               </div>
@@ -784,6 +813,37 @@ export function OverviewTab({
                 </Select>
               </div>
             </div>
+
+            {/* Size Breakdown Quick Badges */}
+            {hasSizes && (
+              <div className="pt-2 border-t border-border/60 space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                    <Tag className="w-3 h-3 text-primary" />
+                    <span>Size Breakdown ({formData.sizes!.length} sizes)</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onSwitchTab("specs")}
+                    className="text-[10px] text-primary hover:underline cursor-pointer flex items-center gap-0.5"
+                  >
+                    <span>Edit in Specs</span>
+                    <ArrowRight className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {formData.sizes!.map((s) => (
+                    <span
+                      key={s.id}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-muted/50 border border-border text-[11px] font-mono"
+                    >
+                      <span className="font-semibold text-foreground">{s.size}:</span>
+                      <span className="text-muted-foreground font-medium">{s.quantity.toLocaleString()} {formData.unit}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -886,9 +946,10 @@ export function OverviewTab({
             </div>
           </div>
 
-          {/* Sub-row: Holes & Quick Action */}
+          {/* Sub-row: Holes, Multi-Layer Mounting & Sizes */}
           <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md bg-muted/20 border border-border text-xs">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              {/* Hole Indicator */}
               <div className="flex items-center gap-1.5">
                 <CircleDot className="w-3.5 h-3.5 text-muted-foreground" />
                 <span className="text-muted-foreground">Hole:</span>
@@ -902,6 +963,36 @@ export function OverviewTab({
                   )}
                 </span>
               </div>
+
+              {/* Multi-Layer Mounting (Kashirovka) */}
+              <div className="flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">Mounting:</span>
+                <span className="font-medium text-foreground">
+                  {kashirovkaMode !== "none" ? (
+                    <Badge variant="outline" className="text-[10px] h-4.5 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-300">
+                      {kashirovkaMode === "triplex" ? "Triplex (3-Ply)" : "Duplex (2-Ply)"} · {kashirovkaTotals.totalMountedGsm} gsm · {kashirovkaTotals.estimatedCaliperMm} mm
+                    </Badge>
+                  ) : (
+                    <span className="text-muted-foreground">None (Single ply)</span>
+                  )}
+                </span>
+              </div>
+
+              {/* Sizes Indicator */}
+              <div className="flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">Sizes:</span>
+                <span className="font-medium text-foreground">
+                  {hasSizes ? (
+                    <span className="font-mono text-primary font-semibold">
+                      {formData.sizes!.length} sizes ({totalSizesQty.toLocaleString()} {formData.unit})
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Single batch ({formData.quantity.toLocaleString()} {formData.unit})</span>
+                  )}
+                </span>
+              </div>
             </div>
 
             <Button
@@ -912,12 +1003,66 @@ export function OverviewTab({
               className="h-7 text-xs gap-1.5 cursor-pointer text-primary border-primary/30 hover:bg-primary/10"
             >
               <Ruler className="w-3.5 h-3.5" />
-              <span>Open die-line</span>
+              <span>Full specifications</span>
             </Button>
           </div>
         </div>
 
-        {/* Card 5: Production Equipment & Scheduling */}
+        {/* Card 6: Quick Attached Files Snapshot */}
+        <div className="@container @3xl:col-span-2 p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
+            <div className="flex items-center gap-2">
+              <Paperclip className="w-4 h-4 text-primary shrink-0" />
+              <span className="font-semibold text-sm text-foreground truncate">
+                Files ({orderAttachments.length})
+              </span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onSwitchTab("files")}
+              className="h-6 px-2 text-[11px] text-primary hover:text-primary/90 hover:bg-primary/10 gap-1 cursor-pointer"
+            >
+              <span>View all</span>
+              <ArrowRight className="w-3 h-3" />
+            </Button>
+          </div>
+
+          {/* Quick file chips list */}
+          {orderAttachments.length > 0 ? (
+            <div className="grid grid-cols-1 @md:grid-cols-2 @2xl:grid-cols-3 gap-2">
+              {orderAttachments.slice(0, 3).map((file) => {
+                const fKind = getFileKind(file);
+                const fMeta = FILE_KIND_ICON[fKind];
+                const Icon = fMeta.icon;
+                return (
+                  <div
+                    key={file.id}
+                    onClick={() => onSwitchTab("files")}
+                    className="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs"
+                  >
+                    <div className="w-6 h-6 rounded bg-background border border-border flex items-center justify-center shrink-0">
+                      <Icon className={cn("w-3.5 h-3.5", fMeta.className)} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-foreground truncate text-[11px]">{file.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{file.size}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground italic">No files attached.</p>
+          )}
+        </div>
+          </div>
+        </div>
+
+        {/* Right Column (1/3 width on xl screens, stacks gracefully on smaller screens) */}
+        <div className="grid grid-cols-1 @3xl:grid-cols-2 @7xl:grid-cols-1 gap-4 content-start">
+          {/* Card 5: Production Equipment & Scheduling */}
         <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
           <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
@@ -1247,62 +1392,6 @@ export function OverviewTab({
           </div>
         </div>
 
-
-
-        {/* Card 6: Quick Attached Files Snapshot */}
-        <div className="@container @3xl:col-span-2 p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
-          <div className="flex items-center justify-between pb-2 border-b border-border">
-            <div className="flex items-center gap-2">
-              <Paperclip className="w-4 h-4 text-primary shrink-0" />
-              <span className="font-semibold text-sm text-foreground truncate">
-                Files ({orderAttachments.length})
-              </span>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => onSwitchTab("files")}
-              className="h-6 px-2 text-[11px] text-primary hover:text-primary/90 hover:bg-primary/10 gap-1 cursor-pointer"
-            >
-              <span>View all</span>
-              <ArrowRight className="w-3 h-3" />
-            </Button>
-          </div>
-
-          {/* Quick file chips list */}
-          {orderAttachments.length > 0 ? (
-            <div className="grid grid-cols-1 @md:grid-cols-2 @2xl:grid-cols-3 gap-2">
-              {orderAttachments.slice(0, 3).map((file) => {
-                const fKind = getFileKind(file);
-                const fMeta = FILE_KIND_ICON[fKind];
-                const Icon = fMeta.icon;
-                return (
-                  <div
-                    key={file.id}
-                    onClick={() => onSwitchTab("files")}
-                    className="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs"
-                  >
-                    <div className="w-6 h-6 rounded bg-background border border-border flex items-center justify-center shrink-0">
-                      <Icon className={cn("w-3.5 h-3.5", fMeta.className)} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-foreground truncate text-[11px]">{file.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{file.size}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground italic">No files attached.</p>
-          )}
-        </div>
-          </div>
-        </div>
-
-        {/* Right Column (1/3 width on xl screens, stacks gracefully on smaller screens) */}
-        <div className="grid grid-cols-1 @3xl:grid-cols-2 @7xl:grid-cols-1 gap-4 content-start">
           {/* Pre-Flight Readiness & Production Route */}
           <OrderReadinessRouteCard
             workOrderId={data?.docNo || tabId}

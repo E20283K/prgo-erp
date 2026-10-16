@@ -359,9 +359,9 @@ export function FinanceGrid({ type }: FinanceGridProps) {
       openTab({
         id: row.id,
         title: `${row.id}: ${row.product}`,
-        type: "client-order",
-        module: "sales",
-        activeLevel3Tab: "cost-calc",
+        type: "work-order",
+        module: "production",
+        activeLevel3Tab: "financials",
         documentData: {
           docNo: row.id,
           customer: row.customer,

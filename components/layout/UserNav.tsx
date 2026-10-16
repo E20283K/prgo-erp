@@ -102,7 +102,7 @@ export function UserNav() {
 
   const getRoleLabel = (role: string) => {
     if (role === "Production Shift Lead" && tAuth.has("roleShiftLead")) return tAuth("roleShiftLead");
-    if (role === "Sales & Client Director" && tAuth.has("roleSalesDirector")) return tAuth("roleSalesDirector");
+    if ((role === "Commercial & Order Manager" || role === "Sales & Client Director") && tAuth.has("roleSalesDirector")) return tAuth("roleSalesDirector");
     if (role === "System Administrator" && tAuth.has("roleSysAdmin")) return tAuth("roleSysAdmin");
     return role;
   };

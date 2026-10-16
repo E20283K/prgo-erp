@@ -377,8 +377,8 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
     openTab({
       id: form.orderId,
       title: `${form.orderId}: ${form.customer}`,
-      type: "client-order",
-      module: "sales",
+      type: "work-order",
+      module: "production",
       documentData: {
         docNo: form.orderId,
         customer: form.customer,

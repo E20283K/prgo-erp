@@ -16,10 +16,7 @@ import {
   ArrowLeftRight,
   Maximize2,
   Ruler,
-  Layers,
   AlertTriangle,
-  ExternalLink,
-  Grid,
   ZoomIn,
   ZoomOut,
   RotateCcw,
@@ -60,8 +57,6 @@ export function DieLinePreview({
 }: DieLinePreviewProps) {
   const t = useTranslations("DieLine");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"unit" | "yield">("unit");
-  const [sheetFormat, setSheetFormat] = useState<"B1" | "B2" | "A1">("B1");
 
   // Zoom & Pan State for in-card preview
   const [cardZoom, setCardZoom] = useState(1);
@@ -178,14 +173,6 @@ export function DieLinePreview({
     }
   };
 
-  const handleViewModeChange = (mode: "unit" | "yield") => {
-    setViewMode(mode);
-    setCardZoom(1);
-    setCardPan({ x: 0, y: 0 });
-    setModalZoom(1);
-    setModalPan({ x: 0, y: 0 });
-  };
-
   const safeW = Math.max(5, Number(width) || 50);
   const safeH = Math.max(5, Number(height) || 90);
   const safeBleed = Math.max(0, Number(bleed) || 0);
@@ -233,54 +220,6 @@ export function DieLinePreview({
     }
     return list;
   }, [safeBleed, safeW, safeH, isFolded, paperStock, t]);
-
-  // Mini-Imposition Sheet Yield Math
-  const sheetDimensions = {
-    B1: { w: 1000, h: 700, name: "B1 (700 × 1000 mm)" },
-    B2: { w: 700, h: 500, name: "B2 (500 × 700 mm)" },
-    A1: { w: 860, h: 610, name: "A1 (610 × 860 mm)" },
-  };
-
-  const currentSheet = sheetDimensions[sheetFormat];
-  const itemWithBleedW = safeW + 2 * safeBleed;
-  const itemWithBleedH = safeH + 2 * safeBleed;
-
-  // Offset press sheet margins: 15mm gripper along bottom, 10mm top & sides
-  const marginSide = 10;
-  const marginTop = 10;
-  const marginGripper = 15;
-  const printableW = Math.max(10, currentSheet.w - 2 * marginSide);
-  const printableH = Math.max(10, currentSheet.h - marginTop - marginGripper);
-
-  // 2mm cutter gutter gap between pieces
-  const stepW = itemWithBleedW + 2;
-  const stepH = itemWithBleedH + 2;
-
-  // Orientation 1: Normal
-  const cols1 = Math.max(1, Math.floor((printableW + 2) / stepW));
-  const rows1 = Math.max(1, Math.floor((printableH + 2) / stepH));
-  const count1 = cols1 * rows1;
-
-  // Orientation 2: Rotated 90°
-  const cols2 = Math.max(1, Math.floor((printableW + 2) / stepH));
-  const rows2 = Math.max(1, Math.floor((printableH + 2) / stepW));
-  const count2 = cols2 * rows2;
-
-  const isRotated = count2 > count1;
-  const cols = isRotated ? cols2 : cols1;
-  const rows = isRotated ? rows2 : rows1;
-  const yieldCount = isRotated ? count2 : count1;
-  const cellItemW = isRotated ? itemWithBleedH : itemWithBleedW;
-  const cellItemH = isRotated ? itemWithBleedW : itemWithBleedH;
-
-  const utilizationPct = Math.min(
-    99.9,
-    Number(((yieldCount * safeW * safeH) / (currentSheet.w * currentSheet.h) * 100).toFixed(1))
-  );
-
-  const targetRun = totalQuantity && totalQuantity > 0 ? totalQuantity : 5000;
-  const netSheets = Math.ceil(targetRun / (yieldCount || 1));
-  const grossSheets = Math.ceil(netSheets * 1.05) + 50;
 
   // 1-Up Die-Line Vector SVG Renderer
   const renderSvgCanvas = (
@@ -615,293 +554,47 @@ export function DieLinePreview({
     );
   };
 
-  // Sheet Imposition Vector SVG Renderer
-  const renderSheetCanvas = (
-    cW: number,
-    cH: number,
-    idSuffix: string
-  ) => {
-    const padX = 28;
-    const padY = 24;
-    const availW = cW - padX * 2;
-    const availH = cH - padY * 2;
-
-    const scale = Math.min(availW / currentSheet.w, availH / currentSheet.h);
-    const drawSheetW = currentSheet.w * scale;
-    const drawSheetH = currentSheet.h * scale;
-
-    const sx = (cW - drawSheetW) / 2;
-    const sy = (cH - drawSheetH) / 2;
-
-    const gripperPx = marginGripper * scale;
-    const marginSidePx = marginSide * scale;
-    const marginTopPx = marginTop * scale;
-
-    const printableDrawW = drawSheetW - 2 * marginSidePx;
-    const printableDrawH = drawSheetH - marginTopPx - gripperPx;
-
-    const cellW_px = cellItemW * scale;
-    const cellH_px = cellItemH * scale;
-    const gutterPx = 2 * scale;
-
-    // Centering the grid within the printable area
-    const gridTotalW = cols * cellW_px + (cols - 1) * gutterPx;
-    const gridTotalH = rows * cellH_px + (rows - 1) * gutterPx;
-    const startX = sx + marginSidePx + Math.max(0, (printableDrawW - gridTotalW) / 2);
-    const startY = sy + marginTopPx + Math.max(0, (printableDrawH - gridTotalH) / 2);
-
-    const stripePatternId = `gripperStripe-${idSuffix}`;
-    const arrowStartId = `sheetArrowStart-${idSuffix}`;
-    const arrowEndId = `sheetArrowEnd-${idSuffix}`;
-
-    return (
-      <svg
-        viewBox={`0 0 ${cW} ${cH}`}
-        className="w-full h-full overflow-visible drop-shadow-sm select-none"
-      >
-        <defs>
-          <pattern
-            id={stripePatternId}
-            width="8"
-            height="8"
-            patternTransform="rotate(45 0 0)"
-            patternUnits="userSpaceOnUse"
-          >
-            <line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" className="text-zinc-400 dark:text-zinc-600" strokeWidth="1.5" />
-          </pattern>
-          <marker
-            id={arrowStartId}
-            viewBox="0 0 6 6"
-            refX="1"
-            refY="3"
-            markerWidth="4"
-            markerHeight="4"
-            orient="auto-start-reverse"
-          >
-            <path d="M 5 0 L 0 3 L 5 6 z" fill="currentColor" className="text-zinc-400 dark:text-zinc-500" />
-          </marker>
-          <marker
-            id={arrowEndId}
-            viewBox="0 0 6 6"
-            refX="5"
-            refY="3"
-            markerWidth="4"
-            markerHeight="4"
-            orient="auto"
-          >
-            <path d="M 0 0 L 5 3 L 0 6 z" fill="currentColor" className="text-zinc-400 dark:text-zinc-500" />
-          </marker>
-        </defs>
-
-        {/* Sheet Outline */}
-        <rect
-          x={sx}
-          y={sy}
-          width={drawSheetW}
-          height={drawSheetH}
-          stroke="currentColor"
-          strokeWidth="1.5"
-          className="fill-white dark:fill-zinc-900 text-zinc-300 dark:text-zinc-700"
-          rx="2"
-        />
-
-        {/* Gripper Margin along bottom */}
-        <rect
-          x={sx}
-          y={sy + drawSheetH - gripperPx}
-          width={drawSheetW}
-          height={gripperPx}
-          fill={`url(#${stripePatternId})`}
-          opacity="0.25"
-        />
-        <line
-          x1={sx}
-          y1={sy + drawSheetH - gripperPx}
-          x2={sx + drawSheetW}
-          y2={sy + drawSheetH - gripperPx}
-          stroke="#ef4444"
-          strokeWidth="1"
-          strokeDasharray="3 2"
-        />
-        <text
-          x={sx + drawSheetW / 2}
-          y={sy + drawSheetH - gripperPx / 2 + 3}
-          textAnchor="middle"
-          className="text-[8px] font-mono font-bold fill-red-500 tracking-wider"
-        >
-          GRIPPER 15mm / КЛАПАН
-        </text>
-
-        {/* Grid of Items */}
-        {Array.from({ length: rows }).map((_, r) =>
-          Array.from({ length: cols }).map((_, c) => {
-            const ix = startX + c * (cellW_px + gutterPx);
-            const iy = startY + r * (cellH_px + gutterPx);
-            const itemNumber = r * cols + c + 1;
-
-            return (
-              <g key={`item-${r}-${c}`}>
-                <rect
-                  x={ix}
-                  y={iy}
-                  width={cellW_px}
-                  height={cellH_px}
-                  rx="1"
-                  fill="rgba(16, 185, 129, 0.12)"
-                  stroke="#10b981"
-                  strokeWidth="0.8"
-                />
-                {cellW_px > 14 && cellH_px > 12 && (
-                  <text
-                    x={ix + cellW_px / 2}
-                    y={iy + cellH_px / 2 + 2.5}
-                    textAnchor="middle"
-                    className="text-[8px] font-mono font-semibold fill-emerald-700 dark:fill-emerald-300 pointer-events-none"
-                  >
-                    {itemNumber}
-                  </text>
-                )}
-              </g>
-            );
-          })
-        )}
-
-        {/* Sheet Width Dimension (Top) */}
-        <g className="text-zinc-400 dark:text-zinc-500">
-          <line
-            x1={sx}
-            y1={sy - 7}
-            x2={sx + drawSheetW}
-            y2={sy - 7}
-            stroke="currentColor"
-            strokeWidth="0.8"
-            markerStart={`url(#${arrowStartId})`}
-            markerEnd={`url(#${arrowEndId})`}
-          />
-          <text
-            x={sx + drawSheetW / 2}
-            y={sy - 10}
-            textAnchor="middle"
-            className="text-[9.5px] font-mono font-bold fill-zinc-600 dark:fill-zinc-300"
-          >
-            {currentSheet.w} mm ({currentSheet.name.split(" ")[0]})
-          </text>
-        </g>
-
-        {/* Sheet Height Dimension (Right) */}
-        <g className="text-zinc-400 dark:text-zinc-500">
-          <line
-            x1={sx + drawSheetW + 8}
-            y1={sy}
-            x2={sx + drawSheetW + 8}
-            y2={sy + drawSheetH}
-            stroke="currentColor"
-            strokeWidth="0.8"
-            markerStart={`url(#${arrowStartId})`}
-            markerEnd={`url(#${arrowEndId})`}
-          />
-          <text
-            x={sx + drawSheetW + 10}
-            y={sy + drawSheetH / 2}
-            textAnchor="middle"
-            transform={`rotate(90, ${sx + drawSheetW + 10}, ${sy + drawSheetH / 2})`}
-            className="text-[9.5px] font-mono font-bold fill-zinc-600 dark:fill-zinc-300"
-          >
-            {currentSheet.h} mm
-          </text>
-        </g>
-      </svg>
-    );
-  };
-
   return (
     <>
       <div
         className={cn(
-          "p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs space-y-3 flex flex-col justify-between select-none min-h-[380px]",
+          "p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3 select-none",
           className
         )}
       >
         {/* Top Inspector Header */}
-        <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-zinc-100 dark:border-zinc-800 flex-wrap">
+        <div className="flex items-center justify-between gap-2 pb-2 border-b border-border flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
-            <Ruler className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-            <span className="font-semibold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 shrink-0 whitespace-nowrap">
+            <Ruler className="w-4 h-4 text-primary shrink-0" />
+            <span className="font-semibold text-xs text-foreground shrink-0 whitespace-nowrap">
               {t("title")}
             </span>
-
-            {/* View Mode Switcher: 1-Up Unit vs Sheet Yield */}
-            <div className="inline-flex items-center p-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shrink-0">
-              <button
-                type="button"
-                onClick={() => handleViewModeChange("unit")}
-                className={cn(
-                  "px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer flex items-center gap-1",
-                  viewMode === "unit"
-                    ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <Ruler className="w-3 h-3" />
-                <span>{t("unitView")}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleViewModeChange("yield")}
-                className={cn(
-                  "px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer flex items-center gap-1",
-                  viewMode === "yield"
-                    ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <Grid className="w-3 h-3" />
-                <span>{t("yieldView")}</span>
-              </button>
-            </div>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-muted text-muted-foreground border border-border">
+              1-Up
+            </span>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {viewMode === "yield" ? (
-              <div className="flex items-center gap-1">
-                {(["B1", "B2", "A1"] as const).map((fmt) => (
-                  <button
-                    key={fmt}
-                    type="button"
-                    onClick={() => setSheetFormat(fmt)}
-                    className={cn(
-                      "px-2 py-0.5 text-[10px] font-mono font-semibold rounded border transition-colors cursor-pointer",
-                      sheetFormat === fmt
-                        ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800"
-                        : "border-zinc-200 dark:border-zinc-800 text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {fmt}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              onFlipOrientation && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        type="button"
-                        onClick={onFlipOrientation}
-                        className="h-6 px-2 text-[11px] text-zinc-600 dark:text-zinc-300 hover:text-foreground gap-1.5 cursor-pointer"
-                      >
-                        <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                        <span>{t("flipOrientation")}</span>
-                      </Button>
-                    }
-                  />
-                  <TooltipContent side="top">
-                    <span className="text-xs">{t("flipOrientation")}</span>
-                  </TooltipContent>
-                </Tooltip>
-              )
+            {onFlipOrientation && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      onClick={onFlipOrientation}
+                      className="h-6 px-2 text-[11px] text-zinc-600 dark:text-zinc-300 hover:text-foreground gap-1.5 cursor-pointer"
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <span>{t("flipOrientation")}</span>
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top">
+                  <span className="text-xs">{t("flipOrientation")}</span>
+                </TooltipContent>
+              </Tooltip>
             )}
 
             <Tooltip>
@@ -934,19 +627,19 @@ export function DieLinePreview({
           onMouseLeave={handleCardMouseUp}
           onDoubleClick={handleCardDoubleClick}
           className={cn(
-            "relative flex-1 flex items-center justify-center py-2.5 min-h-[260px] sm:min-h-[290px] w-full overflow-hidden bg-zinc-50/50 dark:bg-zinc-950/50 rounded-md border border-zinc-200/60 dark:border-zinc-800/80 select-none group",
+            "relative flex-1 flex items-center justify-center py-2.5 min-h-[240px] sm:min-h-[260px] w-full overflow-hidden bg-muted/20 dark:bg-muted/10 rounded-md border border-border select-none group",
             isCardDragging ? "cursor-grabbing" : cardZoom > 1 ? "cursor-grab" : "cursor-crosshair"
           )}
         >
           {/* Mini Hint Badge */}
           <div className="absolute top-2 left-2 z-10 pointer-events-none opacity-0 group-hover:opacity-85 transition-opacity duration-200">
-            <span className="text-[9.5px] font-mono text-zinc-500 dark:text-zinc-400 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-xs px-1.5 py-0.5 rounded border border-zinc-200/60 dark:border-zinc-800/60 shadow-2xs">
+            <span className="text-[9.5px] font-mono text-muted-foreground bg-card/90 backdrop-blur-xs px-1.5 py-0.5 rounded border border-border shadow-2xs">
               {t("zoomHint")}
             </span>
           </div>
 
           {/* Floating Zoom & Pan Controls Overlay */}
-          <div className="absolute bottom-2 right-2 z-10 flex items-center gap-0.5 p-0.5 rounded-md bg-white/90 dark:bg-zinc-900/90 backdrop-blur-xs border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+          <div className="absolute bottom-2 right-2 z-10 flex items-center gap-0.5 p-0.5 rounded-md bg-card/90 backdrop-blur-xs border border-border shadow-xs">
             <button
               type="button"
               onClick={(e) => {
@@ -1008,9 +701,7 @@ export function DieLinePreview({
               transform: `translate(${cardPan.x}px, ${cardPan.y}px) scale(${cardZoom})`,
             }}
           >
-            {viewMode === "unit"
-              ? renderSvgCanvas(380, 260, 260, 180, "inCard")
-              : renderSheetCanvas(380, 260, "inCardSheet")}
+            {renderSvgCanvas(380, 260, 260, 180, "inCard")}
           </div>
         </div>
 
@@ -1035,151 +726,74 @@ export function DieLinePreview({
         )}
 
         {/* Bottom Legend & Area Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-zinc-100 dark:border-zinc-800 text-[10.5px]">
-          {viewMode === "unit" ? (
-            <>
-              {/* Color Legend */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
-                  <span className="w-2.5 h-0.5 bg-emerald-500 rounded-full inline-block" />
-                  <span>{t("trimLine")}</span>
-                </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-border text-[10.5px]">
+          {/* Color Legend */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="w-2.5 h-0.5 bg-emerald-500 rounded-full inline-block" />
+              <span>{t("trimLine")}</span>
+            </div>
 
-                {safeBleed > 0 && (
-                  <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                    <span className="w-2.5 h-0.5 border-b border-dashed border-amber-500 inline-block" />
-                    <span>{t("bleedLine", { bleed: safeBleed })}</span>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
-                  <span className="w-2 h-0.5 border-b border-dotted border-sky-500 inline-block" />
-                  <span>{t("safeZone")}</span>
-                </div>
-
-                {hasHole && (
-                  <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full border border-emerald-500 inline-block" />
-                    <span>Ø{effectiveHoleDiameter}mm ({effectiveHolePos})</span>
-                  </div>
-                )}
-
-                {isFolded && (
-                  <div className="flex items-center gap-1 text-pink-600 dark:text-pink-400">
-                    <span className="w-2.5 h-0.5 border-b border-dashed border-pink-500 inline-block" />
-                    <span>{t("foldLine")}</span>
-                  </div>
-                )}
+            {safeBleed > 0 && (
+              <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                <span className="w-2.5 h-0.5 border-b border-dashed border-amber-500 inline-block" />
+                <span>{t("bleedLine", { bleed: safeBleed })}</span>
               </div>
+            )}
 
-              {/* Net Area calculation */}
-              <div className="font-mono text-muted-foreground shrink-0 font-medium text-[11px]">
-                {t("area")}: <span className="font-semibold text-foreground">{netAreaCm2} cm²</span>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Sheet Yield Stats */}
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <Badge variant="outline" className="text-[10px] font-mono bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-400">
-                  ⚡ {t("yieldResult", { count: yieldCount })}
-                </Badge>
-                <span className="text-zinc-500 font-mono text-[11px]">
-                  {t("utilization")}: <strong className="text-foreground">{utilizationPct}%</strong>
-                </span>
-                <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                <span className="text-zinc-500 font-mono text-[11px]">
-                  {t("grossSheets")}: <strong className="text-foreground">{grossSheets.toLocaleString()} sht</strong>
-                </span>
-              </div>
+            <div className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
+              <span className="w-2 h-0.5 border-b border-dotted border-sky-500 inline-block" />
+              <span>{t("safeZone")}</span>
+            </div>
 
-              {onOpenLayoutTab && (
-                <button
-                  type="button"
-                  onClick={onOpenLayoutTab}
-                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 dark:text-blue-400 font-medium hover:underline cursor-pointer text-[11px]"
-                >
-                  <span>{t("openLayout")}</span>
-                  <ExternalLink className="w-3 h-3" />
-                </button>
-              )}
-            </>
-          )}
+            {hasHole && (
+              <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full border border-emerald-500 inline-block" />
+                <span>Ø{effectiveHoleDiameter}mm ({effectiveHolePos})</span>
+              </div>
+            )}
+
+            {isFolded && (
+              <div className="flex items-center gap-1 text-pink-600 dark:text-pink-400">
+                <span className="w-2.5 h-0.5 border-b border-dashed border-pink-500 inline-block" />
+                <span>{t("foldLine")}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Net Area calculation */}
+          <div className="font-mono text-muted-foreground shrink-0 font-medium text-[11px]">
+            {t("area")}: <span className="font-semibold text-foreground">{netAreaCm2} cm²</span>
+          </div>
         </div>
       </div>
 
       {/* Fullscreen HD Modal Inspector */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="w-[96vw] sm:max-w-4xl p-5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-          <DialogHeader className="pb-3 border-b border-zinc-100 dark:border-zinc-800">
+        <DialogContent className="w-[96vw] sm:max-w-4xl p-5 bg-card border border-border">
+          <DialogHeader className="pb-3 border-b border-border">
             <div className="flex items-center justify-between gap-3 pr-6 flex-wrap">
               <div className="flex items-center gap-2">
-                <Ruler className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
-                <DialogTitle className="text-sm sm:text-base font-bold text-zinc-900 dark:text-zinc-100">
+                <Ruler className="w-5 h-5 text-primary shrink-0" />
+                <DialogTitle className="text-sm sm:text-base font-bold text-foreground">
                   {t("title")}
                 </DialogTitle>
-                <div className="inline-flex items-center p-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shrink-0 ml-2">
-                  <button
-                    type="button"
-                    onClick={() => handleViewModeChange("unit")}
-                    className={cn(
-                      "px-2.5 py-0.5 text-xs font-medium rounded transition-colors cursor-pointer flex items-center gap-1",
-                      viewMode === "unit"
-                        ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <Ruler className="w-3.5 h-3.5" />
-                    <span>{t("unitView")}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleViewModeChange("yield")}
-                    className={cn(
-                      "px-2.5 py-0.5 text-xs font-medium rounded transition-colors cursor-pointer flex items-center gap-1",
-                      viewMode === "yield"
-                        ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <Grid className="w-3.5 h-3.5" />
-                    <span>{t("yieldView")}</span>
-                  </button>
-                </div>
+                <span className="px-2 py-0.5 rounded text-xs font-mono font-medium bg-muted text-muted-foreground border border-border ml-1">
+                  1-Up Unit
+                </span>
               </div>
 
-              {viewMode === "yield" ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground mr-1">{t("parentSheet")}:</span>
-                  {(["B1", "B2", "A1"] as const).map((fmt) => (
-                    <button
-                      key={fmt}
-                      type="button"
-                      onClick={() => setSheetFormat(fmt)}
-                      className={cn(
-                        "px-2.5 py-1 text-xs font-mono font-semibold rounded border transition-colors cursor-pointer",
-                        sheetFormat === fmt
-                          ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800"
-                          : "border-zinc-200 dark:border-zinc-800 text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      {fmt}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                onFlipOrientation && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    onClick={onFlipOrientation}
-                    className="h-7 px-2.5 text-xs text-zinc-600 dark:text-zinc-300 hover:text-foreground gap-1.5 cursor-pointer"
-                  >
-                    <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                    <span>{t("flipOrientation")}</span>
-                  </Button>
-                )
+              {onFlipOrientation && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={onFlipOrientation}
+                  className="h-7 px-2.5 text-xs text-zinc-600 dark:text-zinc-300 hover:text-foreground gap-1.5 cursor-pointer"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span>{t("flipOrientation")}</span>
+                </Button>
               )}
             </div>
           </DialogHeader>
@@ -1267,85 +881,48 @@ export function DieLinePreview({
                 transform: `translate(${modalPan.x}px, ${modalPan.y}px) scale(${modalZoom})`,
               }}
             >
-              {viewMode === "unit"
-                ? renderSvgCanvas(640, 440, 460, 320, "modal")
-                : renderSheetCanvas(640, 440, "modalSheet")}
+              {renderSvgCanvas(640, 440, 460, 320, "modal")}
             </div>
           </div>
 
           {/* Modal Legend / Stats Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-zinc-100 dark:border-zinc-800 text-xs">
-            {viewMode === "unit" ? (
-              <>
-                <div className="flex items-center gap-3.5 flex-wrap">
-                  <div className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
-                    <span className="w-3 h-0.5 bg-emerald-500 rounded-full inline-block" />
-                    <span>{t("trimLine")}</span>
-                  </div>
-
-                  {safeBleed > 0 && (
-                    <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                      <span className="w-3 h-0.5 border-b border-dashed border-amber-500 inline-block" />
-                      <span>{t("bleedLine", { bleed: safeBleed })}</span>
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
-                    <span className="w-3 h-0.5 border-b border-dotted border-sky-500 inline-block" />
-                    <span>{t("safeZone")}</span>
-                  </div>
-
-                  {hasHole && (
-                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                      <span className="w-2 h-2 rounded-full border border-emerald-500 inline-block" />
-                      <span>Ø{effectiveHoleDiameter}mm ({effectiveHolePos})</span>
-                    </div>
-                  )}
-
-                  {isFolded && (
-                    <div className="flex items-center gap-1.5 text-pink-600 dark:text-pink-400">
-                      <span className="w-3 h-0.5 border-b border-dashed border-pink-500 inline-block" />
-                      <span>{t("foldLine")}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="font-mono text-muted-foreground shrink-0 font-medium text-xs">
-                  {t("area")}: <span className="font-bold text-foreground">{netAreaCm2} cm²</span>
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center justify-between w-full">
-                <div className="flex items-center gap-3">
-                  <Badge variant="outline" className="text-xs font-mono bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-400">
-                    ⚡ {t("yieldResult", { count: yieldCount })} ({isRotated ? "Rotated 90°" : "Standard"})
-                  </Badge>
-                  <span className="text-zinc-600 dark:text-zinc-400 font-mono">
-                    {t("utilization")}: <strong className="text-foreground">{utilizationPct}%</strong>
-                  </span>
-                  <span>•</span>
-                  <span className="text-zinc-600 dark:text-zinc-400 font-mono">
-                    {t("grossSheets")}: <strong className="text-foreground">{grossSheets.toLocaleString()} sheets</strong>
-                  </span>
-                </div>
-
-                {onOpenLayoutTab && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setIsModalOpen(false);
-                      onOpenLayoutTab();
-                    }}
-                    className="h-7 text-xs gap-1.5 text-blue-600 hover:text-blue-700 cursor-pointer"
-                  >
-                    <span>{t("openLayout")}</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </Button>
-                )}
+            <div className="flex items-center gap-3.5 flex-wrap">
+              <div className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
+                <span className="w-3 h-0.5 bg-emerald-500 rounded-full inline-block" />
+                <span>{t("trimLine")}</span>
               </div>
-            )}
+
+              {safeBleed > 0 && (
+                <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <span className="w-3 h-0.5 border-b border-dashed border-amber-500 inline-block" />
+                  <span>{t("bleedLine", { bleed: safeBleed })}</span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
+                <span className="w-3 h-0.5 border-b border-dotted border-sky-500 inline-block" />
+                <span>{t("safeZone")}</span>
+              </div>
+
+              {hasHole && (
+                <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                  <span className="w-2 h-2 rounded-full border border-emerald-500 inline-block" />
+                  <span>Ø{effectiveHoleDiameter}mm ({effectiveHolePos})</span>
+                </div>
+              )}
+
+              {isFolded && (
+                <div className="flex items-center gap-1 text-pink-600 dark:text-pink-400">
+                  <span className="w-3 h-0.5 border-b border-dashed border-pink-500 inline-block" />
+                  <span>{t("foldLine")}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="font-mono text-muted-foreground shrink-0 font-medium text-xs">
+              {t("area")}: <span className="font-bold text-foreground">{netAreaCm2} cm²</span>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

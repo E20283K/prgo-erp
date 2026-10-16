@@ -291,7 +291,7 @@ export function SalesGrid({ type }: SalesGridProps) {
         id: newAct.id,
         title: `${newAct.id}: ${newAct.customer}`,
         type: "delivery-act",
-        module: "sales",
+        module: "finance",
         isUnsaved: true,
         activeLevel3Tab: "overview",
         documentData: newAct,
@@ -311,8 +311,8 @@ export function SalesGrid({ type }: SalesGridProps) {
     openTab({
       id: newDocNo,
       title: `${newDocNo}: New ${titleSuffix}`,
-      type: "client-order",
-      module: "sales",
+      type: "work-order",
+      module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
@@ -348,7 +348,7 @@ export function SalesGrid({ type }: SalesGridProps) {
           id: row.id,
           title: `${row.id}: ${row.customer}`,
           type: "delivery-act",
-          module: "sales",
+          module: "finance",
           activeLevel3Tab: "overview",
           documentData: row,
         });
@@ -362,8 +362,8 @@ export function SalesGrid({ type }: SalesGridProps) {
         openTab({
           id: row.id,
           title: `${row.id}: ${row.product}`,
-          type: "client-order",
-          module: "sales",
+          type: "work-order",
+          module: "production",
           documentData: {
             docNo: row.id,
             customer: row.customer,
@@ -382,8 +382,8 @@ export function SalesGrid({ type }: SalesGridProps) {
         openTab({
           id: row.id,
           title: `${row.id}`,
-          type: "client-order",
-          module: "sales",
+          type: "work-order",
+          module: "production",
         });
       }
     }
