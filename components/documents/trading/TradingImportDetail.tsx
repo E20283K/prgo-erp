@@ -13,19 +13,13 @@ import {
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
-import {
-  DocumentHeader,
-  DocumentSidebar,
-  SidebarSummaryCard,
-  DocumentNavItem,
-  InfoRow,
-} from "@/components/documents/common/DocumentShell";
+import { DocumentHeader } from "@/components/documents/common/DocumentShell";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -35,21 +29,12 @@ import {
 } from "@/components/ui/select";
 import {
   Ship,
-  Printer,
   Save,
   Check,
-  Building2,
-  Scale,
-  Calculator,
   Boxes,
   Truck,
-  ExternalLink,
+  Calculator,
   Download,
-  Receipt,
-  Sparkles,
-  Layers,
-  ArrowRight,
-  TrendingUp,
 } from "lucide-react";
 import { TradingImportBatchRecord, ImportBatchItem } from "./types";
 
@@ -59,11 +44,9 @@ const DataEditor = dynamic(
 );
 
 export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, setLevel3Tab, addNotification, theme, openTab } = useWorkspaceStore();
+  const { setTabUnsaved, closeTab, addNotification, theme, openTab } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingImportBatchRecord> = tab.documentData || {};
-
-  const activeTab = tab.activeLevel3Tab || "costing";
 
   // Form State
   const [batchNo] = useState<string>(rawData.batchNo || tab.id);
@@ -101,8 +84,8 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
     rawData.notes || "Qishki mavsum uchun 1-katta partiya. Bojxona to'liq rasmiylashtirildi."
   );
 
-  // High volume mock items for robust virtual data grid testing
-  const [items, setItems] = useState<ImportBatchItem[]>(
+  // High volume items
+  const [items] = useState<ImportBatchItem[]>(
     rawData.items && rawData.items.length > 0
       ? rawData.items
       : [
@@ -195,7 +178,7 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
     };
   }, [fobAmountUSD, internationalCargoUSD, customsDutyUZS, exchangeRate]);
 
-  // Glide Data Grid Columns for Line Items
+  // Glide Data Grid for Items
   const [gridSelection, setGridSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
@@ -204,8 +187,8 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
   const columns = useMemo<GridColumn[]>(
     () => [
       { id: "sku", title: "Artikul", width: 130, icon: GridColumnIcon.HeaderReference },
-      { id: "name", title: "Nomenklatura Nomi", width: 300, icon: GridColumnIcon.HeaderString },
-      { id: "category", title: "Kategoriya", width: 130, icon: GridColumnIcon.HeaderSingleValue },
+      { id: "name", title: "Nomenklatura Nomi", width: 320, icon: GridColumnIcon.HeaderString },
+      { id: "category", title: "Kategoriya", width: 120, icon: GridColumnIcon.HeaderSingleValue },
       { id: "unit", title: "Birlik", width: 80, icon: GridColumnIcon.HeaderString },
       { id: "quantity", title: "Miqdor", width: 110, icon: GridColumnIcon.HeaderNumber },
       { id: "fobPriceUSD", title: "FOB Narx ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
@@ -243,6 +226,7 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
           allowOverlay: false,
           readonly: true,
           contentAlign: "right",
+          themeOverride: { baseFontStyle: "600 11px monospace" },
         };
       }
 
@@ -265,9 +249,7 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
           allowOverlay: false,
           readonly: true,
           contentAlign: "right",
-          themeOverride: {
-            baseFontStyle: "600 11px monospace",
-          },
+          themeOverride: { baseFontStyle: "600 11px monospace" },
         };
       }
 
@@ -325,10 +307,7 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
           unit: row.unit,
           priceUZS: row.suggestedSalePriceUZS,
           priceUSD: row.suggestedSalePriceUZS / exchangeRate,
-          wholesalePriceUZS: Math.round(row.suggestedSalePriceUZS * 0.92),
-          retailPriceUZS: Math.round(row.suggestedSalePriceUZS * 1.08),
           stockQty: row.quantity,
-          minStockLevel: Math.round(row.quantity * 0.2),
           origin: `${origin} (Import: ${batchNo})`,
         },
       });
@@ -358,333 +337,227 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
     closeTab(tab.id);
   };
 
-  const navItems: DocumentNavItem[] = [
-    {
-      id: "costing",
-      label: "Tannarx (Landed Cost)",
-      icon: Calculator,
-    },
-    {
-      id: "items",
-      label: "Partiya Tarkibi (Tovarlar)",
-      icon: Boxes,
-      badge: items.length,
-    },
-    {
-      id: "logistics",
-      label: "Logistika & Bojxona",
-      icon: Ship,
-    },
-  ];
-
   return (
     <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">
-      <Tabs
-        value={activeTab}
-        onValueChange={(val) => setLevel3Tab(tab.id, val)}
-        className="flex-1 flex flex-col overflow-hidden"
-      >
-        {/* Document Header */}
-        <DocumentHeader
-          icon={Ship}
-          title={`Import Partiyasi: ${batchNo}`}
-          docNo={batchNo}
-          date={date}
-          status={status === "Allocated to Stock" ? "Completed" : "Active"}
-          actions={
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleSave}
-                className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+      {/* 1C Standard Document Header */}
+      <DocumentHeader
+        icon={Ship}
+        title={`Import Partiyasi: ${batchNo}`}
+        docNo={batchNo}
+        date={date}
+        status={status === "Allocated to Stock" ? "Completed" : "Active"}
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleSave}
+              className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Saqlash</span>
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={handleAllocateToStock}
+              disabled={status === "Allocated to Stock"}
+              className="h-7 px-3 bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 font-medium shadow-none cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Omborga kirim qilish</span>
+            </Button>
+          </>
+        }
+      />
+
+      {/* SINGLE UNIFIED PAGE BODY */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* ALL TOP FORM FIELDS & FINANCIAL METRICS (NO SUB-TABS) */}
+        <div className="p-3 border-b border-border bg-card shrink-0 space-y-2.5 overflow-y-auto max-h-[38vh]">
+          {/* TOP METRIC TILES */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">FOB Xarid (Xitoy):</span>
+              <div className="text-sm font-mono font-bold text-foreground">${fobAmountUSD.toLocaleString()}</div>
+              <span className="text-[10px] text-muted-foreground font-mono">{(totalFobUZS / 1_000_000).toFixed(1)} mln UZS</span>
+            </div>
+
+            <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Xalqaro Kargo / Fura:</span>
+              <div className="text-sm font-mono font-bold text-blue-600 dark:text-blue-400">${internationalCargoUSD.toLocaleString()}</div>
+              <span className="text-[10px] text-muted-foreground font-mono">{(totalCargoUZS / 1_000_000).toFixed(1)} mln UZS</span>
+            </div>
+
+            <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Bojxona To&apos;lovi (UZS):</span>
+              <div className="text-sm font-mono font-bold text-amber-600 dark:text-amber-400">{(customsDutyUZS / 1_000_000).toFixed(1)} mln</div>
+              <span className="text-[10px] text-muted-foreground">Rastamojka xarajati</span>
+            </div>
+
+            <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Toshkent Omboridagi Tannarx:</span>
+              <div className="text-sm font-mono font-bold text-primary">{(grandLandedCostUZS / 1_000_000).toFixed(1)} mln UZS</div>
+              <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">+{landedMarkupPercent.toFixed(1)}% umumiy ustama</span>
+            </div>
+          </div>
+
+          {/* EDITABLE PARAMETERS ROW 1 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div>
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Xitoy Yetkazib Beruvchi:</Label>
+              <Input
+                value={supplier}
+                onChange={(e) => {
+                  setSupplier(e.target.value);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs mt-0.5"
+              />
+            </div>
+
+            <div>
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Konteyner / Fura №:</Label>
+              <Input
+                value={containerNo}
+                onChange={(e) => {
+                  setContainerNo(e.target.value);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs font-mono mt-0.5"
+              />
+            </div>
+
+            <div>
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Jo&apos;natilgan Shahar / Port:</Label>
+              <Select
+                value={origin}
+                onValueChange={(val: any) => {
+                  setOrigin(val);
+                  setTabUnsaved(tab.id, true);
+                }}
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>Saqlash</span>
-              </Button>
+                <SelectTrigger className="h-7 text-xs mt-0.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="text-xs">
+                  <SelectItem value="Guangzhou, Xitoy">Guangzhou, Xitoy</SelectItem>
+                  <SelectItem value="Yiwu, Xitoy">Yiwu, Xitoy</SelectItem>
+                  <SelectItem value="Shanghai, Xitoy">Shanghai, Xitoy</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-              <Button
-                size="sm"
-                onClick={handleAllocateToStock}
-                disabled={status === "Allocated to Stock"}
-                className="h-7 px-3 bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 font-medium shadow-none cursor-pointer"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Omborga kirim qilish</span>
-              </Button>
-            </>
-          }
-        />
+            <div>
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">MB Valyuta Kursi ($1):</Label>
+              <Input
+                type="number"
+                value={exchangeRate}
+                onChange={(e) => {
+                  setExchangeRate(Number(e.target.value) || 12850);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs font-mono text-right mt-0.5"
+              />
+            </div>
+          </div>
 
-        {/* Workspace Body */}
-        <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
-          <DocumentSidebar
-            sectionsLabel="Bo'limlar"
-            items={navItems}
-            activeId={activeTab}
-            onSelect={(id) => setLevel3Tab(tab.id, id)}
-            summary={
-              <SidebarSummaryCard
-                icon={Ship}
-                title={batchNo}
-                subtitle={origin}
-              >
-                <InfoRow label="Jami Tannarx:">
-                  <span className="font-mono font-bold text-xs text-primary">
-                    {(grandLandedCostUZS / 1_000_000).toFixed(1)} mln UZS
-                  </span>
-                </InfoRow>
+          {/* EDITABLE PARAMETERS ROW 2 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div>
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">FOB Qiymati ($):</Label>
+              <Input
+                type="number"
+                value={fobAmountUSD}
+                onChange={(e) => {
+                  setFobAmountUSD(Number(e.target.value) || 0);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs font-mono mt-0.5"
+              />
+            </div>
 
-                <InfoRow label="FOB Xarid ($):">
-                  <span className="font-mono text-xs">
-                    ${fobAmountUSD.toLocaleString()}
-                  </span>
-                </InfoRow>
+            <div>
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Kargo / Transport ($):</Label>
+              <Input
+                type="number"
+                value={internationalCargoUSD}
+                onChange={(e) => {
+                  setInternationalCargoUSD(Number(e.target.value) || 0);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs font-mono mt-0.5"
+              />
+            </div>
 
-                <InfoRow label="Landed Ustama:">
-                  <Badge variant="outline" className="h-4 px-1 text-[10px] font-mono text-emerald-700 bg-emerald-50 border-emerald-300">
-                    +{landedMarkupPercent.toFixed(1)}%
-                  </Badge>
-                </InfoRow>
+            <div>
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Bojxona To&apos;lovi (UZS):</Label>
+              <Input
+                type="number"
+                value={customsDutyUZS}
+                onChange={(e) => {
+                  setCustomsDutyUZS(Number(e.target.value) || 0);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs font-mono mt-0.5"
+              />
+            </div>
 
-                <InfoRow label="Pozitsiyalar:">
-                  <span className="font-mono text-xs">{items.length} ta tovar</span>
-                </InfoRow>
-              </SidebarSummaryCard>
-            }
-            footer={
-              <div className="space-y-1.5 text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Konteyner:</span>
-                  <span className="font-mono text-[10px] font-semibold text-foreground">{containerNo}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Brutto og'irlik:</span>
-                  <span className="font-mono text-[10px] text-foreground">{grossWeightKg} kg</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Holat:</span>
-                  <Badge variant="secondary" className="text-[9px]">{status}</Badge>
-                </div>
-              </div>
-            }
-          />
-
-          {/* Right Main Viewport */}
-          <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
-            {/* TAB 1: LANDED COST & FINANCIALS */}
-            <TabsContent value="costing" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
-                  <span className="text-[11px] text-muted-foreground block">FOB Xarid (Xitoy zavodi):</span>
-                  <strong className="text-base font-mono block text-foreground">${fobAmountUSD.toLocaleString()}</strong>
-                  <span className="text-[10px] text-muted-foreground font-mono">
-                    {(totalFobUZS / 1_000_000).toFixed(1)} mln UZS
-                  </span>
-                </div>
-
-                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
-                  <span className="text-[11px] text-muted-foreground block">Xalqaro Kargo / Fura:</span>
-                  <strong className="text-base font-mono block text-blue-600 dark:text-blue-400">${internationalCargoUSD.toLocaleString()}</strong>
-                  <span className="text-[10px] text-muted-foreground font-mono">
-                    {(totalCargoUZS / 1_000_000).toFixed(1)} mln UZS
-                  </span>
-                </div>
-
-                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
-                  <span className="text-[11px] text-muted-foreground block">Bojxona To'lovlari (UZS):</span>
-                  <strong className="text-base font-mono block text-amber-600 dark:text-amber-400">
-                    {(customsDutyUZS / 1_000_000).toFixed(1)} mln UZS
-                  </strong>
-                  <span className="text-[10px] text-muted-foreground">Bojxona deklaratsiyasi</span>
-                </div>
-
-                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
-                  <span className="text-[11px] text-muted-foreground block">Toshkent Omboridagi Tannarx:</span>
-                  <strong className="text-base font-mono block text-primary">
-                    {(grandLandedCostUZS / 1_000_000).toFixed(1)} mln UZS
-                  </strong>
-                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
-                    +{landedMarkupPercent.toFixed(1)}% umumiy ustama
-                  </span>
-                </div>
-              </div>
-
-              {/* PARAMETER CONFIGURATION CARD */}
-              <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
-                <div className="flex items-center gap-2 border-b border-border pb-2">
-                  <Calculator className="w-4 h-4 text-primary" />
-                  <span className="font-semibold text-xs text-foreground">
-                    Xarajatlarni Ta&apos;qsimlash va Valyuta Kursi Parametrlari
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
-                  <div>
-                    <Label className="text-[11px] text-muted-foreground">FOB Summa ($):</Label>
-                    <Input
-                      type="number"
-                      value={fobAmountUSD}
-                      onChange={(e) => {
-                        setFobAmountUSD(Number(e.target.value) || 0);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      className="h-8 text-xs font-mono mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="text-[11px] text-muted-foreground">Xalqaro Transport ($):</Label>
-                    <Input
-                      type="number"
-                      value={internationalCargoUSD}
-                      onChange={(e) => {
-                        setInternationalCargoUSD(Number(e.target.value) || 0);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      className="h-8 text-xs font-mono mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="text-[11px] text-muted-foreground">Bojxona (UZS):</Label>
-                    <Input
-                      type="number"
-                      value={customsDutyUZS}
-                      onChange={(e) => {
-                        setCustomsDutyUZS(Number(e.target.value) || 0);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      className="h-8 text-xs font-mono mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="text-[11px] text-muted-foreground">MB Kursi (1 USD):</Label>
-                    <Input
-                      type="number"
-                      value={exchangeRate}
-                      onChange={(e) => {
-                        setExchangeRate(Number(e.target.value) || 12850);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      className="h-8 text-xs font-mono mt-1"
-                    />
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* TAB 2: ITEMS WITH GLIDE DATA GRID */}
-            <TabsContent value="items" className="flex-1 flex flex-col overflow-hidden m-0">
-              <div className="px-3 h-9 border-b border-border bg-card shrink-0 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Boxes className="w-4 h-4 text-primary" />
-                  <span className="font-semibold text-xs text-foreground">
-                    Partiya Tarkibidagi Nomenklaturalar va Tannarx
-                  </span>
-                  <Badge variant="secondary" className="font-mono text-[10px] h-5">
-                    {items.length} ta yozuv
-                  </Badge>
-                </div>
-                <div className="text-[11px] text-muted-foreground font-mono">
-                  Ikkita marta bosing (F12) — Katalog kartochkasini ochish
-                </div>
-              </div>
-
-              <div className="flex-1 min-h-0 relative">
-                <div className="absolute inset-0">
-                  <DataEditor
-                    columns={columns}
-                    rows={items.length}
-                    getCellContent={getCellContent}
-                    onCellActivated={handleCellActivated}
-                    gridSelection={gridSelection}
-                    onGridSelectionChange={setGridSelection}
-                    rowMarkers="both"
-                    freezeColumns={1}
-                    smoothScrollX
-                    smoothScrollY
-                    theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
-                    width="100%"
-                    height="100%"
-                  />
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* TAB 3: LOGISTICS */}
-            <TabsContent value="logistics" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
-              <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
-                <div className="flex items-center gap-2 border-b border-border pb-2">
-                  <Truck className="w-4 h-4 text-primary" />
-                  <span className="font-semibold text-xs text-foreground">
-                    Transport, Marshrut va Bojxona Hujjatlari
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Konteyner / Fura raqami:</Label>
-                    <Input
-                      value={containerNo}
-                      onChange={(e) => {
-                        setContainerNo(e.target.value);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      className="h-8 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Xitoy Yetkazib Beruvchi (Zavod):</Label>
-                    <Input
-                      value={supplier}
-                      onChange={(e) => {
-                        setSupplier(e.target.value);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Jo&apos;natilgan port / shahar:</Label>
-                    <Select
-                      value={origin}
-                      onValueChange={(val: any) => {
-                        setOrigin(val);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                    >
-                      <SelectTrigger className="h-8 text-xs font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="text-xs">
-                        <SelectItem value="Guangzhou, Xitoy">Guangzhou, Xitoy</SelectItem>
-                        <SelectItem value="Yiwu, Xitoy">Yiwu, Xitoy</SelectItem>
-                        <SelectItem value="Shanghai, Xitoy">Shanghai, Xitoy</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="space-y-1 pt-2">
-                  <Label className="text-[11px] text-muted-foreground">Partiya bo&apos;yicha eslatma va deklaratsiya izohlari:</Label>
-                  <Input
-                    value={notes}
-                    onChange={(e) => {
-                      setNotes(e.target.value);
-                      setTabUnsaved(tab.id, true);
-                    }}
-                    className="h-8 text-xs"
-                  />
-                </div>
-              </div>
-            </TabsContent>
+            <div>
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Brutto Og&apos;irligi (kg):</Label>
+              <Input
+                type="number"
+                value={grossWeightKg}
+                onChange={(e) => {
+                  setGrossWeightKg(Number(e.target.value) || 0);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs font-mono mt-0.5"
+              />
+            </div>
           </div>
         </div>
-      </Tabs>
+
+        {/* BOTTOM REAL DATA: GLIDE DATA GRID LIST */}
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {/* TOOLBAR */}
+          <div className="px-3 h-8 border-b border-border bg-card shrink-0 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Boxes className="w-3.5 h-3.5 text-primary" />
+              <span className="font-semibold text-xs text-foreground">
+                Partiya Tarkibidagi Nomenklaturalar va Tannarx
+              </span>
+              <Badge variant="secondary" className="font-mono text-[10px] h-4.5 px-1.5">
+                {items.length} ta yozuv
+              </Badge>
+            </div>
+            <div className="text-[11px] text-muted-foreground font-mono">
+              Ikkita marta bosing (F12) — Katalog kartochkasini ochish
+            </div>
+          </div>
+
+          {/* GLIDE CANVAS */}
+          <div className="flex-1 min-h-0 relative">
+            <div className="absolute inset-0">
+              <DataEditor
+                columns={columns}
+                rows={items.length}
+                getCellContent={getCellContent}
+                onCellActivated={handleCellActivated}
+                gridSelection={gridSelection}
+                onGridSelectionChange={setGridSelection}
+                rowMarkers="both"
+                freezeColumns={1}
+                smoothScrollX
+                smoothScrollY
+                theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+                width="100%"
+                height="100%"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
