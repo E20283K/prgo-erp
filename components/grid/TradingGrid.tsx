@@ -41,6 +41,7 @@ import {
   INITIAL_TRADING_SALES,
   INITIAL_IMPORT_BATCHES,
   INITIAL_SETTLEMENT_LEDGERS,
+  INITIAL_TRADING_CATALOG,
 } from "@/components/documents/trading/data";
 import {
   ContextMenu,
@@ -210,48 +211,13 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "stockQty", title: "Ombor Qoldig'i", width: 120, icon: GridColumnIcon.HeaderNumber },
         { id: "origin", title: "Manba", width: 140, icon: GridColumnIcon.HeaderLookup },
       ];
-      rawRows = [
-        {
-          sku: "BTN-MET-18MM",
-          name: "Metall Gravirovka Tugma 18mm",
-          category: "Tugmalar",
-          unit: "dona",
-          priceUZSFormatted: "480 UZS",
-          priceUSDFormatted: "$0.037",
-          stockQty: "142,000 dona",
-          origin: "Xitoy (Import)",
-        },
-        {
-          sku: "ZIP-NYL-N5-45",
-          name: "Neylon Fermuar (Molniya) N5, 45sm, Qora",
-          category: "Fermuarlar",
-          unit: "dona",
-          priceUZSFormatted: "3,200 UZS",
-          priceUSDFormatted: "$0.249",
-          stockQty: "48,500 dona",
-          origin: "Xitoy (Import)",
-        },
-        {
-          sku: "LBL-JACQ-50X25",
-          name: "Jakkard To'qima Yorliq 50x25mm",
-          category: "Jakkard",
-          unit: "dona",
-          priceUZSFormatted: "220 UZS",
-          priceUSDFormatted: "$0.017",
-          stockQty: "Buyurtmaga",
-          origin: "O'z Seximiz (Bosmaxona)",
-        },
-        {
-          sku: "THRD-POLY-40-2",
-          name: "Tikuvchilik Ipi 40/2 (Oq/Qora/Rangli)",
-          category: "Iplar",
-          unit: "bobo",
-          priceUZSFormatted: "37,000 UZS",
-          priceUSDFormatted: "$2.880",
-          stockQty: "1,200 bobo",
-          origin: "Xitoy (Import)",
-        },
-      ];
+      rawRows = INITIAL_TRADING_CATALOG.map((c) => ({
+        ...c,
+        id: c.sku,
+        priceUZSFormatted: `${c.priceUZS.toLocaleString()} UZS`,
+        priceUSDFormatted: `$${c.priceUSD.toFixed(3)}`,
+        stockQty: `${c.stockQty.toLocaleString()} ${c.unit}`,
+      }));
     }
 
     // Filter by search query
@@ -306,6 +272,22 @@ export function TradingGrid({ type }: TradingGridProps) {
           id: `stl-${row.customer.replace(/[^a-zA-Z0-9]/g, "")}`,
           title: `Akt-Sverka: ${row.customer}`,
           type: "trading-settlement",
+          module: "trading",
+          documentData: row,
+        });
+      } else if (type === "imports") {
+        openTab({
+          id: row.batchNo || row.id || `imp-${Date.now()}`,
+          title: `Import: ${row.batchNo}`,
+          type: "trading-import",
+          module: "trading",
+          documentData: row,
+        });
+      } else if (type === "catalog") {
+        openTab({
+          id: row.sku || row.id || `cat-${Date.now()}`,
+          title: `${row.sku}: ${row.name}`,
+          type: "trading-catalog",
           module: "trading",
           documentData: row,
         });

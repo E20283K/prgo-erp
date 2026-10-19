@@ -56,6 +56,19 @@ export interface YttTurnoverLimitRecord {
   notes?: string;
 }
 
+export interface ImportBatchItem {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  unit: string;
+  quantity: number;
+  fobPriceUSD: number;
+  fobTotalUSD: number;
+  landedCostUZS: number;
+  suggestedSalePriceUZS: number;
+}
+
 export interface TradingImportBatchRecord {
   id: string;
   batchNo: string;
@@ -72,6 +85,28 @@ export interface TradingImportBatchRecord {
   status: "In Transit" | "Customs Clearance" | "Arrived & Calculated" | "Allocated to Stock";
   containerNo: string;
   itemsCount: number;
+  items?: ImportBatchItem[];
+  notes?: string;
+}
+
+export interface TradingCatalogItemRecord {
+  id: string;
+  sku: string;
+  name: string;
+  category: "Tugmalar" | "Fermuarlar" | "Jakkard" | "Iplar" | "Yorliqlar" | "Furnitura";
+  unit: string;
+  priceUZS: number;
+  priceUSD: number;
+  wholesalePriceUZS: number;
+  retailPriceUZS: number;
+  stockQty: number;
+  minStockLevel: number;
+  origin: string;
+  material?: string;
+  colorCode?: string;
+  dimensions?: string;
+  supplier?: string;
+  notes?: string;
 }
 
 export interface TradingSettlementLedgerEntry {
