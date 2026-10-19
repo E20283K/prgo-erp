@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Factory } from "lucide-react";
+import { Stamp, Factory } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { FieldCombobox } from "@/components/ui/field-combobox";
 import { RouteStep, MACHINE_OPTIONS, FLOOR_OPERATORS } from "../types";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 
 interface OperationDialogProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ interface OperationDialogProps {
   form: Omit<RouteStep, "id">;
   setForm: React.Dispatch<React.SetStateAction<Omit<RouteStep, "id">>>;
   onSave: () => void;
+  customerName?: string;
 }
 
 export function OperationDialog({
@@ -31,7 +33,10 @@ export function OperationDialog({
   form,
   setForm,
   onSave,
+  customerName,
 }: OperationDialogProps) {
+  const { customerTooling } = useWorkspaceStore();
+
   const machineOptions = React.useMemo(
     () =>
       MACHINE_OPTIONS.map((m) => ({
@@ -49,6 +54,13 @@ export function OperationDialog({
       })),
     []
   );
+
+  const toolingOptions = React.useMemo(() => {
+    return customerTooling.map((t) => ({
+      value: t.id,
+      label: `${t.id} - ${t.name} (${t.location || "Ombor"})`,
+    }));
+  }, [customerTooling]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -125,6 +137,48 @@ export function OperationDialog({
                 className="h-8 text-xs font-mono"
               />
             </div>
+          </div>
+
+          {/* Technological Tooling (Shtansforma / Klishe / Fixture) */}
+          <div className="space-y-1 pt-1 border-t border-border/60">
+            <label className="text-xs font-medium flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-foreground">
+                <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                Biriktirilgan Texnologik Jihoz (Shtansforma / Klishe)
+              </span>
+              <span className="text-[11px] text-muted-foreground font-normal">Ixtiyoriy</span>
+            </label>
+            <FieldCombobox
+              value={form.toolingId || ""}
+              onChange={(val) => {
+                const matchedTool = customerTooling.find((t) => t.id === val);
+                setForm((p) => ({
+                  ...p,
+                  toolingId: val,
+                  toolingName: matchedTool ? `${matchedTool.id} - ${matchedTool.name}` : val,
+                }));
+              }}
+              allowCustom
+              options={toolingOptions}
+              placeholder="Shtansforma yoki klishe tanlang..."
+              searchPlaceholder="Shtansformalarni qidirish..."
+              className="h-8 text-xs"
+              popoverClassName="w-[380px]"
+            />
+            {form.toolingId && (
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <span>Ombor joylashuvi:</span>
+                <span className="font-mono font-medium text-foreground">
+                  {customerTooling.find((t) => t.id === form.toolingId)?.location || "Belgilanmagan"}
+                </span>
+                <span className="text-muted-foreground/60">•</span>
+                <span>Zarbalar:</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                  {customerTooling.find((t) => t.id === form.toolingId)?.impressionsUsed?.toLocaleString() || 0} /{" "}
+                  {customerTooling.find((t) => t.id === form.toolingId)?.maxLife?.toLocaleString() || 150000}
+                </span>
+              </p>
+            )}
           </div>
         </div>
 

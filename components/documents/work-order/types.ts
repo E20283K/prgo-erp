@@ -349,6 +349,8 @@ export interface RouteStep {
   duration: number;
   qtyCompleted: string;
   status: "Queued" | "In Progress" | "Finished";
+  toolingId?: string;
+  toolingName?: string;
 }
 
 export interface ShiftEvent {
@@ -488,6 +490,10 @@ export interface WorkOrderFormData {
   boxDepth?: number;
   customShape?: ProductCustomShape;
   customSvgPath?: string;
+  selectedToolingId?: string;
+  selectedToolingName?: string;
+  toolingProcurementNeeded?: boolean;
+  toolingProcurementCost?: number;
   attachments?: OrderAttachment[];
   sizes?: SizeDistribution[];
   // Multi-Layer / Kashirovka (Duplex / Triplex Mounting)

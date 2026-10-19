@@ -1520,6 +1520,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         form={opDialogForm}
         setForm={setOpDialogForm}
         onSave={handleSaveOperationDialog}
+        customerName={formData.customer}
       />
 
       {/* Dialog: Shift Downtime Event */}

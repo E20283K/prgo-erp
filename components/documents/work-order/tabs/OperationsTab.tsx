@@ -82,10 +82,11 @@ export function OperationsTab({
 
   const opColumns = useMemo<GridColumn[]>(() => [
     { id: "step", title: "Step #", width: 80, icon: GridColumnIcon.HeaderNumber },
-    { id: "name", title: "Texnologik Operatsiya (Description)", width: 340, icon: GridColumnIcon.HeaderString },
-    { id: "machine", title: "Stanok / Uskuna (Work Center)", width: 280, icon: GridColumnIcon.HeaderLookup },
-    { id: "operator", title: "Mas'ul Operator / Smena", width: 200, icon: GridColumnIcon.HeaderString },
-    { id: "duration", title: "Me'yoriy vaqt (hrs)", width: 150, icon: GridColumnIcon.HeaderNumber },
+    { id: "name", title: "Texnologik Operatsiya (Description)", width: 300, icon: GridColumnIcon.HeaderString },
+    { id: "machine", title: "Stanok / Uskuna (Work Center)", width: 240, icon: GridColumnIcon.HeaderLookup },
+    { id: "tooling", title: "Texnologik Jihoz (Shtansforma / Qolip)", width: 240, icon: GridColumnIcon.HeaderString },
+    { id: "operator", title: "Mas'ul Operator / Smena", width: 180, icon: GridColumnIcon.HeaderString },
+    { id: "duration", title: "Me'yoriy vaqt (hrs)", width: 130, icon: GridColumnIcon.HeaderNumber },
   ], []);
 
   const getOpCellContent = useCallback((cell: Item): GridCell => {
@@ -96,8 +97,9 @@ export function OperationsTab({
     if (col === 0) return { kind: GridCellKind.Number, data: op.stepNumber, displayData: `#${op.stepNumber}`, allowOverlay: false };
     if (col === 1) return { kind: GridCellKind.Text, data: op.name, displayData: op.name, allowOverlay: true };
     if (col === 2) return { kind: GridCellKind.Text, data: op.machine, displayData: op.machine, allowOverlay: true };
-    if (col === 3) return { kind: GridCellKind.Text, data: op.operator || "Unassigned", displayData: op.operator || "Unassigned", allowOverlay: true };
-    if (col === 4) return { kind: GridCellKind.Number, data: op.duration || 1, displayData: `${op.duration || 1} soat`, allowOverlay: true };
+    if (col === 3) return { kind: GridCellKind.Text, data: op.toolingName || op.toolingId || "—", displayData: op.toolingName || op.toolingId || "—", allowOverlay: true };
+    if (col === 4) return { kind: GridCellKind.Text, data: op.operator || "Unassigned", displayData: op.operator || "Unassigned", allowOverlay: true };
+    if (col === 5) return { kind: GridCellKind.Number, data: op.duration || 1, displayData: `${op.duration || 1} soat`, allowOverlay: true };
 
     return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
   }, [operations]);
@@ -110,8 +112,10 @@ export function OperationsTab({
     } else if (col === 2 && newValue.kind === GridCellKind.Text) {
       updated[row].machine = newValue.data.toString();
     } else if (col === 3 && newValue.kind === GridCellKind.Text) {
+      updated[row].toolingName = newValue.data.toString();
+    } else if (col === 4 && newValue.kind === GridCellKind.Text) {
       updated[row].operator = newValue.data.toString();
-    } else if (col === 4 && newValue.kind === GridCellKind.Number) {
+    } else if (col === 5 && newValue.kind === GridCellKind.Number) {
       updated[row].duration = Number(newValue.data);
     }
     setOperations(updated);

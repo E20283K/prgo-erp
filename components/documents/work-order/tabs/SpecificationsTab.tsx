@@ -15,6 +15,9 @@ import {
   Shirt,
   Scissors,
   RotateCw,
+  Stamp,
+  Wrench,
+  Boxes,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -43,6 +46,7 @@ import { DieLinePreview } from "../DieLinePreview";
 import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
 import { useLookupStore } from "@/store/lookupStore";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 import {
   WorkOrderFormData,
   SizeDistribution,
@@ -78,10 +82,65 @@ export function SpecificationsTab({
 }: SpecificationsTabProps) {
   const tDie = useTranslations("DieLine");
   const { paperStocks, addPaperStock, coatings, addCoating } = useLookupStore();
+  const { customerTooling, upsertCustomerTooling, addNotification } = useWorkspaceStore();
   const [isPantoneModalOpen, setIsPantoneModalOpen] = useState(false);
   const [pantoneTargetSide, setPantoneTargetSide] = useState<"front" | "back" | "both">("front");
   const [isSvgModalOpen, setIsSvgModalOpen] = useState(false);
   const [svgInputDraft, setSvgInputDraft] = useState(formData.customSvgPath || "");
+  const [isNewToolingModalOpen, setIsNewToolingModalOpen] = useState(false);
+  const [newToolForm, setNewToolForm] = useState({
+    name: "",
+    toolType: "Flatbed Die (Штанцформа)",
+    format: `${formData.width || 700}×${formData.height || 1000} mm`,
+    cavities: "4-up",
+    estimatedCost: 65,
+  });
+
+  // Matched customer tools
+  const availableCustomerTools = useMemo(() => {
+    const cust = (formData.customer || "").trim().toLowerCase();
+    if (!cust) return customerTooling;
+    const cleanCust = cust.replace(" llc", "").replace(" mchj", "").trim();
+    return customerTooling.filter((t) => {
+      if (!t.customerName) return false;
+      const c = t.customerName.toLowerCase();
+      return c === cleanCust || c.includes(cleanCust) || cleanCust.includes(c);
+    });
+  }, [customerTooling, formData.customer]);
+
+  const selectedTool = useMemo(() => {
+    if (!formData.selectedToolingId) return null;
+    return customerTooling.find((t) => t.id === formData.selectedToolingId) || null;
+  }, [customerTooling, formData.selectedToolingId]);
+
+  const handleOrderNewTooling = () => {
+    const newToolId = `DIE-${Math.floor(100 + Math.random() * 899)}`;
+    const createdTool = {
+      id: newToolId,
+      customerName: formData.customer || "Alpha Media Group LLC",
+      name: newToolForm.name || `${formData.product || "Buyurtma"} Shtansformasi`,
+      toolType: newToolForm.toolType,
+      format: newToolForm.format || `${formData.width || 700}×${formData.height || 1000} mm`,
+      cavities: newToolForm.cavities || "1-up",
+      location: "Kutilmoqda (Pudratda)",
+      impressionsUsed: 0,
+      maxLife: 150000,
+      status: "Ready" as const,
+    };
+    upsertCustomerTooling(createdTool);
+    handleFieldChange("selectedToolingId", newToolId);
+    handleFieldChange("selectedToolingName", createdTool.name);
+    handleFieldChange("toolingProcurementNeeded", true);
+    handleFieldChange("toolingProcurementCost", newToolForm.estimatedCost || 65);
+    onMarkUnsaved();
+    setIsNewToolingModalOpen(false);
+
+    addNotification({
+      title: "Shtansforma tayyorlashga buyurtma kiritildi",
+      description: `${newToolId}: ${createdTool.name} xaridlar va texkartaga biriktirildi.`,
+      severity: "success",
+    });
+  };
 
   const handleSvgFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1151,6 +1210,102 @@ export function SpecificationsTab({
               )}
             </div>
 
+            {/* Technological Tooling / Shtansforma (Die-Cutting) Management */}
+            {(formData.shapeType === "carton_box" ||
+              formData.shapeType === "custom_die" ||
+              formData.shapeType === "folded" ||
+              formData.shapeType === "circle" ||
+              formData.shapeType === "oval" ||
+              formData.cornerType === "Die-cut") && (
+              <div className="pt-2.5 space-y-2 border-t border-border">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                    <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Texkartadagi Jihoz: Kesish Shtansformasi (Die Tooling)</span>
+                  </label>
+                  {selectedTool && (
+                    <Badge variant="outline" className="text-[10px] font-mono border-amber-500/40 text-amber-700 dark:text-amber-300">
+                      Ombor: {selectedTool.location} ({selectedTool.impressionsUsed.toLocaleString()} / {selectedTool.maxLife.toLocaleString()})
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 items-end">
+                  <div className="@md:col-span-2">
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">
+                      Mijozning mavjud shtansformalari
+                    </label>
+                    <Select
+                      value={formData.selectedToolingId || "none"}
+                      disabled={isOperator}
+                      onValueChange={(val) => {
+                        if (val === "none") {
+                          handleFieldChange("selectedToolingId", undefined);
+                          handleFieldChange("selectedToolingName", undefined);
+                          handleFieldChange("toolingProcurementNeeded", false);
+                        } else {
+                          const t = customerTooling.find((x) => x.id === val);
+                          handleFieldChange("selectedToolingId", val);
+                          handleFieldChange("selectedToolingName", t?.name);
+                          handleFieldChange("toolingProcurementNeeded", false);
+                        }
+                        onMarkUnsaved();
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-muted/20">
+                        <SelectValue placeholder="Mavjud shtansformani tanlang..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Shtansforma tanlanmagan (Yangi / Standart)</SelectItem>
+                        {availableCustomerTools.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.id} — {t.name} ({t.format}, {t.location})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isOperator}
+                      onClick={() => {
+                        setNewToolForm({
+                          name: `${formData.product || "Mahsulot"} Shtansformasi`,
+                          toolType: "Flatbed Die (Штанцформа)",
+                          format: `${formData.width || 700}×${formData.height || 1000} mm`,
+                          cavities: "4-up",
+                          estimatedCost: 65,
+                        });
+                        setIsNewToolingModalOpen(true);
+                      }}
+                      className="h-8 w-full text-xs gap-1.5 border-dashed border-amber-500/60 hover:bg-amber-500/10 text-amber-700 dark:text-amber-300 font-medium cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-amber-600" />
+                      <span>+ Yangi buyurtma berish</span>
+                    </Button>
+                  </div>
+                </div>
+
+                {formData.toolingProcurementNeeded && (
+                  <div className="p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-xs flex items-center justify-between text-amber-900 dark:text-amber-200">
+                    <div className="flex items-center gap-1.5">
+                      <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>
+                        Pudratchiga yangi shtansforma buyurtmasi kiritildi (Tannarxga: <strong>${formData.toolingProcurementCost || 65}</strong> qo&apos;shiladi).
+                      </span>
+                    </div>
+                    <Badge variant="secondary" className="text-[10px] bg-amber-500/20 text-amber-800 dark:text-amber-300">
+                      Xarid talab qilinadi
+                    </Badge>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Drill Hole Specifications */}
             <div className="pt-2.5 space-y-2 border-t border-border">
               <div className="flex items-center justify-between">
@@ -1807,6 +1962,111 @@ export function SpecificationsTab({
           </div>
         </div>
       </div>
+
+      {/* New Tooling Procurement Order Dialog */}
+      <Dialog open={isNewToolingModalOpen} onOpenChange={setIsNewToolingModalOpen}>
+        <DialogContent className="sm:max-w-[425px] text-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Stamp className="w-4 h-4 text-amber-600" />
+              <span>Yangi Shtansforma Tayyorlashga Buyurtma</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Mijozning ushbu buyurtmasi uchun yangi kesish qolipi (штанцформа) yasash xaridini shakllantiring.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-xs font-medium block mb-1">Mijoz</label>
+              <Input
+                value={formData.customer || ""}
+                disabled
+                className="h-8 text-xs bg-muted/40 font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium block mb-1">Shtansforma Nomi / Modeli *</label>
+              <Input
+                value={newToolForm.name}
+                onChange={(e) => setNewToolForm((p) => ({ ...p, name: e.target.value }))}
+                placeholder="masalan, Standart Quti 100x60 FEFCO"
+                className="h-8 text-xs font-medium"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-xs font-medium block mb-1">Qolip turi</label>
+                <Select
+                  value={newToolForm.toolType}
+                  onValueChange={(val) => setNewToolForm((p) => ({ ...p, toolType: val || "Flatbed Die (Штанцформа)" }))}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Flatbed Die (Штанцформа)">Flatbed Die (Yassi)</SelectItem>
+                    <SelectItem value="Rotary Die (Aylanma)">Rotary Die (Rotatsion)</SelectItem>
+                    <SelectItem value="Hot Foil Cliché (Brass)">Hot Foil Klishe (Jez)</SelectItem>
+                    <SelectItem value="Embossing Cliché (Magnesium)">Kongrev Klishe (Magniy)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium block mb-1">Format / Razmer</label>
+                <Input
+                  value={newToolForm.format}
+                  onChange={(e) => setNewToolForm((p) => ({ ...p, format: e.target.value }))}
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-xs font-medium block mb-1">Kassetalar soni (Cavities)</label>
+                <Input
+                  value={newToolForm.cavities}
+                  onChange={(e) => setNewToolForm((p) => ({ ...p, cavities: e.target.value }))}
+                  placeholder="masalan, 4-up, 6-up"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium block mb-1">Taxminiy narxi (USD)</label>
+                <Input
+                  type="number"
+                  value={newToolForm.estimatedCost}
+                  onChange={(e) => setNewToolForm((p) => ({ ...p, estimatedCost: parseFloat(e.target.value) || 0 }))}
+                  className="h-8 text-xs font-mono font-medium"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsNewToolingModalOpen(false)}
+              className="h-8 text-xs"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleOrderNewTooling}
+              className="h-8 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium"
+            >
+              Buyurtma berish & Biriktirish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TabsContent>
   );
 }
