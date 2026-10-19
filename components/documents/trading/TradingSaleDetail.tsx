@@ -14,20 +14,13 @@ import {
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
-import {
-  DocumentHeader,
-  DocumentSidebar,
-  SidebarSummaryCard,
-  DocumentNavItem,
-  InfoRow,
-} from "@/components/documents/common/DocumentShell";
+import { DocumentHeader } from "@/components/documents/common/DocumentShell";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -48,15 +41,15 @@ import {
   Check,
   Plus,
   Trash2,
-  Building2,
-  Sparkles,
-  Scale,
-  Users,
-  Coins,
   Receipt,
   Warehouse,
   Search,
   CheckCircle2,
+  TrendingUp,
+  AlertTriangle,
+  Building2,
+  CreditCard,
+  Calendar,
 } from "lucide-react";
 import {
   TradingSaleRecord,
@@ -73,11 +66,10 @@ const DataEditor = dynamic(
 );
 
 export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, setLevel3Tab, addNotification, clientSettlements, theme, openTab } = useWorkspaceStore();
+  const { setTabUnsaved, closeTab, addNotification, clientSettlements, theme, openTab } =
+    useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingSaleRecord> = tab.documentData || {};
-
-  const activeTab = tab.activeLevel3Tab || "overview";
 
   // Form State
   const [docNo] = useState<string>(rawData.docNo || tab.id);
@@ -209,7 +201,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
       { id: "unitPrice", title: `Narxi (${currency})`, width: 130, icon: GridColumnIcon.HeaderNumber },
       { id: "totalAmount", title: `Jami (${currency})`, width: 150, icon: GridColumnIcon.HeaderNumber },
       { id: "equivalent", title: `Ekvivalent (${currency === "UZS" ? "USD" : "UZS"})`, width: 140, icon: GridColumnIcon.HeaderNumber },
-      { id: "originType", title: "Ishlab Chiqarish", width: 140, icon: GridColumnIcon.HeaderLookup },
+      { id: "originType", title: "Ishlab Chiqarish", width: 150, icon: GridColumnIcon.HeaderLookup },
     ],
     [currency]
   );
@@ -306,8 +298,8 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
           readonly: true,
           themeOverride: {
             textDark: item.isSelfProduced
-              ? (isDark ? "#c084fc" : "#7e22ce")
-              : (isDark ? "#38bdf8" : "#0284c7"),
+              ? isDark ? "#c084fc" : "#7e22ce"
+              : isDark ? "#38bdf8" : "#0284c7",
             baseFontStyle: "600 10px sans-serif",
           },
         };
@@ -482,473 +474,323 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     );
   }, [warehouseSearch]);
 
-  const navItems: DocumentNavItem[] = [
-    {
-      id: "overview",
-      label: "Asosiy & Mahsulotlar (Grid)",
-      icon: Receipt,
-      badge: items.length,
-    },
-    {
-      id: "ytt-analysis",
-      label: "YTT Soliq Limiti",
-      icon: Scale,
-      badge: `${simulatedPercent.toFixed(0)}%`,
-      badgeClassName:
-        simulatedPercent > 100
-          ? "bg-red-100 text-red-800 border-red-300 font-bold"
-          : simulatedPercent > 85
-          ? "bg-amber-100 text-amber-800 border-amber-300 font-bold"
-          : "bg-emerald-100 text-emerald-800 border-emerald-300 font-bold",
-    },
-    {
-      id: "contract-settlement",
-      label: "Shartnoma va Saldo",
-      icon: Building2,
-    },
-  ];
-
   return (
     <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">
-      <Tabs
-        value={activeTab}
-        onValueChange={(val) => setLevel3Tab(tab.id, val)}
-        className="flex-1 flex flex-col overflow-hidden"
-      >
-        {/* 1C Standard Document Header */}
-        <DocumentHeader
-          icon={Receipt}
-          title={`Sotuv Hujjati: ${customer}`}
-          docNo={docNo}
-          date={date}
-          status={status === "Posted" ? "Completed" : "Active"}
-          actions={
-            <>
-              <Button
-                size="sm"
+      {/* 1C Standard Document Header (Sales Emerald/Blue Style) */}
+      <DocumentHeader
+        icon={Receipt}
+        title={`Sotuv Hujjati (Hisob-faktura / Realizatsiya): ${customer}`}
+        docNo={docNo}
+        date={date}
+        status={status === "Posted" ? "Completed" : "Active"}
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsPrintModalOpen(true)}
+              className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+              title="Elektron hisob-faktura va yuk xati (PDF)"
+            >
+              <Printer className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="hidden sm:inline">Chop etish (PDF)</span>
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleSave}
+              className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+            >
+              <Save className="w-3.5 h-3.5 text-muted-foreground" />
+              <span>Saqlash (Записать)</span>
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={handlePostAndClose}
+              disabled={status === "Posted"}
+              className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 font-medium shadow-none cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>O&apos;tkazish va yopish</span>
+            </Button>
+          </>
+        }
+      />
+
+      {/* SINGLE-PAGE INDUSTRIAL VIEW: ALL PARAMETERS AT TOP */}
+      <div className="p-3 border-b border-border bg-card shrink-0 space-y-2.5">
+        {/* SUMMARY KPI CARDS (SALES SPECIFIC) */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {/* Card 1: Jami Hisob-faktura */}
+          <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+            <span className="text-[10px] text-muted-foreground uppercase font-semibold">Jami Hujjat Summasi:</span>
+            <div className="text-sm font-mono font-bold text-foreground">
+              {currency === "UZS" ? `${totalAmount.toLocaleString()} UZS` : `$${totalAmount.toFixed(2)}`}
+            </div>
+            <span className="text-[10px] text-muted-foreground font-mono">
+              Ekv: {currency === "UZS" ? `$${totalUSD.toFixed(2)} USD` : `${totalUZS.toLocaleString()} UZS`}
+            </span>
+          </div>
+
+          {/* Card 2: Sotuvchi Yuridik Shaxs */}
+          <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+            <span className="text-[10px] text-muted-foreground uppercase font-semibold">Sotuvchi (INN):</span>
+            <div className="text-xs font-semibold text-foreground truncate" title={selectedEntity.name}>
+              {selectedEntity.name}
+            </div>
+            <span className="text-[10px] text-muted-foreground font-mono">INN: {selectedEntity.inn} • {selectedEntity.legalType}</span>
+          </div>
+
+          {/* Card 3: YTT Soliq Aylanma Limiti */}
+          <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">YTT Yillik Limiti:</span>
+              <Badge
                 variant="outline"
-                onClick={() => setIsPrintModalOpen(true)}
-                className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
-                title="Elektron hisob-faktura va yuk xati (PDF)"
+                className={`text-[9px] px-1 h-3.5 ${
+                  simulatedPercent > 100
+                    ? "bg-red-50 text-red-700 border-red-300"
+                    : simulatedPercent > 85
+                    ? "bg-amber-50 text-amber-700 border-amber-300"
+                    : "bg-emerald-50 text-emerald-700 border-emerald-300"
+                }`}
               >
-                <Printer className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Chop etish (PDF)</span>
-              </Button>
+                {simulatedPercent.toFixed(1)}% band
+              </Badge>
+            </div>
+            <div className="text-xs font-mono font-bold text-foreground">
+              {(simulatedTurnover / 1_000_000).toFixed(1)} / 1,000 mln UZS
+            </div>
+            <span className="text-[10px] text-muted-foreground">
+              {simulatedPercent > 100 ? "Limit oshgan! Boshqa YTT tanlang" : "1 mlrd aylanma chegarasida"}
+            </span>
+          </div>
 
-              <Button
-                size="sm"
+          {/* Card 4: Hujjat Holati & Shartnoma */}
+          <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+            <span className="text-[10px] text-muted-foreground uppercase font-semibold">Holat & Shartnoma:</span>
+            <div className="flex items-center gap-1.5">
+              <Badge
                 variant="outline"
-                onClick={handleSave}
-                className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+                className={
+                  status === "Posted"
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-semibold"
+                    : "bg-amber-50 text-amber-800 border-amber-300 font-semibold"
+                }
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>Saqlash (Записать)</span>
-              </Button>
-
-              <Button
-                size="sm"
-                onClick={handlePostAndClose}
-                disabled={status === "Posted"}
-                className="h-7 px-3 bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 font-medium shadow-none cursor-pointer"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>O&apos;tkazish va yopish</span>
-              </Button>
-            </>
-          }
-        />
-
-        {/* Workspace Body: Left DocumentSidebar + Right Main Viewport */}
-        <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
-          <DocumentSidebar
-            sectionsLabel="Bo'limlar"
-            items={navItems}
-            activeId={activeTab}
-            onSelect={(id) => setLevel3Tab(tab.id, id)}
-            summary={
-              <SidebarSummaryCard
-                icon={Receipt}
-                title={docNo}
-                subtitle={`${customer}`}
-              >
-                <InfoRow label="Jami Summa:">
-                  <span className="font-mono font-bold text-xs text-primary">
-                    {currency === "UZS"
-                      ? `${totalUZS.toLocaleString()} UZS`
-                      : `$${totalUSD.toFixed(2)} USD`}
-                  </span>
-                </InfoRow>
-
-                <InfoRow label="Valyuta / Kurs:">
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    {currency} • 1$ = {exchangeRate.toLocaleString()}
-                  </span>
-                </InfoRow>
-
-                <InfoRow label="Sotuvchi YTT:">
-                  <span className="truncate max-w-[120px] text-[10px]" title={selectedEntity.name}>
-                    {selectedEntity.code} ({selectedEntity.turnoverPercent.toFixed(0)}%)
-                  </span>
-                </InfoRow>
-
-                <InfoRow label="Pozitsiyalar:">
-                  <Badge variant="outline" className="h-4 px-1 text-[10px] font-mono">
-                    {items.length} ta
-                  </Badge>
-                </InfoRow>
-              </SidebarSummaryCard>
-            }
-            footer={
-              <div className="space-y-1.5 text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Holat:</span>
-                  <Badge
-                    variant="outline"
-                    className={
-                      status === "Posted"
-                        ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-semibold"
-                        : "bg-amber-50 text-amber-800 border-amber-300"
-                    }
-                  >
-                    {status === "Posted" ? "✓ O'tkazilgan" : "Qoralama"}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Shartnoma:</span>
-                  <span className="font-mono text-[10px] text-foreground">{contractNo}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">To&apos;lov shakli:</span>
-                  <span className="text-[10px] truncate max-w-[120px] text-foreground" title={paymentMethod}>
-                    {paymentMethod}
-                  </span>
-                </div>
-              </div>
-            }
-          />
-
-          {/* Right Main Viewport */}
-          <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
-            <TabsContent value="overview" className="flex-1 flex flex-col overflow-hidden m-0">
-              {/* TOP INDUSTRIAL PARAMETER CARDS (COLLAPSIBLE / HIGH DENSITY) */}
-              <div className="p-3 border-b border-border bg-card shrink-0 space-y-2.5">
-                {/* SMART YTT BANNER */}
-                <div className="bg-primary/5 border border-primary/20 rounded-md px-3 py-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0">
-                      <Sparkles className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="text-xs">
-                      <span className="text-muted-foreground">Tavsiya YTT: </span>
-                      <strong className="text-foreground">YTT Qodirov Baxtiyor</strong>
-                      <Badge variant="outline" className="ml-2 bg-emerald-50 text-emerald-800 border-emerald-300 text-[10px] font-mono h-4 px-1">
-                        Bo&apos;sh: 412.5 mln UZS (58.7% band)
-                      </Badge>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 text-[10px] px-2 shrink-0 cursor-pointer"
-                    onClick={() => {
-                      setSellerEntityId("ytt-qodirov");
-                      setTabUnsaved(tab.id, true);
-                    }}
-                  >
-                    Tavsiya bo&apos;yicha belgilash
-                  </Button>
-                </div>
-
-                {/* 3-COLUMN COMPACT HEADER CONTROLS */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
-                  {/* Col 1: Seller */}
-                  <div className="p-2 rounded border border-border bg-muted/20 space-y-1">
-                    <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Sotuvchi (Yuridik Shaxs):</Label>
-                    <Select
-                      value={sellerEntityId}
-                      onValueChange={(val: any) => {
-                        setSellerEntityId(val);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                    >
-                      <SelectTrigger className="h-7 text-xs font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="text-xs">
-                        <SelectItem value="ytt-qodirov">YTT Qodirov Baxtiyor (58% band) ★</SelectItem>
-                        <SelectItem value="ytt-aliyev">YTT Aliyev Jamshid (85% band)</SelectItem>
-                        <SelectItem value="ytt-toshmatov">YTT Toshmatov O. (98% band - XAVF)</SelectItem>
-                        <SelectItem value="mchj-printgoo">&quot;PRINTGOO SERVICES&quot; MChJ (QQS)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Col 2: Customer */}
-                  <div className="p-2 rounded border border-border bg-muted/20 space-y-1">
-                    <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Xaridor (Tekstil Fabrikasi):</Label>
-                    <Select
-                      value={customer}
-                      onValueChange={(val) => {
-                        setCustomer(val || "");
-                        if (val === "'REAL TEXTILE INVEST' MChJ") setCustomerTin("304891234");
-                        else if (val === "'BUKHARA COTTON WEAVE' XK") setCustomerTin("201889412");
-                        else if (val === "'SAMARKAND APPAREL' MChJ") setCustomerTin("308112445");
-                        setTabUnsaved(tab.id, true);
-                      }}
-                    >
-                      <SelectTrigger className="h-7 text-xs font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="text-xs">
-                        <SelectItem value="'REAL TEXTILE INVEST' MChJ">&quot;REAL TEXTILE INVEST&quot; MChJ</SelectItem>
-                        <SelectItem value="'BUKHARA COTTON WEAVE' XK">&quot;BUKHARA COTTON WEAVE&quot; XK</SelectItem>
-                        <SelectItem value="'SAMARKAND APPAREL' MChJ">&quot;SAMARKAND APPAREL&quot; MChJ</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Col 3: Currency & Rate */}
-                  <div className="p-2 rounded border border-border bg-muted/20 flex items-center gap-2">
-                    <div className="flex-1">
-                      <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Valyuta:</Label>
-                      <div className="flex rounded border border-input overflow-hidden bg-background p-0.5 mt-0.5 h-7">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCurrency("UZS");
-                            setTabUnsaved(tab.id, true);
-                          }}
-                          className={`flex-1 rounded text-center font-bold text-[11px] transition-colors cursor-pointer ${
-                            currency === "UZS" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground"
-                          }`}
-                        >
-                          UZS
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCurrency("USD");
-                            setTabUnsaved(tab.id, true);
-                          }}
-                          className={`flex-1 rounded text-center font-bold text-[11px] transition-colors cursor-pointer ${
-                            currency === "USD" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground"
-                          }`}
-                        >
-                          USD
-                        </button>
-                      </div>
-                    </div>
-                    <div className="w-24">
-                      <Label className="text-[10px] text-muted-foreground uppercase font-semibold">MB Kursi:</Label>
-                      <Input
-                        type="number"
-                        value={exchangeRate}
-                        onChange={(e) => {
-                          setExchangeRate(Number(e.target.value) || 12850);
-                          setTabUnsaved(tab.id, true);
-                        }}
-                        className="h-7 text-xs font-mono text-right mt-0.5"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* INDUSTRIAL HIGH-DENSITY ACTION TOOLBAR FOR GRID */}
-              <div className="px-3 h-9 border-b border-border bg-card shrink-0 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    size="sm"
-                    onClick={() => setIsWarehousePickerOpen(true)}
-                    className="h-7 px-2.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 shadow-xs cursor-pointer"
-                  >
-                    <Warehouse className="w-3.5 h-3.5" />
-                    <span>Ombordan qo&apos;shish</span>
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleQuickAddRow}
-                    className="h-7 px-2 text-xs flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-primary" />
-                    <span>Qator qo&apos;shish (Ins)</span>
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={handleRemoveSelectedRows}
-                    disabled={gridSelection.rows.length === 0}
-                    className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive flex items-center gap-1 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>O&apos;chirish (Del)</span>
-                  </Button>
-
-                  <Separator orientation="vertical" className="h-4 bg-border mx-1" />
-
-                  <Badge variant="secondary" className="font-mono text-[10px] h-5">
-                    {items.length} ta pozitsiya
-                  </Badge>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <span className="text-[11px] text-muted-foreground font-mono">
-                    Jami: <strong className="text-foreground">{currency === "UZS" ? `${totalUZS.toLocaleString()} UZS` : `$${totalUSD.toFixed(2)} USD`}</strong>
-                  </span>
-                  <span className="text-[11px] text-muted-foreground font-mono hidden md:inline">
-                    (Ikkita marta bosing: Katalog kartochkasi)
-                  </span>
-                </div>
-              </div>
-
-              {/* GLIDE DATA GRID WORKSPACE */}
-              <div className="flex-1 min-h-0 relative">
-                <div className="absolute inset-0">
-                  <DataEditor
-                    columns={columns}
-                    rows={items.length}
-                    getCellContent={getCellContent}
-                    onCellEdited={handleCellEdited}
-                    onCellActivated={handleCellActivated}
-                    gridSelection={gridSelection}
-                    onGridSelectionChange={setGridSelection}
-                    rowMarkers="both"
-                    freezeColumns={1}
-                    smoothScrollX
-                    smoothScrollY
-                    theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
-                    width="100%"
-                    height="100%"
-                  />
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* TAB 2: YTT LIMIT ANALYSIS */}
-            <TabsContent value="ytt-analysis" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
-              <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
-                <div className="flex items-center justify-between border-b border-border pb-2">
-                  <div className="flex items-center gap-2">
-                    <Scale className="w-4 h-4 text-primary" />
-                    <span className="font-semibold text-xs text-foreground">
-                      YTT Yillik Aylanma Limiti Tahlili (Soliq Xavfsizligi)
-                    </span>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className={
-                      simulatedPercent > 100
-                        ? "bg-red-50 text-red-800 border-red-300 font-bold"
-                        : simulatedPercent > 85
-                        ? "bg-amber-50 text-amber-800 border-amber-300 font-bold"
-                        : "bg-emerald-50 text-emerald-800 border-emerald-300 font-bold"
-                    }
-                  >
-                    {simulatedPercent > 100
-                      ? "⛔ LIMITDAN OSHIB KETADI"
-                      : simulatedPercent > 85
-                      ? "⚠ Diqqat zonasi (85%+)"
-                      : "✓ Xavfsiz kvota"}
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
-                  <div className="p-3 rounded-md bg-muted/40 border border-border">
-                    <span className="text-[11px] text-muted-foreground block">Tashkilot:</span>
-                    <strong className="text-foreground">{selectedEntity.name}</strong>
-                    <span className="text-[10px] text-muted-foreground block font-mono mt-0.5">INN: {selectedEntity.inn}</span>
-                  </div>
-                  <div className="p-3 rounded-md bg-muted/40 border border-border">
-                    <span className="text-[11px] text-muted-foreground block">Yillik Soliqsiz Limit:</span>
-                    <strong className="text-foreground font-mono">
-                      {selectedEntity.annualLimit > 10_000_000_000 ? "Cheksiz (MChJ)" : "1,000,000,000 UZS"}
-                    </strong>
-                  </div>
-                  <div className="p-3 rounded-md bg-muted/40 border border-border">
-                    <span className="text-[11px] text-muted-foreground block">Amaldagi Yillik Aylanma:</span>
-                    <strong className="text-foreground font-mono">
-                      {(selectedEntity.currentTurnover / 1_000_000).toFixed(1)} mln UZS ({selectedEntity.turnoverPercent.toFixed(1)}%)
-                    </strong>
-                  </div>
-                  <div className="p-3 rounded-md bg-muted/40 border border-border">
-                    <span className="text-[11px] text-muted-foreground block">Ushbu Hujjatdan Keyingi:</span>
-                    <strong className="text-primary font-mono">
-                      {(simulatedTurnover / 1_000_000).toFixed(1)} mln UZS ({simulatedPercent.toFixed(1)}%)
-                    </strong>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 pt-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">Aylanma kvotasi bandligi:</span>
-                    <span className="font-mono font-bold text-foreground">{simulatedPercent.toFixed(1)}%</span>
-                  </div>
-                  <div className="w-full bg-muted h-3 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-300 ${
-                        simulatedPercent > 100
-                          ? "bg-destructive"
-                          : simulatedPercent > 85
-                          ? "bg-amber-500"
-                          : "bg-primary"
-                      }`}
-                      style={{ width: `${Math.min(100, simulatedPercent)}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* TAB 3: CONTRACT & SETTLEMENT */}
-            <TabsContent value="contract-settlement" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
-              <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
-                <div className="flex items-center gap-2 border-b border-border pb-2">
-                  <Building2 className="w-4 h-4 text-primary" />
-                  <span className="font-semibold text-xs text-foreground">
-                    Shartnoma va O&apos;zaro Hisob-kitob Qoldiqlari
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                  <div className="space-y-2">
-                    <Label className="text-[11px] text-muted-foreground">Shartnoma raqami:</Label>
-                    <Input
-                      value={contractNo}
-                      onChange={(e) => {
-                        setContractNo(e.target.value);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      className="h-8 text-xs font-mono"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-[11px] text-muted-foreground">Hujjat izohi / Maxsus shartlar:</Label>
-                    <Input
-                      value={notes}
-                      onChange={(e) => {
-                        setNotes(e.target.value);
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
+                {status === "Posted" ? "✓ O'tkazilgan" : "Qoralama"}
+              </Badge>
+              <span className="font-mono text-xs text-foreground font-semibold truncate">{contractNo}</span>
+            </div>
+            <span className="text-[10px] text-muted-foreground truncate block" title={paymentMethod}>
+              {paymentMethod}
+            </span>
           </div>
         </div>
-      </Tabs>
 
-      {/* DIALOG: OMBORDAN MAHSULOT QO'SHISH (WAREHOUSE PICKER) */}
+        {/* EDITABLE PARAMETERS: 4 COMPACT COLUMNS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          {/* Col 1: Seller Selector */}
+          <div>
+            <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Sotuvchi YTT / MChJ:</Label>
+            <Select
+              value={sellerEntityId}
+              onValueChange={(val: any) => {
+                setSellerEntityId(val);
+                setTabUnsaved(tab.id, true);
+              }}
+            >
+              <SelectTrigger className="h-7 text-xs font-medium mt-0.5">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="text-xs">
+                <SelectItem value="ytt-qodirov">YTT Qodirov Baxtiyor (58% band) ★</SelectItem>
+                <SelectItem value="ytt-aliyev">YTT Aliyev Jamshid (85% band)</SelectItem>
+                <SelectItem value="ytt-toshmatov">YTT Toshmatov O. (98% band - XAVF)</SelectItem>
+                <SelectItem value="mchj-printgoo">&quot;PRINTGOO SERVICES&quot; MChJ (QQS)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Col 2: Customer */}
+          <div>
+            <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Xaridor (Tekstil Fabrikasi):</Label>
+            <Select
+              value={customer}
+              onValueChange={(val) => {
+                setCustomer(val || "");
+                if (val === "'REAL TEXTILE INVEST' MChJ") setCustomerTin("304891234");
+                else if (val === "'BUKHARA COTTON WEAVE' XK") setCustomerTin("201889412");
+                else if (val === "'SAMARKAND APPAREL' MChJ") setCustomerTin("308112445");
+                setTabUnsaved(tab.id, true);
+              }}
+            >
+              <SelectTrigger className="h-7 text-xs font-medium mt-0.5">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="text-xs">
+                <SelectItem value="'REAL TEXTILE INVEST' MChJ">&quot;REAL TEXTILE INVEST&quot; MChJ</SelectItem>
+                <SelectItem value="'BUKHARA COTTON WEAVE' XK">&quot;BUKHARA COTTON WEAVE&quot; XK</SelectItem>
+                <SelectItem value="'SAMARKAND APPAREL' MChJ">&quot;SAMARKAND APPAREL&quot; MChJ</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Col 3: Currency & Rate */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1">
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Valyuta:</Label>
+              <div className="flex rounded border border-input overflow-hidden bg-background p-0.5 mt-0.5 h-7">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrency("UZS");
+                    setTabUnsaved(tab.id, true);
+                  }}
+                  className={`flex-1 rounded text-center font-bold text-[11px] transition-colors cursor-pointer ${
+                    currency === "UZS" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground"
+                  }`}
+                >
+                  UZS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrency("USD");
+                    setTabUnsaved(tab.id, true);
+                  }}
+                  className={`flex-1 rounded text-center font-bold text-[11px] transition-colors cursor-pointer ${
+                    currency === "USD" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground"
+                  }`}
+                >
+                  USD
+                </button>
+              </div>
+            </div>
+            <div className="w-24">
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">MB Kursi:</Label>
+              <Input
+                type="number"
+                value={exchangeRate}
+                onChange={(e) => {
+                  setExchangeRate(Number(e.target.value) || 12850);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs font-mono text-right mt-0.5"
+              />
+            </div>
+          </div>
+
+          {/* Col 4: Shartnoma & Sana */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1">
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Shartnoma №:</Label>
+              <Input
+                value={contractNo}
+                onChange={(e) => {
+                  setContractNo(e.target.value);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs font-mono mt-0.5"
+              />
+            </div>
+            <div className="w-28">
+              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Sana:</Label>
+              <Input
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="h-7 text-xs mt-0.5"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* INDUSTRIAL ACTION TOOLBAR FOR REAL-TIME GLIDE DATA GRID */}
+      <div className="px-3 h-9 border-b border-border bg-card shrink-0 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            onClick={() => setIsWarehousePickerOpen(true)}
+            className="h-7 px-2.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1 shadow-xs cursor-pointer"
+          >
+            <Warehouse className="w-3.5 h-3.5" />
+            <span>Ombordan qo&apos;shish</span>
+          </Button>
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleQuickAddRow}
+            className="h-7 px-2 text-xs flex items-center gap-1 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5 text-primary" />
+            <span>Qator qo&apos;shish (Ins)</span>
+          </Button>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleRemoveSelectedRows}
+            disabled={gridSelection.rows.length === 0}
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive flex items-center gap-1 cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>O&apos;chirish (Del)</span>
+          </Button>
+
+          <Separator orientation="vertical" className="h-4 bg-border mx-1" />
+
+          <Badge variant="secondary" className="font-mono text-[10px] h-5">
+            {items.length} ta pozitsiya
+          </Badge>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-muted-foreground font-mono">
+            Jami: <strong className="text-foreground">{currency === "UZS" ? `${totalUZS.toLocaleString()} UZS` : `$${totalUSD.toFixed(2)} USD`}</strong>
+          </span>
+          <span className="text-[11px] text-muted-foreground font-mono hidden md:inline">
+            (Ikkita marta bosing: Katalog kartochkasi)
+          </span>
+        </div>
+      </div>
+
+      {/* GLIDE DATA GRID: ENTIRE LOWER VIEWPORT */}
+      <div className="flex-1 min-h-0 relative">
+        <div className="absolute inset-0">
+          <DataEditor
+            columns={columns}
+            rows={items.length}
+            getCellContent={getCellContent}
+            onCellEdited={handleCellEdited}
+            onCellActivated={handleCellActivated}
+            gridSelection={gridSelection}
+            onGridSelectionChange={setGridSelection}
+            rowMarkers="both"
+            freezeColumns={1}
+            smoothScrollX
+            smoothScrollY
+            theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+            width="100%"
+            height="100%"
+          />
+        </div>
+      </div>
+
+      {/* OMBORDAN QO'SHISH MODAL PICKER */}
       <Dialog open={isWarehousePickerOpen} onOpenChange={setIsWarehousePickerOpen}>
         <DialogContent className="max-w-2xl text-xs">
           <DialogHeader>
-            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
-              <Warehouse className="w-4 h-4 text-primary" />
-              <span>Ombor Zaxirasidan Mahsulot Qo&apos;shish</span>
+            <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
+              <Warehouse className="w-4 h-4 text-emerald-600" />
+              <span>Ombordan tovar tanlash va sotuv hujjatiga qo&apos;shish</span>
             </DialogTitle>
           </DialogHeader>
 
@@ -956,41 +798,41 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
               <Input
+                placeholder="Artikul yoki nom bo'yicha qidirish (masalan: Tugma, Molniya, Fermuar)..."
                 value={warehouseSearch}
                 onChange={(e) => setWarehouseSearch(e.target.value)}
-                placeholder="Ombordan qidirish (Artikul, Nomi, Kategoriya)..."
-                className="h-8 pl-8 text-xs font-mono"
+                className="pl-8 h-8 text-xs"
               />
             </div>
 
             <div className="max-h-60 overflow-y-auto border border-border rounded-md divide-y divide-border">
-              {filteredCatalogItems.map((cat) => {
-                const isSelected = selectedCatalogItem?.sku === cat.sku;
+              {filteredCatalogItems.map((c) => {
+                const isSelected = selectedCatalogItem?.sku === c.sku;
                 return (
                   <div
-                    key={cat.sku}
-                    onClick={() => setSelectedCatalogItem(cat)}
-                    className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                    key={c.sku}
+                    onClick={() => setSelectedCatalogItem(c)}
+                    className={`p-2 flex items-center justify-between cursor-pointer transition-colors ${
                       isSelected ? "bg-primary/10 border-l-2 border-primary" : "hover:bg-muted/40"
                     }`}
                   >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-xs text-foreground">{cat.sku}</span>
-                        <Badge variant="secondary" className="text-[9px] h-4 px-1">{cat.category}</Badge>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-foreground">{c.sku}</span>
+                        <Badge variant="outline" className="text-[9px] h-4 px-1">
+                          {c.category}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground">({c.origin})</span>
                       </div>
-                      <div className="font-medium text-xs text-foreground mt-0.5">{cat.name}</div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
-                        Ombordagi qoldiq: <strong className="text-emerald-600 dark:text-emerald-400">{cat.stockQty.toLocaleString()} {cat.unit}</strong> • Manba: {cat.origin}
-                      </div>
+                      <div className="text-muted-foreground text-[11px]">{c.name}</div>
                     </div>
 
-                    <div className="text-right">
-                      <div className="font-mono font-bold text-xs text-primary">
-                        {currency === "UZS" ? `${cat.priceUZS.toLocaleString()} UZS` : `$${cat.priceUSD.toFixed(3)}`}
+                    <div className="text-right space-y-0.5">
+                      <div className="font-mono font-bold text-foreground">
+                        {currency === "UZS" ? `${c.priceUZS.toLocaleString()} UZS` : `$${c.priceUSD.toFixed(3)}`}
                       </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {cat.unit} narxi
+                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
+                        Qoldiq: {c.stockQty.toLocaleString()} {c.unit}
                       </div>
                     </div>
                   </div>
@@ -999,42 +841,53 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
             </div>
 
             {selectedCatalogItem && (
-              <div className="p-3 bg-muted/30 border border-border rounded-md flex items-center justify-between gap-3">
+              <div className="p-2.5 rounded-md bg-muted/40 border border-border flex items-center justify-between">
                 <div>
-                  <span className="text-[11px] text-muted-foreground">Tanlangan:</span>
-                  <div className="font-bold text-xs text-foreground">{selectedCatalogItem.sku} — {selectedCatalogItem.name}</div>
+                  <div className="font-semibold text-foreground">
+                    Tanlandi: {selectedCatalogItem.sku} — {selectedCatalogItem.name}
+                  </div>
+                  <div className="text-muted-foreground text-[11px]">
+                    Ombordagi mavjud qoldiq: {selectedCatalogItem.stockQty.toLocaleString()} {selectedCatalogItem.unit}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Label className="text-[11px] text-muted-foreground">Miqdor ({selectedCatalogItem.unit}):</Label>
+                  <Label className="text-muted-foreground text-xs whitespace-nowrap">Miqdori:</Label>
                   <Input
                     type="number"
                     value={pickerQuantity}
                     onChange={(e) => setPickerQuantity(Number(e.target.value) || 0)}
-                    className="h-8 w-28 text-right font-mono text-xs"
+                    className="w-24 h-7 text-xs font-mono text-right"
                   />
+                  <span className="text-muted-foreground">{selectedCatalogItem.unit}</span>
                 </div>
               </div>
             )}
           </div>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => setIsWarehousePickerOpen(false)} className="h-7 text-xs">
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsWarehousePickerOpen(false)}
+              className="h-8 text-xs cursor-pointer"
+            >
               Bekor qilish
             </Button>
             <Button
               size="sm"
-              onClick={handleAddFromWarehouse}
               disabled={!selectedCatalogItem || pickerQuantity <= 0}
-              className="h-7 text-xs bg-primary text-primary-foreground font-semibold"
+              onClick={handleAddFromWarehouse}
+              className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
             >
-              Hujjatga kiritish
+              <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+              Hujjatga qo&apos;shish
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Official Printable Akt Sverka Dialog */}
+      {/* Official Printable Akt Sverka / Invoice Modal */}
       <AktSverkaPrintModal
         open={isPrintModalOpen}
         onOpenChange={setIsPrintModalOpen}
