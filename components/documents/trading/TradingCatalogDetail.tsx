@@ -245,7 +245,7 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
       if (row.type.includes("Sotuv")) {
         openTab({
           id: row.docNo,
-          title: `Sotuv: ${row.docNo}`,
+          title: `${row.docNo}`,
           type: "trading-sale",
           module: "trading",
           documentData: { id: row.docNo, docNo: row.docNo, customer: row.partner },
@@ -253,7 +253,7 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
       } else if (row.type.includes("Import")) {
         openTab({
           id: row.docNo,
-          title: `Import: ${row.docNo}`,
+          title: `${row.docNo}`,
           type: "trading-import",
           module: "trading",
           documentData: { id: row.docNo, batchNo: row.docNo },
@@ -277,7 +277,7 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
     const newDocId = `TRD-${Date.now().toString().slice(-4)}`;
     openTab({
       id: newDocId,
-      title: `${newDocId} (Sotuv: ${sku})`,
+      title: `${newDocId} (${sku})`,
       type: "trading-sale",
       module: "trading",
       isUnsaved: true,

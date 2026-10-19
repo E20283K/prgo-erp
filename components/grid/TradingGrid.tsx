@@ -262,7 +262,7 @@ export function TradingGrid({ type }: TradingGridProps) {
       if (type === "sales") {
         openTab({
           id: row.id || `TRD-${Date.now()}`,
-          title: `Sotuv: ${row.id || "Hujjat"} (${row.customer || "Tekstil"})`,
+          title: `${row.id || "TRD"} (${row.customer || "Tekstil"})`,
           type: "trading-sale",
           module: "trading",
           documentData: row,
@@ -270,7 +270,7 @@ export function TradingGrid({ type }: TradingGridProps) {
       } else if (type === "orders") {
         openTab({
           id: row.id || `ORD-${Date.now()}`,
-          title: `Buyurtma: ${row.id} (${row.customer || "Tekstil"})`,
+          title: `${row.id} (${row.customer || "Tekstil"})`,
           type: "trading-order",
           module: "trading",
           documentData: row,
