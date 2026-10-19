@@ -1,6 +1,18 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
+import {
+  GridCell,
+  GridCellKind,
+  GridColumn,
+  Item,
+  GridSelection,
+  CompactSelection,
+  GridColumnIcon,
+  EditableGridCell,
+} from "@glideapps/glide-data-grid";
+import "@glideapps/glide-data-grid/dist/index.css";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
 import {
   DocumentHeader,
@@ -9,12 +21,20 @@ import {
   DocumentNavItem,
   InfoRow,
 } from "@/components/documents/common/DocumentShell";
+import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -23,11 +43,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  FileText,
   Printer,
   Save,
   Check,
-  CheckCheck,
   Plus,
   Trash2,
   Building2,
@@ -35,26 +53,28 @@ import {
   Scale,
   Users,
   Coins,
-  ShieldAlert,
-  ShieldCheck,
-  Barcode,
-  History,
-  FileSpreadsheet,
-  AlertTriangle,
   Receipt,
-  ShoppingCart,
-  Percent,
+  Warehouse,
+  Search,
+  CheckCircle2,
 } from "lucide-react";
 import {
   TradingSaleRecord,
   TradingSaleItem,
   TradingCurrency,
+  TradingCatalogItemRecord,
 } from "./types";
-import { INITIAL_YTT_ENTITIES } from "./data";
+import { INITIAL_YTT_ENTITIES, INITIAL_TRADING_CATALOG } from "./data";
 import { AktSverkaPrintModal } from "../customer/components/AktSverkaPrintModal";
 
+const DataEditor = dynamic(
+  () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
+  { ssr: false }
+);
+
 export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, setLevel3Tab, addNotification, clientSettlements } = useWorkspaceStore();
+  const { setTabUnsaved, closeTab, setLevel3Tab, addNotification, clientSettlements, theme, openTab } = useWorkspaceStore();
+  const isDark = theme === "dark";
   const rawData: Partial<TradingSaleRecord> = tab.documentData || {};
 
   const activeTab = tab.activeLevel3Tab || "overview";
@@ -99,7 +119,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
           {
             id: "item-1",
             sku: "BTN-MET-18MM",
-            name: "Metall Gravirovka Tugma 18mm (Xitoy import)",
+            name: "Metall Gravirovka Tugma 18mm",
             category: "Tugmalar",
             unit: "dona",
             quantity: 25000,
@@ -140,6 +160,10 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   );
 
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [isWarehousePickerOpen, setIsWarehousePickerOpen] = useState(false);
+  const [warehouseSearch, setWarehouseSearch] = useState("");
+  const [selectedCatalogItem, setSelectedCatalogItem] = useState<TradingCatalogItemRecord | null>(null);
+  const [pickerQuantity, setPickerQuantity] = useState<number>(10000);
 
   // Selected YTT entity calculations
   const selectedEntity = useMemo(() => {
@@ -169,32 +193,210 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
       ? (simulatedTurnover / selectedEntity.annualLimit) * 100
       : 0;
 
-  const handleItemChange = (
-    index: number,
-    field: "quantity" | "unitPrice",
-    val: number
-  ) => {
-    setItems((prev) => {
-      const next = [...prev];
-      const item = { ...next[index] };
-      item[field] = val;
-      item.totalAmount = item.quantity * item.unitPrice;
-      if (currency === "UZS") {
-        item.unitPriceUZS = item.unitPrice;
-        item.unitPriceUSD = item.unitPrice / exchangeRate;
-        item.totalUSD = item.totalAmount / exchangeRate;
-      } else {
-        item.unitPriceUSD = item.unitPrice;
-        item.unitPriceUZS = item.unitPrice * exchangeRate;
-        item.totalUSD = item.totalAmount;
+  // ─── Glide Data Grid for Sale Items ──────────────────────────────────────────
+  const [gridSelection, setGridSelection] = useState<GridSelection>({
+    columns: CompactSelection.empty(),
+    rows: CompactSelection.empty(),
+  });
+
+  const columns = useMemo<GridColumn[]>(
+    () => [
+      { id: "sku", title: "Artikul", width: 130, icon: GridColumnIcon.HeaderReference },
+      { id: "name", title: "Nomenklatura Nomi", width: 300, icon: GridColumnIcon.HeaderString },
+      { id: "category", title: "Kategoriya", width: 120, icon: GridColumnIcon.HeaderSingleValue },
+      { id: "unit", title: "Birlik", width: 80, icon: GridColumnIcon.HeaderString },
+      { id: "quantity", title: "Miqdor", width: 110, icon: GridColumnIcon.HeaderNumber },
+      { id: "unitPrice", title: `Narxi (${currency})`, width: 130, icon: GridColumnIcon.HeaderNumber },
+      { id: "totalAmount", title: `Jami (${currency})`, width: 150, icon: GridColumnIcon.HeaderNumber },
+      { id: "equivalent", title: `Ekvivalent (${currency === "UZS" ? "USD" : "UZS"})`, width: 140, icon: GridColumnIcon.HeaderNumber },
+      { id: "originType", title: "Ishlab Chiqarish", width: 140, icon: GridColumnIcon.HeaderLookup },
+    ],
+    [currency]
+  );
+
+  const getCellContent = useCallback(
+    (cell: Item): GridCell => {
+      const [colIndex, rowIndex] = cell;
+      const item = items[rowIndex];
+      const col = columns[colIndex];
+      if (!item || !col) return { kind: GridCellKind.Loading, allowOverlay: false };
+
+      if (col.id === "sku" || col.id === "name" || col.id === "category" || col.id === "unit") {
+        const val = String((item as any)[col.id] || "");
+        return {
+          kind: GridCellKind.Text,
+          data: val,
+          displayData: val,
+          allowOverlay: false,
+          readonly: true,
+          themeOverride: col.id === "sku" ? { baseFontStyle: "bold 11px monospace" } : undefined,
+        };
       }
-      next[index] = item;
-      return next;
-    });
+
+      if (col.id === "quantity") {
+        return {
+          kind: GridCellKind.Number,
+          data: item.quantity,
+          displayData: item.quantity.toLocaleString(),
+          allowOverlay: status !== "Posted",
+          readonly: status === "Posted",
+          contentAlign: "right",
+          themeOverride: { baseFontStyle: "600 11px monospace" },
+        };
+      }
+
+      if (col.id === "unitPrice") {
+        return {
+          kind: GridCellKind.Number,
+          data: item.unitPrice,
+          displayData:
+            currency === "UZS"
+              ? `${item.unitPrice.toLocaleString()} UZS`
+              : `$${item.unitPrice.toFixed(3)}`,
+          allowOverlay: status !== "Posted",
+          readonly: status === "Posted",
+          contentAlign: "right",
+        };
+      }
+
+      if (col.id === "totalAmount") {
+        return {
+          kind: GridCellKind.Number,
+          data: item.totalAmount,
+          displayData:
+            currency === "UZS"
+              ? `${item.totalAmount.toLocaleString()} UZS`
+              : `$${item.totalAmount.toFixed(2)}`,
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+          themeOverride: {
+            textDark: isDark ? "#60a5fa" : "#1d4ed8",
+            baseFontStyle: "bold 11px monospace",
+          },
+        };
+      }
+
+      if (col.id === "equivalent") {
+        const equiv =
+          currency === "UZS"
+            ? `$${(item.totalAmount / exchangeRate).toFixed(2)}`
+            : `${(item.totalAmount * exchangeRate).toLocaleString()} UZS`;
+        return {
+          kind: GridCellKind.Text,
+          data: equiv,
+          displayData: equiv,
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+          themeOverride: {
+            textDark: isDark ? "#94a3b8" : "#64748b",
+            baseFontStyle: "11px monospace",
+          },
+        };
+      }
+
+      if (col.id === "originType") {
+        const label = item.isSelfProduced ? "O'z Seximiz (Bosmaxona)" : "Xitoy (Import)";
+        return {
+          kind: GridCellKind.Text,
+          data: label,
+          displayData: label,
+          allowOverlay: false,
+          readonly: true,
+          themeOverride: {
+            textDark: item.isSelfProduced
+              ? (isDark ? "#c084fc" : "#7e22ce")
+              : (isDark ? "#38bdf8" : "#0284c7"),
+            baseFontStyle: "600 10px sans-serif",
+          },
+        };
+      }
+
+      return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+    },
+    [columns, items, currency, exchangeRate, isDark, status]
+  );
+
+  const handleCellEdited = useCallback(
+    (cell: Item, newValue: EditableGridCell) => {
+      if (status === "Posted") return;
+      const [colIndex, rowIndex] = cell;
+      const col = columns[colIndex];
+      if (!col) return;
+
+      setItems((prev) => {
+        const next = [...prev];
+        const item = { ...next[rowIndex] };
+
+        if (col.id === "quantity") {
+          const val = Number(newValue.data) || 0;
+          item.quantity = val;
+          item.totalAmount = item.quantity * item.unitPrice;
+          if (currency === "UZS") {
+            item.totalUSD = item.totalAmount / exchangeRate;
+          } else {
+            item.totalUSD = item.totalAmount;
+          }
+        } else if (col.id === "unitPrice") {
+          const val = Number(newValue.data) || 0;
+          item.unitPrice = val;
+          item.totalAmount = item.quantity * item.unitPrice;
+          if (currency === "UZS") {
+            item.unitPriceUZS = val;
+            item.unitPriceUSD = val / exchangeRate;
+            item.totalUSD = item.totalAmount / exchangeRate;
+          } else {
+            item.unitPriceUSD = val;
+            item.unitPriceUZS = val * exchangeRate;
+            item.totalUSD = item.totalAmount;
+          }
+        }
+
+        next[rowIndex] = item;
+        return next;
+      });
+      setTabUnsaved(tab.id, true);
+    },
+    [columns, currency, exchangeRate, status, setTabUnsaved, tab.id]
+  );
+
+  const handleCellActivated = useCallback(
+    (cell: Item) => {
+      const [, rowIndex] = cell;
+      const row = items[rowIndex];
+      if (!row) return;
+
+      openTab({
+        id: row.sku,
+        title: `${row.sku}: ${row.name}`,
+        type: "trading-catalog",
+        module: "trading",
+        documentData: {
+          id: row.sku,
+          sku: row.sku,
+          name: row.name,
+          category: row.category,
+          unit: row.unit,
+          priceUZS: currency === "UZS" ? row.unitPrice : row.unitPrice * exchangeRate,
+          stockQty: 50000,
+        },
+      });
+    },
+    [items, openTab, currency, exchangeRate]
+  );
+
+  const handleRemoveSelectedRows = () => {
+    if (status === "Posted") return;
+    const selectedRows = gridSelection.rows.toArray();
+    if (selectedRows.length === 0) return;
+    setItems((prev) => prev.filter((_, idx) => !selectedRows.includes(idx)));
+    setGridSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
     setTabUnsaved(tab.id, true);
   };
 
-  const handleAddItem = () => {
+  const handleQuickAddRow = () => {
+    if (status === "Posted") return;
     const newItem: TradingSaleItem = {
       id: `item-${Date.now()}`,
       sku: "ACC-CUSTOM-01",
@@ -212,10 +414,33 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  const handleRemoveItem = (index: number) => {
-    if (items.length <= 1) return;
-    setItems((prev) => prev.filter((_, idx) => idx !== index));
+  const handleAddFromWarehouse = () => {
+    if (!selectedCatalogItem) return;
+    const basePrice = currency === "UZS" ? selectedCatalogItem.priceUZS : selectedCatalogItem.priceUSD;
+    const newItem: TradingSaleItem = {
+      id: `item-${Date.now()}`,
+      sku: selectedCatalogItem.sku,
+      name: selectedCatalogItem.name,
+      category: selectedCatalogItem.category,
+      unit: selectedCatalogItem.unit,
+      quantity: pickerQuantity,
+      unitPrice: basePrice,
+      unitPriceUZS: selectedCatalogItem.priceUZS,
+      unitPriceUSD: selectedCatalogItem.priceUSD,
+      totalAmount: pickerQuantity * basePrice,
+      totalUSD: currency === "USD" ? pickerQuantity * basePrice : (pickerQuantity * basePrice) / exchangeRate,
+      isSelfProduced: selectedCatalogItem.origin.includes("Seximiz"),
+    };
+
+    setItems((prev) => [...prev, newItem]);
     setTabUnsaved(tab.id, true);
+    setIsWarehousePickerOpen(false);
+    setSelectedCatalogItem(null);
+    addNotification({
+      title: "Ombordan tovar qo'shildi",
+      description: `${selectedCatalogItem.sku} (${pickerQuantity.toLocaleString()} ${selectedCatalogItem.unit}) jadvaga kiritildi.`,
+      severity: "success",
+    });
   };
 
   const handleSave = () => {
@@ -246,10 +471,21 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     closeTab(tab.id);
   };
 
+  const filteredCatalogItems = useMemo(() => {
+    if (!warehouseSearch.trim()) return INITIAL_TRADING_CATALOG;
+    const q = warehouseSearch.toLowerCase();
+    return INITIAL_TRADING_CATALOG.filter(
+      (c) =>
+        c.sku.toLowerCase().includes(q) ||
+        c.name.toLowerCase().includes(q) ||
+        c.category.toLowerCase().includes(q)
+    );
+  }, [warehouseSearch]);
+
   const navItems: DocumentNavItem[] = [
     {
       id: "overview",
-      label: "Asosiy va Tovarlar",
+      label: "Asosiy & Mahsulotlar (Grid)",
       icon: Receipt,
       badge: items.length,
     },
@@ -392,53 +628,42 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
           />
 
           {/* Right Main Viewport */}
-          <div className="flex-1 min-w-0 flex flex-col overflow-y-auto bg-background p-4 space-y-4">
-            <TabsContent value="overview" className="m-0 space-y-4">
-              {/* SMART YTT BANNER */}
-              <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center shrink-0 shadow-xs">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="font-semibold text-xs text-foreground flex items-center gap-2">
-                      <span>Tizim tavsiyasi: <strong>YTT Qodirov Baxtiyor</strong></span>
-                      <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-300 text-[10px] font-mono">
-                        Bo&apos;sh kvota: 412,500,000 UZS (58.7% band)
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+            <TabsContent value="overview" className="flex-1 flex flex-col overflow-hidden m-0">
+              {/* TOP INDUSTRIAL PARAMETER CARDS (COLLAPSIBLE / HIGH DENSITY) */}
+              <div className="p-3 border-b border-border bg-card shrink-0 space-y-2.5">
+                {/* SMART YTT BANNER */}
+                <div className="bg-primary/5 border border-primary/20 rounded-md px-3 py-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0">
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="text-xs">
+                      <span className="text-muted-foreground">Tavsiya YTT: </span>
+                      <strong className="text-foreground">YTT Qodirov Baxtiyor</strong>
+                      <Badge variant="outline" className="ml-2 bg-emerald-50 text-emerald-800 border-emerald-300 text-[10px] font-mono h-4 px-1">
+                        Bo&apos;sh: 412.5 mln UZS (58.7% band)
                       </Badge>
                     </div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">
-                      Ushbu YTT soliqsiz aylanma kvotasi eng ko&apos;p saqlangan. Hujjat ushbu shaxs nomidan chiqsa xavfsizlik ta&apos;minlanadi.
-                    </div>
                   </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[10px] px-2 shrink-0 cursor-pointer"
+                    onClick={() => {
+                      setSellerEntityId("ytt-qodirov");
+                      setTabUnsaved(tab.id, true);
+                    }}
+                  >
+                    Tavsiya bo&apos;yicha belgilash
+                  </Button>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs shrink-0 cursor-pointer"
-                  onClick={() => {
-                    setSellerEntityId("ytt-qodirov");
-                    setTabUnsaved(tab.id, true);
-                  }}
-                >
-                  Tavsiya bo&apos;yicha belgilash
-                </Button>
-              </div>
 
-              {/* 3-CARD HIGH-DENSITY PARAMETER CARDS */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {/* 1. SELLER ENTITY */}
-                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-2">
-                  <div className="flex items-center justify-between border-b border-border pb-1.5">
-                    <span className="font-semibold text-foreground flex items-center gap-1.5">
-                      <Building2 className="w-4 h-4 text-primary" />
-                      <span>Sotuvchi (Yuridik Shaxs)</span>
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">Faktura egasi</span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">YTT yoki MChJ:</Label>
+                {/* 3-COLUMN COMPACT HEADER CONTROLS */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
+                  {/* Col 1: Seller */}
+                  <div className="p-2 rounded border border-border bg-muted/20 space-y-1">
+                    <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Sotuvchi (Yuridik Shaxs):</Label>
                     <Select
                       value={sellerEntityId}
                       onValueChange={(val: any) => {
@@ -446,70 +671,21 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
                         setTabUnsaved(tab.id, true);
                       }}
                     >
-                      <SelectTrigger className="h-8 text-xs font-medium">
+                      <SelectTrigger className="h-7 text-xs font-medium">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="text-xs">
-                        <SelectItem value="ytt-qodirov">
-                          YTT Qodirov Baxtiyor (INN: 498213002) — [58% band] ★ Tavsiya
-                        </SelectItem>
-                        <SelectItem value="ytt-aliyev">
-                          YTT Aliyev Jamshid (INN: 501982341) — [85% band - Diqqat]
-                        </SelectItem>
-                        <SelectItem value="ytt-toshmatov">
-                          YTT Toshmatov O. (INN: 412890123) — [98% band - XAVF]
-                        </SelectItem>
-                        <SelectItem value="mchj-printgoo">
-                          &quot;PRINTGOO SERVICES&quot; MChJ (QQS to&apos;lovchi)
-                        </SelectItem>
+                        <SelectItem value="ytt-qodirov">YTT Qodirov Baxtiyor (58% band) ★</SelectItem>
+                        <SelectItem value="ytt-aliyev">YTT Aliyev Jamshid (85% band)</SelectItem>
+                        <SelectItem value="ytt-toshmatov">YTT Toshmatov O. (98% band - XAVF)</SelectItem>
+                        <SelectItem value="mchj-printgoo">&quot;PRINTGOO SERVICES&quot; MChJ (QQS)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
-                  <div className="p-2 rounded bg-muted/40 border border-border space-y-1">
-                    <div className="flex justify-between items-center text-[11px]">
-                      <span className="text-muted-foreground">Yillik soliqsiz kvota (1.0 mlrd):</span>
-                      <span className="font-mono font-bold text-foreground">
-                        {selectedEntity.legalType === "MChJ"
-                          ? "Cheksiz (QQS)"
-                          : `${selectedEntity.turnoverPercent.toFixed(1)}%`}
-                      </span>
-                    </div>
-                    <div className="w-full bg-muted h-2 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          selectedEntity.turnoverPercent > 90
-                            ? "bg-destructive"
-                            : selectedEntity.turnoverPercent > 80
-                            ? "bg-amber-500"
-                            : "bg-primary"
-                        }`}
-                        style={{
-                          width: `${Math.min(100, selectedEntity.turnoverPercent)}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                      <span>Amaldagi: {(selectedEntity.currentTurnover / 1_000_000).toFixed(1)} mln</span>
-                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
-                        Qolgan: {((selectedEntity.annualLimit - selectedEntity.currentTurnover) / 1_000_000).toFixed(1)} mln UZS
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 2. CUSTOMER */}
-                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-2">
-                  <div className="flex items-center justify-between border-b border-border pb-1.5">
-                    <span className="font-semibold text-foreground flex items-center gap-1.5">
-                      <Users className="w-4 h-4 text-primary" />
-                      <span>Xaridor (Kontragent)</span>
-                    </span>
-                    <Badge variant="outline" className="text-[10px] bg-muted/50 font-mono">INN: {customerTin}</Badge>
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Tekstil fabrikasi:</Label>
+                  {/* Col 2: Customer */}
+                  <div className="p-2 rounded border border-border bg-muted/20 space-y-1">
+                    <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Xaridor (Tekstil Fabrikasi):</Label>
                     <Select
                       value={customer}
                       onValueChange={(val) => {
@@ -520,69 +696,30 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
                         setTabUnsaved(tab.id, true);
                       }}
                     >
-                      <SelectTrigger className="h-8 text-xs font-medium">
+                      <SelectTrigger className="h-7 text-xs font-medium">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="text-xs">
-                        <SelectItem value="'REAL TEXTILE INVEST' MChJ">
-                          &quot;REAL TEXTILE INVEST&quot; MChJ (INN: 304891234)
-                        </SelectItem>
-                        <SelectItem value="'BUKHARA COTTON WEAVE' XK">
-                          &quot;BUKHARA COTTON WEAVE&quot; XK (INN: 201889412)
-                        </SelectItem>
-                        <SelectItem value="'SAMARKAND APPAREL' MChJ">
-                          &quot;SAMARKAND APPAREL&quot; MChJ (INN: 308112445)
-                        </SelectItem>
+                        <SelectItem value="'REAL TEXTILE INVEST' MChJ">&quot;REAL TEXTILE INVEST&quot; MChJ</SelectItem>
+                        <SelectItem value="'BUKHARA COTTON WEAVE' XK">&quot;BUKHARA COTTON WEAVE&quot; XK</SelectItem>
+                        <SelectItem value="'SAMARKAND APPAREL' MChJ">&quot;SAMARKAND APPAREL&quot; MChJ</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
-                  <div className="p-2 rounded bg-muted/40 border border-border space-y-1 text-[11px]">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Shartnoma:</span>
-                      <span className="font-mono text-foreground">{contractNo}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Shu YTT bo&apos;yicha qarz:</span>
-                      <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
-                        {sellerEntityId === "ytt-aliyev"
-                          ? "14,200,000 UZS"
-                          : sellerEntityId === "mchj-printgoo"
-                          ? "$1,850 USD"
-                          : "0 UZS"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-[10px] text-muted-foreground pt-0.5 border-t border-border/60">
-                      <span>To&apos;lov intizomi:</span>
-                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Ishonchli (A toifa)</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3. CURRENCY & SETTINGS */}
-                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-2">
-                  <div className="flex items-center justify-between border-b border-border pb-1.5">
-                    <span className="font-semibold text-foreground flex items-center gap-1.5">
-                      <Coins className="w-4 h-4 text-primary" />
-                      <span>Valyuta & Narx Siyosati</span>
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">MB kursi</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[11px] text-muted-foreground">Hisob Valyutasi:</Label>
-                      <div className="flex rounded-md border border-input overflow-hidden bg-muted/40 p-0.5 mt-1">
+                  {/* Col 3: Currency & Rate */}
+                  <div className="p-2 rounded border border-border bg-muted/20 flex items-center gap-2">
+                    <div className="flex-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Valyuta:</Label>
+                      <div className="flex rounded border border-input overflow-hidden bg-background p-0.5 mt-0.5 h-7">
                         <button
                           type="button"
                           onClick={() => {
                             setCurrency("UZS");
                             setTabUnsaved(tab.id, true);
                           }}
-                          className={`flex-1 py-1 rounded text-center font-bold text-xs transition-colors cursor-pointer ${
-                            currency === "UZS"
-                              ? "bg-primary text-primary-foreground shadow-xs"
-                              : "text-muted-foreground hover:text-foreground"
+                          className={`flex-1 rounded text-center font-bold text-[11px] transition-colors cursor-pointer ${
+                            currency === "UZS" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground"
                           }`}
                         >
                           UZS
@@ -593,19 +730,16 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
                             setCurrency("USD");
                             setTabUnsaved(tab.id, true);
                           }}
-                          className={`flex-1 py-1 rounded text-center font-bold text-xs transition-colors cursor-pointer ${
-                            currency === "USD"
-                              ? "bg-primary text-primary-foreground shadow-xs"
-                              : "text-muted-foreground hover:text-foreground"
+                          className={`flex-1 rounded text-center font-bold text-[11px] transition-colors cursor-pointer ${
+                            currency === "USD" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground"
                           }`}
                         >
                           USD
                         </button>
                       </div>
                     </div>
-
-                    <div>
-                      <Label className="text-[11px] text-muted-foreground">MB Kursi (1 USD):</Label>
+                    <div className="w-24">
+                      <Label className="text-[10px] text-muted-foreground uppercase font-semibold">MB Kursi:</Label>
                       <Input
                         type="number"
                         value={exchangeRate}
@@ -613,188 +747,88 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
                           setExchangeRate(Number(e.target.value) || 12850);
                           setTabUnsaved(tab.id, true);
                         }}
-                        className="h-8 text-xs font-mono text-right mt-1"
+                        className="h-7 text-xs font-mono text-right mt-0.5"
                       />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground">Hujjat sanasi:</Label>
-                      <Input
-                        type="date"
-                        value={date}
-                        onChange={(e) => {
-                          setDate(e.target.value);
-                          setTabUnsaved(tab.id, true);
-                        }}
-                        className="h-7 text-xs font-mono mt-0.5"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground">To&apos;lov usuli:</Label>
-                      <Select
-                        value={paymentMethod}
-                        onValueChange={(val: any) => {
-                          setPaymentMethod(val);
-                          setTabUnsaved(tab.id, true);
-                        }}
-                      >
-                        <SelectTrigger className="h-7 text-[11px] mt-0.5">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="text-xs">
-                          <SelectItem value="Bank Wire (Hisob-raqam)">Hisob-raqam</SelectItem>
-                          <SelectItem value="Corporate Card">Korporativ karta</SelectItem>
-                          <SelectItem value="Cash / Cash Register">Naqd / Kassa</SelectItem>
-                        </SelectContent>
-                      </Select>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* ITEMS & ACCESSORIES TABLE */}
-              <div className="bg-card rounded-lg border border-border shadow-xs overflow-hidden">
-                <div className="px-3 py-2 bg-muted/40 border-b border-border flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-semibold text-foreground text-xs">
-                    <Barcode className="w-4 h-4 text-primary" />
-                    <span>Aksessuarlar va Furnituralar Jadvali</span>
-                    <Badge variant="secondary" className="text-[10px] font-mono px-1.5 h-5">
-                      {items.length} ta pozitsiya
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleAddItem}
-                      className="h-7 px-2.5 text-xs flex items-center gap-1 font-semibold cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-primary" />
-                      <span>Qator qo&apos;shish (Ins)</span>
-                    </Button>
-                  </div>
+              {/* INDUSTRIAL HIGH-DENSITY ACTION TOOLBAR FOR GRID */}
+              <div className="px-3 h-9 border-b border-border bg-card shrink-0 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    onClick={() => setIsWarehousePickerOpen(true)}
+                    className="h-7 px-2.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 shadow-xs cursor-pointer"
+                  >
+                    <Warehouse className="w-3.5 h-3.5" />
+                    <span>Ombordan qo&apos;shish</span>
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleQuickAddRow}
+                    className="h-7 px-2 text-xs flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-primary" />
+                    <span>Qator qo&apos;shish (Ins)</span>
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleRemoveSelectedRows}
+                    disabled={gridSelection.rows.length === 0}
+                    className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>O&apos;chirish (Del)</span>
+                  </Button>
+
+                  <Separator orientation="vertical" className="h-4 bg-border mx-1" />
+
+                  <Badge variant="secondary" className="font-mono text-[10px] h-5">
+                    {items.length} ta pozitsiya
+                  </Badge>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-muted/20 text-muted-foreground border-b border-border font-semibold text-[11px]">
-                        <th className="p-2 w-10 text-center">№</th>
-                        <th className="p-2 w-32">Artikul</th>
-                        <th className="p-2">Nomenklatura nomi</th>
-                        <th className="p-2 w-28">Kategoriya</th>
-                        <th className="p-2 w-20 text-center">Birlik</th>
-                        <th className="p-2 w-28 text-right">Miqdor</th>
-                        <th className="p-2 w-32 text-right">Narxi ({currency})</th>
-                        <th className="p-2 w-36 text-right">Jami ({currency})</th>
-                        <th className="p-2 w-32 text-right text-muted-foreground">
-                          Ekvivalent ({currency === "UZS" ? "USD" : "UZS"})
-                        </th>
-                        <th className="p-2 w-12 text-center">Amal</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border text-foreground font-medium">
-                      {items.map((item, idx) => (
-                        <tr key={item.id} className="hover:bg-muted/30 transition-colors">
-                          <td className="p-2 text-center text-muted-foreground font-mono">
-                            {idx + 1}
-                          </td>
-                          <td className="p-2 font-mono text-[11px] text-muted-foreground">
-                            {item.sku}
-                          </td>
-                          <td className="p-2 font-semibold">
-                            <div className="flex items-center gap-2">
-                              <span>{item.name}</span>
-                              {item.isSelfProduced && (
-                                <Badge variant="outline" className="text-[9px] bg-primary/10 text-primary border-primary/30 font-medium">
-                                  O&apos;z Seximiz
-                                </Badge>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-2">
-                            <Badge variant="secondary" className="text-[10px]">{item.category}</Badge>
-                          </td>
-                          <td className="p-2 text-center text-muted-foreground">{item.unit}</td>
-                          <td className="p-2 text-right">
-                            <Input
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) =>
-                                handleItemChange(idx, "quantity", Number(e.target.value) || 0)
-                              }
-                              className="h-7 w-24 text-right font-mono text-xs ml-auto"
-                            />
-                          </td>
-                          <td className="p-2 text-right">
-                            <Input
-                              type="number"
-                              value={item.unitPrice}
-                              onChange={(e) =>
-                                handleItemChange(idx, "unitPrice", Number(e.target.value) || 0)
-                              }
-                              className="h-7 w-28 text-right font-mono text-xs ml-auto"
-                            />
-                          </td>
-                          <td className="p-2 text-right font-mono font-bold text-foreground">
-                            {currency === "UZS"
-                              ? `${item.totalAmount.toLocaleString()} UZS`
-                              : `$${item.totalAmount.toFixed(2)} USD`}
-                          </td>
-                          <td className="p-2 text-right font-mono text-muted-foreground text-[11px]">
-                            {currency === "UZS"
-                              ? `$${(item.totalAmount / exchangeRate).toFixed(2)}`
-                              : `${(item.totalAmount * exchangeRate).toLocaleString()} UZS`}
-                          </td>
-                          <td className="p-2 text-center">
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              onClick={() => handleRemoveItem(idx)}
-                              className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-                              title="O'chirish"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-muted-foreground font-mono">
+                    Jami: <strong className="text-foreground">{currency === "UZS" ? `${totalUZS.toLocaleString()} UZS` : `$${totalUSD.toFixed(2)} USD`}</strong>
+                  </span>
+                  <span className="text-[11px] text-muted-foreground font-mono hidden md:inline">
+                    (Ikkita marta bosing: Katalog kartochkasi)
+                  </span>
                 </div>
+              </div>
 
-                {/* TOTALS & SUMMARY BAR */}
-                <div className="p-3 bg-muted/20 border-t border-border flex items-center justify-between">
-                  <div className="text-muted-foreground">
-                    Jami tovarlar: <strong className="text-foreground">{items.length} ta</strong>
-                  </div>
-
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <div className="text-[11px] text-muted-foreground">Ekvivalent:</div>
-                      <div className="text-sm font-mono font-bold text-muted-foreground">
-                        {currency === "UZS"
-                          ? `$${totalUSD.toFixed(2)} USD`
-                          : `${totalUZS.toLocaleString()} UZS`}
-                      </div>
-                    </div>
-                    <div className="text-right border-l border-border pl-4">
-                      <div className="text-[11px] text-muted-foreground font-medium">Jami to&apos;lov summasi:</div>
-                      <div className="text-lg font-mono font-extrabold text-primary">
-                        {currency === "UZS"
-                          ? `${totalUZS.toLocaleString()} UZS`
-                          : `$${totalUSD.toFixed(2)} USD`}
-                      </div>
-                    </div>
-                  </div>
+              {/* GLIDE DATA GRID WORKSPACE */}
+              <div className="flex-1 min-h-0 relative">
+                <div className="absolute inset-0">
+                  <DataEditor
+                    columns={columns}
+                    rows={items.length}
+                    getCellContent={getCellContent}
+                    onCellEdited={handleCellEdited}
+                    onCellActivated={handleCellActivated}
+                    gridSelection={gridSelection}
+                    onGridSelectionChange={setGridSelection}
+                    rowMarkers="both"
+                    freezeColumns={1}
+                    smoothScrollX
+                    smoothScrollY
+                    theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+                    width="100%"
+                    height="100%"
+                  />
                 </div>
               </div>
             </TabsContent>
 
             {/* TAB 2: YTT LIMIT ANALYSIS */}
-            <TabsContent value="ytt-analysis" className="m-0 space-y-4">
+            <TabsContent value="ytt-analysis" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
               <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
                 <div className="flex items-center justify-between border-b border-border pb-2">
                   <div className="flex items-center gap-2">
@@ -869,7 +903,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
             </TabsContent>
 
             {/* TAB 3: CONTRACT & SETTLEMENT */}
-            <TabsContent value="contract-settlement" className="m-0 space-y-4">
+            <TabsContent value="contract-settlement" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
               <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
                 <div className="flex items-center gap-2 border-b border-border pb-2">
                   <Building2 className="w-4 h-4 text-primary" />
@@ -907,6 +941,98 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
           </div>
         </div>
       </Tabs>
+
+      {/* DIALOG: OMBORDAN MAHSULOT QO'SHISH (WAREHOUSE PICKER) */}
+      <Dialog open={isWarehousePickerOpen} onOpenChange={setIsWarehousePickerOpen}>
+        <DialogContent className="max-w-2xl text-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Warehouse className="w-4 h-4 text-primary" />
+              <span>Ombor Zaxirasidan Mahsulot Qo&apos;shish</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
+              <Input
+                value={warehouseSearch}
+                onChange={(e) => setWarehouseSearch(e.target.value)}
+                placeholder="Ombordan qidirish (Artikul, Nomi, Kategoriya)..."
+                className="h-8 pl-8 text-xs font-mono"
+              />
+            </div>
+
+            <div className="max-h-60 overflow-y-auto border border-border rounded-md divide-y divide-border">
+              {filteredCatalogItems.map((cat) => {
+                const isSelected = selectedCatalogItem?.sku === cat.sku;
+                return (
+                  <div
+                    key={cat.sku}
+                    onClick={() => setSelectedCatalogItem(cat)}
+                    className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                      isSelected ? "bg-primary/10 border-l-2 border-primary" : "hover:bg-muted/40"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-xs text-foreground">{cat.sku}</span>
+                        <Badge variant="secondary" className="text-[9px] h-4 px-1">{cat.category}</Badge>
+                      </div>
+                      <div className="font-medium text-xs text-foreground mt-0.5">{cat.name}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                        Ombordagi qoldiq: <strong className="text-emerald-600 dark:text-emerald-400">{cat.stockQty.toLocaleString()} {cat.unit}</strong> • Manba: {cat.origin}
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="font-mono font-bold text-xs text-primary">
+                        {currency === "UZS" ? `${cat.priceUZS.toLocaleString()} UZS` : `$${cat.priceUSD.toFixed(3)}`}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {cat.unit} narxi
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {selectedCatalogItem && (
+              <div className="p-3 bg-muted/30 border border-border rounded-md flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-[11px] text-muted-foreground">Tanlangan:</span>
+                  <div className="font-bold text-xs text-foreground">{selectedCatalogItem.sku} — {selectedCatalogItem.name}</div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Label className="text-[11px] text-muted-foreground">Miqdor ({selectedCatalogItem.unit}):</Label>
+                  <Input
+                    type="number"
+                    value={pickerQuantity}
+                    onChange={(e) => setPickerQuantity(Number(e.target.value) || 0)}
+                    className="h-8 w-28 text-right font-mono text-xs"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setIsWarehousePickerOpen(false)} className="h-7 text-xs">
+              Bekor qilish
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleAddFromWarehouse}
+              disabled={!selectedCatalogItem || pickerQuantity <= 0}
+              className="h-7 text-xs bg-primary text-primary-foreground font-semibold"
+            >
+              Hujjatga kiritish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Official Printable Akt Sverka Dialog */}
       <AktSverkaPrintModal
