@@ -299,6 +299,14 @@ export function TradingGrid({ type }: TradingGridProps) {
           module: "trading",
           documentData: row,
         });
+      } else if (type === "ytt-limits") {
+        openTab({
+          id: row.id || `ytt-${Date.now()}`,
+          title: `${row.code || row.name}`,
+          type: "trading-ytt-limit",
+          module: "trading",
+          documentData: row,
+        });
       }
     },
     [openTab, rows, type]

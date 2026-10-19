@@ -55,6 +55,7 @@ import { TradingOrderDetail } from "@/components/documents/trading/TradingOrderD
 import { TradingSettlementDetail } from "@/components/documents/trading/TradingSettlementDetail";
 import { TradingImportDetail } from "@/components/documents/trading/TradingImportDetail";
 import { TradingCatalogDetail } from "@/components/documents/trading/TradingCatalogDetail";
+import { TradingYttLimitDetail } from "@/components/documents/trading/TradingYttLimitDetail";
 
 import { TabContentWrapper } from "./TabContentWrapper";
 import { RegistryGridRenderer } from "./RegistryGridRenderer";
@@ -184,6 +185,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     if (tab.type === "trading-settlement") return <TradingSettlementDetail tab={tab} />;
     if (tab.type === "trading-import") return <TradingImportDetail tab={tab} />;
     if (tab.type === "trading-catalog") return <TradingCatalogDetail tab={tab} />;
+    if (tab.type === "trading-ytt-limit") return <TradingYttLimitDetail tab={tab} />;
     if (tab.type === "registry") return <RegistryGridRenderer tab={tab} />;
     return null;
   };
