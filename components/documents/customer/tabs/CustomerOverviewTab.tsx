@@ -433,7 +433,7 @@ export function CustomerOverviewTab({
         <div className="bg-card border border-border rounded-md p-4 space-y-3">
           <div className="flex items-center gap-2 border-b border-border pb-2">
             <Building2 className="w-4 h-4 text-primary" />
-            <span className="font-semibold text-xs uppercase tracking-wider">
+            <span className="font-semibold text-xs text-foreground">
               1. Yuridik va Soliq Rekvizitlari
             </span>
           </div>
@@ -546,7 +546,7 @@ export function CustomerOverviewTab({
         <div className="bg-card border border-border rounded-md p-4 space-y-3">
           <div className="flex items-center gap-2 border-b border-border pb-2">
             <Landmark className="w-4 h-4 text-primary" />
-            <span className="font-semibold text-xs uppercase tracking-wider">
+            <span className="font-semibold text-xs text-foreground">
               2. Bank va Moliyaviy Rekvizitlar
             </span>
           </div>
@@ -641,7 +641,7 @@ export function CustomerOverviewTab({
           <div className="flex items-center justify-between border-b border-border pb-2">
             <div className="flex items-center gap-2">
               <FileSignature className="w-4 h-4 text-primary" />
-              <span className="font-semibold text-xs uppercase tracking-wider">
+              <span className="font-semibold text-xs text-foreground">
                 3. Amaldagi Shartnoma va Mas&apos;ul
               </span>
             </div>
@@ -653,9 +653,9 @@ export function CustomerOverviewTab({
           {/* Active Contract Quick Card */}
           <div className="rounded-md border border-border/80 bg-muted/30 p-2.5 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-semibold text-muted-foreground flex items-center gap-1">
+              <span className="text-[10px] font-semibold text-muted-foreground flex items-center gap-1">
                 <ScrollText className="w-3 h-3 text-blue-500" />
-                Bosh Ramkali Shartnoma
+                Bosh ramkali shartnoma
               </span>
               <button
                 type="button"
@@ -744,7 +744,7 @@ export function CustomerOverviewTab({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-2.5">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4 text-primary" />
-            <span className="font-semibold text-xs uppercase tracking-wider">
+            <span className="font-semibold text-xs text-foreground">
               4. Tashkilot Mas&apos;ul Shaxslari va Aloqa Tarmog&apos;i
             </span>
             <Badge variant="secondary" className="text-[10px] px-1.5 h-5 font-mono">
@@ -953,7 +953,7 @@ export function CustomerOverviewTab({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-2.5">
           <div className="flex items-center gap-2">
             <FileSignature className="w-4 h-4 text-primary" />
-            <span className="font-semibold text-xs uppercase tracking-wider">
+            <span className="font-semibold text-xs text-foreground">
               5. Shartnomalar va Qo&apos;shimcha Kelishuvlar (Tarix va Holati)
             </span>
             <Badge variant="secondary" className="text-[10px] px-1.5 h-5 font-mono">
@@ -1122,7 +1122,7 @@ export function CustomerOverviewTab({
         <div className="bg-card border border-border rounded-md p-4 space-y-3">
           <div className="flex items-center gap-2 border-b border-border pb-2">
             <Truck className="w-4 h-4 text-emerald-600" />
-            <span className="font-semibold text-xs uppercase tracking-wider">
+            <span className="font-semibold text-xs text-foreground">
               6. Logistika, Ombor va Qabul Qilish Shartlari
             </span>
           </div>
@@ -1188,7 +1188,7 @@ export function CustomerOverviewTab({
         <div className="bg-card border border-border rounded-md p-4 space-y-3">
           <div className="flex items-center gap-2 border-b border-border pb-2">
             <ClipboardCheck className="w-4 h-4 text-primary" />
-            <span className="font-semibold text-xs uppercase tracking-wider">
+            <span className="font-semibold text-xs text-foreground">
               7. Maxsus Poligrafik Talablar va CRM Izohlari
             </span>
           </div>

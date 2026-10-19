@@ -398,7 +398,13 @@ export function TradingGrid({ type }: TradingGridProps) {
             variant="outline"
             size="sm"
             className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-            onClick={() => alert("Eksport: Excel / CSV formati yuklab olinmoqda...")}
+            onClick={() => {
+              useWorkspaceStore.getState().addNotification({
+                title: "Excel eksport",
+                description: "Reyestr ma'lumotlari Excel (XLSX) formatida yuklab olinmoqda.",
+                severity: "info",
+              });
+            }}
           >
             <Download className="w-3.5 h-3.5" />
             <span>Excel</span>
@@ -406,8 +412,14 @@ export function TradingGrid({ type }: TradingGridProps) {
           <Button
             variant="outline"
             size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-            onClick={() => alert("Chop etish: Reyestr PDF formatida tayyorlanmoqda...")}
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
+            onClick={() => {
+              useWorkspaceStore.getState().addNotification({
+                title: "Chop etish",
+                description: "Reyestr PDF formatida tayyorlanmoqda.",
+                severity: "info",
+              });
+            }}
           >
             <Printer className="w-3.5 h-3.5" />
             <span>Chop etish</span>

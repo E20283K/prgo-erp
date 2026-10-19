@@ -1,10 +1,17 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { DocumentTab } from "@/store/workspaceStore";
+import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
+import {
+  DocumentHeader,
+  DocumentSidebar,
+  SidebarSummaryCard,
+  DocumentNavItem,
+  InfoRow,
+} from "@/components/documents/common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -13,24 +20,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  FileText,
-  Printer,
   Scale,
+  Printer,
+  Download,
   Building2,
   Users,
-  FileCheck2,
   Sparkles,
-  Download,
-  Calendar,
-  AlertCircle,
-  ExternalLink,
+  ArrowRight,
+  TrendingDown,
+  TrendingUp,
+  CreditCard,
+  Receipt,
+  FileSpreadsheet,
 } from "lucide-react";
 import { INITIAL_SETTLEMENT_LEDGERS, INITIAL_YTT_ENTITIES } from "./data";
+import { AktSverkaPrintModal } from "../customer/components/AktSverkaPrintModal";
 
 export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
-  const [selectedEntityId, setSelectedEntityId] = useState<string>("ytt-aliyev");
+  const { setLevel3Tab, clientSettlements, addNotification } = useWorkspaceStore();
   const rawData = tab.documentData || {};
   const customerName = rawData.customer || "'REAL TEXTILE INVEST' MChJ";
+  const [selectedEntityId, setSelectedEntityId] = useState<string>("ytt-aliyev");
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  const activeTab = tab.activeLevel3Tab || "ledger";
 
   const selectedEntity = useMemo(() => {
     return (
@@ -55,7 +68,7 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
   const { totalDebit, totalCredit, closingBalance, currency } = useMemo(() => {
     let d = 0;
     let c = 0;
-    let curr = selectedEntityId === "mchj-printgoo" ? "USD" : "UZS";
+    const curr = selectedEntityId === "mchj-printgoo" ? "USD" : "UZS";
     filteredLedger.forEach((row) => {
       d += row.debit;
       c += row.credit;
@@ -68,227 +81,313 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
     };
   }, [filteredLedger, selectedEntityId]);
 
-  const handlePrintPDF = () => {
-    alert(
-      `Rasmiy Akt-Sverka (PDF) shakllantirildi!\nSotuvchi korxona: ${selectedEntity.name}\nXaridor: ${customerName}\nSaldo: ${closingBalance.toLocaleString()} ${currency}`
-    );
-  };
+  const navItems: DocumentNavItem[] = [
+    {
+      id: "ledger",
+      label: "O'zaro Hisob-kitob (Ledger)",
+      icon: Scale,
+      badge: filteredLedger.length,
+    },
+    {
+      id: "cross-sell",
+      label: "Cross-Sell Radar",
+      icon: Sparkles,
+    },
+  ];
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-zinc-950 overflow-y-auto text-xs font-sans">
-      {/* 1C TOOLBAR */}
-      <div className="bg-white dark:bg-zinc-900 border-b border-border px-3 py-1.5 flex items-center justify-between shrink-0 shadow-xs">
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={handlePrintPDF}
-            className="h-7 px-3 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 shadow-xs"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Rasmiy Akt-Sverka (PDF chop etish)</span>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => alert("Excel fayli yuklab olinmoqda...")}
-            className="h-7 px-2.5 text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Excelga eksport</span>
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground font-mono">Davr:</span>
-          <span className="font-semibold text-foreground">01.10.2026 — 18.10.2026</span>
-        </div>
-      </div>
-
-      <div className="p-3 space-y-3 max-w-7xl mx-auto w-full">
-        {/* CUSTOMER 360 HEADER CARD */}
-        <div className="bg-card p-4 rounded-lg border border-border shadow-xs flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-11 h-11 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-lg font-bold shadow-xs">
-              RT
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-foreground">{customerName}</h2>
-                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px]">
-                  Doimiy Mijoz
-                </Badge>
-              </div>
-              <div className="text-muted-foreground text-[11px] flex items-center gap-3 mt-0.5">
-                <span>INN: <strong className="text-foreground font-mono">304891234</strong></span>
-                <span>•</span>
-                <span>Mas'ul: Jasur Rustamov (+998 90 123-45-67)</span>
-                <span>•</span>
-                <span>Manzil: Farg'ona vil., Quva tumani</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4 bg-muted/40 p-2 rounded-lg border border-border text-right">
-            <div>
-              <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-                Xolding bo'yicha jami umumiy qarz:
-              </div>
-              <div className="text-xs font-mono font-bold text-foreground">
-                14,200,000 UZS + $1,850 USD
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ISOLATED RECONCILIATION CONFIGURATION (SAVOLGA ASOSAN) */}
-        <div className="bg-card rounded-lg border border-border shadow-xs p-3.5 space-y-3">
-          <div className="flex flex-wrap items-center justify-between border-b border-border pb-2.5 gap-2">
-            <div>
-              <h3 className="font-bold text-foreground flex items-center gap-2">
-                <Scale className="w-4 h-4 text-blue-600" />
-                <span>O'zaro Hisob-kitob Dalolatnomasi (Akt-Sverka)</span>
-              </h3>
-              <p className="text-[11px] text-muted-foreground">
-                Talabga asosan: Har bir YTT yoki MChJ uchun mutlaqo mustaqil, alohida hisob-kitob yuritiladi.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground font-medium text-[11px]">Sotuvchi korxonani tanlang:</span>
-              <Select
-                value={selectedEntityId}
-                onValueChange={(val) => setSelectedEntityId(val || "ytt-aliyev")}
+    <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">
+      <Tabs
+        value={activeTab}
+        onValueChange={(val) => setLevel3Tab(tab.id, val)}
+        className="flex-1 flex flex-col overflow-hidden"
+      >
+        {/* 1C Standard Document Header */}
+        <DocumentHeader
+          icon={Scale}
+          title={`Akt-Sverka: ${customerName}`}
+          docNo={`STL-${selectedEntity.code}`}
+          date="01.10.2026 — 18.10.2026"
+          status={closingBalance > 0 ? "Active" : "Completed"}
+          actions={
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsPrintModalOpen(true)}
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+                title="Akt-Sverka rasmiy PDF shakli"
               >
-                <SelectTrigger className="h-8 w-64 text-xs font-semibold">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="text-xs">
-                  <SelectItem value="ytt-aliyev">
-                    YTT Aliyev Jamshid (Aksessuarlar)
-                  </SelectItem>
-                  <SelectItem value="ytt-qodirov">
-                    YTT Qodirov Baxtiyor (Aksessuarlar)
-                  </SelectItem>
-                  <SelectItem value="mchj-printgoo">
-                    "PRINTGOO SERVICES" MChJ (Flexo / Jakkard)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+                <Printer className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Chop etish (PDF)</span>
+              </Button>
 
-          {/* Active Contract Info Banner */}
-          <div className="p-2.5 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 flex items-center justify-between">
-            <div className="space-y-0.5">
-              <div className="font-semibold text-foreground">
-                Shartnoma:{" "}
-                <span className="text-blue-700 dark:text-blue-300">
-                  {selectedEntityId === "ytt-aliyev"
-                    ? "№ AK-2025/11 (Aksessuarlar yetkazib berish)"
-                    : selectedEntityId === "ytt-qodirov"
-                    ? "№ AK-2026/04 (Aksessuarlar yetkazib berish)"
-                    : "№ PRG-2026/18 (Flexo & Jakkard bosma xizmatlari)"}
-                </span>
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                Sotuvchi: <strong>{selectedEntity.name}</strong> (INN: {selectedEntity.inn}) • Xaridor: <strong>{customerName}</strong>
-              </div>
-            </div>
-
-            <div className="text-right">
-              <span className="text-muted-foreground text-[10px] block uppercase font-medium">Ushbu shaxs oldidagi qarz (Saldo):</span>
-              <span
-                className={`text-sm font-mono font-extrabold ${
-                  closingBalance > 0 ? "text-amber-600" : "text-emerald-600"
-                }`}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  addNotification({
+                    title: "Excel eksport",
+                    description: `${customerName} akt-sverkasi yuklab olinmoqda.`,
+                    severity: "info",
+                  });
+                }}
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
               >
-                {closingBalance > 0
-                  ? `${closingBalance.toLocaleString()} ${currency}`
-                  : "0 UZS (Qarz yo'q)"}
-              </span>
-            </div>
-          </div>
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Excel</span>
+              </Button>
+            </>
+          }
+        />
 
-          {/* LEDGER TABLE */}
-          <div className="rounded-md border border-border overflow-hidden">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead className="bg-muted/40 text-muted-foreground border-b border-border font-semibold text-[11px]">
-                <tr>
-                  <th className="p-2 w-24">Sana</th>
-                  <th className="p-2">Hujjat turi va raqami</th>
-                  <th className="p-2 w-48">Operatsiya tavsifi</th>
-                  <th className="p-2 w-36 text-right">
-                    Berilgan Tovar (Debet)
-                  </th>
-                  <th className="p-2 w-36 text-right">
-                    Tushgan To'lov (Kredit)
-                  </th>
-                  <th className="p-2 w-36 text-right">Qoldiq Saldo</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border font-mono">
-                {filteredLedger.length > 0 ? (
-                  filteredLedger.map((row) => (
-                    <tr key={row.id} className="hover:bg-muted/30">
-                      <td className="p-2 text-muted-foreground">{row.date}</td>
-                      <td className="p-2 font-sans font-medium text-foreground">
-                        {row.docNo} ({row.docType})
-                      </td>
-                      <td className="p-2 font-sans text-muted-foreground text-[11px]">
-                        {row.docType === "Sotuv Hujjati"
-                          ? "Aksessuarlar jo'natildi"
-                          : row.docType === "Bank To'lovi"
-                          ? "Bank orqali to'lov qabul qilindi"
-                          : "Boshlang'ich qoldiq"}
-                      </td>
-                      <td className="p-2 text-right font-bold text-blue-600 dark:text-blue-400">
-                        {row.debit > 0 ? `${row.debit.toLocaleString()} ${row.currency}` : "—"}
-                      </td>
-                      <td className="p-2 text-right font-bold text-emerald-600 dark:text-emerald-400">
-                        {row.credit > 0 ? `${row.credit.toLocaleString()} ${row.currency}` : "—"}
-                      </td>
-                      <td className="p-2 text-right font-bold text-foreground">
-                        {row.balance.toLocaleString()} {row.currency}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={6} className="p-4 text-center text-muted-foreground font-sans">
-                      Ushbu tashkilot bilan hisob-kitoblar to'liq tenglashgan yoki operatsiyalar mavjud emas.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+        {/* Workspace Body */}
+        <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
+          <DocumentSidebar
+            sectionsLabel="Bo'limlar"
+            items={navItems}
+            activeId={activeTab}
+            onSelect={(id) => setLevel3Tab(tab.id, id)}
+            summary={
+              <SidebarSummaryCard
+                icon={Building2}
+                title={customerName}
+                subtitle="Tekstil Kontragent"
+              >
+                <InfoRow label="Sotuvchi:">
+                  <span className="truncate max-w-[120px] text-[10px]" title={selectedEntity.name}>
+                    {selectedEntity.name}
+                  </span>
+                </InfoRow>
+
+                <InfoRow label="Joriy Saldo:">
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span
+                      className={`font-mono font-bold text-xs ${
+                        closingBalance > 0
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-emerald-600 dark:text-emerald-400"
+                      }`}
+                    >
+                      {closingBalance > 0
+                        ? `${closingBalance.toLocaleString()} ${currency}`
+                        : "0 (Qarz yo'q)"}
+                    </span>
+                  </div>
+                </InfoRow>
+
+                <InfoRow label="Operatsiyalar:">
+                  <Badge variant="outline" className="h-4 px-1 text-[10px] font-mono">
+                    {filteredLedger.length} ta
+                  </Badge>
+                </InfoRow>
+              </SidebarSummaryCard>
+            }
+            footer={
+              <div className="space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Davr:</span>
+                  <span className="font-mono text-[10px]">Oktabr 2026</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Umumiy Qarz:</span>
+                  <span className="font-mono text-[10px] text-foreground font-semibold">
+                    14.2M UZS + $1.8K
+                  </span>
+                </div>
+              </div>
+            }
+          />
+
+          {/* Right Main Viewport */}
+          <div className="flex-1 min-w-0 flex flex-col overflow-y-auto bg-background p-4 space-y-4">
+            <TabsContent value="ledger" className="m-0 space-y-4">
+              {/* SELLER SELECTOR CARD */}
+              <div className="bg-card p-4 rounded-lg border border-border shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-primary" />
+                    <span className="font-semibold text-xs text-foreground">
+                      Sotuvchi Yuridik Shaxsni Tanlang:
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Har bir YTT yoki MChJ bo&apos;yicha alohida, mustaqil akt-sverka yuritiladi.
+                  </p>
+                </div>
+
+                <div className="w-full sm:w-72">
+                  <Select
+                    value={selectedEntityId}
+                    onValueChange={(val) => setSelectedEntityId(val || "ytt-aliyev")}
+                  >
+                    <SelectTrigger className="h-8 text-xs font-semibold">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="text-xs">
+                      <SelectItem value="ytt-aliyev">
+                        YTT Aliyev Jamshid (Aksessuarlar)
+                      </SelectItem>
+                      <SelectItem value="ytt-qodirov">
+                        YTT Qodirov Baxtiyor (Aksessuarlar)
+                      </SelectItem>
+                      <SelectItem value="mchj-printgoo">
+                        &quot;PRINTGOO SERVICES&quot; MChJ (Flexo / Jakkard)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* ACTIVE CONTRACT AND BALANCE OVERVIEW */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
+                  <span className="text-[11px] text-muted-foreground block">Amaldagi Shartnoma:</span>
+                  <strong className="text-foreground text-xs block">
+                    {selectedEntityId === "ytt-aliyev"
+                      ? "№ AK-2025/11 (Aksessuarlar)"
+                      : selectedEntityId === "ytt-qodirov"
+                      ? "№ AK-2026/04 (Aksessuarlar)"
+                      : "№ PRG-2026/18 (Flexo & Jakkard)"}
+                  </strong>
+                  <span className="text-[10px] text-muted-foreground font-mono block">
+                    Sotuvchi INN: {selectedEntity.inn}
+                  </span>
+                </div>
+
+                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
+                  <span className="text-[11px] text-muted-foreground block">Berilgan Tovar (Debet):</span>
+                  <strong className="text-primary text-sm font-mono block">
+                    {totalDebit > 0 ? `${totalDebit.toLocaleString()} ${currency}` : "0"}
+                  </strong>
+                  <span className="text-[10px] text-muted-foreground">Yuk xatlari bo&apos;yicha</span>
+                </div>
+
+                <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
+                  <span className="text-[11px] text-muted-foreground block">Ushbu shaxs oldidagi qarz (Saldo):</span>
+                  <strong
+                    className={`text-sm font-mono block ${
+                      closingBalance > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                    }`}
+                  >
+                    {closingBalance > 0
+                      ? `${closingBalance.toLocaleString()} ${currency}`
+                      : "0 (Qarz yo'q)"}
+                  </strong>
+                  <span className="text-[10px] text-muted-foreground">Oxirgi holat bo&apos;yicha</span>
+                </div>
+              </div>
+
+              {/* LEDGER TABLE */}
+              <div className="bg-card rounded-lg border border-border shadow-xs overflow-hidden">
+                <div className="px-3 py-2 bg-muted/40 border-b border-border flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-semibold text-foreground text-xs">
+                    <Scale className="w-4 h-4 text-primary" />
+                    <span>Operatsiyalar va Hujjatlar Reestri</span>
+                    <Badge variant="secondary" className="text-[10px] font-mono px-1.5 h-5">
+                      {filteredLedger.length} ta yozuv
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-muted/20 text-muted-foreground border-b border-border font-semibold text-[11px]">
+                        <th className="p-2 w-24">Sana</th>
+                        <th className="p-2">Hujjat turi va raqami</th>
+                        <th className="p-2 w-48">Operatsiya tavsifi</th>
+                        <th className="p-2 w-36 text-right">Berilgan Tovar (Debet)</th>
+                        <th className="p-2 w-36 text-right">Tushgan To&apos;lov (Kredit)</th>
+                        <th className="p-2 w-36 text-right">Qoldiq Saldo</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border font-mono text-foreground font-medium">
+                      {filteredLedger.length > 0 ? (
+                        filteredLedger.map((row) => (
+                          <tr key={row.id} className="hover:bg-muted/30 transition-colors">
+                            <td className="p-2 text-muted-foreground">{row.date}</td>
+                            <td className="p-2 font-sans font-medium text-foreground">
+                              {row.docNo} ({row.docType})
+                            </td>
+                            <td className="p-2 font-sans text-muted-foreground text-[11px]">
+                              {row.docType === "Sotuv Hujjati"
+                                ? "Aksessuarlar jo'natildi"
+                                : row.docType === "Bank To'lovi"
+                                ? "Bank orqali to'lov qabul qilindi"
+                                : "Boshlang'ich qoldiq"}
+                            </td>
+                            <td className="p-2 text-right font-bold text-primary">
+                              {row.debit > 0 ? `${row.debit.toLocaleString()} ${row.currency}` : "—"}
+                            </td>
+                            <td className="p-2 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                              {row.credit > 0 ? `${row.credit.toLocaleString()} ${row.currency}` : "—"}
+                            </td>
+                            <td className="p-2 text-right font-bold text-foreground">
+                              {row.balance.toLocaleString()} {row.currency}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="p-4 text-center text-muted-foreground font-sans">
+                            Ushbu tashkilot bilan hisob-kitoblar to&apos;liq tenglashgan yoki operatsiyalar mavjud emas.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* TAB 2: CROSS SELL */}
+            <TabsContent value="cross-sell" className="m-0 space-y-4">
+              <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
+                <div className="flex items-center gap-2 border-b border-border pb-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <span className="font-semibold text-xs text-foreground">
+                    Cross-Sell Imkoniyati (PrintGoo Bosmaxonasi bilan integratsiya)
+                  </span>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Ushbu mijoz (&quot;{customerName}&quot;) muntazam aksessuar va furnitura xarid qilmoqda, lekin <strong>Flexo samokleyka etiketka</strong> yoki <strong>Ofset quti</strong> poligrafiya buyurtmalarini bermagan.
+                </p>
+
+                <div className="pt-2">
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs bg-primary text-primary-foreground font-medium cursor-pointer"
+                    onClick={() => {
+                      addNotification({
+                        title: "Menejerga topshiriq biriktirildi",
+                        description: `${customerName} uchun bosmaxona xizmatlari bo'yicha tijoriy taklif shakllantirish topshirig'i yaratildi.`,
+                        severity: "success",
+                      });
+                    }}
+                  >
+                    Bosmaxona taklifi yaratish
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
           </div>
         </div>
+      </Tabs>
 
-        {/* CROSS-SELL RADAR (PrintGoo Bosmaxonasi bilan integratsiya) */}
-        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950/30 dark:to-indigo-950/20 border border-purple-200 dark:border-purple-900 rounded-lg p-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-md bg-purple-600 text-white flex items-center justify-center text-sm shadow-xs">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="font-bold text-purple-950 dark:text-purple-100 text-xs">
-                Cross-Sell Imkoniyati (PrintGoo Bosmaxona)
-              </h4>
-              <p className="text-[11px] text-purple-800 dark:text-purple-300 mt-0.5">
-                Ushbu mijoz ("{customerName}") muntazam aksessuar xarid qilmoqda, lekin <strong>Flexo samokleyka etiketka</strong> yoki <strong>Ofset quti</strong> buyurtma bermagan!
-              </p>
-            </div>
-          </div>
-          <Button
-            size="sm"
-            className="h-7 text-xs bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-xs"
-            onClick={() => alert("Menejerga vazifa biriktirildi: Bosmaxona xizmatlari bo'yicha tijoriy taklif jo'natish!")}
-          >
-            Bosmaxona taklifi yaratish
-          </Button>
-        </div>
-      </div>
+      {/* Official Printable Akt Sverka Dialog */}
+      <AktSverkaPrintModal
+        open={isPrintModalOpen}
+        onOpenChange={setIsPrintModalOpen}
+        customer={{
+          id: "cust-trd-stl",
+          name: customerName,
+          tin: "304891234",
+          contractNo: "AK-2026/04",
+        } as any}
+        settlement={clientSettlements[0] || null}
+      />
     </div>
   );
 }
