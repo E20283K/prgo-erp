@@ -121,3 +121,37 @@ export interface TradingSettlementLedgerEntry {
   currency: "UZS" | "USD";
   balance: number;
 }
+
+export interface TradingOrderItem {
+  id: string;
+  sku: string;
+  name: string;
+  spec: string; // e.g. "Rang: Pantone 19-4052, Diametr: 18mm"
+  unit: string;
+  quantity: number;
+  unitPriceUSD: number;
+  totalUSD: number;
+  chinaFactoryStatus: "Navbatda" | "Ishlab chiqarilmoqda" | "Sifat nazoratida" | "Kargoga topshirildi" | "Omborda tayyor";
+}
+
+export interface TradingOrderRecord {
+  id: string;
+  orderNo: string;
+  date: string;
+  customer: string;
+  customerTin: string;
+  contractNo: string;
+  category: string;
+  deliveryDate: string;
+  chinaStatus: "Navbatda" | "Guangzhou Zavodida Ishlab Chiqarilmoqda" | "Kargo Avto Yo'lda (CN-2026-OCT-14)" | "Ombordan Zaxiradan Ajratildi" | "Yetkazib Berildi";
+  advanceStatus: "0% Kutilmoqda" | "30% Avans Olingan" | "50% To'langan" | "100% To'langan" | "Shartnoma Bo'yicha";
+  advancePercent: number; // e.g. 30
+  advanceAmountUSD: number;
+  totalUSD: number;
+  exchangeRate: number;
+  shippingMethod: "Avto Fura Kargo (12-16 kun)" | "Avia Ekspress (4-6 kun)" | "Temir yo'l Konteyner (20-25 kun)";
+  trackingNo?: string;
+  notes?: string;
+  items: TradingOrderItem[];
+}
+

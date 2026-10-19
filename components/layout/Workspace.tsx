@@ -51,6 +51,7 @@ import { WarehouseStockDetail } from "@/components/documents/WarehouseStockDetai
 import { PlantDetail } from "@/components/documents/PlantDetail";
 import { EmployeeDetail } from "@/components/documents/hr/EmployeeDetail";
 import { TradingSaleDetail } from "@/components/documents/trading/TradingSaleDetail";
+import { TradingOrderDetail } from "@/components/documents/trading/TradingOrderDetail";
 import { TradingSettlementDetail } from "@/components/documents/trading/TradingSettlementDetail";
 import { TradingImportDetail } from "@/components/documents/trading/TradingImportDetail";
 import { TradingCatalogDetail } from "@/components/documents/trading/TradingCatalogDetail";
@@ -175,6 +176,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     if (tab.type === "plant-detail") return <PlantDetail tab={tab} />;
     if (tab.type === "employee-detail") return <EmployeeDetail tab={tab} />;
     if (tab.type === "trading-sale") return <TradingSaleDetail tab={tab} />;
+    if (tab.type === "trading-order") return <TradingOrderDetail tab={tab} />;
     if (tab.type === "trading-settlement") return <TradingSettlementDetail tab={tab} />;
     if (tab.type === "trading-import") return <TradingImportDetail tab={tab} />;
     if (tab.type === "trading-catalog") return <TradingCatalogDetail tab={tab} />;

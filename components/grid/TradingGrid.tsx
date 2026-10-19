@@ -259,11 +259,19 @@ export function TradingGrid({ type }: TradingGridProps) {
       const row = rows[rowIndex];
       if (!row) return;
 
-      if (type === "sales" || type === "orders") {
+      if (type === "sales") {
         openTab({
           id: row.id || `TRD-${Date.now()}`,
-          title: `${row.id || "Sotuv Hujjati"} (${row.customer || "Tekstil"})`,
+          title: `Sotuv: ${row.id || "Hujjat"} (${row.customer || "Tekstil"})`,
           type: "trading-sale",
+          module: "trading",
+          documentData: row,
+        });
+      } else if (type === "orders") {
+        openTab({
+          id: row.id || `ORD-${Date.now()}`,
+          title: `Buyurtma: ${row.id} (${row.customer || "Tekstil"})`,
+          type: "trading-order",
           module: "trading",
           documentData: row,
         });
@@ -297,6 +305,36 @@ export function TradingGrid({ type }: TradingGridProps) {
   );
 
   const handleCreateNew = () => {
+    if (type === "orders") {
+      const newId = `ORD-ACC-${String(Math.floor(100 + Math.random() * 900))}`;
+      openTab({
+        id: newId,
+        title: `${newId} (Yangi Buyurtma)`,
+        type: "trading-order",
+        module: "trading",
+        isUnsaved: true,
+        documentData: {
+          id: newId,
+          orderNo: newId,
+          date: new Date().toISOString().split("T")[0],
+          customer: "'REAL TEXTILE INVEST' MChJ",
+          contractNo: "AK-2026/04",
+          category: "Aksessuarlar",
+          deliveryDate: "2026-11-15",
+          chinaStatus: "Navbatda",
+          advanceStatus: "0% Kutilmoqda",
+          advancePercent: 0,
+          advanceAmountUSD: 0,
+          totalUSD: 0,
+          exchangeRate: 12850,
+          shippingMethod: "Avto Fura Kargo (12-16 kun)",
+          trackingNo: "CN-NEW",
+          items: [],
+        },
+      });
+      return;
+    }
+
     const newId = `TRD-2026-${String(Math.floor(1000 + Math.random() * 9000))}`;
     openTab({
       id: newId,
@@ -335,10 +373,21 @@ export function TradingGrid({ type }: TradingGridProps) {
             <Button
               size="sm"
               onClick={handleCreateNew}
-              className="h-7 px-2.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 shadow-xs"
+              className="h-7 px-2.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1 shadow-xs cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Yangi Sotuv Hujjati (Ins)</span>
+            </Button>
+          )}
+
+          {type === "orders" && (
+            <Button
+              size="sm"
+              onClick={handleCreateNew}
+              className="h-7 px-2.5 text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 flex items-center gap-1 shadow-xs cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Yangi Buyurtma (Back-to-back Ins)</span>
             </Button>
           )}
 

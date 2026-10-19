@@ -25,7 +25,7 @@ import { MASTER_SPECIFICATIONS } from "@/components/documents/work-order/types";
 export interface DocumentTab {
   id: string;
   title: string;
-  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "invoice" | "client-order" | "sales-record" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "employee-detail" | "payroll-detail" | "trading-sale" | "trading-settlement" | "trading-import" | "trading-catalog";
+  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "invoice" | "client-order" | "sales-record" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "employee-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog";
   module: string;
   isUnsaved?: boolean;
   documentData?: any;
