@@ -278,7 +278,7 @@ export function TradingGrid({ type }: TradingGridProps) {
       } else if (type === "settlements") {
         openTab({
           id: `stl-${row.customer.replace(/[^a-zA-Z0-9]/g, "")}`,
-          title: `Akt-Sverka: ${row.customer}`,
+          title: `${row.customer}`,
           type: "trading-settlement",
           module: "trading",
           documentData: row,
@@ -286,7 +286,7 @@ export function TradingGrid({ type }: TradingGridProps) {
       } else if (type === "imports") {
         openTab({
           id: row.batchNo || row.id || `imp-${Date.now()}`,
-          title: `Import: ${row.batchNo}`,
+          title: `${row.batchNo}`,
           type: "trading-import",
           module: "trading",
           documentData: row,

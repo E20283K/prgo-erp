@@ -142,6 +142,10 @@ export function Workspace({ children }: { children: React.ReactNode }) {
         return tMod(subId);
       }
     }
+    if (tab.title) {
+      // Strip legacy verbose prefixes like "Sotuv:", "Buyurtma:", "Akt-Sverka:", "Import:"
+      return tab.title.replace(/^(Sotuv|Buyurtma|Akt-Sverka|Import):\s*/i, "");
+    }
     return tab.title;
   };
 
