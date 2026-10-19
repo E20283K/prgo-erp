@@ -29,12 +29,13 @@ export function LayoutCell({
   const pW = itemW - bleed * 2;
   const pH = itemH - bleed * 2;
 
-  const labelText = cellData.label || "";
-  const maxLabelW = pW * 0.82;
-  const charCount = Math.max(1, labelText.length);
-  const autoFontSize = maxLabelW / (charCount * 0.6);
-  const labelFontSize = Math.max(2.4, Math.min(autoFontSize, pH * 0.13, 7));
-  const slotNumFontSize = Math.max(2, Math.min(labelFontSize * 0.7, 3.6));
+  const primaryText = cellData.sizeCode || cellData.label || "";
+  const modelText = cellData.model || "";
+  const maxLabelW = pW * 0.85;
+  const charCount = Math.max(1, primaryText.length);
+  const autoFontSize = maxLabelW / (charCount * 0.58);
+  const labelFontSize = Math.max(2.6, Math.min(autoFontSize, pH * 0.14, 7.5));
+  const slotNumFontSize = Math.max(2, Math.min(labelFontSize * 0.68, 3.5));
 
   return (
     <g>
@@ -68,7 +69,7 @@ export function LayoutCell({
             <>
               <text
                 x={x + itemW / 2}
-                y={y + itemH / 2 - labelFontSize * 0.75}
+                y={y + itemH / 2 - labelFontSize * (modelText ? 1.15 : 0.75)}
                 fontSize={slotNumFontSize}
                 fill={cellData.sideBadge === "BACK" ? "#6d28d9" : "#6b7280"}
                 textAnchor="middle"
@@ -79,20 +80,33 @@ export function LayoutCell({
                   ? `#${index + 1} · ${cellData.sideBadge}`
                   : `#${index + 1}`}
               </text>
+              {modelText && (
+                <text
+                  x={x + itemW / 2}
+                  y={y + itemH / 2 - labelFontSize * 0.35}
+                  fontSize={Math.max(2.2, slotNumFontSize * 1.05)}
+                  fill="#1e40af"
+                  textAnchor="middle"
+                  alignmentBaseline="middle"
+                  fontWeight="700"
+                >
+                  {modelText}
+                </text>
+              )}
               <text
                 x={x + itemW / 2}
-                y={y + itemH / 2 + labelFontSize * 0.25}
+                y={y + itemH / 2 + labelFontSize * (modelText ? 0.55 : 0.25)}
                 fontSize={labelFontSize}
                 fill="#111827"
                 textAnchor="middle"
                 alignmentBaseline="middle"
                 fontWeight="bold"
               >
-                {cellData.label}
+                {primaryText}
               </text>
               <text
                 x={x + itemW / 2}
-                y={y + itemH / 2 + labelFontSize * 1.25}
+                y={y + itemH / 2 + labelFontSize * (modelText ? 1.45 : 1.25)}
                 fontSize={slotNumFontSize * 0.9}
                 fill="#9ca3af"
                 textAnchor="middle"

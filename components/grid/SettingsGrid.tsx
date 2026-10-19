@@ -14,6 +14,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { useTranslations } from "next-intl";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { PlantRecord } from "@/components/documents/plant/types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,23 +39,10 @@ import {
   Shield,
   Coins,
   Save,
-  Check,
 } from "lucide-react";
 
 interface SettingsGridProps {
   type: "plants" | "users" | "tariffs";
-}
-
-interface PlantRecord {
-  id: string;
-  name: string;
-  branchType: string;
-  tin: string;
-  address: string;
-  director: string;
-  shiftRegime: string;
-  machinesCount: number;
-  status: "Active" | "Maintenance";
 }
 
 interface UserRecord {
@@ -80,63 +68,30 @@ interface TariffRecord {
   status: "Active" | "Review";
 }
 
-const INITIAL_PLANTS: PlantRecord[] = [
-  {
-    id: "PLT-001",
-    name: "PrintGoo Main Factory — Tashkent (HQ)",
-    branchType: "Offset & Packaging Plant",
-    tin: "305112890",
-    address: "12 Amir Temur St, Yunusabad, Tashkent",
-    director: "Dmitry Morozov",
-    shiftRegime: "24/7 (2×12h Shifts)",
-    machinesCount: 9,
-    status: "Active",
-  },
-  {
-    id: "PLT-002",
-    name: "Flexo & Label Division — Tashkent Building 2",
-    branchType: "Narrow-Web Flexo & Thermal",
-    tin: "305112890",
-    address: "14B Amir Temur St, Tashkent",
-    director: "Alexey Kovalev",
-    shiftRegime: "2×10h Shifts",
-    machinesCount: 5,
-    status: "Active",
-  },
-  {
-    id: "PLT-003",
-    name: "Post-Press, Kashirovka & Die-Cut Shop",
-    branchType: "Finishing & Mounting",
-    tin: "305112890",
-    address: "Main Factory Block B, Tashkent",
-    director: "S. Abdullayev",
-    shiftRegime: "Day / Extended Shift",
-    machinesCount: 6,
-    status: "Active",
-  },
-  {
-    id: "PLT-004",
-    name: "Central Paper & Substrate Warehouse",
-    branchType: "Climate-Controlled Storage",
-    tin: "305112890",
-    address: "Main Factory Yard, Gate 2, Tashkent",
-    director: "D. Karimov",
-    shiftRegime: "08:00 – 20:00",
-    machinesCount: 2,
-    status: "Active",
-  },
-  {
-    id: "PLT-005",
-    name: "Samarkand Regional Distribution & Print Hub",
-    branchType: "Regional Branch & Warehouse",
-    tin: "305112890-01",
-    address: "45 Registan Ave, Samarkand",
-    director: "N. Yusupova",
-    shiftRegime: "09:00 – 18:00",
-    machinesCount: 3,
-    status: "Active",
-  },
-];
+interface SettingsRow {
+  id: string;
+  name?: string;
+  fullName?: string;
+  operationName?: string;
+  branchType?: string;
+  tin?: string;
+  director?: string;
+  shiftRegime?: string;
+  machinesCount?: number;
+  address?: string;
+  email?: string;
+  role?: string;
+  department?: string;
+  accessLevel?: string;
+  category?: string;
+  machineOrDept?: string;
+  unit?: string;
+  rateUsd?: number;
+  setupFeeUsd?: number;
+  vatRate?: number;
+  status?: string;
+  [key: string]: unknown;
+}
 
 const INITIAL_USERS: UserRecord[] = [
   {
@@ -317,10 +272,9 @@ const INITIAL_TARIFFS: TariffRecord[] = [
 export function SettingsGrid({ type }: SettingsGridProps) {
   const tCommon = useTranslations("Common");
   const tMod = useTranslations("Modules");
-  const { updateGridStats, theme } = useWorkspaceStore();
+  const { updateGridStats, theme, openTab, plants, upsertPlant } = useWorkspaceStore();
   const isDark = theme === "dark";
 
-  const [plants, setPlants] = useState<PlantRecord[]>(INITIAL_PLANTS);
   const [users, setUsers] = useState<UserRecord[]>(INITIAL_USERS);
   const [tariffs, setTariffs] = useState<TariffRecord[]>(INITIAL_TARIFFS);
 
@@ -341,7 +295,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
 
   const { columns, rows } = useMemo(() => {
     let cols: GridColumn[] = [];
-    let dataRows: any[] = [];
+    let dataRows: SettingsRow[] = [];
 
     if (type === "plants") {
       cols = [
@@ -355,7 +309,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
         { id: "address", title: "Location Address", width: 240, icon: GridColumnIcon.HeaderString },
         { id: "status", title: "Status", width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      dataRows = plants;
+      dataRows = plants as unknown as SettingsRow[];
     } else if (type === "users") {
       cols = [
         { id: "id", title: "User ID", width: 90, icon: GridColumnIcon.HeaderReference },
@@ -367,7 +321,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
         { id: "plant", title: "Assigned Branch", width: 240, icon: GridColumnIcon.HeaderString },
         { id: "status", title: "Status", width: 105, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      dataRows = users;
+      dataRows = users as unknown as SettingsRow[];
     } else {
       cols = [
         { id: "id", title: "Tariff Code", width: 100, icon: GridColumnIcon.HeaderReference },
@@ -380,7 +334,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
         { id: "vatRate", title: "VAT (%)", width: 85, icon: GridColumnIcon.HeaderNumber },
         { id: "status", title: "Status", width: 105, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      dataRows = tariffs;
+      dataRows = tariffs as unknown as SettingsRow[];
     }
 
     return { columns: cols, rows: dataRows };
@@ -446,15 +400,16 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       }
 
       if (typeof val === "number") {
+        const numVal = val as number;
         const isMoney = column.id === "rateUsd" || column.id === "setupFeeUsd";
         return {
           kind: GridCellKind.Number,
-          data: val,
+          data: numVal,
           displayData: isMoney
-            ? `$${val.toFixed(2)}`
+            ? `$${numVal.toFixed(2)}`
             : column.id === "vatRate"
-            ? `${val}%`
-            : String(val),
+            ? `${numVal}%`
+            : String(numVal),
           allowOverlay: false,
           contentAlign: "right",
           themeOverride: isMoney
@@ -481,15 +436,25 @@ export function SettingsGrid({ type }: SettingsGridProps) {
   const handleOpenRow = (rowIndex: number) => {
     const row = filteredRows[rowIndex];
     if (!row) return;
+
+    if (type === "plants") {
+      openTab({
+        id: `plant-${row.id}`,
+        title: row.name || "",
+        type: "plant-detail",
+        module: "settings",
+        documentData: row,
+      });
+      return;
+    }
+
     setSelectedRowId(row.id);
     if (type === "tariffs") {
-      setEditName(row.operationName);
-      setEditRateUsd(String(row.rateUsd));
-      setEditSetupUsd(String(row.setupFeeUsd));
-    } else if (type === "plants") {
-      setEditName(row.name);
+      setEditName(row.operationName || "");
+      setEditRateUsd(String(row.rateUsd ?? ""));
+      setEditSetupUsd(String(row.setupFeeUsd ?? ""));
     } else {
-      setEditName(row.fullName);
+      setEditName(row.fullName || "");
     }
     setIsDrawerOpen(true);
   };
@@ -514,21 +479,56 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       setEditSetupUsd(String(newTariff.setupFeeUsd));
       setIsDrawerOpen(true);
     } else if (type === "plants") {
+      const nextNum = plants.length + 1;
       const newPlant: PlantRecord = {
-        id: `PLT-${String(plants.length + 1).padStart(3, "0")}`,
-        name: "New Production Workshop",
-        branchType: "Production Line",
+        id: `PLT-${String(nextNum).padStart(3, "0")}`,
+        code: `BRN-${String(nextNum).padStart(2, "0")}`,
+        name: `Yangi Filial / Sex #${nextNum}`,
+        shortName: `Filial #${nextNum}`,
+        legalEntityName: "'PrintGoo Industrial Group' MCHJ",
+        branchType: "Offset & Packaging Plant",
         tin: "305112890",
-        address: "Tashkent",
-        director: "A. Kovalev",
-        shiftRegime: "08:00 – 20:00",
-        machinesCount: 2,
+        vatNumber: "320011289012",
+        oked: "18.12.0",
+        address: "Toshkent shahri",
+        legalAddress: "Toshkent shahri",
+        phone: "+998 71 200-55-00",
+        email: "branch@printgoo.uz",
+        director: "Yangi Rahbar",
+        chiefAccountant: "Bosh Buxgalter",
+        shiftRegime: "24/7 (2×12h Shifts)",
+        workingHours: "08:00 – 20:00 / 20:00 – 08:00",
+        daysOfWeek: "Dushanba – Shanba",
+        machinesCount: 0,
         status: "Active",
+        departments: [],
+        warehouses: [],
+        bankAccounts: [
+          {
+            id: `ACC-${Date.now()}`,
+            bankName: "AT 'Kapitalbank' Bosh Ofisi",
+            mfo: "01087",
+            accountNumber: "20208000700543210001",
+            currency: "UZS",
+            isPrimary: true,
+          },
+        ],
+        integration: {
+          didoxEnabled: true,
+          didoxContractorCode: `DIDOX-BRN-${nextNum}`,
+          apiKeySet: false,
+          autoSyncInvoices: false,
+          oneCSyncEnabled: false,
+        },
       };
-      setPlants((prev) => [newPlant, ...prev]);
-      setSelectedRowId(newPlant.id);
-      setEditName(newPlant.name);
-      setIsDrawerOpen(true);
+      upsertPlant(newPlant);
+      openTab({
+        id: `plant-${newPlant.id}`,
+        title: newPlant.name,
+        type: "plant-detail",
+        module: "settings",
+        documentData: newPlant,
+      });
     } else {
       const newUser: UserRecord = {
         id: `USR-${String(users.length + 1).padStart(3, "0")}`,
@@ -563,13 +563,8 @@ export function SettingsGrid({ type }: SettingsGridProps) {
         )
       );
     } else if (type === "plants") {
-      setPlants((prev) =>
-        prev.map((item) =>
-          item.id === selectedRecord.id
-            ? { ...item, name: editName || item.name }
-            : item
-        )
-      );
+      const plant = selectedRecord as unknown as PlantRecord;
+      upsertPlant({ ...plant, name: editName || plant.name });
     } else {
       setUsers((prev) =>
         prev.map((item) =>

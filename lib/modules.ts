@@ -41,6 +41,7 @@ import {
   ArrowDownToLine,
   Send,
   MapPin,
+  PackageCheck,
   // Finance icons
   Calculator,
   CreditCard,
@@ -58,6 +59,13 @@ import {
   Code,
   Coins,
   Stamp,
+  // HR icons
+  UserCheck,
+  CalendarClock,
+  Clock,
+  Award,
+  // Trading icons
+  Ship,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -104,6 +112,43 @@ export const MODULE_NAV: ModuleDef[] = [
     ],
   },
   {
+    id: "trading",
+    label: "Savdo",
+    icon: ShoppingCart,
+    sections: [
+      {
+        id: "trading-sales-sec",
+        label: "Savdo",
+        icon: FileText,
+        defaultOpen: true,
+        items: [
+          { id: "trading-sales", label: "Sotuvlar", icon: Receipt },
+          { id: "trading-orders", label: "Buyurtmalar", icon: ShoppingBag },
+        ],
+      },
+      {
+        id: "trading-entities-sec",
+        label: "Tashkilotlar",
+        icon: Building2,
+        defaultOpen: true,
+        items: [
+          { id: "trading-ytt-limits", label: "YTT limitlari", icon: Scale },
+          { id: "trading-settlements", label: "Akt-sverka", icon: Calculator },
+        ],
+      },
+      {
+        id: "trading-procurement-sec",
+        label: "Xaridlar",
+        icon: Truck,
+        defaultOpen: true,
+        items: [
+          { id: "trading-imports", label: "Import", icon: Ship },
+          { id: "trading-catalog", label: "Katalog", icon: Tag },
+        ],
+      },
+    ],
+  },
+  {
     id: "production",
     label: "Production",
     icon: Factory,
@@ -144,6 +189,7 @@ export const MODULE_NAV: ModuleDef[] = [
         defaultOpen: true,
         items: [
           { id: "stock-balance", label: "Stock Balance", icon: Layers },
+          { id: "finished-goods", label: "Tayyor Mahsulotlar (Zaxira)", icon: PackageCheck },
           { id: "movements", label: "Movements & Transfers", icon: ArrowLeftRight },
         ],
       },
@@ -174,6 +220,43 @@ export const MODULE_NAV: ModuleDef[] = [
           { id: "settlements", label: "Client Settlements (Akt sverka)", icon: Scale },
           { id: "payments", label: "Payments & Cashflow", icon: CreditCard },
           { id: "cost-analysis", label: "Order Cost & Margin", icon: TrendingUp },
+        ],
+      },
+    ],
+  },
+  {
+    id: "hr",
+    label: "HR & Payroll",
+    icon: Users,
+    sections: [
+      {
+        id: "staff",
+        label: "Staff & Personnel",
+        icon: UserCheck,
+        defaultOpen: true,
+        items: [
+          { id: "employees", label: "Employees Registry", icon: UserCheck },
+          { id: "departments", label: "Departments & Workshops", icon: Building2 },
+        ],
+      },
+      {
+        id: "attendance-sec",
+        label: "Time & Attendance",
+        icon: CalendarClock,
+        defaultOpen: true,
+        items: [
+          { id: "attendance", label: "Timesheet (T-13)", icon: CalendarClock },
+          { id: "shifts", label: "Shift Schedules", icon: Clock },
+        ],
+      },
+      {
+        id: "compensation",
+        label: "Compensation & Wages",
+        icon: Banknote,
+        defaultOpen: true,
+        items: [
+          { id: "piecework", label: "Piecework Wages (Sdelka)", icon: Award },
+          { id: "payroll", label: "Payroll Ledger", icon: Calculator },
         ],
       },
     ],

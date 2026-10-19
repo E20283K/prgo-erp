@@ -20,17 +20,22 @@ import {
   Download, 
   Printer, 
   Search, 
-  ExternalLink,
   Check,
   Lock,
   FileText,
   Save,
   X,
+  Scissors,
+  Camera,
 } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { ReturnOffcutDialog } from "./ReturnOffcutDialog";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
+import { getMaterialImage } from "@/lib/materialImages";
+import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/documents/MaterialImageModal";
+import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -341,7 +346,7 @@ const COMBOBOX_FIELDS: Record<string, ComboboxOption[]> = {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 interface WarehouseGridProps {
-  type: string; // "stock-balance" | "movements" | "inventory" | "receipts" | "shipments" | "locations"
+  type: string; // "stock-balance" | "movements" | "inventory" | "receipts" | "shipments" | "locations" | "finished-goods"
 }
 
 export function WarehouseGrid({ type }: WarehouseGridProps) {
@@ -351,6 +356,9 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     theme,
     warehouseShipments,
     warehouseStock,
+    warehouseMovements,
+    finishedGoods,
+    crmCustomers,
     upsertWarehouseStock,
     addWarehouseShipment,
     updateWarehouseShipmentStatus,
@@ -362,8 +370,13 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const [rowsData, setRowsData] = useState<any[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
   const [isConfirmAlertOpen, setIsConfirmAlertOpen] = useState(false);
+  const [isOffcutDialogOpen, setIsOffcutDialogOpen] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [sheetMode, setSheetMode] = useState<'view' | 'create'>('view');
   const [formData, setFormData] = useState<Record<string, string>>({});
+  const [previewMaterial, setPreviewMaterial] = useState<MaterialImagePreviewData | null>(null);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState<boolean>(false);
+  const [uploadTargetRecord, setUploadTargetRecord] = useState<any | null>(null);
 
   // Blank templates for each record type
   const blankTemplates: Record<string, Record<string, string>> = {
@@ -435,6 +448,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       unit: 'sheets',
       lastReceived: new Date().toISOString().split('T')[0],
       status: 'In Stock',
+      imageUrl: '',
     },
   };
 
@@ -452,6 +466,41 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
           date: new Date().toISOString().split("T")[0],
           supplier: "Tashkent Paper Trade LLC",
           status: "Draft",
+        },
+      });
+      return;
+    }
+    if (type === "shipments") {
+      const nextNum = 6010 + warehouseShipments.length;
+      const newId = `SHP-${nextNum}`;
+      openTab({
+        id: newId,
+        title: `${newId}: Yangi Ombor Chiqimi`,
+        type: "warehouse-shipment",
+        module: "warehouse",
+        isUnsaved: true,
+        documentData: {
+          id: newId,
+          date: new Date().toISOString().split("T")[0],
+          status: "Draft",
+        },
+      });
+      return;
+    }
+    if (type === "finished-goods") {
+      const nextNum = 6010 + warehouseShipments.length;
+      const newId = `SHP-${nextNum}`;
+      openTab({
+        id: newId,
+        title: `${newId}: Zaxiradan Chiqim`,
+        type: "warehouse-shipment",
+        module: "warehouse",
+        isUnsaved: true,
+        documentData: {
+          id: newId,
+          date: new Date().toISOString().split("T")[0],
+          status: "Draft",
+          notes: "Tayyor mahsulot (mijoz zaxirasi) omboridan chiqim",
         },
       });
       return;
@@ -501,6 +550,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         unitPriceUsd: 0.25,
         lastReceived: formData.lastReceived || new Date().toISOString().split('T')[0],
         status: 'In Stock',
+        imageUrl: formData.imageUrl || getMaterialImage({ name: formData.name, sku: formData.sku, category: formData.category }),
       });
     } else if (type === 'receipts') {
       setRowsData(prev => [newRow, ...prev]);
@@ -535,23 +585,61 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       });
       return;
     }
-    if (type === "shipments" && record.deliveryActId && String(record.deliveryActId).startsWith("SF-")) {
-      const act = deliveryActs.find((a) => a.id === record.deliveryActId);
+    if (type === "shipments") {
       openTab({
-        id: record.deliveryActId,
-        title: `${record.deliveryActId}: ${record.customer}`,
-        type: "delivery-act",
-        module: "sales",
-        activeLevel3Tab: "overview",
-        documentData: act || {
-          id: record.deliveryActId,
-          customer: record.customer,
-          product: record.product,
-          quantity: record.quantity,
-          workOrderId: record.workOrder,
-        },
+        id: record.id,
+        title: `${record.id}: ${record.customer || "Ombor Chiqimi"}`,
+        type: "warehouse-shipment",
+        module: "warehouse",
+        documentData: record,
       });
       return;
+    }
+    if (type === "stock-balance") {
+      openTab({
+        id: `stock-${record.sku}`,
+        title: `${record.sku}: ${record.name}`,
+        type: "warehouse-stock",
+        module: "warehouse",
+        documentData: record,
+      });
+      return;
+    }
+    if (type === "finished-goods") {
+      const custName = (record.customerName || record.customer || "").trim().toLowerCase();
+      const matchedCust = crmCustomers.find(
+        (c) =>
+          c.id === record.customerId ||
+          c.name.trim().toLowerCase() === custName ||
+          c.name.toLowerCase().includes(custName) ||
+          custName.includes(c.name.toLowerCase())
+      );
+      if (matchedCust) {
+        openTab({
+          id: matchedCust.id,
+          title: `${matchedCust.id}: ${matchedCust.name}`,
+          type: "customer",
+          module: "crm",
+          activeLevel3Tab: "orders",
+          documentData: matchedCust,
+        });
+        return;
+      }
+      if (record.workOrderId) {
+        openTab({
+          id: record.workOrderId,
+          title: `${record.workOrderId}: ${record.productName || record.product}`,
+          type: "work-order",
+          module: "production",
+          activeLevel3Tab: "overview",
+          documentData: {
+            docNo: record.workOrderId,
+            customer: record.customerName || record.customer,
+            product: record.productName || record.product,
+          },
+        });
+        return;
+      }
     }
     setSheetMode('view');
     setSelectedRecord(record);
@@ -560,11 +648,29 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
   const columns = useMemo(() => {
     let cols: GridColumn[] = [];
-    if (type === 'stock-balance') {
+    if (type === 'finished-goods') {
       cols = [
-        { id: 'sku', title: 'SKU', width: 100, icon: GridColumnIcon.HeaderReference },
-        { id: 'name', title: 'Material Name', width: 280, icon: GridColumnIcon.HeaderString },
-        { id: 'category', title: 'Category', width: 145, icon: GridColumnIcon.HeaderLookup },
+        { id: 'id', title: 'Partiya / WO №', width: 125, icon: GridColumnIcon.HeaderReference },
+        { id: 'customerName', title: 'Buyurtmachi (Mijoz)', width: 220, icon: GridColumnIcon.HeaderString },
+        { id: 'productName', title: 'Tayyor Mahsulot Nomi', width: 280, icon: GridColumnIcon.HeaderString },
+        { id: 'completionDate', title: 'Ishlab chiqarildi', width: 115, icon: GridColumnIcon.HeaderDate },
+        { id: 'orderedQty', title: 'Buyurtma (Tiraj)', width: 110, icon: GridColumnIcon.HeaderNumber },
+        { id: 'producedQty', title: 'Chiqarildi (Fakt)', width: 115, icon: GridColumnIcon.HeaderNumber },
+        { id: 'shippedQty', title: 'Yuklandi (SF)', width: 105, icon: GridColumnIcon.HeaderNumber },
+        { id: 'stockQty', title: 'Ombordagi Zaxira', width: 135, icon: GridColumnIcon.HeaderNumber },
+        { id: 'unit', title: 'Birlik', width: 75, icon: GridColumnIcon.HeaderString },
+        { id: 'totalStockValue', title: 'Zaxira Qiymati ($)', width: 125, icon: GridColumnIcon.HeaderNumber },
+        { id: 'location', title: 'Saqlash Joyi (Rampa/Pallet)', width: 240, icon: GridColumnIcon.HeaderString },
+        { id: 'daysInStock', title: 'Muddat', width: 85, icon: GridColumnIcon.HeaderNumber },
+        { id: 'status', title: 'Holati', width: 130, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+    } else if (type === 'stock-balance') {
+      cols = [
+        { id: 'image', title: tCommon('image'), width: 56, icon: GridColumnIcon.HeaderImage },
+        { id: 'sku', title: 'SKU', width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: 'name', title: 'Material Name', width: 290, icon: GridColumnIcon.HeaderString },
+        { id: 'category', title: 'Category', width: 155, icon: GridColumnIcon.HeaderLookup },
+        { id: 'sheetFormat', title: 'Format / Dimensions', width: 130, icon: GridColumnIcon.HeaderString },
         { id: 'location', title: 'Location', width: 220, icon: GridColumnIcon.HeaderString },
         { id: 'stockLevel', title: 'Total Stock', width: 110, icon: GridColumnIcon.HeaderNumber },
         { id: 'reserved', title: 'Reserved (WO)', width: 115, icon: GridColumnIcon.HeaderNumber },
@@ -577,7 +683,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       cols = [
         { id: 'id', title: 'Move ID', width: 110, icon: GridColumnIcon.HeaderReference },
         { id: 'date', title: 'Date', width: 110, icon: GridColumnIcon.HeaderDate },
-        { id: 'material', title: 'Material', width: 250, icon: GridColumnIcon.HeaderString },
+        { id: 'material', title: 'Material', width: 280, icon: GridColumnIcon.HeaderString },
+        { id: 'movementType', title: 'Operation Type', width: 150, icon: GridColumnIcon.HeaderLookup },
         { id: 'quantity', title: 'Sent Qty', width: 85, icon: GridColumnIcon.HeaderNumber },
         { id: 'receivedQty', title: 'Rcvd Qty', width: 85, icon: GridColumnIcon.HeaderNumber },
         { id: 'unit', title: 'Unit', width: 80, icon: GridColumnIcon.HeaderString },
@@ -616,15 +723,16 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     } else if (type === 'shipments') {
       cols = [
         { id: 'id', title: 'Shipment ID', width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: 'date', title: 'Date', width: 110, icon: GridColumnIcon.HeaderDate },
-        { id: 'deliveryActId', title: 'Schet-faktura №', width: 120, icon: GridColumnIcon.HeaderReference },
-        { id: 'customer', title: 'Customer', width: 200, icon: GridColumnIcon.HeaderString },
-        { id: 'workOrder', title: 'Work Order', width: 115, icon: GridColumnIcon.HeaderReference },
-        { id: 'product', title: 'Product', width: 230, icon: GridColumnIcon.HeaderString },
-        { id: 'quantity', title: 'Qty (No Price)', width: 110, icon: GridColumnIcon.HeaderNumber },
-        { id: 'from', title: 'Ship From', width: 200, icon: GridColumnIcon.HeaderString },
-        { id: 'carrier', title: 'Carrier', width: 150, icon: GridColumnIcon.HeaderString },
-        { id: 'trackingNo', title: 'Tracking No', width: 130, icon: GridColumnIcon.HeaderString },
+        { id: 'date', title: 'Date', width: 105, icon: GridColumnIcon.HeaderDate },
+        { id: 'shipmentType', title: 'Chiqim turi', width: 155, icon: GridColumnIcon.HeaderLookup },
+        { id: 'deliveryActId', title: 'Schet-faktura / TTN', width: 135, icon: GridColumnIcon.HeaderReference },
+        { id: 'customer', title: 'Qabul qiluvchi', width: 210, icon: GridColumnIcon.HeaderString },
+        { id: 'workOrder', title: 'Buyurtma / Asos', width: 130, icon: GridColumnIcon.HeaderReference },
+        { id: 'product', title: 'Mahsulot / Yuk', width: 230, icon: GridColumnIcon.HeaderString },
+        { id: 'quantity', title: 'Miqdor', width: 95, icon: GridColumnIcon.HeaderNumber },
+        { id: 'from', title: 'Chiqaruvchi ombor', width: 200, icon: GridColumnIcon.HeaderString },
+        { id: 'carrier', title: 'Tashuvchi', width: 160, icon: GridColumnIcon.HeaderString },
+        { id: 'trackingNo', title: 'Tracking No', width: 120, icon: GridColumnIcon.HeaderString },
         { id: 'status', title: 'Status', width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
     } else {
@@ -644,6 +752,10 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   }, [type]);
 
   useEffect(() => {
+    if (type === 'finished-goods') {
+      setRowsData(finishedGoods);
+      return;
+    }
     if (type === 'shipments') {
       setRowsData(warehouseShipments);
       return;
@@ -652,13 +764,16 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       setRowsData(warehouseStock);
       return;
     }
+    if (type === 'movements') {
+      setRowsData(warehouseMovements);
+      return;
+    }
     let mockRows = [];
-    if (type === 'movements') mockRows = generateMovements();
-    else if (type === 'inventory') mockRows = generateInventoryCounts();
+    if (type === 'inventory') mockRows = generateInventoryCounts();
     else if (type === 'receipts') mockRows = generateReceipts();
     else mockRows = generateLocations();
     setRowsData(mockRows);
-  }, [type, warehouseShipments, warehouseStock]);
+  }, [type, warehouseShipments, warehouseStock, warehouseMovements, finishedGoods]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -672,9 +787,33 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       const searchStr = Object.values(r).join(" ").toLowerCase();
       const matchesSearch = !searchFilter || searchStr.includes(searchFilter.toLowerCase());
       const matchesStatus = statusFilter === "ALL" || r.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      let matchesCategory = true;
+      if (type === 'stock-balance' && categoryFilter !== "ALL") {
+        if (categoryFilter === "Offcuts") {
+          matchesCategory = Boolean(r.isOffcut || r.category === "Offcuts & Scraps");
+        } else {
+          matchesCategory = r.category === categoryFilter;
+        }
+      } else if (type === 'movements' && categoryFilter !== "ALL") {
+        if (categoryFilter === "Offcuts") {
+          matchesCategory = Boolean(r.isOffcut || r.movementType === "CuttingReturn");
+        } else if (categoryFilter === "ProductionIssue") {
+          matchesCategory = r.movementType === "ProductionIssue";
+        } else if (categoryFilter === "WriteOff") {
+          matchesCategory = r.movementType === "WriteOff";
+        } else if (categoryFilter === "Transfers") {
+          matchesCategory = r.movementType === "Transfer" || !r.movementType;
+        }
+      } else if (type === 'shipments' && categoryFilter !== "ALL") {
+        if (categoryFilter === "CustomerDelivery") {
+          matchesCategory = !r.shipmentType || r.shipmentType === "CustomerDelivery";
+        } else {
+          matchesCategory = r.shipmentType === categoryFilter;
+        }
+      }
+      return matchesSearch && matchesStatus && matchesCategory;
     });
-  }, [rowsData, searchFilter, statusFilter]);
+  }, [rowsData, searchFilter, statusFilter, categoryFilter, type]);
 
   useEffect(() => {
     const selectedRowsCount = selection.rows.length;
@@ -688,27 +827,30 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   }, [selection, filteredRows.length, columns, updateGridStats]);
 
 
-  // Double-click on row / cell opens document sheet
+  // Double-click on row / cell opens document sheet or image preview
   const handleCellActivated = useCallback((cell: Item) => {
-    const [, row] = cell;
+    const [col, row] = cell;
     const rowData = filteredRows[row];
+    const column = columns[col];
     if (rowData) {
+      if (column?.id === "image") {
+        setPreviewMaterial({
+          imageUrl: rowData.imageUrl || getMaterialImage(rowData),
+          title: rowData.name || rowData.sku,
+          sku: rowData.sku,
+          category: rowData.category,
+          spec: rowData.sheetFormat ? `${rowData.sheetFormat} mm` : rowData.cutDimensions,
+          stock: rowData.available !== undefined ? rowData.available.toLocaleString() : rowData.stockLevel,
+          unit: rowData.unit,
+          location: rowData.location,
+          supplier: rowData.supplier,
+          status: rowData.status,
+        });
+        return;
+      }
       handleOpenSheet(rowData);
     }
-  }, [filteredRows]);
-
-  const handleOpenSelected = useCallback(() => {
-    let rowIndex = 0;
-    if (selection.current?.cell) {
-      rowIndex = selection.current.cell[1];
-    } else if (selection.rows.length > 0) {
-      rowIndex = selection.rows.toArray()[0];
-    }
-    const rowData = filteredRows[rowIndex];
-    if (rowData) {
-      handleOpenSheet(rowData);
-    }
-  }, [filteredRows, selection]);
+  }, [filteredRows, columns]);
 
   const handleConfirm = () => {
     if (!selectedRecord) return;
@@ -743,11 +885,22 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     const column = columns[col];
     const val = rowData[column.id as keyof typeof rowData];
 
+    // Image column for stock-balance
+    if (column.id === "image") {
+      const img = rowData.imageUrl || getMaterialImage(rowData);
+      return {
+        kind: GridCellKind.Image,
+        data: [img],
+        displayData: [img],
+        allowOverlay: true,
+      };
+    }
+
     // Status column — color-coded
     if (column.id === "status") {
-      const positives = ["In Stock", "Completed", "Received", "Accepted", "Delivered", "Matched", "Active"];
+      const positives = ["In Stock", "Completed", "Received", "Accepted", "Delivered", "Matched", "Active", "Ready for Dispatch", "Partially Shipped"];
       const negatives = ["Critical", "Out of Stock", "Shortage", "Quarantine", "Inactive"];
-      const warnings = ["Low Stock", "In Transit", "Pending", "Inspecting", "Packed", "Dispatched", "Surplus"];
+      const warnings = ["Low Stock", "In Transit", "Pending", "Inspecting", "Packed", "Dispatched", "Surplus", "Reserved"];
 
       let color = isDark ? "#facc15" : "#a16207"; // default warning
       if (positives.includes(String(val))) color = isDark ? "#4ade80" : "#15803d";
@@ -797,6 +950,138 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       };
     }
 
+    // Shipment Type column
+    if (column.id === "shipmentType") {
+      const sType = rowData.shipmentType || "CustomerDelivery";
+      const configs: Record<string, { label: string; dark: string; light: string }> = {
+        CustomerDelivery: { label: "🛍️ Mijozga", dark: "#60a5fa", light: "#1d4ed8" },
+        BranchTransfer: { label: "🚛 Filialga", dark: "#38bdf8", light: "#0284c7" },
+        Outsourcing: { label: "🔄 Subpudrat", dark: "#c084fc", light: "#7e22ce" },
+        VendorReturn: { label: "↩️ Qaytarish", dark: "#f87171", light: "#dc2626" },
+        MaterialSale: { label: "📦 Sotuv", dark: "#fbbf24", light: "#d97706" },
+      };
+      const info = configs[sType] || { label: String(sType), dark: "#94a3b8", light: "#475569" };
+      return {
+        kind: GridCellKind.Text,
+        data: info.label,
+        displayData: info.label,
+        allowOverlay: false,
+        themeOverride: {
+          textDark: isDark ? info.dark : info.light,
+          baseFontStyle: "600 12px sans-serif",
+        },
+      };
+    }
+
+    // Movement Type column
+    if (column.id === "movementType") {
+      const mType = rowData.movementType;
+      let label = "🔄 Tokchalararo";
+      let dark = "#a78bfa";
+      let light = "#6d28d9";
+      if (mType === "CuttingReturn" || rowData.isOffcut) {
+        label = "✂️ Delovoy Otxod";
+        dark = "#fbbf24";
+        light = "#b45309";
+      } else if (mType === "ProductionIssue") {
+        label = "🏭 Sexga sarf";
+        dark = "#38bdf8";
+        light = "#0369a1";
+      } else if (mType === "WriteOff") {
+        label = "⚠️ Spisaniye (Brak)";
+        dark = "#f87171";
+        light = "#dc2626";
+      }
+      return {
+        kind: GridCellKind.Text,
+        data: label,
+        displayData: label,
+        allowOverlay: false,
+        themeOverride: {
+          textDark: isDark ? dark : light,
+          baseFontStyle: "600 12px sans-serif",
+        },
+      };
+    }
+
+    // Material Name column - highlight offcuts
+    if (column.id === "name" && rowData.isOffcut) {
+      const offcutLabel = `✂️ ${val}`;
+      return {
+        kind: GridCellKind.Text,
+        data: String(val),
+        displayData: offcutLabel,
+        allowOverlay: true,
+        themeOverride: { textDark: isDark ? "#fbbf24" : "#b45309", baseFontStyle: "600 12px sans-serif" },
+      };
+    }
+
+    // Sheet Format column
+    if (column.id === "sheetFormat") {
+      const fmt = String(val || rowData.cutDimensions || "-");
+      return {
+        kind: GridCellKind.Text,
+        data: fmt,
+        displayData: fmt,
+        allowOverlay: true,
+        themeOverride: rowData.isOffcut
+          ? { textDark: isDark ? "#fbbf24" : "#b45309", baseFontStyle: "600 12px monospace" }
+          : { baseFontStyle: "12px monospace" },
+      };
+    }
+
+    if (column.id === "stockQty") {
+      const num = Number(val || 0);
+      return {
+        kind: GridCellKind.Number,
+        data: num,
+        displayData: `${num.toLocaleString()} ${rowData.unit || "dona"}`,
+        allowOverlay: false,
+        contentAlign: "right",
+        themeOverride: num > 0 ? {
+          textDark: isDark ? "#4ade80" : "#15803d",
+          baseFontStyle: "bold 12px monospace",
+        } : undefined,
+      };
+    }
+
+    if (column.id === "totalStockValue") {
+      const num = Number(val || 0);
+      return {
+        kind: GridCellKind.Number,
+        data: num,
+        displayData: `$${num.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+        allowOverlay: false,
+        contentAlign: "right",
+        themeOverride: {
+          textDark: isDark ? "#93c5fd" : "#1d4ed8",
+          baseFontStyle: "600 12px monospace",
+        },
+      };
+    }
+
+    if (column.id === "daysInStock") {
+      const num = Number(val || 0);
+      return {
+        kind: GridCellKind.Number,
+        data: num,
+        displayData: `${num} kun`,
+        allowOverlay: false,
+        contentAlign: "right",
+      };
+    }
+
+    if (column.id && ["orderedQty", "producedQty", "shippedQty"].includes(column.id)) {
+      const num = Number(val || 0);
+      return {
+        kind: GridCellKind.Number,
+        data: num,
+        displayData: num.toLocaleString(),
+        allowOverlay: false,
+        contentAlign: "right",
+      };
+    }
+
     return {
       kind: typeof val === "number" ? GridCellKind.Number : GridCellKind.Text,
       data: val,
@@ -815,6 +1100,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   }, [rowsData]);
 
   const typeLabels: Record<string, string> = {
+    "finished-goods": "finished goods (mijoz zaxirasi)",
     "stock-balance": "stock",
     "movements": "movements",
     "inventory": "inventory counts",
@@ -838,16 +1124,166 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 <Plus className="w-3.5 h-3.5" />
                 <span>Create New</span>
               </Button>
-              <Button 
-                onClick={handleOpenSelected}
-                variant="outline" 
-                size="sm" 
-                className="h-7 px-2.5 text-xs font-medium gap-1 rounded"
-              >
-                <ExternalLink className="w-3 h-3 text-muted-foreground" />
-                <span>Open</span>
-              </Button>
+
+              {type === 'movements' && (
+                <Button
+                  onClick={() => setIsOffcutDialogOpen(true)}
+                  size="sm"
+                  className="h-7 px-2.5 text-xs font-medium gap-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white shadow-none"
+                >
+                  <Scissors className="w-3.5 h-3.5" />
+                  <span>Qoldiqni kirim qilish</span>
+                </Button>
+              )}
+
               <Separator orientation="vertical" className="h-4 mx-1" />
+
+              {/* Finished Goods KPI Summary Strip */}
+              {type === 'finished-goods' && (
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center bg-muted/80 px-2.5 py-0.5 rounded text-[11px] gap-2 border border-border">
+                    <span className="text-muted-foreground">📦 Mas&apos;ul Saqlovdagi Zaxira:</span>
+                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                      {finishedGoods.reduce((sum, g) => sum + g.stockQty, 0).toLocaleString()} dona
+                    </span>
+                    <span className="text-muted-foreground/60">•</span>
+                    <span className="text-muted-foreground">Mijozlar:</span>
+                    <span className="font-semibold text-foreground">
+                      {new Set(finishedGoods.map((g) => g.customerName)).size} ta
+                    </span>
+                    <span className="text-muted-foreground/60">•</span>
+                    <span className="text-muted-foreground">Umumiy Qiymati:</span>
+                    <span className="font-mono font-semibold text-foreground">
+                      ${finishedGoods.reduce((sum, g) => sum + g.totalStockValue, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Stock Balance Category Filters */}
+              {type === 'stock-balance' && (
+                <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+                  <button
+                    onClick={() => setCategoryFilter("ALL")}
+                    className={`px-2 py-0.5 rounded transition-colors ${categoryFilter === "ALL" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Barcha toifalar
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("Offcuts")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "Offcuts" ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold shadow-xs border border-amber-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <Scissors className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                    <span>Delovoy Otxodlar</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-amber-500/25 text-amber-800 dark:text-amber-200">
+                      {warehouseStock.filter((s) => s.isOffcut).length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("Paper & Board")}
+                    className={`px-2 py-0.5 rounded transition-colors ${categoryFilter === "Paper & Board" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Asosiy Qog'ozlar
+                  </button>
+                </div>
+              )}
+
+              {/* Movements Type Filters */}
+              {type === 'movements' && (
+                <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+                  <button
+                    onClick={() => setCategoryFilter("ALL")}
+                    className={`px-2 py-0.5 rounded transition-colors ${categoryFilter === "ALL" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Barchasi
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("Offcuts")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "Offcuts" ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold shadow-xs border border-amber-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <Scissors className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                    <span>Delovoy Otxod kirimi</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-amber-500/25 text-amber-800 dark:text-amber-200">
+                      {warehouseMovements.filter((m) => m.isOffcut || m.movementType === 'CuttingReturn').length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("ProductionIssue")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "ProductionIssue" ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 font-semibold shadow-xs border border-sky-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span>Sexga sarf</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-sky-500/20 text-sky-800 dark:text-sky-200">
+                      {warehouseMovements.filter((m) => m.movementType === 'ProductionIssue').length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("WriteOff")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "WriteOff" ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 font-semibold shadow-xs border border-rose-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span>Spisaniye (Brak)</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-rose-500/20 text-rose-800 dark:text-rose-200">
+                      {warehouseMovements.filter((m) => m.movementType === 'WriteOff').length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("Transfers")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "Transfers" ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 font-semibold shadow-xs border border-purple-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span>Tokchalararo</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-purple-500/20 text-purple-800 dark:text-purple-200">
+                      {warehouseMovements.filter((m) => m.movementType === 'Transfer' || (!m.movementType && !m.isOffcut)).length}
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Shipments Type Filters */}
+              {type === 'shipments' && (
+                <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+                  <button
+                    onClick={() => setCategoryFilter("ALL")}
+                    className={`px-2 py-0.5 rounded transition-colors ${categoryFilter === "ALL" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Barchasi
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("CustomerDelivery")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "CustomerDelivery" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span>🛍️ Mijozlarga</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-muted-foreground/15">
+                      {warehouseShipments.filter((s) => !s.shipmentType || s.shipmentType === "CustomerDelivery").length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("BranchTransfer")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "BranchTransfer" ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 font-semibold shadow-xs border border-sky-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span>🚛 Filiallarga</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-sky-500/20 text-sky-800 dark:text-sky-200">
+                      {warehouseShipments.filter((s) => s.shipmentType === "BranchTransfer").length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("Outsourcing")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "Outsourcing" ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 font-semibold shadow-xs border border-purple-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span>🔄 Subpudrat</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-purple-500/20 text-purple-800 dark:text-purple-200">
+                      {warehouseShipments.filter((s) => s.shipmentType === "Outsourcing").length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCategoryFilter("VendorReturn")}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "VendorReturn" ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 font-semibold shadow-xs border border-rose-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <span>↩️ Qaytarish</span>
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-rose-500/20 text-rose-800 dark:text-rose-200">
+                      {warehouseShipments.filter((s) => s.shipmentType === "VendorReturn").length}
+                    </span>
+                  </button>
+                </div>
+              )}
 
               {availableStatuses.length > 0 && (
                 <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
@@ -898,7 +1334,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               columns={columns}
               rows={filteredRows.length}
               rowMarkers="both"
-              freezeColumns={1}
+              freezeColumns={type === 'stock-balance' ? 2 : 1}
               smoothScrollX={true}
               smoothScrollY={true}
               width="100%"
@@ -955,6 +1391,40 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               <div className="flex-1 p-5 overflow-y-auto flex flex-col gap-4">
                 {Object.entries(formData).map(([key, val]) => {
                   if (key === 'status') return null;
+                  if (key === 'imageUrl') {
+                    const currentImg = val || getMaterialImage({ name: formData.name, sku: formData.sku, category: formData.category });
+                    return (
+                      <div key={key} className="flex flex-col gap-1.5">
+                        <Label className="text-xs font-semibold text-muted-foreground">
+                          Material Rasmi (Image)
+                        </Label>
+                        <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                          <div className="size-14 rounded-md border border-border bg-background overflow-hidden p-1 shrink-0 flex items-center justify-center">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={currentImg} alt="Preview" className="size-full object-contain" />
+                          </div>
+                          <div className="flex-1 min-w-0 flex flex-col gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setUploadTargetRecord(null);
+                                setIsUploadDialogOpen(true);
+                              }}
+                              className="h-7 text-xs gap-1.5 w-full justify-center"
+                            >
+                              <Camera className="size-3.5 text-muted-foreground" />
+                              <span>Rasm yuklash / tanlash</span>
+                            </Button>
+                            <span className="text-[10px] text-muted-foreground truncate">
+                              {val ? "Maxsus rasm biriktirilgan" : "Avtomatik vektor shablon"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
                   const comboOptions = COMBOBOX_FIELDS[key];
                   const label = key.replace(/([A-Z])/g, ' $1').trim();
                   return (
@@ -1072,8 +1542,55 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 </div>
 
                 <div className="flex-1 p-5 overflow-y-auto flex flex-col gap-4">
+                  {(type === 'stock-balance' || selectedRecord.imageUrl || selectedRecord.category) && (() => {
+                    const img = selectedRecord.imageUrl || getMaterialImage(selectedRecord);
+                    return (
+                      <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                        <div
+                          className="size-16 rounded-md border border-border bg-background overflow-hidden p-1 shrink-0 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-blue-500/40 transition-all shadow-sm"
+                          onClick={() => {
+                            setPreviewMaterial({
+                              imageUrl: img,
+                              title: selectedRecord.name || selectedRecord.sku || selectedRecord.id,
+                              sku: selectedRecord.sku,
+                              category: selectedRecord.category,
+                              spec: selectedRecord.sheetFormat || selectedRecord.cutDimensions,
+                              stock: selectedRecord.available !== undefined ? selectedRecord.available.toLocaleString() : selectedRecord.stockLevel,
+                              unit: selectedRecord.unit,
+                              location: selectedRecord.location,
+                              supplier: selectedRecord.supplier,
+                              status: selectedRecord.status,
+                            });
+                          }}
+                          title="Rasmni kattalashtirish uchun bosing"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={img} alt="Preview" className="size-full object-contain select-none" />
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                          <span className="text-xs font-semibold text-foreground truncate">
+                            {selectedRecord.name || selectedRecord.sku || "Material"}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setUploadTargetRecord(selectedRecord);
+                              setIsUploadDialogOpen(true);
+                            }}
+                            className="h-7 text-xs gap-1.5 w-full justify-center"
+                          >
+                            <Camera className="size-3.5 text-muted-foreground" />
+                            <span>Rasmni o'zgartirish</span>
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {Object.entries(selectedRecord).map(([key, val]) => {
-                    if (key === 'id' || key === 'status') return null;
+                    if (key === 'id' || key === 'status' || key === 'imageUrl') return null;
                     return (
                       <div key={key} className="flex flex-col gap-1.5">
                         <Label className="text-xs font-semibold text-muted-foreground capitalize">
@@ -1094,6 +1611,48 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
         </SheetContent>
       </Sheet>
+
+      <ReturnOffcutDialog open={isOffcutDialogOpen} onOpenChange={setIsOffcutDialogOpen} />
+      <MaterialImageModal
+        data={previewMaterial}
+        isOpen={!!previewMaterial}
+        onClose={() => setPreviewMaterial(null)}
+      />
+      <MaterialImageUploadDialog
+        isOpen={isUploadDialogOpen}
+        onClose={() => {
+          setIsUploadDialogOpen(false);
+          setUploadTargetRecord(null);
+        }}
+        materialName={uploadTargetRecord?.name || formData?.name || "Yangi material"}
+        materialSku={uploadTargetRecord?.sku || formData?.sku}
+        currentImageUrl={
+          uploadTargetRecord?.imageUrl ||
+          formData?.imageUrl ||
+          (uploadTargetRecord ? getMaterialImage(uploadTargetRecord) : undefined)
+        }
+        onSave={(newUrl) => {
+          if (uploadTargetRecord) {
+            if (type === "stock-balance") {
+              upsertWarehouseStock({
+                ...uploadTargetRecord,
+                imageUrl: newUrl,
+              });
+            }
+            setSelectedRecord((prev: any) => (prev ? { ...prev, imageUrl: newUrl } : null));
+            setRowsData((prev) =>
+              prev.map((r) =>
+                (uploadTargetRecord.sku && r.sku === uploadTargetRecord.sku) ||
+                (uploadTargetRecord.id && r.id === uploadTargetRecord.id)
+                  ? { ...r, imageUrl: newUrl }
+                  : r
+              )
+            );
+          } else {
+            setFormData((prev) => ({ ...prev, imageUrl: newUrl }));
+          }
+        }}
+      />
     </ContextMenu>
   );
 }

@@ -12,14 +12,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { RouteStep } from "../types";
+import { FieldCombobox } from "@/components/ui/field-combobox";
+import { RouteStep, MACHINE_OPTIONS, FLOOR_OPERATORS } from "../types";
 
 interface OperationDialogProps {
   isOpen: boolean;
@@ -38,6 +32,24 @@ export function OperationDialog({
   setForm,
   onSave,
 }: OperationDialogProps) {
+  const machineOptions = React.useMemo(
+    () =>
+      MACHINE_OPTIONS.map((m) => ({
+        value: m.name,
+        label: `${m.name} (${m.department})`,
+      })),
+    []
+  );
+
+  const operatorOptions = React.useMemo(
+    () =>
+      FLOOR_OPERATORS.map((op) => ({
+        value: op,
+        label: op,
+      })),
+    []
+  );
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[460px] text-xs">
@@ -47,14 +59,14 @@ export function OperationDialog({
             <span>{editingOpIndex !== null ? "Edit Routing Operation" : "Add Routing Step to Work Order"}</span>
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
-            Define the operation sequence, equipment, operator, and planned run duration.
+            Configure technological step, work center, operator, and planned normative duration. Execution status and output are tracked in Timeline.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           <div className="grid grid-cols-3 gap-2.5">
             <div>
-              <label className="text-xs font-medium">Step #</label>
+              <label className="text-xs font-medium block mb-1">Step #</label>
               <Input
                 type="number"
                 step="10"
@@ -64,7 +76,7 @@ export function OperationDialog({
               />
             </div>
             <div className="col-span-2">
-              <label className="text-xs font-medium">Operation Description *</label>
+              <label className="text-xs font-medium block mb-1">Operation Description *</label>
               <Input
                 value={form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
@@ -75,28 +87,36 @@ export function OperationDialog({
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium">Assigned Machine / Work Center *</label>
-            <Input
+            <label className="text-xs font-medium block">Assigned Machine / Work Center *</label>
+            <FieldCombobox
               value={form.machine}
-              onChange={(e) => setForm((p) => ({ ...p, machine: e.target.value }))}
+              onChange={(val) => setForm((p) => ({ ...p, machine: val }))}
+              allowCustom
+              options={machineOptions}
+              placeholder="Select or type equipment..."
+              searchPlaceholder="Search equipment..."
               className="h-8 text-xs"
-              placeholder="e.g. Heidelberg Speedmaster XL 106"
+              popoverClassName="w-[380px]"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
             <div className="space-y-1">
-              <label className="text-xs font-medium">Assigned Operator</label>
-              <Input
+              <label className="text-xs font-medium block">Assigned Operator</label>
+              <FieldCombobox
                 value={form.operator}
-                onChange={(e) => setForm((p) => ({ ...p, operator: e.target.value }))}
+                onChange={(val) => setForm((p) => ({ ...p, operator: val }))}
+                allowCustom
+                options={operatorOptions}
+                placeholder="Select operator..."
+                searchPlaceholder="Search operator..."
                 className="h-8 text-xs"
-                placeholder="Operator name"
+                popoverClassName="w-[260px]"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium">Planned Duration (hrs)</label>
+              <label className="text-xs font-medium block">Planned Duration (hrs)</label>
               <Input
                 type="number"
                 step="0.1"
@@ -104,35 +124,6 @@ export function OperationDialog({
                 onChange={(e) => setForm((p) => ({ ...p, duration: parseFloat(e.target.value) || 1 }))}
                 className="h-8 text-xs font-mono"
               />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="space-y-1">
-              <label className="text-xs font-medium">Progress / Output</label>
-              <Input
-                value={form.qtyCompleted}
-                onChange={(e) => setForm((p) => ({ ...p, qtyCompleted: e.target.value }))}
-                className="h-8 text-xs font-mono"
-                placeholder="e.g. 3,200 / 5,000"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium">Status</label>
-              <Select
-                value={form.status}
-                onValueChange={(val: any) => val && setForm((p) => ({ ...p, status: val }))}
-              >
-                <SelectTrigger className="h-8 text-xs bg-background">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Queued">Queued</SelectItem>
-                  <SelectItem value="In Progress">In Progress</SelectItem>
-                  <SelectItem value="Finished">Finished</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
           </div>
         </div>

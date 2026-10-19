@@ -11,6 +11,7 @@ import { CommandPalette } from "@/components/command/CommandPalette";
 import { AiChatSheet } from "./AiChatSheet";
 import { Toaster } from "@/components/ui/toast";
 import { MODULE_NAV } from "@/lib/modules";
+import { ElementInspectorOverlay } from "@/components/dev/ElementInspectorOverlay";
 
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -62,6 +63,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     // 2. Block standard browser keyboard shortcuts & unify F11 fullscreen
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 0. Ctrl+Shift+C / Cmd+Shift+C: Toggle AI Element & Container Inspector
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key.toLowerCase() === "c" || e.code === "KeyC")) {
+        e.preventDefault();
+        e.stopPropagation();
+        useWorkspaceStore.getState().toggleInspectorMode();
+        return;
+      }
+
       // 1. Ctrl+K / Cmd+K: Activate or toggle Command Palette
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -70,9 +79,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // 2. Esc: Activate Command Palette when not already open
+      // 2. Esc: Exit Inspector Mode first if active, otherwise activate Command Palette
       if (e.key === "Escape") {
         const store = useWorkspaceStore.getState();
+        if (store.isInspectorActive) {
+          e.preventDefault();
+          e.stopPropagation();
+          store.setInspectorActive(false);
+          return;
+        }
         if (!store.isCommandOpen) {
           e.preventDefault();
           e.stopPropagation();
@@ -102,7 +117,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         e.stopPropagation();
         const store = useWorkspaceStore.getState();
         if (store.activeTabId) {
-          store.closeTab(store.activeTabId);
+          store.requestCloseTab(store.activeTabId);
         }
         return;
       }
@@ -221,6 +236,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Global Toast Notification System */}
       <Toaster />
+
+      {/* AI UI Element & Container Inspector Overlay (Ctrl+Shift+C) */}
+      <ElementInspectorOverlay />
     </SidebarProvider>
   );
 }

@@ -159,8 +159,26 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     category: "registry-grid",
     description: "System parameters, plant configurations, and user RBAC security.",
   },
+  "grid-hr": {
+    componentName: "HrGrid",
+    fileName: "HrGrid.tsx",
+    relativePath: "components/grid/HrGrid.tsx",
+    linesOfCode: 720,
+    featureModule: "hr",
+    category: "registry-grid",
+    description: "Human resources, staff registry, T-13 timesheet, piecework wages, and payroll ledger.",
+  },
 
   // Document Detail Views
+  "doc-employee-detail": {
+    componentName: "EmployeeDetail",
+    fileName: "EmployeeDetail.tsx",
+    relativePath: "components/documents/hr/EmployeeDetail.tsx",
+    linesOfCode: 520,
+    featureModule: "hr",
+    category: "document-editor",
+    description: "Employee T-2 personal record, wage tariffs, piecework logs, and attendance history.",
+  },
   "doc-work-order": {
     componentName: "WorkOrderDetail",
     fileName: "WorkOrderDetail.tsx",
@@ -326,6 +344,15 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     category: "document-editor",
     description: "Bill of materials formulation and raw component matrix.",
   },
+  "doc-plant-detail": {
+    componentName: "PlantDetail",
+    fileName: "PlantDetail.tsx",
+    relativePath: "components/documents/PlantDetail.tsx",
+    linesOfCode: 320,
+    featureModule: "settings",
+    category: "document-editor",
+    description: "Enterprise factory, workshops, bank requisites, and warehouse configurations.",
+  },
 };
 
 /**
@@ -371,6 +398,8 @@ export function resolveActiveComponent(
       meta = COMPONENT_REGISTRY["grid-sales"];
     } else if (mod === "finance") {
       meta = COMPONENT_REGISTRY["grid-finance"];
+    } else if (mod === "hr") {
+      meta = COMPONENT_REGISTRY["grid-hr"];
     } else if (mod === "settings") {
       meta = COMPONENT_REGISTRY["grid-settings"];
     } else {

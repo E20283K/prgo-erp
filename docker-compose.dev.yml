@@ -1,0 +1,60 @@
+name: printgoo-erp-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: printgoo-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-printgoo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-printgoo_dev_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-printgoo_erp}
+      TZ: Asia/Tashkent
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printgoo} -d ${POSTGRES_DB:-printgoo_erp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: printgoo-redis-dev
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata_dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: elestio/minio:latest
+    container_name: printgoo-minio-dev
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-printgoo_minio}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-printgoo_minio_secret_key}
+    ports:
+      - "${S3_API_PORT:-9000}:9000"
+      - "${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - miniodata_dev:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata_dev:
+  redisdata_dev:
+  miniodata_dev:

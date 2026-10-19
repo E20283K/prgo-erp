@@ -48,9 +48,7 @@ import {
 import { JR_1521_CYLINDERS, FLEXO_MACHINES, FLEXO_MATERIALS } from "@/lib/flexo/masterData";
 import { calculateFlexoLayout, findCylinderCandidates } from "@/lib/flexo/calculator";
 import { renderFlexoSVG } from "@/lib/flexo/svgRenderer";
-import { renderFlexoCylinderSVG } from "@/lib/flexo/cylinderRenderer";
 import { renderFlexoCylinder2DSVG } from "@/lib/flexo/cylinder2DRenderer";
-import { Cylinder3DView } from "./Cylinder3DView";
 import { exportFlexoPDF } from "@/lib/flexo/pdfExport";
 
 interface Props {
@@ -64,6 +62,7 @@ interface Props {
   defaultBleed?: number;
   onAuditLog?: (action: string, detail: string) => void;
   onFlexoSave?: (result: FlexoLayoutResult) => void;
+  onSwitchTab?: (tabKey: string) => void;
 }
 
 export function FlexoCalcTab({
@@ -77,6 +76,7 @@ export function FlexoCalcTab({
   defaultBleed = 1.5,
   onAuditLog,
   onFlexoSave,
+  onSwitchTab,
 }: Props) {
   // Prepress & Machine Inputs
   const [machineId, setMachineId] = useState<string>("JR-1521");
@@ -110,11 +110,10 @@ export function FlexoCalcTab({
   const [overproductionValue, setOverproductionValue] = useState<number>(5);
   const [baseQuantity, setBaseQuantity] = useState<number>(defaultQuantity || 10000);
 
-  // Preview Mode: Flat Web vs 3D Cylinder Roller
+  // Preview Mode: Flat Web vs 2D Cylinder Engineering Drawing
   const [previewType, setPreviewType] = useState<"flat" | "cylinder">("flat");
   const [displayOrientation, setDisplayOrientation] = useState<"horizontal" | "vertical">("horizontal");
   const [cylinderRotation, setCylinderRotation] = useState<number>(0);
-  const [cylinderViewMode, setCylinderViewMode] = useState<"2d" | "3d">("2d");
   const [isAutoSpinning, setIsAutoSpinning] = useState<boolean>(false);
 
   // SVG Viewer States
@@ -277,7 +276,6 @@ export function FlexoCalcTab({
       previewType,
       displayOrientation,
       cylinderRotation,
-      cylinderViewMode,
       repeatMode,
       previewRepeats: 3,
       showDimensions,
@@ -291,7 +289,6 @@ export function FlexoCalcTab({
       previewType,
       displayOrientation,
       cylinderRotation,
-      cylinderViewMode,
       repeatMode,
       showDimensions,
       showMarks,
@@ -301,16 +298,14 @@ export function FlexoCalcTab({
     ]
   );
 
-  // Generate SVG string (Flat Web, 2D Cylinder Drawing or 3D Cylinder Roller)
+  // Generate SVG string (Flat Web or 2D Cylinder Engineering Drawing)
   const svgContent = useMemo(() => {
     const meta = { docNo, orderName, customer, productName };
     if (previewType === "cylinder") {
-      return cylinderViewMode === "2d"
-        ? renderFlexoCylinder2DSVG(layoutResult, renderOptions, meta)
-        : renderFlexoCylinderSVG(layoutResult, renderOptions, meta);
+      return renderFlexoCylinder2DSVG(layoutResult, renderOptions, meta);
     }
     return renderFlexoSVG(layoutResult, renderOptions, meta);
-  }, [previewType, cylinderViewMode, layoutResult, renderOptions, docNo, orderName, customer, productName]);
+  }, [previewType, layoutResult, renderOptions, docNo, orderName, customer, productName]);
 
   // Handle Exports
   const handleDownloadSVG = () => {
@@ -540,88 +535,66 @@ export function FlexoCalcTab({
             </div>
           </div>
 
-          {/* Section 2: Product Dimensions & Spacing */}
+          {/* Section 2: Product Dimensions (SSOT) & Flexo Gaps */}
           <div className="space-y-2 border border-border rounded-md p-2.5 bg-zinc-50/50 dark:bg-zinc-900/40">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-foreground text-[11px] flex items-center gap-1.5">
                 <Ruler className="w-3.5 h-3.5 text-blue-600" />
-                Product Dimensions & Gaps
+                Product Specs (SSOT) & Gaps
               </span>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => setOrientation(orientation === "normal" ? "rotated" : "normal")}
-                className="h-6 text-[10px] px-1.5 gap-1 font-mono"
+                className="h-6 text-[10px] px-1.5 gap-1 font-mono cursor-pointer"
               >
                 <RotateCw className="w-2.5 h-2.5" />
                 {orientation === "normal" ? "Normal (0°)" : "Rotated (90°)"}
               </Button>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">Width (mm)</label>
-                <Input
-                  type="number"
-                  value={prodW}
-                  onChange={(e) => setProdW(Math.max(1, Number(e.target.value)))}
-                  className="h-7 text-xs bg-background font-mono"
-                />
+            <div className="flex items-center justify-between gap-2 p-1.5 rounded bg-background border border-border">
+              <div className="flex flex-wrap items-center gap-1 text-[10px] font-mono">
+                <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono">
+                  {prodW} × {prodH} mm
+                </Badge>
+                <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono">
+                  Bleed: {bleedX} mm
+                </Badge>
               </div>
-              <div>
-                <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">Height (mm)</label>
-                <Input
-                  type="number"
-                  value={prodH}
-                  onChange={(e) => setProdH(Math.max(1, Number(e.target.value)))}
-                  className="h-7 text-xs bg-background font-mono"
-                />
-              </div>
+              {onSwitchTab && (
+                <button
+                  type="button"
+                  onClick={() => onSwitchTab("specs")}
+                  className="text-[10px] text-primary hover:underline font-medium cursor-pointer shrink-0"
+                >
+                  Edit in Specs →
+                </button>
+              )}
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">Bleed X/Y (mm)</label>
-                <div className="flex gap-1">
-                  <Input
-                    type="number"
-                    step={0.5}
-                    value={bleedX}
-                    onChange={(e) => setBleedX(Math.max(0, Number(e.target.value)))}
-                    className="h-7 text-xs bg-background text-center px-1 font-mono"
-                    title="Bleed X"
-                  />
-                  <Input
-                    type="number"
-                    step={0.5}
-                    value={bleedY}
-                    onChange={(e) => setBleedY(Math.max(0, Number(e.target.value)))}
-                    className="h-7 text-xs bg-background text-center px-1 font-mono"
-                    title="Bleed Y"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">Gaps X / Y (mm)</label>
-                <div className="flex gap-1">
-                  <Input
-                    type="number"
-                    step={0.5}
-                    value={gapX}
-                    onChange={(e) => setGapX(Math.max(0, Number(e.target.value)))}
-                    className="h-7 text-xs bg-background text-center px-1 font-mono"
-                    title="Horizontal Gap"
-                  />
-                  <Input
-                    type="number"
-                    step={0.5}
-                    value={gapY}
-                    onChange={(e) => setGapY(Math.max(0, Number(e.target.value)))}
-                    className="h-7 text-xs bg-background text-center px-1 font-mono"
-                    title="Vertical Gap"
-                  />
-                </div>
+            <div>
+              <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">
+                Flexo Step Gaps X / Y (mm)
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="number"
+                  step={0.5}
+                  value={gapX}
+                  onChange={(e) => setGapX(Math.max(0, Number(e.target.value)))}
+                  className="h-7 text-xs bg-background text-center px-1 font-mono"
+                  title="Horizontal Gap across Web (X)"
+                />
+                <Input
+                  type="number"
+                  step={0.5}
+                  value={gapY}
+                  onChange={(e) => setGapY(Math.max(0, Number(e.target.value)))}
+                  className="h-7 text-xs bg-background text-center px-1 font-mono"
+                  title="Vertical Repeat Gap along Web (Y)"
+                />
               </div>
             </div>
           </div>
@@ -810,18 +783,15 @@ export function FlexoCalcTab({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 items-end">
               <div>
                 <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">
-                  Required (pcs)
+                  Order Qty (SSOT)
                 </label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={baseQuantity}
-                  onChange={(e) => setBaseQuantity(Math.max(1, Number(e.target.value)))}
-                  className="h-7 text-xs bg-background font-mono"
-                />
+                <div className="h-7 px-2 rounded border border-border bg-muted/50 flex items-center justify-between text-xs font-mono font-semibold text-foreground">
+                  <span>{baseQuantity.toLocaleString()}</span>
+                  <span className="text-[10px] text-muted-foreground font-normal">pcs</span>
+                </div>
               </div>
 
               <div>
@@ -924,30 +894,9 @@ export function FlexoCalcTab({
                 }`}
               >
                 <Disc className="w-3.5 h-3.5 text-cyan-300" />
-                <span>Cylinder Roller</span>
+                <span>Cylinder</span>
               </button>
             </div>
-
-            {/* Cylinder View: 2D Technical Drawing vs 3D Shaded Roller */}
-            {previewType === "cylinder" && (
-              <div className="flex bg-card border border-border rounded-md shadow-xs p-0.5">
-                {(["2d", "3d"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setCylinderViewMode(mode)}
-                    className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
-                      cylinderViewMode === mode
-                        ? "bg-zinc-800 text-white dark:bg-zinc-700 shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                    title={mode === "2d" ? "2D technical drawing (end view + front elevation)" : "3D shaded roller"}
-                  >
-                    {mode.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            )}
 
             {/* Flat Web Orientation: Horizontal vs Vertical */}
             {previewType === "flat" && (
@@ -1162,26 +1111,6 @@ export function FlexoCalcTab({
                 {isAutoSpinning ? <Pause className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5" />}
                 <span>{isAutoSpinning ? "Pause" : "Auto-Spin"}</span>
               </Button>
-
-              <div className="flex gap-1 ml-1">
-                {[0, 90, 180, 270].map((deg) => (
-                  <button
-                    key={deg}
-                    type="button"
-                    onClick={() => {
-                      setCylinderRotation(deg);
-                      setIsAutoSpinning(false);
-                    }}
-                    className={`px-1.5 py-0.5 rounded text-[9px] font-mono border transition-colors ${
-                      cylinderRotation === deg
-                        ? "bg-blue-600 text-white border-blue-600 font-bold"
-                        : "bg-background text-muted-foreground border-border hover:text-foreground"
-                    }`}
-                  >
-                    {deg}°
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         )}
@@ -1219,28 +1148,14 @@ export function FlexoCalcTab({
           </div>
         )}
 
-        {/* Visual Canvas Display: Real WebGL 3D vs SVG Canvas */}
-        {previewType === "cylinder" && cylinderViewMode === "3d" ? (
-          <div className="flex-1 w-full h-full min-h-[420px] relative rounded-md overflow-hidden">
-            <Cylinder3DView
-              result={layoutResult}
-              options={renderOptions}
-              cylinderRotation={cylinderRotation}
-              onRotationChange={setCylinderRotation}
-              isAutoSpinning={isAutoSpinning}
-              onAutoSpinChange={setIsAutoSpinning}
-              orderMeta={{ docNo, productName, customer }}
-            />
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center p-3 relative overflow-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            <div
-              className="transition-transform duration-150 ease-out origin-center flex items-center justify-center w-full max-h-full [&>svg]:w-full [&>svg]:h-auto [&>svg]:max-h-[70vh] [&>svg]:rounded-md [&>svg]:shadow-md"
-              style={{ transform: `scale(${zoomLevel / 100})` }}
-              dangerouslySetInnerHTML={{ __html: svgContent }}
-            />
-          </div>
-        )}
+        {/* Visual Canvas Display: Clean SVG Canvas (Flat Web & 2D Technical Drawing) */}
+        <div className="flex-1 flex items-center justify-center p-3 relative overflow-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <div
+            className="transition-transform duration-150 ease-out origin-center flex items-center justify-center w-full max-h-full [&>svg]:w-full [&>svg]:h-auto [&>svg]:max-h-[70vh] [&>svg]:rounded-md [&>svg]:shadow-md"
+            style={{ transform: `scale(${zoomLevel / 100})` }}
+            dangerouslySetInnerHTML={{ __html: svgContent }}
+          />
+        </div>
       </div>
     </div>
   );

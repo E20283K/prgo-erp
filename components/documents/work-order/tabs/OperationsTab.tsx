@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useCallback } from "react";
-import { Plus, ExternalLink, CheckCircle2, Trash2, Layers, Clock, ChevronRight } from "lucide-react";
+import { Plus, ExternalLink, Trash2, Clock, Sparkles, ArrowUpRight, Package } from "lucide-react";
 import { TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +27,18 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { RouteStep } from "../types";
+import { OrderReadinessRouteCard } from "../OrderReadinessRouteCard";
 
 interface OperationsTabProps {
+  workOrderId?: string;
+  fallbackData?: {
+    customer?: string;
+    product?: string;
+    machine?: string;
+    quantity?: number;
+    deadline?: string;
+    department?: string;
+  };
   operations: RouteStep[];
   setOperations: React.Dispatch<React.SetStateAction<RouteStep[]>>;
   opSelection: GridSelection;
@@ -38,9 +48,16 @@ interface OperationsTabProps {
   onDeleteSelectedOperation: () => void;
   isDark: boolean;
   onMarkUnsaved: () => void;
+  onSyncFromPlan?: () => void;
+  onOpenInTimeline?: (opId: string) => void;
+  onOpenPackaging?: () => void;
+  isPacked?: boolean;
+  packagesCount?: number;
 }
 
 export function OperationsTab({
+  workOrderId,
+  fallbackData,
   operations,
   setOperations,
   opSelection,
@@ -50,6 +67,11 @@ export function OperationsTab({
   onDeleteSelectedOperation,
   isDark,
   onMarkUnsaved,
+  onSyncFromPlan,
+  onOpenInTimeline,
+  onOpenPackaging,
+  isPacked,
+  packagesCount,
 }: OperationsTabProps) {
   const selectedOpRow = opSelection.rows.first();
   const hasSelectedOp = selectedOpRow !== undefined && operations[selectedOpRow] !== undefined;
@@ -58,18 +80,12 @@ export function OperationsTab({
     return operations.reduce((sum, op) => sum + (Number(op.duration) || 0), 0);
   }, [operations]);
 
-  const finishedCount = useMemo(() => {
-    return operations.filter((op) => op.status === "Finished").length;
-  }, [operations]);
-
   const opColumns = useMemo<GridColumn[]>(() => [
-    { id: "step", title: "Step", width: 65, icon: GridColumnIcon.HeaderNumber },
-    { id: "name", title: "Texnologik Operatsiya (Description)", width: 280, icon: GridColumnIcon.HeaderString },
-    { id: "machine", title: "Stanok / Uskuna (Work Center)", width: 230, icon: GridColumnIcon.HeaderLookup },
-    { id: "operator", title: "Operator / Smena", width: 150, icon: GridColumnIcon.HeaderString },
-    { id: "duration", title: "Davomiyligi (hrs)", width: 120, icon: GridColumnIcon.HeaderNumber },
-    { id: "progress", title: "Bajarildi (Qty)", width: 140, icon: GridColumnIcon.HeaderString },
-    { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
+    { id: "step", title: "Step #", width: 80, icon: GridColumnIcon.HeaderNumber },
+    { id: "name", title: "Texnologik Operatsiya (Description)", width: 340, icon: GridColumnIcon.HeaderString },
+    { id: "machine", title: "Stanok / Uskuna (Work Center)", width: 280, icon: GridColumnIcon.HeaderLookup },
+    { id: "operator", title: "Mas'ul Operator / Smena", width: 200, icon: GridColumnIcon.HeaderString },
+    { id: "duration", title: "Me'yoriy vaqt (hrs)", width: 150, icon: GridColumnIcon.HeaderNumber },
   ], []);
 
   const getOpCellContent = useCallback((cell: Item): GridCell => {
@@ -82,27 +98,9 @@ export function OperationsTab({
     if (col === 2) return { kind: GridCellKind.Text, data: op.machine, displayData: op.machine, allowOverlay: true };
     if (col === 3) return { kind: GridCellKind.Text, data: op.operator || "Unassigned", displayData: op.operator || "Unassigned", allowOverlay: true };
     if (col === 4) return { kind: GridCellKind.Number, data: op.duration || 1, displayData: `${op.duration || 1} soat`, allowOverlay: true };
-    if (col === 5) return { kind: GridCellKind.Text, data: op.qtyCompleted || "0 / 0", displayData: op.qtyCompleted || "0 / 0", allowOverlay: true };
-    if (col === 6) {
-      const statusColor = op.status === "Finished" 
-        ? (isDark ? "#4ade80" : "#15803d") 
-        : op.status === "In Progress" 
-        ? (isDark ? "#60a5fa" : "#2563eb") 
-        : (isDark ? "#9ca3af" : "#64748b");
-      return {
-        kind: GridCellKind.Text,
-        data: op.status,
-        displayData: op.status,
-        allowOverlay: false,
-        themeOverride: {
-          textDark: statusColor,
-          baseFontStyle: "600 12px sans-serif",
-        }
-      };
-    }
 
     return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
-  }, [operations, isDark]);
+  }, [operations]);
 
   const onOpCellEdited = useCallback((cell: Item, newValue: EditableGridCell) => {
     const [col, row] = cell;
@@ -115,79 +113,23 @@ export function OperationsTab({
       updated[row].operator = newValue.data.toString();
     } else if (col === 4 && newValue.kind === GridCellKind.Number) {
       updated[row].duration = Number(newValue.data);
-    } else if (col === 5 && newValue.kind === GridCellKind.Text) {
-      updated[row].qtyCompleted = newValue.data.toString();
     }
     setOperations(updated);
     onMarkUnsaved();
   }, [operations, setOperations, onMarkUnsaved]);
 
-  const handleToggleStatus = () => {
-    if (!hasSelectedOp) return;
-    const updated = [...operations];
-    updated[selectedOpRow].status = updated[selectedOpRow].status === "Finished" ? "In Progress" : "Finished";
-    setOperations(updated);
-    onMarkUnsaved();
-  };
-
   return (
     <TabsContent value="operations" className="flex-1 overflow-hidden p-0 m-0 flex flex-col bg-background select-none">
-      {/* 1. Visual Route Pipeline Bar */}
-      <div className="h-11 border-b border-border bg-muted/30 px-3 flex items-center gap-2 overflow-x-auto shrink-0">
-        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider shrink-0 flex items-center gap-1.5 mr-1">
-          <Layers className="w-3.5 h-3.5 text-blue-500" />
-          <span className="hidden sm:inline">Marshrut Zanjiri:</span>
-        </span>
+      {/* 0. Pre-Flight Readiness & Production Route (Full Stage-Gate Bar) */}
+      {workOrderId && (
+        <OrderReadinessRouteCard
+          variant="horizontal"
+          workOrderId={workOrderId}
+          fallbackData={fallbackData}
+        />
+      )}
 
-        <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto py-1">
-          {operations.map((op, idx) => {
-            const isFinished = op.status === "Finished";
-            const isInProgress = op.status === "In Progress";
-            const isSelected = selectedOpRow === idx;
-
-            return (
-              <React.Fragment key={op.id || idx}>
-                {idx > 0 && <ChevronRight className="w-3 h-3 text-muted-foreground/40 shrink-0" />}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpSelection({
-                      columns: CompactSelection.empty(),
-                      rows: CompactSelection.fromSingleSelection(idx),
-                    });
-                  }}
-                  className={`px-2.5 py-1 rounded text-xs flex items-center gap-1.5 cursor-pointer border transition-all shrink-0 ${
-                    isSelected
-                      ? "ring-2 ring-blue-500/50 border-blue-500 font-semibold shadow-xs"
-                      : ""
-                  } ${
-                    isFinished
-                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-medium"
-                      : isInProgress
-                      ? "bg-blue-500/15 border-blue-500/40 text-blue-600 dark:text-blue-400 font-semibold"
-                      : "bg-background border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                  title={`${op.name} (${op.machine})`}
-                >
-                  <span className="text-[10px] font-mono opacity-70">#{op.stepNumber}</span>
-                  <span className="truncate max-w-[130px]">{op.name.split(" ")[0]} {op.name.split(" ")[1] || ""}</span>
-                  {isFinished && <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />}
-                  {isInProgress && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />}
-                </button>
-              </React.Fragment>
-            );
-          })}
-        </div>
-
-        {/* Stats Pill */}
-        <div className="hidden md:flex items-center gap-2 ml-auto shrink-0 pl-2 text-[11px] text-muted-foreground border-l border-border">
-          <span>Bosqichlar: <strong className="text-foreground">{finishedCount}/{operations.length}</strong></span>
-          <Separator orientation="vertical" className="h-3" />
-          <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> <strong className="text-foreground">{totalDuration} soat</strong></span>
-        </div>
-      </div>
-
-      {/* 2. Operations Toolbar */}
+      {/* 1. Operations Toolbar */}
       <div className="h-9 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-1.5">
           <Button
@@ -198,6 +140,37 @@ export function OperationsTab({
             <Plus className="w-3.5 h-3.5" />
             <span>Bosqich qo&apos;shish</span>
           </Button>
+
+          {onOpenPackaging && (
+            <Button
+              onClick={onOpenPackaging}
+              variant="outline"
+              size="sm"
+              className="h-6.5 px-2.5 text-xs font-medium gap-1 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 rounded cursor-pointer"
+              title="Mahsulotni qutilarga taqsimlash va quti pasportlarini chop etish"
+            >
+              <Package className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Qadoqlash (Quick Pack)</span>
+              {packagesCount !== undefined && packagesCount > 0 && (
+                <Badge variant="secondary" className="h-4 px-1 text-[10px] font-mono ml-0.5">
+                  {packagesCount} quti
+                </Badge>
+              )}
+            </Button>
+          )}
+
+          {onSyncFromPlan && (
+            <Button
+              onClick={onSyncFromPlan}
+              variant="outline"
+              size="sm"
+              className="h-6.5 px-2 text-xs font-medium gap-1 text-primary border-primary/30 hover:bg-primary/10 rounded cursor-pointer"
+              title="CTP va bosma hisobidan texnologik marshrutni yangilash"
+            >
+              <Sparkles className="w-3 h-3 text-amber-500" />
+              <span>Rejadan yangilash</span>
+            </Button>
+          )}
 
           {hasSelectedOp && (
             <>
@@ -211,15 +184,18 @@ export function OperationsTab({
                 <span>Tahrirlash</span>
               </Button>
 
-              <Button
-                onClick={handleToggleStatus}
-                variant="outline"
-                size="sm"
-                className="h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer"
-              >
-                <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                <span>{operations[selectedOpRow].status === "Finished" ? "Jarayonga qaytarish" : "Bajarildi qilish"}</span>
-              </Button>
+              {onOpenInTimeline && (
+                <Button
+                  onClick={() => onOpenInTimeline(operations[selectedOpRow].id)}
+                  variant="outline"
+                  size="sm"
+                  className="h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                  title="Ushbu bosqichning sexdagi bajarilishi va smena hisobotini Timeline bo'limida ochish"
+                >
+                  <ArrowUpRight className="w-3 h-3" />
+                  <span>Bajarilish (Timeline)</span>
+                </Button>
+              )}
 
               <Button
                 onClick={onDeleteSelectedOperation}
@@ -234,12 +210,24 @@ export function OperationsTab({
           )}
         </div>
 
-        <div className="text-[11px] text-muted-foreground font-mono">
-          {hasSelectedOp ? `Tanlangan: #${operations[selectedOpRow].stepNumber} (${operations[selectedOpRow].machine})` : `${operations.length} ta marshrut bosqichi`}
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          {hasSelectedOp && (
+            <>
+              <span className="font-mono">
+                Tanlangan: <strong className="text-foreground">#{operations[selectedOpRow].stepNumber}</strong> ({operations[selectedOpRow].machine})
+              </span>
+              <Separator orientation="vertical" className="h-3" />
+            </>
+          )}
+          <span>Bosqichlar: <strong className="text-foreground">{operations.length} ta</strong></span>
+          <Separator orientation="vertical" className="h-3" />
+          <span className="flex items-center gap-1">
+            <Clock className="w-3 h-3" /> Me&apos;yor: <strong className="text-foreground">{totalDuration} soat</strong>
+          </span>
         </div>
       </div>
 
-      {/* 3. Glide Data Grid */}
+      {/* 2. Glide Data Grid */}
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div 
@@ -296,21 +284,23 @@ export function OperationsTab({
           {hasSelectedOp && (
             <ContextMenuItem onClick={() => onOpenEditOperation(selectedOpRow)} className="gap-2 cursor-pointer">
               <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-              <span>Edit Step Details</span>
+              <span>Edit Step Plan</span>
               <span className="ml-auto text-[10px] text-muted-foreground font-mono">Enter</span>
+            </ContextMenuItem>
+          )}
+
+          {hasSelectedOp && onOpenInTimeline && (
+            <ContextMenuItem
+              onClick={() => onOpenInTimeline(operations[selectedOpRow].id)}
+              className="gap-2 cursor-pointer text-blue-600 dark:text-blue-400"
+            >
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              <span>Track Execution in Timeline</span>
             </ContextMenuItem>
           )}
 
           {hasSelectedOp && (
             <>
-              <ContextMenuSeparator />
-              <ContextMenuItem 
-                onClick={handleToggleStatus} 
-                className="gap-2 cursor-pointer"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Toggle Finished Status</span>
-              </ContextMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem onClick={onDeleteSelectedOperation} className="gap-2 cursor-pointer text-destructive focus:text-destructive">
                 <Trash2 className="w-3.5 h-3.5" />

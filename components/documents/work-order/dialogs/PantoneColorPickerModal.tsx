@@ -40,15 +40,23 @@ interface PantoneColorPickerModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onSelectColor: (spot: SpotStationSelection) => void;
+  defaultSide?: "front" | "back" | "both";
 }
 
 export function PantoneColorPickerModal({
   isOpen,
   onOpenChange,
   onSelectColor,
+  defaultSide = "front",
 }: PantoneColorPickerModalProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [targetSide, setTargetSide] = useState<"front" | "back" | "both">("front");
+  const [targetSide, setTargetSide] = useState<"front" | "back" | "both">(defaultSide);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setTargetSide(defaultSide);
+    }
+  }, [isOpen, defaultSide]);
   const [activeCategory, setActiveCategory] = useState<"all" | "base" | "specialty" | "custom">("base");
 
   // Custom mix inputs

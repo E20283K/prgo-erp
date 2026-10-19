@@ -3,7 +3,11 @@ import {
   KashirovkaMode,
   KashirovkaImpositionStrategy,
   SubstrateLayer,
+  SideColorConfig,
+  SpotColorItem,
+  RouteStep,
 } from "../../types";
+import { PrintMethod, PrintPlanningResult } from "../../planningEngine";
 
 export interface LayoutCalcTabProps {
   sizes?: SizeDistribution[];
@@ -13,6 +17,18 @@ export interface LayoutCalcTabProps {
   defaultProdW?: number;
   defaultProdH?: number;
   defaultBleed?: number;
+  frontColors?: SideColorConfig;
+  backColors?: SideColorConfig;
+  spotColors?: SpotColorItem[];
+  printMethod?: PrintMethod;
+  onPrintMethodChange?: (method: PrintMethod) => void;
+  onApplyRouteToOperations?: (steps: RouteStep[]) => void;
+  pressMachine?: string;
+  paperStock?: string;
+  lamination?: string;
+  embellishment?: string;
+  isOperator?: boolean;
+  onSwitchTab?: (tabKey: string) => void;
   kashirovkaMode?: KashirovkaMode;
   kashirovkaStrategy?: KashirovkaImpositionStrategy;
   kashirovkaLayers?: SubstrateLayer[];
@@ -23,6 +39,8 @@ export interface LayoutCalcTabProps {
     kashirovkaStrategy?: KashirovkaImpositionStrategy;
     kashirovkaMakeReadySheets?: number;
   }) => void;
+  sampleQty?: number;
+  onSampleQtyChange?: (qty: number) => void;
 }
 
 export interface KashirovkaSummary {
@@ -43,9 +61,13 @@ export interface KashirovkaSummary {
   splitCutAxisX?: number;
 }
 
+export type PlatePartitionStrategy = "gang_capacity" | "by_model" | "by_volume";
+
 export interface SlotAssignment {
   sizeId: string;
   sizeLabel: string;
+  model?: string;
+  sizeCode?: string;
   targetQuantity: number;
   slots: number;
 }
@@ -54,12 +76,14 @@ export interface PlateConfig {
   id: string;
   name: string;
   manualSlots: Record<string, number>;
+  assignedSizeIds?: string[];
 }
 
 export interface CalculatedPlate extends PlateConfig {
   assignments: SlotAssignment[];
   requiredSheets: number;
   unassignedSlots: number;
+  overflowSkusCount?: number;
 }
 
 export interface PrepressMargins {
@@ -88,6 +112,8 @@ export interface ImpositionLayout {
 
 export interface GridCell {
   label: string;
+  model?: string;
+  sizeCode?: string;
   color: string;
   sizeId: string;
   sideBadge?: "FRONT" | "BACK";

@@ -2,348 +2,757 @@
 
 import React, { useState } from "react";
 import { cn } from "cn";
-import { Truck, CheckCircle2, Factory, ChevronRight, Send, RotateCcw, ArrowRight, Check } from "lucide-react";
+import {
+  FlaskConical,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
+  Sparkles,
+  Layers,
+  Printer,
+  Check,
+  ShieldCheck,
+  History,
+  Lock,
+  ArrowRight,
+  ChevronRight,
+  ClipboardCheck,
+  FileSpreadsheet,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DatePicker } from "@/components/ui/date-picker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  WorkOrderFormData,
+  WorkOrderSampleData,
+  SampleTestPurpose,
+  SampleRevisionRecord,
+} from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
-import { ClientOrderFormData, ClientOrderSampleData } from "../types";
 
-const COURIER_OPTIONS = ["Yandex Delivery", "UPS", "FedEx", "DHL", "Own driver", "Client pickup"];
+const TEST_PURPOSE_OPTIONS: { value: SampleTestPurpose; label: string; desc: string }[] = [
+  {
+    value: "color_proof",
+    label: "Rang va Pantone sinovi (Цветопроба)",
+    desc: "Spektrofotometriya va rang zichligi (CMYK / Spot ink)",
+  },
+  {
+    value: "dieline_structure",
+    label: "Konstruksiya va qolip bichimi (Die-line)",
+    desc: "Quti yig'ilishi, bigovka chiziqlari va o'lcham aniqligi",
+  },
+  {
+    value: "full_finished",
+    label: "To'liq tayyor namuna (Master Sample)",
+    desc: "Bosma + Laminatsiya + Lak/Zarhal + Qolipda to'liq bichim",
+  },
+  {
+    value: "substrate_test",
+    label: "Material va kashirovka sinovi",
+    desc: "Qog'oz zichligi, yelim adgeziyasi va qatlamlar mustahkamligi",
+  },
+];
+
+const REVISION_REASONS: { value: SampleRevisionRecord["reasonCategory"]; label: string }[] = [
+  { value: "color_shift", label: "Rang nomuvofiqligi (Delta E yuqori / Pantone farq qildi)" },
+  { value: "geometry_dieline", label: "O'lcham yoki konstruksiya xatosi (Bigovka / Qolip)" },
+  { value: "text_error", label: "Matn, shtrix-kod yoki grafika xatosi" },
+  { value: "coating_finish", label: "Laminatsiya, lak yoki zarhal nuqsoni" },
+  { value: "client_change", label: "Mijoz tomonidan o'zgartirish kiritildi" },
+];
+
+const SAMPLE_PILLS = [1, 3, 5, 10, 20];
 
 interface Props {
-  formData: ClientOrderFormData;
-  sampleData: ClientOrderSampleData;
-  handleSampleChange: (field: keyof ClientOrderSampleData, val: any) => void;
-  handleFieldChange: (field: keyof ClientOrderFormData, val: any) => void;
+  formData: WorkOrderFormData;
+  sampleData: WorkOrderSampleData;
+  handleSampleChange: (field: keyof WorkOrderSampleData, val: any) => void;
+  handleFieldChange: (field: keyof WorkOrderFormData, val: any) => void;
+  onApproveAndReleaseMassRun: () => void;
+  onRejectSample: (reasonCategory: SampleRevisionRecord["reasonCategory"], notes: string) => void;
   tabId: string;
 }
 
-export function SampleTab({ formData, sampleData, handleSampleChange, handleFieldChange, tabId }: Props) {
-  const { addNotification, openTab } = useWorkspaceStore();
-  const [isConfirmSendOpen, setIsConfirmSendOpen] = useState(false);
+export function SampleTab({
+  formData,
+  sampleData,
+  handleSampleChange,
+  handleFieldChange,
+  onApproveAndReleaseMassRun,
+  onRejectSample,
+  tabId,
+}: Props) {
+  const { currentUser } = useWorkspaceStore();
+  const [isRevisionBoxOpen, setIsRevisionBoxOpen] = useState(false);
+  const [revisionReason, setRevisionReason] = useState<SampleRevisionRecord["reasonCategory"]>("color_shift");
+  const [revisionNotes, setRevisionNotes] = useState("");
 
-  const handleMarkDispatched = () => {
-    handleSampleChange("isDispatched", true);
-    addNotification({
-      title: `Sample dispatched for ${tabId}`,
-      description: `Sent via ${sampleData.deliveryMethod} to ${sampleData.recipientName}. Awaiting approval.`,
-      severity: "info",
-      link: { module: "crm", subModule: "client-orders" }
-    });
+  const isDirectProduction = formData.orderType === "Production";
+  const sampleQty = sampleData.sampleQty || 5;
+  const revisions = sampleData.revisions || [];
+
+  const handleConfirmRevision = () => {
+    if (!revisionNotes.trim()) return;
+    onRejectSample(revisionReason, revisionNotes.trim());
+    setRevisionNotes("");
+    setIsRevisionBoxOpen(false);
   };
 
-  const handleCreateWorkOrder = () => {
-    const newWoId = `WO-00${Math.floor(Math.random() * 900) + 100}`;
-    
-    openTab({
-      id: newWoId,
-      title: `${newWoId}: ${formData.customer} — ${formData.product}`,
-      type: "work-order",
-      module: "production",
-      isUnsaved: true,
-      activeLevel3Tab: "overview",
-      documentData: {
-        docNo: newWoId,
-        customer: formData.customer,
-        product: formData.product,
-        quantity: formData.orderType === "Sample" ? sampleData.sampleQty : formData.quantity,
-        unit: formData.unit,
-        status: "Draft",
-        priority: "Normal",
-        orderType: formData.orderType,
-        linkedOrderId: tabId,
-        recipe: formData.recipe,
-        deadline: formData.deadline,
-      },
-    });
+  const handleMarkProduced = () => {
+    const now = new Date();
+    const timeStr = `${now.toISOString().split("T")[0]} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    handleSampleChange("isProduced", true);
+    handleSampleChange("producedAt", timeStr);
+    handleSampleChange("producedBy", currentUser?.name || "Operator (Press Dept)");
+    if (sampleData.approvalStatus !== "approved") {
+      handleSampleChange("approvalStatus", "awaiting_approval");
+    }
+  };
 
-    handleFieldChange("linkedWoId", newWoId);
-    handleFieldChange("status", "In Production");
-    setIsConfirmSendOpen(false);
-    
-    addNotification({
-      title: "Work Order Created",
-      description: `${newWoId} has been pushed to Production.`,
-      severity: "success",
-    });
+  const handleToggleQc = () => {
+    const nextVal = !sampleData.qcPassed;
+    handleSampleChange("qcPassed", nextVal);
+    if (nextVal && !sampleData.isProduced) {
+      handleMarkProduced();
+    }
   };
 
   return (
-    <>
-      <div className="bg-card border border-border rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-sm">
-        {/* Step indicators */}
-        <div className="flex items-center gap-2 sm:gap-2.5 text-xs">
-          <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium text-xs transition-colors", 
-            formData.orderType === "Production"
-              ? "bg-muted text-muted-foreground"
-              : sampleData.isDispatched 
-              ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800" 
-              : "bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
-          )}>
-            <Truck className="w-3.5 h-3.5" />
-            <span>1. Send Sample</span>
-            {sampleData.isDispatched && formData.orderType === "Sample" && <Check className="w-3 h-3 stroke-[3]" />}
+    <div className="space-y-4">
+      {/* ── TOP HEADER / WORKFLOW PROGRESS BAR ── */}
+      <div className="bg-card border border-border rounded-lg p-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+        {/* Step Indicators */}
+        <div className="flex items-center gap-2 text-xs flex-wrap">
+          {/* Step 1: Mode */}
+          <div
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium text-xs border transition-colors",
+              isDirectProduction
+                ? "bg-muted text-muted-foreground border-border"
+                : "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800"
+            )}
+          >
+            <FlaskConical className="w-3.5 h-3.5" />
+            <span>1. Namuna rejimi</span>
+            {!isDirectProduction && <Check className="w-3 h-3 stroke-[3]" />}
           </div>
 
           <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
 
-          <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium text-xs transition-colors",
-            formData.orderType === "Production"
-              ? "bg-muted text-muted-foreground"
-              : sampleData.approvalStatus === "Approved"
-              ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
-              : sampleData.approvalStatus === "Revision Requested"
-              ? "bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
-              : sampleData.isDispatched
-              ? "bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800"
-              : "text-muted-foreground bg-muted/40"
-          )}>
+          {/* Step 2: Produced & QC */}
+          <div
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium text-xs border transition-colors",
+              isDirectProduction
+                ? "bg-muted text-muted-foreground border-border"
+                : sampleData.isProduced && sampleData.qcPassed
+                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                : sampleData.isProduced
+                ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                : "bg-muted/40 text-muted-foreground border-border/60"
+            )}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>2. Sex & OTK</span>
+            {sampleData.isProduced && sampleData.qcPassed && !isDirectProduction && (
+              <Check className="w-3 h-3 stroke-[3]" />
+            )}
+          </div>
+
+          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
+
+          {/* Step 3: Approval Gate */}
+          <div
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium text-xs border transition-colors",
+              isDirectProduction
+                ? "bg-muted text-muted-foreground border-border"
+                : sampleData.approvalStatus === "approved"
+                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                : sampleData.approvalStatus === "revision_requested"
+                ? "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
+                : "bg-muted/40 text-muted-foreground border-border/60"
+            )}
+          >
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>2. Client Decision</span>
-            {sampleData.approvalStatus === "Approved" && formData.orderType === "Sample" && <Check className="w-3 h-3 stroke-[3]" />}
+            <span>3. Tasdiq darvozasi</span>
+            {sampleData.approvalStatus === "approved" && <Check className="w-3 h-3 stroke-[3]" />}
           </div>
 
           <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
 
-          <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium text-xs transition-colors",
-            formData.linkedWoId
-              ? "bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800"
-              : (sampleData.approvalStatus === "Approved" || formData.orderType === "Production")
-              ? "bg-primary/10 text-primary border border-primary/20"
-              : "text-muted-foreground bg-muted/40"
-          )}>
-            <Factory className="w-3.5 h-3.5" />
-            <span>3. Production Work Order</span>
-            {formData.linkedWoId && <Check className="w-3 h-3 stroke-[3]" />}
+          {/* Step 4: Mass Production */}
+          <div
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium text-xs border transition-colors",
+              isDirectProduction || sampleData.approvalStatus === "approved"
+                ? "bg-primary/10 text-primary border-primary/30 font-semibold"
+                : "bg-muted/40 text-muted-foreground border-border/60"
+            )}
+          >
+            <Printer className="w-3.5 h-3.5" />
+            <span>4. Asosiy ishlab chiqarish</span>
+            {(isDirectProduction || sampleData.approvalStatus === "approved") && (
+              <Check className="w-3 h-3 stroke-[3]" />
+            )}
           </div>
         </div>
 
-        {/* Quick Mode Toggle */}
-        <div className="flex items-center gap-1.5 bg-muted/50 p-1 rounded-md border border-border/60 text-xs">
+        {/* Quick Mode Switcher */}
+        <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border text-xs">
           <button
             type="button"
-            onClick={() => handleFieldChange("orderType", "Sample")}
-            className={cn("px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer", 
-              formData.orderType === "Sample" 
-                ? "bg-background text-foreground font-semibold shadow-xs" 
+            onClick={() => {
+              handleFieldChange("orderType", "Sample");
+              handleSampleChange("isRequired", true);
+            }}
+            className={cn(
+              "px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5",
+              !isDirectProduction
+                ? "bg-background text-foreground font-semibold shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            Physical Sample Run
+            <FlaskConical className="w-3.5 h-3.5 text-amber-500" />
+            <span>Dastlab namuna (Sample First)</span>
           </button>
           <button
             type="button"
-            onClick={() => handleFieldChange("orderType", "Production")}
-            className={cn("px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer", 
-              formData.orderType === "Production" 
-                ? "bg-background text-foreground font-semibold shadow-sm" 
+            onClick={() => {
+              handleFieldChange("orderType", "Production");
+              handleSampleChange("isRequired", false);
+            }}
+            className={cn(
+              "px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5",
+              isDirectProduction
+                ? "bg-background text-foreground font-semibold shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            Direct Production
+            <Printer className="w-3.5 h-3.5 text-blue-500" />
+            <span>To'g'ridan-to'g'ri ishlab chiqarish</span>
           </button>
         </div>
       </div>
 
-      {formData.orderType === "Production" ? (
-        <div className="bg-card border border-border rounded-lg p-6 text-center space-y-4 shadow-sm mt-4">
+      {/* ── STATE A: DIRECT PRODUCTION VIEW ── */}
+      {isDirectProduction ? (
+        <div className="bg-card border border-border rounded-lg p-6 text-center space-y-4 shadow-xs">
           <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto border border-blue-200 dark:border-blue-800">
-            <Factory className="w-6 h-6" />
+            <Printer className="w-6 h-6" />
           </div>
-          <div className="max-w-md mx-auto space-y-1">
-            <h4 className="font-semibold text-sm text-foreground">Direct Production Order (No Sample Required)</h4>
-            <p className="text-xs text-muted-foreground">
-              The client has directly confirmed the order without requesting a physical test sample. You can launch full manufacturing immediately for <strong>{formData.quantity.toLocaleString()} {formData.unit}</strong>.
+          <div className="max-w-md mx-auto space-y-1.5">
+            <h4 className="font-semibold text-sm text-foreground">
+              To'g'ridan-to'g'ri ishlab chiqarish rejimi
+            </h4>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Ushbu buyurtmada jismoniy sinov namunasi (test run) talab etilmaydi. Buyurtma to'liq adad{" "}
+              <strong className="text-foreground">
+                {formData.quantity.toLocaleString()} {formData.unit}
+              </strong>{" "}
+              bilan bevosita ishlab chiqarish jadvalida faol.
             </p>
           </div>
 
-          {formData.linkedWoId ? (
-            <div className="inline-flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-4 py-2 rounded-md text-xs font-medium text-emerald-800 dark:text-emerald-300">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Work Order Created: <strong>{formData.linkedWoId}</strong></span>
-            </div>
-          ) : (
-            <div className="pt-2">
-              {isConfirmSendOpen ? (
-                <div className="space-y-2 max-w-sm mx-auto">
-                  <p className="text-xs text-muted-foreground">Confirm sending this order to production?</p>
-                  <div className="flex gap-2 justify-center">
-                    <Button variant="outline" size="sm" onClick={() => setIsConfirmSendOpen(false)}>Cancel</Button>
-                    <Button size="sm" onClick={handleCreateWorkOrder}>Confirm</Button>
-                  </div>
-                </div>
-              ) : (
-                <Button 
-                  onClick={() => setIsConfirmSendOpen(true)} 
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 px-6 gap-2 shadow-sm"
-                >
-                  <Factory className="w-4 h-4" />
-                  <span>Launch Production Work Order</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </Button>
-              )}
-            </div>
-          )}
+          <div className="flex justify-center pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                handleFieldChange("orderType", "Sample");
+                handleSampleChange("isRequired", true);
+                if (sampleData.approvalStatus === "approved") {
+                  handleSampleChange("approvalStatus", "pending_production");
+                }
+              }}
+              className="text-xs gap-1.5 border-dashed border-amber-500/60 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+            >
+              <FlaskConical className="w-3.5 h-3.5" />
+              <span>Namunaviy sinov rejimiga o'tkazish</span>
+            </Button>
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          {/* Step 1: Dispatch */}
-          <div className="bg-card border border-border rounded-lg p-4 flex flex-col justify-between shadow-sm">
-            <div>
-              <div className="flex items-center justify-between pb-3 border-b border-border mb-3">
+        /* ── STATE B: SAMPLE FIRST WORKFLOW VIEW ── */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {/* Left Column (7 cols): Production Specs & Floor QC */}
+          <div className="lg:col-span-7 space-y-4">
+            {/* Card 1: Technical Sample Parameters */}
+            <div className="bg-card border border-border rounded-lg p-4 space-y-3.5 shadow-xs">
+              <div className="flex items-center justify-between pb-2.5 border-b border-border">
                 <div className="flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-amber-500" />
-                  <h4 className="font-semibold text-xs text-foreground">1. Send Sample to Client</h4>
+                  <FlaskConical className="w-4 h-4 text-amber-500" />
+                  <h4 className="font-semibold text-xs text-foreground">
+                    1. Sinov namunasi parametrlari (Sample Specs)
+                  </h4>
                 </div>
-                <Badge 
-                  variant="outline" 
-                  className={cn("text-[10px] font-semibold", 
-                    sampleData.isDispatched 
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-400" 
-                      : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/50 dark:text-amber-400"
-                  )}
-                >
-                  {sampleData.isDispatched ? "✓ Dispatched" : "Awaiting Dispatch"}
+                <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                  {sampleQty} {formData.unit || "dona"} sinov
                 </Badge>
               </div>
 
-              {sampleData.isDispatched ? (
-                <div className="p-3 bg-muted/40 border border-border rounded-md space-y-2 text-xs">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="text-muted-foreground block text-[11px]">Delivery Method:</span>
-                      <span className="font-semibold text-foreground">{sampleData.deliveryMethod}</span>
-                      {sampleData.courierName && <span className="text-muted-foreground"> ({sampleData.courierName})</span>}
-                    </div>
-                    <div className="text-right">
-                      <span className="text-muted-foreground block text-[11px]">Dispatched Date:</span>
-                      <span className="font-medium text-foreground">{sampleData.dispatchDate}</span>
-                    </div>
-                  </div>
-
-                  {sampleData.recipientName && (
-                    <div className="pt-1.5 border-t border-border/50 text-[11px] text-muted-foreground">
-                      <span>Recipient: </span>
-                      <strong className="text-foreground">{sampleData.recipientName}</strong>
-                      {sampleData.recipientPhone && <span> • {sampleData.recipientPhone}</span>}
-                    </div>
-                  )}
+              {/* Sample Qty Selector (Synced with LayoutCalcTab) */}
+              <div className="space-y-1.5 bg-muted/40 p-2.5 rounded-md border border-border/80">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-medium text-foreground">Sinov adadi (SSOT):</span>
+                  <span className="text-muted-foreground font-mono">
+                    Umumiy tiraj: {formData.quantity.toLocaleString()} {formData.unit}
+                  </span>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-muted-foreground font-medium block text-[11px] mb-1">Sample Qty</label>
-                      <Input type="number" value={sampleData.sampleQty} onChange={e => handleSampleChange("sampleQty", Number(e.target.value))} className="h-8 text-xs bg-background" />
-                    </div>
-                    <div>
-                      <label className="text-muted-foreground font-medium block text-[11px] mb-1">Dispatch Date</label>
-                      <DatePicker value={sampleData.dispatchDate} onChange={(v) => handleSampleChange("dispatchDate", v)} className="h-8 text-xs" />
-                    </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 flex-1">
+                    {SAMPLE_PILLS.map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => handleSampleChange("sampleQty", n)}
+                        className={cn(
+                          "flex-1 py-1 text-[11px] font-medium rounded border transition-colors cursor-pointer",
+                          sampleQty === n
+                            ? "bg-amber-500 text-white border-amber-500 shadow-xs"
+                            : "bg-background text-muted-foreground border-border hover:text-foreground"
+                        )}
+                      >
+                        {n}
+                      </button>
+                    ))}
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-muted-foreground font-medium block text-[11px] mb-1">Method</label>
-                      <Select value={sampleData.deliveryMethod} onValueChange={(v) => handleSampleChange("deliveryMethod", v)}>
-                        <SelectTrigger className="h-8 text-xs bg-background"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {COURIER_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <label className="text-muted-foreground font-medium block text-[11px] mb-1">Tracking #</label>
-                      <Input value={sampleData.trackingNumber} onChange={e => handleSampleChange("trackingNumber", e.target.value)} className="h-8 text-xs bg-background" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-muted-foreground font-medium block text-[11px] mb-1">Recipient</label>
-                    <Input value={sampleData.recipientName} onChange={e => handleSampleChange("recipientName", e.target.value)} className="h-8 text-xs bg-background" />
-                  </div>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={sampleQty}
+                    onChange={(e) => handleSampleChange("sampleQty", Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-16 h-7 text-xs text-center bg-background font-mono"
+                  />
                 </div>
-              )}
+
+                {/* Target Single Size for Sample if multi-size matrix exists */}
+                {formData.sizes && formData.sizes.length > 0 && (
+                  <div className="pt-2 mt-2 border-t border-border/60 flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <label className="text-[11px] font-medium text-foreground block">
+                        Namunada bosiladigan o'lcham:
+                      </label>
+                      <span className="text-[10px] text-muted-foreground block truncate">
+                        Matritsadagi barcha razmerlar emas, faqat tanlangan razmer sinovdan o'tkaziladi
+                      </span>
+                    </div>
+                    <Select
+                      value={sampleData.sampleTargetSize || formData.sizes[0]?.size || "all"}
+                      onValueChange={(val) => {
+                        handleSampleChange("sampleTargetSize", val);
+                        handleFieldChange("sampleTargetSize", val);
+                      }}
+                    >
+                      <SelectTrigger className="w-40 h-7 text-xs bg-background font-mono">
+                        <SelectValue placeholder="O'lchamni tanlang" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Barcha o'lchamlar (Mikro-tiraj)</SelectItem>
+                        {formData.sizes.map((s) => (
+                          <SelectItem key={s.id} value={s.size} className="font-mono text-xs">
+                            {s.size} (Aslida: {s.quantity.toLocaleString()} ta)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Test Purpose & Machine Selection */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-muted-foreground font-medium block text-[11px] mb-1">
+                    Sinov maqsadi (Purpose)
+                  </label>
+                  <Select
+                    value={sampleData.testPurpose || "color_proof"}
+                    onValueChange={(val) => handleSampleChange("testPurpose", val)}
+                  >
+                    <SelectTrigger className="h-8 text-xs bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TEST_PURPOSE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                          <div>
+                            <span className="font-medium">{opt.label}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-muted-foreground font-medium block text-[11px] mb-1">
+                    Sinov uskunasi (Machine / Line)
+                  </label>
+                  <Input
+                    value={sampleData.testMachine || formData.pressMachine || ""}
+                    onChange={(e) => handleSampleChange("testMachine", e.target.value)}
+                    placeholder="Uskuna nomi..."
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
+              </div>
+
+              {/* Substrate Source & Tech Instruction */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="text-muted-foreground font-medium block text-[11px] mb-1">
+                    Qog'oz / xomashyo manbasi
+                  </label>
+                  <Select
+                    value={sampleData.substrateSource || "precut"}
+                    onValueChange={(val) => handleSampleChange("substrateSource", val)}
+                  >
+                    <SelectTrigger className="h-8 text-xs bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="precut" className="text-xs">
+                        Pre-cut tayyor varaqlar (Ombordan)
+                      </SelectItem>
+                      <SelectItem value="parent_sheet" className="text-xs">
+                        Katta formatli listdan kesish (Offcut)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-muted-foreground font-medium block text-[11px] mb-1">
+                    Texnologik talab / Ko'rsatma
+                  </label>
+                  <Input
+                    value={sampleData.technicalNotes || ""}
+                    onChange={(e) => handleSampleChange("technicalNotes", e.target.value)}
+                    placeholder="Masalan: Delta E < 2.0, zichlik 1.45..."
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="pt-4 mt-2">
-              {!sampleData.isDispatched ? (
-                <Button onClick={handleMarkDispatched} className="w-full h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5 shadow-sm">
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Mark as Dispatched</span>
-                </Button>
-              ) : (
-                <Button onClick={() => handleSampleChange("isDispatched", false)} variant="outline" size="sm" className="w-full h-7 text-xs">
-                  <RotateCcw className="w-3 h-3 mr-1" />
-                  <span>Edit Dispatch</span>
-                </Button>
-              )}
+            {/* Card 2: Shop-Floor Execution & QC Inspection */}
+            <div className="bg-card border border-border rounded-lg p-4 space-y-3.5 shadow-xs">
+              <div className="flex items-center justify-between pb-2.5 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <h4 className="font-semibold text-xs text-foreground">
+                    2. Sex va Sifat Nazorati (OTK Inspection)
+                  </h4>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px] font-semibold",
+                      sampleData.qcPassed
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-400"
+                        : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/50 dark:text-amber-400"
+                    )}
+                  >
+                    {sampleData.qcPassed ? "✓ OTK Tasdiqladi" : "OTK Tekshiruvi Kutilmoqda"}
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Status rows */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {/* Floor Production Status */}
+                <div className="p-3 bg-muted/40 border border-border rounded-md space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground font-medium">Namuna chop etilishi:</span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[10px]",
+                        sampleData.isProduced
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-400"
+                          : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {sampleData.isProduced ? "Chop etildi" : "Kutilmoqda"}
+                    </Badge>
+                  </div>
+                  {sampleData.isProduced ? (
+                    <div className="text-[11px] text-muted-foreground space-y-0.5 pt-1 border-t border-border/50">
+                      <div>Vaqt: <strong className="text-foreground">{sampleData.producedAt || "—"}</strong></div>
+                      <div>Mas'ul: <strong className="text-foreground">{sampleData.producedBy || "Operator"}</strong></div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Uskunada sinov varaqlarini chiqarib, tugmani bosing.
+                    </p>
+                  )}
+                  <Button
+                    type="button"
+                    variant={sampleData.isProduced ? "outline" : "default"}
+                    size="sm"
+                    onClick={handleMarkProduced}
+                    className="w-full h-7 text-xs mt-1"
+                  >
+                    <Printer className="w-3.5 h-3.5 mr-1" />
+                    <span>{sampleData.isProduced ? "Qayta chop etish" : "Namuna chop etildi deb belgilash"}</span>
+                  </Button>
+                </div>
+
+                {/* QC Inspection Status */}
+                <div className="p-3 bg-muted/40 border border-border rounded-md space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground font-medium">OTK tekshiruvi:</span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[10px]",
+                        sampleData.qcPassed
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-400"
+                          : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {sampleData.qcPassed ? "Qabul qilindi" : "Tekshirilmagan"}
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Rang balansi, bigovka, razmer va chop defektlari yo'qligini tasdiqlash.
+                  </p>
+                  <Button
+                    type="button"
+                    variant={sampleData.qcPassed ? "outline" : "default"}
+                    size="sm"
+                    onClick={handleToggleQc}
+                    className={cn(
+                      "w-full h-7 text-xs mt-1",
+                      sampleData.qcPassed
+                        ? "text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    )}
+                  >
+                    <ClipboardCheck className="w-3.5 h-3.5 mr-1" />
+                    <span>{sampleData.qcPassed ? "OTK bekor qilish" : "OTK Sifatini Tasdiqlash"}</span>
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Step 2: Decision */}
-          <div className="bg-card border border-border rounded-lg p-4 flex flex-col justify-between shadow-sm opacity-100">
-            <div className={cn(!sampleData.isDispatched && "opacity-50 pointer-events-none")}>
-              <div className="flex items-center justify-between pb-3 border-b border-border mb-3">
+          {/* Right Column (5 cols): Decision Gate & Revision History */}
+          <div className="lg:col-span-5 space-y-4">
+            {/* Card 3: Decision Gate (Approve or Reject) */}
+            <div className="bg-card border border-border rounded-lg p-4 space-y-3.5 shadow-xs">
+              <div className="flex items-center justify-between pb-2.5 border-b border-border">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-blue-600" />
-                  <h4 className="font-semibold text-xs text-foreground">2. Client Sample Review</h4>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <h4 className="font-semibold text-xs text-foreground">
+                    3. Tasdiqlash va Ruxsat Darvozasi (Approval Gate)
+                  </h4>
                 </div>
-                <Badge variant="outline" className={cn("text-[10px] font-semibold", 
-                  sampleData.approvalStatus === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-300" :
-                  sampleData.approvalStatus === "Revision Requested" ? "bg-amber-50 text-amber-700 border-amber-300" :
-                  "bg-zinc-100 text-zinc-500"
-                )}>
-                  {sampleData.approvalStatus}
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px] font-semibold",
+                    sampleData.approvalStatus === "approved"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-400"
+                      : sampleData.approvalStatus === "revision_requested"
+                      ? "bg-red-50 text-red-700 border-red-300 dark:bg-red-950/50 dark:text-red-400"
+                      : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/50 dark:text-amber-400"
+                  )}
+                >
+                  {sampleData.approvalStatus === "approved"
+                    ? "✓ Tasdiqlangan"
+                    : sampleData.approvalStatus === "revision_requested"
+                    ? "Qayta ishlashda"
+                    : "Tasdiq kutilmoqda"}
                 </Badge>
               </div>
 
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <Button 
-                    variant={sampleData.approvalStatus === "Approved" ? "default" : "outline"}
-                    className={cn("h-16 flex flex-col gap-1", sampleData.approvalStatus === "Approved" && "bg-emerald-600 hover:bg-emerald-700")}
-                    onClick={() => handleSampleChange("approvalStatus", "Approved")}
-                  >
-                    <CheckCircle2 className="w-5 h-5" />
-                    <span>Approved</span>
-                  </Button>
-                  <Button 
-                    variant={sampleData.approvalStatus === "Revision Requested" ? "default" : "outline"}
-                    className={cn("h-16 flex flex-col gap-1", sampleData.approvalStatus === "Revision Requested" && "bg-amber-600 hover:bg-amber-700 text-white")}
-                    onClick={() => handleSampleChange("approvalStatus", "Revision Requested")}
-                  >
-                    <RotateCcw className="w-5 h-5" />
-                    <span>Revision</span>
-                  </Button>
-                </div>
-              </div>
-            </div>
-            
-            <div className="pt-4 mt-2 border-t border-border/50">
-              {formData.linkedWoId ? (
-                <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-md text-xs font-medium text-emerald-800 w-full justify-center">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Work Order: <strong>{formData.linkedWoId}</strong></span>
+              {/* Status explanation */}
+              {sampleData.approvalStatus === "approved" ? (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-md space-y-1.5 text-xs text-emerald-900 dark:text-emerald-200">
+                  <div className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Namuna to'liq tasdiqlangan</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80">
+                    Naryad to'liq tiraj (<strong>{formData.quantity.toLocaleString()} {formData.unit}</strong>) bilan
+                    ishlab chiqarish jadvaliga yo'naltirildi. Mashina va navbat qulfdan chiqarildi.
+                  </p>
+                  {sampleData.approvedAt && (
+                    <div className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80 pt-1 border-t border-emerald-500/20">
+                      Sana: {sampleData.approvedAt} • Tasdiqladi: {sampleData.approvedBy || "Bosh Texnolog"}
+                    </div>
+                  )}
                 </div>
               ) : (
-                <Button 
-                  onClick={handleCreateWorkOrder}
-                  disabled={sampleData.approvalStatus !== "Approved"}
-                  className="w-full h-9 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs gap-2 shadow-sm"
-                >
-                  <Factory className="w-4 h-4" />
-                  <span>Launch Production</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </Button>
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-md space-y-1.5 text-xs text-amber-950 dark:text-amber-200">
+                  <div className="flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-300">
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Asosiy tiraj bloklangan 🔒</span>
+                  </div>
+                  <p className="text-[11px] text-amber-900/80 dark:text-amber-300/80 leading-relaxed">
+                    Namuna tasdiqlanmaguncha asosiy bosma (<strong>{formData.quantity.toLocaleString()} {formData.unit}</strong>)
+                    mashina navbatida ruxsat ololmaydi.
+                  </p>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="space-y-2 pt-1">
+                {sampleData.approvalStatus !== "approved" ? (
+                  <>
+                    <Button
+                      type="button"
+                      onClick={onApproveAndReleaseMassRun}
+                      className="w-full h-9 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs gap-1.5 shadow-sm"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      <span>Tasdiqlash & Asosiy Tirajga Ruxsat Berish</span>
+                      <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsRevisionBoxOpen(!isRevisionBoxOpen)}
+                      className="w-full h-8 text-xs border-amber-300 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40 gap-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Qayta ishlash / Reviziya talab qilish</span>
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      handleSampleChange("approvalStatus", "awaiting_approval");
+                      handleFieldChange("orderType", "Sample");
+                    }}
+                    className="w-full h-7 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <RotateCcw className="w-3 h-3 mr-1" />
+                    <span>Tasdiqni bekor qilish (Qayta ko'rib chiqish)</span>
+                  </Button>
+                )}
+              </div>
+
+              {/* Inline Revision Input Form */}
+              {isRevisionBoxOpen && (
+                <div className="p-3 bg-muted/60 border border-border rounded-md space-y-2.5 text-xs animate-in fade-in-50 duration-200">
+                  <div className="font-semibold text-[11px] text-foreground flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Reviziya sababi va texnik izoh</span>
+                  </div>
+
+                  <div>
+                    <label className="text-muted-foreground text-[10px] block mb-1">Xatolik toifasi</label>
+                    <Select
+                      value={revisionReason}
+                      onValueChange={(val: any) => setRevisionReason(val)}
+                    >
+                      <SelectTrigger className="h-7 text-xs bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REVISION_REASONS.map((r) => (
+                          <SelectItem key={r.value} value={r.value} className="text-xs">
+                            {r.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-muted-foreground text-[10px] block mb-1">
+                      Tuzatish bo'yicha ko'rsatma (Sex va operator uchun)
+                    </label>
+                    <Input
+                      value={revisionNotes}
+                      onChange={(e) => setRevisionNotes(e.target.value)}
+                      placeholder="Masalan: Cyan zichligini 10% kamaytirish, qolip siljigan..."
+                      className="h-8 text-xs bg-background"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsRevisionBoxOpen(false)}
+                      className="h-7 text-xs"
+                    >
+                      Bekor qilish
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleConfirmRevision}
+                      disabled={!revisionNotes.trim()}
+                      className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white"
+                    >
+                      Qayta ishlashga yuborish
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Card 4: Technical Revision Log / History */}
+            <div className="bg-card border border-border rounded-lg p-4 space-y-2.5 shadow-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-border">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                  <History className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span>Reviziyalar jurnali ({revisions.length})</span>
+                </div>
+              </div>
+
+              {revisions.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground py-2 text-center italic">
+                  Hozircha hech qanday reviziya qayd etilmagan.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {revisions.map((rev) => (
+                    <div
+                      key={rev.id}
+                      className="p-2.5 rounded-md bg-muted/40 border border-border text-[11px] space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-foreground">
+                          Reviziya #{rev.revisionNumber}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{rev.date}</span>
+                      </div>
+                      <div className="text-[10px] text-amber-700 dark:text-amber-400 font-medium">
+                        {REVISION_REASONS.find((r) => r.value === rev.reasonCategory)?.label || rev.reasonCategory}
+                      </div>
+                      <p className="text-muted-foreground leading-tight pt-0.5">{rev.notes}</p>
+                      <div className="text-[9px] text-muted-foreground/80 pt-0.5">
+                        Kiritdi: {rev.reportedBy}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

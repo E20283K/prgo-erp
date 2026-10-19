@@ -16,6 +16,7 @@ import {
   Code2,
   Copy,
   ExternalLink,
+  Crosshair,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toggleAppFullscreen } from "@/lib/fullscreen";
@@ -66,9 +67,11 @@ import { Kbd } from "@/components/ui/kbd";
 const MODULE_COLORS: Record<string, string> = {
   production: "bg-blue-600",
   crm:        "bg-violet-600",
+  trading:    "bg-indigo-600",
   sales:      "bg-emerald-600",
   warehouse:  "bg-amber-600",
   finance:    "bg-rose-600",
+  hr:         "bg-teal-600",
   settings:   "bg-zinc-600",
 };
 
@@ -91,6 +94,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     setAiChatOpen,
     showStatusBar,
     setShowStatusBar,
+    isInspectorActive,
+    setInspectorActive,
+    lastInspectedElement,
     tabs,
     activeTabId,
   } = useWorkspaceStore();
@@ -98,6 +104,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const resolvedComponent = resolveActiveComponent(activeTab, activeModule, currentSubModule);
   const [copiedPath, setCopiedPath] = React.useState(false);
+  const [copiedInspected, setCopiedInspected] = React.useState(false);
 
   const handleCopyComponentPath = () => {
     navigator.clipboard.writeText(resolvedComponent.relativePath);
@@ -356,6 +363,53 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               </span>
             </div>
           </ContextMenuCheckboxItem>
+
+          <ContextMenuCheckboxItem
+            checked={isInspectorActive}
+            onCheckedChange={(checked) => setInspectorActive(checked)}
+            className="cursor-pointer py-1.5"
+          >
+            <div className="flex items-center justify-between w-full gap-2">
+              <span className="flex items-center gap-1.5 font-medium text-cyan-500 dark:text-cyan-400">
+                <Crosshair className="size-3.5 shrink-0" />
+                <span>Inspect Element (AI)</span>
+              </span>
+              <Kbd className="text-[9px]">Ctrl+Shift+C</Kbd>
+            </div>
+          </ContextMenuCheckboxItem>
+
+          {lastInspectedElement && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuLabel className="text-[10px] text-cyan-500 dark:text-cyan-400 uppercase tracking-wider py-0.5 px-2 font-mono">
+                Last Inspected (AI Context)
+              </ContextMenuLabel>
+              <ContextMenuItem
+                onClick={() => {
+                  navigator.clipboard.writeText(lastInspectedElement.aiPromptText);
+                  setCopiedInspected(true);
+                  setTimeout(() => setCopiedInspected(false), 2000);
+                }}
+                className="gap-2 cursor-pointer py-1.5"
+              >
+                {copiedInspected ? (
+                  <Check className="size-3.5 text-emerald-500 shrink-0" />
+                ) : (
+                  <Copy className="size-3.5 text-cyan-500 shrink-0" />
+                )}
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="truncate font-mono text-[11px] font-semibold text-foreground">
+                    {lastInspectedElement.fileName}:{lastInspectedElement.lineRangeLabel}
+                  </span>
+                  <span className="truncate text-[10px] text-muted-foreground font-mono">
+                    {copiedInspected
+                      ? "Copied AI context!"
+                      : `${lastInspectedElement.componentName} · ${lastInspectedElement.elementLabel}`}
+                  </span>
+                </div>
+              </ContextMenuItem>
+            </>
+          )}
 
           <ContextMenuSeparator />
 

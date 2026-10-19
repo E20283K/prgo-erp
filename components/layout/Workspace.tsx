@@ -3,8 +3,17 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { useWorkspaceStore, DocumentTab } from "@/store/workspaceStore";
-import { X, FileText, Table, Plus, ChevronDown, Check, Layers, Trash2 } from "lucide-react";
+import { X, FileText, Table, Plus, ChevronDown, Check, Layers, Trash2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -30,13 +39,19 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { WorkOrderDetail } from "@/components/documents/WorkOrderDetail";
-import { CreateWorkOrderPickerModal } from "@/components/documents/work-order/dialogs/CreateWorkOrderPickerModal";
 import { ProductSpecDetail } from "@/components/documents/ProductSpecDetail";
 import { SalesRecordDetail } from "@/components/documents/SalesRecordDetail";
 import { DeliveryActDetail } from "@/components/documents/DeliveryActDetail";
 import { CustomerDetail } from "@/components/documents/CustomerDetail";
 import { WarehouseReceiptDetail } from "@/components/documents/WarehouseReceiptDetail";
+import { WarehouseShipmentDetail } from "@/components/documents/WarehouseShipmentDetail";
 import { PlanningSlotDetail } from "@/components/documents/PlanningSlotDetail";
+import { MachineDetail } from "@/components/documents/MachineDetail";
+import { WarehouseStockDetail } from "@/components/documents/WarehouseStockDetail";
+import { PlantDetail } from "@/components/documents/PlantDetail";
+import { EmployeeDetail } from "@/components/documents/hr/EmployeeDetail";
+import { TradingSaleDetail } from "@/components/documents/trading/TradingSaleDetail";
+import { TradingSettlementDetail } from "@/components/documents/trading/TradingSettlementDetail";
 
 import { TabContentWrapper } from "./TabContentWrapper";
 import { RegistryGridRenderer } from "./RegistryGridRenderer";
@@ -51,6 +66,10 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     activeTabId,
     setActiveTab,
     closeTab,
+    requestCloseTab,
+    tabToConfirmClose,
+    setTabToConfirmClose,
+    setTabUnsaved,
     closeSavedTabs,
     closeAllDocumentTabs,
     openTab,
@@ -125,14 +144,14 @@ export function Workspace({ children }: { children: React.ReactNode }) {
 
   const handleCloseOthers = (keepId: string) => {
     tabs.forEach((t) => {
-      if (t.id !== keepId && t.type !== "registry") closeTab(t.id);
+      if (t.id !== keepId && t.type !== "registry") requestCloseTab(t.id);
     });
   };
 
   const handleCloseToRight = (tabId: string) => {
     const idx = tabs.findIndex((t) => t.id === tabId);
     if (idx !== -1) {
-      tabs.slice(idx + 1).forEach((t) => closeTab(t.id));
+      tabs.slice(idx + 1).forEach((t) => requestCloseTab(t.id));
     }
   };
 
@@ -147,7 +166,14 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     if (tab.type === "delivery-act") return <DeliveryActDetail tab={tab} />;
     if (tab.type === "customer") return <CustomerDetail tab={tab} />;
     if (tab.type === "warehouse-receipt") return <WarehouseReceiptDetail tab={tab} />;
+    if (tab.type === "warehouse-shipment") return <WarehouseShipmentDetail tab={tab} />;
+    if (tab.type === "warehouse-stock") return <WarehouseStockDetail tab={tab} />;
     if (tab.type === "planning-slot") return <PlanningSlotDetail tab={tab} />;
+    if (tab.type === "machine-detail") return <MachineDetail tab={tab} />;
+    if (tab.type === "plant-detail") return <PlantDetail tab={tab} />;
+    if (tab.type === "employee-detail") return <EmployeeDetail tab={tab} />;
+    if (tab.type === "trading-sale") return <TradingSaleDetail tab={tab} />;
+    if (tab.type === "trading-settlement") return <TradingSettlementDetail tab={tab} />;
     if (tab.type === "registry") return <RegistryGridRenderer tab={tab} />;
     return null;
   };
@@ -155,11 +181,6 @@ export function Workspace({ children }: { children: React.ReactNode }) {
   return (
     <TooltipProvider delay={300}>
       <div className="flex-1 flex flex-col min-w-0 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
-        <CreateWorkOrderPickerModal
-          isOpen={isCreateWorkOrderOpen}
-          onOpenChange={setCreateWorkOrderOpen}
-        />
-
         {/* VS Code + 1C Document Tab Bar (Fluid Widths, No Scrollbar, Overflow Dropdown) */}
         {!isPOSActive && (
           <div
@@ -190,7 +211,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
                               onAuxClick={(e) => {
                                 if (e.button === 1 && canClose) {
                                   e.preventDefault();
-                                  closeTab(tab.id);
+                                  requestCloseTab(tab.id);
                                 }
                               }}
                               className={cn(
@@ -232,7 +253,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    closeTab(tab.id);
+                                    requestCloseTab(tab.id);
                                   }}
                                   className={cn(
                                     "p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors shrink-0",
@@ -254,7 +275,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
 
                     <ContextMenuContent className="text-xs w-48">
                       {canClose && (
-                        <ContextMenuItem onClick={() => closeTab(tab.id)}>
+                        <ContextMenuItem onClick={() => requestCloseTab(tab.id)}>
                           {t("close")}
                         </ContextMenuItem>
                       )}
@@ -383,7 +404,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  closeTab(tab.id);
+                                  requestCloseTab(tab.id);
                                 }}
                                 className="p-0.5 rounded opacity-60 hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-opacity shrink-0"
                                 title={t("close")}
@@ -452,6 +473,76 @@ export function Workspace({ children }: { children: React.ReactNode }) {
         ))}
         {tabs.length === 0 && children}
       </div>
+
+      {/* Confirmation Dialog for Closing Tabs with Unsaved Changes */}
+      <Dialog
+        open={Boolean(tabToConfirmClose)}
+        onOpenChange={(open) => {
+          if (!open) setTabToConfirmClose(null);
+        }}
+      >
+        <DialogContent className="max-w-md p-5">
+          <DialogHeader className="gap-2">
+            <div className="flex items-center gap-2.5 text-amber-600 dark:text-amber-500">
+              <div className="w-8 h-8 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              </div>
+              <DialogTitle className="text-sm font-semibold text-foreground">
+                {t("unsavedChangesTitle")}
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
+              {t("unsavedChangesDescription", {
+                title: tabToConfirmClose ? getTabTitle(tabToConfirmClose) : "",
+              })}
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setTabToConfirmClose(null)}
+              className="text-xs h-8 cursor-pointer"
+            >
+              {t("cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (tabToConfirmClose) {
+                  setTabUnsaved(tabToConfirmClose.id, false);
+                  closeTab(tabToConfirmClose.id);
+                  setTabToConfirmClose(null);
+                }
+              }}
+              className="text-xs h-8 cursor-pointer"
+            >
+              {t("discardAndClose")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                if (tabToConfirmClose) {
+                  window.dispatchEvent(
+                    new CustomEvent("printgo:save-and-close", {
+                      detail: { tabId: tabToConfirmClose.id },
+                    })
+                  );
+                  setTabToConfirmClose(null);
+                }
+              }}
+              className="text-xs h-8 cursor-pointer"
+            >
+              {t("saveAndClose")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
     </TooltipProvider>
   );

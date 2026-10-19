@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Plus,
   Download,
@@ -44,6 +45,12 @@ import {
   Save,
   ArrowUpRight,
   Sparkles,
+  Mail,
+  Phone,
+  MessageSquare,
+  Copy,
+  Check,
+  FileText,
 } from "lucide-react";
 
 import { useWorkspaceStore, CrmCustomerRecord } from "@/store/workspaceStore";
@@ -61,10 +68,12 @@ interface LeadRecord {
   tin: string;
   contact: string;
   phone: string;
+  email?: string;
   productInterest: string;
   estimatedOrderUsd: number;
   source: string;
   manager: string;
+  notes?: string;
   status: "New" | "Contacted" | "Sample Sent" | "Qualified" | "Converted";
 }
 
@@ -73,12 +82,14 @@ const INITIAL_LEADS: LeadRecord[] = [
     id: "LD-1001",
     company: "Tashkent Tea & Spices LLC",
     tin: "309881240",
-    contact: "JavlonbekOrifov",
+    contact: "Javlonbek Orifov",
     phone: "+998 90 944-11-22",
+    email: "procurement@tea-spices.uz",
     productInterest: "300g Coated Tea Packaging Box + Hot Foil (25,000 pcs)",
     estimatedOrderUsd: 6400,
     source: "UzPrint Expo 2026",
     manager: "Elena Voronina",
+    notes: "Ko'rgazmada tanishdik. 25,000 dona quti uchun qolip (die-cut) va oltin folga namunalarini taqdim etish so'ralgan. To'lov shartlari: 50% oldindan.",
     status: "Qualified",
   },
   {
@@ -87,10 +98,12 @@ const INITIAL_LEADS: LeadRecord[] = [
     tin: "307612398",
     contact: "Malika Karimova",
     phone: "+998 93 380-55-66",
+    email: "sales@silkroadhotel.uz",
     productInterest: "600g Duplex Kashirovka VIP Keycard Holder & Welcome Folder",
     estimatedOrderUsd: 3200,
     source: "Instagram / Website",
     manager: "Elena Voronina",
+    notes: "Mehmonxona ochilishiga brendlashtirilgan VIP kartochka qutisi va papka kerak. Namunalar kuryer orqali yuborildi.",
     status: "Sample Sent",
   },
   {
@@ -99,10 +112,12 @@ const INITIAL_LEADS: LeadRecord[] = [
     tin: "304119872",
     contact: "Rustamjon Sobirov",
     phone: "+998 97 301-77-88",
+    email: "info@bukhara-textile.com",
     productInterest: "Woven Satin 60mm Care Labels + Hangtags (100,000 pcs)",
     estimatedOrderUsd: 8900,
-    source: "Direct Referral",
+    source: "Tavsiya (Referral)",
     manager: "T. Alimov",
+    notes: "Eksport uchun to'qimachilik yorliqlari (satin lentali pechat). O'lchamlari: 60x30mm, 4 rangli pechat. Qayta aloqaga chiqish: Dushanba 14:00.",
     status: "Contacted",
   },
   {
@@ -111,10 +126,12 @@ const INITIAL_LEADS: LeadRecord[] = [
     tin: "305229104",
     contact: "Sherzod Normatov",
     phone: "+998 99 512-00-99",
+    email: "supply@samarkand-sweets.uz",
     productInterest: "E-Flute Laminated Gift Box 350g + Matte Lamination",
     estimatedOrderUsd: 14500,
-    source: "Cold Call",
+    source: "Sovuq qo'ng'iroq",
     manager: "M. Ivanova",
+    notes: "Yangi yil va bayram shirinliklari uchun mikrogofrali sovg'a qutilari. Namunaviy maket va narx taklifi tayyorlanmoqda.",
     status: "New",
   },
   {
@@ -123,10 +140,12 @@ const INITIAL_LEADS: LeadRecord[] = [
     tin: "308771203",
     contact: "Dilnoza Rahimova",
     phone: "+998 71 277-88-99",
+    email: "purchasing@orienpharma.uz",
     productInterest: "Medicine Folding Cartons + 80g Instructions Insert",
     estimatedOrderUsd: 11200,
     source: "Tender Portal",
     manager: "Elena Voronina",
+    notes: "Farmatsevtika dori qutilari va ichki yo'riqnoma qog'ozlari (80g ofset). Sertifikatlar va gigiyenik xulosalar talab qilinadi.",
     status: "Qualified",
   },
 ];
@@ -149,6 +168,14 @@ export function CrmGrid({ type }: CrmGridProps) {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CrmCustomerRecord | null>(null);
   const [editingLead, setEditingLead] = useState<LeadRecord | null>(null);
+  const [copiedPhone, setCopiedPhone] = useState(false);
+
+  const handleCopyPhone = (text: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedPhone(true);
+    setTimeout(() => setCopiedPhone(false), 2000);
+  };
 
   const customerRows = useMemo(() => {
     return crmCustomers.map((c) => {
@@ -183,10 +210,9 @@ export function CrmGrid({ type }: CrmGridProps) {
     // Default: "customers"
     const cols: GridColumn[] = [
       { id: "id", title: "Cust ID", width: 95, icon: GridColumnIcon.HeaderReference },
-      { id: "name", title: "Company Name", width: 220, icon: GridColumnIcon.HeaderString },
+      { id: "name", title: "Company Name", width: 230, icon: GridColumnIcon.HeaderString },
       { id: "tin", title: "STIR / INN", width: 110, icon: GridColumnIcon.HeaderCode },
-      { id: "contractNo", title: "Contract No.", width: 130, icon: GridColumnIcon.HeaderCode },
-      { id: "contactPerson", title: "Contact Person", width: 155, icon: GridColumnIcon.HeaderString },
+      { id: "contactPerson", title: "Contact Person", width: 165, icon: GridColumnIcon.HeaderString },
       { id: "phone", title: "Phone", width: 145, icon: GridColumnIcon.HeaderString },
       { id: "paymentTerms", title: "Payment Terms", width: 185, icon: GridColumnIcon.HeaderString },
       { id: "balance", title: "Balance ($)", width: 125, icon: GridColumnIcon.HeaderNumber },
@@ -378,13 +404,15 @@ export function CrmGrid({ type }: CrmGridProps) {
       setEditingLead({
         id: `LD-${nextNum}`,
         company: "",
-        tin: "309000000",
+        tin: "",
         contact: "",
-        phone: "+998 90 ",
-        productInterest: "300g Coated Box / Catalog",
+        phone: "+998 ",
+        email: "",
+        productInterest: "",
         estimatedOrderUsd: 2500,
-        source: "Direct Inquiry",
+        source: "Instagram / Website",
         manager: "Elena Voronina",
+        notes: "",
         status: "New",
       });
       setEditingCustomer(null);
@@ -485,7 +513,7 @@ export function CrmGrid({ type }: CrmGridProps) {
       industry: "Commercial & Packaging",
       contactPerson: lead.contact || "Procurement Lead",
       phone: lead.phone || "+998 90 000-00-00",
-      email: "orders@client.uz",
+      email: lead.email || "orders@client.uz",
       contractNo: `CON-2026-${nextNum}`,
       paymentTerms: "50% Advance / 50% Before Dispatch",
       manager: lead.manager || "Elena Voronina",
@@ -517,6 +545,7 @@ export function CrmGrid({ type }: CrmGridProps) {
         department: "Offset",
         deadline: "2026-10-25",
         responsible: newCust.manager,
+        notes: lead.notes || "",
       },
     });
     setInspectorOpen(false);
@@ -546,15 +575,6 @@ export function CrmGrid({ type }: CrmGridProps) {
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>{type === "leads" ? "New Lead" : "New Customer"}</span>
-                </Button>
-                <Button
-                  onClick={handleOpenSelected}
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2.5 text-xs font-medium gap-1 rounded"
-                >
-                  <ExternalLink className="w-3 h-3 text-muted-foreground" />
-                  <span>Open 360° Card</span>
                 </Button>
                 <Separator orientation="vertical" className="h-4 mx-1" />
 
@@ -641,34 +661,34 @@ export function CrmGrid({ type }: CrmGridProps) {
 
       {/* 360° Customer / Lead Inspector Drawer */}
       <Sheet open={inspectorOpen} onOpenChange={setInspectorOpen}>
-        <SheetContent className="w-[480px] sm:max-w-[480px] overflow-y-auto">
+        <SheetContent className="w-[520px] sm:max-w-[540px] p-0 flex flex-col h-full bg-card overflow-hidden">
           {editingCustomer && (
-            <>
-              <SheetHeader className="pb-3 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <Badge variant="outline" className="font-mono text-xs">
+            <div className="flex flex-col h-full overflow-hidden">
+              <SheetHeader className="px-6 pt-5 pb-3 border-b border-border pr-12 bg-muted/20 shrink-0 text-left">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="font-mono text-xs bg-background">
                     {editingCustomer.id}
                   </Badge>
                   <Badge
                     className={
                       editingCustomer.status === "VIP"
-                        ? "bg-amber-500/15 text-amber-500 border-amber-500/30"
-                        : "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
+                        ? "bg-amber-500/15 text-amber-500 border-amber-500/30 font-medium"
+                        : "bg-emerald-500/15 text-emerald-500 border-emerald-500/30 font-medium"
                     }
                   >
                     {editingCustomer.status}
                   </Badge>
                 </div>
-                <SheetTitle className="flex items-center gap-2 text-base pt-1">
-                  <Building2 className="w-4 h-4 text-blue-500" />
-                  <span>{editingCustomer.name || "New Customer Card (360°)"}</span>
+                <SheetTitle className="flex items-center gap-2 text-base pt-1 truncate">
+                  <Building2 className="w-4 h-4 text-blue-500 shrink-0" />
+                  <span className="truncate">{editingCustomer.name || "Customer Card (360°)"}</span>
                 </SheetTitle>
                 <SheetDescription className="text-xs">
                   Mijoz rekvizitlari (STIR, Shartnoma), o&apos;zaro hisob-kitob saldosi va tezkor buyurtma ochish.
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="space-y-4 py-4">
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
                 {/* Live Financial Settlement Card */}
                 <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
                   <div className="flex items-center justify-between">
@@ -839,149 +859,336 @@ export function CrmGrid({ type }: CrmGridProps) {
 
                 <Separator />
 
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs gap-1.5 border-blue-500/40 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
-                    onClick={() => handleCreateOrderForCustomer(editingCustomer)}
-                  >
-                    <FilePlus2 className="w-3.5 h-3.5" />
-                    <span>Yangi Buyurtma Ochish (Client Order)</span>
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    className="h-8 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
-                    onClick={handleSaveCustomer}
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Saqlash</span>
-                  </Button>
-                </div>
               </div>
-            </>
+
+              <div className="p-4 border-t border-border bg-muted/20 shrink-0 flex items-center justify-between gap-3">
+                <Button
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => handleCreateOrderForCustomer(editingCustomer)}
+                >
+                  <FilePlus2 className="w-3.5 h-3.5" />
+                  <span>Yangi Buyurtma Ochish</span>
+                </Button>
+
+                <Button
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                  onClick={handleSaveCustomer}
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Saqlash</span>
+                </Button>
+              </div>
+            </div>
           )}
 
           {editingLead && (
-            <>
-              <SheetHeader className="pb-3 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <Badge variant="outline" className="font-mono text-xs">
+            <div className="flex flex-col h-full overflow-hidden">
+              <SheetHeader className="px-6 pt-5 pb-3 border-b border-border pr-12 bg-muted/20 shrink-0 text-left">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="font-mono text-xs bg-background">
                     {editingLead.id}
                   </Badge>
-                  <Badge className="bg-blue-500/15 text-blue-500 border-blue-500/30">
+                  <Badge
+                    className={
+                      editingLead.status === "New"
+                        ? "bg-sky-500/15 text-sky-500 border-sky-500/30 font-medium"
+                        : editingLead.status === "Qualified"
+                        ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30 font-medium"
+                        : editingLead.status === "Sample Sent"
+                        ? "bg-purple-500/15 text-purple-500 border-purple-500/30 font-medium"
+                        : editingLead.status === "Contacted"
+                        ? "bg-amber-500/15 text-amber-500 border-amber-500/30 font-medium"
+                        : "bg-blue-500/15 text-blue-500 border-blue-500/30 font-medium"
+                    }
+                  >
                     {editingLead.status}
                   </Badge>
+                  {editingLead.source && (
+                    <Badge variant="secondary" className="text-[11px] font-normal">
+                      {editingLead.source}
+                    </Badge>
+                  )}
                 </div>
-                <SheetTitle className="flex items-center gap-2 text-base pt-1">
-                  <UserCheck className="w-4 h-4 text-blue-500" />
-                  <span>{editingLead.company || "New Lead / So'rov"}</span>
+                <SheetTitle className="flex items-center gap-2 text-base pt-1 truncate">
+                  <UserCheck className="w-4 h-4 text-primary shrink-0" />
+                  <span className="truncate">{editingLead.company || "Yangi Lead / So'rov"}</span>
                 </SheetTitle>
                 <SheetDescription className="text-xs">
-                  Kiruvchi so&apos;rovni ko&apos;rib chiqish va 1-bosishda Mijoz + Kalkulyatsiya buyurtmasiga aylantirish.
+                  Kiruvchi so&apos;rov ma&apos;lumotlari, mijoz talabi va muzokara bosqichi.
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="space-y-3 py-4">
-                <div className="space-y-1">
-                  <Label className="text-xs">Kompaniya / Brend nomi</Label>
-                  <Input
-                    value={editingLead.company}
-                    onChange={(e) =>
-                      setEditingLead({ ...editingLead, company: e.target.value })
-                    }
-                    className="h-8 text-xs"
-                  />
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3.5">
+                {/* 1. Kompaniya va Bog'lanish */}
+                <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Kompaniya va Aloqa Rekvizitlari</span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div className="col-span-2 space-y-1">
+                      <Label className="text-xs">Kompaniya / Brend nomi</Label>
+                      <Input
+                        value={editingLead.company}
+                        onChange={(e) =>
+                          setEditingLead({ ...editingLead, company: e.target.value })
+                        }
+                        placeholder="Masalan: Silk Road LLC"
+                        className="h-8 text-xs font-medium"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">STIR / INN</Label>
+                      <Input
+                        value={editingLead.tin || ""}
+                        onChange={(e) =>
+                          setEditingLead({ ...editingLead, tin: e.target.value })
+                        }
+                        placeholder="309..."
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Muloqotdagi shaxs</Label>
+                      <Input
+                        value={editingLead.contact}
+                        onChange={(e) =>
+                          setEditingLead({ ...editingLead, contact: e.target.value })
+                        }
+                        placeholder="Ism Familiya"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">Telefon</Label>
+                        {editingLead.phone && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPhone(editingLead.phone)}
+                            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+                          >
+                            {copiedPhone ? (
+                              <Check className="w-2.5 h-2.5 text-emerald-500" />
+                            ) : (
+                              <Copy className="w-2.5 h-2.5" />
+                            )}
+                            <span>{copiedPhone ? "Nusxalandi" : "Nusxalash"}</span>
+                          </button>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <Phone className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-2.5" />
+                        <Input
+                          value={editingLead.phone}
+                          onChange={(e) =>
+                            setEditingLead({ ...editingLead, phone: e.target.value })
+                          }
+                          className="h-8 text-xs font-mono pl-8"
+                          placeholder="+998 90 123-45-67"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Email pochta</Label>
+                    <div className="relative">
+                      <Mail className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-2.5" />
+                      <Input
+                        value={editingLead.email || ""}
+                        onChange={(e) =>
+                          setEditingLead({ ...editingLead, email: e.target.value })
+                        }
+                        placeholder="procurement@company.uz"
+                        className="h-8 text-xs pl-8"
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                {/* 2. Spetsifikatsiya va Baholash */}
+                <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Poligrafiya Buyurtmasi va Baholash</span>
+                  </div>
+
                   <div className="space-y-1">
-                    <Label className="text-xs">Muloqotdagi shaxs</Label>
+                    <Label className="text-xs">So&apos;ralayotgan poligrafiya mahsuloti (Print Spec)</Label>
                     <Input
-                      value={editingLead.contact}
+                      value={editingLead.productInterest}
                       onChange={(e) =>
-                        setEditingLead({ ...editingLead, contact: e.target.value })
+                        setEditingLead({ ...editingLead, productInterest: e.target.value })
                       }
+                      placeholder="Masalan: 300g Coated Tea Packaging Box + Hot Foil (25,000 dona)"
                       className="h-8 text-xs"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Telefon</Label>
-                    <Input
-                      value={editingLead.phone}
-                      onChange={(e) =>
-                        setEditingLead({ ...editingLead, phone: e.target.value })
-                      }
-                      className="h-8 text-xs font-mono"
-                    />
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Taxminiy buyurtma qiymati ($)</Label>
+                      <Input
+                        type="number"
+                        value={editingLead.estimatedOrderUsd}
+                        onChange={(e) =>
+                          setEditingLead({
+                            ...editingLead,
+                            estimatedOrderUsd: Number(e.target.value) || 0,
+                          })
+                        }
+                        className="h-8 text-xs font-mono font-semibold"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs">Bosqich (Stage)</Label>
+                      <Select
+                        value={editingLead.status}
+                        onValueChange={(val) =>
+                          val && setEditingLead({ ...editingLead, status: val as LeadRecord["status"] })
+                        }
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="New">New (Yangi so&apos;rov)</SelectItem>
+                          <SelectItem value="Contacted">Contacted (Bog&apos;lanildi)</SelectItem>
+                          <SelectItem value="Sample Sent">Sample Sent (Namuna yuborildi)</SelectItem>
+                          <SelectItem value="Qualified">Qualified (Kelishildi)</SelectItem>
+                          <SelectItem value="Converted">Converted (Buyurtmaga aylandi)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Kelib tushish manbasi (Source)</Label>
+                      <Select
+                        value={editingLead.source}
+                        onValueChange={(val) =>
+                          val && setEditingLead({ ...editingLead, source: val })
+                        }
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UzPrint Expo 2026">UzPrint Expo 2026</SelectItem>
+                          <SelectItem value="Instagram / Website">Instagram / Website</SelectItem>
+                          <SelectItem value="Telegram">Telegram</SelectItem>
+                          <SelectItem value="Tavsiya (Referral)">Tavsiya (Referral)</SelectItem>
+                          <SelectItem value="Sovuq qo'ng'iroq">Sovuq qo&apos;ng&apos;iroq</SelectItem>
+                          <SelectItem value="Tender Portal">Tender Portal</SelectItem>
+                          <SelectItem value="Direct Inquiry">Boshqa / To&apos;g&apos;ridan-to&apos;g&apos;ri</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs">Mas&apos;ul menejer</Label>
+                      <Select
+                        value={editingLead.manager}
+                        onValueChange={(val) =>
+                          val && setEditingLead({ ...editingLead, manager: val })
+                        }
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Elena Voronina">Elena Voronina</SelectItem>
+                          <SelectItem value="T. Alimov">T. Alimov</SelectItem>
+                          <SelectItem value="M. Ivanova">M. Ivanova</SelectItem>
+                          <SelectItem value="Bobur Shokirov">Bobur Shokirov</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <Label className="text-xs">So&apos;ralayotgan poligrafiya mahsuloti (Print Spec)</Label>
-                  <Input
-                    value={editingLead.productInterest}
+                {/* 3. Muzokara Tarixi va Izohlar */}
+                <div className="rounded-lg border border-border bg-card p-3.5 space-y-2.5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
+                      Muzokara Izohi va Eslatmalar
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-normal">
+                      Menejer kundaligi
+                    </span>
+                  </div>
+
+                  <Textarea
+                    value={editingLead.notes || ""}
                     onChange={(e) =>
-                      setEditingLead({ ...editingLead, productInterest: e.target.value })
+                      setEditingLead({ ...editingLead, notes: e.target.value })
                     }
-                    className="h-8 text-xs"
+                    placeholder="Mijoz talablari, so'ralgan namunalar, muddatlar va qayta qo'ng'iroq vaqti..."
+                    className="min-h-[85px] text-xs resize-none leading-relaxed"
                   />
-                </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Taxminiy buyurtma summasi ($)</Label>
-                    <Input
-                      type="number"
-                      value={editingLead.estimatedOrderUsd}
-                      onChange={(e) =>
-                        setEditingLead({
-                          ...editingLead,
-                          estimatedOrderUsd: Number(e.target.value) || 0,
-                        })
-                      }
-                      className="h-8 text-xs font-mono"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Bosqich (Stage)</Label>
-                    <Select
-                      value={editingLead.status}
-                      onValueChange={(val) =>
-                        val && setEditingLead({ ...editingLead, status: val as LeadRecord["status"] })
-                      }
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="New">New</SelectItem>
-                        <SelectItem value="Contacted">Contacted</SelectItem>
-                        <SelectItem value="Sample Sent">Sample Sent</SelectItem>
-                        <SelectItem value="Qualified">Qualified</SelectItem>
-                        <SelectItem value="Converted">Converted</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  {/* Tezkor teglar */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-muted-foreground mr-1">Tezkor:</span>
+                    {[
+                      "+ Namunalar yuborildi",
+                      "+ Maket kutilmoqda",
+                      "+ Narx kelishilmoqda",
+                      "+ Shoshilinch tiraj",
+                      "+ Qayta qo'ng'iroq",
+                    ].map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          const current = editingLead.notes || "";
+                          const updated = current
+                            ? `${current}\n${tag.replace("+ ", "• ")}`
+                            : tag.replace("+ ", "• ");
+                          setEditingLead({ ...editingLead, notes: updated });
+                        }}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors border border-border/50"
+                      >
+                        {tag}
+                      </button>
+                    ))}
                   </div>
                 </div>
+              </div>
 
-                <Separator className="my-2" />
+              {/* Pinned Footer */}
+              <div className="p-4 border-t border-border bg-muted/20 shrink-0 flex items-center justify-between gap-3">
+                <Button
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-xs"
+                  onClick={() => handleConvertLeadToOrder(editingLead)}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Mijozga aylantirish va Buyurtma ochish</span>
+                </Button>
 
-                <div className="flex items-center justify-between gap-2 pt-2">
+                <div className="flex items-center gap-2">
                   <Button
+                    variant="ghost"
                     size="sm"
-                    className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                    onClick={() => handleConvertLeadToOrder(editingLead)}
+                    className="h-8 text-xs"
+                    onClick={() => setInspectorOpen(false)}
                   >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Mijozga aylantirish va Buyurtma ochish</span>
+                    Bekor qilish
                   </Button>
-
                   <Button
-                    variant="outline"
                     size="sm"
-                    className="h-8 text-xs gap-1.5"
+                    className="h-8 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium"
                     onClick={handleSaveLead}
                   >
                     <Save className="w-3.5 h-3.5" />
@@ -989,7 +1196,7 @@ export function CrmGrid({ type }: CrmGridProps) {
                   </Button>
                 </div>
               </div>
-            </>
+            </div>
           )}
         </SheetContent>
       </Sheet>

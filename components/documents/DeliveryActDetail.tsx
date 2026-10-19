@@ -28,6 +28,20 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  WAREHOUSE_LOCATIONS,
+  DEFAULT_CARRIERS,
+  CarrierProfile,
+  CarrierCombobox,
+  CarrierDialog,
+} from "./WarehouseShipmentDetail";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -47,6 +61,9 @@ import {
   ArrowRight,
   Lock,
   AlertCircle,
+  Tag,
+  Sparkles,
+  Layers,
 } from "lucide-react";
 
 const DataEditor = dynamic(
@@ -125,6 +142,8 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
   }, [storeRecord, tab.documentData, tab.id]);
 
   const [form, setForm] = useState<DeliveryActRecord>(initialRecord);
+  const [carriers, setCarriers] = useState<CarrierProfile[]>(DEFAULT_CARRIERS);
+  const [carrierDialogOpen, setCarrierDialogOpen] = useState(false);
 
   // Sync when store record updates (e.g. after posting)
   React.useEffect(() => {
@@ -134,6 +153,30 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
   }, [storeRecord]);
 
   const isPosted = form.status === "Signed & Stamped";
+
+  const handleSelectCarrier = useCallback(
+    (profile: CarrierProfile) => {
+      if (isPosted) return;
+      setForm((prev) => ({
+        ...prev,
+        carrier: profile.name,
+        driverName:
+          profile.vehicleNo && profile.vehicleNo !== "—"
+            ? `${profile.driverName} (${profile.vehicleNo})`
+            : profile.driverName,
+      }));
+      setTabUnsaved(tab.id, true);
+    },
+    [isPosted, setTabUnsaved, tab.id]
+  );
+
+  const handleAddNewCarrier = useCallback(
+    (newProfile: CarrierProfile) => {
+      setCarriers((prev) => [newProfile, ...prev]);
+      handleSelectCarrier(newProfile);
+    },
+    [handleSelectCarrier]
+  );
 
   // Recalculate totals from line items
   const totals = useMemo(() => {
@@ -198,7 +241,8 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
   const itemColumns = useMemo<GridColumn[]>(
     () => [
       { id: "sku", title: t("colSku"), width: 110, icon: GridColumnIcon.HeaderReference },
-      { id: "name", title: t("colName"), width: 290, icon: GridColumnIcon.HeaderString },
+      { id: "name", title: t("colName"), width: 270, icon: GridColumnIcon.HeaderString },
+      { id: "size", title: "O'lcham (Razmer)", width: 130, icon: GridColumnIcon.HeaderSingleValue },
       { id: "unit", title: t("colUnit"), width: 75, icon: GridColumnIcon.HeaderString },
       { id: "quantity", title: t("colQty"), width: 100, icon: GridColumnIcon.HeaderNumber },
       { id: "unitPrice", title: t("colPrice"), width: 110, icon: GridColumnIcon.HeaderNumber },
@@ -231,6 +275,21 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
           displayData: val,
           allowOverlay: !isPosted,
           readonly: isPosted,
+        };
+      }
+
+      if (column.id === "size") {
+        const val = String(item.size || "Universal");
+        return {
+          kind: GridCellKind.Text,
+          data: val,
+          displayData: val,
+          allowOverlay: !isPosted,
+          readonly: isPosted,
+          themeOverride: {
+            baseFontStyle: "bold 11px monospace",
+            textDark: isDark ? "#38bdf8" : "#0284c7",
+          },
         };
       }
 
@@ -290,7 +349,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
         if (!target) return prev;
 
         if (
-          (column.id === "sku" || column.id === "name" || column.id === "unit") &&
+          (column.id === "sku" || column.id === "name" || column.id === "unit" || column.id === "size") &&
           newValue.kind === GridCellKind.Text
         ) {
           (target as any)[column.id] = newValue.data;
@@ -319,8 +378,9 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
     const newItem: DeliveryActItem = {
       id: `item-${Date.now()}`,
       sku: `PRN-0${form.items.length + 1}`,
-      name: "Qo'shimcha bosma xizmati / mahsulot",
-      unit: "pcs",
+      name: form.product || "Qo'shimcha tekstil mahsuloti",
+      size: "Universal",
+      unit: form.unit || "pcs",
       quantity: 1000,
       unitPrice: 0.5,
       vatRate: 12,
@@ -331,6 +391,59 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
     }));
     setTabUnsaved(tab.id, true);
   };
+
+  const handlePopulateTextileSizes = (preset: "standard" | "extended" | "kids" = "standard") => {
+    if (isPosted) return;
+    const baseName = form.product || form.items[0]?.name || "Tekstil yorlig'i / Buyurtma";
+    const baseSku = form.items[0]?.sku || "TXT-01";
+    const basePrice = form.items[0]?.unitPrice || 0.45;
+
+    let targetSizes: string[];
+    if (preset === "kids") {
+      targetSizes = ["98-104", "110-116", "122-128", "134-140", "146-152"];
+    } else if (preset === "extended") {
+      targetSizes = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL"];
+    } else {
+      targetSizes = ["XS", "S", "M", "L", "XL", "XXL"];
+    }
+
+    const cleanBaseName = baseName.replace(/\s*\([^)]*\)$/, "");
+    const cleanBaseSku = baseSku.replace(/-[A-Z0-9]+$/, "");
+
+    const newItems: DeliveryActItem[] = targetSizes.map((sz, i) => ({
+      id: `item-sz-${Date.now()}-${i}`,
+      sku: `${cleanBaseSku}-${sz}`,
+      name: `${cleanBaseName} (${sz})`,
+      size: sz,
+      unit: form.unit || "pcs",
+      quantity: 1000,
+      unitPrice: basePrice,
+      vatRate: 12,
+    }));
+
+    setForm((prev) => {
+      const isSingleUniversal =
+        prev.items.length <= 1 &&
+        (!prev.items[0]?.size || prev.items[0]?.size === "Universal");
+      const updated = isSingleUniversal ? newItems : [...prev.items, ...newItems];
+      return {
+        ...prev,
+        product: cleanBaseName,
+        quantity: updated.reduce((s, i) => s + i.quantity, 0),
+        items: updated,
+      };
+    });
+    setTabUnsaved(tab.id, true);
+  };
+
+  const sizeBreakdown = useMemo(() => {
+    const counts: Record<string, number> = {};
+    form.items.forEach((item) => {
+      const s = (item.size || "Universal").trim();
+      counts[s] = (counts[s] || 0) + (item.quantity || 0);
+    });
+    return counts;
+  }, [form.items]);
 
   const handleDeleteSelectedRow = () => {
     if (isPosted) return;
@@ -594,43 +707,32 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                     className="h-7 text-xs font-mono"
                   />
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">{t("linkedOrder")}</Label>
-                  <div className="flex items-center gap-1">
-                    <Input
-                      value={form.orderId}
-                      readOnly={isPosted}
-                      onChange={(e) => handleFieldChange("orderId", e.target.value)}
-                      className="h-7 text-xs font-mono"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleNavigateToOrder}
-                      className="h-7 w-7 p-0 shrink-0"
-                      title={t("linkedOrder")}
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">{t("linkedWo")}</Label>
-                  <div className="flex items-center gap-1">
+                <div className="space-y-1 col-span-2">
+                  <Label className="text-[11px] text-muted-foreground flex items-center justify-between">
+                    <span>Ish buyurtmasi / Work Order (WO) *</span>
+                    {form.workOrderId && (
+                      <span className="text-[10px] text-primary font-mono font-medium">
+                        Texnologik xarita biriktirilgan
+                      </span>
+                    )}
+                  </Label>
+                  <div className="flex items-center gap-1.5">
                     <Input
                       value={form.workOrderId}
                       readOnly={isPosted}
                       onChange={(e) => handleFieldChange("workOrderId", e.target.value)}
-                      className="h-7 text-xs font-mono"
+                      placeholder="Masalan: WO-00351"
+                      className="h-7 text-xs font-mono font-semibold"
                     />
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={handleNavigateToWorkOrder}
-                      className="h-7 w-7 p-0 shrink-0"
-                      title={t("linkedWo")}
+                      className="h-7 px-2.5 text-xs gap-1.5 shrink-0 cursor-pointer"
+                      title="Ish buyurtmasiga o'tish (WO)"
                     >
-                      <ExternalLink className="w-3 h-3" />
+                      <ExternalLink className="w-3.5 h-3.5 text-primary" />
+                      <span className="hidden sm:inline">WO ochish</span>
                     </Button>
                   </div>
                 </div>
@@ -658,40 +760,47 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
               <div className="grid grid-cols-1 gap-2">
                 <div className="space-y-1">
                   <Label className="text-[11px] text-muted-foreground">{t("warehouse")}</Label>
-                  <Input
+                  <Select
                     value={form.warehouse}
-                    readOnly={isPosted}
-                    onChange={(e) => handleFieldChange("warehouse", e.target.value)}
-                    className="h-7 text-xs"
+                    disabled={isPosted}
+                    onValueChange={(val) => handleFieldChange("warehouse", val)}
+                  >
+                    <SelectTrigger className="h-7 text-xs bg-background">
+                      <SelectValue placeholder="Chiqim omborini tanlang..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WAREHOUSE_LOCATIONS.map((loc) => (
+                        <SelectItem key={loc} value={loc} className="text-xs">
+                          {loc}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground flex items-center justify-between">
+                    <span>{t("carrier")} & Transport</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">Bitta tanlov (Combobox)</span>
+                  </Label>
+                  <CarrierCombobox
+                    carrier={form.carrier}
+                    driverName={form.driverName}
+                    carriers={carriers}
+                    onSelect={handleSelectCarrier}
+                    onAddNew={() => setCarrierDialogOpen(true)}
+                    disabled={isPosted}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">{t("carrier")}</Label>
-                    <Input
-                      value={form.carrier}
-                      readOnly={isPosted}
-                      onChange={(e) => handleFieldChange("carrier", e.target.value)}
-                      className="h-7 text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">{t("driver")}</Label>
-                    <Input
-                      value={form.driverName}
-                      readOnly={isPosted}
-                      onChange={(e) => handleFieldChange("driverName", e.target.value)}
-                      className="h-7 text-xs"
-                    />
-                  </div>
-                </div>
+
                 <div className="space-y-1">
                   <Label className="text-[11px] text-muted-foreground">{t("recipient")}</Label>
                   <Input
                     value={form.recipientName}
                     readOnly={isPosted}
                     onChange={(e) => handleFieldChange("recipientName", e.target.value)}
-                    className="h-7 text-xs"
+                    placeholder="Masalan: Vakil (Ishonchnoma asosida)"
+                    className="h-7 text-xs bg-background"
                   />
                 </div>
               </div>
@@ -772,8 +881,18 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={() => handlePopulateTextileSizes("standard")}
+                    className="h-7 px-2.5 text-xs gap-1.5 text-primary border-primary/30 hover:bg-primary/10 cursor-pointer"
+                    title="Tekstil o'lchamlarini (XS, S, M, L, XL, XXL) avtomatik to'ldirish"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>+ Tekstil o&apos;lchamlari (XS-XXL)</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleAddRow}
-                    className="h-7 px-2 text-xs gap-1"
+                    className="h-7 px-2 text-xs gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>{t("addRow")}</span>
@@ -783,7 +902,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                     size="sm"
                     onClick={handleDeleteSelectedRow}
                     disabled={selection.rows.length === 0 || form.items.length <= 1}
-                    className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                    className="h-7 px-2 text-xs text-destructive hover:text-destructive cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -791,7 +910,27 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
               )}
             </div>
 
-            <div className="w-full h-[210px] relative">
+            {/* Textile Size Breakdown Ribbon */}
+            <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 bg-muted/20 border-b border-border text-xs">
+              <div className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
+                <Tag className="w-3 h-3 text-primary" />
+                <span>O&apos;lchamlar taqsimoti (Tekstil matrisi):</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {Object.entries(sizeBreakdown).map(([sz, qty]) => (
+                  <Badge
+                    key={sz}
+                    variant="outline"
+                    className="text-[10px] h-5 px-1.5 py-0 font-mono bg-background border-border gap-1"
+                  >
+                    <span className="font-bold text-primary">{sz}:</span>
+                    <span>{qty.toLocaleString()} {form.unit}</span>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <div className="w-full h-[340px] relative">
               <DataEditor
                 getCellContent={getCellContent}
                 onCellEdited={handleCellEdited}
@@ -800,7 +939,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                 rowMarkers="both"
                 freezeColumns={1}
                 width="100%"
-                height={210}
+                height={340}
                 gridSelection={selection}
                 onGridSelectionChange={setSelection}
                 headerHeight={28}
@@ -849,7 +988,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                 № {form.id} • {form.date} yil
               </div>
               <div className="text-[11px] text-muted-foreground">
-                Shartnoma: {form.contractNo} | Buyurtma: {form.orderId} (Ish buyurtmasi: {form.workOrderId})
+                Shartnoma: {form.contractNo} | Ish buyurtmasi (WO): {form.workOrderId}
               </div>
             </div>
 
@@ -882,7 +1021,8 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
             <div className="border border-border rounded overflow-hidden">
               <div className="grid grid-cols-12 bg-muted/70 border-b border-border font-semibold text-[11px] py-1.5 px-2">
                 <div className="col-span-1">№</div>
-                <div className="col-span-4">{t("colName")}</div>
+                <div className="col-span-3">{t("colName")}</div>
+                <div className="col-span-1 text-center">O&apos;lcham</div>
                 <div className="col-span-1 text-center">{t("colUnit")}</div>
                 <div className="col-span-1 text-right">{t("colQty")}</div>
                 <div className="col-span-1 text-right">{t("colPrice")}</div>
@@ -901,9 +1041,12 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                     className="grid grid-cols-12 border-b border-border last:border-b-0 py-2 px-2 text-xs items-center"
                   >
                     <div className="col-span-1 font-mono text-muted-foreground">{idx + 1}</div>
-                    <div className="col-span-4 font-medium">
+                    <div className="col-span-3 font-medium">
                       <div>{item.name}</div>
                       <div className="font-mono text-[10px] text-muted-foreground">{item.sku}</div>
+                    </div>
+                    <div className="col-span-1 text-center font-mono font-bold text-primary">
+                      {item.size || "Universal"}
                     </div>
                     <div className="col-span-1 text-center">{item.unit}</div>
                     <div className="col-span-1 text-right font-mono">{item.quantity.toLocaleString()}</div>
@@ -1072,6 +1215,13 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Unified Carrier Dialog for adding/editing vehicles and drivers */}
+      <CarrierDialog
+        open={carrierDialogOpen}
+        onOpenChange={setCarrierDialogOpen}
+        onSave={handleAddNewCarrier}
+      />
     </div>
   );
 }

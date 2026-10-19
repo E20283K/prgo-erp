@@ -11,6 +11,8 @@ const SalesGrid = dynamic(() => import("@/components/grid/SalesGrid").then((mod)
 const FinanceGrid = dynamic(() => import("@/components/grid/FinanceGrid").then((mod) => mod.FinanceGrid), { ssr: false });
 const TaskGrid = dynamic(() => import("@/components/grid/TaskGrid").then((mod) => mod.TaskGrid), { ssr: false });
 const SettingsGrid = dynamic(() => import("@/components/grid/SettingsGrid").then((mod) => mod.SettingsGrid), { ssr: false });
+const HrGrid = dynamic(() => import("@/components/grid/HrGrid").then((mod) => mod.HrGrid), { ssr: false });
+const TradingGrid = dynamic(() => import("@/components/grid/TradingGrid").then((mod) => mod.TradingGrid), { ssr: false });
 
 export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
   if (tab.id.includes("tasks")) {
@@ -32,6 +34,7 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("products")) return <SalesGrid type="products" />;
     return <DataGrid />;
   } else if (tab.module === "warehouse") {
+    if (tab.id.includes("finished-goods")) return <WarehouseGrid type="finished-goods" />;
     if (tab.id.includes("stock-balance")) return <WarehouseGrid type="stock-balance" />;
     if (tab.id.includes("movements")) return <WarehouseGrid type="movements" />;
     if (tab.id.includes("inventory")) return <WarehouseGrid type="inventory" />;
@@ -49,6 +52,20 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("users")) return <SettingsGrid type="users" />;
     if (tab.id.includes("tariffs")) return <SettingsGrid type="tariffs" />;
     return <SettingsGrid type="plants" />;
+  } else if (tab.module === "hr") {
+    if (tab.id.includes("departments")) return <HrGrid type="departments" />;
+    if (tab.id.includes("attendance")) return <HrGrid type="attendance" />;
+    if (tab.id.includes("shifts")) return <HrGrid type="shifts" />;
+    if (tab.id.includes("piecework")) return <HrGrid type="piecework" />;
+    if (tab.id.includes("payroll")) return <HrGrid type="payroll" />;
+    return <HrGrid type="employees" />;
+  } else if (tab.module === "trading") {
+    if (tab.id.includes("trading-orders")) return <TradingGrid type="orders" />;
+    if (tab.id.includes("trading-ytt-limits")) return <TradingGrid type="ytt-limits" />;
+    if (tab.id.includes("trading-settlements")) return <TradingGrid type="settlements" />;
+    if (tab.id.includes("trading-imports")) return <TradingGrid type="imports" />;
+    if (tab.id.includes("trading-catalog")) return <TradingGrid type="catalog" />;
+    return <TradingGrid type="sales" />;
   }
   return <DataGrid />;
 }

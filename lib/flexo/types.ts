@@ -31,6 +31,28 @@ export interface FlexoMaterial {
   description?: string;
 }
 
+export interface FlexoDieTooling {
+  id: string;
+  code: string;
+  name: string;
+  dieType: "rotary_magnetic" | "solid_rotary" | "flatbed" | "hot_stamp" | "embossing";
+  shape: "rectangle" | "rounded_rect" | "circle" | "oval" | "custom";
+  widthMm: number;
+  heightMm: number;
+  cornerRadiusMm: number;
+  acrossCount: number;
+  aroundCount: number;
+  gapXMm: number;
+  gapYMm: number;
+  repeatLengthMm?: number;
+  cylinderTeeth?: number;
+  location?: string;
+  status: "available" | "in_use" | "sharpening" | "retired";
+  totalImpressions: number;
+  maxImpressions?: number;
+  notes?: string;
+}
+
 export interface FlexoInputs {
   machineId: string;
   materialId: string;
@@ -179,7 +201,6 @@ export interface FlexoRenderOptions {
   previewType?: "flat" | "cylinder";
   displayOrientation?: "horizontal" | "vertical";
   cylinderRotation?: number; // 0 - 360 degrees
-  cylinderViewMode?: "2d" | "3d"; // 2D engineering drawing vs 3D shaded roller
   repeatMode: "single" | "run";
   previewRepeats: number;
   showDimensions: boolean;

@@ -23,18 +23,25 @@ import {
   LayoutTemplate,
   Disc,
   Package,
-  ChevronDown,
-  ShieldAlert,
+  FlaskConical,
+  X,
+  RotateCw,
+  MoreVertical,
+  BookmarkPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   DropdownMenu,
+  DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import {
   DocumentHeader,
   HeaderIconAction,
@@ -51,6 +58,9 @@ import { CompactSelection, GridSelection } from "@glideapps/glide-data-grid";
 
 import {
   WorkOrderFormData,
+  WorkOrderSampleData,
+  SampleRevisionRecord,
+  SizeDistribution,
   OrderAttachment,
   RouteStep,
   ShiftEvent,
@@ -76,11 +86,13 @@ import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
 import { SampleTab } from "./tabs/SampleTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
-import { pdf } from "@react-pdf/renderer";
-import { WorkOrderSpecPDF } from "./WorkOrderSpecPDF";
-import { OrderSpecificationPDF } from "./OrderSpecificationPDF";
-import { calculateFlexoLayout } from "@/lib/flexo/calculator";
-import { exportFlexoPDF } from "@/lib/flexo/pdfExport";
+import { JobTicketDialog } from "./dialogs/JobTicketDialog";
+import { PackagingDialog } from "./dialogs/PackagingDialog";
+import { BoxLabelPrintModal } from "./dialogs/BoxLabelPrintModal";
+import { SaveSpecDialog } from "./dialogs/SaveSpecDialog";
+import { BomItem } from "../BomMaterialsGrid";
+import { WorkOrderPackagingSummary } from "./types";
+import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEngine";
 
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
@@ -89,21 +101,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const {
     currentUser,
     setTabUnsaved,
+    updateTabData,
+    upsertProductionQueueItem,
     closeTab,
+    requestCloseTab,
     setLevel3Tab,
     theme,
     openTab,
     addNotification,
     createDeliveryActFromOrder,
+    masterSpecifications,
+    upsertMasterSpecification,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
 
-  const isOperator =
-    Boolean(currentUser?.role) &&
-    (currentUser.role.toLowerCase().includes("shift lead") ||
-      currentUser.role.toLowerCase().includes("operator") ||
-      currentUser.role.toLowerCase().includes("pressman"));
+  const [viewMode, setViewMode] = useState<"manager" | "operator">("manager");
+  const isOperator = viewMode === "operator";
 
   const [formData, setFormData] = useState<WorkOrderFormData>({
     customer: data.customer || "Alpha Media Group",
@@ -138,6 +152,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     dimensionUnit: data.dimensionUnit || "mm",
     cornerType: data.cornerType || "Square",
     bleed: data.bleed || 2,
+    shapeType: data.shapeType || (data.itemCategory === "Carton" ? "carton_box" : data.itemCategory === "Flyer" ? "folded" : "rectangle"),
+    foldType: data.foldType || "half_vertical",
+    boxType: data.boxType || "tuck_end",
+    boxDepth: data.boxDepth || 40,
+    customShape: data.customShape || "arch",
+    customSvgPath: data.customSvgPath || "",
     colorsConfig: data.colorsConfig || "4+0 (CMYK)",
     frontColors: data.frontColors || { c: true, m: true, y: true, k: true },
     backColors: data.backColors || { c: false, m: false, y: false, k: false },
@@ -166,42 +186,140 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       { id: "m4", name: "Printing", department: "Offset", status: "Pending", assignedTo: "Press Dept", dueDate: "2026-10-06 11:30" },
       { id: "m5", name: "Post-press", department: "Finishing", status: "Pending", assignedTo: "Finishing Dept", dueDate: "2026-10-06 18:00" }
     ],
+    parentWorkOrderId: data.parentWorkOrderId || data.linkedWoId || undefined,
+    isReorder: data.isReorder ?? Boolean(data.parentWorkOrderId),
   });
 
   const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(
     data.attachments || EXAMPLE_ATTACHMENTS
   );
 
-  const [sampleData, setSampleData] = useState({
-    dispatchDate: data.sampleDispatchDate || new Date().toISOString().split("T")[0],
-    deliveryMethod: data.sampleDeliveryMethod || "Courier service",
-    courierName: data.sampleCourier || "",
-    recipientName: data.sampleRecipient || "",
-    recipientPhone: data.samplePhone || "",
-    deliveryAddress: data.sampleAddress || "",
-    trackingNumber: data.sampleTracking || "",
+  const [sampleData, setSampleData] = useState<WorkOrderSampleData>({
+    isRequired: data.orderType === "Sample" || data.sampleRequired === true,
     sampleQty: data.sampleQty || 5,
-    packingNotes: data.sampleNotes || "",
-    isDispatched: data.sampleDispatched || false,
-    approvalStatus: data.approvalStatus || "Pending",
-    approvalNotes: data.approvalNotes || "",
+    testPurpose: data.sampleTestPurpose || "color_proof",
+    testMachine: data.sampleTestMachine || data.pressMachine || "Heidelberg Speedmaster XL 106",
+    substrateSource: data.sampleSubstrateSource || "precut",
+    technicalNotes: data.sampleTechNotes || "CMYK spektral zichlik va pantone rang solishtirilsin",
+    isProduced: data.sampleProduced || false,
+    producedAt: data.sampleProducedAt || undefined,
+    producedBy: data.sampleProducedBy || undefined,
+    qcPassed: data.sampleQcPassed || false,
+    qcNotes: data.sampleQcNotes || undefined,
+    approvalStatus:
+      data.sampleApprovalStatus ||
+      (data.orderType === "Sample" ? "pending_production" : "approved"),
+    approvedAt: data.sampleApprovedAt || undefined,
+    approvedBy: data.sampleApprovedBy || undefined,
+    revisions: data.sampleRevisions || [],
+    sampleTargetSize: data.sampleTargetSize || data.sampleSize || undefined,
   });
 
-  const handleSampleChange = (field: string, val: any) => {
-    setSampleData((prev: any) => ({ ...prev, [field]: val }));
+  const handleSampleChange = (field: keyof WorkOrderSampleData, val: any) => {
+    setSampleData((prev) => {
+      const next = { ...prev, [field]: val };
+      updateTabData(tab.id, { sampleData: next, [field]: val });
+      return next;
+    });
     setTabUnsaved(tab.id, true);
+  };
+
+  const handleApproveSampleAndRelease = () => {
+    const today = new Date().toISOString().split("T")[0];
+    const approver = currentUser?.name || "Bosh Texnolog";
+    const massQty = formData.quantity || 5000;
+
+    setSampleData((prev) => ({
+      ...prev,
+      approvalStatus: "approved",
+      approvedAt: today,
+      approvedBy: approver,
+      qcPassed: true,
+      isProduced: true,
+    }));
+
+    handleFieldChange("orderType", "Production");
+    handleFieldChange("status", "In Production");
+
+    // Scale operations target to full mass quantity
+    setOperations((prev) =>
+      prev.map((op, idx) => ({
+        ...op,
+        qtyCompleted: `0 / ${massQty.toLocaleString()}`,
+        status: idx === 0 ? "In Progress" : "Queued",
+      }))
+    );
+
+    const docNo = data.docNo || tab.id;
+    upsertProductionQueueItem({
+      id: docNo,
+      stage: "Ready to Print",
+      sampleStatus: "approved",
+      sampleRequired: true,
+      quantity: massQty,
+    });
+
+    setTabUnsaved(tab.id, true);
+
+    addNotification({
+      title: "Namuna tasdiqlandi — Asosiy tirajga ruxsat berildi",
+      description: `${docNo}: ${formData.product} buyurtmasi to'liq tiraj (${massQty.toLocaleString()} ${formData.unit}) bilan mashina navbatiga chiqarildi.`,
+      severity: "success",
+    });
+  };
+
+  const handleRejectSample = (
+    reasonCategory: SampleRevisionRecord["reasonCategory"],
+    notes: string
+  ) => {
+    const today = new Date().toISOString().split("T")[0];
+    const reporter = currentUser?.name || "Bosh Texnolog / OTK";
+    const newRev: SampleRevisionRecord = {
+      id: `rev-${Date.now()}`,
+      revisionNumber: (sampleData.revisions?.length || 0) + 1,
+      date: today,
+      reasonCategory,
+      notes,
+      reportedBy: reporter,
+    };
+
+    setSampleData((prev) => ({
+      ...prev,
+      approvalStatus: "revision_requested",
+      isProduced: false,
+      qcPassed: false,
+      revisions: [newRev, ...(prev.revisions || [])],
+    }));
+
+    const docNo = data.docNo || tab.id;
+    upsertProductionQueueItem({
+      id: docNo,
+      stage: "Queue",
+      sampleStatus: "revision_requested",
+    });
+
+    setTabUnsaved(tab.id, true);
+
+    addNotification({
+      title: "Namuna qayta ishlashga qaytarildi (Revision)",
+      description: `${docNo}: Sabab — ${notes}`,
+      severity: "warning",
+    });
   };
 
   // Operations Route State
   const [operations, setOperations] = useState<RouteStep[]>(
-    getInitialOperations(formData.recipe, formData.pressMachine, formData.department, formData.quantity)
+    data.operations || getInitialOperations(formData.recipe, formData.pressMachine, formData.department, formData.quantity)
   );
 
+  const prevRecipeRef = React.useRef(formData.recipe);
   React.useEffect(() => {
-    if (formData.recipe) {
+    // Only reset operations if the RECIPE template was changed to a different one
+    if (formData.recipe && prevRecipeRef.current !== formData.recipe) {
+      prevRecipeRef.current = formData.recipe;
       setOperations(getInitialOperations(formData.recipe, formData.pressMachine, formData.department, formData.quantity));
     }
-  }, [formData.recipe, formData.pressMachine, formData.department, formData.quantity]);
+  }, [formData.recipe]);
 
   const [opSelection, setOpSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -218,6 +336,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     qtyCompleted: "0 / 5,000",
     status: "Queued",
   });
+
+  // Save As Specification State
+  const [isSaveSpecDialogOpen, setIsSaveSpecDialogOpen] = useState(false);
+  const [currentBomItems, setCurrentBomItems] = useState<BomItem[]>([]);
 
   // Shift Timeline & Log Events State
   const [selectedTimelineOpId, setSelectedTimelineOpId] = useState<string>("2");
@@ -245,11 +367,174 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   });
 
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [isPackagingOpen, setIsPackagingOpen] = useState(false);
+  const [isLabelPrintOpen, setIsLabelPrintOpen] = useState(false);
+
+  const handleSavePackaging = (summary: WorkOrderPackagingSummary, markComplete: boolean) => {
+    handleFieldChange("packagingData", summary);
+
+    if (markComplete) {
+      setOperations((prev) =>
+        prev.map((op) => {
+          const isPackOp = /qadoq|pack|finishing/i.test(op.name);
+          return isPackOp ? { ...op, status: "Finished", qtyCompleted: String(summary.totalPackedQty) } : op;
+        })
+      );
+
+      const targetWoId = data.docNo || tab.id;
+      upsertProductionQueueItem({
+        id: targetWoId,
+        stage: "Completed",
+        completedSheets: summary.totalPackedQty,
+      });
+
+      addNotification({
+        title: "Qadoqlash yakunlandi",
+        description: `${summary.totalBoxes} ta quti (${summary.totalPackedQty.toLocaleString()} dona) qadoqlanib, Tayyor mahsulot omboriga qabulga tayyorlandi.`,
+        severity: "success",
+      });
+    } else {
+      addNotification({
+        title: "Qadoqlash qoralamasi saqlandi",
+        description: `${summary.totalBoxes} ta quti kiritildi.`,
+        severity: "info",
+      });
+    }
+    setTabUnsaved(tab.id, true);
+  };
+
+  // Action: Create Repeat / Reorder Work Order from current order
+  const handleReorderWorkOrder = () => {
+    const currentDocNo = data.docNo || tab.id;
+    const newWoId = `WO-00${Math.floor(300 + Math.random() * 699)}`;
+    const today = new Date().toISOString().split("T")[0];
+    const deadlineDate = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+
+    // Reset operations to Queued with 0 / target quantity
+    const resetOperations: RouteStep[] = operations.map((op) => ({
+      ...op,
+      status: "Queued",
+      qtyCompleted: `0 / ${(formData.quantity || 5000).toLocaleString()}`,
+    }));
+
+    // Construct reorder payload carrying over all technical specs
+    const reorderPayload = {
+      ...data,
+      ...formData,
+      docNo: newWoId,
+      parentWorkOrderId: currentDocNo,
+      isReorder: true,
+      status: "Draft",
+      startDate: today,
+      deadline: deadlineDate,
+      operations: resetOperations,
+      sampleRequired: false,
+      orderType: "Production",
+      sampleData: {
+        ...sampleData,
+        isRequired: false,
+        approvalStatus: "approved",
+        qcPassed: true,
+        isProduced: true,
+        technicalNotes: `Takroriy buyurtma: ${currentDocNo} tasdiqlangan etaloni asosida`,
+      },
+      milestones: (formData.milestones || []).map((m) => ({
+        ...m,
+        status: "Pending",
+      })),
+      packagingData: undefined,
+    };
+
+    openTab({
+      id: newWoId,
+      title: `${newWoId}: ${formData.product}`,
+      type: "work-order",
+      module: "production",
+      isUnsaved: true,
+      activeLevel3Tab: "overview",
+      documentData: reorderPayload,
+    });
+
+    addNotification({
+      title: "Qayta buyurtma ochildi",
+      description: `${currentDocNo} asosida yangi ${newWoId} takroriy hujjati yaratildi. Barcha texnik parametrlar nusxalandi.`,
+      severity: "success",
+    });
+  };
+
+  const handleSaveAsNewSpec = (specData: {
+    code: string;
+    name: string;
+    department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+    description: string;
+    materials: BomItem[];
+    operations: RouteStep[];
+  }) => {
+    const specId = `SPEC-${specData.department.slice(0, 3).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+    const costEstimate = `$${(specData.materials.length * 450).toLocaleString()}`;
+
+    // 1. Persist new spec in workspace store
+    upsertMasterSpecification({
+      id: specId,
+      code: specData.code,
+      name: specData.name,
+      department: specData.department,
+      description: specData.description,
+      materialsCount: specData.materials.length,
+      estimatedCost: costEstimate,
+      unit: "pcs",
+      materials: specData.materials.map((m) => ({
+        id: m.id,
+        name: m.name,
+        quantity: m.actualQty || m.planQty || m.qty || 1,
+        unit: m.unit || "pcs",
+        spec: m.spec,
+        unitPrice: m.unitPrice,
+      })),
+      operations: specData.operations.map((op) => ({
+        id: op.id,
+        name: op.name,
+        machineStr: op.machine || "Standard Machine",
+      })),
+    });
+
+    // 2. Automatically link current work order to newly created recipe
+    handleFieldChange("recipe", specData.code);
+    if (specData.department !== formData.department) {
+      handleDepartmentChange(specData.department);
+    }
+    setTabUnsaved(tab.id, true);
+
+    // 3. Notify user
+    addNotification({
+      title: "Yangi Spetsifikatsiya yaratildi",
+      description: `${specData.code} (${specData.name}) muvaffaqiyatli saqlandi va joriy buyurtmaga bog'landi.`,
+      severity: "success",
+    });
+  };
+
+  const handleOpenParentWorkOrder = (parentDocNo: string) => {
+    openTab({
+      id: parentDocNo,
+      title: `${parentDocNo}: ${formData.product}`,
+      type: "work-order",
+      module: "production",
+      activeLevel3Tab: "overview",
+      documentData: {
+        docNo: parentDocNo,
+        customer: formData.customer,
+        product: formData.product,
+        status: "Completed",
+      },
+    });
+  };
 
   // Derived Values
   const activeSpec = useMemo(
-    () => MASTER_SPECIFICATIONS.find((s) => s.code === formData.recipe),
-    [formData.recipe]
+    () =>
+      (masterSpecifications || MASTER_SPECIFICATIONS).find((s) => s.code === formData.recipe) ||
+      MASTER_SPECIFICATIONS.find((s) => s.code === formData.recipe),
+    [masterSpecifications, formData.recipe]
   );
   const activeSite = useMemo(
     () => SITE_OPTIONS.find((s) => s.id === formData.site || s.name === formData.site) || SITE_OPTIONS[0],
@@ -271,6 +556,19 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const currentRecipeMaterials = RECIPE_MATERIALS[formData.recipe] || [];
   const hasShortage = currentRecipeMaterials.some((m) => m.req > m.stock);
 
+  const deadlineCountdown = useMemo(() => {
+    if (!formData.deadline) return null;
+    try {
+      const target = new Date(formData.deadline).getTime();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diffDays = Math.ceil((target - today.getTime()) / (1000 * 60 * 60 * 24));
+      return isNaN(diffDays) ? null : diffDays;
+    } catch {
+      return null;
+    }
+  }, [formData.deadline]);
+
   const selectedOp = useMemo(() => {
     return operations.find((op) => op.id === selectedTimelineOpId) || operations[0] || {
       id: "1",
@@ -290,17 +588,28 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   // Actions
   const handleFieldChange = (field: string, val: any) => {
-    setFormData((prev) => ({ ...prev, [field]: val }));
+    setFormData((prev) => {
+      const next = { ...prev, [field]: val };
+      updateTabData(tab.id, { [field]: val });
+      return next;
+    });
     setTabUnsaved(tab.id, true);
   };
 
-  const handleSizesChange = (newSizes: { id: string; size: string; quantity: number }[]) => {
+  const handleSizesChange = (newSizes: SizeDistribution[]) => {
     const total = newSizes.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
-    setFormData((prev) => ({
-      ...prev,
-      sizes: newSizes,
-      ...(newSizes.length > 0 ? { quantity: total } : {}),
-    }));
+    setFormData((prev) => {
+      const next = {
+        ...prev,
+        sizes: newSizes,
+        ...(newSizes.length > 0 ? { quantity: total } : {}),
+      };
+      updateTabData(tab.id, {
+        sizes: newSizes,
+        ...(newSizes.length > 0 ? { quantity: total } : {}),
+      });
+      return next;
+    });
     setTabUnsaved(tab.id, true);
   };
 
@@ -314,127 +623,164 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       recipe: defaultRecipe,
       pressMachine: defaultMachine,
     }));
+    updateTabData(tab.id, {
+      department: newDept,
+      recipe: defaultRecipe,
+      pressMachine: defaultMachine,
+    });
     setTabUnsaved(tab.id, true);
   };
 
-  const handleSave = () => {
+  const persistOrderDetails = () => {
+    const docNo = data.docNo || tab.id;
+    updateTabData(
+      tab.id,
+      {
+        ...data,
+        ...formData,
+        operations,
+        shiftEvents,
+        docNo,
+        sampleData,
+        sampleQty: sampleData.sampleQty,
+        sampleRequired: formData.orderType === "Sample",
+        sampleApprovalStatus: sampleData.approvalStatus,
+        sampleTestPurpose: sampleData.testPurpose,
+        sampleTestMachine: sampleData.testMachine,
+        sampleProduced: sampleData.isProduced,
+        sampleQcPassed: sampleData.qcPassed,
+        sampleRevisions: sampleData.revisions,
+        attachments: orderAttachments,
+      },
+      `${docNo}: ${formData.product}`
+    );
+    upsertProductionQueueItem({
+      id: docNo,
+      customer: formData.customer,
+      product: formData.product,
+      quantity:
+        formData.orderType === "Sample" && sampleData.approvalStatus !== "approved"
+          ? sampleData.sampleQty
+          : formData.quantity,
+      unit: formData.unit,
+      pressMachine: formData.pressMachine,
+      department: formData.department,
+      priority: (formData.priority as "Normal" | "High" | "Urgent") || "Normal",
+      deadline: formData.deadline,
+      sampleRequired: formData.orderType === "Sample",
+      sampleStatus:
+        formData.orderType === "Sample"
+          ? sampleData.approvalStatus === "approved"
+            ? "approved"
+            : sampleData.approvalStatus === "revision_requested"
+            ? "revision_requested"
+            : sampleData.isProduced
+            ? "awaiting_approval"
+            : "in_production"
+          : "none",
+      sampleQty: sampleData.sampleQty,
+    });
     setTabUnsaved(tab.id, false);
+  };
+
+  const handleSave = () => {
+    persistOrderDetails();
+    addNotification({
+      title: "Order Details Saved",
+      description: `${data.docNo || tab.id} — ${formData.product} (${formData.customer}) updated.`,
+      severity: "success",
+    });
   };
 
   const handleSaveAndClose = () => {
-    setTabUnsaved(tab.id, false);
+    persistOrderDetails();
     closeTab(tab.id);
   };
 
-  const handlePrintTraveler = async () => {
-    try {
-      const docNo = data.docNo || tab.id;
-      const materials = RECIPE_MATERIALS[formData.recipe] || [];
+  const handleSaveAndCloseRef = React.useRef(handleSaveAndClose);
+  handleSaveAndCloseRef.current = handleSaveAndClose;
 
-      const blob = await pdf(
-        <WorkOrderSpecPDF
-          docNo={docNo}
-          orderData={formData}
-          operations={operations}
-          materials={materials}
-          shiftEvents={shiftEvents}
-        />
-      ).toBlob();
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `Work_Order_Traveler_${docNo || "PRINTGOO"}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      addNotification({
-        title: "Production Traveler Exported",
-        description: `Downloaded traveler spec for ${docNo}`,
-        severity: "success",
-      });
-    } catch (err) {
-      console.error("Failed to generate work order traveler PDF", err);
-      if (typeof window !== "undefined") {
-        window.print();
+  // Listen for Save and Close event from Workspace confirmation modal
+  React.useEffect(() => {
+    const handleSaveAndCloseEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ tabId: string }>).detail;
+      if (detail?.tabId === tab.id) {
+        handleSaveAndCloseRef.current();
       }
-    }
+    };
+    window.addEventListener("printgo:save-and-close", handleSaveAndCloseEvent);
+    return () => window.removeEventListener("printgo:save-and-close", handleSaveAndCloseEvent);
+  }, [tab.id]);
+
+  // Prevent accidental browser tab close / refresh when unsaved
+  React.useEffect(() => {
+    if (!tab.isUnsaved) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [tab.isUnsaved]);
+
+  const activePrintPlan = React.useMemo(
+    () =>
+      calculatePrintPlanning({
+        targetQuantity: formData.quantity || 5000,
+        piecesPerSheet: formData.sizes && formData.sizes.length > 0 ? formData.sizes.length : 10,
+        frontColors: formData.frontColors || { c: true, m: true, y: true, k: true },
+        backColors: formData.backColors || { c: false, m: false, y: false, k: false },
+        spotColors: formData.spotColorItems || [],
+        printMethod: formData.printMethod,
+        parentSheetW: formData.parentSheetW || 1000,
+        parentSheetH: formData.parentSheetH || 700,
+        pressSheetW: formData.pressSheetW || 500,
+        pressSheetH: formData.pressSheetH || 700,
+      }),
+    [
+      formData.quantity,
+      formData.sizes,
+      formData.frontColors,
+      formData.backColors,
+      formData.spotColorItems,
+      formData.printMethod,
+      formData.parentSheetW,
+      formData.parentSheetH,
+      formData.pressSheetW,
+      formData.pressSheetH,
+    ]
+  );
+
+  const handleApplyRouteFromPlan = (steps?: RouteStep[]) => {
+    const newSteps =
+      steps ||
+      generateRouteStepsFromPlan(
+        activePrintPlan,
+        formData.pressMachine,
+        formData.lamination,
+        formData.embellishment
+      );
+    setOperations(newSteps);
+    setTabUnsaved(tab.id, true);
+    addNotification({
+      title: "Texnologik marshrut yangilandi",
+      description: `${newSteps.length} ta operatsiya CTP va bosma hisobi asosida avtomatik shakllantirildi.`,
+      severity: "success",
+    });
   };
 
-  const handlePrintClientSpec = async () => {
-    try {
-      const docNo = data.docNo || tab.id;
-      const blob = await pdf(
-        <OrderSpecificationPDF
-          docNo={docNo}
-          orderData={formData as any}
-          sizes={formData.sizes || []}
-          sampleData={sampleData as any}
-        />
-      ).toBlob();
+  const [isJobTicketOpen, setIsJobTicketOpen] = useState(false);
 
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `Order_Spec_${docNo || "PRINTGOO"}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      addNotification({
-        title: "Client Specification Exported",
-        description: `Downloaded specification for ${docNo}`,
-        severity: "success",
-      });
-    } catch (err) {
-      console.error("Failed to generate client spec PDF", err);
-      if (typeof window !== "undefined") {
-        window.print();
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setIsJobTicketOpen(true);
       }
-    }
-  };
-
-  const handlePrintFlexoSpec = () => {
-    try {
-      const inputs = {
-        machineId: formData.flexoMachineId || "JR-1521",
-        materialId: formData.flexoMaterialId || "satin-white",
-        webWidth: formData.flexoWebWidth || 35,
-        sideMarginLeft: 2.5,
-        sideMarginRight: 2.5,
-        productWidth: formData.width || 30,
-        productHeight: formData.height || 65,
-        orientation: (formData.flexoOrientation as any) || "normal",
-        bleedX: formData.bleed || 1.5,
-        bleedY: formData.bleed || 1.5,
-        gapX: formData.flexoGapX || 2,
-        gapY: formData.flexoGapY || 2.5,
-        cylinderTeeth: formData.flexoCylinderTeeth || 100,
-        plateThickness: formData.flexoPlateThickness || 1.7,
-        colors: formData.flexoColors || 4,
-        requiredQuantity: formData.quantity || 10000,
-        overproductionMode: "percent" as const,
-        overproductionValue: 5,
-      };
-      const result = calculateFlexoLayout(inputs);
-      exportFlexoPDF(result, {
-        docNo: data.docNo || tab.id,
-        orderName: formData.product,
-        customer: formData.customer,
-        productName: formData.product,
-      });
-      addNotification({
-        title: "Flexo Spec Exported",
-        description: `Exported cylinder repeat spec (${result.gearTeeth}T)`,
-        severity: "success",
-      });
-    } catch (err) {
-      console.error("Failed to generate flexo PDF", err);
-    }
-  };
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Operation Dialog Handlers
   const handleOpenAddOperation = () => {
@@ -532,11 +878,25 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setIsLogEventDialogOpen(false);
   };
 
-  const isFlexo = formData.department === "Flexo" || (formData.recipe && formData.recipe.startsWith("FLEXO_"));
-  const isOffset = formData.department === "Offset" || (formData.recipe && formData.recipe.startsWith("OFFSET_"));
+  const isFlexo = formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false);
+  const isJacquard = formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false);
+  const isOffset = !isFlexo && !isJacquard;
 
   const rawActiveTab = tab.activeLevel3Tab || "overview";
-  const activeTab = (isOperator && (rawActiveTab === "financials" || rawActiveTab === "sample")) ? "overview" : rawActiveTab;
+  const activeTab = (isOperator && (rawActiveTab === "financials" || rawActiveTab === "sample"))
+    ? "overview"
+    : (!isOffset && rawActiveTab === "layout")
+    ? "specs"
+    : (!isFlexo && rawActiveTab === "flexo")
+    ? "specs"
+    : rawActiveTab;
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new Event("resize"));
+    }, 20);
+    return () => clearTimeout(timer);
+  }, [activeTab]);
 
   return (
     <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">
@@ -550,79 +910,145 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           icon={Factory}
           title={formData.product}
           docNo={data.docNo || tab.id}
+          date={formData.startDate || "2026-09-30"}
           status={formData.status}
           priority={formData.priority}
+          parentDocRef={
+            formData.parentWorkOrderId
+              ? {
+                  docNo: formData.parentWorkOrderId,
+                  label: `Asos: ${formData.parentWorkOrderId} (Takroriy)`,
+                  onClick: () => handleOpenParentWorkOrder(formData.parentWorkOrderId!),
+                }
+              : undefined
+          }
           actions={
             <>
-              {!isOperator && (
-                <HeaderIconAction
-                  icon={Receipt}
-                  label={tAct("createFromOrder")}
-                  variant="outline"
-                  className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                  onClick={() => {
-                    const newAct = createDeliveryActFromOrder({
-                      orderId: data.linkedOrderId || data.docNo || tab.id,
-                      workOrderId: data.docNo || tab.id,
-                      customer: formData.customer || "Alpha Media Group LLC",
-                      product: formData.product || "A4 Hardcover Catalog 96p",
-                      quantity: formData.quantity || 5000,
-                      unit: formData.unit || "pcs",
-                      priceTotal: formData.priceTotal || 14850,
-                      currency: formData.currency || "USD",
-                    });
-                    openTab({
-                      id: newAct.id,
-                      title: `${newAct.id}: ${newAct.customer}`,
-                      type: "delivery-act",
-                      module: "finance",
-                      isUnsaved: true,
-                      activeLevel3Tab: "overview",
-                      documentData: newAct,
-                    });
-                  }}
+              {/* 1. Job Ticket / Passport Print (Icon button with tooltip) */}
+              <HeaderIconAction
+                icon={Printer}
+                label={`${tOrder("printSpec") || "Ish pasporti"} (Ctrl+P)`}
+                variant="outline"
+                onClick={() => setIsJobTicketOpen(true)}
+              />
+
+              {/* 2. Packaging (Icon button with badge if boxes packed) */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={() => setIsPackagingOpen(true)}
+                      className={cn(
+                        "h-7 w-7 relative cursor-pointer",
+                        formData.packagingData?.totalBoxes
+                          ? "text-emerald-700 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20"
+                          : ""
+                      )}
+                      aria-label="Qadoqlash"
+                    >
+                      <Package className="w-3.5 h-3.5" />
+                      {formData.packagingData?.totalBoxes ? (
+                        <span className="absolute -top-1 -right-1 h-3.5 min-w-3.5 px-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-mono flex items-center justify-center font-bold">
+                          {formData.packagingData.totalBoxes}
+                        </span>
+                      ) : null}
+                    </Button>
+                  }
                 />
-              )}
+                <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+                  {formData.packagingData?.totalBoxes
+                    ? `Qadoqlash (${formData.packagingData.totalBoxes} quti)`
+                    : "Qutilarga qadoqlash"}
+                </TooltipContent>
+              </Tooltip>
+
+              {/* 3. Three Vertical Dots (Dropdown Menu with secondary actions) */}
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs gap-1.5 cursor-pointer">
-                      <Printer className="w-3.5 h-3.5" />
-                      <span>{tOrder("printSpec")}</span>
-                      <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      className="h-7 w-7 cursor-pointer text-muted-foreground hover:text-foreground"
+                      aria-label="Qo'shimcha amallar"
+                    >
+                      <MoreVertical className="w-3.5 h-3.5" />
                     </Button>
                   }
                 />
                 <DropdownMenuContent align="end" className="w-60 text-xs">
-                  <DropdownMenuItem onClick={handlePrintTraveler} className="cursor-pointer gap-2 py-1.5">
-                    <Factory className="w-4 h-4 text-blue-500 shrink-0" />
-                    <div className="flex flex-col">
-                      <span className="font-medium">Production Traveler (Техкарта)</span>
-                      <span className="text-[10px] text-muted-foreground">Shop-floor route & materials</span>
-                    </div>
+                  <DropdownMenuItem
+                    onClick={handleReorderWorkOrder}
+                    className="gap-2 cursor-pointer font-medium text-blue-700 dark:text-blue-400"
+                  >
+                    <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Qayta buyurtma (Reorder)</span>
                   </DropdownMenuItem>
+
                   {!isOperator && (
-                    <DropdownMenuItem onClick={handlePrintClientSpec} className="cursor-pointer gap-2 py-1.5">
-                      <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
-                      <div className="flex flex-col">
-                        <span className="font-medium">Client Order Spec (PDF)</span>
-                        <span className="text-[10px] text-muted-foreground">Commercial spec & sample approval</span>
-                      </div>
+                    <DropdownMenuItem
+                      onClick={() => setIsSaveSpecDialogOpen(true)}
+                      className="gap-2 cursor-pointer font-medium text-violet-700 dark:text-violet-400"
+                    >
+                      <BookmarkPlus className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+                      <span>Yangi Spetsifikatsiya qilib saqlash</span>
                     </DropdownMenuItem>
                   )}
-                  {isFlexo && (
-                    <DropdownMenuItem onClick={handlePrintFlexoSpec} className="cursor-pointer gap-2 py-1.5">
-                      <Disc className="w-4 h-4 text-indigo-500 shrink-0" />
-                      <div className="flex flex-col">
-                        <span className="font-medium">Flexo Cylinder Spec (PDF)</span>
-                        <span className="text-[10px] text-muted-foreground">Teeth count & repeat layout</span>
-                      </div>
+
+                  {!isOperator && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        const newAct = createDeliveryActFromOrder({
+                          orderId: data.docNo || tab.id,
+                          workOrderId: data.docNo || tab.id,
+                          customer: formData.customer || "Alpha Media Group LLC",
+                          product: formData.product || "A4 Hardcover Catalog 96p",
+                          quantity: formData.quantity || 5000,
+                          unit: formData.unit || "pcs",
+                          priceTotal: formData.priceTotal || 14850,
+                          currency: formData.currency || "USD",
+                        });
+                        openTab({
+                          id: newAct.id,
+                          title: `${newAct.id}: ${newAct.customer}`,
+                          type: "delivery-act",
+                          module: "finance",
+                          isUnsaved: true,
+                          activeLevel3Tab: "overview",
+                          documentData: newAct,
+                        });
+                      }}
+                      className="gap-2 cursor-pointer text-emerald-700 dark:text-emerald-400 font-medium"
+                    >
+                      <Receipt className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>{tAct("createFromOrder") || "Yetkazib berish akti tuzish"}</span>
                     </DropdownMenuItem>
                   )}
+
+                  <DropdownMenuSeparator />
+
+                  <DropdownMenuItem onClick={() => setIsJobTicketOpen(true)} className="gap-2 cursor-pointer">
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Ish pasporti (Job Ticket)</span>
+                    <DropdownMenuShortcut>Ctrl+P</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem onClick={() => setIsPackagingOpen(true)} className="gap-2 cursor-pointer">
+                    <Package className="w-3.5 h-3.5" />
+                    <span>Qutilarga qadoqlash</span>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
               <Separator orientation="vertical" className="h-4 mx-0.5" />
+
+              {/* 4. Save icon button */}
               <HeaderIconAction icon={Save} label={`${tOrder("save")} (Ctrl+S)`} variant="outline" onClick={handleSave} />
+
+              {/* 5. Primary Post & Close button */}
               <Button
                 onClick={handleSaveAndClose}
                 size="sm"
@@ -645,37 +1071,115 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               <SidebarSummaryCard
                 icon={Building2}
                 title={formData.customer}
-                subtitle={formData.recipe}
+                subtitle={formData.product}
               >
+                {formData.parentWorkOrderId && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenParentWorkOrder(formData.parentWorkOrderId!)}
+                    className="w-full text-left flex items-center justify-between px-2 py-1 bg-blue-500/10 border border-blue-500/30 rounded text-[10px] text-blue-700 dark:text-blue-400 font-semibold mb-1.5 hover:bg-blue-500/20 transition-colors cursor-pointer"
+                    title={`Asosiy buyurtma: ${formData.parentWorkOrderId} (Ko'rish uchun bosing)`}
+                  >
+                    <span className="flex items-center gap-1 truncate mr-1">
+                      <RotateCw className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />
+                      <span className="truncate">Asos: {formData.parentWorkOrderId}</span>
+                    </span>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 shrink-0">
+                      Takroriy
+                    </Badge>
+                  </button>
+                )}
+
                 {isOperator && (
-                  <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-500/10 border border-amber-500/30 rounded text-[10px] text-amber-700 dark:text-amber-400 font-semibold mb-2">
+                  <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-500/10 border border-amber-500/30 rounded text-[10px] text-amber-700 dark:text-amber-400 font-semibold mb-1">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                     <span>Floor Mode · Specs Locked</span>
                   </div>
                 )}
-                {!isOperator && (
-                  <InfoRow label={tShell("totalAmount")}>
-                    <span className="font-mono font-bold">{formatMoney(formData.priceTotal, formData.currency)}</span>
-                  </InfoRow>
-                )}
+
+                {/* 1. Adad (va Namuna bo'lsa sinov adadi) */}
                 <InfoRow label={tShell("quantity")}>
-                  <span className="font-mono font-bold">
-                    {formData.quantity.toLocaleString()} {formData.unit}
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-foreground">
+                      {formData.quantity.toLocaleString()} {formData.unit}
+                    </span>
+                    {formData.orderType === "Sample" && (
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                        (🧪 Namuna: {sampleData.sampleQty} dona)
+                      </span>
+                    )}
+                  </div>
+                </InfoRow>
+
+                {/* 2. Qog'oz / Xomashyo */}
+                <InfoRow label="Qog'oz" title={formData.paperStock}>
+                  <span className="truncate max-w-[125px] font-medium text-foreground" title={formData.paperStock}>
+                    {formData.paperStock || "Belgilanmagan"}
                   </span>
                 </InfoRow>
-                <InfoRow label={tShell("technology")}>{formData.department}</InfoRow>
-                <InfoRow label={tShell("lamination")}>
-                  {formData.lamination && formData.lamination.toLowerCase() !== "none" ? (
-                    <span className="text-blue-600 dark:text-blue-400">
-                      {formData.lamination.split(" ")[0]} ({(formData.laminationSides || "1s").toUpperCase()})
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground italic font-normal">{tShell("none")}</span>
-                  )}
+
+                {/* 3. Ranglilik (CMYK / Pantones) */}
+                <InfoRow label="Ranglilik">
+                  <span className="font-mono font-medium text-foreground">
+                    {formData.colorsConfig || "4+0 (CMYK)"}
+                  </span>
                 </InfoRow>
+
+                {/* 4. Tayinlangan Uskuna */}
+                <InfoRow label={tShell("machine")} title={formData.pressMachine}>
+                  <span
+                    className="truncate max-w-[125px] font-medium text-blue-600 dark:text-blue-400"
+                    title={formData.pressMachine}
+                  >
+                    {formData.pressMachine.replace("Speedmaster ", "")}
+                  </span>
+                </InfoRow>
+
+                {/* 5. Muddat va Qolgan kunlar */}
+                <InfoRow label={tShell("deadline")}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-foreground">{formData.deadline}</span>
+                    {deadlineCountdown !== null && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[9px] px-1 py-0 h-4 font-mono font-medium",
+                          deadlineCountdown < 0
+                            ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                            : deadlineCountdown <= 2
+                            ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                            : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                        )}
+                      >
+                        {deadlineCountdown < 0
+                          ? "Kechikdi"
+                          : deadlineCountdown === 0
+                          ? "Bugun"
+                          : `${deadlineCountdown}k`}
+                      </Badge>
+                    )}
+                  </div>
+                </InfoRow>
+
+                {/* 6. Holat / Bosqich */}
+                <InfoRow label="Bosqich">
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px] px-1.5 py-0 font-medium",
+                      formData.status === "In Production" || formData.status === "Active"
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                        : "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {formData.status}
+                  </Badge>
+                </InfoRow>
+
+                {/* 7. Xomashyo yetishmasligi (BOM shortage alert) */}
                 {hasShortage && (
-                  <div className="flex items-center gap-1 pt-1 text-[10px] text-amber-600 dark:text-amber-400 font-medium">
-                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                  <div className="flex items-center gap-1 pt-1.5 border-t border-border/50 text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-500" />
                     <span className="truncate">{tShell("materialShortage")}</span>
                   </div>
                 )}
@@ -689,7 +1193,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 icon: Ruler,
                 badge: `${formData.width || 50}×${formData.height || 90}`,
               },
-              ...(!isFlexo || isOffset ? [{ id: "layout", label: "Imposition (Layout)", icon: LayoutTemplate }] : []),
+              ...(isOffset ? [{ id: "layout", label: tOrder("tabPlanning"), icon: LayoutTemplate }] : []),
               ...(isFlexo ? [{ id: "flexo", label: "Flexo Imposition", icon: Disc }] : []),
               {
                 id: "materials",
@@ -701,20 +1205,36 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   : undefined,
               },
               { id: "operations", label: tOrder("tabOperations"), icon: Factory, badge: operations.length },
-              { id: "timeline", label: tOrder("tabTimeline"), icon: Clock, badge: shiftEvents.length },
+              {
+                id: "timeline",
+                label: tOrder("tabTimeline"),
+                icon: Clock,
+                badge: `${operations.filter((o) => o.status === "Finished").length}/${operations.length}`,
+              },
               ...(!isOperator
                 ? [
                     {
                       id: "sample",
-                      label: "Sample Proof",
-                      icon: Package,
-                      badge: sampleData.approvalStatus,
+                      label: formData.orderType === "Sample" ? "Namuna (Sample)" : "Namuna sinovi",
+                      icon: FlaskConical,
+                      badge:
+                        formData.orderType === "Production"
+                          ? "Kerak emas"
+                          : sampleData.approvalStatus === "approved"
+                          ? "Tasdiqlangan"
+                          : sampleData.approvalStatus === "revision_requested"
+                          ? "Reviziya"
+                          : sampleData.isProduced
+                          ? "Tasdiq kutilmoqda"
+                          : "Tayyorlanmoqda",
                       badgeClassName:
-                        sampleData.approvalStatus === "Approved"
-                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                          : sampleData.approvalStatus === "Revision"
-                          ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                          : undefined,
+                        formData.orderType === "Production"
+                          ? "bg-muted text-muted-foreground"
+                          : sampleData.approvalStatus === "approved"
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold"
+                          : sampleData.approvalStatus === "revision_requested"
+                          ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 font-semibold"
+                          : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-semibold",
                     },
                     {
                       id: "financials",
@@ -727,20 +1247,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               { id: "files", label: tShell("filesAndDocs"), icon: Paperclip, badge: orderAttachments.length || null },
               { id: "history", label: tOrder("tabHistory"), icon: History },
             ]}
-            footer={
-              <>
-                <SidebarSectionTitle label={tShell("machineAndDeadline")} icon={Cpu} />
-                <div>
-                  <InfoRow label={tShell("machine")} title={formData.pressMachine}>
-                    {formData.pressMachine}
-                  </InfoRow>
-                  <InfoRow label={tShell("deadline")}>
-                    <span className="font-mono">{formData.deadline}</span>
-                  </InfoRow>
-                  <InfoRow label={tShell("site")}>{formData.site}</InfoRow>
-                </div>
-              </>
-            }
           />
 
           {/* ── RIGHT MAIN VIEWPORT (flex-1) ── */}
@@ -762,11 +1268,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               hasShortage={hasShortage}
               orderAttachments={orderAttachments}
               setOrderAttachments={setOrderAttachments}
+              sampleData={sampleData}
+              onSampleChange={handleSampleChange}
               onOpenLightbox={() => setIsLightboxOpen(true)}
               onOpenTab={openTab}
               onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
               onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
               isOperator={isOperator}
+              onToggleOperatorMode={(mode) => setViewMode(mode)}
               tOrder={tOrder}
             />
 
@@ -778,10 +1287,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
               onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
               isOperator={isOperator}
+              sampleData={sampleData}
+              onSampleChange={handleSampleChange}
             />
 
-            {/* Tab: Imposition / Layout for Offset */}
-            {(!isFlexo || isOffset) && (
+            {/* Tab: Imposition / Layout for Offset & Front-Back Print Planning */}
+            {isOffset && (
               <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
                 <LayoutCalcTab
                   sizes={formData.sizes || []}
@@ -791,6 +1302,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   defaultProdW={formData.width}
                   defaultProdH={formData.height}
                   defaultBleed={formData.bleed}
+                  frontColors={formData.frontColors}
+                  backColors={formData.backColors}
+                  spotColors={formData.spotColorItems}
+                  printMethod={formData.printMethod}
+                  onPrintMethodChange={(method) => handleFieldChange("printMethod", method)}
+                  onApplyRouteToOperations={handleApplyRouteFromPlan}
+                  pressMachine={formData.pressMachine}
+                  paperStock={formData.paperStock}
+                  lamination={formData.lamination}
+                  embellishment={formData.embellishment}
+                  isOperator={isOperator}
+                  onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                   kashirovkaMode={formData.kashirovkaMode}
                   kashirovkaStrategy={formData.kashirovkaStrategy}
                   kashirovkaLayers={formData.kashirovkaLayers}
@@ -807,6 +1330,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       handleFieldChange("kashirovkaMakeReadySheets", patch.kashirovkaMakeReadySheets);
                     }
                   }}
+                  sampleQty={sampleData.sampleQty}
+                  onSampleQtyChange={(q) => handleSampleChange("sampleQty", q)}
                 />
               </TabsContent>
             )}
@@ -823,6 +1348,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   defaultProdW={formData.width}
                   defaultProdH={formData.height}
                   defaultBleed={formData.bleed}
+                  onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                   onAuditLog={() => {}}
                   onFlexoSave={(res) => {
                     if (
@@ -841,10 +1367,37 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             )}
 
             {/* Tab 3: Materials BOM */}
-            <MaterialsTab tabId={tab.id} department={formData.department} />
+            <MaterialsTab
+              tabId={tab.id}
+              department={formData.department}
+              recipe={formData.recipe}
+              activeSpec={activeSpec}
+              onRecipeChange={(code, dept) => {
+                handleFieldChange("recipe", code);
+                if (dept && formData.department !== dept) {
+                  handleDepartmentChange(dept);
+                }
+              }}
+              onOpenTab={openTab}
+              isOperator={isOperator}
+              onItemsChange={(newItems) => setCurrentBomItems(newItems)}
+              onSaveAsSpec={(items) => {
+                setCurrentBomItems(items);
+                setIsSaveSpecDialogOpen(true);
+              }}
+            />
 
             {/* Tab 4: Technological Route */}
             <OperationsTab
+              workOrderId={data.docNo || tab.id}
+              fallbackData={{
+                customer: formData.customer,
+                product: formData.product,
+                machine: formData.pressMachine,
+                department: formData.department,
+                quantity: formData.quantity,
+                deadline: formData.deadline,
+              }}
               operations={operations}
               setOperations={setOperations}
               opSelection={opSelection}
@@ -854,6 +1407,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               onDeleteSelectedOperation={handleDeleteSelectedOperation}
               isDark={isDark}
               onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+              onSyncFromPlan={() => handleApplyRouteFromPlan()}
+              onOpenInTimeline={(opId) => {
+                setSelectedTimelineOpId(opId);
+                setLevel3Tab(tab.id, "timeline");
+              }}
+              onOpenPackaging={() => setIsPackagingOpen(true)}
+              isPacked={formData.packagingData?.isCompleted}
+              packagesCount={formData.packagingData?.totalBoxes}
             />
 
             {/* Tab 5: Shift Timeline & Notes */}
@@ -893,10 +1454,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 setShiftEvents((prev) => [newEvent, ...prev]);
                 setTabUnsaved(tab.id, true);
               }}
-              shiftNotes={formData.shiftNotes || []}
-              onAddShiftNote={(note) => {
-                const currentNotes = formData.shiftNotes || [];
-                handleFieldChange("shiftNotes", [note, ...currentNotes]);
+              onChangeStepStatus={(opId, status) => {
+                setOperations((prev) =>
+                  prev.map((op) => (op.id === opId ? { ...op, status } : op))
+                );
                 setTabUnsaved(tab.id, true);
               }}
             />
@@ -905,10 +1466,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             {!isOperator && (
               <TabsContent value="sample" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
                 <SampleTab
-                  formData={formData as any}
-                  sampleData={sampleData as any}
-                  handleSampleChange={handleSampleChange as any}
-                  handleFieldChange={handleFieldChange as any}
+                  formData={formData}
+                  sampleData={sampleData}
+                  handleSampleChange={handleSampleChange}
+                  handleFieldChange={handleFieldChange}
+                  onApproveAndReleaseMassRun={handleApproveSampleAndRelease}
+                  onRejectSample={handleRejectSample}
                   tabId={tab.id}
                 />
               </TabsContent>
@@ -916,7 +1479,20 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
             {/* Tab 6: Financials (Hidden for Operators) */}
             {!isOperator && (
-              <FinancialsTab shiftEvents={shiftEvents} />
+              <FinancialsTab
+                shiftEvents={shiftEvents}
+                formData={formData}
+                printPlan={activePrintPlan}
+                operations={operations}
+                docNo={data.docNo || tab.id}
+                onPriceChange={(newPrice, fin) => {
+                  handleFieldChange("priceTotal", newPrice);
+                  if (fin) {
+                    handleFieldChange("financials", fin);
+                  }
+                  persistOrderDetails();
+                }}
+              />
             )}
 
             {/* Tab 7: Files & Tech Documents */}
@@ -928,7 +1504,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             />
 
             {/* Tab 8: History */}
-            <HistoryTab />
+            <HistoryTab
+              docNo={data.docNo || tab.id}
+              formData={formData}
+            />
           </div>
         </div>
       </Tabs>
@@ -953,6 +1532,57 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         onSave={handleSaveLogEvent}
       />
 
+      {/* Unified Order Passport / Job Ticket Dialog */}
+      <JobTicketDialog
+        isOpen={isJobTicketOpen}
+        onOpenChange={setIsJobTicketOpen}
+        workOrderId={data.docNo || tab.id}
+        formData={formData}
+        activeSpec={activeSpec}
+        activeMachine={activeMachine}
+        operations={operations}
+        materials={currentRecipeMaterials}
+        shiftEvents={shiftEvents}
+        onExportSuccess={(docId) =>
+          addNotification({
+            title: tOrder("printSpec"),
+            description: `PDF exported: ${docId}`,
+            severity: "success",
+          })
+        }
+      />
+
+      {/* Quick Packaging Dialog */}
+      <PackagingDialog
+        isOpen={isPackagingOpen}
+        onOpenChange={setIsPackagingOpen}
+        workOrderNo={data.docNo || tab.id}
+        clientOrderNo={formData.linkedOrderId}
+        customer={formData.customer}
+        product={formData.product}
+        targetQuantity={formData.quantity}
+        unit={formData.unit}
+        sizes={formData.sizes}
+        existingPackaging={formData.packagingData}
+        onSavePackaging={handleSavePackaging}
+        onOpenPrintModal={(summary) => {
+          handleFieldChange("packagingData", summary);
+          setIsLabelPrintOpen(true);
+        }}
+      />
+
+      {/* Box Label Passport Print Modal (100x150 mm) */}
+      <BoxLabelPrintModal
+        isOpen={isLabelPrintOpen}
+        onOpenChange={setIsLabelPrintOpen}
+        workOrderNo={data.docNo || tab.id}
+        clientOrderNo={formData.linkedOrderId}
+        customer={formData.customer}
+        product={formData.product}
+        boxes={formData.packagingData?.boxes || []}
+        totalBoxes={formData.packagingData?.totalBoxes || 0}
+      />
+
       {/* Lightbox for Sample Proof */}
       <ImageLightbox
         isOpen={isLightboxOpen}
@@ -961,6 +1591,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         alt={formData.product || "Sample Proof"}
         title={`${tab.documentData?.docNo || tab.id}: Sample Proof`}
         subtitle={`${formData.product} • ${formData.customer} (${formData.department})`}
+      />
+
+      {/* Save As Specification Dialog */}
+      <SaveSpecDialog
+        isOpen={isSaveSpecDialogOpen}
+        onOpenChange={setIsSaveSpecDialogOpen}
+        department={formData.department}
+        currentRecipeCode={formData.recipe}
+        currentRecipeName={activeSpec?.name}
+        materials={currentBomItems}
+        operations={operations}
+        onSaveSpec={handleSaveAsNewSpec}
       />
     </div>
   );

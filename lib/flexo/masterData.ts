@@ -992,3 +992,129 @@ export const FLEXO_MATERIALS: FlexoMaterial[] = [
     description: "100% natural unbleached cotton herringbone webbing",
   },
 ];
+
+export const DEFAULT_DIES_TOOLING: import("./types").FlexoDieTooling[] = [
+  {
+    id: "DIE-RECT-50x90-R3",
+    code: "DIE-RECT-50x90-R3",
+    name: "Hangtag Die 50×90 mm (R3)",
+    dieType: "rotary_magnetic",
+    shape: "rounded_rect",
+    widthMm: 50,
+    heightMm: 90,
+    cornerRadiusMm: 3,
+    acrossCount: 2,
+    aroundCount: 1,
+    gapXMm: 3,
+    gapYMm: 3,
+    repeatLengthMm: 93,
+    cylinderTeeth: 70,
+    location: "SHELF-DIE-A1",
+    status: "available",
+    totalImpressions: 12500,
+    notes: "Standart kiyim yorliqlari uchun egiluvchan magnit pichoq",
+  },
+  {
+    id: "DIE-CIRC-40",
+    code: "DIE-CIRC-40",
+    name: "Round Sticker Die Ø 40 mm",
+    dieType: "rotary_magnetic",
+    shape: "circle",
+    widthMm: 40,
+    heightMm: 40,
+    cornerRadiusMm: 20,
+    acrossCount: 3,
+    aroundCount: 2,
+    gapXMm: 3,
+    gapYMm: 3,
+    repeatLengthMm: 86,
+    cylinderTeeth: 64,
+    location: "SHELF-DIE-B2",
+    status: "available",
+    totalImpressions: 45000,
+    notes: "Doira stikerlar va qadoq plombasi uchun",
+  },
+  {
+    id: "DIE-LABEL-30x70",
+    code: "DIE-LABEL-30x70",
+    name: "Textile Care Label Die 30×70 mm",
+    dieType: "solid_rotary",
+    shape: "rectangle",
+    widthMm: 30,
+    heightMm: 70,
+    cornerRadiusMm: 0,
+    acrossCount: 1,
+    aroundCount: 1,
+    gapXMm: 0,
+    gapYMm: 2,
+    repeatLengthMm: 72,
+    cylinderTeeth: 53,
+    location: "SHELF-DIE-C1",
+    status: "available",
+    totalImpressions: 89000,
+    notes: "Satin va neylon tasmalar uchun issiq/sovuq qirquvchi pichoq",
+  },
+  {
+    id: "DIE-STICKER-50x50-R2",
+    code: "DIE-STICKER-50x50-R2",
+    name: "Square Sticker Die 50×50 mm (R2)",
+    dieType: "rotary_magnetic",
+    shape: "rounded_rect",
+    widthMm: 50,
+    heightMm: 50,
+    cornerRadiusMm: 2,
+    acrossCount: 2,
+    aroundCount: 2,
+    gapXMm: 3,
+    gapYMm: 3,
+    repeatLengthMm: 106,
+    cylinderTeeth: 78,
+    location: "SHELF-DIE-A3",
+    status: "available",
+    totalImpressions: 34000,
+    notes: "Kvadrat samokleyka stikerlar uchun",
+  },
+];
+
+/**
+ * Server API orqali stanoklar ro'yxatini yuklash (PostgreSQL + Redis orqali)
+ * Xatolik bo'lsa lokal FLEXO_MACHINES ga avtomatik o'tadi
+ */
+export async function fetchFlexoMachinesAsync(companyCode = "PRINTGOO"): Promise<FlexoMachine[]> {
+  try {
+    const res = await fetch(`/api/v1/master/printing/machines?company=${companyCode}`);
+    if (!res.ok) throw new Error("Failed to load machines from API");
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      return json.data;
+    }
+  } catch (e) {
+    console.warn("[FlexoMasterData] Fallback to local machines:", e);
+  }
+  return FLEXO_MACHINES;
+}
+
+/**
+ * Server API orqali pichoq va shtamplar ro'yxatini yuklash
+ */
+export async function fetchDiesToolingAsync(companyCode = "PRINTGOO"): Promise<import("./types").FlexoDieTooling[]> {
+  try {
+    const res = await fetch(`/api/v1/master/printing/dies?company=${companyCode}`);
+    if (!res.ok) throw new Error("Failed to load dies from API");
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      return json.data.map((d: any) => ({
+        ...d,
+        widthMm: Number(d.widthMm),
+        heightMm: Number(d.heightMm),
+        cornerRadiusMm: Number(d.cornerRadiusMm),
+        gapXMm: Number(d.gapXMm),
+        gapYMm: Number(d.gapYMm),
+        repeatLengthMm: d.repeatLengthMm ? Number(d.repeatLengthMm) : undefined,
+      }));
+    }
+  } catch (e) {
+    console.warn("[FlexoMasterData] Fallback to local dies:", e);
+  }
+  return DEFAULT_DIES_TOOLING;
+}

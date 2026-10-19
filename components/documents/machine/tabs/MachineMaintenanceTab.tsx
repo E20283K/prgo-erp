@@ -1,0 +1,354 @@
+"use client";
+
+import React, { useState } from "react";
+import { MachineRecord, MachineMaintenanceRecord } from "../types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Wrench,
+  Clock,
+  CheckCircle2,
+  AlertTriangle,
+  Plus,
+  Calendar,
+  DollarSign,
+  Activity,
+  Gauge,
+  Thermometer,
+  Flame,
+  ShieldCheck,
+  Save,
+  RotateCcw,
+} from "lucide-react";
+
+interface MachineMaintenanceTabProps {
+  machine: MachineRecord;
+  onUpdate: (updated: Partial<MachineRecord>) => void;
+}
+
+export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceTabProps) {
+  const [isAddingLog, setIsAddingLog] = useState(false);
+  const [logType, setLogType] = useState<MachineMaintenanceRecord["type"]>("Routine Oil/Lube");
+  const [technician, setTechnician] = useState("");
+  const [downtime, setDowntime] = useState<number>(2);
+  const [cost, setCost] = useState<number>(150);
+  const [description, setDescription] = useState("");
+  const [nextDue, setNextDue] = useState("");
+
+  const handleSaveNewLog = () => {
+    if (!description.trim()) return;
+
+    const newRecord: MachineMaintenanceRecord = {
+      id: `MNT-0${830 + machine.maintenanceLogs.length}`,
+      date: new Date().toISOString().split("T")[0],
+      type: logType,
+      meterReading: `${machine.totalLifetimeCounter.toLocaleString()} ${machine.counterUnit}`,
+      technician: technician.trim() || machine.leadOperator,
+      costUsd: cost,
+      downtimeHours: downtime,
+      description: description.trim(),
+      nextDueAt: nextDue.trim() || "Navbatdagi tekshiruv 3 oydan so'ng",
+    };
+
+    onUpdate({
+      maintenanceLogs: [newRecord, ...machine.maintenanceLogs],
+    });
+
+    setIsAddingLog(false);
+    setDescription("");
+    setTechnician("");
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 4 Telemetry & Health Gauges */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+              Umumiy Resurs / Odometer
+            </span>
+            <Gauge className="w-4 h-4 text-primary" />
+          </div>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-xl font-bold font-mono text-foreground">
+              {(machine.totalLifetimeCounter / 1000000).toFixed(1)}M
+            </span>
+            <span className="text-xs text-muted-foreground">{machine.counterUnit}</span>
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            Jami: {machine.totalLifetimeCounter.toLocaleString()} {machine.counterUnit}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+              Moylash Bosimi (Lubrication)
+            </span>
+            <Activity className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
+              {machine.telemetry.oilPressureBar} bar
+            </span>
+          </div>
+          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" />
+            Normal ishchi bosim (4.0 - 5.5 bar)
+          </div>
+        </div>
+
+        {machine.telemetry.uvLampHoursUsed !== undefined && (
+          <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                UV Chiroqlar Resursi
+              </span>
+              <Flame className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="flex items-baseline gap-1 mt-1">
+              <span className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">
+                {machine.telemetry.uvLampHoursUsed}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                / {machine.telemetry.uvLampMaxHours} soat
+              </span>
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              Qolgan resurs:{" "}
+              {Math.round(
+                (1 -
+                  (machine.telemetry.uvLampHoursUsed || 0) /
+                    (machine.telemetry.uvLampMaxHours || 1)) *
+                  100
+              )}
+              %
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+              Harorat & Tebranish
+            </span>
+            <Thermometer className="w-4 h-4 text-blue-500" />
+          </div>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-xl font-bold font-mono text-foreground">
+              {machine.telemetry.temperatureC}°C
+            </span>
+            <span className="text-xs text-muted-foreground">
+              / {machine.telemetry.vibrationMmS} mm/s
+            </span>
+          </div>
+          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center gap-1">
+            <ShieldCheck className="w-3 h-3" />
+            Vibratsiya me'yorda (&lt; 2.5 mm/s)
+          </div>
+        </div>
+      </div>
+
+      {/* New Maintenance Entry Form */}
+      {isAddingLog && (
+        <div className="rounded-lg border border-primary/40 bg-card shadow-sm overflow-hidden">
+          <div className="py-2.5 px-3.5 border-b border-border bg-primary/5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Wrench className="w-4 h-4 text-primary" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                Yangi Texnik Xizmat / Ta'mirlash Yozuvini Qo'shish
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsAddingLog(false)}
+              className="h-6 text-xs"
+            >
+              Yopish
+            </Button>
+          </div>
+          <div className="p-3.5 space-y-3 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Xizmat Turi:</Label>
+                <Select
+                  value={logType}
+                  onValueChange={(val: any) => setLogType(val)}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Routine Oil/Lube">Rejali Moylash / Filtr</SelectItem>
+                    <SelectItem value="Roller Replacement">Val / Rezina Almashtirish</SelectItem>
+                    <SelectItem value="UV Lamp Change">UV Lampa / Isitgich Yangilash</SelectItem>
+                    <SelectItem value="Blade Sharpening">Pichoq O'tkirlash / Almashtirish</SelectItem>
+                    <SelectItem value="Bearing/Sensor Repair">Podshipnik / Datchik Ta'miri</SelectItem>
+                    <SelectItem value="General Overhaul">Katta Kapital Ta'mir</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Usta / Texnik Xodim:</Label>
+                <Input
+                  placeholder="Ism sharif yoki servis kompaniya"
+                  value={technician}
+                  onChange={(e) => setTechnician(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">To'xtash Vaqti (Downtime soat):</Label>
+                <Input
+                  type="number"
+                  step="0.5"
+                  value={downtime}
+                  onChange={(e) => setDowntime(Number(e.target.value) || 0)}
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Ehtiyot Qism & Xizmat Narxi ($):</Label>
+                <Input
+                  type="number"
+                  step="10"
+                  value={cost}
+                  onChange={(e) => setCost(Number(e.target.value) || 0)}
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Bajarilgan Ishlar Tavsifi:</Label>
+              <Textarea
+                placeholder="Almashtirilgan qismlar, moy markasi, kalibrlash tafsilotlari..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="text-xs h-16 resize-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Keyingi Xizmat Ko'rsatish Ko'rsatkichi:</Label>
+                <Input
+                  placeholder="Masalan: 88,000,000 varaq yoki 2026-12-01"
+                  value={nextDue}
+                  onChange={(e) => setNextDue(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              <div className="flex items-end justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsAddingLog(false)}
+                  className="h-8 text-xs"
+                >
+                  Bekor Qilish
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleSaveNewLog}
+                  className="h-8 text-xs gap-1 bg-primary text-primary-foreground"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Yozuvni Saqlash
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Maintenance History Table */}
+      <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
+        <div className="py-2.5 px-3.5 border-b border-border bg-muted/30 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Wrench className="w-4 h-4 text-primary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+              Texnik Xizmat va Ta'mirlash Tarixi ({machine.maintenanceLogs.length})
+            </span>
+          </div>
+          {!isAddingLog && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsAddingLog(true)}
+              className="h-6 text-[11px] gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              Yangi Servis Yozuvi
+            </Button>
+          )}
+        </div>
+        <div>
+          {machine.maintenanceLogs.length > 0 ? (
+            <div className="divide-y divide-border">
+              {machine.maintenanceLogs.map((log) => (
+                <div key={log.id} className="p-3 hover:bg-muted/30 transition-colors text-xs space-y-1.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-bold text-foreground">
+                        {log.id}
+                      </span>
+                      <Badge variant="outline" className="text-[10px] font-medium">
+                        {log.type}
+                      </Badge>
+                      <span className="text-muted-foreground flex items-center gap-1 font-mono text-[11px]">
+                        <Calendar className="w-3 h-3" />
+                        {log.date}
+                      </span>
+                      <span className="text-muted-foreground">•</span>
+                      <span className="font-mono text-muted-foreground text-[11px]">
+                        {log.meterReading}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 text-muted-foreground text-[11px]">
+                      <span>
+                        To'xtash: <strong className="text-foreground">{log.downtimeHours} soat</strong>
+                      </span>
+                      <span>
+                        Xarajat: <strong className="text-foreground font-mono">${log.costUsd}</strong>
+                      </span>
+                      <span>
+                        Mutaxassis: <strong className="text-foreground">{log.technician}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-foreground text-xs leading-relaxed">
+                    {log.description}
+                  </p>
+
+                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-blue-500" />
+                    <span>Rejalashtirilgan keyingi servis:</span>
+                    <strong className="text-foreground">{log.nextDueAt}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-6 text-center text-muted-foreground text-xs">
+              Ushbu uskuna uchun texnik xizmat yozuvlari kiritilmagan.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

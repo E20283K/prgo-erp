@@ -1,42 +1,23 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
-import dynamic from "next/dynamic";
-import { cn } from "cn";
-import {
-  GridCell,
-  GridCellKind,
-  GridColumn,
-  Item,
-  GridSelection,
-  CompactSelection,
-  GridColumnIcon,
-} from "@glideapps/glide-data-grid";
-import "@glideapps/glide-data-grid/dist/index.css";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
   useWorkspaceStore,
   DocumentTab,
   CrmCustomerRecord,
+  CustomerContactPerson,
+  CustomerContractRecord,
 } from "@/store/workspaceStore";
-import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
+import {
+  DocumentHeader,
+  DocumentSidebar,
+  SidebarSummaryCard,
+  DocumentNavItem,
+  InfoRow,
+} from "@/components/documents/common/DocumentShell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   Building2,
   Scale,
@@ -45,112 +26,122 @@ import {
   Printer,
   Save,
   Check,
-  Plus,
-  CreditCard,
   FilePlus2,
-  ExternalLink,
+  CreditCard,
   Phone,
   Mail,
   UserCheck,
-  FileText,
 } from "lucide-react";
+import { CustomerOverviewTab } from "./customer/tabs/CustomerOverviewTab";
+import { CustomerSettlementsTab } from "./customer/tabs/CustomerSettlementsTab";
+import { CustomerOrdersTab } from "./customer/tabs/CustomerOrdersTab";
+import { CustomerToolingTab } from "./customer/tabs/CustomerToolingTab";
+import { AktSverkaPrintModal } from "./customer/components/AktSverkaPrintModal";
 
-const DataEditor = dynamic(
-  () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
-  { ssr: false }
-);
-
-interface CustomerToolingItem {
-  id: string;
-  name: string;
-  toolType: string;
-  format: string;
-  cavities: string;
-  location: string;
-  impressionsUsed: number;
-  maxLife: number;
-  status: string;
+function ensureCustomerContracts(customer: Partial<CrmCustomerRecord>): CustomerContractRecord[] {
+  if (customer.contracts && customer.contracts.length > 0) {
+    return customer.contracts;
+  }
+  const defaultNo = customer.contractNo || "CON-2026-101";
+  const numMatch = defaultNo.match(/\d+$/);
+  const numPart = numMatch ? numMatch[0] : "101";
+  return [
+    {
+      id: `${customer.id || "cust"}-cnt-2026`,
+      contractNo: defaultNo,
+      title: "Bosh yetkazib berish va poligrafiya shartnomasi",
+      type: "annual",
+      startDate: customer.contractDate || "2026-01-01",
+      endDate: customer.contractExpiry || "2026-12-31",
+      status: "active",
+      isDefault: true,
+      paymentTerms: customer.paymentTerms || "50% Advance / 50% Net 15",
+      notes: "2026-moliyaviy yili uchun Didox va Soliq orqali tasdiqlangan bosh ramkali shartnoma.",
+    },
+    {
+      id: `${customer.id || "cust"}-cnt-2025`,
+      contractNo: `CON-2025-${numPart}`,
+      title: "2025-yilgi mahsulot yetkazib berish shartnomasi",
+      type: "annual",
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+      status: "expired",
+      isDefault: false,
+      paymentTerms: "100% Oldindan to'lov",
+      notes: "Arxiv shartnoma. Barcha majburiyatlar va to'lovlar to'liq bajarilgan.",
+    },
+  ];
 }
 
-const CUSTOMER_TOOLING_MOCK: Record<string, CustomerToolingItem[]> = {
-  "Alpha Media Group": [
+function ensureCustomerContacts(customer: Partial<CrmCustomerRecord>): CustomerContactPerson[] {
+  if (customer.contacts && customer.contacts.length > 0) {
+    return customer.contacts;
+  }
+  return [
     {
-      id: "FOIL-301",
-      name: "Hot Foil Brass Cliché — Luxury Perfume & Catalog Cover",
-      toolType: "Hot Foil Cliché (Brass 7mm)",
-      format: "180×120 mm",
-      cavities: "2-up",
-      location: "Cabinet C-01",
-      impressionsUsed: 18500,
-      maxLife: 300000,
-      status: "Ready",
+      id: `${customer.id || "cust"}-cont-1`,
+      role: "director",
+      roleLabel: "Bosh direktor",
+      name: "Sherzod Toshmatov",
+      phone: "+998 90 333-44-55",
+      email: "director@client.uz",
+      telegram: "sherzod_director",
+      isPrimary: false,
+      notes: "Shartnoma va strategik masalalar",
     },
     {
-      id: "DIE-004",
-      name: "A4 Presentation Folder Die w/ Business Card Slot",
-      toolType: "Flatbed Die (Штанцформа)",
-      format: "640×460 mm (B2)",
-      cavities: "2-up",
-      location: "Rack A-05",
-      impressionsUsed: 42000,
-      maxLife: 150000,
-      status: "Ready",
-    },
-  ],
-  "Apex Packaging": [
-    {
-      id: "DIE-001",
-      name: "FEFCO 0201 Master Carton Die (400×300×250)",
-      toolType: "Flatbed Die (Штанцформа)",
-      format: "1020×720 mm (B1)",
-      cavities: "2-up",
-      location: "Rack A-01",
-      impressionsUsed: 64200,
-      maxLife: 150000,
-      status: "Ready",
+      id: `${customer.id || "cust"}-cont-2`,
+      role: "accountant",
+      roleLabel: "Bosh buxgalter",
+      name: "Dilnoza Rahimova",
+      phone: "+998 91 777-66-55",
+      email: "finance@client.uz",
+      telegram: "dilnoza_finance",
+      isPrimary: false,
+      notes: "To'lovlar, schyot-faktura va akt sverka",
     },
     {
-      id: "DIE-002",
-      name: "Pharma Folding Box 60×40×110 (Tuck-End)",
-      toolType: "Flatbed Die (Штанцформа)",
-      format: "700×1000 mm",
-      cavities: "18-up",
-      location: "Rack A-02",
-      impressionsUsed: 138500,
-      maxLife: 150000,
-      status: "Re-knifing Soon",
+      id: `${customer.id || "cust"}-cont-3`,
+      role: "procurement",
+      roleLabel: "Ta'minot / Buyurtmachi",
+      name: customer.contactPerson || "Kamola Rustamova",
+      phone: customer.phone || "+998 93 551-20-10",
+      email: customer.email || "supply@client.uz",
+      telegram: "kamola_procurement",
+      isPrimary: true,
+      notes: "Poligrafiya buyurtmalari, maketlar va tiraj",
     },
-  ],
-  "Nordic Print Co": [
     {
-      id: "CL-204",
-      name: "Flexo Photopolymer Plate Set (CMYK + White) — Satin Label",
-      toolType: "Flexo Cliché (Флексоклише 1.14mm)",
-      format: "Z=96 (304.8 mm)",
-      cavities: "6-up",
-      location: "Cabinet B-04",
-      impressionsUsed: 210000,
-      maxLife: 500000,
-      status: "Ready",
+      id: `${customer.id || "cust"}-cont-4`,
+      role: "warehouse",
+      roleLabel: "Ombor mudiri",
+      name: "Jasur Aliyev",
+      phone: "+998 99 770-88-99",
+      email: "warehouse@client.uz",
+      telegram: "jasur_ombor",
+      isPrimary: false,
+      notes: "Tayyor mahsulotni qabul qilish va ishonchnoma",
     },
-  ],
-};
+  ];
+}
 
 export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   const {
     crmCustomers,
     clientSettlements,
     deliveryActs,
+    productionQueue,
+    customerTooling,
+    finishedGoods,
     upsertCustomer,
-    recordClientPayment,
+    upsertProductionQueueItem,
     setTabUnsaved,
     setLevel3Tab,
     openTab,
     closeTab,
-    theme,
+    addNotification,
   } = useWorkspaceStore();
 
-  const isDark = theme === "dark";
   const activeTab = tab.activeLevel3Tab || "overview";
 
   // Find customer from store by ID or Name
@@ -172,9 +163,15 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   }, [crmCustomers, tab.id, tab.documentData]);
 
   const initialRecord: CrmCustomerRecord = useMemo(() => {
-    if (storeCustomer) return storeCustomer;
+    if (storeCustomer) {
+      return {
+        ...storeCustomer,
+        contacts: ensureCustomerContacts(storeCustomer),
+        contracts: ensureCustomerContracts(storeCustomer),
+      };
+    }
     const d = tab.documentData || {};
-    return {
+    const baseCust: CrmCustomerRecord = {
       id: d.id || (tab.id.startsWith("CUST-") ? tab.id : `CUST-${Math.floor(100 + Math.random() * 899)}`),
       name: d.name || d.customer || "Alpha Media Group LLC",
       tin: d.tin || d.customerTin || "305841920",
@@ -186,25 +183,49 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
       paymentTerms: d.paymentTerms || "50% Prepay / 50% Ship",
       manager: d.manager || "Elena Voronina",
       status: d.status === "VIP" || d.status === "Active" || d.status === "New" || d.status === "Blocked" ? d.status : "Active",
+      legalAddress: d.legalAddress || "Toshkent sh., Chilonzor tumani, Bunyodkor shoh ko'chasi 42",
+      deliveryAddress: d.deliveryAddress || "Toshkent vil., Zangiota tumani, Ombor №3",
+      bankName: d.bankName || "ATB Ipoteka Bank Bosh amaliyot filiali",
+      bankAccount: d.bankAccount || "20208000900501234001",
+      mfo: d.mfo || "00450",
+      oked: d.oked || "18120",
+      vatPayer: d.vatPayer ?? true,
+      creditLimitUsd: d.creditLimitUsd ?? 10000,
+      contractDate: d.contractDate || "2026-01-10",
+      contractExpiry: d.contractExpiry || "2026-12-31",
+      receivingHours: d.receivingHours || "Dush-Juma: 09:00 - 18:00 (Tushlik 13:00 - 14:00)",
+      requiresPowerOfAttorney: d.requiresPowerOfAttorney ?? true,
+      deliveryTransportNote: d.deliveryTransportNote || "Fura va Gazel bemalol kiradi, rampa bor",
+      specialRequirements: d.specialRequirements || "Mijoz talablari bo'yicha sifat nazorati va qadoqlash",
     };
+    baseCust.contacts = ensureCustomerContacts(baseCust);
+    baseCust.contracts = ensureCustomerContracts(baseCust);
+    return baseCust;
   }, [storeCustomer, tab.documentData, tab.id]);
 
   const [form, setForm] = useState<CrmCustomerRecord>(initialRecord);
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (storeCustomer) {
-      setForm(storeCustomer);
+      setForm((prev) => ({
+        ...prev,
+        ...storeCustomer,
+        contacts: ensureCustomerContacts(storeCustomer),
+        contracts: ensureCustomerContracts(storeCustomer),
+      }));
     }
   }, [storeCustomer]);
 
-  const handleFieldChange = (field: keyof CrmCustomerRecord, val: string) => {
+  const handleFieldChange = (field: keyof CrmCustomerRecord, val: any) => {
     setForm((prev) => ({ ...prev, [field]: val }));
     setTabUnsaved(tab.id, true);
   };
 
   // Match live Client Settlement (Akt Sverka)
   const settlement = useMemo(() => {
-    const cleanName = form.name.replace(" LLC", "").toLowerCase();
+    const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
     return (
       clientSettlements.find(
         (s) =>
@@ -216,138 +237,110 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
     );
   }, [clientSettlements, form.name, form.tin]);
 
-  // Compute Ledger rows with Running Balance (Saldo)
-  const ledgerRows = useMemo(() => {
-    if (!settlement) return [];
-    let runningSaldo = 0;
-    return settlement.ledger.map((entry, idx) => {
-      runningSaldo = Number((runningSaldo + entry.debit - entry.credit).toFixed(2));
-      return {
-        idx: idx + 1,
-        ...entry,
-        runningSaldo,
-      };
+  // Customer Orders count (Work Orders + Delivery Acts)
+  const ordersCount = useMemo(() => {
+    const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
+    const acts = deliveryActs.filter(
+      (a) =>
+        a.customer.toLowerCase().includes(cleanName) ||
+        form.name.toLowerCase().includes(a.customer.toLowerCase())
+    ).length;
+    const queues = productionQueue.filter(
+      (q) =>
+        q.customer.toLowerCase().includes(cleanName) ||
+        form.name.toLowerCase().includes(q.customer.toLowerCase())
+    ).length;
+    return acts + (queues > 0 ? queues : 1);
+  }, [deliveryActs, productionQueue, form.name]);
+
+  // Customer Tooling count
+  const toolingCount = useMemo(() => {
+    const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
+    const matched = customerTooling.filter((t) => {
+      if (t.customerId && t.customerId === form.id) return true;
+      if (!t.customerName) return false;
+      const tName = t.customerName.toLowerCase();
+      return (
+        tName === cleanName ||
+        tName.includes(cleanName) ||
+        cleanName.includes(tName)
+      );
     });
-  }, [settlement]);
+    return matched.length > 0 ? matched.length : 1;
+  }, [customerTooling, form.id, form.name]);
 
-  // Customer Orders & Delivery Acts
-  const customerOrders = useMemo(() => {
-    const cleanName = form.name.replace(" LLC", "").toLowerCase();
-    const acts = deliveryActs
-      .filter(
-        (a) =>
-          a.customer.toLowerCase().includes(cleanName) ||
-          form.name.toLowerCase().includes(a.customer.toLowerCase())
-      )
-      .map((a) => ({
-        docId: a.id,
-        docType: "Schet-faktura (SF)",
-        date: a.date,
-        orderRef: a.orderId,
-        workOrderRef: a.workOrderId,
-        product: a.product,
-        quantity: a.quantity,
-        unit: a.unit,
-        amountUsd: a.totalAmount,
-        status: a.status,
-      }));
+  // Customer Dedicated Finished Goods Stock (Zaxira)
+  const customerStockQty = useMemo(() => {
+    const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
+    const matched = finishedGoods.filter((fg) => {
+      if (fg.customerId && fg.customerId === form.id) return true;
+      if (form.tin && fg.customerTin === form.tin) return true;
+      const fgName = fg.customerName.toLowerCase();
+      return (
+        fgName === cleanName ||
+        fgName.includes(cleanName) ||
+        cleanName.includes(fgName)
+      );
+    });
+    return matched.reduce((sum, item) => sum + (item.stockQty || 0), 0);
+  }, [finishedGoods, form.id, form.name, form.tin]);
 
-    const baseOrders = [
-      {
-        docId: "CO-00041",
-        docType: "Client Order (CO)",
-        date: "2026-10-08",
-        orderRef: "CO-00041",
-        workOrderRef: "WO-00351",
-        product: "A4 Hardcover Catalog 96p + Matte Lam",
-        quantity: 5000,
-        unit: "pcs",
-        amountUsd: 14850,
-        status: "In Production",
-      },
-      {
-        docId: "CO-00038",
-        docType: "Client Order (CO)",
-        date: "2026-09-29",
-        orderRef: "CO-00038",
-        workOrderRef: "WO-00342",
-        product: "350g Duplex Packaging Box + Hot Foil",
-        quantity: 12000,
-        unit: "pcs",
-        amountUsd: 8400,
-        status: "Completed",
-      },
-    ];
+  const closingBalance = settlement?.closingBalance ?? 0;
 
-    return [...acts, ...baseOrders];
-  }, [deliveryActs, form.name]);
-
-  // Customer Tooling (Dies & Clichés)
-  const customerTooling = useMemo<CustomerToolingItem[]>(() => {
-    const matchKey = Object.keys(CUSTOMER_TOOLING_MOCK).find((k) =>
-      form.name.toLowerCase().includes(k.toLowerCase())
-    );
-    if (matchKey) return CUSTOMER_TOOLING_MOCK[matchKey];
-    return [
-      {
-        id: "DIE-009",
-        name: `${form.name} — Custom Packaging Flatbed Die`,
-        toolType: "Flatbed Die (Штанцформа)",
-        format: "700×1000 mm (B1)",
-        cavities: "4-up",
-        location: "Rack B-03",
-        impressionsUsed: 24500,
-        maxLife: 150000,
-        status: "Ready",
-      },
-    ];
-  }, [form.name]);
-
-  // Payment Form State
-  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState("5000");
-  const [paymentMethod, setPaymentMethod] = useState("Bank o'tkazmasi (UZS/USD)");
-  const [paymentNote, setPaymentNote] = useState("");
-
-  const handleConfirmPayment = () => {
-    const amt = Number(paymentAmount);
-    if (!amt || amt <= 0) return;
-    const customerKey = settlement ? settlement.customer : form.name;
-    recordClientPayment(
-      customerKey,
-      amt,
-      undefined,
-      paymentNote.trim()
-        ? `${paymentNote.trim()} (${paymentMethod})`
-        : `Shartnoma ${form.contractNo} bo'yicha to'lov (${paymentMethod})`
-    );
-    setIsPaymentOpen(false);
-    setPaymentNote("");
-  };
-
+  // Actions
   const handleSave = () => {
     upsertCustomer(form);
     setTabUnsaved(tab.id, false);
+    addNotification({
+      title: "Mijoz kartochkasi saqlandi",
+      description: `${form.name} (STIR: ${form.tin}) rekvizitlari muvaffaqiyatli yangilandi.`,
+      severity: "success",
+      link: { module: "crm", subModule: "customers" },
+    });
   };
 
   const handleSaveAndClose = () => {
     upsertCustomer(form);
     setTabUnsaved(tab.id, false);
+    addNotification({
+      title: "Mijoz kartochkasi saqlandi",
+      description: `${form.name} ma'lumotlari bazaga yozildi.`,
+      severity: "success",
+      link: { module: "crm", subModule: "customers" },
+    });
     closeTab(tab.id);
   };
 
   const handleCreateClientOrder = () => {
     upsertCustomer(form);
-    const newId = `WO-${String(Math.floor(100 + Math.random() * 899)).padStart(5, "0")}`;
+    const newWoId = `WO-${String(Math.floor(100 + Math.random() * 899)).padStart(5, "0")}`;
+    const newCoId = `CO-${String(Math.floor(10 + Math.random() * 89)).padStart(5, "0")}`;
+
+    // Add directly to production queue so it reflects instantly across the ERP
+    upsertProductionQueueItem({
+      id: newWoId,
+      clientOrderId: newCoId,
+      customer: form.name,
+      product: `${form.name} — Yangi buyurtma`,
+      quantity: 5000,
+      unit: "pcs",
+      pressMachine: "Heidelberg Speedmaster XL 106",
+      department: "Offset Printing",
+      priority: "Normal",
+      stage: "Queue",
+      deadline: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+    });
+
     openTab({
-      id: newId,
-      title: `${newId}: ${form.name}`,
+      id: newWoId,
+      title: `${newWoId}: ${form.name}`,
       type: "work-order",
       module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
-        docNo: newId,
+        docNo: newWoId,
+        clientOrderId: newCoId,
         customer: form.name,
         customerTin: form.tin,
         contractNo: form.contractNo,
@@ -358,265 +351,105 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
     });
   };
 
-  // ── Grid 1: Akt Sverka Ledger Columns & Cell Renderer ──────────────────────
-  const [ledgerSelection, setLedgerSelection] = useState<GridSelection>({
-    columns: CompactSelection.empty(),
-    rows: CompactSelection.empty(),
-  });
+  const handleOpenDeliveryAct = (docNo: string, debitAmount?: number) => {
+    const act = deliveryActs.find((a) => a.id === docNo);
+    openTab({
+      id: docNo,
+      title: `${docNo}: ${form.name}`,
+      type: "delivery-act",
+      module: "finance",
+      activeLevel3Tab: "overview",
+      documentData: act || {
+        id: docNo,
+        customer: form.name,
+        customerTin: form.tin,
+        contractNo: form.contractNo,
+        totalAmount: debitAmount || 0,
+      },
+    });
+  };
 
-  const ledgerColumns = useMemo<GridColumn[]>(
-    () => [
-      { id: "idx", title: "№", width: 50, icon: GridColumnIcon.HeaderNumber },
-      { id: "date", title: "Sana (Date)", width: 115, icon: GridColumnIcon.HeaderDate },
-      { id: "docNo", title: "Hujjat №", width: 120, icon: GridColumnIcon.HeaderReference },
-      { id: "docType", title: "Operatsiya turi", width: 155, icon: GridColumnIcon.HeaderSingleValue },
-      { id: "description", title: "Mazmuni / Asos (Shartnoma, Mahsulot)", width: 360, icon: GridColumnIcon.HeaderString },
-      { id: "debit", title: "Debet / Yuklandi (+Dt $)", width: 165, icon: GridColumnIcon.HeaderNumber },
-      { id: "credit", title: "Kredit / To'landi (-Kt $)", width: 165, icon: GridColumnIcon.HeaderNumber },
-      { id: "runningSaldo", title: "Joriy Saldo ($)", width: 155, icon: GridColumnIcon.HeaderNumber },
-    ],
-    []
-  );
+  const handleOpenWorkOrder = (order: any) => {
+    openTab({
+      id: order.docId,
+      title: `${order.docId}: ${order.product}`,
+      type: "work-order",
+      module: "production",
+      activeLevel3Tab: "overview",
+      documentData: {
+        docNo: order.docId,
+        customer: form.name,
+        product: order.product,
+        quantity: order.quantity,
+        linkedWoId: order.workOrderRef,
+        status: order.status,
+      },
+    });
+  };
 
-  const getLedgerCellContent = useCallback(
-    (cell: Item): GridCell => {
-      const [col, row] = cell;
-      const item = ledgerRows[row];
-      const column = ledgerColumns[col];
-      if (!item || !column) {
-        return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
-      }
+  const handleReorderWorkOrder = (order: any) => {
+    const newWoId = `WO-00${Math.floor(300 + Math.random() * 699)}`;
+    const today = new Date().toISOString().split("T")[0];
+    const deadlineDate = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
 
-      if (column.id === "idx") {
-        return {
-          kind: GridCellKind.Number,
-          data: item.idx,
-          displayData: String(item.idx),
-          allowOverlay: false,
-          contentAlign: "center",
-        };
-      }
+    openTab({
+      id: newWoId,
+      title: `${newWoId}: ${order.product}`,
+      type: "work-order",
+      module: "production",
+      isUnsaved: true,
+      activeLevel3Tab: "overview",
+      documentData: {
+        docNo: newWoId,
+        parentWorkOrderId: order.docId,
+        isReorder: true,
+        customer: form.name,
+        customerTin: form.tin,
+        product: order.product,
+        quantity: order.quantity || 5000,
+        unit: order.unit || "pcs",
+        status: "Draft",
+        startDate: today,
+        deadline: deadlineDate,
+        sampleRequired: false,
+        orderType: "Production",
+      },
+    });
 
-      if (column.id === "debit" || column.id === "credit" || column.id === "runningSaldo") {
-        const val = Number(item[column.id as "debit" | "credit" | "runningSaldo"] || 0);
-        const isDebit = column.id === "debit";
-        const isCredit = column.id === "credit";
-        const isSaldo = column.id === "runningSaldo";
+    addNotification({
+      title: "Qayta buyurtma yaratildi",
+      description: `${order.docId} asosida yangi ${newWoId} buyurtmasi shakllantirildi.`,
+      severity: "success",
+    });
+  };
 
-        let color: string | undefined = undefined;
-        if (isDebit && val > 0) color = isDark ? "#f87171" : "#b91c1c";
-        if (isCredit && val > 0) color = isDark ? "#4ade80" : "#15803d";
-        if (isSaldo) {
-          color =
-            val > 0
-              ? isDark
-                ? "#f87171"
-                : "#b91c1c"
-              : val < 0
-              ? isDark
-                ? "#60a5fa"
-                : "#1d4ed8"
-              : isDark
-              ? "#4ade80"
-              : "#15803d";
-        }
-
-        const display =
-          val === 0 && !isSaldo
-            ? "—"
-            : `${isDebit && val > 0 ? "+" : isCredit && val > 0 ? "-" : ""}$${Math.abs(val).toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}`;
-
-        return {
-          kind: GridCellKind.Text,
-          data: display,
-          displayData: display,
-          allowOverlay: false,
-          contentAlign: "right",
-          themeOverride: color
-            ? { textDark: color, baseFontStyle: "700 12px monospace" }
-            : undefined,
-        };
-      }
-
-      const strVal = String((item as any)[String(column.id)] ?? "");
-      return {
-        kind: GridCellKind.Text,
-        data: strVal,
-        displayData: strVal,
-        allowOverlay: false,
-      };
+  const navItems: DocumentNavItem[] = [
+    {
+      id: "overview",
+      label: "Rekvizitlar va Shartnoma",
+      icon: Building2,
     },
-    [ledgerRows, ledgerColumns, isDark]
-  );
-
-  const handleLedgerRowActivated = useCallback(
-    (cell: Item) => {
-      const [, row] = cell;
-      const entry = ledgerRows[row];
-      if (!entry) return;
-      if (entry.docType === "Schet-faktura" || entry.docNo.startsWith("SF-")) {
-        const act = deliveryActs.find((a) => a.id === entry.docNo);
-        openTab({
-          id: entry.docNo,
-          title: `${entry.docNo}: ${form.name}`,
-          type: "delivery-act",
-          module: "finance",
-          activeLevel3Tab: "overview",
-          documentData: act || {
-            id: entry.docNo,
-            customer: form.name,
-            customerTin: form.tin,
-            contractNo: form.contractNo,
-            totalAmount: entry.debit,
-          },
-        });
-      }
+    {
+      id: "settlements",
+      label: "Akt Sverka",
+      icon: Scale,
+      badge: settlement?.ledger.length || 0,
+      badgeClassName: closingBalance > 0 ? "text-rose-600 font-bold" : undefined,
     },
-    [ledgerRows, deliveryActs, openTab, form]
-  );
-
-  // ── Grid 2: Customer Orders & Delivery Acts ────────────────────────────────
-  const [ordersSelection, setOrdersSelection] = useState<GridSelection>({
-    columns: CompactSelection.empty(),
-    rows: CompactSelection.empty(),
-  });
-
-  const orderColumns = useMemo<GridColumn[]>(
-    () => [
-      { id: "docId", title: "Hujjat №", width: 120, icon: GridColumnIcon.HeaderReference },
-      { id: "docType", title: "Hujjat Turi", width: 155, icon: GridColumnIcon.HeaderSingleValue },
-      { id: "date", title: "Sana", width: 115, icon: GridColumnIcon.HeaderDate },
-      { id: "workOrderRef", title: "Ishlab chiqarish (WO)", width: 145, icon: GridColumnIcon.HeaderReference },
-      { id: "product", title: "Bosma mahsulot / Zakaz nomi", width: 320, icon: GridColumnIcon.HeaderString },
-      { id: "quantity", title: "Tiraj (Qty)", width: 115, icon: GridColumnIcon.HeaderNumber },
-      { id: "amountUsd", title: "Summa ($)", width: 135, icon: GridColumnIcon.HeaderNumber },
-      { id: "status", title: "Holati (Status)", width: 145, icon: GridColumnIcon.HeaderSingleValue },
-    ],
-    []
-  );
-
-  const getOrderCellContent = useCallback(
-    (cell: Item): GridCell => {
-      const [col, row] = cell;
-      const item = customerOrders[row];
-      const column = orderColumns[col];
-      if (!item || !column) {
-        return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
-      }
-      if (column.id === "quantity" || column.id === "amountUsd") {
-        const num = Number((item as any)[column.id] || 0);
-        return {
-          kind: GridCellKind.Number,
-          data: num,
-          displayData:
-            column.id === "amountUsd"
-              ? `$${num.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-              : num.toLocaleString(),
-          allowOverlay: false,
-          contentAlign: "right",
-        };
-      }
-      const val = String((item as any)[String(column.id)] ?? "");
-      return {
-        kind: GridCellKind.Text,
-        data: val,
-        displayData: val,
-        allowOverlay: false,
-      };
+    {
+      id: "orders",
+      label: "Buyurtmalar va Zaxira",
+      icon: ClipboardList,
+      badge: customerStockQty > 0 ? `${customerStockQty.toLocaleString()} zaxira` : ordersCount,
+      badgeClassName: customerStockQty > 0 ? "text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/70 border-emerald-400 font-semibold" : undefined,
     },
-    [customerOrders, orderColumns]
-  );
-
-  const handleOrderRowActivated = useCallback(
-    (cell: Item) => {
-      const [, row] = cell;
-      const item = customerOrders[row];
-      if (!item) return;
-      if (item.docId.startsWith("SF-")) {
-        const act = deliveryActs.find((a) => a.id === item.docId);
-        openTab({
-          id: item.docId,
-          title: `${item.docId}: ${form.name}`,
-          type: "delivery-act",
-          module: "finance",
-          activeLevel3Tab: "overview",
-          documentData: act || {
-            id: item.docId,
-            customer: form.name,
-            product: item.product,
-            quantity: item.quantity,
-            totalAmount: item.amountUsd,
-          },
-        });
-      } else {
-        openTab({
-          id: item.docId,
-          title: `${item.docId}: ${item.product}`,
-          type: "work-order",
-          module: "production",
-          activeLevel3Tab: "overview",
-          documentData: {
-            docNo: item.docId,
-            customer: form.name,
-            product: item.product,
-            quantity: item.quantity,
-            linkedWoId: item.workOrderRef,
-            status: item.status,
-          },
-        });
-      }
+    {
+      id: "tooling",
+      label: "Shtansformalar",
+      icon: Stamp,
+      badge: toolingCount,
     },
-    [customerOrders, deliveryActs, openTab, form.name]
-  );
-
-  // ── Grid 3: Customer Dies & Clichés ────────────────────────────────────────
-  const toolingColumns = useMemo<GridColumn[]>(
-    () => [
-      { id: "id", title: "Osnastka ID", width: 115, icon: GridColumnIcon.HeaderReference },
-      { id: "name", title: "Shtansforma / Klishe Nomi", width: 320, icon: GridColumnIcon.HeaderString },
-      { id: "toolType", title: "Turi", width: 210, icon: GridColumnIcon.HeaderSingleValue },
-      { id: "format", title: "Format / O'lcham", width: 150, icon: GridColumnIcon.HeaderString },
-      { id: "cavities", title: "Katak (N-up)", width: 105, icon: GridColumnIcon.HeaderString },
-      { id: "location", title: "Stellaj / Joyi", width: 130, icon: GridColumnIcon.HeaderString },
-      { id: "impressionsUsed", title: "Ishlatilgan (Udar)", width: 140, icon: GridColumnIcon.HeaderNumber },
-      { id: "maxLife", title: "Maks. Resurs", width: 130, icon: GridColumnIcon.HeaderNumber },
-      { id: "status", title: "Holati", width: 130, icon: GridColumnIcon.HeaderSingleValue },
-    ],
-    []
-  );
-
-  const getToolingCellContent = useCallback(
-    (cell: Item): GridCell => {
-      const [col, row] = cell;
-      const item = customerTooling[row];
-      const column = toolingColumns[col];
-      if (!item || !column) {
-        return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
-      }
-      const val = (item as any)[String(column.id)];
-      if (typeof val === "number") {
-        return {
-          kind: GridCellKind.Number,
-          data: val,
-          displayData: val.toLocaleString(),
-          allowOverlay: false,
-          contentAlign: "right",
-        };
-      }
-      return {
-        kind: GridCellKind.Text,
-        data: String(val ?? ""),
-        displayData: String(val ?? ""),
-        allowOverlay: false,
-      };
-    },
-    [customerTooling, toolingColumns]
-  );
-
-  const closingBalance = settlement?.closingBalance ?? 0;
+  ];
 
   return (
     <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">
@@ -625,126 +458,125 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
         onValueChange={(val) => setLevel3Tab(tab.id, val)}
         className="flex-1 flex flex-col overflow-hidden"
       >
-        {/* 1C Level-3 Document Workspace Header Bar */}
-        <div className="px-3 bg-muted/60 border-b border-border shrink-0 flex items-center justify-between h-9 gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Building2 className="w-4 h-4 text-primary shrink-0" />
-            <span className="font-bold text-xs text-foreground truncate max-w-[200px] sm:max-w-[320px]">
-              {form.name}
-            </span>
+        {/* Standard 1C Document Header */}
+        <DocumentHeader
+          icon={Building2}
+          title={form.name}
+          docNo={form.id}
+          status={form.status}
+          actions={
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleCreateClientOrder}
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+              >
+                <FilePlus2 className="w-3.5 h-3.5 text-primary" />
+                <span className="hidden sm:inline">+ Yangi buyurtma</span>
+              </Button>
 
-            <Separator orientation="vertical" className="h-4 mx-1 shrink-0" />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsPrintModalOpen(true)}
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+                title="Akt Sverka chop etish"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Akt Sverka</span>
+              </Button>
 
-            <Badge
-              variant="outline"
-              className="font-mono text-[11px] shrink-0"
-            >
-              {form.id}
-            </Badge>
-            <Badge
-              className={
-                form.status === "VIP"
-                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300 text-[11px]"
-                  : form.status === "Blocked"
-                  ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 border-red-300 text-[11px]"
-                  : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300 text-[11px]"
-              }
-            >
-              {form.status}
-            </Badge>
-          </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleSave}
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Saqlash</span>
+              </Button>
 
-          {/* 1C Standard Top-Right Action Bar */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleCreateClientOrder}
-              className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
-            >
-              <FilePlus2 className="w-3.5 h-3.5 text-primary" />
-              <span>+ Yangi Buyurtma (CO)</span>
-            </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveAndClose}
+                className="h-7 px-3 bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 font-medium shadow-none cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Saqlash va yopish</span>
+              </Button>
+            </>
+          }
+        />
 
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    onClick={() => typeof window !== "undefined" && window.print()}
-                    variant="outline"
-                    size="icon-sm"
-                    className="h-7 w-7 cursor-pointer"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                Chop etish (Akt Sverka / Kartochka)
-              </TooltipContent>
-            </Tooltip>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleSave}
-              className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Saqlash</span>
-            </Button>
-
-            <Button
-              size="sm"
-              onClick={handleSaveAndClose}
-              className="h-7 px-3 bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 font-medium shadow-none cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>Saqlash va yopish</span>
-            </Button>
-          </div>
-        </div>
-
-        {/* Main Workspace Body: Left Sub-Sidebar + Right Content Viewport */}
+        {/* Workspace Body: Standard Left DocumentSidebar + Right Main Viewport */}
         <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
-          {/* ── LEFT CRM SUB-SIDEBAR (w-60) ── */}
-          <aside className="w-60 shrink-0 bg-card border-r border-border flex flex-col justify-between overflow-y-auto select-none">
-            <div className="p-3 space-y-3">
-              {/* Mini Profile Summary Card */}
-              <div className="p-2.5 rounded-lg bg-muted/50 border border-border/80 space-y-2">
-                <div className="flex items-start gap-2">
-                  <div className="w-7 h-7 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold">
-                    <Building2 className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-xs text-foreground truncate" title={form.name}>
-                      {form.name}
-                    </h3>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <span className="font-mono text-[10px] text-muted-foreground">INN: {form.tin}</span>
-                    </div>
-                  </div>
-                </div>
+          <DocumentSidebar
+            sectionsLabel="Bo'limlar"
+            items={navItems}
+            activeId={activeTab}
+            onSelect={(id) => setLevel3Tab(tab.id, id)}
+            summary={
+              <SidebarSummaryCard
+                icon={Building2}
+                title={form.name}
+                subtitle={`INN: ${form.tin} • ${form.industry}`}
+              >
+                <InfoRow label="Shartnoma:" title={form.contractNo}>
+                  <span className="font-mono text-[10px]">{form.contractNo}</span>
+                </InfoRow>
 
-                {/* Live Saldo / Debt Status Box */}
-                <div
-                  className={cn(
-                    "p-2 rounded-md border text-[11px] flex items-center justify-between",
-                    closingBalance > 0
-                      ? "bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-300"
-                      : closingBalance < 0
-                      ? "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-900 text-blue-800 dark:text-blue-300"
-                      : "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-300"
-                  )}
-                >
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-[10px] font-medium opacity-80 truncate">
-                      {closingBalance > 0 ? "Qarzdorlik" : closingBalance < 0 ? "Ortiqcha to'lov" : "Hisob nol"}
-                    </span>
-                    <span className="font-mono font-bold text-xs mt-0.5">
+                <InfoRow label="Joriy Saldo:">
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span
+                      className={`font-mono font-bold text-xs ${
+                        closingBalance > 0
+                          ? "text-rose-600 dark:text-rose-400"
+                          : closingBalance < 0
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-emerald-600 dark:text-emerald-400"
+                      }`}
+                    >
                       ${Math.abs(closingBalance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </span>
+                    <Badge
+                      variant="outline"
+                      className={`text-[9px] px-1 h-3.5 ${
+                        closingBalance > 0
+                          ? "border-rose-300 text-rose-700 bg-rose-50 dark:bg-rose-950"
+                          : closingBalance < 0
+                          ? "border-blue-300 text-blue-700 bg-blue-50 dark:bg-blue-950"
+                          : "border-emerald-300 text-emerald-700 bg-emerald-50 dark:bg-emerald-950"
+                      }`}
+                    >
+                      {closingBalance > 0 ? "Qarz" : closingBalance < 0 ? "Avans" : "0.00"}
+                    </Badge>
                   </div>
+                </InfoRow>
+
+                <InfoRow label="Tayyor Zaxira:">
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span
+                      className={`font-mono font-bold text-xs ${
+                        customerStockQty > 0
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {customerStockQty.toLocaleString()} dona
+                    </span>
+                    {customerStockQty > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] px-1 h-3.5 border-emerald-300 text-emerald-700 bg-emerald-50 dark:bg-emerald-950 font-semibold"
+                      >
+                        Omborda
+                      </Badge>
+                    )}
+                  </div>
+                </InfoRow>
+
+                <div className="pt-1.5 flex justify-end">
                   <Button
                     size="sm"
                     variant="outline"
@@ -752,98 +584,15 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
                       setLevel3Tab(tab.id, "settlements");
                       setIsPaymentOpen(true);
                     }}
-                    className="h-6 px-1.5 text-[10px] gap-1 bg-background hover:bg-muted text-foreground border-border shadow-xs shrink-0 cursor-pointer"
-                    title="To'lov kiritish (Kirim)"
+                    className="h-6 w-full text-[10px] gap-1 bg-muted/60 hover:bg-muted text-foreground border-border shadow-xs cursor-pointer"
                   >
                     <CreditCard className="w-3 h-3 text-emerald-600" />
-                    <span>+ To'lov</span>
+                    <span>+ To&apos;lov kiritish (Kirim)</span>
                   </Button>
                 </div>
-              </div>
-
-              {/* Vertical Navigation Items */}
-              <div className="space-y-1">
-                <div className="px-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Bo&apos;limlar
-                </div>
-                {[
-                  {
-                    id: "overview",
-                    label: "Rekvizitlar va Shartnoma",
-                    icon: Building2,
-                    count: null,
-                  },
-                  {
-                    id: "settlements",
-                    label: "Akt Sverka",
-                    icon: Scale,
-                    count: ledgerRows.length,
-                    badgeColor: closingBalance > 0 ? "text-rose-600" : undefined,
-                  },
-                  {
-                    id: "orders",
-                    label: "Buyurtmalar va SF",
-                    icon: ClipboardList,
-                    count: customerOrders.length,
-                  },
-                  {
-                    id: "tooling",
-                    label: "Shtansformalar",
-                    icon: Stamp,
-                    count: customerTooling.length,
-                  },
-                ].map((item) => {
-                  const isActive = activeTab === item.id;
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setLevel3Tab(tab.id, item.id)}
-                      className={cn(
-                        "w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs font-medium transition-all text-left group cursor-pointer",
-                        isActive
-                          ? "bg-primary text-primary-foreground shadow-xs font-semibold"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      )}
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <Icon
-                          className={cn(
-                            "w-4 h-4 shrink-0",
-                            isActive
-                              ? "text-primary-foreground"
-                              : "text-muted-foreground group-hover:text-foreground"
-                          )}
-                        />
-                        <span className="truncate">{item.label}</span>
-                      </div>
-                      {item.count !== null && (
-                        <Badge
-                          variant={isActive ? "outline" : "secondary"}
-                          className={cn(
-                            "text-[10px] h-4.5 px-1.5 font-mono shrink-0 ml-1.5",
-                            isActive
-                              ? "bg-primary-foreground/20 text-primary-foreground border-transparent"
-                              : item.badgeColor || "text-muted-foreground"
-                          )}
-                        >
-                          {item.count}
-                        </Badge>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Bottom Quick Contacts Card */}
-            <div className="p-3 border-t border-border bg-muted/20 space-y-2">
-              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
-                <span>Biriktirilgan shaxs</span>
-                <UserCheck className="w-3 h-3 text-primary" />
-              </div>
-
+              </SidebarSummaryCard>
+            }
+            footer={
               <div className="space-y-1.5 text-[11px]">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Menejer:</span>
@@ -866,505 +615,59 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
                   </div>
                 )}
               </div>
-            </div>
-          </aside>
+            }
+          />
 
-          {/* ── RIGHT MAIN VIEWPORT (flex-1) ── */}
+          {/* Right Main Viewport */}
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+            <TabsContent value="overview" className="flex-1 overflow-hidden m-0 flex flex-col">
+              <CustomerOverviewTab
+                form={form}
+                onChange={handleFieldChange}
+                settlement={settlement}
+                onNavigateTab={(target) => setLevel3Tab(tab.id, target)}
+                onOpenPaymentModal={() => {
+                  setLevel3Tab(tab.id, "settlements");
+                  setIsPaymentOpen(true);
+                }}
+                onCreateClientOrder={handleCreateClientOrder}
+              />
+            </TabsContent>
 
-        {/* ── TAB 1: OVERVIEW (360° Requisites, Contracts & Balance Summary) ── */}
-        <TabsContent
-          value="overview"
-          className="flex-1 overflow-y-auto p-4 space-y-4 m-0"
-        >
-          {/* Live Financial KPI Strip */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div className="bg-card border border-border rounded-md p-3 flex items-center justify-between">
-              <div>
-                <div className="text-[11px] text-muted-foreground font-medium">
-                  Boshlang&apos;ich qoldiq (Opening)
-                </div>
-                <div className="font-mono text-base font-bold mt-0.5">
-                  ${(settlement?.openingBalance ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
-              <Badge variant="outline" className="font-mono text-[10px]">
-                USD
-              </Badge>
-            </div>
+            <TabsContent value="settlements" className="flex-1 overflow-hidden m-0 flex flex-col">
+              <CustomerSettlementsTab
+                customer={form}
+                settlement={settlement}
+                isPaymentOpen={isPaymentOpen}
+                setIsPaymentOpen={setIsPaymentOpen}
+                onOpenDeliveryAct={handleOpenDeliveryAct}
+              />
+            </TabsContent>
 
-            <div className="bg-card border border-border rounded-md p-3 flex items-center justify-between">
-              <div>
-                <div className="text-[11px] text-muted-foreground font-medium">
-                  Jami Yuklangan (+Dt / Schet-faktura)
-                </div>
-                <div className="font-mono text-base font-bold text-primary mt-0.5">
-                  +${(settlement?.totalDebit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
-              <Badge variant="secondary" className="text-[10px]">
-                Realizatsiya
-              </Badge>
-            </div>
+            <TabsContent value="orders" className="flex-1 overflow-hidden m-0 flex flex-col">
+              <CustomerOrdersTab
+                customer={form}
+                onCreateClientOrder={handleCreateClientOrder}
+                onOpenWorkOrder={handleOpenWorkOrder}
+                onReorderWorkOrder={handleReorderWorkOrder}
+                onOpenDeliveryAct={handleOpenDeliveryAct}
+              />
+            </TabsContent>
 
-            <div className="bg-card border border-border rounded-md p-3 flex items-center justify-between">
-              <div>
-                <div className="text-[11px] text-muted-foreground font-medium">
-                  Jami To&apos;langan (-Kt / Bank)
-                </div>
-                <div className="font-mono text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
-                  -${(settlement?.totalCredit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
-              <Badge variant="secondary" className="text-[10px]">
-                Kirim
-              </Badge>
-            </div>
-
-            <div className="bg-card border border-border rounded-md p-3 flex items-center justify-between">
-              <div>
-                <div className="text-[11px] text-muted-foreground font-medium">
-                  Yakuniy Saldo (Closing Balance)
-                </div>
-                <div
-                  className={`font-mono text-base font-bold mt-0.5 ${
-                    closingBalance > 0
-                      ? "text-rose-600 dark:text-rose-400"
-                      : closingBalance < 0
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-emerald-600 dark:text-emerald-400"
-                  }`}
-                >
-                  ${closingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setLevel3Tab(tab.id, "settlements")}
-                className="h-7 px-2 text-[11px] gap-1"
-              >
-                <Scale className="w-3 h-3" />
-                <span>Akt Sverka</span>
-              </Button>
-            </div>
-          </div>
-
-          {/* High-Density 3-Column 1C Counterparty Form Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Column 1: Yuridik Rekvizitlar */}
-            <div className="bg-card border border-border rounded-md p-4 space-y-3">
-              <div className="flex items-center gap-2 border-b border-border pb-2">
-                <Building2 className="w-4 h-4 text-primary" />
-                <span className="font-semibold text-xs uppercase tracking-wider">
-                  1. Yuridik va Soliq Rekvizitlari
-                </span>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">
-                  Korxona / Kontragent nomi *
-                </Label>
-                <Input
-                  value={form.name}
-                  onChange={(e) => handleFieldChange("name", e.target.value)}
-                  className="h-8 text-xs font-medium bg-background"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground">
-                    STIR (INN) *
-                  </Label>
-                  <Input
-                    value={form.tin}
-                    onChange={(e) => handleFieldChange("tin", e.target.value)}
-                    className="h-8 text-xs font-mono bg-background"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground">
-                    Mijoz Segmenti / Status
-                  </Label>
-                  <Select
-                    value={form.status}
-                    onValueChange={(v) =>
-                      handleFieldChange("status", v as CrmCustomerRecord["status"])
-                    }
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-background">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="VIP">VIP Mijoz</SelectItem>
-                      <SelectItem value="Active">Faol (Active)</SelectItem>
-                      <SelectItem value="New">Yangi (New)</SelectItem>
-                      <SelectItem value="Blocked">Bloklangan (Stop-list)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">
-                  Faoliyat sohasi (Industry)
-                </Label>
-                <Input
-                  value={form.industry}
-                  onChange={(e) => handleFieldChange("industry", e.target.value)}
-                  className="h-8 text-xs bg-background"
-                />
-              </div>
-            </div>
-
-            {/* Column 2: Aloqa va Mas'ul Menejer */}
-            <div className="bg-card border border-border rounded-md p-4 space-y-3">
-              <div className="flex items-center gap-2 border-b border-border pb-2">
-                <UserCheck className="w-4 h-4 text-primary" />
-                <span className="font-semibold text-xs uppercase tracking-wider">
-                  2. Mas&apos;ul Shaxs va Aloqa
-                </span>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">
-                  Aloqa uchun mas&apos;ul shaxs (F.I.Sh)
-                </Label>
-                <Input
-                  value={form.contactPerson}
-                  onChange={(e) => handleFieldChange("contactPerson", e.target.value)}
-                  className="h-8 text-xs bg-background"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Phone className="w-3 h-3" /> Telefon raqami
-                  </Label>
-                  <Input
-                    value={form.phone}
-                    onChange={(e) => handleFieldChange("phone", e.target.value)}
-                    className="h-8 text-xs font-mono bg-background"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Mail className="w-3 h-3" /> Email manzili
-                  </Label>
-                  <Input
-                    value={form.email}
-                    onChange={(e) => handleFieldChange("email", e.target.value)}
-                    className="h-8 text-xs bg-background"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">
-                  Biriktirilgan Buyurtma Menejeri
-                </Label>
-                <Input
-                  value={form.manager}
-                  onChange={(e) => handleFieldChange("manager", e.target.value)}
-                  className="h-8 text-xs bg-background"
-                />
-              </div>
-            </div>
-
-            {/* Column 3: Shartnoma va To'lov Shartlari */}
-            <div className="bg-card border border-border rounded-md p-4 space-y-3">
-              <div className="flex items-center gap-2 border-b border-border pb-2">
-                <FileText className="w-4 h-4 text-primary" />
-                <span className="font-semibold text-xs uppercase tracking-wider">
-                  3. Bosh Shartnoma va To&apos;lov Shartlari
-                </span>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">
-                  Asosiy Shartnoma Raqami (Contract №) *
-                </Label>
-                <Input
-                  value={form.contractNo}
-                  onChange={(e) => handleFieldChange("contractNo", e.target.value)}
-                  className="h-8 text-xs font-mono bg-background"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">
-                  To&apos;lov shartlari (Payment Terms)
-                </Label>
-                <Select
-                  value={form.paymentTerms}
-                  onValueChange={(v) => v && handleFieldChange("paymentTerms", v)}
-                >
-                  <SelectTrigger className="h-8 text-xs bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="100% Prepayment">100% Oldindan to&apos;lov</SelectItem>
-                    <SelectItem value="50% Prepay / 50% Ship">50% Avans / 50% Yuklashda</SelectItem>
-                    <SelectItem value="30% Prepay / 70% Net 15">30% Avans / 70% 15 kun</SelectItem>
-                    <SelectItem value="15 Days Net">15 kunlik nasiya (Net 15)</SelectItem>
-                    <SelectItem value="30 Days Net">30 kunlik nasiya (Net 30)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="pt-2 flex items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setLevel3Tab(tab.id, "settlements");
-                    setIsPaymentOpen(true);
-                  }}
-                  className="h-8 flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5"
-                >
-                  <CreditCard className="w-3.5 h-3.5" />
-                  <span>+ To&apos;lov kiritish (Kirim)</span>
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleCreateClientOrder}
-                  className="h-8 flex-1 text-xs gap-1.5"
-                >
-                  <FilePlus2 className="w-3.5 h-3.5 text-primary" />
-                  <span>+ Yangi Zakaz</span>
-                </Button>
-              </div>
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* ── TAB 2: AKT SVERKA (Full-Screen Reconciliation Grid + Payment Entry) ── */}
-        <TabsContent
-          value="settlements"
-          className="flex-1 flex flex-col overflow-hidden m-0"
-        >
-          {/* Akt Sverka Action & KPI Sub-Header */}
-          <div className="px-4 py-2.5 bg-card border-b border-border flex flex-wrap items-center justify-between gap-3 shrink-0">
-            <div className="flex items-center gap-4">
-              <div>
-                <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-                  Kontragent / STIR
-                </div>
-                <div className="text-xs font-bold">
-                  {form.name} <span className="font-mono text-muted-foreground">({form.tin})</span>
-                </div>
-              </div>
-              <Separator orientation="vertical" className="h-6" />
-              <div>
-                <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-                  Jami Yuklandi (+Dt)
-                </div>
-                <div className="font-mono text-xs font-bold text-rose-600 dark:text-rose-400">
-                  +${(settlement?.totalDebit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
-              <Separator orientation="vertical" className="h-6" />
-              <div>
-                <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-                  Jami To&apos;landi (-Kt)
-                </div>
-                <div className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                  -${(settlement?.totalCredit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
-              <Separator orientation="vertical" className="h-6" />
-              <div>
-                <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-                  Joriy Saldo (Qoldiq)
-                </div>
-                <div
-                  className={`font-mono text-xs font-bold ${
-                    closingBalance > 0
-                      ? "text-rose-600 dark:text-rose-400"
-                      : closingBalance < 0
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-emerald-600 dark:text-emerald-400"
-                  }`}
-                >
-                  ${closingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}{" "}
-                  <span className="font-sans text-[10px] font-normal">
-                    ({closingBalance > 0 ? "Mijoz qarzdor" : closingBalance < 0 ? "Avans" : "0.00 Yopilgan"})
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                onClick={() => setIsPaymentOpen((v) => !v)}
-                className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 shadow-none"
-              >
-                <CreditCard className="w-3.5 h-3.5" />
-                <span>+ To&apos;lov qabul qilish (ПКО / Bank)</span>
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => typeof window !== "undefined" && window.print()}
-                className="h-7 px-2.5 text-xs gap-1.5"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Akt Sverka Chop Etish</span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Inline Payment Bar */}
-          {isPaymentOpen && (
-            <div className="px-4 py-3 bg-muted/70 border-b border-border flex flex-wrap items-end gap-3 shrink-0">
-              <div className="space-y-1 w-40">
-                <Label className="text-[11px] font-semibold">To&apos;lov summasi ($)</Label>
-                <Input
-                  type="number"
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                  className="h-7 text-xs font-mono bg-background"
-                />
-              </div>
-              <div className="space-y-1 w-56">
-                <Label className="text-[11px] font-semibold">To&apos;lov usuli</Label>
-                <Select value={paymentMethod} onValueChange={(v) => v && setPaymentMethod(v)}>
-                  <SelectTrigger className="h-7 text-xs bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Bank o'tkazmasi (UZS/USD)">Bank o&apos;tkazmasi (UZS/USD)</SelectItem>
-                    <SelectItem value="Korporativ karta / Payme">Korporativ karta</SelectItem>
-                    <SelectItem value="Naqd kassa (ПКО)">Naqd kassa (ПКО)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1 flex-1 min-w-[220px]">
-                <Label className="text-[11px] font-semibold">Izoh / To&apos;lov topshiriqnomasi №</Label>
-                <Input
-                  value={paymentNote}
-                  onChange={(e) => setPaymentNote(e.target.value)}
-                  placeholder={`Shartnoma ${form.contractNo} bo'yicha to'lov...`}
-                  className="h-7 text-xs bg-background"
-                />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Button
-                  size="sm"
-                  onClick={handleConfirmPayment}
-                  className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Tasdiqlash va Balansga yozish</span>
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setIsPaymentOpen(false)}
-                  className="h-7 text-xs"
-                >
-                  Bekor qilish
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Full-screen Glide Data Grid for Akt Sverka */}
-          <div className="flex-1 w-full h-full relative">
-            <DataEditor
-              getCellContent={getLedgerCellContent}
-              onCellActivated={handleLedgerRowActivated}
-              columns={ledgerColumns}
-              rows={ledgerRows.length}
-              rowMarkers="both"
-              freezeColumns={3}
-              smoothScrollX={true}
-              smoothScrollY={true}
-              width="100%"
-              height="100%"
-              gridSelection={ledgerSelection}
-              onGridSelectionChange={setLedgerSelection}
-              headerHeight={28}
-              rowHeight={30}
-              theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
-            />
-          </div>
-        </TabsContent>
-
-        {/* ── TAB 3: CUSTOMER ORDERS & DELIVERY ACTS ── */}
-        <TabsContent
-          value="orders"
-          className="flex-1 flex flex-col overflow-hidden m-0"
-        >
-          <div className="px-4 py-2 bg-card border-b border-border flex items-center justify-between shrink-0">
-            <div className="text-xs text-muted-foreground">
-              Ikki marta bosish (`Double-click`) orqali tanlangan Buyurtma (`CO`) yoki Schet-faktura (`SF`) to&apos;liq oynada ochiladi.
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                onClick={handleCreateClientOrder}
-                className="h-7 px-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ Yangi Mijoz Buyurtmasi (CO)</span>
-              </Button>
-            </div>
-          </div>
-          <div className="flex-1 w-full h-full relative">
-            <DataEditor
-              getCellContent={getOrderCellContent}
-              onCellActivated={handleOrderRowActivated}
-              columns={orderColumns}
-              rows={customerOrders.length}
-              rowMarkers="both"
-              freezeColumns={1}
-              smoothScrollX={true}
-              smoothScrollY={true}
-              width="100%"
-              height="100%"
-              gridSelection={ordersSelection}
-              onGridSelectionChange={setOrdersSelection}
-              headerHeight={28}
-              rowHeight={30}
-              theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
-            />
-          </div>
-        </TabsContent>
-
-        {/* ── TAB 4: CUSTOMER DIES & CLICHÉS (TOOLING) ── */}
-        <TabsContent
-          value="tooling"
-          className="flex-1 flex flex-col overflow-hidden m-0"
-        >
-          <div className="px-4 py-2 bg-card border-b border-border flex items-center justify-between shrink-0">
-            <div className="text-xs text-muted-foreground">
-              Ushbu mijozning buyurtmalari uchun tayyorlangan va korxona omborida saqlanayotgan shtansformalar hamda klishelar.
-            </div>
-          </div>
-          <div className="flex-1 w-full h-full relative">
-            <DataEditor
-              getCellContent={getToolingCellContent}
-              columns={toolingColumns}
-              rows={customerTooling.length}
-              rowMarkers="both"
-              freezeColumns={1}
-              smoothScrollX={true}
-              smoothScrollY={true}
-              width="100%"
-              height="100%"
-              headerHeight={28}
-              rowHeight={30}
-              theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
-            />
-          </div>
-        </TabsContent>
+            <TabsContent value="tooling" className="flex-1 overflow-hidden m-0 flex flex-col">
+              <CustomerToolingTab customer={form} />
+            </TabsContent>
           </div>
         </div>
       </Tabs>
+
+      {/* Official Printable Akt Sverka Dialog */}
+      <AktSverkaPrintModal
+        open={isPrintModalOpen}
+        onOpenChange={setIsPrintModalOpen}
+        customer={form}
+        settlement={settlement}
+      />
     </div>
   );
 }

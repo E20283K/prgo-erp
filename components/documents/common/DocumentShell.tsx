@@ -71,15 +71,23 @@ export function DocumentHeader({
   icon: Icon,
   title,
   docNo,
+  date,
   status,
   priority,
+  parentDocRef,
   actions,
 }: {
   icon: LucideIcon;
   title: string;
   docNo: string;
+  date?: string;
   status?: string;
   priority?: string;
+  parentDocRef?: {
+    docNo: string;
+    label?: string;
+    onClick?: () => void;
+  };
   actions: React.ReactNode;
 }) {
   return (
@@ -93,6 +101,21 @@ export function DocumentHeader({
         <Badge variant="outline" className="h-5 font-mono text-[11px] shrink-0">
           {docNo}
         </Badge>
+        {date && (
+          <span className="text-[11px] font-mono text-muted-foreground shrink-0 hidden sm:inline">
+            {date}
+          </span>
+        )}
+        {parentDocRef && (
+          <button
+            type="button"
+            onClick={parentDocRef.onClick}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 hover:bg-blue-500/25 transition-colors cursor-pointer shrink-0"
+            title={`Asos hujjat: ${parentDocRef.docNo} (Ko'rish uchun bosing)`}
+          >
+            <span>{parentDocRef.label || `Asos: ${parentDocRef.docNo}`}</span>
+          </button>
+        )}
         <StatusBadge status={status} />
         <span className="hidden md:contents">
           <PriorityBadge priority={priority} />

@@ -1,4 +1,4 @@
-import { SizeDistribution } from "../../types";
+import { SizeDistribution, parseModelAndSize } from "../../types";
 import { 
   PrepressMargins, 
   ImpositionLayout, 
@@ -8,7 +8,8 @@ import {
   TrimMarkSegment, 
   GripperEdge, 
   Orientation,
-  ParentCutResult
+  ParentCutResult,
+  PlatePartitionStrategy,
 } from "./types";
 
 export function calculatePrepressMargins(
@@ -104,6 +105,104 @@ export function calculateImposition(
   return orientation === "A" ? optA : optB;
 }
 
+export function buildPartitionedPlates(
+  strategy: PlatePartitionStrategy,
+  effectivePieces: number,
+  adjustedSizes: (SizeDistribution & { originalQuantity?: number })[]
+): PlateConfig[] {
+  const cap = Math.max(1, effectivePieces);
+  if (adjustedSizes.length === 0) {
+    return [{ id: `plate-1-${Date.now()}`, name: "Plate 1", manualSlots: {} }];
+  }
+
+  if (strategy === "by_model") {
+    // Group SKUs by model name
+    const groups = new Map<string, (SizeDistribution & { originalQuantity?: number })[]>();
+    adjustedSizes.forEach((s) => {
+      const { model } = parseModelAndSize(s);
+      const key = model || "Asosiy model";
+      const list = groups.get(key) || [];
+      list.push(s);
+      groups.set(key, list);
+    });
+
+    const result: PlateConfig[] = [];
+    let pCounter = 1;
+    groups.forEach((groupItems, modelName) => {
+      if (groupItems.length <= cap) {
+        result.push({
+          id: `plate-${pCounter}-${Date.now()}`,
+          name: groups.size > 1 ? `Plate ${pCounter} (${modelName})` : `Plate ${pCounter}`,
+          manualSlots: {},
+          assignedSizeIds: groupItems.map((i) => i.id),
+        });
+        pCounter++;
+      } else {
+        // Model itself has more sizes than 1 sheet capacity -> split model into sub-plates
+        const subCount = Math.ceil(groupItems.length / cap);
+        for (let sub = 0; sub < subCount; sub++) {
+          const slice = groupItems.slice(sub * cap, (sub + 1) * cap);
+          result.push({
+            id: `plate-${pCounter}-${Date.now()}-${sub}`,
+            name: `Plate ${pCounter} (${modelName} · ${sub + 1}/${subCount})`,
+            manualSlots: {},
+            assignedSizeIds: slice.map((i) => i.id),
+          });
+          pCounter++;
+        }
+      }
+    });
+    return result;
+  }
+
+  if (strategy === "by_volume") {
+    // Sort SKUs by quantity descending so high-volume items and low-volume items are separated
+    const sorted = [...adjustedSizes].sort((a, b) => b.quantity - a.quantity);
+    // If all fit on 1 sheet, still split into at least 2 plates (High-run vs Low-run) if there are >= 4 SKUs and max/min ratio >= 1.8
+    const maxQ = sorted[0]?.quantity || 0;
+    const minQ = sorted[sorted.length - 1]?.quantity || 0;
+    const minPlatesForCap = Math.ceil(sorted.length / cap);
+    const targetPlates =
+      minPlatesForCap === 1 && sorted.length >= 4 && minQ > 0 && maxQ / minQ >= 1.5
+        ? 2
+        : Math.max(1, minPlatesForCap);
+
+    const chunkSize = Math.ceil(sorted.length / targetPlates);
+    const result: PlateConfig[] = [];
+    for (let i = 0; i < targetPlates; i++) {
+      const slice = sorted.slice(i * chunkSize, (i + 1) * chunkSize);
+      if (slice.length > 0) {
+        const labelSuffix =
+          targetPlates === 2 ? (i === 0 ? "High-Run" : "Low-Run") : `Batch ${i + 1}`;
+        result.push({
+          id: `plate-${i + 1}-${Date.now()}`,
+          name: `Plate ${i + 1} (${labelSuffix})`,
+          manualSlots: {},
+          assignedSizeIds: slice.map((s) => s.id),
+        });
+      }
+    }
+    return result;
+  }
+
+  // Default: "gang_capacity" (Pack as many SKUs per plate as effectivePieces allows)
+  const neededPlates = Math.max(1, Math.ceil(adjustedSizes.length / cap));
+  const chunkSize = Math.ceil(adjustedSizes.length / neededPlates);
+  const result: PlateConfig[] = [];
+  for (let i = 0; i < neededPlates; i++) {
+    const slice = adjustedSizes.slice(i * chunkSize, (i + 1) * chunkSize);
+    if (slice.length > 0) {
+      result.push({
+        id: `plate-${i + 1}-${Date.now()}`,
+        name: `Plate ${i + 1}`,
+        manualSlots: {},
+        assignedSizeIds: slice.map((s) => s.id),
+      });
+    }
+  }
+  return result;
+}
+
 export function calculatePlateDistribution(
   pieces: number,
   plates: PlateConfig[],
@@ -116,6 +215,7 @@ export function calculatePlateDistribution(
       assignments: [] as SlotAssignment[],
       requiredSheets: 0,
       unassignedSlots: 0,
+      overflowSkusCount: 0,
     }));
   }
 
@@ -138,12 +238,19 @@ export function calculatePlateDistribution(
         ],
         requiredSheets: reqSheets,
         unassignedSlots: 0,
+        overflowSkusCount: 0,
       };
     }
 
-    // If multiple plates, partition sizes or distribute equally across plates
+    // Determine which sizes belong to this plate
     let plateSizes = adjustedSizes;
-    if (totalPlates > 1) {
+    if (plate.assignedSizeIds && plate.assignedSizeIds.length > 0) {
+      const idSet = new Set(plate.assignedSizeIds);
+      const filtered = adjustedSizes.filter((s) => idSet.has(s.id));
+      if (filtered.length > 0) {
+        plateSizes = filtered;
+      }
+    } else if (totalPlates > 1) {
       const chunkSize = Math.ceil(adjustedSizes.length / totalPlates);
       const start = pIdx * chunkSize;
       plateSizes = adjustedSizes.slice(start, start + chunkSize);
@@ -158,6 +265,7 @@ export function calculatePlateDistribution(
     let remainingSlots = pieces;
     const assignments: SlotAssignment[] = [];
     let hasManual = false;
+    let overflowSkusCount = 0;
 
     for (const s of plateSizes) {
       if (plate.manualSlots[s.id] !== undefined) {
@@ -169,16 +277,37 @@ export function calculatePlateDistribution(
     if (hasManual) {
       for (const s of plateSizes) {
         const slots = plate.manualSlots[s.id] ?? 0;
+        const { model, sizeCode } = parseModelAndSize(s);
         assignments.push({
           sizeId: s.id,
           sizeLabel: s.size,
+          model: model || undefined,
+          sizeCode: sizeCode || s.size,
           targetQuantity: s.quantity,
           slots,
         });
         remainingSlots -= slots;
       }
+    } else if (plateSizes.length > pieces) {
+      // More SKUs assigned to this single plate than physical slots on the sheet!
+      // Allocate 1 slot to the first `pieces` SKUs (by priority/quantity) and 0 to the rest,
+      // and record overflowSkusCount so the UI prompts to Auto-Split plates.
+      overflowSkusCount = plateSizes.length - pieces;
+      plateSizes.forEach((s, idx) => {
+        const slots = idx < pieces ? 1 : 0;
+        const { model, sizeCode } = parseModelAndSize(s);
+        assignments.push({
+          sizeId: s.id,
+          sizeLabel: s.size,
+          model: model || undefined,
+          sizeCode: sizeCode || s.size,
+          targetQuantity: s.quantity,
+          slots,
+        });
+      });
+      remainingSlots = 0;
     } else {
-      // Proportional Auto-Distribution
+      // Proportional Auto-Distribution when plateSizes.length <= pieces
       const exactSlots = plateSizes.map((s) => ({
         ...s,
         exact: totalTargetInPlate > 0 ? (s.quantity / totalTargetInPlate) * pieces : 0,
@@ -186,10 +315,13 @@ export function calculatePlateDistribution(
 
       let assigned = 0;
       exactSlots.forEach((s) => {
-        const slots = Math.max(1, Math.floor(s.exact)); // at least 1 slot if possible
+        const slots = Math.max(1, Math.floor(s.exact)); // at least 1 slot
+        const { model, sizeCode } = parseModelAndSize(s);
         assignments.push({
           sizeId: s.id,
           sizeLabel: s.size,
+          model: model || undefined,
+          sizeCode: sizeCode || s.size,
           targetQuantity: s.quantity,
           slots,
         });
@@ -212,10 +344,9 @@ export function calculatePlateDistribution(
         }
         remainingSlots = 0;
       } else if (remainingSlots < 0) {
-        // Adjust if overassigned
         let over = Math.abs(remainingSlots);
         for (let i = assignments.length - 1; i >= 0 && over > 0; i--) {
-          if (assignments[i].slots > 1) {
+          while (assignments[i].slots > 1 && over > 0) {
             assignments[i].slots -= 1;
             over -= 1;
           }
@@ -238,6 +369,7 @@ export function calculatePlateDistribution(
       assignments,
       requiredSheets,
       unassignedSlots: remainingSlots,
+      overflowSkusCount,
     };
   });
 }

@@ -86,25 +86,216 @@ export function calculateKashirovkaTotals(
   };
 }
 
-export interface ClientOrderSampleData {
-  dispatchDate: string;
-  deliveryMethod: string;
-  courierName: string;
-  recipientName: string;
-  recipientPhone: string;
-  deliveryAddress: string;
-  trackingNumber: string;
-  sampleQty: number;
-  packingNotes: string;
-  isDispatched: boolean;
-  approvalStatus: string;
-  approvalNotes: string;
+export type SampleTestPurpose =
+  | "color_proof"
+  | "dieline_structure"
+  | "full_finished"
+  | "substrate_test";
+
+export interface SampleRevisionRecord {
+  id: string;
+  revisionNumber: number;
+  date: string;
+  reasonCategory: "color_shift" | "geometry_dieline" | "text_error" | "coating_finish" | "client_change";
+  notes: string;
+  reportedBy: string;
 }
+
+export interface WorkOrderSampleData {
+  isRequired: boolean;
+  sampleQty: number;
+  testPurpose: SampleTestPurpose;
+  testMachine: string;
+  substrateSource?: "precut" | "parent_sheet";
+  technicalNotes?: string;
+  isProduced: boolean;
+  producedAt?: string;
+  producedBy?: string;
+  qcPassed: boolean;
+  qcNotes?: string;
+  approvalStatus: "pending_production" | "awaiting_approval" | "approved" | "revision_requested";
+  approvedAt?: string;
+  approvedBy?: string;
+  revisions: SampleRevisionRecord[];
+  sampleTargetSize?: string;
+  
+  // Legacy compatibility fields if any older code references them
+  dispatchDate?: string;
+  deliveryMethod?: string;
+  isDispatched?: boolean;
+}
+
+export type ClientOrderSampleData = WorkOrderSampleData;
 
 export interface SizeDistribution {
   id: string;
   size: string;
   quantity: number;
+  model?: string;
+  sizeCode?: string;
+}
+
+export interface SizeScalePreset {
+  id: string;
+  label: string;
+  shortLabel: string;
+  description: string;
+  sizes: string[];
+}
+
+export const SIZE_SCALE_PRESETS: SizeScalePreset[] = [
+  {
+    id: "alpha_ext",
+    label: "Harf kengaytirilgan (X – 3XL)",
+    shortLabel: "X..3XL",
+    description: "X, XS, S, M, XL, XXL, 3XL",
+    sizes: ["X", "XS", "S", "M", "XL", "XXL", "3XL"],
+  },
+  {
+    id: "alpha_std",
+    label: "Harf standart (XS – 3XL)",
+    shortLabel: "XS..3XL",
+    description: "XS, S, M, L, XL, 2XL, 3XL",
+    sizes: ["XS", "S", "M", "L", "XL", "2XL", "3XL"],
+  },
+  {
+    id: "kids_height",
+    label: "Bolalar bo'y o'lchami (110 – 158)",
+    shortLabel: "110..158",
+    description: "110, 112, 116, 122, 128, 134, 140, 146, 152, 158",
+    sizes: ["110", "112", "116", "122", "128", "134", "140", "146", "152", "158"],
+  },
+  {
+    id: "eu_numeric",
+    label: "Raqamli standart (36 – 54)",
+    shortLabel: "36..54",
+    description: "36, 38, 40, 42, 44, 46, 48, 50, 52, 54",
+    sizes: ["36", "38", "40", "42", "44", "46", "48", "50", "52", "54"],
+  },
+  {
+    id: "baby_age",
+    label: "Yosh bo'yicha (0-3M – 4Y)",
+    shortLabel: "0-3M..4Y",
+    description: "0-3M, 3-6M, 6-9M, 9-12M, 12-18M, 18-24M, 2Y, 3Y, 4Y",
+    sizes: ["0-3M", "3-6M", "6-9M", "9-12M", "12-18M", "18-24M", "2Y", "3Y", "4Y"],
+  },
+];
+
+export function parseModelAndSize(item: SizeDistribution): { model: string; sizeCode: string } {
+  if (item.model !== undefined && item.sizeCode !== undefined) {
+    return { model: item.model, sizeCode: item.sizeCode };
+  }
+  const raw = (item.size || "").trim();
+  const sepMatch = raw.match(/^(.+?)\s*(?:·|\/|\||—|-|:)\s*(.+)$/);
+  if (sepMatch) {
+    return {
+      model: item.model ?? sepMatch[1].trim(),
+      sizeCode: item.sizeCode ?? sepMatch[2].trim(),
+    };
+  }
+  return {
+    model: item.model ?? "",
+    sizeCode: item.sizeCode ?? raw,
+  };
+}
+
+export function formatModelAndSize(model: string, sizeCode: string): string {
+  const m = model.trim();
+  const s = sizeCode.trim();
+  if (!m) return s;
+  if (!s) return m;
+  return `${m} · ${s}`;
+}
+
+export interface PackagingBoxItem {
+  id: string;
+  boxNumber: number;
+  boxCode: string;
+  model?: string;
+  sizeCode?: string;
+  quantity: number;
+  grossWeightKg?: number;
+  packerName: string;
+  packedAt: string;
+  barcode: string;
+  notes?: string;
+}
+
+export interface WorkOrderPackagingSummary {
+  standardBoxCapacity: number;
+  boxType: string;
+  totalBoxes: number;
+  totalPackedQty: number;
+  targetQty: number;
+  isCompleted: boolean;
+  completedAt?: string;
+  boxes: PackagingBoxItem[];
+}
+
+export function autoGeneratePackagingBoxes(params: {
+  workOrderNo: string;
+  targetQuantity: number;
+  standardCapacity: number;
+  sizes?: SizeDistribution[];
+  defaultPacker?: string;
+}): PackagingBoxItem[] {
+  const { workOrderNo, targetQuantity, standardCapacity, sizes, defaultPacker = "N. Fedorov (Packaging)" } = params;
+  const capacity = Math.max(1, standardCapacity || 500);
+  const now = new Date().toISOString();
+  const cleanWo = (workOrderNo || "WO-00000").replace(/[^a-zA-Z0-9_-]/g, "");
+
+  const validSizes = (sizes || []).filter((s) => Number(s.quantity) > 0);
+
+  if (validSizes.length > 0) {
+    const generated: PackagingBoxItem[] = [];
+    let boxNum = 1;
+
+    for (const item of validSizes) {
+      const { model, sizeCode } = parseModelAndSize(item);
+      let remaining = Number(item.quantity);
+
+      while (remaining > 0) {
+        const boxQty = Math.min(remaining, capacity);
+        const boxCode = `BX-${cleanWo}-${String(boxNum).padStart(2, "0")}`;
+        generated.push({
+          id: `box-${Date.now()}-${boxNum}`,
+          boxNumber: boxNum,
+          boxCode,
+          model: model || undefined,
+          sizeCode: sizeCode || undefined,
+          quantity: boxQty,
+          packerName: defaultPacker,
+          packedAt: now,
+          barcode: `${cleanWo}-B${String(boxNum).padStart(2, "0")}`,
+        });
+        boxNum++;
+        remaining -= boxQty;
+      }
+    }
+    return generated;
+  }
+
+  // Non-size matrix (monotype / regular order)
+  const total = Math.max(1, targetQuantity || 1);
+  const boxCount = Math.ceil(total / capacity);
+  const generated: PackagingBoxItem[] = [];
+
+  for (let i = 1; i <= boxCount; i++) {
+    const isLast = i === boxCount;
+    const boxQty = isLast ? total - (boxCount - 1) * capacity : capacity;
+    const boxCode = `BX-${cleanWo}-${String(i).padStart(2, "0")}`;
+    generated.push({
+      id: `box-${Date.now()}-${i}`,
+      boxNumber: i,
+      boxCode,
+      quantity: Math.max(1, boxQty),
+      packerName: defaultPacker,
+      packedAt: now,
+      barcode: `${cleanWo}-B${String(i).padStart(2, "0")}`,
+    });
+  }
+
+  return generated;
 }
 
 export type ClientOrderFormData = WorkOrderFormData;
@@ -201,6 +392,31 @@ export interface ShiftNote {
   text: string;
 }
 
+export type HistoryEventCategory = "status" | "spec" | "material" | "planning" | "system";
+
+export interface HistoryDiffItem {
+  field: string;
+  fieldLabel: string;
+  oldValue: string;
+  newValue: string;
+}
+
+export interface WorkOrderHistoryEntry {
+  id: string;
+  timestamp: string;
+  author: {
+    name: string;
+    role: string;
+    initials?: string;
+  };
+  category: HistoryEventCategory;
+  action: string;
+  details?: string;
+  diffs?: HistoryDiffItem[];
+  badgeText?: string;
+  badgeVariant?: "default" | "secondary" | "outline" | "destructive";
+}
+
 export interface SpotColorItem {
   id: string;
   name: string;
@@ -216,6 +432,11 @@ export interface SideColorConfig {
   k: boolean;
 }
 
+export type ProductShapeType = "rectangle" | "circle" | "oval" | "folded" | "carton_box" | "custom_die";
+export type ProductFoldType = "half_vertical" | "half_horizontal" | "tri_c" | "tri_z" | "gate";
+export type ProductBoxType = "tuck_end" | "snap_lock" | "auto_bottom" | "sleeve";
+export type ProductCustomShape = "arch" | "star" | "hexagon" | "pillow" | "vector_svg";
+
 export interface WorkOrderFormData {
   customer: string;
   product: string;
@@ -229,6 +450,8 @@ export interface WorkOrderFormData {
   orderType?: string;
   responsible?: string;
   linkedWoId?: string;
+  parentWorkOrderId?: string;
+  isReorder?: boolean;
   linkedOrderId?: string;
   pressMachine: string;
   startDate: string;
@@ -259,8 +482,14 @@ export interface WorkOrderFormData {
   dimensionUnit?: string;
   cornerType?: string;
   bleed?: number;
+  shapeType?: ProductShapeType;
+  foldType?: ProductFoldType;
+  boxType?: ProductBoxType;
+  boxDepth?: number;
+  customShape?: ProductCustomShape;
+  customSvgPath?: string;
   attachments?: OrderAttachment[];
-  sizes?: { id: string; size: string; quantity: number }[];
+  sizes?: SizeDistribution[];
   // Multi-Layer / Kashirovka (Duplex / Triplex Mounting)
   kashirovkaMode?: KashirovkaMode;
   kashirovkaStrategy?: KashirovkaImpositionStrategy;
@@ -276,6 +505,13 @@ export interface WorkOrderFormData {
   holeSize?: number;
   holePosition?: "top-center" | "top-left" | "top-right" | "left-center" | "right-center" | "none";
   holeOffset?: number;
+  printMethod?: "single_sided" | "sheetwise" | "work_and_turn" | "work_and_tumble" | "kashirovka";
+  parentSheetW?: number;
+  parentSheetH?: number;
+  pressSheetW?: number;
+  pressSheetH?: number;
+  makeReadyPerPlate?: number;
+  runWastePercent?: number;
   shiftNotes?: ShiftNote[];
   flexoMachineId?: string;
   flexoMaterialId?: string;
@@ -286,6 +522,23 @@ export interface WorkOrderFormData {
   flexoGapX?: number;
   flexoGapY?: number;
   flexoColors?: number;
+  // Textile & Flexo / Jacquard Ribbon Label Specifics
+  labelFoldType?: "straight_cut" | "center_fold" | "end_fold" | "mitre_fold" | "manhattan_fold" | "roll";
+  labelCutType?: "ultrasonic" | "hot_knife" | "cold_knife" | "laser";
+  labelMaterialType?: string;
+  labelEdgeType?: "woven_edge" | "hot_slit" | "ultrasonic_slit";
+  labelWashResistance?: "40c" | "60c" | "90c_boil" | "dry_clean";
+  labelSewingMarginMm?: number;
+  labelPrintSides?: "1s" | "2s";
+  // Jacquard Woven Specs
+  weaveQuality?: "damask_50d" | "damask_100d" | "woven_satin" | "taffeta" | "hd_microfiber";
+  weaveGroundColor?: string;
+  weaveThreadCount?: number;
+  hasLurexThread?: boolean;
+  lurexColor?: "gold" | "silver" | "copper" | "none";
+  sampleTargetSize?: string;
+  sampleQty?: number;
+  packagingData?: WorkOrderPackagingSummary;
 }
 
 export const FLOOR_OPERATORS = [
@@ -297,6 +550,7 @@ export const FLOOR_OPERATORS = [
   "M. Ivanova (Press)",
   "A. Becker (Lamination)",
   "S. Petrov (Die-cut)",
+  "N. Fedorov (Packaging)",
 ];
 
 export const MOCK_CUSTOMERS = [
@@ -708,7 +962,7 @@ export const getInitialOperations = (
         index === 0
           ? `${quantity.toLocaleString()} / ${quantity.toLocaleString()}`
           : index === 1
-          ? `3,200 / ${quantity.toLocaleString()}`
+          ? `${Math.round(quantity * 0.64).toLocaleString()} / ${quantity.toLocaleString()}`
           : `0 / ${quantity.toLocaleString()}`,
       status: index === 0 ? "Finished" : index === 1 ? "In Progress" : "Queued",
     }));
@@ -734,3 +988,127 @@ export const getInitialOperations = (
     { id: "4", stepNumber: 40, name: "Die-cutting", machine: "Bobst Novacut 106", operator: "S. Petrov", duration: 1.2, qtyCompleted: "0 / 5,000", status: "Queued" }
   ];
 };
+
+export type ProductNameNamingPreset = "standard" | "compact" | "technical" | "clean";
+
+/**
+ * Generates an industrial-standard product description string based on ERP order parameters.
+ * Formula: [Customer], [Item Category (Subtype)], [Dimensions], [Stock & Finishes] - [Optional Brand/Note]
+ */
+export function generateSuggestedProductName(
+  formData: Partial<WorkOrderFormData>,
+  preset: ProductNameNamingPreset = "standard",
+  extraNote?: string
+): string {
+  const parts: string[] = [];
+
+  // 1. Customer (for standard, compact, clean)
+  const customer = formData.customer?.trim();
+  if (customer && preset !== "technical") {
+    parts.push(customer);
+  }
+
+  // 2. Product Category / Subtype
+  let categoryLabel = "";
+  const cat = formData.itemCategory;
+  if (cat === "Hangtag") {
+    categoryLabel = "Yorliq (Hangtag)";
+  } else if (cat === "Carton") {
+    const boxTypeNames: Record<string, string> = {
+      auto_bottom: "Avto-tag",
+      snap_lock: "Qulfli tub",
+      tuck_end: "Tuck-end",
+      sleeve: "Shuber",
+    };
+    const bType = formData.boxType && boxTypeNames[formData.boxType] ? ` (${boxTypeNames[formData.boxType]})` : "";
+    categoryLabel = `Quti${bType}`;
+  } else if (cat === "Label") {
+    categoryLabel = "Etiketka";
+  } else if (cat === "Card") {
+    categoryLabel = "Vizitka / Karta";
+  } else if (cat === "Flyer") {
+    const foldNames: Record<string, string> = {
+      half_vertical: "1 buklama",
+      half_horizontal: "Gorizontal",
+      tri_c: "C-buklama",
+      tri_z: "Z-buklama",
+      gate: "Darvoza",
+    };
+    const fType = formData.foldType && foldNames[formData.foldType] ? ` (${foldNames[formData.foldType]})` : "";
+    categoryLabel = `Buklet${fType}`;
+  } else if (cat === "Other") {
+    categoryLabel = "Maxsus mahsulot";
+  } else if (formData.department === "Jacquard") {
+    categoryLabel = "To'qilgan yorliq";
+  } else if (formData.department === "Flexo") {
+    categoryLabel = "Rulonli etiketka";
+  } else {
+    categoryLabel = "Mahsulot";
+  }
+
+  parts.push(categoryLabel);
+
+  // 3. Dimensions
+  if (formData.width && formData.height) {
+    const unit = formData.dimensionUnit || "mm";
+    if (cat === "Carton" && formData.boxDepth) {
+      parts.push(`${formData.width}×${formData.height}×${formData.boxDepth} ${unit}`);
+    } else {
+      parts.push(`${formData.width}×${formData.height} ${unit}`);
+    }
+  }
+
+  // 4. Technical specifications (Materials, Colors, Finishing)
+  if (preset === "standard" || preset === "technical") {
+    const techDetails: string[] = [];
+
+    // Paper Stock / Substrate
+    if (formData.paperStock) {
+      const gsmMatch = formData.paperStock.match(/(\d{2,4}\s*g(?:[\/m²]*))/i);
+      if (gsmMatch) {
+        techDetails.push(gsmMatch[1].replace(/\/m²/i, ""));
+      } else {
+        const words = formData.paperStock.split(" ").slice(0, 2).join(" ");
+        techDetails.push(words);
+      }
+    }
+
+    // Color notation e.g. "4+0"
+    if (formData.colorsConfig) {
+      const colorMatch = formData.colorsConfig.match(/^\d\+\d/);
+      if (colorMatch) {
+        techDetails.push(colorMatch[0]);
+      }
+    }
+
+    // Coating / Lamination
+    if (formData.lamination && formData.lamination !== "None" && formData.lamination !== "none") {
+      const lamLower = formData.lamination.toLowerCase();
+      if (lamLower.includes("soft-touch")) {
+        techDetails.push("Soft-Touch");
+      } else if (lamLower.includes("matte") || lamLower.includes("mat")) {
+        techDetails.push("Mat lam");
+      } else if (lamLower.includes("gloss") || lamLower.includes("yaltiroq")) {
+        techDetails.push("Yaltiroq lam");
+      }
+    } else if (formData.coating && formData.coating !== "None" && formData.coating !== "none") {
+      const coatLower = formData.coating.toLowerCase();
+      if (coatLower.includes("uv")) {
+        techDetails.push("UV lak");
+      }
+    }
+
+    if (techDetails.length > 0) {
+      parts.push(techDetails.join(" "));
+    }
+  }
+
+  let finalName = parts.filter(Boolean).join(", ");
+
+  if (extraNote?.trim()) {
+    finalName += ` - "${extraNote.trim()}"`;
+  }
+
+  return finalName;
+}
+

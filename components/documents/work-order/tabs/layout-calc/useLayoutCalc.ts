@@ -4,6 +4,7 @@ import {
   KashirovkaImpositionStrategy,
   getDefaultKashirovkaLayers,
   calculateKashirovkaTotals,
+  parseModelAndSize,
 } from "../../types";
 import { 
   LayoutCalcTabProps, 
@@ -18,25 +19,36 @@ import {
   PrecutStockPreset,
   ParentCutResult,
   KashirovkaSummary,
+  PlatePartitionStrategy,
 } from "./types";
-import { 
+import {
   calculatePrepressMargins, 
   calculateImposition, 
   calculatePlateDistribution, 
   calculateOuterTrimMarks,
-  calculateParentSheetCuts 
+  calculateParentSheetCuts,
+  buildPartitionedPlates,
 } from "./engine";
 import { exportSvg, exportPdf } from "./export";
+import {
+  calculatePrintPlanning,
+  PrintMethod,
+  PrintPlanningResult,
+} from "../../planningEngine";
 
 const COLOR_PALETTE = [
-  "#dbeafe",
-  "#dcfce7",
-  "#fef3c7",
-  "#ffedd5",
-  "#f3e8ff",
-  "#fce7f3",
-  "#ccfbf1",
-  "#e0e7ff",
+  "#dbeafe", // Blue
+  "#dcfce7", // Emerald
+  "#fef3c7", // Amber
+  "#f3e8ff", // Purple
+  "#fce7f3", // Pink
+  "#ccfbf1", // Teal
+  "#ffedd5", // Orange
+  "#e0e7ff", // Indigo
+  "#fae8ff", // Fuchsia
+  "#ecfccb", // Lime
+  "#cffafe", // Cyan
+  "#ffe4e6", // Rose
 ];
 
 export function useLayoutCalc({
@@ -47,12 +59,26 @@ export function useLayoutCalc({
   defaultProdW,
   defaultProdH,
   defaultBleed,
+  frontColors = { c: true, m: true, y: true, k: true },
+  backColors = { c: false, m: false, y: false, k: false },
+  spotColors = [],
+  printMethod: propPrintMethod,
+  onPrintMethodChange,
+  onApplyRouteToOperations,
+  pressMachine = "Heidelberg Speedmaster XL 106",
+  paperStock,
+  lamination,
+  embellishment,
+  isOperator = false,
+  onSwitchTab,
   kashirovkaMode: propKashMode = "none",
   kashirovkaStrategy: propKashStrategy = "split_half_sheet",
   kashirovkaLayers: propKashLayers,
   kashirovkaGlueGsm = 25,
   kashirovkaMakeReadySheets: propKashMakeReady = 50,
   onKashirovkaChange,
+  sampleQty: propSampleQty,
+  onSampleQtyChange,
 }: LayoutCalcTabProps) {
   // Mode: Production vs Sample
   const [calcMode, setCalcMode] = useState<LayoutCalcMode>("production");
@@ -97,8 +123,8 @@ export function useLayoutCalc({
   const [prodOverproductionMode, setProdOverproductionMode] = useState<OverproductionMode>("percent");
   const [prodOverproductionValue, setProdOverproductionValue] = useState<number>(5);
 
-  // Sample settings cache
-  const [sampleQty, setSampleQty] = useState(5);
+  // Sample settings cache (Synced with Sample Proof tab when propSampleQty is provided)
+  const [sampleQty, setSampleQty] = useState(propSampleQty && propSampleQty > 0 ? propSampleQty : 5);
   const [sampleStockSource, setSampleStockSource] = useState<SampleStockSource>("precut_stock");
   const [selectedPrecutId, setSelectedPrecutId] = useState("sra3");
   const [sampleSheetW, setSampleSheetW] = useState(450);
@@ -111,6 +137,15 @@ export function useLayoutCalc({
   const [sampleMachineType, setSampleMachineType] = useState("digital_press");
   const [sampleBillingMode, setSampleBillingMode] = useState<"complimentary" | "billable">("complimentary");
   const [samplePrice, setSamplePrice] = useState(35);
+
+  useEffect(() => {
+    if (propSampleQty && propSampleQty > 0 && propSampleQty !== sampleQty) {
+      setSampleQty(propSampleQty);
+      if (calcMode === "sample") {
+        setBaseQuantity(propSampleQty);
+      }
+    }
+  }, [propSampleQty, calcMode, sampleQty]);
 
   // Active Parameters that drive the imposition engine
   const [sheetW, setSheetW] = useState(1000);
@@ -129,7 +164,21 @@ export function useLayoutCalc({
   const [gripperEdge, setGripperEdge] = useState<GripperEdge>("Auto");
 
   const [orientation, setOrientation] = useState<Orientation>("A");
-  const [cmykColors, setCmykColors] = useState<number>(4);
+
+  // Auto-derive active color stations per plate from Specs & Drawing (SSOT)
+  const derivedColorsPerPlate = useMemo(() => {
+    const fProc = (frontColors.c ? 1 : 0) + (frontColors.m ? 1 : 0) + (frontColors.y ? 1 : 0) + (frontColors.k ? 1 : 0);
+    const fSpot = spotColors.filter((s) => s.side === "front" || s.side === "both").length;
+    const bProc = (backColors.c ? 1 : 0) + (backColors.m ? 1 : 0) + (backColors.y ? 1 : 0) + (backColors.k ? 1 : 0);
+    const bSpot = spotColors.filter((s) => s.side === "back" || s.side === "both").length;
+    return Math.max(1, fProc + fSpot, bProc + bSpot);
+  }, [frontColors, backColors, spotColors]);
+
+  const [cmykColors, setCmykColors] = useState<number>(derivedColorsPerPlate);
+
+  useEffect(() => {
+    setCmykColors(derivedColorsPerPlate);
+  }, [derivedColorsPerPlate]);
 
   // Overproduction
   const [overproductionMode, setOverproductionMode] = useState<OverproductionMode>("percent");
@@ -244,6 +293,7 @@ export function useLayoutCalc({
   const handleSampleQtyChange = (qty: number) => {
     const val = Math.max(1, qty);
     setSampleQty(val);
+    onSampleQtyChange?.(val);
     if (calcMode === "sample") {
       setBaseQuantity(val);
     }
@@ -349,6 +399,19 @@ export function useLayoutCalc({
     );
   }, [parentSheetW, parentSheetH, sampleCutW, sampleCutH, activePlate]);
 
+  const [partitionStrategy, setPartitionStrategy] = useState<PlatePartitionStrategy>("gang_capacity");
+
+  const uniqueModels = useMemo(() => {
+    const set = new Set<string>();
+    adjustedSizes.forEach((s) => {
+      const { model } = parseModelAndSize(s);
+      if (model) set.add(model);
+    });
+    return Array.from(set);
+  }, [adjustedSizes]);
+
+  const hasMultipleModels = uniqueModels.length > 1;
+
   // Plate Actions
   const handleAddPlate = () => {
     const newIdx = plates.length + 1;
@@ -370,17 +433,13 @@ export function useLayoutCalc({
     }
   };
 
-  const handleAutoPartitionPlates = () => {
+  const handleAutoPartitionPlates = (strategyOverride?: PlatePartitionStrategy) => {
     if (effectivePieces === 0 || adjustedSizes.length === 0) return;
-    const needed = Math.max(1, Math.ceil(adjustedSizes.length / effectivePieces));
-    const newPlatesList: PlateConfig[] = [];
-    for (let i = 0; i < needed; i++) {
-      newPlatesList.push({
-        id: `plate-${i + 1}-${Date.now()}`,
-        name: `Plate ${i + 1}`,
-        manualSlots: {},
-      });
+    const strat = strategyOverride || partitionStrategy;
+    if (strategyOverride) {
+      setPartitionStrategy(strategyOverride);
     }
+    const newPlatesList = buildPartitionedPlates(strat, effectivePieces, adjustedSizes);
     setPlates(newPlatesList);
     setActivePlateIndex(0);
   };
@@ -405,6 +464,16 @@ export function useLayoutCalc({
   const gridCells = useMemo<GridCell[]>(() => {
     if (!activePlate) return [];
 
+    const getCellColor = (assignment: { model?: string }, index: number) => {
+      if (hasMultipleModels && assignment.model) {
+        const mIdx = uniqueModels.indexOf(assignment.model);
+        if (mIdx >= 0) {
+          return COLOR_PALETTE[(mIdx * 2 + (index % 2)) % COLOR_PALETTE.length];
+        }
+      }
+      return COLOR_PALETTE[index % COLOR_PALETTE.length];
+    };
+
     // When Split-Half Kashirovka is active, Left Half = FRONT, Right Half = BACK (Mirror)
     if (isSplitHalfKashirovka && layout.cols >= 2) {
       const halfPool: GridCell[] = [];
@@ -412,7 +481,9 @@ export function useLayoutCalc({
         for (let i = 0; i < assignment.slots; i++) {
           halfPool.push({
             label: assignment.sizeLabel,
-            color: COLOR_PALETTE[index % COLOR_PALETTE.length],
+            model: assignment.model,
+            sizeCode: assignment.sizeCode,
+            color: getCellColor(assignment, index),
             sizeId: assignment.sizeId,
           });
         }
@@ -457,7 +528,9 @@ export function useLayoutCalc({
       for (let i = 0; i < assignment.slots; i++) {
         cells.push({
           label: assignment.sizeLabel,
-          color: COLOR_PALETTE[index % COLOR_PALETTE.length],
+          model: assignment.model,
+          sizeCode: assignment.sizeCode,
+          color: getCellColor(assignment, index),
           sizeId: assignment.sizeId,
         });
       }
@@ -468,7 +541,7 @@ export function useLayoutCalc({
     }
 
     return cells;
-  }, [activePlate, layout.pieces, layout.cols, layout.rows, isSplitHalfKashirovka, halfCols, effectivePieces]);
+  }, [activePlate, layout.pieces, layout.cols, layout.rows, isSplitHalfKashirovka, halfCols, effectivePieces, hasMultipleModels, uniqueModels]);
 
   // Overall Statistics
   const baseSheetsRun = plateCalculations.reduce((sum, p) => sum + p.requiredSheets, 0);
@@ -584,9 +657,47 @@ export function useLayoutCalc({
   const totalSheetsRun = isKashirovkaEnabled
     ? kashirovkaSummary.totalRawBoardSheets
     : baseSheetsRun;
+  const [selectedPrintMethod, setSelectedPrintMethod] = useState<PrintMethod | undefined>(propPrintMethod);
+
+  useEffect(() => {
+    if (propPrintMethod) setSelectedPrintMethod(propPrintMethod);
+  }, [propPrintMethod]);
+
+  const handlePrintMethodChange = (m: PrintMethod) => {
+    setSelectedPrintMethod(m);
+    onPrintMethodChange?.(m);
+  };
+
+  const printPlan = useMemo<PrintPlanningResult>(() => {
+    return calculatePrintPlanning({
+      targetQuantity: baseQuantity,
+      piecesPerSheet: effectivePieces,
+      frontColors,
+      backColors,
+      spotColors,
+      printMethod: selectedPrintMethod,
+      parentSheetW,
+      parentSheetH,
+      pressSheetW: sheetW,
+      pressSheetH: sheetH,
+      paperGsm: 300,
+    });
+  }, [
+    baseQuantity,
+    effectivePieces,
+    frontColors,
+    backColors,
+    spotColors,
+    selectedPrintMethod,
+    parentSheetW,
+    parentSheetH,
+    sheetW,
+    sheetH,
+  ]);
+
   const totalCtpPlates = isKashirovkaEnabled
     ? kashirovkaSummary.totalCtpPlates
-    : plates.length * cmykColors;
+    : printPlan.totalCtpPlates;
   const paperAreaWastePercent = Math.max(0, 100 - layout.utilization);
 
   // Outer crop marks
@@ -705,10 +816,26 @@ export function useLayoutCalc({
     setActivePlateIndex,
     activePlate,
     plateCalculations,
+    partitionStrategy,
+    hasMultipleModels,
+    uniqueModelsCount: uniqueModels.length,
     handleAddPlate,
     handleRemovePlate,
     handleAutoPartitionPlates,
     handleManualSlotChange,
+
+    // Print Planning Result & Actions
+    printPlan,
+    handlePrintMethodChange,
+    onApplyRouteToOperations,
+    frontColors,
+    backColors,
+    spotColors,
+    pressMachine,
+    lamination,
+    embellishment,
+    isOperator,
+    onSwitchTab,
 
     // Computed / Visuals
     prepressMargins,

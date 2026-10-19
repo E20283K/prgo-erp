@@ -16,7 +16,7 @@ import {
   Play,
   CheckCircle2,
   Info,
-  MoreVertical,
+  ChevronDown,
   RotateCcw,
   ShieldCheck,
 } from "lucide-react";
@@ -59,12 +59,16 @@ interface OrderReadinessRouteCardProps {
     deadline?: string;
     department?: string;
   };
+  variant?: "full" | "compact" | "horizontal";
+  onOpenFullRoute?: () => void;
   className?: string;
 }
 
 export function OrderReadinessRouteCard({
   workOrderId,
   fallbackData,
+  variant = "full",
+  onOpenFullRoute,
   className,
 }: OrderReadinessRouteCardProps) {
   const t = useTranslations("ProductionRoute");
@@ -303,16 +307,144 @@ export function OrderReadinessRouteCard({
     },
   ];
 
+  if (variant === "compact") {
+    return (
+      <div
+        className={cn(
+          "p-2.5 bg-muted/30 border border-border rounded-md space-y-2 select-none",
+          className
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span className="font-semibold text-xs text-foreground truncate">
+              {t("cardTitle")}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1.5 py-0 h-5 font-medium text-muted-foreground"
+            >
+              {currentStage}
+            </Badge>
+            <Badge
+              variant="outline"
+              onClick={onOpenFullRoute}
+              className={cn(
+                "text-[10px] font-semibold px-1.5 py-0 h-5 transition-colors gap-1 shrink-0",
+                onOpenFullRoute && "cursor-pointer hover:opacity-85",
+                blockedCount > 0
+                  ? "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30"
+                  : isAllReady
+                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+              )}
+            >
+              {blockedCount > 0 ? (
+                <AlertTriangle className="w-3 h-3 text-rose-500" />
+              ) : isAllReady ? (
+                <Check className="w-3 h-3 text-emerald-600" />
+              ) : (
+                <Clock className="w-3 h-3 text-amber-600" />
+              )}
+              {blockedCount > 0
+                ? `${blockedCount} ${t("statusBlocked")}`
+                : t("readyScore", { ready: readyCount, total: 4 })}
+            </Badge>
+          </div>
+        </div>
+
+        {/* 4-Segment Compact Gate Pills */}
+        <div className="grid grid-cols-4 gap-1.5">
+          {CHECK_ITEMS.map((item) => {
+            const isReady = !!checks[item.key];
+            const audit = auditMap[item.key];
+            const isBlocked = audit?.status === "blocked";
+            return (
+              <Tooltip key={item.key}>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      onClick={() => onOpenFullRoute?.()}
+                      className={cn(
+                        "flex flex-col gap-1 p-1.5 rounded border text-left transition-colors min-w-0",
+                        onOpenFullRoute ? "cursor-pointer" : "cursor-default",
+                        isBlocked
+                          ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400"
+                          : isReady
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
+                          : "bg-background/70 hover:bg-background border-border/80 text-muted-foreground"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-1 w-full">
+                        <span className="text-[10px] font-mono font-bold leading-none">
+                          G{item.stepNumber}
+                        </span>
+                        {isBlocked ? (
+                          <AlertTriangle className="w-3 h-3 text-rose-500 shrink-0" />
+                        ) : isReady ? (
+                          <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <Clock className="w-2.5 h-2.5 text-muted-foreground/70 shrink-0" />
+                        )}
+                      </div>
+                      <span className="text-[10px] font-medium truncate w-full text-foreground/90 leading-tight">
+                        {item.title}
+                      </span>
+                      <div
+                        className={cn(
+                          "h-1 w-full rounded-full",
+                          isBlocked
+                            ? "bg-rose-500"
+                            : isReady
+                            ? "bg-emerald-500"
+                            : "bg-muted-foreground/25"
+                        )}
+                      />
+                    </button>
+                  }
+                />
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="font-semibold text-xs">
+                    {t("stepBadge", { num: item.stepNumber })}: {item.title}
+                  </p>
+                  <p className="text-[11px] opacity-90">
+                    {isBlocked
+                      ? t("auditBlocked", { note: audit?.note || "Issue reported" })
+                      : isReady
+                      ? t("auditVerified", {
+                          name: audit?.verifiedBy || "Operator",
+                          time: audit?.verifiedAt || "Ready",
+                        })
+                      : item.desc}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  const isHorizontal = variant === "horizontal";
+
   return (
     <div
       className={cn(
-        "p-4 bg-card border border-border rounded-lg shadow-2xs space-y-3.5 select-none",
+        isHorizontal
+          ? "px-3 py-2.5 bg-card/60 border-b border-border space-y-2.5 select-none shrink-0"
+          : "p-4 bg-card border border-border rounded-lg shadow-2xs space-y-3.5 select-none",
         className
       )}
     >
-      {/* Header: Title, Department Badge, Readiness Score & Progress Bar */}
-      <div className="space-y-2 pb-2.5 border-b border-border/80">
-        <div className="flex items-center justify-between gap-2">
+      {/* Header: Title, Department Badge, Readiness Score & (in horizontal mode) Stage Stepper */}
+      <div className={cn("space-y-2", !isHorizontal && "pb-2.5 border-b border-border/80")}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
             <span className="font-semibold text-xs text-foreground truncate">
@@ -321,57 +453,141 @@ export function OrderReadinessRouteCard({
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-medium text-muted-foreground shrink-0">
               {effectiveDept}
             </Badge>
+            {currentItem?.sampleRequired && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[10px] px-1.5 py-0 font-medium shrink-0",
+                  currentItem.sampleStatus === "approved"
+                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                    : currentItem.sampleStatus === "revision_requested"
+                    ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30"
+                    : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                )}
+              >
+                {currentItem.sampleStatus === "approved"
+                  ? "✓ Namuna tasdiqlangan"
+                  : `🧪 Namuna (${currentItem.sampleQty || 5} dona)`}
+              </Badge>
+            )}
+
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[11px] font-semibold px-2 py-0.5 transition-colors gap-1 shrink-0",
+                blockedCount > 0
+                  ? "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30"
+                  : isAllReady
+                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+              )}
+            >
+              {blockedCount > 0 ? (
+                <AlertTriangle className="w-3 h-3 text-rose-500" />
+              ) : isAllReady ? (
+                <Check className="w-3 h-3 text-emerald-600" />
+              ) : (
+                <Clock className="w-3 h-3 text-amber-600" />
+              )}
+              {blockedCount > 0
+                ? `${blockedCount} Blocked`
+                : t("readyScore", { ready: readyCount, total: 4 })}
+            </Badge>
           </div>
 
-          <Badge
-            variant="outline"
-            className={cn(
-              "text-[11px] font-semibold px-2 py-0.5 transition-colors gap-1 shrink-0",
-              blockedCount > 0
-                ? "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30"
-                : isAllReady
-                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
-                : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
-            )}
-          >
-            {blockedCount > 0 ? (
-              <AlertTriangle className="w-3 h-3 text-rose-500" />
-            ) : isAllReady ? (
-              <Check className="w-3 h-3 text-emerald-600" />
-            ) : (
-              <Clock className="w-3 h-3 text-amber-600" />
-            )}
-            {blockedCount > 0
-              ? `${blockedCount} Blocked`
-              : t("readyScore", { ready: readyCount, total: 4 })}
-          </Badge>
+          {isHorizontal && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-0.5 bg-muted/60 p-0.5 rounded-md border border-border/60">
+                {STAGES.map((s) => {
+                  const isActive = currentStage === s.stage;
+                  return (
+                    <Tooltip key={s.stage}>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            onClick={() => handleStageChange(s.stage)}
+                            className={cn(
+                              "flex items-center gap-1 py-1 px-2 rounded text-[11px] font-medium transition-all cursor-pointer",
+                              isActive
+                                ? s.stage === "Completed"
+                                  ? "bg-blue-600 text-white shadow-xs font-semibold"
+                                  : s.stage === "In Production"
+                                  ? "bg-amber-600 text-white shadow-xs font-semibold"
+                                  : s.stage === "Ready to Print"
+                                  ? "bg-emerald-600 text-white shadow-xs font-semibold"
+                                  : "bg-background text-foreground shadow-xs font-semibold border border-border"
+                                : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                            )}
+                          >
+                            {s.icon}
+                            <span>{s.shortLabel}</span>
+                          </button>
+                        }
+                      />
+                      <TooltipContent side="top">
+                        <span className="text-xs">{s.label}</span>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleOpenPlanning}
+                      className="h-7 text-xs shrink-0 gap-1.5 font-medium"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-primary" />
+                      <span>{t("openPlanning")}</span>
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top">
+                  <span className="text-xs">{machineName}</span>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
         </div>
 
-        {/* 4-Segment Progress Bar */}
-        <div className="grid grid-cols-4 gap-1.5 pt-0.5">
-          {CHECK_ITEMS.map((item) => {
-            const isReady = !!checks[item.key];
-            const isBlocked = auditMap[item.key]?.status === "blocked";
-            return (
-              <div
-                key={item.key}
-                className={cn(
-                  "h-1.5 rounded-full transition-all",
-                  isBlocked
-                    ? "bg-rose-500"
-                    : isReady
-                    ? "bg-emerald-500"
-                    : "bg-muted-foreground/20"
-                )}
-                title={`${item.title}: ${isBlocked ? "Blocked" : isReady ? "Ready" : "Pending"}`}
-              />
-            );
-          })}
-        </div>
+        {/* 4-Segment Progress Bar (shown in full vertical mode) */}
+        {!isHorizontal && (
+          <div className="grid grid-cols-4 gap-1.5 pt-0.5">
+            {CHECK_ITEMS.map((item) => {
+              const isReady = !!checks[item.key];
+              const isBlocked = auditMap[item.key]?.status === "blocked";
+              return (
+                <div
+                  key={item.key}
+                  className={cn(
+                    "h-1.5 rounded-full transition-all",
+                    isBlocked
+                      ? "bg-rose-500"
+                      : isReady
+                      ? "bg-emerald-500"
+                      : "bg-muted-foreground/20"
+                  )}
+                  title={`${item.title}: ${isBlocked ? "Blocked" : isReady ? "Ready" : "Pending"}`}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* 4 Compact Enterprise Stage-Gate Rows */}
-      <div className="flex flex-col gap-1.5">
+      {/* 4 Compact Enterprise Stage-Gate Rows / Columns */}
+      <div
+        className={cn(
+          isHorizontal
+            ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2"
+            : "flex flex-col gap-1.5"
+        )}
+      >
         {CHECK_ITEMS.map((item) => {
           const isReady = !!checks[item.key];
           const audit = auditMap[item.key];
@@ -386,33 +602,29 @@ export function OrderReadinessRouteCard({
                   ? "bg-rose-50/70 dark:bg-rose-950/20 border-rose-300 dark:border-rose-900/60 shadow-2xs"
                   : isReady
                   ? "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/60"
-                  : "bg-muted/20 hover:bg-muted/40 border-border/70"
+                  : "bg-muted/20 border-border/70"
               )}
             >
-              {/* Left Column: Interactive Checkbox + Gate Badge + Title & Subtitle */}
+              {/* Left Column: Non-clickable Step Icon + Gate Badge + Title & Subtitle */}
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                {/* Clickable Status Icon */}
-                <button
-                  type="button"
-                  onClick={() => handleToggle(item.key)}
-                  title={isBlocked ? t("resolveBlocker") : isReady ? t("resetPending") : t("markReady")}
+                <div
                   className={cn(
-                    "w-5 h-5 rounded flex items-center justify-center shrink-0 transition-all cursor-pointer focus:outline-hidden",
+                    "w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors",
                     isBlocked
-                      ? "bg-rose-600 text-white shadow-2xs dark:bg-rose-500 hover:bg-rose-700"
+                      ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30"
                       : isReady
-                      ? "bg-emerald-600 text-white shadow-2xs dark:bg-emerald-500 hover:bg-emerald-700"
-                      : "border border-input bg-background hover:border-primary/70 text-transparent hover:text-muted-foreground/40"
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                      : "bg-muted text-muted-foreground border border-border"
                   )}
                 >
                   {isBlocked ? (
-                    <AlertTriangle className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <AlertTriangle className="w-3.5 h-3.5" />
                   ) : isReady ? (
-                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                   ) : (
-                    <Check className="w-3.5 h-3.5 stroke-[2]" />
+                    item.icon
                   )}
-                </button>
+                </div>
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -469,23 +681,8 @@ export function OrderReadinessRouteCard({
                 </div>
               </div>
 
-              {/* Right Column: Status Pill + Scope Info Popover + Actions Menu */}
+              {/* Right Column: Scope Info Popover + Unified Status Select Dropdown */}
               <div className="flex items-center gap-1 shrink-0">
-                <Badge
-                  variant="outline"
-                  onClick={() => handleToggle(item.key)}
-                  className={cn(
-                    "text-[10px] font-semibold px-1.5 py-0 cursor-pointer transition-colors select-none",
-                    isBlocked
-                      ? "bg-rose-500/15 text-rose-700 dark:text-rose-400 border-rose-500/30"
-                      : isReady
-                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
-                      : "bg-muted/70 text-muted-foreground border-border/80"
-                  )}
-                >
-                  {isBlocked ? t("statusBlocked") : isReady ? t("statusReady") : t("statusPending")}
-                </Badge>
-
                 {/* Scope Info Popover (i) */}
                 <Popover>
                   <PopoverTrigger
@@ -527,37 +724,72 @@ export function OrderReadinessRouteCard({
                   </PopoverContent>
                 </Popover>
 
-                {/* Quick Actions Dropdown Menu */}
+                {/* Intentional Status Select Dropdown (Pending / Ready / Blocked) */}
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
                       <button
                         type="button"
-                        className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+                        className={cn(
+                          "h-6 px-2 rounded border text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer select-none",
+                          isBlocked
+                            ? "bg-rose-500/15 text-rose-700 dark:text-rose-400 border-rose-500/30 hover:bg-rose-500/25"
+                            : isReady
+                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25"
+                            : "bg-background text-muted-foreground border-border hover:text-foreground hover:bg-muted/60"
+                        )}
                       >
-                        <MoreVertical className="w-3.5 h-3.5" />
+                        {isBlocked ? (
+                          <AlertTriangle className="w-3 h-3 text-rose-500 shrink-0" />
+                        ) : isReady ? (
+                          <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        ) : (
+                          <Clock className="w-3 h-3 text-muted-foreground shrink-0" />
+                        )}
+                        <span>
+                          {isBlocked
+                            ? t("statusBlocked")
+                            : isReady
+                            ? t("statusReady")
+                            : t("statusPending")}
+                        </span>
+                        <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
                       </button>
                     }
                   />
-                  <DropdownMenuContent align="end" side="bottom">
-                    {!isReady && (
-                      <DropdownMenuItem onClick={() => handleSetReady(item.key)}>
-                        <Check className="w-3.5 h-3.5 text-emerald-600 mr-1.5" />
-                        <span>{t("markReady")}</span>
-                      </DropdownMenuItem>
-                    )}
-                    {!isBlocked && (
-                      <DropdownMenuItem onClick={() => handleOpenBlocker(item.key)}>
-                        <AlertTriangle className="w-3.5 h-3.5 text-rose-500 mr-1.5" />
+                  <DropdownMenuContent align="end" side="bottom" className="w-44">
+                    <DropdownMenuItem
+                      onClick={() => handleResetPending(item.key)}
+                      className="flex items-center justify-between text-xs cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span>{t("statusPending")}</span>
+                      </span>
+                      {!isReady && !isBlocked && <Check className="w-3.5 h-3.5 text-primary" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSetReady(item.key)}
+                      className="flex items-center justify-between text-xs cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>{t("statusReady")}</span>
+                      </span>
+                      {isReady && !isBlocked && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleOpenBlocker(item.key)}
+                      className="flex items-center justify-between text-xs cursor-pointer text-rose-600 dark:text-rose-400"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
                         <span>{t("flagBlocker")}</span>
-                      </DropdownMenuItem>
-                    )}
-                    {(isReady || isBlocked) && (
-                      <DropdownMenuItem onClick={() => handleResetPending(item.key)}>
-                        <RotateCcw className="w-3.5 h-3.5 text-muted-foreground mr-1.5" />
-                        <span>{t("resetPending")}</span>
-                      </DropdownMenuItem>
-                    )}
+                      </span>
+                      {isBlocked && <Check className="w-3.5 h-3.5 text-rose-500" />}
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -584,78 +816,81 @@ export function OrderReadinessRouteCard({
         </div>
       )}
 
-      {/* Production Stage Stepper */}
-      <div className="space-y-1.5 pt-1 border-t border-border/60">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-[11px] font-medium text-muted-foreground">{t("currentStage")}</span>
-          <span className="font-semibold text-foreground text-xs">{currentStage}</span>
-        </div>
+      {/* Production Stage Stepper & Machine Jump Bar (shown in full vertical mode) */}
+      {!isHorizontal && (
+        <>
+          <div className="space-y-1.5 pt-1 border-t border-border/60">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[11px] font-medium text-muted-foreground">{t("currentStage")}</span>
+              <span className="font-semibold text-foreground text-xs">{currentStage}</span>
+            </div>
 
-        <div className="grid grid-cols-4 gap-1 bg-muted/60 p-1 rounded-md border border-border/60">
-          {STAGES.map((s) => {
-            const isActive = currentStage === s.stage;
-            return (
-              <Tooltip key={s.stage}>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      onClick={() => handleStageChange(s.stage)}
-                      className={cn(
-                        "flex items-center justify-center gap-1 py-1.5 px-1 rounded text-xs font-medium transition-all cursor-pointer min-w-0",
-                        isActive
-                          ? s.stage === "Completed"
-                            ? "bg-blue-600 text-white shadow-xs font-semibold"
-                            : s.stage === "In Production"
-                            ? "bg-amber-600 text-white shadow-xs font-semibold"
-                            : s.stage === "Ready to Print"
-                            ? "bg-emerald-600 text-white shadow-xs font-semibold"
-                            : "bg-background text-foreground shadow-xs font-semibold border border-border"
-                          : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                      )}
-                    >
-                      {s.icon}
-                      <span className="truncate text-[11px]">{s.shortLabel}</span>
-                    </button>
-                  }
-                />
-                <TooltipContent side="top">
-                  <span className="text-xs">{s.label}</span>
-                </TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </div>
-      </div>
+            <div className="grid grid-cols-4 gap-1 bg-muted/60 p-1 rounded-md border border-border/60">
+              {STAGES.map((s) => {
+                const isActive = currentStage === s.stage;
+                return (
+                  <Tooltip key={s.stage}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => handleStageChange(s.stage)}
+                          className={cn(
+                            "flex items-center justify-center gap-1 py-1.5 px-1 rounded text-xs font-medium transition-all cursor-pointer min-w-0",
+                            isActive
+                              ? s.stage === "Completed"
+                                ? "bg-blue-600 text-white shadow-xs font-semibold"
+                                : s.stage === "In Production"
+                                ? "bg-amber-600 text-white shadow-xs font-semibold"
+                                : s.stage === "Ready to Print"
+                                ? "bg-emerald-600 text-white shadow-xs font-semibold"
+                                : "bg-background text-foreground shadow-xs font-semibold border border-border"
+                              : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                          )}
+                        >
+                          {s.icon}
+                          <span className="truncate text-[11px]">{s.shortLabel}</span>
+                        </button>
+                      }
+                    />
+                    <TooltipContent side="top">
+                      <span className="text-xs">{s.label}</span>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </div>
 
-      {/* Assigned Machine & Planning Jump Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pt-2 border-t border-border/60 text-xs">
-        <div className="min-w-0 flex-1">
-          <span className="text-muted-foreground block text-[10.5px] leading-tight">{t("scheduledMachine")}</span>
-          <span className="font-semibold text-foreground truncate block text-xs" title={machineName}>
-            {machineName}
-          </span>
-        </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pt-2 border-t border-border/60 text-xs">
+            <div className="min-w-0 flex-1">
+              <span className="text-muted-foreground block text-[10.5px] leading-tight">{t("scheduledMachine")}</span>
+              <span className="font-semibold text-foreground truncate block text-xs" title={machineName}>
+                {machineName}
+              </span>
+            </div>
 
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleOpenPlanning}
-                className="h-7 text-xs shrink-0 gap-1.5 font-medium self-start sm:self-auto"
-              >
-                <ExternalLink className="w-3.5 h-3.5 text-primary" />
-                <span>{t("openPlanning")}</span>
-              </Button>
-            }
-          />
-          <TooltipContent side="top">
-            <span className="text-xs">Navigate to Machine Queues & Shift Planning</span>
-          </TooltipContent>
-        </Tooltip>
-      </div>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleOpenPlanning}
+                    className="h-7 text-xs shrink-0 gap-1.5 font-medium self-start sm:self-auto"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-primary" />
+                    <span>{t("openPlanning")}</span>
+                  </Button>
+                }
+              />
+              <TooltipContent side="top">
+                <span className="text-xs">Navigate to Machine Queues & Shift Planning</span>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </>
+      )}
 
       {/* Blocker Modal Dialog */}
       <Dialog open={!!blockerModalKey} onOpenChange={(open) => !open && setBlockerModalKey(null)}>

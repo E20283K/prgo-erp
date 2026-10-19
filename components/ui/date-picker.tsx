@@ -18,6 +18,7 @@ interface DatePickerProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  formatString?: string;
 }
 
 export function DatePicker({
@@ -26,6 +27,7 @@ export function DatePicker({
   placeholder = "Pick a date",
   className,
   disabled = false,
+  formatString = "dd.MM.yyyy",
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -58,13 +60,15 @@ export function DatePicker({
             variant="outline"
             disabled={disabled}
             className={cn(
-              "h-8 w-full justify-start text-left font-normal text-xs px-2.5 shadow-none",
+              "h-8 w-full justify-start text-left font-normal text-xs px-2 shadow-none min-w-0 truncate",
               !selectedDate && "text-muted-foreground",
               className
             )}
           >
-            <CalendarIcon className="mr-2 h-3.5 w-3.5 opacity-70" />
-            {selectedDate ? format(selectedDate, "PPP") : <span>{placeholder}</span>}
+            <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0 opacity-70" />
+            <span className="truncate">
+              {selectedDate ? format(selectedDate, formatString || "dd.MM.yyyy") : placeholder}
+            </span>
           </Button>
         }
       />

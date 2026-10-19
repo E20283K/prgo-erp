@@ -57,8 +57,7 @@ interface ShiftTimelineTabProps {
     wasteQty?: number,
     wasteReason?: string
   ) => void;
-  shiftNotes?: ShiftNote[];
-  onAddShiftNote?: (note: ShiftNote) => void;
+  onChangeStepStatus?: (opId: string, status: RouteStep["status"]) => void;
 }
 
 export function ShiftTimelineTab({
@@ -69,34 +68,29 @@ export function ShiftTimelineTab({
   selectedOpEvents,
   onOpenLogEvent,
   onUpdateStepOutput,
-  shiftNotes = [],
-  onAddShiftNote,
+  onChangeStepStatus,
 }: ShiftTimelineTabProps) {
-  const [newShiftType, setNewShiftType] = useState<string>("Morning");
-  const [newNoteAuthor, setNewNoteAuthor] = useState<string>("M. Ivanova");
-  const [newNoteText, setNewNoteText] = useState<string>("");
-
-  const handleAddNote = () => {
-    if (!newNoteText.trim()) return;
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const newNote: ShiftNote = {
-      id: `sn-${Date.now()}`,
-      author: newNoteAuthor.trim() || "Operator",
-      shift: newShiftType,
-      time: `Today ${timeStr}`,
-      text: newNoteText.trim(),
-    };
-    if (onAddShiftNote) {
-      onAddShiftNote(newNote);
-    }
-    setNewNoteText("");
-  };
-
   const { completed, target, unitSuffix, percent } = useMemo(
     () => parseQtyString(selectedOp.qtyCompleted),
     [selectedOp.qtyCompleted]
   );
+
+  // Overall Route Progress across all technological steps
+  const { finishedStepsCount, overallPercent } = useMemo(() => {
+    if (!operations || operations.length === 0) {
+      return { finishedStepsCount: 0, overallPercent: 0 };
+    }
+    const finished = operations.filter((op) => op.status === "Finished").length;
+    const sumPct = operations.reduce((acc, op) => {
+      if (op.status === "Finished") return acc + 100;
+      if (op.status === "Queued") return acc;
+      return acc + parseQtyString(op.qtyCompleted).percent;
+    }, 0);
+    return {
+      finishedStepsCount: finished,
+      overallPercent: Math.min(100, Math.round(sumPct / operations.length)),
+    };
+  }, [operations]);
 
   // Previous step output for Pass-Through mode
   const prevStep = useMemo(() => {
@@ -190,21 +184,73 @@ export function ShiftTimelineTab({
   return (
     <TabsContent value="timeline" className="flex-1 p-4 m-0 overflow-y-auto space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 shrink-0">
             <Clock className="w-4 h-4 text-blue-600" />
             Shift Allocation & Timeline
           </h3>
-          <Badge variant="outline" className="text-[10px] font-mono">
+          <Badge variant="outline" className="text-[10px] font-mono truncate">
             Step {selectedOp.stepNumber}: {selectedOp.name}
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
+
+        {/* Center: Overall Route Progress Bar */}
+        <div className="hidden md:flex items-center gap-2.5 px-3 py-1 rounded-md bg-zinc-100/70 dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800">
+          <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+            Umumiy bajarilish:
+          </span>
+          <div className="w-36 lg:w-48 h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className={cn(
+                "h-full transition-all duration-300 rounded-full",
+                overallPercent >= 100
+                  ? "bg-emerald-500"
+                  : "bg-gradient-to-r from-blue-600 to-emerald-500"
+              )}
+              style={{ width: `${overallPercent}%` }}
+            />
+          </div>
+          <span className="text-[11px] font-mono font-bold text-zinc-900 dark:text-zinc-100 whitespace-nowrap">
+            {overallPercent}%
+          </span>
+          <span className="text-[10px] font-mono text-zinc-400 whitespace-nowrap">
+            ({finishedStepsCount}/{operations.length} bosqich)
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           <Badge variant="outline" className="text-[10px] font-mono">
             Planned: {selectedOp.duration}h
           </Badge>
-          {selectedOp.status === "Finished" ? (
+          {onChangeStepStatus ? (
+            <Select
+              value={selectedOp.status}
+              onValueChange={(val) => {
+                if (val === "Queued" || val === "In Progress" || val === "Finished") {
+                  onChangeStepStatus(selectedOp.id, val);
+                }
+              }}
+            >
+              <SelectTrigger
+                className={cn(
+                  "h-6 text-[10px] font-semibold px-2 py-0 w-[130px] border",
+                  selectedOp.status === "Finished"
+                    ? "bg-emerald-100/80 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800"
+                    : selectedOp.status === "In Progress"
+                    ? "bg-blue-100/80 text-blue-700 border-blue-300 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800"
+                    : "bg-zinc-100 text-zinc-600 border-zinc-300 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700"
+                )}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Queued" className="text-xs">Queued (Pending)</SelectItem>
+                <SelectItem value="In Progress" className="text-xs">In Progress</SelectItem>
+                <SelectItem value="Finished" className="text-xs">Finished</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : selectedOp.status === "Finished" ? (
             <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300 border-none text-[10px]">
               Finished
             </Badge>
@@ -296,38 +342,6 @@ export function ShiftTimelineTab({
                 );
               })}
             </RadioGroup>
-          </div>
-
-          {/* Shift Assignment Card */}
-          <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md space-y-2.5">
-            <div className="font-semibold text-zinc-800 dark:text-zinc-200 text-xs pb-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-              <span>Assignment Details</span>
-              <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400">Step {selectedOp.stepNumber}</span>
-            </div>
-            <div className="space-y-2">
-              <div>
-                <label className="text-zinc-500 font-medium block mb-1 text-[11px]">Assigned Shift</label>
-                <Select defaultValue="day-shift">
-                  <SelectTrigger className="h-7 text-xs bg-zinc-50 dark:bg-zinc-950">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="day-shift">Day Shift (08:00 - 20:00)</SelectItem>
-                    <SelectItem value="night-shift">Night Shift (20:00 - 08:00)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-zinc-500 font-medium block mb-1 text-[11px]">Shift Lead / Operator</label>
-                  <Input disabled value={selectedOp.operator} className="h-7 text-xs bg-zinc-100 dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300 font-medium" />
-                </div>
-                <div>
-                  <label className="text-zinc-500 font-medium block mb-1 text-[11px]">Work Center / Machine</label>
-                  <Input disabled value={selectedOp.machine} className="h-7 text-xs bg-zinc-100 dark:bg-zinc-950 text-zinc-500" />
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -689,97 +703,6 @@ export function ShiftTimelineTab({
             ))}
           </div>
         )}
-          </div>
-
-          {/* Shift Handover Notes Log */}
-          <div className="p-3.5 bg-card border border-border rounded-lg shadow-2xs space-y-3 flex flex-col">
-            <div className="flex items-center justify-between pb-2 border-b border-border">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-primary shrink-0" />
-                <span className="font-semibold text-xs text-foreground">Smena Qabul Qilish Eslatmalari (Shift Handover Notes)</span>
-              </div>
-              <span className="text-[11px] text-muted-foreground font-mono">
-                {shiftNotes.length} ta eslatma
-              </span>
-            </div>
-
-            {/* New note input form */}
-            <div className="space-y-2 bg-muted/20 p-2.5 rounded-md border border-border">
-              <div className="grid grid-cols-2 gap-2">
-                <Select value={newShiftType} onValueChange={(val: any) => setNewShiftType(val)}>
-                  <SelectTrigger className="h-7 text-xs bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Morning">Ertalabki smena (Morning)</SelectItem>
-                    <SelectItem value="Evening">Kechki smena (Evening)</SelectItem>
-                    <SelectItem value="Night">Tungi smena (Night)</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Input
-                  value={newNoteAuthor}
-                  onChange={(e) => setNewNoteAuthor(e.target.value)}
-                  placeholder="Operator ismi"
-                  className="h-7 text-xs bg-background"
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <Input
-                  value={newNoteText}
-                  onChange={(e) => setNewNoteText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddNote();
-                  }}
-                  placeholder="Keyingi smena operatoriga muhim xabar yoki ko'rsatma yozing..."
-                  className="h-7 text-xs bg-background flex-1"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleAddNote}
-                  disabled={!newNoteText.trim()}
-                  className="h-7 px-2.5 text-xs gap-1 cursor-pointer shrink-0"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Qo&apos;shish</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Existing notes list */}
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {shiftNotes.map((note) => (
-                <div
-                  key={note.id}
-                  className="p-2 rounded-md bg-muted/20 border border-border text-xs space-y-1"
-                >
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={cn(
-                          "px-1.5 py-0.2 rounded text-[10px] font-semibold border",
-                          note.shift === "Morning" && "text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10",
-                          note.shift === "Evening" && "text-blue-600 dark:text-blue-400 border-blue-500/30 bg-blue-500/10",
-                          note.shift === "Night" && "text-purple-600 dark:text-purple-400 border-purple-500/30 bg-purple-500/10"
-                        )}
-                      >
-                        {note.shift}
-                      </span>
-                      <span className="font-semibold text-foreground">{note.author}</span>
-                    </div>
-                    <span className="font-mono text-[10px]">{note.time}</span>
-                  </div>
-                  <p className="text-foreground/90 leading-snug">{note.text}</p>
-                </div>
-              ))}
-              {shiftNotes.length === 0 && (
-                <div className="text-center py-4 text-muted-foreground text-[11px] italic">
-                  Hozircha smena eslatmalari yozilmagan.
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </div>

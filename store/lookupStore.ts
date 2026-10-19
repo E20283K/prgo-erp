@@ -72,7 +72,11 @@ interface LookupStoreState {
   coatings: ComboboxItem[];
   sizePresets: LookupPresetItem[];
 
+  isSyncing: boolean;
+  syncError: string | null;
+
   // Actions for In-Place Lookup additions (Method 2)
+  syncWithServer: (companyCode?: string) => Promise<void>;
   addCustomer: (name: string) => void;
   addSite: (site: Partial<SiteOption> & { name: string }) => SiteOption;
   addFormat: (item: string | ComboboxItem) => void;
@@ -104,6 +108,74 @@ export const useLookupStore = create<LookupStoreState>()(
       paperStocks: [...DEFAULT_PAPER_STOCKS],
       coatings: [...DEFAULT_COATINGS],
       sizePresets: [...DEFAULT_SIZE_PRESETS],
+      isSyncing: false,
+      syncError: null,
+
+      syncWithServer: async (companyCode = "PRINTGOO") => {
+        set({ isSyncing: true, syncError: null });
+        try {
+          const [itemsRes, diesRes] = await Promise.all([
+            fetch(`/api/v1/master/items?company=${companyCode}`),
+            fetch(`/api/v1/master/printing/dies?company=${companyCode}`),
+          ]);
+
+          if (itemsRes.ok) {
+            const itemsJson = await itemsRes.json();
+            if (itemsJson.success && Array.isArray(itemsJson.data)) {
+              const currentStocks = get().paperStocks;
+              const newStocks: ComboboxItem[] = [...currentStocks];
+
+              for (const it of itemsJson.data) {
+                const label = it.name;
+                const exists = newStocks.some(
+                  (s) => s.value.toLowerCase() === label.toLowerCase() || s.label.toLowerCase() === label.toLowerCase()
+                );
+                if (!exists) {
+                  newStocks.push({
+                    value: label,
+                    label,
+                    description: it.description || `${it.category} material`,
+                    badge: it.category || "DB",
+                  });
+                }
+              }
+              set({ paperStocks: newStocks });
+            }
+          }
+
+          if (diesRes.ok) {
+            const diesJson = await diesRes.json();
+            if (diesJson.success && Array.isArray(diesJson.data)) {
+              const currentPresets = get().sizePresets;
+              const newPresets: LookupPresetItem[] = [...currentPresets];
+
+              for (const die of diesJson.data) {
+                const val = die.code;
+                const exists = newPresets.some((p) => p.value.toLowerCase() === val.toLowerCase());
+                if (!exists) {
+                  newPresets.push({
+                    value: val,
+                    label: `${die.name} (${die.widthMm}×${die.heightMm}mm)`,
+                    description: die.notes || `Die ${die.shape}`,
+                    badge: "Die Tool",
+                    width: Number(die.widthMm),
+                    height: Number(die.heightMm),
+                    category: die.shape,
+                  });
+                }
+              }
+              set({ sizePresets: newPresets });
+            }
+          }
+
+          set({ isSyncing: false });
+        } catch (err) {
+          set({
+            isSyncing: false,
+            syncError: err instanceof Error ? err.message : "Sync failed",
+          });
+        }
+      },
 
       addCustomer: (name: string) => {
         const clean = name.trim();

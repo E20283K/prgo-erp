@@ -5,16 +5,18 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
 import { notFound } from 'next/navigation';
-import { routing } from '@/i18n/routing';import QueryProvider from "@/components/providers/QueryProvider";
+import { routing } from '@/i18n/routing';
+import QueryProvider from "@/components/providers/QueryProvider";
+import { FontCacheInitializer } from "@/components/providers/FontCacheInitializer";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
 });
 
 export const metadata: Metadata = {
@@ -53,10 +55,27 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} className="dark" suppressHydrationWarning>
+      <head>
+        <link
+          rel="preload"
+          href="/fonts/Roboto-Regular.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/Roboto-Bold.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+      </head>
       <body
         suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased bg-background text-foreground h-screen w-screen overflow-hidden`}
       >
+        <FontCacheInitializer />
         <NextIntlClientProvider messages={messages}>
           <QueryProvider>
             <TooltipProvider>{children}</TooltipProvider>

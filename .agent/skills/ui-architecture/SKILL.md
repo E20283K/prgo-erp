@@ -155,6 +155,11 @@ State is managed globally in `@/store/workspaceStore.ts`:
   - Strict currency, numerical, and date formatting.
 - **Form Layout**: High-density grid cards (`grid grid-cols-1 md:grid-cols-3 gap-3`).
 - **Pages vs Dialogs**: Large forms must open as workspace document tabs. Dialogs are reserved only for quick actions, confirmations, and parameter prompts.
+- **Numerical & Quantity Inputs (Prohibition of Native Spinners)**:
+  - **Strict Prohibition**: Native browser spin-buttons (stepper up/down arrows inside `<input type="number">`) are **strictly prohibited**. They render as ugly white boxes in dark mode, overlap text in dense `h-7`/`h-8` inputs, and harm 1C keyboard-centric ergonomics.
+  - Global CSS in `app/globals.css` and `@/components/ui/input.tsx` suppresses these controls (`[appearance:textfield]`, `::-webkit-inner-spin-button`, `::-webkit-outer-spin-button`).
+  - ERP quantities (e.g. 10,000 pcs, paper grammage, sheet sizes) require direct keyboard entry with monospace styling (`font-mono`).
+  - If incremental step controls are genuinely needed (e.g. POS counter checkout), use a styled shadcn `InputGroup` with Lucide `Minus`/`Plus` buttons—never browser native steppers.
 
 ---
 
@@ -177,6 +182,7 @@ Before completing any UI task, verify:
 - [ ] Are all tables powered by `@glideapps/glide-data-grid`?
 - [ ] Is dynamic import with `ssr: false` used for Glide Data Grid?
 - [ ] Are all colors mapped to semantic tokens (`bg-primary`, `text-muted-foreground`, etc.)?
+- [ ] Are numerical/quantity inputs clean without native browser spin-buttons?
 - [ ] Are Lucide icons properly sized (`w-3.5 h-3.5` or `w-4 h-4`)?
 - [ ] Does double-clicking a record open a document tab in `workspaceStore`?
 - [ ] Does the document follow the Level 3 tab structure (Overview, Materials, Operations)?

@@ -469,6 +469,23 @@ export function MachineQueueBoard({
                             <span className="text-muted-foreground ml-2">
                               • {item.quantity.toLocaleString()} {item.unit}
                             </span>
+                            {item.sampleRequired && (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "ml-2 text-[10px] px-1.5 py-0 font-medium inline-flex items-center gap-1 align-middle",
+                                  item.sampleStatus === "approved"
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                    : item.sampleStatus === "revision_requested"
+                                    ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30"
+                                    : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                                )}
+                              >
+                                {item.sampleStatus === "approved"
+                                  ? "✓ Namuna tasdiqlangan"
+                                  : `🧪 Namuna (${item.sampleQty || 5} dona)`}
+                              </Badge>
+                            )}
                             <div className="text-[11px] text-muted-foreground">
                               {item.customer}
                             </div>

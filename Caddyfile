@@ -1,0 +1,19 @@
+{
+    auto_https {$CADDY_AUTO_HTTPS:on}
+}
+
+{$APP_DOMAIN:localhost} {
+    encode zstd gzip
+
+    # Reverse proxy to Next.js Standalone App
+    reverse_proxy app:3000 {
+        flush_interval -1
+    }
+}
+
+{$S3_PUBLIC_DOMAIN:s3.localhost} {
+    encode zstd gzip
+
+    # Reverse proxy for direct browser Presigned URL uploads/downloads to MinIO
+    reverse_proxy minio:9000
+}

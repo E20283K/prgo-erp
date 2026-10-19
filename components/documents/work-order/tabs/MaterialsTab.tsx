@@ -16,15 +16,44 @@ const BomMaterialsGrid = dynamic(
   }
 );
 
+import { MasterSpecification } from "../types";
+
 interface MaterialsTabProps {
   tabId: string;
   department: string;
+  recipe?: string;
+  activeSpec?: MasterSpecification;
+  onRecipeChange?: (code: string, department: string) => void;
+  onOpenTab?: (tab: any) => void;
+  isOperator?: boolean;
+  onSaveAsSpec?: (items: any[]) => void;
+  onItemsChange?: (items: any[]) => void;
 }
 
-export function MaterialsTab({ tabId, department }: MaterialsTabProps) {
+export function MaterialsTab({
+  tabId,
+  department,
+  recipe,
+  activeSpec,
+  onRecipeChange,
+  onOpenTab,
+  isOperator,
+  onSaveAsSpec,
+  onItemsChange,
+}: MaterialsTabProps) {
   return (
     <TabsContent value="materials" className="flex-1 overflow-hidden p-0 m-0 h-full flex flex-col data-[state=inactive]:hidden">
-      <BomMaterialsGrid tabId={tabId} department={department} />
+      <BomMaterialsGrid
+        tabId={tabId}
+        department={department}
+        recipe={recipe}
+        activeSpec={activeSpec}
+        onRecipeChange={onRecipeChange}
+        onOpenTab={onOpenTab}
+        isOperator={isOperator}
+        onSaveAsSpec={onSaveAsSpec}
+        onItemsChange={onItemsChange}
+      />
     </TabsContent>
   );
 }

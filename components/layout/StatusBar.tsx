@@ -19,6 +19,7 @@ import {
   Sparkles,
   Database,
   Cpu,
+  Crosshair,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -41,6 +42,9 @@ export function StatusBar() {
     currentModule,
     currentSubModule,
     setShowStatusBar,
+    isInspectorActive,
+    toggleInspectorMode,
+    lastInspectedElement,
   } = useWorkspaceStore();
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -133,6 +137,30 @@ export function StatusBar() {
             </span>
             <span>DEV HUD</span>
           </div>
+
+          {/* Chrome-style AI Element Inspector Button (Ctrl+Shift+C) */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={toggleInspectorMode}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer shrink-0 ${
+                    isInspectorActive
+                      ? "bg-cyan-500 text-zinc-950 border-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]"
+                      : "bg-zinc-900 hover:bg-zinc-800 text-cyan-400 border-cyan-500/30 hover:border-cyan-400/60"
+                  }`}
+                  title="Inspect Element or Container for AI (Ctrl+Shift+C)"
+                />
+              }
+            >
+              <Crosshair className={`w-3 h-3 ${isInspectorActive ? "animate-spin" : ""}`} />
+              <span>{isInspectorActive ? "INSPECTING..." : "INSPECT"}</span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6} className="text-xs font-mono">
+              Inspect Element & Code Line for AI (Ctrl+Shift+C)
+            </TooltipContent>
+          </Tooltip>
 
           {/* Module tag */}
           <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300 text-[10px] shrink-0 uppercase font-semibold">
@@ -271,6 +299,71 @@ export function StatusBar() {
               </div>
             </PopoverContent>
           </Popover>
+
+          {lastInspectedElement && (
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="hidden md:flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono transition-colors cursor-pointer shrink-0"
+                    title="Click to view or copy last inspected element for AI"
+                  />
+                }
+              >
+                <Crosshair className="w-3 h-3 text-cyan-400 shrink-0" />
+                <span className="font-semibold">{lastInspectedElement.fileName}</span>
+                <span className="px-1 rounded bg-cyan-500/20 text-cyan-200 font-bold">
+                  {lastInspectedElement.lineRangeLabel}
+                </span>
+              </PopoverTrigger>
+              <PopoverContent
+                side="top"
+                align="start"
+                sideOffset={8}
+                className="w-96 p-3 bg-zinc-950 border border-cyan-800/70 text-zinc-200 shadow-2xl rounded-lg font-mono text-xs z-50 space-y-2"
+              >
+                <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800">
+                  <div className="flex items-center gap-1.5 text-cyan-400 font-bold">
+                    <Crosshair className="w-3.5 h-3.5" />
+                    <span>Last Inspected UI Target</span>
+                  </div>
+                  <span className="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold">
+                    {lastInspectedElement.lineRangeLabel}
+                  </span>
+                </div>
+                <div className="text-[11px] text-zinc-300 truncate">
+                  {lastInspectedElement.elementLabel}
+                </div>
+                <pre className="p-2 rounded bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                  {lastInspectedElement.aiPromptText}
+                </pre>
+                <div className="pt-1 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(lastInspectedElement.aiPromptText, "ai-context")}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-medium transition-colors cursor-pointer"
+                  >
+                    {copiedKey === "ai-context" ? (
+                      <Check className="w-3.5 h-3.5" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {copiedKey === "ai-context" ? "Copied for AI!" : "Copy AI Context"}
+                    </span>
+                  </button>
+                  <a
+                    href={lastInspectedElement.vscodeUrl}
+                    className="px-2.5 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
+                    <span>VS Code</span>
+                  </a>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
 
           <span className="hidden md:inline text-zinc-700">|</span>
 

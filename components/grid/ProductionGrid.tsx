@@ -65,7 +65,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { CreateWorkOrderPickerModal } from "@/components/documents/work-order/dialogs/CreateWorkOrderPickerModal";
 import {
   Sheet,
   SheetContent,
@@ -216,10 +215,9 @@ const INITIAL_PLANNING_SLOTS: PlanningSlotRecord[] = Array.from({ length: 40 }, 
 export function ProductionGrid({ type }: ProductionGridProps) {
   const tCommon = useTranslations("Common");
   const tGrid = useTranslations("DataGrid");
-  const { updateGridStats, theme, openTab, addNotification, productionQueue } = useWorkspaceStore();
+  const { updateGridStats, theme, openTab, addNotification, productionQueue, setCreateWorkOrderOpen, machines } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [viewMode, setViewMode] = useState<"board" | "table">("board");
-  const [isWorkOrderPickerOpen, setIsWorkOrderPickerOpen] = useState(false);
 
   // Status colorful rows toggle (persisted in localStorage, default true)
   const [enableStatusColors, setEnableStatusColors] = useState<boolean>(() => {
@@ -248,6 +246,62 @@ export function ProductionGrid({ type }: ProductionGridProps) {
   const [editParam1, setEditParam1] = useState("");
   const [editParam2, setEditParam2] = useState("");
 
+  const mappedMachines = useMemo(() => {
+    if (!machines || machines.length === 0) return machinesData;
+    return machines.map((m) => {
+      let maxFormat = "Standart";
+      let maxGrammage = "Standart";
+      let makeReady = 50;
+
+      if (m.offsetSpecs) {
+        maxFormat = m.offsetSpecs.maxSheetMm;
+        maxGrammage = m.offsetSpecs.grammageRange;
+        makeReady = m.offsetSpecs.makeReadyWasteSheets;
+      } else if (m.flexoSpecs) {
+        maxFormat = `${m.flexoSpecs.maxWebWidthMm} mm Web`;
+        maxGrammage = "BOPP / Film";
+        makeReady = m.flexoSpecs.makeReadyWasteMeters;
+      } else if (m.dieCuttingSpecs) {
+        maxFormat = m.dieCuttingSpecs.maxSheetMm;
+        maxGrammage = m.dieCuttingSpecs.substrateRange.slice(0, 20);
+        makeReady = m.dieCuttingSpecs.makeReadyWasteSheets;
+      } else if (m.laminationSpecs) {
+        maxFormat = m.laminationSpecs.maxSheetMm;
+        maxGrammage = m.laminationSpecs.grammageRange;
+        makeReady = m.laminationSpecs.makeReadyWasteSheets;
+      } else if (m.guillotineSpecs) {
+        maxFormat = `${m.guillotineSpecs.cuttingWidthMm} mm Cut`;
+        maxGrammage = "1200 g/m²";
+        makeReady = 10;
+      } else if (m.jacquardSpecs) {
+        maxFormat = `${m.jacquardSpecs.reedWidthMm} mm / ${m.jacquardSpecs.hooksCount} H`;
+        maxGrammage = "Damask / Yarn";
+        makeReady = m.jacquardSpecs.wasteMeters;
+      } else if (m.mountingSpecs) {
+        maxFormat = m.mountingSpecs.maxSheetMm;
+        maxGrammage = "Corrugated";
+        makeReady = m.mountingSpecs.makeReadyWasteSheets;
+      } else if (m.casingInSpecs) {
+        maxFormat = m.casingInSpecs.maxBookFormatMm;
+        maxGrammage = "Hardcover";
+        makeReady = m.casingInSpecs.makeReadyWasteBooks;
+      }
+
+      return {
+        id: m.id,
+        name: m.name,
+        type: `${m.department} (${m.category})`,
+        maxFormat,
+        maxGrammage,
+        makeReadySheets: makeReady,
+        hourlyRate: m.costing.standardHourlyRateUsd,
+        efficiency: m.overallEfficiency,
+        status: m.status,
+        rawMachine: m,
+      };
+    });
+  }, [machines, machinesData]);
+
   const handleCreateNew = useCallback(() => {
     if (type === "bom") {
       const newId = `SPEC-00${Math.floor(100 + Math.random() * 900)}`;
@@ -267,7 +321,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         },
       });
     } else if (type === "planning") {
-      setIsWorkOrderPickerOpen(true);
+      setCreateWorkOrderOpen(true);
     } else if (type === "tooling") {
       const newTool = {
         id: `DIE-0${105 + toolingData.length}`,
@@ -289,27 +343,25 @@ export function ProductionGrid({ type }: ProductionGridProps) {
       setEditParam2(newTool.rack);
       setIsDrawerOpen(true);
     } else if (type === "machines") {
-      const newMac = {
-        id: `MAC-${101 + machinesData.length}`,
-        name: "New Workshop Press / Finisher",
-        type: "Post-Press",
-        maxFormat: "700×1000 mm",
-        maxGrammage: "400 g/m²",
-        makeReadySheets: 50,
-        hourlyRate: 85,
-        status: "Idle",
-        efficiency: 90,
-      };
-      setMachinesData((prev) => [newMac, ...prev]);
-      setSelectedRecordId(newMac.id);
-      setEditTitle(newMac.name);
-      setEditParam1(String(newMac.hourlyRate));
-      setEditParam2(String(newMac.makeReadySheets));
-      setIsDrawerOpen(true);
+      const newId = `MAC-${101 + (machines ? machines.length : machinesData.length)}`;
+      openTab({
+        id: `machine-${newId}`,
+        title: "Yangi Uskuna Pasporti",
+        type: "machine-detail",
+        module: "production",
+        isUnsaved: true,
+        activeLevel3Tab: "overview",
+        documentData: {
+          id: newId,
+          name: "Yangi Chop Etish / Pardozlash Uskunasi",
+          code: `EQ-${newId}`,
+          department: "Offset",
+        },
+      });
     } else {
-      setIsWorkOrderPickerOpen(true);
+      setCreateWorkOrderOpen(true);
     }
-  }, [type, openTab, planningData.length, toolingData.length, machinesData.length]);
+  }, [type, openTab, setCreateWorkOrderOpen, planningData.length, toolingData.length, machinesData.length, machines]);
 
   // Keyboard shortcut: Ins to Create New
   useEffect(() => {
@@ -382,7 +434,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         { id: "efficiency", title: "OEE (%)", width: 95, icon: GridColumnIcon.HeaderNumber },
         { id: "status", title: "Status", width: 115, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      mockRows = machinesData;
+      mockRows = mappedMachines;
     } else if (type === "bom") {
       cols = [
         { id: "id", title: "BOM ID", width: 100, icon: GridColumnIcon.HeaderReference },
@@ -423,7 +475,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     }
 
     return { columns: cols, rows: mockRows };
-  }, [type, planningData, machinesData, toolingData, productionQueue]);
+  }, [type, planningData, machinesData, mappedMachines, toolingData, productionQueue]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -514,11 +566,19 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           severity: "info",
         });
       } else if (type === "machines") {
-        setSelectedRecordId(selectedRow.id);
-        setEditTitle(selectedRow.name);
-        setEditParam1(String(selectedRow.hourlyRate));
-        setEditParam2(String(selectedRow.makeReadySheets));
-        setIsDrawerOpen(true);
+        openTab({
+          id: `machine-${selectedRow.id}`,
+          title: selectedRow.name,
+          type: "machine-detail",
+          module: "production",
+          activeLevel3Tab: "overview",
+          documentData: selectedRow.rawMachine || selectedRow,
+        });
+        addNotification({
+          title: "Uskuna Pasporti Ochildi",
+          description: `${selectedRow.name} (${selectedRow.id}) texnik pasporti ochildi`,
+          severity: "info",
+        });
       } else if (type === "tooling") {
         setSelectedRecordId(selectedRow.id);
         setEditTitle(selectedRow.name);
@@ -527,7 +587,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         setIsDrawerOpen(true);
       }
     },
-    [filteredRows, type, openTab, planningData, productionQueue]
+    [filteredRows, type, openTab, planningData, productionQueue, addNotification]
   );
 
   const handleOpen = useCallback(() => {
@@ -772,48 +832,50 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         <ContextMenuTrigger asChild>
           <div className="w-full h-full bg-card flex flex-col select-none overflow-hidden">
             {/* Toolbar */}
-            <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-1.5">
+            <div className="h-8 border-b border-border bg-card px-2.5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-1.5 min-w-0 shrink overflow-x-auto no-scrollbar">
                 {type === "planning" ? (
                   <>
                     {/* View Mode Toggle (Machine Queues vs Data Table) */}
-                    <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium mr-1">
+                    <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
                       <button
                         type="button"
                         onClick={() => setViewMode("board")}
-                        className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded transition-colors cursor-pointer ${
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           viewMode === "board"
                             ? "bg-background text-primary font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
                         }`}
+                        title="Stanoklar Navbati (Board)"
                       >
                         <LayoutGrid className="w-3.5 h-3.5" />
-                        <span>Stanoklar Navbati</span>
+                        <span>Navbat</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setViewMode("table")}
-                        className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded transition-colors cursor-pointer ${
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           viewMode === "table"
                             ? "bg-background text-primary font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
                         }`}
+                        title="Jadval (Table)"
                       >
                         <TableIcon className="w-3.5 h-3.5" />
-                        <span>Jadval (Table)</span>
+                        <span>Jadval</span>
                       </button>
                     </div>
 
-                    <Separator orientation="vertical" className="h-4 mx-1" />
+                    <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
 
                     {/* Machine Dispatch Selector */}
-                    <div className="flex items-center gap-1.5 mr-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium pl-0.5 shrink-0">
                         <Cpu className="w-3.5 h-3.5 text-blue-500" />
-                        <span className="hidden sm:inline">Stanok:</span>
+                        <span className="hidden md:inline">Stanok:</span>
                       </span>
                       <Select value={machineFilter} onValueChange={(val) => setMachineFilter(val ?? "ALL")}>
-                        <SelectTrigger className="h-7 text-xs w-[190px] bg-background">
+                        <SelectTrigger className="h-6.5 text-xs w-[140px] sm:w-[160px] bg-background shrink-0">
                           <SelectValue placeholder="Barcha stanoklar" />
                         </SelectTrigger>
                         <SelectContent className="text-xs">
@@ -830,13 +892,13 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       </Select>
                     </div>
 
-                    <Separator orientation="vertical" className="h-4 mx-1" />
+                    <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
 
                     {/* Operational Status Filters */}
-                    <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+                    <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
                       <button
                         onClick={() => setStatusFilter("ALL")}
-                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "ALL"
                             ? "bg-background text-foreground font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -846,7 +908,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       </button>
                       <button
                         onClick={() => setStatusFilter("Running")}
-                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "Running"
                             ? "bg-background text-amber-600 dark:text-amber-400 font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -856,17 +918,17 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       </button>
                       <button
                         onClick={() => setStatusFilter("Ready to Print")}
-                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "Ready to Print"
                             ? "bg-background text-emerald-600 dark:text-emerald-400 font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
-                        Chopga Tayyor
+                        Chopga tayyor
                       </button>
                       <button
                         onClick={() => setStatusFilter("Queue")}
-                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "Queue"
                             ? "bg-background text-blue-600 dark:text-blue-400 font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -876,7 +938,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       </button>
                       <button
                         onClick={() => setStatusFilter("Completed")}
-                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "Completed"
                             ? "bg-background text-zinc-600 dark:text-zinc-300 font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -888,10 +950,10 @@ export function ProductionGrid({ type }: ProductionGridProps) {
 
                     {viewMode === "table" && (
                       <>
-                        <Separator orientation="vertical" className="h-4 mx-1" />
+                        <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
                         {/* Color Rows Feature Toggle */}
                         <div
-                          className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors cursor-pointer select-none ${
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors cursor-pointer select-none whitespace-nowrap shrink-0 ${
                             enableStatusColors
                               ? "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 font-medium"
                               : "bg-muted/50 border-border/60 text-muted-foreground hover:text-foreground"
@@ -899,8 +961,8 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                           onClick={() => handleToggleColorRows(!enableStatusColors)}
                           title={tGrid("toggleColorRowsTip")}
                         >
-                          <Palette className="w-3.5 h-3.5" />
-                          <span className="text-[11px] hidden sm:inline">
+                          <Palette className="w-3 h-3" />
+                          <span className="text-[11px] hidden xl:inline">
                             {tGrid("statusColors")}
                           </span>
                           <Switch
@@ -918,7 +980,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     <Button
                       onClick={handleCreateNew}
                       size="sm"
-                      className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded"
+                      className="h-6.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded shrink-0 whitespace-nowrap"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>{tCommon("create")}</span>
@@ -927,19 +989,19 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       onClick={handleOpen}
                       variant="outline"
                       size="sm"
-                      className="h-7 px-2.5 text-xs font-medium gap-1 rounded"
+                      className="h-6.5 px-2 text-xs font-medium gap-1 rounded shrink-0 whitespace-nowrap"
                     >
                       <ExternalLink className="w-3 h-3 text-muted-foreground" />
                       <span>Open</span>
                     </Button>
-                    <Separator orientation="vertical" className="h-4 mx-1" />
+                    <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
 
                     {/* Status Filters */}
                     {availableStatuses.length > 0 && (
-                      <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+                      <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
                         <button
                           onClick={() => setStatusFilter("ALL")}
-                          className={`px-2 py-0.5 rounded transition-colors ${
+                          className={`px-1.5 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 ${
                             statusFilter === "ALL"
                               ? "bg-background text-foreground font-semibold shadow-xs"
                               : "text-muted-foreground hover:text-foreground"
@@ -951,7 +1013,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                           <button
                             key={status}
                             onClick={() => setStatusFilter(status)}
-                            className={`px-2 py-0.5 rounded transition-colors ${
+                            className={`px-1.5 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 ${
                               statusFilter === status
                                 ? "bg-background text-foreground font-semibold shadow-xs"
                                 : "text-muted-foreground hover:text-foreground"
@@ -967,7 +1029,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                               render={
                                 <button
                                   type="button"
-                                  className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
+                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 ${
                                     overflowStatuses.includes(statusFilter)
                                       ? "bg-background text-blue-600 dark:text-blue-400 font-semibold shadow-xs"
                                       : "text-muted-foreground hover:text-foreground"
@@ -1007,28 +1069,28 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <div className="relative w-52">
+              <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                <div className="relative w-36 sm:w-44">
                   <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
                   <Input
                     value={searchFilter}
                     onChange={(e) => setSearchFilter(e.target.value)}
                     placeholder={`Search ${type}...`}
-                    className="pl-7 h-7 text-xs bg-background border-input rounded"
+                    className="pl-7 h-6.5 text-xs bg-background border-input rounded"
                   />
                 </div>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  className="h-6.5 px-2 text-xs text-muted-foreground hover:text-foreground whitespace-nowrap"
                 >
                   <Download className="w-3.5 h-3.5 mr-1" />
-                  <span>{tCommon("export")}</span>
+                  <span className="hidden sm:inline">{tCommon("export")}</span>
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                  className="h-6.5 w-6.5 p-0 text-muted-foreground hover:text-foreground shrink-0"
                 >
                   <Printer className="w-3.5 h-3.5" />
                 </Button>
@@ -1247,12 +1309,6 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           </div>
         </SheetContent>
       </Sheet>
-
-      {/* Lightweight Picker for Production Work Orders */}
-      <CreateWorkOrderPickerModal
-        isOpen={isWorkOrderPickerOpen}
-        onOpenChange={setIsWorkOrderPickerOpen}
-      />
     </>
   );
 }

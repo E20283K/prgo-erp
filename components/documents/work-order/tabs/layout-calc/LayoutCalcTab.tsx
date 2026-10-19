@@ -2,11 +2,10 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Calculator, RotateCw, Sparkles, Factory, FlaskConical, Layers } from "lucide-react";
+import { Calculator, RotateCw, Sparkles, Factory, FlaskConical, Layers, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
 import { LayoutCalcTabProps } from "./types";
 import { useLayoutCalc } from "./useLayoutCalc";
 import { OverproductionSection } from "./panels/OverproductionSection";
@@ -17,17 +16,38 @@ import { ProductionSummary } from "./panels/ProductionSummary";
 import { SampleConfigSection } from "./panels/SampleConfigSection";
 import { PreviewToolbar } from "./preview/PreviewToolbar";
 import { SheetPreview } from "./preview/SheetPreview";
+import { PrintPlanningCard } from "./panels/PrintPlanningCard";
 
 export function LayoutCalcTab(props: LayoutCalcTabProps) {
   const t = useTranslations("ClientOrder");
   const calc = useLayoutCalc(props);
 
   return (
-    <div className="flex flex-col md:flex-row gap-3 h-full text-xs">
-      {/* ─────────────────────────────────────────────────────────────
-          LEFT PANEL: CONTROLS & DISTRIBUTIONS
-      ───────────────────────────────────────────────────────────── */}
-      <div className="w-full md:w-[350px] shrink-0 bg-card border border-border rounded-lg flex flex-col overflow-hidden">
+    <div className="flex flex-col gap-3 h-full text-xs overflow-y-auto no-scrollbar">
+      {/* ── TOP: PRINT PLANNING & TURN ENGINE CARD (COLLAPSIBLE) ── */}
+      <div className="shrink-0">
+        <PrintPlanningCard
+          plan={calc.printPlan}
+          onPrintMethodChange={calc.handlePrintMethodChange}
+          onApplyRouteToOperations={calc.onApplyRouteToOperations}
+          frontColors={calc.frontColors}
+          backColors={calc.backColors}
+          spotColors={calc.spotColors}
+          targetQuantity={calc.baseQuantity}
+          pressMachine={calc.pressMachine}
+          lamination={calc.lamination}
+          embellishment={calc.embellishment}
+          isOperator={calc.isOperator}
+          onSwitchTab={calc.onSwitchTab}
+        />
+      </div>
+
+      {/* ── SPLIT VIEW: CONTROLS & SHEET CANVAS ── */}
+      <div className="flex-1 flex flex-col md:flex-row gap-3 min-h-[580px]">
+        {/* ─────────────────────────────────────────────────────────────
+            LEFT PANEL: CONTROLS & DISTRIBUTIONS
+        ───────────────────────────────────────────────────────────── */}
+        <div className="w-full md:w-[350px] shrink-0 bg-card border border-border rounded-lg flex flex-col overflow-hidden">
         {/* Header Bar */}
         <div className="p-2.5 border-b border-border bg-zinc-50 dark:bg-zinc-900 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-1.5 font-semibold text-foreground">
@@ -45,10 +65,10 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
             </Button>
             {calc.calcMode === "production" && (
               <Button
-                onClick={calc.handleAutoPartitionPlates}
+                onClick={() => calc.handleAutoPartitionPlates()}
                 variant="secondary"
                 size="sm"
-                className="h-6 text-[10px] gap-1 px-2"
+                className="h-6 text-[10px] gap-1 px-2 cursor-pointer"
               >
                 <Sparkles className="w-3 h-3 text-amber-500" /> Auto-Split
               </Button>
@@ -107,56 +127,42 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
                 sampleCutH={calc.sampleCutH}
                 setSampleCutH={(h) => calc.handleSampleCutDimChange(calc.sampleCutW, h)}
                 parentCutResult={calc.parentCutResult}
-                machineType={calc.sampleMachineType}
-                onMachineTypeChange={calc.setSampleMachineType}
-                billingMode={calc.sampleBillingMode}
-                onBillingModeChange={calc.setSampleBillingMode}
-                samplePrice={calc.samplePrice}
-                onSamplePriceChange={calc.setSamplePrice}
+                onSwitchTab={calc.onSwitchTab}
               />
 
-              {/* Product Size and Bleed adjustment for sample */}
+              {/* Product Geometry (Read-Only SSOT from Specs) + Gap adjustment for sample */}
               <div className="bg-zinc-50 dark:bg-zinc-900/60 p-2.5 rounded-md border border-border space-y-2">
-                <span className="text-[10px] uppercase font-semibold text-zinc-500 block">
-                  Product Geometry
-                </span>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[9px] uppercase font-semibold text-zinc-500 block mb-0.5">Product W (mm)</label>
-                    <Input
-                      type="number"
-                      value={calc.prodW}
-                      onChange={(e) => calc.setProdW(Number(e.target.value))}
-                      className="h-7 text-xs bg-white dark:bg-zinc-950"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] uppercase font-semibold text-zinc-500 block mb-0.5">Product H (mm)</label>
-                    <Input
-                      type="number"
-                      value={calc.prodH}
-                      onChange={(e) => calc.setProdH(Number(e.target.value))}
-                      className="h-7 text-xs bg-white dark:bg-zinc-950"
-                    />
-                  </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-semibold text-zinc-500">
+                    Product Geometry (SSOT)
+                  </span>
+                  {calc.onSwitchTab && (
+                    <button
+                      type="button"
+                      onClick={() => calc.onSwitchTab?.("specs")}
+                      className="text-[10px] text-primary hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
+                    >
+                      <span>Edit in Specs</span>
+                      <ArrowRight className="w-2.5 h-2.5" />
+                    </button>
+                  )}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[9px] uppercase font-semibold text-zinc-500 block mb-0.5">Bleed (mm)</label>
-                    <Input
-                      type="number"
-                      value={calc.bleed}
-                      onChange={(e) => calc.setBleed(Number(e.target.value))}
-                      className="h-7 text-xs bg-white dark:bg-zinc-950"
-                    />
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono bg-background">
+                      {calc.prodW} × {calc.prodH} mm
+                    </Badge>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono bg-background">
+                      Bleed: {calc.bleed} mm
+                    </Badge>
                   </div>
-                  <div>
-                    <label className="text-[9px] uppercase font-semibold text-zinc-500 block mb-0.5">Gap (mm)</label>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <label className="text-[10px] font-semibold text-zinc-500">Gap (mm):</label>
                     <Input
                       type="number"
                       value={calc.gap}
                       onChange={(e) => calc.setGap(Number(e.target.value))}
-                      className="h-7 text-xs bg-white dark:bg-zinc-950"
+                      className="h-6 w-14 text-xs text-center bg-white dark:bg-zinc-950 font-mono px-1"
                     />
                   </div>
                 </div>
@@ -172,93 +178,67 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
           ) : (
             /* ──── MASS PRODUCTION MODE CONTROLS ──── */
             <>
-              {/* Kashirovka (Multi-Layer Duplex / Triplex Mounting) Controls */}
-              <div className="bg-muted/40 p-2.5 rounded-md border border-border space-y-2">
-                <div className="flex items-center justify-between gap-1.5">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground min-w-0">
-                    <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                    <span className="truncate">{t("kashirovkaTitle")}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {calc.kashirovkaSummary.enabled && (
+              {/* Kashirovka Imposition Strategy (Only shown when Kashirovka is enabled in Specs & Drawing) */}
+              {calc.kashMode !== "none" && (
+                <div className="bg-muted/40 p-2.5 rounded-md border border-border space-y-2">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground min-w-0">
+                      <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span className="truncate">
+                        {t("kashirovkaTitle")} ({calc.kashMode === "triplex" ? "Triplex 3-Ply" : "Duplex 2-Ply"})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <Badge
                         variant="outline"
                         className="text-[10px] font-mono bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300 px-1.5 h-5"
                       >
                         {calc.kashirovkaSummary.totalMountedGsm}g/m²
                       </Badge>
-                    )}
-                    <Switch
-                      size="sm"
-                      checked={calc.kashMode !== "none"}
-                      onCheckedChange={(checked) =>
-                        calc.setKashMode(checked ? "duplex" : "none")
-                      }
-                    />
-                  </div>
-                </div>
-
-                {calc.kashMode !== "none" && (
-                  <div className="space-y-2 pt-1.5 border-t border-border/60">
-                    {/* 2-Ply vs 3-Ply Segmented Pill */}
-                    <div className="grid grid-cols-2 gap-1 bg-zinc-200/70 dark:bg-zinc-900 p-0.5 rounded-md">
-                      <button
-                        type="button"
-                        onClick={() => calc.setKashMode("duplex")}
-                        className={`py-1 px-1.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
-                          calc.kashMode === "duplex"
-                            ? "bg-white dark:bg-zinc-800 text-foreground font-semibold shadow-2xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {t("kashirovkaDuplex")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => calc.setKashMode("triplex")}
-                        className={`py-1 px-1.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
-                          calc.kashMode === "triplex"
-                            ? "bg-white dark:bg-zinc-800 text-foreground font-semibold shadow-2xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {t("kashirovkaTriplex")}
-                      </button>
+                      {calc.onSwitchTab && (
+                        <button
+                          type="button"
+                          onClick={() => calc.onSwitchTab?.("specs")}
+                          className="text-[10px] text-primary hover:underline cursor-pointer font-medium"
+                        >
+                          Specs
+                        </button>
+                      )}
                     </div>
+                  </div>
 
-                    {/* Strategy Selector Cards */}
-                    <div>
-                      <label className="text-[10px] text-muted-foreground block mb-1">
-                        {t("kashirovkaStrategyLabel")}
-                      </label>
-                      <div className="grid grid-cols-2 gap-1">
-                        <button
-                          type="button"
-                          onClick={() => calc.setKashStrategy("split_half_sheet")}
-                          className={`p-1.5 rounded border text-left transition-all cursor-pointer ${
-                            calc.kashStrategy === "split_half_sheet"
-                              ? "bg-background border-blue-500 text-foreground font-semibold"
-                              : "bg-background/50 border-border text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          <div className="text-[10px] leading-tight">
-                            {t("kashirovkaStrategySplitShort")}
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => calc.setKashStrategy("separate_sheets")}
-                          className={`p-1.5 rounded border text-left transition-all cursor-pointer ${
-                            calc.kashStrategy === "separate_sheets"
-                              ? "bg-background border-blue-500 text-foreground font-semibold"
-                              : "bg-background/50 border-border text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          <div className="text-[10px] leading-tight">
-                            {t("kashirovkaStrategySeparateShort")}
-                          </div>
-                        </button>
-                      </div>
+                  {/* Imposition Strategy Selector Cards (Specific to Layout / Imposition) */}
+                  <div className="space-y-1.5 pt-1 border-t border-border/60">
+                    <label className="text-[10px] text-muted-foreground block">
+                      {t("kashirovkaStrategyLabel")}
+                    </label>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => calc.setKashStrategy("split_half_sheet")}
+                        className={`p-1.5 rounded border text-left transition-all cursor-pointer ${
+                          calc.kashStrategy === "split_half_sheet"
+                            ? "bg-background border-blue-500 text-foreground font-semibold"
+                            : "bg-background/50 border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <div className="text-[10px] leading-tight">
+                          {t("kashirovkaStrategySplitShort")}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => calc.setKashStrategy("separate_sheets")}
+                        className={`p-1.5 rounded border text-left transition-all cursor-pointer ${
+                          calc.kashStrategy === "separate_sheets"
+                            ? "bg-background border-blue-500 text-foreground font-semibold"
+                            : "bg-background/50 border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <div className="text-[10px] leading-tight">
+                          {t("kashirovkaStrategySeparateShort")}
+                        </div>
+                      </button>
                     </div>
 
                     <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
@@ -276,8 +256,8 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
                       </span>
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Overproduction Section */}
               <OverproductionSection
@@ -287,18 +267,15 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
                 onValueChange={calc.setOverproductionValue}
               />
 
-              {/* Sheet & Product Dimensions */}
+              {/* Sheet & Imposition Margins (with Read-Only Product Specs SSOT) */}
               <DimensionsSection
                 sheetW={calc.sheetW}
                 setSheetW={calc.setSheetW}
                 sheetH={calc.sheetH}
                 setSheetH={calc.setSheetH}
                 prodW={calc.prodW}
-                setProdW={calc.setProdW}
                 prodH={calc.prodH}
-                setProdH={calc.setProdH}
                 bleed={calc.bleed}
-                setBleed={calc.setBleed}
                 gap={calc.gap}
                 setGap={calc.setGap}
                 marginTop={calc.marginTop}
@@ -314,16 +291,20 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
                 gripperEdge={calc.gripperEdge}
                 setGripperEdge={calc.setGripperEdge}
                 cmykColors={calc.cmykColors}
-                setCmykColors={calc.setCmykColors}
+                onSwitchTab={calc.onSwitchTab}
               />
 
               {/* Plates Selector / Tabs */}
               <PlateTabs
                 plates={calc.plates}
                 activePlateIndex={calc.activePlateIndex}
+                partitionStrategy={calc.partitionStrategy}
+                hasMultipleModels={calc.hasMultipleModels}
+                uniqueModelsCount={calc.uniqueModelsCount}
                 onSelectPlate={calc.setActivePlateIndex}
                 onAddPlate={calc.handleAddPlate}
                 onRemovePlate={calc.handleRemovePlate}
+                onAutoPartition={(strat) => calc.handleAutoPartitionPlates(strat)}
               />
 
               {/* Active Plate Slot Assignment Table */}
@@ -331,6 +312,7 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
                 activePlate={calc.activePlate}
                 layoutPieces={calc.effectivePieces}
                 onManualSlotChange={calc.handleManualSlotChange}
+                onAutoPartition={(strat) => calc.handleAutoPartitionPlates(strat)}
               />
             </>
           )}
@@ -413,6 +395,7 @@ export function LayoutCalcTab(props: LayoutCalcTabProps) {
         />
       </div>
     </div>
+  </div>
   );
 }
 

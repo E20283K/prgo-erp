@@ -113,6 +113,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   const { setTabUnsaved, closeTab, setLevel3Tab, theme } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
+  const { upsertMasterSpecification, addNotification } = useWorkspaceStore();
   
   const [formData, setFormData] = useState({
     code: data.code || "NEW_SPEC",
@@ -123,15 +124,34 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     version: data.version || "1.0",
   });
 
-  const [materials, setMaterials] = useState([
-    { id: "1", name: "Hubergroup CMYK Process Ink", quantity: 0.5, unit: "kg" },
-    { id: "2", name: "Spot UV Gloss Varnish", quantity: 0.1, unit: "kg" }
-  ]);
+  const [materials, setMaterials] = useState(() => {
+    if (Array.isArray(data.materials) && data.materials.length > 0) {
+      return data.materials.map((m: any, idx: number) => ({
+        id: String(m.id || idx + 1),
+        name: m.name || "",
+        quantity: Number(m.quantity ?? m.actualQty ?? m.planQty ?? m.qty ?? 1),
+        unit: m.unit || "kg",
+      }));
+    }
+    return [
+      { id: "1", name: "Hubergroup CMYK Process Ink", quantity: 0.5, unit: "kg" },
+      { id: "2", name: "Spot UV Gloss Varnish", quantity: 0.1, unit: "kg" }
+    ];
+  });
 
-  const [operations, setOperations] = useState([
-    { id: "1", name: "Pre-press & CTP Plate Imaging", machineStr: "Screen PlateRite 8600 CTP" },
-    { id: "2", name: "4-Color Offset Printing", machineStr: "Heidelberg Speedmaster XL 106" }
-  ]);
+  const [operations, setOperations] = useState(() => {
+    if (Array.isArray(data.operations) && data.operations.length > 0) {
+      return data.operations.map((op: any, idx: number) => ({
+        id: String(op.id || idx + 1),
+        name: op.name || "",
+        machineStr: op.machineStr || op.machine || "Standard Station",
+      }));
+    }
+    return [
+      { id: "1", name: "Pre-press & CTP Plate Imaging", machineStr: "Screen PlateRite 8600 CTP" },
+      { id: "2", name: "4-Color Offset Printing", machineStr: "Heidelberg Speedmaster XL 106" }
+    ];
+  });
 
   // Selections
   const [matSelection, setMatSelection] = useState<GridSelection>({
@@ -167,8 +187,33 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  const handleSaveAndClose = () => {
+  const persistSpecification = () => {
+    upsertMasterSpecification({
+      id: tab.id,
+      code: formData.code,
+      name: formData.name,
+      department: (formData.department as any) || "Offset",
+      description: `${formData.name} (${materials.length} material, ${operations.length} operatsiya)`,
+      materialsCount: materials.length,
+      estimatedCost: `$${(materials.length * 450).toLocaleString()}`,
+      unit: "pcs",
+      materials,
+      operations,
+    });
     setTabUnsaved(tab.id, false);
+    addNotification({
+      title: "Spetsifikatsiya saqlandi",
+      description: `${formData.code}: ${formData.name} muvaffaqiyatli yangilandi`,
+      severity: "success",
+    });
+  };
+
+  const handleSave = () => {
+    persistSpecification();
+  };
+
+  const handleSaveAndClose = () => {
+    persistSpecification();
     closeTab(tab.id);
   };
 
@@ -225,7 +270,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   const handleDeleteSelectedMaterial = () => {
     const selectedRows = matSelection.rows.toArray();
     if (selectedRows.length === 0) return;
-    const remaining = materials.filter((_, idx) => !selectedRows.includes(idx));
+    const remaining = materials.filter((_: any, idx: number) => !selectedRows.includes(idx));
     setMaterials(remaining);
     setMatSelection({
       columns: CompactSelection.empty(),
@@ -283,7 +328,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   const handleDeleteSelectedOperation = () => {
     const selectedRows = opSelection.rows.toArray();
     if (selectedRows.length === 0) return;
-    const remaining = operations.filter((_, idx) => !selectedRows.includes(idx));
+    const remaining = operations.filter((_: any, idx: number) => !selectedRows.includes(idx));
     setOperations(remaining);
     setOpSelection({
       columns: CompactSelection.empty(),
@@ -389,7 +434,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
               <TooltipTrigger
                 render={
                   <Button
-                    onClick={() => setTabUnsaved(tab.id, false)}
+                    onClick={handleSave}
                     variant="outline"
                     size="icon-sm"
                     className="h-7 w-7 border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded cursor-pointer"
