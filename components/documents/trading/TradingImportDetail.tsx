@@ -1,6 +1,17 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
+import {
+  GridCell,
+  GridCellKind,
+  GridColumn,
+  Item,
+  GridSelection,
+  CompactSelection,
+  GridColumnIcon,
+} from "@glideapps/glide-data-grid";
+import "@glideapps/glide-data-grid/dist/index.css";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
 import {
   DocumentHeader,
@@ -9,11 +20,11 @@ import {
   DocumentNavItem,
   InfoRow,
 } from "@/components/documents/common/DocumentShell";
+import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   Select,
@@ -27,22 +38,29 @@ import {
   Printer,
   Save,
   Check,
-  Plus,
-  Trash2,
   Building2,
   Scale,
   Calculator,
   Boxes,
-  Paperclip,
   Truck,
   ExternalLink,
   Download,
+  Receipt,
+  Sparkles,
+  Layers,
+  ArrowRight,
+  TrendingUp,
 } from "lucide-react";
 import { TradingImportBatchRecord, ImportBatchItem } from "./types";
-import { INITIAL_IMPORT_BATCHES } from "./data";
+
+const DataEditor = dynamic(
+  () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
+  { ssr: false }
+);
 
 export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, setLevel3Tab, addNotification } = useWorkspaceStore();
+  const { setTabUnsaved, closeTab, setLevel3Tab, addNotification, theme, openTab } = useWorkspaceStore();
+  const isDark = theme === "dark";
   const rawData: Partial<TradingImportBatchRecord> = tab.documentData || {};
 
   const activeTab = tab.activeLevel3Tab || "costing";
@@ -83,6 +101,7 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
     rawData.notes || "Qishki mavsum uchun 1-katta partiya. Bojxona to'liq rasmiylashtirildi."
   );
 
+  // High volume mock items for robust virtual data grid testing
   const [items, setItems] = useState<ImportBatchItem[]>(
     rawData.items && rawData.items.length > 0
       ? rawData.items
@@ -111,6 +130,54 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
             landedCostUZS: 2750,
             suggestedSalePriceUZS: 3200,
           },
+          {
+            id: "imp-item-3",
+            sku: "THRD-POLY-40-2",
+            name: "Tikuvchilik Ipi 40/2 (Oq/Qora/Rangli)",
+            category: "Iplar",
+            unit: "bobo",
+            quantity: 1500,
+            fobPriceUSD: 2.10,
+            fobTotalUSD: 3150,
+            landedCostUZS: 31200,
+            suggestedSalePriceUZS: 37000,
+          },
+          {
+            id: "imp-item-4",
+            sku: "ZIP-MET-N4-20",
+            name: "Metall Fermuar N4 Jinsi uchun 20sm",
+            category: "Fermuarlar",
+            unit: "dona",
+            quantity: 40000,
+            fobPriceUSD: 0.22,
+            fobTotalUSD: 8800,
+            landedCostUZS: 3450,
+            suggestedSalePriceUZS: 4100,
+          },
+          {
+            id: "imp-item-5",
+            sku: "BTN-SNAP-15MM",
+            name: "Knopka (Qadama) Tugma 15mm Nikel",
+            category: "Tugmalar",
+            unit: "dona",
+            quantity: 80000,
+            fobPriceUSD: 0.018,
+            fobTotalUSD: 1440,
+            landedCostUZS: 295,
+            suggestedSalePriceUZS: 360,
+          },
+          {
+            id: "imp-item-6",
+            sku: "ELAST-WVN-40MM",
+            name: "Keng elastik tasma (Rezinka) 40mm Qora",
+            category: "Furnitura",
+            unit: "metr",
+            quantity: 15000,
+            fobPriceUSD: 0.12,
+            fobTotalUSD: 1800,
+            landedCostUZS: 1850,
+            suggestedSalePriceUZS: 2300,
+          },
         ]
   );
 
@@ -127,6 +194,147 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
       landedMarkupPercent: markup,
     };
   }, [fobAmountUSD, internationalCargoUSD, customsDutyUZS, exchangeRate]);
+
+  // Glide Data Grid Columns for Line Items
+  const [gridSelection, setGridSelection] = useState<GridSelection>({
+    columns: CompactSelection.empty(),
+    rows: CompactSelection.empty(),
+  });
+
+  const columns = useMemo<GridColumn[]>(
+    () => [
+      { id: "sku", title: "Artikul", width: 130, icon: GridColumnIcon.HeaderReference },
+      { id: "name", title: "Nomenklatura Nomi", width: 300, icon: GridColumnIcon.HeaderString },
+      { id: "category", title: "Kategoriya", width: 130, icon: GridColumnIcon.HeaderSingleValue },
+      { id: "unit", title: "Birlik", width: 80, icon: GridColumnIcon.HeaderString },
+      { id: "quantity", title: "Miqdor", width: 110, icon: GridColumnIcon.HeaderNumber },
+      { id: "fobPriceUSD", title: "FOB Narx ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
+      { id: "fobTotalUSD", title: "Jami FOB ($)", width: 130, icon: GridColumnIcon.HeaderNumber },
+      { id: "landedCostUZS", title: "Landed Tannarx (UZS)", width: 160, icon: GridColumnIcon.HeaderNumber },
+      { id: "suggestedSalePriceUZS", title: "Tavsiya Sotuv (UZS)", width: 160, icon: GridColumnIcon.HeaderNumber },
+    ],
+    []
+  );
+
+  const getCellContent = useCallback(
+    (cell: Item): GridCell => {
+      const [colIndex, rowIndex] = cell;
+      const item = items[rowIndex];
+      const col = columns[colIndex];
+      if (!item || !col) return { kind: GridCellKind.Loading, allowOverlay: false };
+
+      if (col.id === "sku" || col.id === "name" || col.id === "category" || col.id === "unit") {
+        const val = String((item as any)[col.id] || "");
+        return {
+          kind: GridCellKind.Text,
+          data: val,
+          displayData: val,
+          allowOverlay: false,
+          readonly: true,
+          themeOverride: col.id === "sku" ? { baseFontStyle: "bold 11px monospace" } : undefined,
+        };
+      }
+
+      if (col.id === "quantity") {
+        return {
+          kind: GridCellKind.Number,
+          data: item.quantity,
+          displayData: item.quantity.toLocaleString(),
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+        };
+      }
+
+      if (col.id === "fobPriceUSD") {
+        return {
+          kind: GridCellKind.Number,
+          data: item.fobPriceUSD,
+          displayData: `$${item.fobPriceUSD.toFixed(3)}`,
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+        };
+      }
+
+      if (col.id === "fobTotalUSD") {
+        return {
+          kind: GridCellKind.Number,
+          data: item.fobTotalUSD,
+          displayData: `$${item.fobTotalUSD.toLocaleString()}`,
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+          themeOverride: {
+            baseFontStyle: "600 11px monospace",
+          },
+        };
+      }
+
+      if (col.id === "landedCostUZS") {
+        return {
+          kind: GridCellKind.Number,
+          data: item.landedCostUZS,
+          displayData: `${item.landedCostUZS.toLocaleString()} UZS`,
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+          themeOverride: {
+            textDark: isDark ? "#60a5fa" : "#1d4ed8",
+            baseFontStyle: "bold 11px monospace",
+          },
+        };
+      }
+
+      if (col.id === "suggestedSalePriceUZS") {
+        return {
+          kind: GridCellKind.Number,
+          data: item.suggestedSalePriceUZS,
+          displayData: `${item.suggestedSalePriceUZS.toLocaleString()} UZS`,
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+          themeOverride: {
+            textDark: isDark ? "#34d399" : "#059669",
+            baseFontStyle: "bold 11px monospace",
+          },
+        };
+      }
+
+      return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+    },
+    [columns, items, isDark]
+  );
+
+  const handleCellActivated = useCallback(
+    (cell: Item) => {
+      const [, rowIndex] = cell;
+      const row = items[rowIndex];
+      if (!row) return;
+
+      openTab({
+        id: row.sku,
+        title: `${row.sku}: ${row.name}`,
+        type: "trading-catalog",
+        module: "trading",
+        documentData: {
+          id: row.sku,
+          sku: row.sku,
+          name: row.name,
+          category: row.category,
+          unit: row.unit,
+          priceUZS: row.suggestedSalePriceUZS,
+          priceUSD: row.suggestedSalePriceUZS / exchangeRate,
+          wholesalePriceUZS: Math.round(row.suggestedSalePriceUZS * 0.92),
+          retailPriceUZS: Math.round(row.suggestedSalePriceUZS * 1.08),
+          stockQty: row.quantity,
+          minStockLevel: Math.round(row.quantity * 0.2),
+          origin: `${origin} (Import: ${batchNo})`,
+        },
+      });
+    },
+    [items, openTab, batchNo, origin, exchangeRate]
+  );
 
   const handleSave = () => {
     setTabUnsaved(tab.id, false);
@@ -263,9 +471,9 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
           />
 
           {/* Right Main Viewport */}
-          <div className="flex-1 min-w-0 flex flex-col overflow-y-auto bg-background p-4 space-y-4">
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
             {/* TAB 1: LANDED COST & FINANCIALS */}
-            <TabsContent value="costing" className="m-0 space-y-4">
+            <TabsContent value="costing" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
                   <span className="text-[11px] text-muted-foreground block">FOB Xarid (Xitoy zavodi):</span>
@@ -367,62 +575,46 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
               </div>
             </TabsContent>
 
-            {/* TAB 2: ITEMS */}
-            <TabsContent value="items" className="m-0 space-y-4">
-              <div className="bg-card rounded-lg border border-border shadow-xs overflow-hidden">
-                <div className="px-3 py-2 bg-muted/40 border-b border-border flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-semibold text-foreground text-xs">
-                    <Boxes className="w-4 h-4 text-primary" />
-                    <span>Partiyadagi Tovarlar va Landed Tannarx Taqsimoti</span>
-                    <Badge variant="secondary" className="text-[10px] font-mono px-1.5 h-5">
-                      {items.length} ta tovar
-                    </Badge>
-                  </div>
+            {/* TAB 2: ITEMS WITH GLIDE DATA GRID */}
+            <TabsContent value="items" className="flex-1 flex flex-col overflow-hidden m-0">
+              <div className="px-3 h-9 border-b border-border bg-card shrink-0 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Boxes className="w-4 h-4 text-primary" />
+                  <span className="font-semibold text-xs text-foreground">
+                    Partiya Tarkibidagi Nomenklaturalar va Tannarx
+                  </span>
+                  <Badge variant="secondary" className="font-mono text-[10px] h-5">
+                    {items.length} ta yozuv
+                  </Badge>
                 </div>
+                <div className="text-[11px] text-muted-foreground font-mono">
+                  Ikkita marta bosing (F12) — Katalog kartochkasini ochish
+                </div>
+              </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-muted/20 text-muted-foreground border-b border-border font-semibold text-[11px]">
-                        <th className="p-2 w-10 text-center">№</th>
-                        <th className="p-2 w-32">Artikul</th>
-                        <th className="p-2">Mahsulot Nomi</th>
-                        <th className="p-2 w-28">Kategoriya</th>
-                        <th className="p-2 w-20 text-center">Birlik</th>
-                        <th className="p-2 w-28 text-right">Miqdor</th>
-                        <th className="p-2 w-28 text-right">FOB Narx ($)</th>
-                        <th className="p-2 w-32 text-right">Landed Tannarx (UZS)</th>
-                        <th className="p-2 w-32 text-right">Tavsiya Sotuv (UZS)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border text-foreground font-medium">
-                      {items.map((item, idx) => (
-                        <tr key={item.id} className="hover:bg-muted/30 transition-colors">
-                          <td className="p-2 text-center text-muted-foreground font-mono">{idx + 1}</td>
-                          <td className="p-2 font-mono text-muted-foreground text-[11px]">{item.sku}</td>
-                          <td className="p-2 font-semibold">{item.name}</td>
-                          <td className="p-2">
-                            <Badge variant="secondary" className="text-[10px]">{item.category}</Badge>
-                          </td>
-                          <td className="p-2 text-center text-muted-foreground">{item.unit}</td>
-                          <td className="p-2 text-right font-mono">{item.quantity.toLocaleString()}</td>
-                          <td className="p-2 text-right font-mono text-muted-foreground">${item.fobPriceUSD.toFixed(3)}</td>
-                          <td className="p-2 text-right font-mono font-bold text-blue-600 dark:text-blue-400">
-                            {item.landedCostUZS.toLocaleString()} UZS
-                          </td>
-                          <td className="p-2 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                            {item.suggestedSalePriceUZS.toLocaleString()} UZS
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="flex-1 min-h-0 relative">
+                <div className="absolute inset-0">
+                  <DataEditor
+                    columns={columns}
+                    rows={items.length}
+                    getCellContent={getCellContent}
+                    onCellActivated={handleCellActivated}
+                    gridSelection={gridSelection}
+                    onGridSelectionChange={setGridSelection}
+                    rowMarkers="both"
+                    freezeColumns={1}
+                    smoothScrollX
+                    smoothScrollY
+                    theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+                    width="100%"
+                    height="100%"
+                  />
                 </div>
               </div>
             </TabsContent>
 
             {/* TAB 3: LOGISTICS */}
-            <TabsContent value="logistics" className="m-0 space-y-4">
+            <TabsContent value="logistics" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
               <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
                 <div className="flex items-center gap-2 border-b border-border pb-2">
                   <Truck className="w-4 h-4 text-primary" />

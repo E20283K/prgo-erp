@@ -1,6 +1,17 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
+import {
+  GridCell,
+  GridCellKind,
+  GridColumn,
+  Item,
+  GridSelection,
+  CompactSelection,
+  GridColumnIcon,
+} from "@glideapps/glide-data-grid";
+import "@glideapps/glide-data-grid/dist/index.css";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
 import {
   DocumentHeader,
@@ -9,6 +20,7 @@ import {
   DocumentNavItem,
   InfoRow,
 } from "@/components/documents/common/DocumentShell";
+import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,12 +44,32 @@ import {
   Barcode,
   Layers,
   ArrowRight,
+  TrendingDown,
+  TrendingUp,
+  History,
+  FileSpreadsheet,
 } from "lucide-react";
 import { TradingCatalogItemRecord } from "./types";
-import { INITIAL_TRADING_CATALOG } from "./data";
+
+const DataEditor = dynamic(
+  () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
+  { ssr: false }
+);
+
+interface StockMovementRow {
+  id: string;
+  date: string;
+  type: "Kirim (Import)" | "Chiqim (Sotuv)" | "Rezerv";
+  docNo: string;
+  partner: string;
+  qty: number;
+  balanceAfter: number;
+  priceFormatted: string;
+}
 
 export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, setLevel3Tab, addNotification, openTab } = useWorkspaceStore();
+  const { setTabUnsaved, closeTab, setLevel3Tab, addNotification, openTab, theme } = useWorkspaceStore();
+  const isDark = theme === "dark";
   const rawData: Partial<TradingCatalogItemRecord> = tab.documentData || {};
 
   const activeTab = tab.activeLevel3Tab || "pricing";
@@ -66,17 +98,188 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
   const [origin, setOrigin] = useState<string>(rawData.origin || "Guangzhou, Xitoy (Import)");
 
   // Technical Specs
-  const [material, setMaterial] = useState<string>(rawData.material || "Metall qotishma");
-  const [colorCode, setColorCode] = useState<string>(rawData.colorCode || "Antik bronza");
+  const [material, setMaterial] = useState<string>(rawData.material || "Zamak metall qotishmasi");
+  const [colorCode, setColorCode] = useState<string>(rawData.colorCode || "Antik bronza / Kumush");
   const [dimensions, setDimensions] = useState<string>(rawData.dimensions || "18mm diametr");
   const [supplier, setSupplier] = useState<string>(
     rawData.supplier || "Yiwu Accessories Industrial Group Ltd"
   );
   const [notes, setNotes] = useState<string>(
-    rawData.notes || "Tekstil fabrikalari uchun standart furnitura."
+    rawData.notes || "Kurtka va qalin kiyimlar uchun maxsus gravirovkali tugma."
   );
 
   const priceUSD = priceUZS / exchangeRate;
+
+  // Real-world warehouse stock movements for Glide Data Grid
+  const stockMovements: StockMovementRow[] = useMemo(
+    () => [
+      {
+        id: "mov-1",
+        date: "2026-10-18",
+        type: "Chiqim (Sotuv)",
+        docNo: "TRD-2026-0842",
+        partner: "'REAL TEXTILE INVEST' MChJ",
+        qty: -25000,
+        balanceAfter: 142000,
+        priceFormatted: "480 UZS",
+      },
+      {
+        id: "mov-2",
+        date: "2026-10-14",
+        type: "Kirim (Import)",
+        docNo: "CN-2026-OCT-14",
+        partner: "Yiwu Accessories Industrial Group",
+        qty: 100000,
+        balanceAfter: 167000,
+        priceFormatted: "$0.025 FOB",
+      },
+      {
+        id: "mov-3",
+        date: "2026-10-10",
+        type: "Chiqim (Sotuv)",
+        docNo: "TRD-2026-0820",
+        partner: "'BUKHARA COTTON WEAVE' XK",
+        qty: -15000,
+        balanceAfter: 67000,
+        priceFormatted: "480 UZS",
+      },
+      {
+        id: "mov-4",
+        date: "2026-10-05",
+        type: "Chiqim (Sotuv)",
+        docNo: "TRD-2026-0795",
+        partner: "'SAMARKAND APPAREL' MChJ",
+        qty: -20000,
+        balanceAfter: 82000,
+        priceFormatted: "$0.037",
+      },
+      {
+        id: "mov-5",
+        date: "2026-09-28",
+        type: "Kirim (Import)",
+        docNo: "CN-2026-SEP-28",
+        partner: "Zhejiang Zipper & Button Factory",
+        qty: 50000,
+        balanceAfter: 102000,
+        priceFormatted: "$0.024 FOB",
+      },
+    ],
+    []
+  );
+
+  const [gridSelection, setGridSelection] = useState<GridSelection>({
+    columns: CompactSelection.empty(),
+    rows: CompactSelection.empty(),
+  });
+
+  const movementColumns = useMemo<GridColumn[]>(
+    () => [
+      { id: "date", title: "Sana", width: 110, icon: GridColumnIcon.HeaderDate },
+      { id: "type", title: "Operatsiya Turi", width: 150, icon: GridColumnIcon.HeaderSingleValue },
+      { id: "docNo", title: "Hujjat №", width: 140, icon: GridColumnIcon.HeaderReference },
+      { id: "partner", title: "Kontragent (Xaridor / Zavod)", width: 260, icon: GridColumnIcon.HeaderString },
+      { id: "qty", title: "Miqdor", width: 120, icon: GridColumnIcon.HeaderNumber },
+      { id: "balanceAfter", title: "Qoldiq Zaxira", width: 130, icon: GridColumnIcon.HeaderNumber },
+      { id: "priceFormatted", title: "Narx", width: 120, icon: GridColumnIcon.HeaderNumber },
+    ],
+    []
+  );
+
+  const getCellContent = useCallback(
+    (cell: Item): GridCell => {
+      const [colIndex, rowIndex] = cell;
+      const mov = stockMovements[rowIndex];
+      const col = movementColumns[colIndex];
+      if (!mov || !col) return { kind: GridCellKind.Loading, allowOverlay: false };
+
+      if (col.id === "date" || col.id === "docNo" || col.id === "partner" || col.id === "priceFormatted") {
+        const val = String((mov as any)[col.id] || "");
+        return {
+          kind: GridCellKind.Text,
+          data: val,
+          displayData: val,
+          allowOverlay: false,
+          readonly: true,
+          themeOverride: col.id === "docNo" ? { baseFontStyle: "bold 11px monospace" } : undefined,
+        };
+      }
+
+      if (col.id === "type") {
+        const isKirim = mov.type.includes("Kirim");
+        return {
+          kind: GridCellKind.Text,
+          data: mov.type,
+          displayData: mov.type,
+          allowOverlay: false,
+          readonly: true,
+          themeOverride: {
+            textDark: isKirim ? (isDark ? "#4ade80" : "#15803d") : (isDark ? "#38bdf8" : "#0284c7"),
+            baseFontStyle: "600 11px sans-serif",
+          },
+        };
+      }
+
+      if (col.id === "qty") {
+        const isNeg = mov.qty < 0;
+        return {
+          kind: GridCellKind.Number,
+          data: mov.qty,
+          displayData: `${mov.qty > 0 ? "+" : ""}${mov.qty.toLocaleString()}`,
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+          themeOverride: {
+            textDark: isNeg ? (isDark ? "#fb7185" : "#e11d48") : (isDark ? "#4ade80" : "#15803d"),
+            baseFontStyle: "bold 11px monospace",
+          },
+        };
+      }
+
+      if (col.id === "balanceAfter") {
+        return {
+          kind: GridCellKind.Number,
+          data: mov.balanceAfter,
+          displayData: `${mov.balanceAfter.toLocaleString()} ${unit}`,
+          allowOverlay: false,
+          readonly: true,
+          contentAlign: "right",
+          themeOverride: {
+            baseFontStyle: "600 11px monospace",
+          },
+        };
+      }
+
+      return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+    },
+    [movementColumns, stockMovements, unit, isDark]
+  );
+
+  const handleCellActivated = useCallback(
+    (cell: Item) => {
+      const [, rowIndex] = cell;
+      const row = stockMovements[rowIndex];
+      if (!row) return;
+
+      if (row.type.includes("Sotuv")) {
+        openTab({
+          id: row.docNo,
+          title: `Sotuv: ${row.docNo}`,
+          type: "trading-sale",
+          module: "trading",
+          documentData: { id: row.docNo, docNo: row.docNo, customer: row.partner },
+        });
+      } else if (row.type.includes("Import")) {
+        openTab({
+          id: row.docNo,
+          title: `Import: ${row.docNo}`,
+          type: "trading-import",
+          module: "trading",
+          documentData: { id: row.docNo, batchNo: row.docNo },
+        });
+      }
+    },
+    [stockMovements, openTab]
+  );
 
   const handleSave = () => {
     setTabUnsaved(tab.id, false);
@@ -237,9 +440,9 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
           />
 
           {/* Right Main Viewport */}
-          <div className="flex-1 min-w-0 flex flex-col overflow-y-auto bg-background p-4 space-y-4">
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
             {/* TAB 1: PRICING */}
-            <TabsContent value="pricing" className="m-0 space-y-4">
+            <TabsContent value="pricing" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="bg-card p-3 rounded-lg border border-border shadow-2xs space-y-1">
                   <span className="text-[11px] text-muted-foreground block">B2B Standart Sotuv Narxi:</span>
@@ -320,46 +523,71 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
               </div>
             </TabsContent>
 
-            {/* TAB 2: STOCK */}
-            <TabsContent value="stock" className="m-0 space-y-4">
-              <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
-                <div className="flex items-center gap-2 border-b border-border pb-2">
-                  <Warehouse className="w-4 h-4 text-primary" />
-                  <span className="font-semibold text-xs text-foreground">
-                    Ombor Qoldig&apos;i va Minimal Chegara Nazorati
-                  </span>
+            {/* TAB 2: STOCK & GLIDE DATA GRID MOVEMENTS */}
+            <TabsContent value="stock" className="flex-1 flex flex-col overflow-hidden m-0">
+              {/* TOP SUMMARY BAR */}
+              <div className="p-3 bg-muted/30 border-b border-border shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-card border border-border">
+                  <span className="text-[11px] text-muted-foreground">Joriy Ombor Zaxirasi:</span>
+                  <strong className="text-sm font-mono text-emerald-600 dark:text-emerald-400">
+                    {stockQty.toLocaleString()} {unit}
+                  </strong>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded-md bg-muted/40 border border-border">
-                    <span className="text-[11px] text-muted-foreground block">Amaldagi Zaxira Qoldig&apos;i:</span>
-                    <strong className="text-lg font-mono text-emerald-600 dark:text-emerald-400 block mt-1">
-                      {stockQty.toLocaleString()} {unit}
-                    </strong>
-                    <span className="text-[10px] text-muted-foreground">Asosiy Toshkent Omborida</span>
-                  </div>
+                <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-card border border-border">
+                  <span className="text-[11px] text-muted-foreground">Minimal Xavfsiz Chegara:</span>
+                  <strong className="text-sm font-mono text-foreground">
+                    {minStockLevel.toLocaleString()} {unit}
+                  </strong>
+                </div>
 
-                  <div className="p-3 rounded-md bg-muted/40 border border-border">
-                    <span className="text-[11px] text-muted-foreground block">Minimal Xavfsiz Chegara:</span>
-                    <strong className="text-lg font-mono text-foreground block mt-1">
-                      {minStockLevel.toLocaleString()} {unit}
-                    </strong>
-                    <span className="text-[10px] text-muted-foreground">Tugashidan oldin Xitoyga buyurtirish uchun</span>
-                  </div>
+                <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-card border border-border">
+                  <span className="text-[11px] text-muted-foreground">Manba:</span>
+                  <span className="text-xs font-medium text-foreground truncate max-w-[150px]" title={origin}>
+                    {origin}
+                  </span>
+                </div>
+              </div>
 
-                  <div className="p-3 rounded-md bg-muted/40 border border-border">
-                    <span className="text-[11px] text-muted-foreground block">Yetkazib Berish Manbasi:</span>
-                    <strong className="text-xs font-sans text-foreground block mt-1">
-                      {origin}
-                    </strong>
-                    <span className="text-[10px] text-muted-foreground">Ishlab chiqaruvchi zavod</span>
-                  </div>
+              {/* GLIDE DATA GRID WORKSPACE */}
+              <div className="px-3 h-8 border-b border-border bg-card shrink-0 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <History className="w-3.5 h-3.5 text-primary" />
+                  <span className="font-semibold text-xs text-foreground">
+                    Kirim-Chiqim Partiyalar Tarixi (Katalog Kartochkasi)
+                  </span>
+                  <Badge variant="secondary" className="font-mono text-[10px] h-4.5 px-1.5">
+                    {stockMovements.length} ta operatsiya
+                  </Badge>
+                </div>
+                <div className="text-[11px] text-muted-foreground font-mono">
+                  Ikkita marta bosing (F12) — Asos hujjatni ochish
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-0 relative">
+                <div className="absolute inset-0">
+                  <DataEditor
+                    columns={movementColumns}
+                    rows={stockMovements.length}
+                    getCellContent={getCellContent}
+                    onCellActivated={handleCellActivated}
+                    gridSelection={gridSelection}
+                    onGridSelectionChange={setGridSelection}
+                    rowMarkers="both"
+                    freezeColumns={1}
+                    smoothScrollX
+                    smoothScrollY
+                    theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+                    width="100%"
+                    height="100%"
+                  />
                 </div>
               </div>
             </TabsContent>
 
             {/* TAB 3: SPECS */}
-            <TabsContent value="specs" className="m-0 space-y-4">
+            <TabsContent value="specs" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
               <div className="bg-card p-4 rounded-lg border border-border shadow-2xs space-y-3">
                 <div className="flex items-center gap-2 border-b border-border pb-2">
                   <Layers className="w-4 h-4 text-primary" />
