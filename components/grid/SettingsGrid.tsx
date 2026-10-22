@@ -274,8 +274,14 @@ const INITIAL_TARIFFS: TariffRecord[] = [
 export function SettingsGrid({ type }: SettingsGridProps) {
   const tCommon = useTranslations("Common");
   const tMod = useTranslations("Modules");
-  const { updateGridStats, theme, openTab, plants, upsertPlant, users, upsertUser } = useWorkspaceStore();
+  const { updateGridStats, theme, openTab, plants, upsertPlant, users, upsertUser, fetchUsers } = useWorkspaceStore();
   const isDark = theme === "dark";
+
+  useEffect(() => {
+    if (type === "users") {
+      fetchUsers();
+    }
+  }, [type, fetchUsers]);
 
   const [tariffs, setTariffs] = useState<TariffRecord[]>(INITIAL_TARIFFS);
 
