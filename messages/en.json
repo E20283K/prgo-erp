@@ -180,7 +180,13 @@
     "addPhoto": "Add photo",
     "attachSamplePhoto": "Click to attach sample photo",
     "fullScreenView": "Full screen view",
-    "removePhoto": "Remove photo"
+    "removePhoto": "Remove photo",
+    "addCustomer": "Add customer",
+    "newCustomer": "New customer",
+    "openCard": "Open card",
+    "openCustomerCard": "Open customer card",
+    "selectCustomer": "Select customer...",
+    "searchCustomer": "Search or type new customer..."
   },
   "NotificationPanel": {
     "title": "Notifications",
@@ -202,8 +208,8 @@
     "title": "PrintGoo Copilot",
     "subtitle": "AI Industrial Assistant for Polygraphy",
     "welcomeMessage": "Hello! I am PrintGoo AI Copilot. I can query real-time production orders, verify warehouse substrate inventory, inspect press machine queues, and assist with prepress technical specs.",
-    "suggestWo351": "WO-00351 Status",
-    "suggestWo351Prompt": "What is the current status and deadline for WO-00351?",
+    "suggestWo351": "WOOF-26-0351 Status",
+    "suggestWo351Prompt": "What is the current status and deadline for WOOF-26-0351?",
     "suggestPaperStock": "Paper Stock Alert",
     "suggestPaperStockPrompt": "Check current stock of Galerie Art Silk 150g in warehouse.",
     "suggestShiftLead": "Shift Schedule",
@@ -320,7 +326,8 @@
     "bank-cash": "Bank & Cash Accounts",
     "p-and-l": "P&L Statements",
     "roles-permissions": "Access & Roles",
-    "audit-logs": "System Event Log"
+    "audit-logs": "System Event Log",
+    "requirements": "Material Requirements & Deficits"
   },
   "BOM": {
     "title": "Bill of Materials (BOM Spec #BOM-9821)",
@@ -623,7 +630,7 @@
     "fieldDueDate": "Due Date & Time",
     "fieldShift": "Target Shift",
     "fieldRelatedType": "Linked Entity Type",
-    "fieldRelatedId": "Entity ID (e.g. WO-00351, MCH-01)",
+    "fieldRelatedId": "Entity ID (e.g. WOOF-26-0351, MCH-01)",
     "fieldRelatedName": "Entity Name",
     "checklistTitle": "Execution Checklist",
     "checklistPlaceholder": "Add checklist step and press Enter...",
@@ -875,7 +882,9 @@
     "uploadSvg": "Upload SVG",
     "clearSvg": "Clear SVG",
     "svgUploadTitle": "Upload or Paste SVG Dieline",
-    "svgUploadDesc": "Enter standard SVG path data (d=\"...\") or upload a CAD .svg vector file."
+    "svgUploadDesc": "Enter standard SVG path data (d=\"...\") or upload a CAD .svg vector file.",
+    "lockAspectRatio": "Lock aspect ratio (Keep proportions)",
+    "unlockAspectRatio": "Unlock aspect ratio (Free resize)"
   },
   "JobTicket": {
     "title": "Order Passport (Job Ticket)",
@@ -993,7 +1002,8 @@
     "posTopRight": "Top Right",
     "posLeftCenter": "Left Center",
     "posRightCenter": "Right Center",
-    "posNone": "None (No Hole)"
+    "posNone": "None (No Hole)",
+    "posBothSidesFold": "Symmetrical on fold (Both panels)"
   },
   "DocumentShell": {
     "sections": "Sections",

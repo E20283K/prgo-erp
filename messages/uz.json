@@ -180,7 +180,13 @@
     "addPhoto": "Rasm qo'shish",
     "attachSamplePhoto": "Namuna rasmini biriktirish uchun bosing",
     "fullScreenView": "To'liq ekran",
-    "removePhoto": "Rasmni o'chirish"
+    "removePhoto": "Rasmni o'chirish",
+    "addCustomer": "Yangi mijoz qo'shish",
+    "newCustomer": "Yangi mijoz",
+    "openCard": "Kartani ochish",
+    "openCustomerCard": "Mijoz kartasini ochish",
+    "selectCustomer": "Mijozni tanlang...",
+    "searchCustomer": "Mijozni qidirish yoki yangi nom yozish..."
   },
   "NotificationPanel": {
     "title": "Bildirishnomalar",
@@ -202,8 +208,8 @@
     "title": "PrintGoo Yordamchi",
     "subtitle": "Matbaa ishlab chiqarish intellektual yordamchisi",
     "welcomeMessage": "Assalomu alaykum! Men PrintGoo sun'iy intellekt yordamchisiman. Buyurtmalar holati, ombordagi qog'oz qoldiqlari, uskunalar navbati va texnik parametrlar bo'yicha yordam bera olaman.",
-    "suggestWo351": "WO-00351 buyurtma holati",
-    "suggestWo351Prompt": "WO-00351 buyurtmasining joriy holati va muddati qanday?",
+    "suggestWo351": "WOOF-26-0351 buyurtma holati",
+    "suggestWo351Prompt": "WOOF-26-0351 buyurtmasining joriy holati va muddati qanday?",
     "suggestPaperStock": "Ombordagi qog'oz qoldig'i",
     "suggestPaperStockPrompt": "Omborda Galerie Art Silk 150g qog'ozi qoldig'ini tekshirib ber.",
     "suggestShiftLead": "Smena grafiklari",
@@ -320,7 +326,8 @@
     "bank-cash": "Bank va kassa hisoblari",
     "p-and-l": "Foyda va zararlar hisoboti",
     "roles-permissions": "Kirish huquqlari va rollar",
-    "audit-logs": "Tizim hodisalari jurnali"
+    "audit-logs": "Tizim hodisalari jurnali",
+    "requirements": "Ehtiyojlar va Defitsit"
   },
   "BOM": {
     "title": "Xomashyo spetsifikatsiyasi (BOM №BOM-9821)",
@@ -623,7 +630,7 @@
     "fieldDueDate": "Muddati",
     "fieldShift": "Smena",
     "fieldRelatedType": "Obyekt turi",
-    "fieldRelatedId": "Obyekt kodi (WO-00351, MCH-01...)",
+    "fieldRelatedId": "Obyekt kodi (WOOF-26-0351, MCH-01...)",
     "fieldRelatedName": "Obyekt nomi",
     "checklistTitle": "Tekshiruv punktlari (chek-list)",
     "checklistPlaceholder": "Band qo'shing va Enter bosing...",
@@ -875,7 +882,9 @@
     "uploadSvg": "SVG yuklash",
     "clearSvg": "Tozalash",
     "svgUploadTitle": "SVG shtansforma yuklash yoki kiritish",
-    "svgUploadDesc": "Vektorli CAD .svg faylini yuklang yoki SVG path ma'lumotlarini (d=\"...\") kiriting."
+    "svgUploadDesc": "Vektorli CAD .svg faylini yuklang yoki SVG path ma'lumotlarini (d=\"...\") kiriting.",
+    "lockAspectRatio": "Proporsiyani qulflash (Nisbatni saqlash)",
+    "unlockAspectRatio": "Proporsiyani yechish (Mustaqil o'lcham)"
   },
   "JobTicket": {
     "title": "Buyurtma Pasporti (Наряд-заказ)",
@@ -993,7 +1002,8 @@
     "posTopRight": "Tepada o'ngda",
     "posLeftCenter": "Chapda o'rtada",
     "posRightCenter": "O'ngda o'rtada",
-    "posNone": "Teshiksiz"
+    "posNone": "Teshiksiz",
+    "posBothSidesFold": "Buklama atrofida juft (Ikkala panelda)"
   },
   "DocumentShell": {
     "sections": "Bo'limlar",

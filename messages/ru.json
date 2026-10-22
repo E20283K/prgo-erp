@@ -180,7 +180,13 @@
     "addPhoto": "Добавить фото",
     "attachSamplePhoto": "Нажмите, чтобы прикрепить фото образца",
     "fullScreenView": "Во весь экран",
-    "removePhoto": "Удалить фото"
+    "removePhoto": "Удалить фото",
+    "addCustomer": "Добавить клиента",
+    "newCustomer": "Новый клиент",
+    "openCard": "Открыть карточку",
+    "openCustomerCard": "Открыть карточку клиента",
+    "selectCustomer": "Выберите клиента...",
+    "searchCustomer": "Поиск или ввод нового клиента..."
   },
   "NotificationPanel": {
     "title": "Уведомления",
@@ -202,8 +208,8 @@
     "title": "PrintGoo Ассистент",
     "subtitle": "Интеллектуальный помощник полиграфического производства",
     "welcomeMessage": "Здравствуйте! Я цифровой помощник PrintGoo. Могу проверить статус заказов, остатки сырья на складе, очередь печатных машин и параметры допечатной подготовки.",
-    "suggestWo351": "Статус заказа WO-00351",
-    "suggestWo351Prompt": "Какой текущий статус и срок сдачи по заказу WO-00351?",
+    "suggestWo351": "Статус заказа WOOF-26-0351",
+    "suggestWo351Prompt": "Какой текущий статус и срок сдачи по заказу WOOF-26-0351?",
     "suggestPaperStock": "Остатки бумаги на складе",
     "suggestPaperStockPrompt": "Проверь текущий остаток бумаги Galerie Art Silk 150g на складе.",
     "suggestShiftLead": "График печатников",
@@ -320,7 +326,8 @@
     "bank-cash": "Банк и касса",
     "p-and-l": "Отчёты о прибылях и убытках",
     "roles-permissions": "Права и роли",
-    "audit-logs": "Журнал аудита системы"
+    "audit-logs": "Журнал аудита системы",
+    "requirements": "Потребности и дефицит"
   },
   "BOM": {
     "title": "Спецификация материалов (BOM №BOM-9821)",
@@ -623,7 +630,7 @@
     "fieldDueDate": "Крайний срок (дедлайн)",
     "fieldShift": "Рабочая смена",
     "fieldRelatedType": "Тип связанного объекта",
-    "fieldRelatedId": "Код объекта (WO-00351, MCH-01...)",
+    "fieldRelatedId": "Код объекта (WOOF-26-0351, MCH-01...)",
     "fieldRelatedName": "Наименование объекта",
     "checklistTitle": "Контрольные пункты (чек-лист)",
     "checklistPlaceholder": "Добавить пункт и нажать Enter...",
@@ -875,7 +882,9 @@
     "uploadSvg": "Загрузить SVG",
     "clearSvg": "Очистить",
     "svgUploadTitle": "Загрузка векторного штампа SVG",
-    "svgUploadDesc": "Загрузите файл CAD .svg или вставьте данные контура SVG path (d=\"...\")."
+    "svgUploadDesc": "Загрузите файл CAD .svg или вставьте данные контура SVG path (d=\"...\").",
+    "lockAspectRatio": "Сохранять пропорции (Заблокировать)",
+    "unlockAspectRatio": "Свободный размер (Разблокировать)"
   },
   "JobTicket": {
     "title": "Паспорт заказа (Наряд-заказ)",
@@ -993,7 +1002,8 @@
     "posTopRight": "Сверху справа",
     "posLeftCenter": "Слева по центру",
     "posRightCenter": "Справа по центру",
-    "posNone": "Без отверстия"
+    "posNone": "Без отверстия",
+    "posBothSidesFold": "Симметрично у сгиба (Обе панели)"
   },
   "DocumentShell": {
     "sections": "Разделы",

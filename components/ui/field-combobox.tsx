@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { Check, ChevronsUpDown, Plus } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -19,7 +19,7 @@ export interface ComboboxOption {
   label: string;
 }
 
-interface FieldComboboxProps {
+export interface FieldComboboxProps {
   value: string;
   onChange: (value: string) => void;
   onAddNew?: (newValue: string) => void;
@@ -31,6 +31,10 @@ interface FieldComboboxProps {
   className?: string;
   popoverClassName?: string;
   disabled?: boolean;
+  actionLabel?: string;
+  onAction?: (searchValue?: string) => void;
+  actionIcon?: React.ComponentType<{ className?: string }>;
+  addCustomLabel?: string | ((val: string) => string);
 }
 
 export function FieldCombobox({
@@ -45,6 +49,10 @@ export function FieldCombobox({
   className,
   popoverClassName,
   disabled = false,
+  actionLabel,
+  onAction,
+  actionIcon: ActionIcon,
+  addCustomLabel,
 }: FieldComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
@@ -89,11 +97,11 @@ export function FieldCombobox({
         }
       />
       <PopoverContent
-        className={cn("w-(--anchor-width) p-0 overflow-hidden shadow-lg border border-border", popoverClassName)}
+        className={cn("w-(--anchor-width) p-0 overflow-hidden shadow-lg border border-border flex flex-col", popoverClassName)}
         align="start"
         sideOffset={4}
       >
-        <Command className="w-full">
+        <Command className="w-full flex flex-col">
           <CommandInput 
             placeholder={searchPlaceholder} 
             value={searchValue}
@@ -105,10 +113,16 @@ export function FieldCombobox({
                 <button
                   type="button"
                   onClick={() => handleAddCustom(searchValue)}
-                  className="flex items-center justify-center gap-1.5 w-full py-1 text-blue-600 dark:text-blue-400 font-medium hover:underline cursor-pointer text-xs"
+                  className="flex items-center justify-center gap-1.5 w-full py-1 text-primary font-medium hover:underline cursor-pointer text-xs"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add customer: &quot;{searchValue.trim()}&quot;</span>
+                  <span>
+                    {typeof addCustomLabel === "function"
+                      ? addCustomLabel(searchValue.trim())
+                      : addCustomLabel
+                      ? `${addCustomLabel}: "${searchValue.trim()}"`
+                      : `Add: "${searchValue.trim()}"`}
+                  </span>
                 </button>
               ) : (
                 emptyText
@@ -140,14 +154,40 @@ export function FieldCombobox({
                 <CommandItem
                   value={searchValue.trim()}
                   onSelect={() => handleAddCustom(searchValue)}
-                  className="py-1.5 px-2 text-xs cursor-pointer text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5 border-t border-border mt-1"
+                  className="py-1.5 px-2 text-xs cursor-pointer text-primary font-medium flex items-center gap-1.5 border-t border-border mt-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add new: &quot;{searchValue.trim()}&quot;</span>
+                  <span>
+                    {typeof addCustomLabel === "function"
+                      ? addCustomLabel(searchValue.trim())
+                      : addCustomLabel
+                      ? `${addCustomLabel}: "${searchValue.trim()}"`
+                      : `Add: "${searchValue.trim()}"`}
+                  </span>
                 </CommandItem>
               )}
             </CommandGroup>
           </CommandList>
+
+          {onAction && actionLabel && (
+            <div className="p-1 border-t border-border bg-muted/40 shrink-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setOpen(false);
+                  onAction(searchValue.trim());
+                }}
+                className="w-full justify-start text-xs font-medium text-primary hover:text-primary hover:bg-primary/10 h-7.5 gap-1.5 cursor-pointer rounded px-2"
+              >
+                {ActionIcon ? <ActionIcon className="w-3.5 h-3.5 shrink-0" /> : <Plus className="w-3.5 h-3.5 shrink-0" />}
+                <span className="truncate">
+                  {searchValue.trim() ? `${actionLabel}: "${searchValue.trim()}"` : actionLabel}
+                </span>
+              </Button>
+            </div>
+          )}
         </Command>
       </PopoverContent>
     </Popover>

@@ -179,7 +179,13 @@
     "addPhoto": "Fotoğraf ekle",
     "attachSamplePhoto": "Numune fotoğrafı eklemek için tıklayın",
     "fullScreenView": "Tam ekran",
-    "removePhoto": "Fotoğrafı kaldır"
+    "removePhoto": "Fotoğrafı kaldır",
+    "addCustomer": "Yeni müşteri ekle",
+    "newCustomer": "Yeni müşteri",
+    "openCard": "Kartı aç",
+    "openCustomerCard": "Müşteri kartını aç",
+    "selectCustomer": "Müşteri seçin...",
+    "searchCustomer": "Müşteri ara veya yeni yaz..."
   },
   "NotificationPanel": {
     "title": "Bildirimler",
@@ -201,8 +207,8 @@
     "title": "PrintGoo Asistan",
     "subtitle": "Matbaa Üretim ve Kayıt Yapay Zeka Asistanı",
     "welcomeMessage": "Merhaba! Ben PrintGoo yapay zeka asistanıyım. Üretim siparişlerinin durumunu, depo kağıt stoklarını, makine iş kuyruklarını sorgulayabilir ve baskı öncesi teknik detaylarda yardımcı olabilirim.",
-    "suggestWo351": "WO-00351 Durumu",
-    "suggestWo351Prompt": "WO-00351 numaralı siparişin güncel durumu ve teslim tarihi nedir?",
+    "suggestWo351": "WOOF-26-0351 Durumu",
+    "suggestWo351Prompt": "WOOF-26-0351 numaralı siparişin güncel durumu ve teslim tarihi nedir?",
     "suggestPaperStock": "Kağıt Stok Durumu",
     "suggestPaperStockPrompt": "Depodaki Galerie Art Silk 150g kağıt stoğunu kontrol et.",
     "suggestShiftLead": "Vardiya Planı",
@@ -319,7 +325,8 @@
     "bank-cash": "Banka ve Kasa Hesapları",
     "p-and-l": "Kâr/Zarar Tabloları",
     "roles-permissions": "Erişim Yetkileri ve Roller",
-    "audit-logs": "Sistem Olay Günlüğü"
+    "audit-logs": "Sistem Olay Günlüğü",
+    "requirements": "Malzeme İhtiyaçları ve Eksikler"
   },
   "BOM": {
     "title": "Ürün Ağacı Malzeme Listesi (BOM #BOM-9821)",
@@ -622,7 +629,7 @@
     "fieldDueDate": "Son Tarih",
     "fieldShift": "Hedef Vardiya",
     "fieldRelatedType": "Kayıt Türü",
-    "fieldRelatedId": "Kayıt Kodu (WO-00351, MCH-01...)",
+    "fieldRelatedId": "Kayıt Kodu (WOOF-26-0351, MCH-01...)",
     "fieldRelatedName": "Kayıt Adı",
     "checklistTitle": "Kontrol Maddeleri",
     "checklistPlaceholder": "Madde ekleyin ve Enter'a basın...",
@@ -874,7 +881,9 @@
     "uploadSvg": "SVG Yükle",
     "clearSvg": "Temizle",
     "svgUploadTitle": "Vektörel SVG Bıçak Yükleme",
-    "svgUploadDesc": "CAD .svg dosyasını yükleyin veya SVG path verisini (d=\"...\") yapıştırın."
+    "svgUploadDesc": "CAD .svg dosyasını yükleyin veya SVG path verisini (d=\"...\") yapıştırın.",
+    "lockAspectRatio": "En-boy oranını kilitle (Orantılı)",
+    "unlockAspectRatio": "Oranı serbest bırak (Bağımsız)"
   },
   "JobTicket": {
     "title": "Sipariş Pasaportu (Üretim İş Emri)",
@@ -992,7 +1001,8 @@
     "posTopRight": "Üst Sağ",
     "posLeftCenter": "Sol Orta",
     "posRightCenter": "Sağ Orta",
-    "posNone": "Deliksiz"
+    "posNone": "Deliksiz",
+    "posBothSidesFold": "Katlama çevresinde çift (Her iki panelde)"
   },
   "DocumentShell": {
     "sections": "Bölümler",

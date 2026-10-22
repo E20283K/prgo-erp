@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import {
   Tag,
@@ -38,6 +38,7 @@ import {
   FlaskConical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useWorkspaceStore, type CrmCustomerRecord } from "@/store/workspaceStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -67,6 +68,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FieldCombobox } from "@/components/ui/field-combobox";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { SmartCombobox } from "@/components/ui/smart-combobox";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
@@ -109,7 +111,6 @@ import {
   ShiftNote,
   SpotColorItem,
   SideColorConfig,
-  MOCK_CUSTOMERS,
   SITE_OPTIONS,
   TECHNOLOGY_OPTIONS,
   MACHINE_OPTIONS,
@@ -119,9 +120,13 @@ import {
   WorkOrderSampleData,
   generateSuggestedProductName,
   ProductNameNamingPreset,
+  RouteStep,
 } from "../types";
+import { BomItem } from "../../BomMaterialsGrid";
+import { formatMoney, getCurrencySymbol } from "../../common/DocumentShell";
 
 interface OverviewTabProps {
+  onSelectProductTemplate?: (spec: MasterSpecification) => void;
   formData: WorkOrderFormData;
   handleFieldChange: (field: string, val: any) => void;
   handleSizesChange?: (newSizes: SizeDistribution[]) => void;
@@ -134,6 +139,8 @@ interface OverviewTabProps {
   activeMachine: MachineOption | undefined;
   currentDeptMachines: MachineOption[];
   currentRecipeMaterials: { name: string; req: number; unit: string; stock: number }[];
+  materials?: BomItem[];
+  operations?: RouteStep[];
   hasShortage: boolean;
   orderAttachments: OrderAttachment[];
   setOrderAttachments: React.Dispatch<React.SetStateAction<OrderAttachment[]>>;
@@ -194,6 +201,7 @@ const WASH_RESISTANCE_LABELS: Record<string, string> = {
 };
 
 export function OverviewTab({
+  onSelectProductTemplate,
   formData,
   handleFieldChange,
   handleSizesChange,
@@ -206,6 +214,8 @@ export function OverviewTab({
   activeMachine,
   currentDeptMachines,
   currentRecipeMaterials,
+  materials = [],
+  operations = [],
   hasShortage,
   orderAttachments,
   setOrderAttachments,
@@ -224,7 +234,177 @@ export function OverviewTab({
     sites,
     addCustomer,
     addSite,
+    syncWithServer,
   } = useLookupStore();
+  const {
+    masterSpecifications,
+    crmCustomers,
+    loadCrmCustomers,
+    upsertCustomerAsync,
+    openTab,
+  } = useWorkspaceStore();
+
+  useEffect(() => {
+    loadCrmCustomers();
+    syncWithServer();
+  }, [loadCrmCustomers, syncWithServer]);
+
+  // Real customer options from CRM database (PostgreSQL)
+  const customerOptions = useMemo(() => {
+    const list: { value: string; label: string }[] = [];
+    const seen = new Set<string>();
+
+    // 1. Database CRM Clients
+    for (const c of crmCustomers) {
+      const name = c.name?.trim();
+      if (!name) continue;
+      const lower = name.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        list.push({ value: c.name, label: c.name });
+      }
+    }
+
+    // 2. Locally cached/synced customers
+    for (const name of customers) {
+      const clean = name?.trim();
+      if (!clean) continue;
+      const lower = clean.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        list.push({ value: clean, label: clean });
+      }
+    }
+
+    // 3. Ensure current formData.customer is present
+    if (formData.customer) {
+      const current = formData.customer.trim();
+      if (current && !seen.has(current.toLowerCase())) {
+        list.unshift({ value: current, label: current });
+      }
+    }
+
+    return list;
+  }, [crmCustomers, customers, formData.customer]);
+
+  const handleAddNewCustomer = async (newCust: string) => {
+    const clean = newCust.trim();
+    if (!clean) return;
+    addCustomer(clean);
+    const existingIds = crmCustomers
+      .map((c) => parseInt(c.id.replace(/\D/g, ""), 10))
+      .filter((n) => !isNaN(n));
+    const nextNum = existingIds.length > 0 ? Math.max(...existingIds) + 1 : Math.floor(100 + Math.random() * 899);
+    const newRecord: CrmCustomerRecord = {
+      id: `CUST-${nextNum}`,
+      name: clean,
+      tin: "",
+      industry: "General",
+      contactPerson: "",
+      phone: "",
+      email: "",
+      contractNo: "",
+      paymentTerms: "",
+      manager: "",
+      status: "New",
+      contacts: [],
+      contracts: [],
+    };
+    await upsertCustomerAsync(newRecord);
+    handleFieldChange("customer", clean);
+    onMarkUnsaved();
+
+    // Open CustomerDetail tab
+    openTab({
+      id: newRecord.id,
+      title: `${newRecord.id}: ${clean}`,
+      type: "customer",
+      module: "crm",
+      isUnsaved: true,
+      activeLevel3Tab: "overview",
+      documentData: newRecord,
+    });
+  };
+
+  const handleOpenNewCustomer = (initialName?: string) => {
+    const clean = (initialName || "").trim();
+    const existingIds = crmCustomers
+      .map((c) => parseInt(c.id.replace(/\D/g, ""), 10))
+      .filter((n) => !isNaN(n));
+    const nextNum = existingIds.length > 0 ? Math.max(...existingIds) + 1 : Math.floor(100 + Math.random() * 899);
+    const newId = `CUST-${nextNum}`;
+
+    const newRecord: CrmCustomerRecord = {
+      id: newId,
+      name: clean,
+      tin: "",
+      industry: "General",
+      contactPerson: "",
+      phone: "",
+      email: "",
+      contractNo: "",
+      paymentTerms: "",
+      manager: "",
+      status: "New",
+      contacts: [],
+      contracts: [],
+    };
+
+    if (clean) {
+      addCustomer(clean);
+      upsertCustomerAsync(newRecord);
+      handleFieldChange("customer", clean);
+      onMarkUnsaved();
+    }
+
+    // Open CustomerDetail tab
+    openTab({
+      id: newRecord.id,
+      title: clean ? `${newRecord.id}: ${clean}` : `${newRecord.id}: ${tOrder("newCustomer") || "Yangi mijoz"}`,
+      type: "customer",
+      module: "crm",
+      isUnsaved: true,
+      activeLevel3Tab: "overview",
+      documentData: newRecord,
+    });
+  };
+
+  const handleOpenCurrentCustomer = () => {
+    if (!formData.customer) return;
+    const clean = formData.customer.trim().toLowerCase();
+    const matched = crmCustomers.find(
+      (c) =>
+        c.name.toLowerCase() === clean ||
+        c.name.toLowerCase().includes(clean) ||
+        clean.includes(c.name.toLowerCase())
+    );
+
+    const custId = matched?.id || `CUST-${Math.floor(100 + Math.random() * 899)}`;
+    const custRecord: CrmCustomerRecord = matched || {
+      id: custId,
+      name: formData.customer,
+      tin: "",
+      industry: "General",
+      contactPerson: "",
+      phone: "",
+      email: "",
+      contractNo: "",
+      paymentTerms: "",
+      manager: "",
+      status: "Active",
+      contacts: [],
+      contracts: [],
+    };
+
+    openTab({
+      id: custRecord.id,
+      title: `${custRecord.id}: ${custRecord.name}`,
+      type: "customer",
+      module: "crm",
+      activeLevel3Tab: "overview",
+      documentData: custRecord,
+    });
+  };
 
   const [isSiteComboboxOpen, setIsSiteComboboxOpen] = useState(false);
   const [isTechComboboxOpen, setIsTechComboboxOpen] = useState(false);
@@ -246,7 +426,7 @@ export function OverviewTab({
   const isOffset = !isFlexo && !isJacquard;
 
   // Dynamic Inks & Printing Stations (Read-only summary derived from Specs & Drawing)
-  const frontColors: SideColorConfig = formData.frontColors || { c: true, m: true, y: true, k: true };
+  const frontColors: SideColorConfig = formData.frontColors || { c: false, m: false, y: false, k: false };
   const backColors: SideColorConfig = formData.backColors || { c: false, m: false, y: false, k: false };
   const spotColorItems: SpotColorItem[] = formData.spotColorItems || (
     formData.spotColors && formData.spotColors.length > 0
@@ -257,15 +437,7 @@ export function OverviewTab({
           hex: name.includes("021") ? "#fe5000" : name.includes("871") ? "#84754e" : "#2563eb",
           side: "front" as const,
         }))
-      : [
-          {
-            id: "spot-1",
-            name: "PANTONE 021 C (Neon Orange)",
-            code: "021 C",
-            hex: "#fe5000",
-            side: "front" as const,
-          },
-        ]
+      : []
   );
 
   const frontProcessCount = (frontColors.c ? 1 : 0) + (frontColors.m ? 1 : 0) + (frontColors.y ? 1 : 0) + (frontColors.k ? 1 : 0);
@@ -282,7 +454,7 @@ export function OverviewTab({
   const effectiveHoleSize = formData.holeSize !== undefined
     ? formData.holeSize
     : (formData.itemCategory === "Hangtag" ? 4 : 0);
-  const effectiveHolePos = (formData.holePosition || (formData.itemCategory === "Hangtag" ? "top-center" : "none")) as "top-center" | "top-left" | "top-right" | "left-center" | "right-center" | "none";
+  const effectiveHolePos = (formData.holePosition || (formData.itemCategory === "Hangtag" ? "top-center" : "none")) as "top-center" | "top-left" | "top-right" | "left-center" | "right-center" | "both-sides-fold" | "none";
   const effectiveHoleOffset = formData.holeOffset ?? 6;
 
   // Multi-Layer Mounting (Kashirovka) Calculations
@@ -307,9 +479,9 @@ export function OverviewTab({
   // Print Planning Engine calculation (Front/Back printing, CTP plates, sheets, impressions)
   const printPlan = useMemo(() => {
     return calculatePrintPlanning({
-      targetQuantity: formData.quantity || 5000,
+      targetQuantity: formData.quantity || 0,
       piecesPerSheet: hasSizes && formData.sizes ? formData.sizes.length : 10,
-      frontColors: formData.frontColors || { c: true, m: true, y: true, k: true },
+      frontColors: formData.frontColors || { c: false, m: false, y: false, k: false },
       backColors: formData.backColors || { c: false, m: false, y: false, k: false },
       spotColors: spotColorItems,
       printMethod: formData.printMethod,
@@ -686,14 +858,42 @@ export function OverviewTab({
                 className="hidden"
                 accept="image/*"
                 multiple
-                onChange={(e) => {
+                onChange={async (e) => {
                   const files = e.target.files;
                   if (files && files.length > 0) {
-                    const newUrls = Array.from(files).map((f) => URL.createObjectURL(f));
-                    const updatedPhotos = [...photos, ...newUrls];
+                    const uploadedUrls: string[] = [];
+                    for (const file of Array.from(files)) {
+                      try {
+                        const res = await fetch(`/api/v1/production/work-orders/${tabId}/files`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            docNo: data?.docNo || tabId,
+                            fileName: file.name,
+                            fileType: file.type,
+                            fileSize: `${(file.size / 1024).toFixed(1)} KB`,
+                            category: "proofs",
+                          }),
+                        });
+                        const resData = await res.json();
+                        if (resData.success && resData.uploadUrl) {
+                          await fetch(resData.uploadUrl, {
+                            method: "PUT",
+                            headers: { "Content-Type": file.type },
+                            body: file,
+                          });
+                          uploadedUrls.push(resData.downloadUrl);
+                        } else {
+                          uploadedUrls.push(URL.createObjectURL(file));
+                        }
+                      } catch {
+                        uploadedUrls.push(URL.createObjectURL(file));
+                      }
+                    }
+                    const updatedPhotos = [...photos, ...uploadedUrls];
                     handleFieldChange("photoUrls", updatedPhotos);
-                    if (!formData.photoUrl && newUrls[0]) {
-                      handleFieldChange("photoUrl", newUrls[0]);
+                    if (!formData.photoUrl && uploadedUrls[0]) {
+                      handleFieldChange("photoUrl", uploadedUrls[0]);
                     }
                     onMarkUnsaved();
                   }
@@ -717,22 +917,80 @@ export function OverviewTab({
 
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("customerLabel")}</label>
-              <FieldCombobox
-                value={formData.customer}
-                onChange={(val) => {
-                  handleFieldChange("customer", val);
-                  onMarkUnsaved();
-                }}
-                disabled={isOperator}
-                allowCustom={!isOperator}
-                onAddNew={(newCust) => addCustomer(newCust)}
-                options={customers.map((c) => ({ value: c, label: c }))}
-                placeholder="Select customer..."
-                searchPlaceholder="Search or type new customer..."
-                className="h-8 text-xs bg-muted/30"
-                popoverClassName="w-auto min-w-[280px]"
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-muted-foreground">{tOrder("customerLabel")}</label>
+                {!isOperator && (
+                  <div className="flex items-center gap-1.5">
+                    {formData.customer && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={handleOpenCurrentCustomer}
+                        className="h-5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground gap-1 font-normal cursor-pointer"
+                        title={tOrder("openCustomerCard") || "Mijoz kartasini ochish"}
+                      >
+                        <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                        <span>{tOrder("openCard") || "Kartani ochish"}</span>
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => handleOpenNewCustomer()}
+                      className="h-5 px-1.5 text-[11px] text-primary hover:text-primary hover:bg-primary/10 gap-1 font-medium cursor-pointer"
+                      title={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>{tOrder("addCustomer") || "Yangi mijoz"}</span>
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <FieldCombobox
+                    value={formData.customer}
+                    onChange={(val) => {
+                      handleFieldChange("customer", val);
+                      onMarkUnsaved();
+                    }}
+                    disabled={isOperator}
+                    allowCustom={!isOperator}
+                    onAddNew={handleAddNewCustomer}
+                    options={customerOptions}
+                    placeholder={tOrder("selectCustomer") || "Select customer..."}
+                    searchPlaceholder={tOrder("searchCustomer") || "Search or type new customer..."}
+                    actionLabel={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
+                    onAction={(search) => handleOpenNewCustomer(search)}
+                    addCustomLabel={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
+                    className="h-8 text-xs bg-muted/30"
+                    popoverClassName="w-auto min-w-[300px]"
+                  />
+                </div>
+                {!isOperator && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => handleOpenNewCustomer()}
+                          className="h-8 w-8 shrink-0 cursor-pointer text-primary hover:bg-primary/10 hover:text-primary border-border"
+                          title={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="top">
+                      <span>{tOrder("addCustomer") || "Yangi mijoz qo'shish"}</span>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
             </div>
 
             <div>
@@ -808,25 +1066,102 @@ export function OverviewTab({
                 )}
               </div>
 
-              <div className="relative">
-                <Input 
-                  value={formData.product} 
-                  onChange={(e) => handleFieldChange("product", e.target.value)}
-                  disabled={isOperator}
-                  className="h-8 text-xs bg-muted/30 font-medium disabled:opacity-85 pr-8" 
-                  placeholder="Product specification name"
-                />
-                {!isOperator && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleApplySuggestedName("standard")}
-                    title={tOrder("autoNamingTooltip")}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:text-amber-500 cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                  </Button>
+              <div className="flex items-center gap-1.5">
+                <div className="relative flex-1 min-w-0">
+                  <Input 
+                    value={formData.product} 
+                    onChange={(e) => handleFieldChange("product", e.target.value)}
+                    disabled={isOperator}
+                    className="h-8 text-xs bg-muted/30 font-medium disabled:opacity-85 pr-8" 
+                    placeholder="Mahsulot nomi yoki texkartani tanlang"
+                  />
+                  {!isOperator && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleApplySuggestedName("standard")}
+                      title={tOrder("autoNamingTooltip")}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:text-amber-500 cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                </div>
+
+                {!isOperator && onSelectProductTemplate && (
+                  <Popover>
+                    <PopoverTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs gap-1.5 bg-card hover:bg-muted font-normal border-border shrink-0 cursor-pointer"
+                          title="Tayyor shablon / texkarta (BOM) tanlash"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-primary" />
+                          <span className="hidden sm:inline font-medium">Shablon / BOM</span>
+                        </Button>
+                      }
+                    />
+                    <PopoverContent className="w-[380px] p-0 shadow-xl border border-border bg-popover" align="end">
+                      <Command className="w-full">
+                        <CommandInput placeholder="Mahsulot yoki texkarta qidirish..." className="h-8 text-xs" />
+                        <CommandList className="max-h-72">
+                          <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">
+                            Mos shablon topilmadi.
+                          </CommandEmpty>
+
+                          {(["Offset", "Flexo", "Jacquard"] as const).map((dept) => {
+                            const deptSpecs = (masterSpecifications || []).filter((s) => s.department === dept);
+                            if (deptSpecs.length === 0) return null;
+
+                            return (
+                              <CommandGroup key={dept} heading={`${dept} Texkartalari`}>
+                                {deptSpecs.map((spec) => {
+                                  const isSelected = formData.recipe === spec.code;
+                                  return (
+                                    <CommandItem
+                                      key={spec.code}
+                                      value={`${spec.code} ${spec.name} ${spec.department} ${spec.description}`}
+                                      onSelect={() => onSelectProductTemplate && onSelectProductTemplate(spec as any)}
+                                      className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5"
+                                    >
+                                      <div className="mt-0.5 shrink-0">
+                                        <Check className={cn("h-4 w-4 text-primary", isSelected ? "opacity-100" : "opacity-0")} />
+                                      </div>
+                                      <div className="flex-1 min-w-0 space-y-0.5">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-mono font-semibold text-[11px] text-primary">
+                                            {spec.code}
+                                          </span>
+                                          <span className="font-medium text-foreground truncate">
+                                            {spec.name}
+                                          </span>
+                                          <Badge variant="outline" className="ml-auto text-[10px] px-1 py-0 shrink-0 font-normal">
+                                            {spec.department}
+                                          </Badge>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground line-clamp-1">
+                                          {spec.description}
+                                        </p>
+                                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5 font-mono">
+                                          <span>{spec.materialsCount} xomashyo</span>
+                                          <span>•</span>
+                                          <span>{spec.estimatedCost}</span>
+                                        </div>
+                                      </div>
+                                    </CommandItem>
+                                  );
+                                })}
+                              </CommandGroup>
+                            );
+                          })}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 )}
               </div>
 
@@ -931,29 +1266,38 @@ export function OverviewTab({
             {!isOperator && (
               <div className="grid grid-cols-3 gap-2 pt-1">
                 <div className="col-span-2">
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Order Total Amount</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={formData.priceTotal}
-                    onChange={(e) => handleFieldChange("priceTotal", Number(e.target.value))}
-                    className="h-8 text-xs bg-muted/30 font-mono font-semibold"
-                  />
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    Buyurtma umumiy summasi ({getCurrencySymbol(formData.currency)})
+                  </label>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      min={0}
+                      step={formData.currency === "UZS" ? "1" : "0.01"}
+                      value={formData.priceTotal || ""}
+                      onChange={(e) => handleFieldChange("priceTotal", Number(e.target.value))}
+                      className="h-8 text-xs bg-muted/30 font-mono font-semibold pr-14"
+                      placeholder="0"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-muted-foreground pointer-events-none">
+                      {getCurrencySymbol(formData.currency)}
+                    </span>
+                  </div>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Currency</label>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">Valyuta</label>
                   <Select
                     value={formData.currency || "USD"}
                     onValueChange={(val: any) => val && handleFieldChange("currency", val)}
                   >
-                    <SelectTrigger className="h-8 text-xs bg-muted/30 font-mono">
+                    <SelectTrigger className="h-8 text-xs bg-muted/30 font-mono font-semibold">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="USD">USD</SelectItem>
-                      <SelectItem value="UZS">UZS</SelectItem>
-                      <SelectItem value="EUR">EUR</SelectItem>
+                      <SelectItem value="USD">USD ($)</SelectItem>
+                      <SelectItem value="UZS">UZS (so&apos;m)</SelectItem>
+                      <SelectItem value="EUR">EUR (€)</SelectItem>
+                      <SelectItem value="RUB">RUB (₽)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1264,13 +1608,19 @@ export function OverviewTab({
                       Size ({formData.dimensionUnit || "mm"})
                     </span>
                     <p className="font-mono font-bold text-foreground text-sm">
-                      {formData.width || 50} × {formData.height || 90}{" "}
-                      <span className="text-xs font-normal text-muted-foreground">
-                        {formData.dimensionUnit || "mm"}
-                      </span>
+                      {formData.width && formData.height ? (
+                        <>
+                          {formData.width} × {formData.height}{" "}
+                          <span className="text-xs font-normal text-muted-foreground">
+                            {formData.dimensionUnit || "mm"}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground text-xs font-normal">Kiritilmagan</span>
+                      )}
                     </p>
                     <p className="text-[10px] text-muted-foreground truncate">
-                      Bleed {formData.bleed || 2}mm · {formData.cornerType || "Square"}
+                      {formData.bleed ? `Bleed ${formData.bleed}mm · ` : ""}{formData.cornerType || "Square"}
                     </p>
                   </div>
 
@@ -1280,7 +1630,7 @@ export function OverviewTab({
                       Material
                     </span>
                     <p className="font-semibold text-foreground text-xs truncate" title={formData.paperStock}>
-                      {formData.paperStock || "Galerie Art Silk 150g/m²"}
+                      {formData.paperStock || "Kiritilmagan"}
                     </p>
                     <p className="text-[10px] text-muted-foreground truncate">
                       {formData.itemCategory ? `${formData.itemCategory} · ${formData.department}` : formData.department}
@@ -1614,18 +1964,34 @@ export function OverviewTab({
                     <div className="flex items-center gap-2 min-w-0 flex-1 text-left">
                       <Cpu className="w-3.5 h-3.5 text-primary shrink-0" />
                       <span className="truncate font-semibold text-foreground">
-                        {activeMachine?.name || formData.pressMachine}
+                        {activeMachine
+                          ? `[${activeMachine.code}] ${activeMachine.name}`
+                          : formData.pressMachine
+                          ? formData.pressMachine
+                          : "Uskunani tanlang..."}
                       </span>
-                      {activeMachine && (
+                      {activeMachine && activeMachine.format && (
                         <span className="text-[11px] text-muted-foreground shrink-0 hidden @lg:inline font-mono">
-                          • {activeMachine.format} ({activeMachine.speed})
+                          • {activeMachine.format} {activeMachine.speed ? `(${activeMachine.speed})` : ""}
                         </span>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
-                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                        <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" />
-                        Ready
+                      <span className={cn(
+                        "inline-flex items-center gap-1 text-[11px] font-medium",
+                        (activeMachine?.status === "Running" || activeMachine?.status === "Ready" || activeMachine?.status === "Available") && "text-emerald-600 dark:text-emerald-400",
+                        activeMachine?.status === "Idle" && "text-amber-600 dark:text-amber-400",
+                        activeMachine?.status === "Maintenance" && "text-rose-600 dark:text-rose-400",
+                        activeMachine?.status && !["Running", "Ready", "Available", "Idle", "Maintenance"].includes(activeMachine.status) && "text-blue-600 dark:text-blue-400"
+                      )}>
+                        <span className={cn(
+                          "size-1.5 rounded-full shrink-0",
+                          (activeMachine?.status === "Running" || activeMachine?.status === "Ready" || activeMachine?.status === "Available") && "bg-emerald-500",
+                          activeMachine?.status === "Idle" && "bg-amber-500",
+                          activeMachine?.status === "Maintenance" && "bg-rose-500",
+                          activeMachine?.status && !["Running", "Ready", "Available", "Idle", "Maintenance"].includes(activeMachine.status) && "bg-blue-500"
+                        )} />
+                        {activeMachine?.status || "Tanlanmagan"}
                       </span>
                       <ChevronsUpDown className="h-3 w-3 opacity-50" />
                     </div>
@@ -1634,34 +2000,96 @@ export function OverviewTab({
                     <Command className="w-full">
                       <CommandInput placeholder="Search machine name, model, speed, format..." className="h-8 text-xs" />
                       <CommandList className="max-h-72">
-                        <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">No machine matching search.</CommandEmpty>
+                        <CommandEmpty className="py-6 px-4 text-center space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            {formData.department} bo&apos;limida uskuna topilmadi.
+                          </p>
+                          {!isOperator && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch("/api/v1/production/machines?nextCode=true");
+                                  const json = await res.json();
+                                  const nextCode = json?.nextCode || "MAC-0001";
+                                  openTab({
+                                    id: `machine-new-${Date.now()}`,
+                                    title: `Yangi Uskuna (${nextCode})`,
+                                    type: "machine-detail",
+                                    module: "production",
+                                    isUnsaved: true,
+                                    activeLevel3Tab: "overview",
+                                    documentData: {
+                                      isNew: true,
+                                      name: "",
+                                      code: nextCode,
+                                      department: formData.department || "Offset",
+                                      category: formData.department === "Flexo" ? "flexo" : formData.department === "Jacquard" ? "jacquard" : "offset",
+                                      status: "Idle",
+                                    },
+                                  });
+                                  setIsMachineComboboxOpen(false);
+                                } catch (e) {
+                                  console.error("Open new machine error", e);
+                                }
+                              }}
+                              className="h-7 text-xs gap-1.5 font-medium"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Yangi uskuna pasportini yaratish</span>
+                            </Button>
+                          )}
+                        </CommandEmpty>
                         
-                        <CommandGroup heading={`${formData.department} Presses & Equipment`}>
-                          {currentDeptMachines.map((mach) => {
+                        <CommandGroup heading={`${formData.department} Presses & Equipment (Database)`}>
+                          {currentDeptMachines.map((mach: any) => {
                             const isSelected = formData.pressMachine === mach.name || formData.pressMachine === mach.code;
                             return (
                               <CommandItem
-                                key={mach.code}
-                                value={`${mach.code} ${mach.name} ${mach.department} ${mach.features} ${mach.format}`}
+                                key={mach.code || mach.id}
+                                value={`${mach.code || ""} ${mach.name} ${mach.department || ""} ${mach.features || ""} ${mach.format || ""}`}
                                 onSelect={() => {
-                                  handleFieldChange("pressMachine", mach.name);
+                                  handleFieldChange("pressMachine", mach.code || mach.name);
                                   setIsMachineComboboxOpen(false);
+                                  onMarkUnsaved();
                                 }}
                                 className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5"
                               >
                                 <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
                                 <div className="flex-1 min-w-0 space-y-0.5">
                                   <div className="flex items-center justify-between">
-                                    <span className="font-semibold text-foreground">{mach.name}</span>
-                                    <span className="font-mono text-[10px] text-primary">{mach.code}</span>
+                                    <div className="flex items-center gap-1.5">
+                                      {mach.code && (
+                                        <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1 py-0.5 rounded">
+                                          {mach.code}
+                                        </span>
+                                      )}
+                                      <span className="font-semibold text-foreground">{mach.name}</span>
+                                    </div>
+                                    <span className={cn(
+                                      "font-medium text-[10px]",
+                                      (mach.status === "Running" || mach.status === "Ready" || mach.status === "Available") && "text-emerald-600 dark:text-emerald-400",
+                                      mach.status === "Maintenance" && "text-rose-600 dark:text-rose-400",
+                                      mach.status === "Idle" && "text-amber-600 dark:text-amber-400"
+                                    )}>● {mach.status || "Idle"}</span>
                                   </div>
-                                  <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>
+                                  {mach.features && <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>}
                                   <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5">
-                                    <span className="font-medium text-foreground">{mach.format}</span>
-                                    <span>•</span>
-                                    <span>{mach.speed}</span>
-                                    <span>•</span>
-                                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">● {mach.status}</span>
+                                    {mach.format && <span className="font-medium text-foreground">{mach.format}</span>}
+                                    {mach.speed && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{mach.speed}</span>
+                                      </>
+                                    )}
+                                    {mach.hourlyRate ? (
+                                      <>
+                                        <span>•</span>
+                                        <span className="font-mono text-primary">${mach.hourlyRate}/soat</span>
+                                      </>
+                                    ) : null}
                                   </div>
                                 </div>
                               </CommandItem>
@@ -1669,38 +2097,40 @@ export function OverviewTab({
                           })}
                         </CommandGroup>
 
-                        {MACHINE_OPTIONS.filter((m) => m.department !== formData.department).length > 0 && (
-                          <CommandGroup heading="Other Departments Equipment">
-                            {MACHINE_OPTIONS.filter((m) => m.department !== formData.department).map((mach) => {
-                              const isSelected = formData.pressMachine === mach.name || formData.pressMachine === mach.code;
-                              return (
-                                <CommandItem
-                                  key={mach.code}
-                                  value={`${mach.code} ${mach.name} ${mach.department} ${mach.features} ${mach.format}`}
-                                  onSelect={() => {
-                                    handleFieldChange("pressMachine", mach.name);
-                                    handleDepartmentChange(mach.department);
-                                    setIsMachineComboboxOpen(false);
-                                  }}
-                                  className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5 opacity-80 hover:opacity-100"
-                                >
-                                  <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
-                                  <div className="flex-1 min-w-0 space-y-0.5">
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-medium text-foreground">{mach.name}</span>
-                                      <span className="text-[10px] font-mono text-muted-foreground">{mach.department}</span>
-                                    </div>
-                                    <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>
-                                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                                      <span>{mach.format}</span>
-                                      <span>•</span>
-                                      <span>{mach.speed}</span>
-                                    </div>
-                                  </div>
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
+                        {!isOperator && (
+                          <CommandItem
+                            value="__add_new_machine_action__"
+                            onSelect={async () => {
+                              try {
+                                const res = await fetch("/api/v1/production/machines?nextCode=true");
+                                const json = await res.json();
+                                const nextCode = json?.nextCode || "MAC-0001";
+                                openTab({
+                                  id: `machine-new-${Date.now()}`,
+                                  title: `Yangi Uskuna (${nextCode})`,
+                                  type: "machine-detail",
+                                  module: "production",
+                                  isUnsaved: true,
+                                  activeLevel3Tab: "overview",
+                                  documentData: {
+                                    isNew: true,
+                                    name: "",
+                                    code: nextCode,
+                                    department: formData.department || "Offset",
+                                    category: formData.department === "Flexo" ? "flexo" : formData.department === "Jacquard" ? "jacquard" : "offset",
+                                    status: "Idle",
+                                  },
+                                });
+                                setIsMachineComboboxOpen(false);
+                              } catch (e) {
+                                console.error("Machine open error", e);
+                              }
+                            }}
+                            className="py-2 px-2.5 cursor-pointer text-xs flex items-center gap-2 text-primary font-medium border-t border-border mt-1"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>Yangi uskuna pasportini yaratish (To&apos;liq texnik karta)...</span>
+                          </CommandItem>
                         )}
                       </CommandList>
                     </Command>
@@ -1860,10 +2290,49 @@ export function OverviewTab({
 
         {/* Card 4: Financial Calculation */}
         {!isOperator && (() => {
-          const directCost = printPlan.totalDirectProductionCost;
-          const revenue = formData.priceTotal || 14850;
-          const margin = revenue > 0 ? Number((((revenue - directCost) / revenue) * 100).toFixed(1)) : 0;
-          const isProfitable = margin >= 20;
+          const revenue = Number(formData.priceTotal) || 0;
+          const currency = formData.currency || "USD";
+          const qty = Number(formData.quantity) || 0;
+
+          // 1. Real Material Costs (from BOM Materials or PrintPlan estimation)
+          const bomMaterialsCost = (materials || []).reduce(
+            (sum, item) => sum + (Number(item.totalPrice) || 0),
+            0
+          );
+          const rawMaterialCost = bomMaterialsCost > 0
+            ? bomMaterialsCost
+            : (printPlan ? (printPlan.estimatedPaperCost + printPlan.estimatedPlatesCost) : 0);
+
+          // 2. Real Operations / Machine Cost
+          const operationsCost = (operations && operations.length > 0)
+            ? operations.reduce((sum, op) => sum + ((Number(op.duration) || 1) * 20), 0)
+            : (printPlan ? printPlan.estimatedPressCost : 0);
+
+          // 3. Direct Production Cost
+          const directCost = Number((rawMaterialCost + operationsCost).toFixed(2));
+          const hasCosts = directCost > 0;
+          const costPerUnit = qty > 0 && directCost > 0 ? Number((directCost / qty).toFixed(2)) : 0;
+
+          // 4. Margin Calculation
+          let margin = 0;
+          let marginLabel = "0%";
+          let statusText = "Reja kiritilmagan";
+          let isProfitable = false;
+
+          if (revenue > 0 && hasCosts) {
+            margin = Number((((revenue - directCost) / revenue) * 100).toFixed(1));
+            marginLabel = `Margin: ${margin}%`;
+            isProfitable = margin >= 20;
+            statusText = isProfitable
+              ? `Foydali (+${formatMoney(revenue - directCost, currency)})`
+              : `Past marja (+${formatMoney(revenue - directCost, currency)})`;
+          } else if (revenue > 0 && !hasCosts) {
+            marginLabel = "Tannarx belgilanmagan";
+            statusText = "BOM materiallari kiritilmagan";
+          } else {
+            marginLabel = "0%";
+            statusText = "Reja kiritilmagan";
+          }
 
           return (
             <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
@@ -1875,12 +2344,14 @@ export function OverviewTab({
                 <span
                   className={cn(
                     "text-xs font-mono font-medium px-2 py-0.5 rounded-full border",
-                    isProfitable
+                    revenue === 0 || !hasCosts
+                      ? "text-muted-foreground bg-muted border-border"
+                      : isProfitable
                       ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
                       : "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20"
                   )}
                 >
-                  Margin: {margin}%
+                  {marginLabel}
                 </span>
               </div>
 
@@ -1892,46 +2363,80 @@ export function OverviewTab({
                         ? "Xomashyo va To'quv Iplari:"
                         : isFlexo
                         ? "Tekstil Lentasi & Bo'yoqlar:"
-                        : `Qog'oz va Xomashyo (${printPlan.totalPaperWeightKg} kg):`}
+                        : bomMaterialsCost > 0
+                        ? `BOM Xomashyosi (${materials?.length || 0} xil):`
+                        : `Qog'oz va Xomashyo:`}
                     </span>
-                    <span className="text-foreground font-medium">${printPlan.estimatedPaperCost.toFixed(2)}</span>
+                    <span className="text-foreground font-medium">
+                      {formatMoney(rawMaterialCost, currency)}
+                    </span>
                   </div>
+
                   <div className="flex justify-between text-muted-foreground">
                     <span className="font-sans">
                       {isJacquard
                         ? "To'quv Dasturi & Rapoport Sozlash:"
                         : isFlexo
-                        ? `Fotopolimer Klishelar (${printPlan.totalCtpPlates} ta):`
-                        : `CTP Formalar (${printPlan.totalCtpPlates} ta forma):`}
+                        ? "Fotopolimer Klishelar & Formalar:"
+                        : "CTP Formalar & Qoliplar:"}
                     </span>
-                    <span className="text-foreground font-medium">${printPlan.estimatedPlatesCost.toFixed(2)}</span>
+                    <span className="text-foreground font-medium">
+                      {formatMoney(printPlan ? printPlan.estimatedPlatesCost : 0, currency)}
+                    </span>
                   </div>
+
                   <div className="flex justify-between text-muted-foreground">
                     <span className="font-sans">
                       {isJacquard
-                        ? `To'quv Dastgohi (~${printPlan.totalPressHours} soat):`
+                        ? "To'quv Dastgohi va Operatsiyalar:"
                         : isFlexo
-                        ? `Flexo Stanok (~${printPlan.totalPressHours} soat):`
-                        : `Stanok Soati (~${printPlan.totalPressHours} soat):`}
+                        ? "Flexo Stanok va Operatsiyalar:"
+                        : "Stanok Soati va Operatsiyalar:"}
                     </span>
-                    <span className="text-foreground font-medium">${printPlan.estimatedPressCost.toFixed(2)}</span>
+                    <span className="text-foreground font-medium">
+                      {formatMoney(operationsCost, currency)}
+                    </span>
                   </div>
+
                   <div className="flex justify-between text-muted-foreground text-[11px] pt-0.5 border-t border-border/50">
                     <span className="font-sans">To&apos;g&apos;ri Ishlab Chiqarish Tannarxi:</span>
-                    <span className="font-bold text-foreground font-mono">${directCost.toFixed(2)}</span>
+                    <span className="font-bold text-foreground font-mono">
+                      {formatMoney(directCost, currency)}
+                    </span>
                   </div>
+
                   <Separator className="my-1.5" />
+
                   <div className="flex justify-between items-baseline font-bold">
                     <span className="text-foreground font-sans">Document Total (Buyurtma):</span>
                     <span className="text-primary font-semibold text-sm font-mono">
-                      ${formData.priceTotal.toLocaleString("en-US")} {formData.currency}
+                      {formatMoney(revenue, currency)}
                     </span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground bg-muted/20 p-2 rounded-md border border-border">
-                  <div>Tannarx / dona: <span className="font-semibold text-foreground font-mono">${printPlan.costPerFinishedUnit}</span></div>
-                  <div>Status: <span className="font-semibold text-emerald-600 dark:text-emerald-400 font-mono">Foydali (+{(revenue - directCost).toFixed(0)}$)</span></div>
+                  <div>
+                    Tannarx / dona:{" "}
+                    <span className="font-semibold text-foreground font-mono">
+                      {costPerUnit > 0 ? formatMoney(costPerUnit, currency, currency === "UZS" ? 0 : 3) : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    Status:{" "}
+                    <span
+                      className={cn(
+                        "font-semibold font-mono",
+                        revenue > 0 && hasCosts
+                          ? isProfitable
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-amber-600 dark:text-amber-400"
+                          : "text-muted-foreground"
+                      )}
+                    >
+                      {statusText}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
