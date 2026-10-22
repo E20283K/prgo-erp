@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWorkspaceStore } from "@/store/workspaceStore";
-import { MACHINE_MAP } from "../types";
+import { MACHINE_MAP, getNextWorkOrderNo, type WorkOrderDepartment } from "../types";
 import {
   DataEditor,
   GridCell,
@@ -52,7 +52,7 @@ export interface PendingCrmOrder {
   id: string;
   customer: string;
   product: string;
-  department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  department: WorkOrderDepartment;
   quantity: number;
   unit: string;
   recipe: string;
@@ -62,112 +62,7 @@ export interface PendingCrmOrder {
   pressMachine: string;
 }
 
-export const MOCK_APPROVED_CRM_ORDERS: PendingCrmOrder[] = [
-  {
-    id: "CO-00042",
-    customer: "Nordic Print Co",
-    product: "Woven Labels 30x50 Damask",
-    department: "Jacquard",
-    quantity: 15000,
-    unit: "pcs",
-    recipe: "JACQ_WOVEN_V1",
-    deadline: "2026-10-14",
-    priority: "High",
-    site: "Building 2",
-    pressMachine: "Staubli Jacquard Loom DX",
-  },
-  {
-    id: "CO-00043",
-    customer: "Baltic Press LLC",
-    product: "Nylon Taffeta Care Label 30mm",
-    department: "Flexo",
-    quantity: 25000,
-    unit: "m",
-    recipe: "FLEXO_NYLON_V1",
-    deadline: "2026-10-10",
-    priority: "Urgent",
-    site: "Building 2",
-    pressMachine: "Mark Andy Performance P7",
-  },
-  {
-    id: "CO-00044",
-    customer: "Apex Packaging",
-    product: "Luxury Perfume Folding Boxes 250g",
-    department: "Offset",
-    quantity: 10000,
-    unit: "pcs",
-    recipe: "OFFSET_PREM_V2",
-    deadline: "2026-10-18",
-    priority: "Normal",
-    site: "Building 1",
-    pressMachine: "Heidelberg Speedmaster XL 106",
-  },
-  {
-    id: "CO-00045",
-    customer: "Alpha Media Group",
-    product: "A4 Exhibition Product Catalog 96p",
-    department: "Offset",
-    quantity: 5000,
-    unit: "pcs",
-    recipe: "OFFSET_STD_V1",
-    deadline: "2026-10-12",
-    priority: "High",
-    site: "Building 1",
-    pressMachine: "Komori Lithrone G40",
-  },
-  {
-    id: "CO-00048",
-    customer: "Global Apparel Brand",
-    product: "Premium Satin Luxury Ribbon 40mm",
-    department: "Flexo",
-    quantity: 5000,
-    unit: "rolls",
-    recipe: "FLEXO_SATIN_V2",
-    deadline: "2026-10-16",
-    priority: "Normal",
-    site: "Building 2",
-    pressMachine: "Nilpeter FA-Line",
-  },
-  {
-    id: "CO-00049",
-    customer: "Vanguard Fashion LLC",
-    product: "Hangtags 350g Soft-Touch + Spot UV",
-    department: "Post-press",
-    quantity: 8000,
-    unit: "pcs",
-    recipe: "POST_GENERIC_V1",
-    deadline: "2026-10-11",
-    priority: "Urgent",
-    site: "Building 1",
-    pressMachine: "Bobst Novacut 106",
-  },
-  {
-    id: "CO-00051",
-    customer: "Eurasia Retail Group",
-    product: "Thermal Barcode Shipping Rolls",
-    department: "Flexo",
-    quantity: 12000,
-    unit: "rolls",
-    recipe: "FLEXO_NYLON_V1",
-    deadline: "2026-10-19",
-    priority: "Normal",
-    site: "Building 2",
-    pressMachine: "Mark Andy Performance P7",
-  },
-  {
-    id: "CO-00053",
-    customer: "Orion Media House",
-    product: "Hardcover Presentation Book 120p",
-    department: "Offset",
-    quantity: 3000,
-    unit: "pcs",
-    recipe: "OFFSET_PREM_V2",
-    deadline: "2026-10-21",
-    priority: "High",
-    site: "Building 1",
-    pressMachine: "Heidelberg Speedmaster XL 106",
-  },
-];
+export const MOCK_APPROVED_CRM_ORDERS: PendingCrmOrder[] = [];
 
 interface CreateWorkOrderPickerModalProps {
   isOpen: boolean;
@@ -192,7 +87,7 @@ export function CreateWorkOrderPickerModal({
       | "Make-to-Stock / Inventory"
       | "Machine Calibration & Test Run"
       | "Factory Sample / Marketing",
-    department: "Offset" as "Offset" | "Flexo" | "Jacquard" | "Post-press",
+    department: "Offset" as WorkOrderDepartment,
     product: "Defect reprint - 500 sheets Folding Carton",
     quantity: 500,
     unit: "pcs",
@@ -350,7 +245,7 @@ export function CreateWorkOrderPickerModal({
 
   // Action: Create from order object
   const dispatchOrder = useCallback((orderToDispatch: PendingCrmOrder) => {
-    const newWoId = `WO-00${Math.floor(300 + Math.random() * 699)}`;
+    const newWoId = `draft-wo-${Date.now()}`;
     openTab({
       id: newWoId,
       title: `${newWoId}: ${orderToDispatch.product}`,
@@ -359,7 +254,7 @@ export function CreateWorkOrderPickerModal({
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
-        docNo: newWoId,
+        docNo: "",
         linkedOrderId: orderToDispatch.id,
         orderType: "Production",
         customer: orderToDispatch.customer,
@@ -402,14 +297,12 @@ export function CreateWorkOrderPickerModal({
 
   // Handle Create Internal / Rework Work Order
   const handleCreateInternal = () => {
-    const newWoId = `WO-INT-${Math.floor(100 + Math.random() * 899)}`;
+    const newWoId = `draft-wo-${Date.now()}`;
     const defaultRecipe =
       internalForm.department === "Flexo"
         ? "FLEXO_NYLON_V1"
         : internalForm.department === "Jacquard"
         ? "JACQ_WOVEN_V1"
-        : internalForm.department === "Post-press"
-        ? "POST_GENERIC_V1"
         : "OFFSET_STD_V1";
 
     openTab({
@@ -420,7 +313,7 @@ export function CreateWorkOrderPickerModal({
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
-        docNo: newWoId,
+        docNo: "",
         linkedOrderId: undefined,
         orderType: "Sample",
         customer: `Internal Factory (${internalForm.category})`,
@@ -623,7 +516,6 @@ export function CreateWorkOrderPickerModal({
                       <SelectItem value="Offset">Offset Sheetfed</SelectItem>
                       <SelectItem value="Flexo">Flexo Rotary</SelectItem>
                       <SelectItem value="Jacquard">Jacquard Weaving</SelectItem>
-                      <SelectItem value="Post-press">Post-press Finishing</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

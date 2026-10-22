@@ -79,19 +79,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // 2. Esc: Exit Inspector Mode first if active, otherwise activate Command Palette
+      // 2. Esc: Exit Inspector Mode first if active
       if (e.key === "Escape") {
         const store = useWorkspaceStore.getState();
         if (store.isInspectorActive) {
           e.preventDefault();
           e.stopPropagation();
           store.setInspectorActive(false);
-          return;
-        }
-        if (!store.isCommandOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          store.setCommandOpen(true);
           return;
         }
       }
@@ -132,11 +126,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
 
       // 6. Switch ERP Module: Alt+1..6, Ctrl+Shift+1..6, or Ctrl/Cmd+1..6
+      // IMPORTANT: Never intercept when focus is inside an editable input/textarea/contenteditable!
+      const isInputFocused =
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable);
+
       const codeMatch = e.code.match(/^(?:Digit|Numpad)([1-6])$/);
       const keyMatch = e.key.match(/^[1-6]$/);
       const digit = codeMatch ? parseInt(codeMatch[1], 10) : (keyMatch ? parseInt(keyMatch[0], 10) : null);
 
-      if (digit !== null && digit >= 1 && digit <= MODULE_NAV.length) {
+      if (!isInputFocused && digit !== null && digit >= 1 && digit <= MODULE_NAV.length) {
         const isAlt = e.altKey && !e.ctrlKey && !e.metaKey;
         const isCtrlShift = (e.ctrlKey || e.metaKey) && e.shiftKey;
         const isCtrlCmd = (e.ctrlKey || e.metaKey) && !e.altKey;
@@ -228,7 +228,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {!isPOSActive && showStatusBar && <StatusBar />}
       </SidebarInset>
 
-      {/* Global Command Palette (Ctrl+K or Esc) */}
+      {/* Global Command Palette (Ctrl+K) */}
       <CommandPalette />
 
       {/* AI Copilot Chat Sheet (Ctrl+J or Topbar/Command) */}

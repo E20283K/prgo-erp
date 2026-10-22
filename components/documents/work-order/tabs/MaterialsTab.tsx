@@ -28,6 +28,7 @@ interface MaterialsTabProps {
   isOperator?: boolean;
   onSaveAsSpec?: (items: any[]) => void;
   onItemsChange?: (items: any[]) => void;
+  initialItems?: any[];
 }
 
 export function MaterialsTab({
@@ -40,6 +41,7 @@ export function MaterialsTab({
   isOperator,
   onSaveAsSpec,
   onItemsChange,
+  initialItems,
 }: MaterialsTabProps) {
   return (
     <TabsContent value="materials" className="flex-1 overflow-hidden p-0 m-0 h-full flex flex-col data-[state=inactive]:hidden">
@@ -48,6 +50,7 @@ export function MaterialsTab({
         department={department}
         recipe={recipe}
         activeSpec={activeSpec}
+        initialItems={initialItems}
         onRecipeChange={onRecipeChange}
         onOpenTab={onOpenTab}
         isOperator={isOperator}

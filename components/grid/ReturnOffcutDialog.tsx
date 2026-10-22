@@ -45,7 +45,7 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
     paperSubstrates[0]?.sku || "MAT-1010"
   );
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<string>(
-    productionQueue[0]?.id || "WO-00351"
+    productionQueue[0]?.id || "WOOF-26-0351"
   );
   const [cutDimensions, setCutDimensions] = useState<string>("470×700");
   const [quantity, setQuantity] = useState<string>("850");

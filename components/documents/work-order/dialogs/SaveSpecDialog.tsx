@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RouteStep } from "../types";
+import { RouteStep, type WorkOrderDepartment } from "../types";
 import { BomItem } from "../../BomMaterialsGrid";
 
 interface SaveSpecDialogProps {
@@ -34,7 +34,7 @@ interface SaveSpecDialogProps {
   onSaveSpec: (newSpec: {
     code: string;
     name: string;
-    department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+    department: WorkOrderDepartment;
     description: string;
     materials: BomItem[];
     operations: RouteStep[];
@@ -58,8 +58,6 @@ export function SaveSpecDialog({
         ? "FLEXO"
         : department === "Jacquard"
         ? "JACQ"
-        : department === "Post-press"
-        ? "POST"
         : "OFFSET";
     const rand = Math.floor(100 + Math.random() * 900);
     return `${prefix}_CUSTOM_${rand}`;
@@ -69,7 +67,7 @@ export function SaveSpecDialog({
   const [name, setName] = useState(
     currentRecipeName ? `${currentRecipeName} (Moslashtirilgan)` : "Yangi mahsulot spetsifikatsiyasi"
   );
-  const [dept, setDept] = useState<"Offset" | "Flexo" | "Jacquard" | "Post-press">(
+  const [dept, setDept] = useState<WorkOrderDepartment>(
     (department as any) || "Offset"
   );
   const [description, setDescription] = useState(
@@ -156,7 +154,6 @@ export function SaveSpecDialog({
                   <SelectItem value="Offset">Offset Printing</SelectItem>
                   <SelectItem value="Flexo">Flexo Label & Web</SelectItem>
                   <SelectItem value="Jacquard">Jacquard Woven</SelectItem>
-                  <SelectItem value="Post-press">Post-press & Packaging</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -157,7 +157,7 @@ const JACQUARD_BOM_ITEMS: BomItem[] = [
   { id: "MAT-YRN-GLD", name: "Metallic Lurex Yarn", spec: "Gold, 30D", planQty: 15, actualQty: 15, wasteQty: 0, qty: 15, unit: "kg", unitPrice: 18.50, totalPrice: 277.50, supplier: "Lurex Co", availability: "Reserved", issueType: "standard", faultParty: "none" },
 ];
 
-const RECIPE_BOM_MAP: Record<string, BomItem[]> = {
+export const RECIPE_BOM_MAP: Record<string, BomItem[]> = {
   OFFSET_STD_V1: OFFSET_BOM_ITEMS,
   OFFSET_KASHIROVKA_V1: [
     { id: "MAT-CRD-300F", name: "Layer 1: Coated Cardboard 300g/m²", spec: "Face Sheet 4+0, 700x1000mm", planQty: 1100, actualQty: 1150, wasteQty: 50, qty: 1150, unit: "Sheets", unitPrice: 0.68, totalPrice: 782.00, supplier: "Stora Enso", availability: "In Stock", issueType: "standard", faultParty: "none" },
@@ -919,108 +919,21 @@ export function BomMaterialsGrid({
       <div className="h-9 border-b border-border bg-card px-2.5 flex items-center justify-between gap-2 shrink-0 overflow-x-auto no-scrollbar">
         {/* Left Action Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Master BOM Specification Selector & Action Menu */}
-          {onRecipeChange && (
-            <div className="flex items-center gap-1 shrink-0">
+          {/* Master BOM Specification Indicator & Action Menu */}
+          {(activeSpec || recipe) && (
+            <div className="flex items-center gap-1.5 shrink-0 bg-muted/40 border border-border/80 rounded px-2 py-0.5">
               <span className="text-[11px] font-medium text-muted-foreground hidden xl:inline shrink-0">
-                Texkarta:
+                Retsept:
               </span>
+              <div className="flex items-center gap-1.5 min-w-0 text-left">
+                <span className="font-mono text-[11px] font-semibold text-primary shrink-0">
+                  {activeSpec?.code || recipe}
+                </span>
+                <span className="truncate text-xs font-medium text-foreground max-w-[140px] sm:max-w-[200px]">
+                  {activeSpec?.name || recipe}
+                </span>
+              </div>
 
-              {/* Combobox Trigger */}
-              <Popover open={!isOperator && isSpecComboboxOpen} onOpenChange={isOperator ? undefined : setIsSpecComboboxOpen}>
-                <PopoverTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      role="combobox"
-                      disabled={isOperator}
-                      aria-expanded={isSpecComboboxOpen}
-                      className={cn(
-                        "h-6.5 w-[150px] sm:w-[185px] lg:w-[210px] justify-between px-2 text-xs bg-muted/30 font-normal shadow-none border-border transition-colors cursor-pointer",
-                        isOperator ? "opacity-85 cursor-not-allowed" : "hover:border-primary/50"
-                      )}
-                    />
-                  }
-                >
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1 text-left">
-                    <span className="font-mono text-[11px] font-semibold text-primary shrink-0">
-                      {activeSpec?.code || recipe}
-                    </span>
-                    <span className="truncate text-xs font-medium text-foreground flex-1 min-w-0">
-                      {activeSpec?.name || recipe}
-                    </span>
-                  </div>
-                  <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
-                </PopoverTrigger>
-
-                <PopoverContent className="w-[380px] p-0 shadow-xl border border-border bg-popover" align="start">
-                  <Command className="w-full">
-                    <CommandInput placeholder="Texkarta kodi yoki nomi..." className="h-8 text-xs" />
-                    <CommandList className="max-h-72">
-                      <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">
-                        Mos texkarta topilmadi.
-                      </CommandEmpty>
-
-                      {(["Offset", "Flexo", "Jacquard", "Post-press"] as const).map((dept) => {
-                        const allAvailable = masterSpecifications || MASTER_SPECIFICATIONS;
-                        const deptSpecs = allAvailable.filter((s) => s.department === dept);
-                        if (deptSpecs.length === 0) return null;
-
-                        return (
-                          <CommandGroup key={dept} heading={`${dept} Technology Specifications`}>
-                            {deptSpecs.map((spec) => {
-                              const isSelected = recipe === spec.code;
-                              return (
-                                <CommandItem
-                                  key={spec.code}
-                                  value={`${spec.code} ${spec.name} ${spec.department} ${spec.description}`}
-                                  onSelect={() => {
-                                    onRecipeChange(spec.code, spec.department);
-                                    if (RECIPE_BOM_MAP[spec.code]) {
-                                      setItems(RECIPE_BOM_MAP[spec.code]);
-                                    }
-                                    if (tabId) setTabUnsaved(tabId, true);
-                                    setIsSpecComboboxOpen(false);
-                                  }}
-                                  className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5"
-                                >
-                                  <div className="mt-0.5 shrink-0">
-                                    <Check className={cn("h-4 w-4 text-primary", isSelected ? "opacity-100" : "opacity-0")} />
-                                  </div>
-                                  <div className="flex-1 min-w-0 space-y-0.5">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-mono font-semibold text-[11px] text-primary">
-                                        {spec.code}
-                                      </span>
-                                      <span className="font-medium text-foreground truncate">
-                                        {spec.name}
-                                      </span>
-                                      <Badge variant="outline" className="ml-auto text-[10px] px-1 py-0 shrink-0 font-normal">
-                                        {spec.department}
-                                      </Badge>
-                                    </div>
-                                    <p className="text-[11px] text-muted-foreground line-clamp-1">
-                                      {spec.description}
-                                    </p>
-                                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5 font-mono">
-                                      <span>{spec.materialsCount} xomashyo</span>
-                                      <span>•</span>
-                                      <span>{spec.estimatedCost}</span>
-                                    </div>
-                                  </div>
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        );
-                      })}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-
-              {/* Compact Unified Spec Action Dropdown */}
               {(onOpenTab || onSaveAsSpec) && (
                 <DropdownMenu>
                   <Tooltip>
@@ -1030,9 +943,9 @@ export function BomMaterialsGrid({
                           render={
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="ghost"
                               size="icon-sm"
-                              className="h-6.5 w-6.5 p-0 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+                              className="h-5 w-5 p-0 ml-1 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
                             >
                               <MoreHorizontal className="w-3.5 h-3.5" />
                             </Button>
@@ -1041,7 +954,7 @@ export function BomMaterialsGrid({
                       }
                     />
                     <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                      Texkarta amallari
+                      Spetsifikatsiya amallari
                     </TooltipContent>
                   </Tooltip>
 
@@ -1105,7 +1018,6 @@ export function BomMaterialsGrid({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-
               <Separator orientation="vertical" className="h-4 mx-0.5" />
             </div>
           )}
@@ -1444,8 +1356,24 @@ export function BomMaterialsGrid({
                   <Command>
                     <CommandInput placeholder="Material nomi yoki SKU bo'yicha qidirish..." className="h-9 text-xs" />
                     <CommandList className="max-h-[280px]">
-                      <CommandEmpty className="text-xs p-3 text-center text-muted-foreground">
-                        Omborda bunday material topilmadi.
+                      <CommandEmpty className="text-xs p-3 text-center text-muted-foreground space-y-2">
+                        <div>Omborda bunday material topilmadi.</div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1.5 border-dashed"
+                          onClick={() => {
+                            setFormState((p) => ({
+                              ...p,
+                              availability: "On Order",
+                            }));
+                            setIsWarehousePickerOpen(false);
+                          }}
+                        >
+                          <Plus className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Yangi rejaviy xomashyo sifatida kiritish</span>
+                        </Button>
                       </CommandEmpty>
                       {stockCategories.map((cat) => {
                         const itemsInCat = warehouseStock.filter((s) => s.category === cat);
@@ -1513,7 +1441,7 @@ export function BomMaterialsGrid({
               </Popover>
 
               {/* Selected Stock Real-time Info & Deficit Warning */}
-              {selectedStockItem && (
+              {selectedStockItem ? (
                 <div className="mt-1 pt-1.5 border-t border-blue-200/60 dark:border-blue-900/40 flex items-center justify-between text-[11px]">
                   <div className="flex items-center gap-1.5 text-blue-900 dark:text-blue-200">
                     <span className="font-medium">Ombor qoldig&apos;i:</span>
@@ -1527,7 +1455,7 @@ export function BomMaterialsGrid({
                     <div className="flex items-center gap-1 text-rose-600 dark:text-rose-400 font-medium text-[10px]">
                       <AlertCircle className="w-3 h-3 shrink-0" />
                       <span>
-                        Yetishmovchilik: {(formState.actualQty - selectedStockItem.available).toLocaleString()} {selectedStockItem.unit}
+                        Yetishmovchilik: {(formState.actualQty - selectedStockItem.available).toLocaleString()} {selectedStockItem.unit} (Xarid talab)
                       </span>
                     </div>
                   ) : (
@@ -1535,6 +1463,13 @@ export function BomMaterialsGrid({
                       Yetarli zaxira mavjud
                     </span>
                   )}
+                </div>
+              ) : (
+                <div className="mt-1 pt-1.5 border-t border-blue-200/60 dark:border-blue-900/40 flex items-center justify-between text-[11px] text-amber-700 dark:text-amber-300">
+                  <span>Yangi rejaviy xomashyo (Omborda yo&apos;q — Xarid kutilmoqda)</span>
+                  <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">
+                    On Order / Defitsit
+                  </Badge>
                 </div>
               )}
             </div>

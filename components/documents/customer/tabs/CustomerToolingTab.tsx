@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
   GridCell,
@@ -53,13 +53,51 @@ interface CustomerToolingTabProps {
 }
 
 export function CustomerToolingTab({ customer }: CustomerToolingTabProps) {
-  const { customerTooling, upsertCustomerTooling, theme, addNotification } = useWorkspaceStore();
+  const {
+    customerTooling,
+    upsertCustomerTooling,
+    diesTooling,
+    loadDiesToolingAsync,
+    upsertDieToolingAsync,
+    theme,
+    addNotification,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
+
+  useEffect(() => {
+    if (loadDiesToolingAsync) loadDiesToolingAsync();
+  }, [loadDiesToolingAsync]);
 
   // Filter tools belonging to this customer
   const tools = useMemo(() => {
     const cleanCustomer = customer.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
-    const matched = customerTooling.filter((t) => {
+    
+    // 1. Real database dies
+    const realMatched = (diesTooling || []).filter((t) => {
+      if (t.customerId && t.customerId === customer.id) return true;
+      if (!t.customerName) return false;
+      const tName = t.customerName.toLowerCase();
+      return (
+        tName === cleanCustomer ||
+        tName.includes(cleanCustomer) ||
+        cleanCustomer.includes(tName)
+      );
+    }).map((t) => ({
+      id: t.code || t.id,
+      customerId: customer.id,
+      customerName: customer.name,
+      name: t.name,
+      toolType: t.dieType || "Flatbed Die",
+      format: `${t.widthMm}×${t.heightMm} mm`,
+      cavities: `${t.acrossCount}×${t.aroundCount}-up`,
+      location: t.location || "Rack",
+      impressionsUsed: Number(t.totalImpressions) || 0,
+      maxLife: Number(t.maxImpressions) || 150000,
+      status: (t.status === "available" ? "Ready" : t.status === "in_use" ? "Ready" : "In Maintenance") as CustomerToolingItem["status"],
+    }));
+
+    // 2. Legacy customerTooling
+    const legacyMatched = customerTooling.filter((t) => {
       if (t.customerId && t.customerId === customer.id) return true;
       if (!t.customerName) return false;
       const tName = t.customerName.toLowerCase();
@@ -70,24 +108,17 @@ export function CustomerToolingTab({ customer }: CustomerToolingTabProps) {
       );
     });
 
-    if (matched.length > 0) return matched;
+    // Merge avoiding duplicates by id
+    const ids = new Set(realMatched.map((m) => m.id));
+    const merged: any[] = [...realMatched];
+    for (const leg of legacyMatched) {
+      if (!ids.has(leg.id)) {
+        merged.push(leg);
+      }
+    }
 
-    // Default template item for new customer
-    return [
-      {
-        id: `DIE-${customer.id.replace("CUST-", "0")}`,
-        customerName: customer.name,
-        name: `${customer.name} — Standart Qadoq Shtansformasi`,
-        toolType: "Flatbed Die (Штанцформа)",
-        format: "700×1000 mm (B1)",
-        cavities: "4-up",
-        location: "Rack B-04",
-        impressionsUsed: 15400,
-        maxLife: 150000,
-        status: "Ready" as const,
-      },
-    ];
-  }, [customerTooling, customer.name, customer.id]);
+    return merged;
+  }, [customerTooling, diesTooling, customer.name, customer.id]);
 
   // Modal State for adding new tooling
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -120,6 +151,20 @@ export function CustomerToolingTab({ customer }: CustomerToolingTabProps) {
     };
 
     upsertCustomerTooling(itemToSave);
+    if (upsertDieToolingAsync) {
+      upsertDieToolingAsync({
+        code: itemToSave.id,
+        name: itemToSave.name,
+        customerId: customer.id,
+        customerName: customer.name,
+        ownership: "customer_owned",
+        isDedicated: true,
+        location: itemToSave.location,
+        totalImpressions: itemToSave.impressionsUsed,
+        maxImpressions: itemToSave.maxLife,
+        status: "available",
+      });
+    }
     addNotification({
       title: "Yangi shtansforma qo'shildi",
       description: `${itemToSave.name} (${itemToSave.id}) ${customer.name} hisobiga saqlandi.`,

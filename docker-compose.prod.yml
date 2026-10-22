@@ -34,12 +34,15 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-printgoo}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-printgoo_erp}
       REDIS_URL: redis://redis:6379
       S3_INTERNAL_ENDPOINT: http://minio:9000
+      DOC_SERVICE_URL: http://doc-service:8000
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      doc-service:
         condition: service_healthy
 
   worker:
@@ -55,6 +58,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-printgoo}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-printgoo_erp}
       REDIS_URL: redis://redis:6379
       S3_INTERNAL_ENDPOINT: http://minio:9000
+      DOC_SERVICE_URL: http://doc-service:8000
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,6 +66,29 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      doc-service:
+        condition: service_healthy
+
+  doc-service:
+    build:
+      context: ./doc-service
+    container_name: printgoo-doc-service
+    restart: unless-stopped
+    environment:
+      S3_INTERNAL_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET_DOCS: ${S3_BUCKET_DOCS:-printgoo-docs}
+      TZ: Asia/Tashkent
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: postgres:17-alpine

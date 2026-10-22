@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import { MachineRecord } from "../types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,9 +19,6 @@ import {
   Save,
   RotateCcw,
   Sparkles,
-  Layers,
-  ArrowRight,
-  Info,
 } from "lucide-react";
 
 interface MachineCostingTabProps {
@@ -31,20 +27,20 @@ interface MachineCostingTabProps {
 }
 
 export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps) {
-  // Costing settings state
-  const [investment, setInvestment] = useState<number>(machine.costing.investmentUsd);
-  const [deprecYears, setDeprecYears] = useState<number>(machine.costing.depreciationYears);
-  const [annualHours, setAnnualHours] = useState<number>(machine.costing.annualWorkHours);
-  const [maintenanceFund, setMaintenanceFund] = useState<number>(machine.costing.hourlyMaintenanceReserveUsd);
-  const [operatorWage, setOperatorWage] = useState<number>(machine.costing.operatorHourlyWageUsd);
-  const [assistantWage, setAssistantWage] = useState<number>(machine.costing.assistantHourlyWageUsd);
-  const [factoryOverhead, setFactoryOverhead] = useState<number>(machine.costing.factoryOverheadUsd);
-  const [billingRate, setBillingRate] = useState<number>(machine.costing.standardHourlyRateUsd);
+  // Costing settings state (clean defaults, no hardcoded Heidelberg rates)
+  const [investment, setInvestment] = useState<number>(machine.costing?.investmentUsd || 0);
+  const [deprecYears, setDeprecYears] = useState<number>(machine.costing?.depreciationYears || 8);
+  const [annualHours, setAnnualHours] = useState<number>(machine.costing?.annualWorkHours || 2000);
+  const [maintenanceFund, setMaintenanceFund] = useState<number>(machine.costing?.hourlyMaintenanceReserveUsd || 0);
+  const [operatorWage, setOperatorWage] = useState<number>(machine.costing?.operatorHourlyWageUsd || 0);
+  const [assistantWage, setAssistantWage] = useState<number>(machine.costing?.assistantHourlyWageUsd || 0);
+  const [factoryOverhead, setFactoryOverhead] = useState<number>(machine.costing?.factoryOverheadUsd || 0);
+  const [billingRate, setBillingRate] = useState<number>(machine.costing?.standardHourlyRateUsd || 0);
 
   // Dynamic calculations
-  const electricityRate = machine.energy.hourlyElectricityCostUsd;
+  const electricityRate = machine.energy?.hourlyElectricityCostUsd || 0;
   const totalDeprecHours = Math.max(1, deprecYears * annualHours);
-  const hourlyDepreciation = Number((investment / totalDeprecHours).toFixed(2));
+  const hourlyDepreciation = investment > 0 ? Number((investment / totalDeprecHours).toFixed(2)) : 0;
   const totalBaseCost = Number(
     (
       hourlyDepreciation +
@@ -62,43 +58,51 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
   const getDefaultRunQty = () => {
     switch (machine.category) {
       case "flexo":
-        return 5000;
+      case "lamination":
+        return 1000;
       case "jacquard":
-        return 10000;
+        return 5000;
       case "guillotine":
-        return 2000;
+        return 500;
+      case "casing-in":
+        return 300;
       default:
-        return 10000;
+        return 1000;
     }
   };
 
   const getSpeedDefault = () => {
     switch (machine.category) {
       case "offset":
-        return machine.offsetSpecs?.practicalSpeedSph || 13500;
+        return machine.offsetSpecs?.practicalSpeedSph || 0;
       case "flexo":
-        return (machine.flexoSpecs?.practicalSpeedMpm || 130) * 60;
+        return (machine.flexoSpecs?.practicalSpeedMpm || 0) * 60;
       case "die-cutting":
-        return machine.dieCuttingSpecs?.practicalSpeedSph || 6500;
+        return machine.dieCuttingSpecs?.practicalSpeedSph || 0;
       case "lamination":
-        return (machine.laminationSpecs?.practicalSpeedMpm || 45) * 60;
+        return (machine.laminationSpecs?.practicalSpeedMpm || 0) * 60;
       case "jacquard":
-        return (machine.jacquardSpecs?.practicalRpm || 720) * 60;
+        return (machine.jacquardSpecs?.practicalRpm || 0) * 60;
+      case "mounting":
+        return machine.mountingSpecs?.practicalSpeedSph || 0;
+      case "casing-in":
+        return machine.casingInSpecs?.speedCyclesPerHour || 0;
       case "guillotine":
-        return 1500;
+        return machine.guillotineSpecs?.cycleTimeSec ? Math.round(3600 / machine.guillotineSpecs.cycleTimeSec) : 0;
       default:
-        return 5000;
+        return 0;
     }
   };
 
   const getUnitName = () => {
     switch (machine.category) {
       case "flexo":
+      case "lamination":
         return "metr";
       case "jacquard":
-        return "pick (urish)";
+        return "zarb (picks)";
       case "guillotine":
-        return "kesim (zarb)";
+        return "kesim";
       case "casing-in":
         return "kitob";
       default:
@@ -116,11 +120,14 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
     machine.dieCuttingSpecs?.makeReadyMinutes ||
     machine.laminationSpecs?.makeReadyMinutes ||
     machine.jacquardSpecs?.makeReadyMinutes ||
-    20;
+    machine.mountingSpecs?.makeReadyMinutes ||
+    machine.casingInSpecs?.makeReadyMinutes ||
+    0;
   const makeReadyHours = makeReadyMinutes / 60;
 
   // Simulation computations
-  const simRunHours = simSpeedPerHour > 0 ? simRunQty / simSpeedPerHour : 0;
+  const effectiveSpeed = simSpeedPerHour > 0 ? simSpeedPerHour : (getSpeedDefault() || 1000);
+  const simRunHours = effectiveSpeed > 0 ? simRunQty / effectiveSpeed : 0;
   const simTotalHours = makeReadyHours + simRunHours;
 
   const simSetupBaseCost = makeReadyHours * totalBaseCost;
@@ -156,44 +163,28 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
   };
 
   const handleResetCosting = () => {
-    setInvestment(machine.costing.investmentUsd);
-    setDeprecYears(machine.costing.depreciationYears);
-    setAnnualHours(machine.costing.annualWorkHours);
-    setMaintenanceFund(machine.costing.hourlyMaintenanceReserveUsd);
-    setOperatorWage(machine.costing.operatorHourlyWageUsd);
-    setAssistantWage(machine.costing.assistantHourlyWageUsd);
-    setFactoryOverhead(machine.costing.factoryOverheadUsd);
-    setBillingRate(machine.costing.standardHourlyRateUsd);
+    setInvestment(machine.costing?.investmentUsd || 0);
+    setDeprecYears(machine.costing?.depreciationYears || 8);
+    setAnnualHours(machine.costing?.annualWorkHours || 2000);
+    setMaintenanceFund(machine.costing?.hourlyMaintenanceReserveUsd || 0);
+    setOperatorWage(machine.costing?.operatorHourlyWageUsd || 0);
+    setAssistantWage(machine.costing?.assistantHourlyWageUsd || 0);
+    setFactoryOverhead(machine.costing?.factoryOverheadUsd || 0);
+    setBillingRate(machine.costing?.standardHourlyRateUsd || 0);
   };
 
   return (
     <div className="space-y-4">
-      {/* 4 Costing KPI Cards */}
+      {/* 4 Financial KPI Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              Ichki Tannarx (Base Cost)
+              Tijoriy Soatlik Stavka
             </span>
-            <DollarSign className="w-4 h-4 text-blue-500" />
-          </div>
-          <div className="flex items-baseline gap-1 mt-1">
-            <span className="text-2xl font-bold font-mono text-foreground">
-              ${totalBaseCost.toFixed(2)}
-            </span>
-            <span className="text-xs text-muted-foreground">/ soat</span>
-          </div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">
-            Amortizatsiya + Elektr + Oylik + Tsex xarajati
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              Tijoriy Stavka (Kalkulyatsiya)
-            </span>
-            <TrendingUp className="w-4 h-4 text-emerald-500" />
+            <div className="h-7 w-7 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+              <DollarSign className="w-4 h-4" />
+            </div>
           </div>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-2xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
@@ -202,383 +193,338 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
             <span className="text-xs text-muted-foreground">/ soat</span>
           </div>
           <div className="text-[10px] text-muted-foreground mt-0.5">
-            Mijozga taqdim etiladigan rasmiy soatlik narx
+            Mijoz kalkulyatsiyasidagi stavka
           </div>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              Sof Uskuna Marjasi
+              To'liq Tannarx (Base Cost)
             </span>
-            <Percent className="w-4 h-4 text-purple-500" />
+            <div className="h-7 w-7 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+              <Calculator className="w-4 h-4" />
+            </div>
           </div>
           <div className="flex items-baseline gap-1 mt-1">
-            <span className="text-2xl font-bold font-mono text-purple-600 dark:text-purple-400">
-              +${profitMarginUsd.toFixed(2)}
+            <span className="text-2xl font-bold font-mono text-foreground">
+              ${totalBaseCost.toFixed(2)}
             </span>
             <span className="text-xs text-muted-foreground">/ soat</span>
           </div>
           <div className="text-[10px] text-muted-foreground mt-0.5">
-            Ustama: +{markupPercent}% (Foydalilik ko'rsatkichi)
+            Sex xarajatlari va ish haqi yig'indisi
           </div>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              Uskuna Investitsiyasi
+              Soatlik Sof Foyda
             </span>
-            <Building2 className="w-4 h-4 text-amber-500" />
+            <div className="h-7 w-7 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-2xl font-bold font-mono text-purple-600 dark:text-purple-400">
+              ${profitMarginUsd.toFixed(2)}
+            </span>
+            <span className="text-xs text-muted-foreground">/ soat</span>
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            Marja: {markupPercent}% ustama
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+              1,000 dona Tannarxi
+            </span>
+            <div className="h-7 w-7 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+              <Percent className="w-4 h-4" />
+            </div>
           </div>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-2xl font-bold font-mono text-foreground">
-              ${(investment / 1000).toFixed(0)}k
+              ${simCostPer1000Base.toFixed(2)}
             </span>
+            <span className="text-xs text-muted-foreground">/ 1k</span>
           </div>
           <div className="text-[10px] text-muted-foreground mt-0.5">
-            {deprecYears} yillik muddat ({annualHours.toLocaleString()} soat/yil)
+            Sotish narxi: ${simPricePer1000Billing.toFixed(2)}/1k
           </div>
         </div>
       </div>
 
-      {/* Main 2-Column: Hourly Cost Breakdown Table vs Live Simulator */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left: 1C Hourly Cost Breakdown Form */}
-        <div className="lg:col-span-6 space-y-4">
-          <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
-            <div className="py-2.5 px-3.5 border-b border-border bg-muted/30 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Calculator className="w-4 h-4 text-primary" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
-                  Soatlik Ishlab Chiqarish Tannarxi Strukturasi
-                </span>
-              </div>
-              <Badge variant="outline" className="text-[10px] font-mono">
-                1C Standart
-              </Badge>
+      {/* 2-Column: Left Cost Structure Breakdown & Right Simulator */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Left: Hourly Cost Matrix Configuration */}
+        <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs flex flex-col">
+          <div className="py-2.5 px-3.5 border-b border-border bg-muted/30 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Calculator className="w-4 h-4 text-primary" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                Soatlik Xarajatlar Tarkibi (Cost Structure)
+              </span>
             </div>
-            <div className="p-3.5 space-y-2.5 text-xs">
-              {/* 1. Depreciation */}
-              <div className="flex items-center justify-between py-1 border-b border-border/50">
-                <div className="space-y-0.5">
-                  <span className="font-medium text-foreground flex items-center gap-1.5">
-                    1. Uskuna Amortizatsiyasi:
-                  </span>
-                  <span className="text-[10px] text-muted-foreground block">
-                    ${investment.toLocaleString()} ÷ ({deprecYears} yil × {annualHours.toLocaleString()} h)
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="font-mono font-bold text-foreground">
-                    ${hourlyDepreciation.toFixed(2)}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground"> / soat</span>
-                </div>
-              </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleResetCosting}
+                className="h-6 text-[10px] gap-1 px-1.5"
+                title="Boshlang'ich holatga qaytarish"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Qaytarish
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveCosting}
+                className="h-6 text-[10px] gap-1 px-2 bg-primary text-primary-foreground"
+              >
+                <Save className="w-3 h-3" />
+                Saqlash
+              </Button>
+            </div>
+          </div>
 
-              {/* 2. Electricity */}
-              <div className="flex items-center justify-between py-1 border-b border-border/50">
-                <div className="space-y-0.5">
-                  <span className="font-medium text-foreground flex items-center gap-1.5">
-                    2. Elektr Energiyasi Sarfi:
-                  </span>
-                  <span className="text-[10px] text-muted-foreground block">
-                    {machine.energy.activePowerKw} kW × ${machine.energy.electricityTariffUsd}/kWh
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
-                    ${electricityRate.toFixed(2)}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground"> / soat</span>
-                </div>
-              </div>
-
-              {/* 3. Maintenance Fund */}
-              <div className="flex items-center justify-between py-1 border-b border-border/50">
-                <div className="space-y-0.5">
-                  <span className="font-medium text-foreground flex items-center gap-1.5">
-                    3. Texnik Xizmat & Ehtiyot Qismlar Fondi:
-                  </span>
-                  <span className="text-[10px] text-muted-foreground block">
-                    Vallar, rezinamatolar, moylar va filtrlar zaxirasi
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Input
-                    type="number"
-                    step="0.5"
-                    value={maintenanceFund}
-                    onChange={(e) => setMaintenanceFund(Number(e.target.value) || 0)}
-                    className="w-20 h-7 text-xs font-mono text-right"
-                  />
-                  <span className="text-[10px] text-muted-foreground">$/h</span>
-                </div>
-              </div>
-
-              {/* 4. Operator Wage */}
-              <div className="flex items-center justify-between py-1 border-b border-border/50">
-                <div className="space-y-0.5">
-                  <span className="font-medium text-foreground flex items-center gap-1.5">
-                    4. Mas'ul Bosmachi / Operator Oyligi:
-                  </span>
-                  <span className="text-[10px] text-muted-foreground block">
-                    1-darajali bosh mutaxassis stavkasi
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Input
-                    type="number"
-                    step="0.5"
-                    value={operatorWage}
-                    onChange={(e) => setOperatorWage(Number(e.target.value) || 0)}
-                    className="w-20 h-7 text-xs font-mono text-right"
-                  />
-                  <span className="text-[10px] text-muted-foreground">$/h</span>
-                </div>
-              </div>
-
-              {/* 5. Assistant Wage */}
-              <div className="flex items-center justify-between py-1 border-b border-border/50">
-                <div className="space-y-0.5">
-                  <span className="font-medium text-foreground flex items-center gap-1.5">
-                    5. Yordamchi / Taqlovchi Xodim Oyligi:
-                  </span>
-                  <span className="text-[10px] text-muted-foreground block">
-                    Qog'oz beruvchi yoki qabul qiluvchi yordamchi
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Input
-                    type="number"
-                    step="0.5"
-                    value={assistantWage}
-                    onChange={(e) => setAssistantWage(Number(e.target.value) || 0)}
-                    className="w-20 h-7 text-xs font-mono text-right"
-                  />
-                  <span className="text-[10px] text-muted-foreground">$/h</span>
-                </div>
-              </div>
-
-              {/* 6. Factory Overhead */}
-              <div className="flex items-center justify-between py-1 border-b border-border/50">
-                <div className="space-y-0.5">
-                  <span className="font-medium text-foreground flex items-center gap-1.5">
-                    6. Tsex & Ma'muriy Umumiy Xarajatlar:
-                  </span>
-                  <span className="text-[10px] text-muted-foreground block">
-                    Maydon ijarasi, yoritish, shamollatish, sug'urta ulushi
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Input
-                    type="number"
-                    step="0.5"
-                    value={factoryOverhead}
-                    onChange={(e) => setFactoryOverhead(Number(e.target.value) || 0)}
-                    className="w-20 h-7 text-xs font-mono text-right"
-                  />
-                  <span className="text-[10px] text-muted-foreground">$/h</span>
-                </div>
-              </div>
-
-              {/* Total Base Hourly Rate Row */}
-              <div className="flex items-center justify-between p-2 rounded bg-muted/60 font-semibold text-xs mt-2">
-                <span>Jami Mashina Soatlik Tannarxi (Net Cost):</span>
-                <span className="font-mono text-sm text-foreground">
-                  ${totalBaseCost.toFixed(2)} / soat
+          <div className="p-3.5 space-y-3 text-xs flex-1">
+            {/* 1. Depreciation */}
+            <div className="rounded border border-border/70 p-2.5 space-y-2 bg-muted/10">
+              <div className="flex items-center justify-between font-medium">
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <Building2 className="w-3.5 h-3.5 text-blue-500" />
+                  Uskuna Investitsiyasi va Amortizatsiya
+                </span>
+                <span className="font-mono font-bold text-foreground">
+                  ${hourlyDepreciation.toFixed(2)}/soat
                 </span>
               </div>
-
-              {/* Standard Commercial Billing Rate */}
-              <div className="flex items-center justify-between p-2 rounded bg-emerald-500/10 border border-emerald-500/20 font-semibold text-xs mt-2">
-                <div className="space-y-0.5">
-                  <span className="text-emerald-700 dark:text-emerald-300">
-                    Mijozga Hisoblanadigan Tijoriy Narx (Billing Rate):
-                  </span>
-                  <span className="text-[10px] text-muted-foreground block font-normal">
-                    Foyda marjasi: +${profitMarginUsd.toFixed(2)}/h ({markupPercent}%)
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
+              <div className="grid grid-cols-3 gap-2 text-[11px]">
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Investitsiya ($):</Label>
                   <Input
                     type="number"
-                    step="5"
-                    value={billingRate}
-                    onChange={(e) => setBillingRate(Number(e.target.value) || 0)}
-                    className="w-24 h-8 text-xs font-mono font-bold text-right text-emerald-600 dark:text-emerald-400 bg-background"
+                    value={investment || ""}
+                    onChange={(e) => setInvestment(Number(e.target.value) || 0)}
+                    placeholder="0"
+                    className="h-7 text-xs font-mono"
                   />
-                  <span className="text-xs text-muted-foreground">$/h</span>
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Amortizatsiya (yil):</Label>
+                  <Input
+                    type="number"
+                    value={deprecYears || ""}
+                    onChange={(e) => setDeprecYears(Number(e.target.value) || 1)}
+                    placeholder="8"
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Yillik ish soati:</Label>
+                  <Input
+                    type="number"
+                    value={annualHours || ""}
+                    onChange={(e) => setAnnualHours(Number(e.target.value) || 1)}
+                    placeholder="2000"
+                    className="h-7 text-xs font-mono"
+                  />
                 </div>
               </div>
+            </div>
 
-              {/* Save / Reset Actions */}
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleResetCosting}
-                  className="h-7 text-xs gap-1"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Qaytarish
-                </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={handleSaveCosting}
-                  className="h-7 text-xs gap-1 bg-primary text-primary-foreground"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  Stavkani Saqlash
-                </Button>
+            {/* 2. Electricity & Maintenance */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="rounded border border-border/70 p-2.5 space-y-1.5 bg-muted/10">
+                <div className="flex items-center justify-between font-medium">
+                  <span className="flex items-center gap-1 text-foreground">
+                    <Zap className="w-3.5 h-3.5 text-amber-500" />
+                    Elektr Energiyasi
+                  </span>
+                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                    ${electricityRate.toFixed(2)}/h
+                  </span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Elektr quvvati va tarifi asosida hisoblanadi
+                </p>
+              </div>
+
+              <div className="rounded border border-border/70 p-2.5 space-y-1 bg-muted/10">
+                <div className="flex items-center justify-between font-medium">
+                  <span className="flex items-center gap-1 text-foreground">
+                    <Wrench className="w-3.5 h-3.5 text-purple-500" />
+                    Ta'mir Jamg'armasi
+                  </span>
+                  <span className="font-mono font-bold text-foreground">
+                    ${maintenanceFund.toFixed(2)}/h
+                  </span>
+                </div>
+                <Input
+                  type="number"
+                  step="0.5"
+                  value={maintenanceFund || ""}
+                  onChange={(e) => setMaintenanceFund(Number(e.target.value) || 0)}
+                  placeholder="0"
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            {/* 3. Labor Wages */}
+            <div className="rounded border border-border/70 p-2.5 space-y-2 bg-muted/10">
+              <div className="flex items-center justify-between font-medium">
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <Users className="w-3.5 h-3.5 text-emerald-500" />
+                  Ish Haqi (Operator va Yordamchi)
+                </span>
+                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                  ${(operatorWage + assistantWage).toFixed(2)}/soat
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Bosh operator stavkasi ($/soat):</Label>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    value={operatorWage || ""}
+                    onChange={(e) => setOperatorWage(Number(e.target.value) || 0)}
+                    placeholder="0"
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Yordamchi stavkasi ($/soat):</Label>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    value={assistantWage || ""}
+                    onChange={(e) => setAssistantWage(Number(e.target.value) || 0)}
+                    placeholder="0"
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Overhead & Commercial Rate */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="rounded border border-border/70 p-2.5 space-y-1 bg-muted/10">
+                <Label className="text-[10px] font-medium text-muted-foreground">Sex / Zavod Umumiy Xarajati ($/h):</Label>
+                <Input
+                  type="number"
+                  step="0.5"
+                  value={factoryOverhead || ""}
+                  onChange={(e) => setFactoryOverhead(Number(e.target.value) || 0)}
+                  placeholder="0"
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
+              <div className="rounded border border-primary/40 bg-primary/5 p-2.5 space-y-1">
+                <Label className="text-[10px] font-semibold text-primary">Tijoriy Sotish Stavkasi ($/h):</Label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={billingRate || ""}
+                  onChange={(e) => setBillingRate(Number(e.target.value) || 0)}
+                  placeholder="0"
+                  className="h-7 text-xs font-mono font-bold text-primary"
+                />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right: Live Unit Cost Production Simulator */}
-        <div className="lg:col-span-6 space-y-4">
-          <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
-            <div className="py-2.5 px-3.5 border-b border-border bg-muted/30 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-primary" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
-                  Jonli Tiraj & Birlik Narxi Kalkulyatori
+        {/* Right: Real-time Job Costing Calculator */}
+        <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs flex flex-col">
+          <div className="py-2.5 px-3.5 border-b border-border bg-muted/30 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                Tannarx va Narx Simulyatori
+              </span>
+            </div>
+          </div>
+
+          <div className="p-3.5 space-y-3 text-xs flex-1">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Simulyatsiya Tiraji ({getUnitName()}):
+                </Label>
+                <Input
+                  type="number"
+                  step="500"
+                  value={simRunQty || ""}
+                  onChange={(e) => setSimRunQty(Number(e.target.value) || 0)}
+                  className="h-8 text-xs font-mono font-bold"
+                />
+              </div>
+              <div>
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Tezlik ({getUnitName()}/soat):
+                </Label>
+                <Input
+                  type="number"
+                  step="500"
+                  value={simSpeedPerHour || ""}
+                  onChange={(e) => setSimSpeedPerHour(Number(e.target.value) || 0)}
+                  className="h-8 text-xs font-mono font-medium"
+                />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Calculations Breakdown */}
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between py-1 border-b border-border/50">
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-purple-500" />
+                  Priladka Vaqti:
+                </span>
+                <span className="font-mono text-foreground">
+                  {makeReadyMinutes} daqiqa ({makeReadyHours.toFixed(2)} soat)
                 </span>
               </div>
-              <Badge variant="secondary" className="text-[10px] font-mono">
-                1,000 {getUnitName()} hisobi
-              </Badge>
-            </div>
-            <div className="p-3.5 space-y-4 text-xs">
-              {/* Simulation Controls */}
-              <div className="space-y-3 p-3 rounded-lg border border-border bg-muted/20">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-medium text-foreground">
-                    Tiraj Hajmi ({getUnitName()}):
-                  </Label>
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      type="number"
-                      step="1000"
-                      value={simRunQty}
-                      onChange={(e) => setSimRunQty(Number(e.target.value) || 0)}
-                      className="w-28 h-7 text-xs font-mono text-right"
-                    />
-                    <span className="text-xs text-muted-foreground">{getUnitName()}</span>
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-medium text-foreground">
-                    Ishlash Tezligi ({getUnitName()}/soat):
-                  </Label>
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      type="number"
-                      step="500"
-                      value={simSpeedPerHour}
-                      onChange={(e) => setSimSpeedPerHour(Number(e.target.value) || 0)}
-                      className="w-28 h-7 text-xs font-mono text-right"
-                    />
-                    <span className="text-xs text-muted-foreground">/ soat</span>
-                  </div>
-                </div>
+              <div className="flex items-center justify-between py-1 border-b border-border/50">
+                <span className="text-muted-foreground">Chop Etish / Ish Vaqti:</span>
+                <span className="font-mono text-foreground">{simRunHours.toFixed(2)} soat</span>
               </div>
 
-              {/* Simulation Results Breakdown */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">
-                    Priladka (Setup) Vaqti & Narxi:
-                  </span>
-                  <div className="text-right">
-                    <span className="font-mono font-medium text-foreground">
-                      {makeReadyMinutes} daq (${simSetupBillingPrice.toFixed(2)})
-                    </span>
-                    <span className="text-[10px] text-muted-foreground block">
-                      Tannarxi: ${simSetupBaseCost.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
+              <div className="flex items-center justify-between py-1 border-b border-border/50 font-medium">
+                <span className="text-foreground">Jami Kerakli Vaqt:</span>
+                <span className="font-mono font-bold text-foreground">{simTotalHours.toFixed(2)} soat</span>
+              </div>
 
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">
-                    Asosiy Chop Etish Vaqti:
-                  </span>
-                  <div className="text-right">
-                    <span className="font-mono font-medium text-foreground">
-                      {simRunHours.toFixed(2)} soat ({Math.round(simRunHours * 60)} daq)
-                    </span>
-                    <span className="text-[10px] text-muted-foreground block">
-                      Chop narxi: ${simRunBillingPrice.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
+              <div className="flex items-center justify-between py-1 border-b border-border/50">
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  Elektr Sarfi Narxi:
+                </span>
+                <span className="font-mono text-amber-600 dark:text-amber-400">
+                  ${simPowerCost.toFixed(2)}
+                </span>
+              </div>
 
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">
-                    Jami Uskuna Bandlik Vaqti:
-                  </span>
-                  <span className="font-mono font-bold text-foreground">
-                    {simTotalHours.toFixed(2)} soat ({Math.round(simTotalHours * 60)} daq)
-                  </span>
-                </div>
+              <div className="flex items-center justify-between py-1 border-b border-border/50">
+                <span className="text-muted-foreground">Ishlab Chiqarish Tannarxi (Base):</span>
+                <span className="font-mono text-foreground font-semibold">
+                  ${simTotalBaseCost.toFixed(2)}
+                </span>
+              </div>
 
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">
-                    Ushbu Tirajda Elektr Xarajati:
-                  </span>
-                  <span className="font-mono text-amber-600 dark:text-amber-400 font-medium">
-                    ${simPowerCost.toFixed(2)} ({Number((simTotalHours * machine.energy.activePowerKw).toFixed(1))} kWh)
-                  </span>
-                </div>
-
-                {/* 1,000 units highlighted cards */}
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                  <div className="p-2.5 rounded-lg border border-border bg-muted/40">
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
-                      1,000 {getUnitName()} Tannarxi:
-                    </span>
-                    <div className="flex items-baseline gap-1 mt-0.5">
-                      <span className="text-lg font-bold font-mono text-foreground">
-                        ${simCostPer1000Base.toFixed(2)}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground block mt-0.5">
-                      Jami tannarx: ${simTotalBaseCost.toFixed(2)}
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10">
-                    <span className="text-[10px] text-emerald-700 dark:text-emerald-300 uppercase tracking-wider block">
-                      1,000 {getUnitName()} Mijoz Narxi:
-                    </span>
-                    <div className="flex items-baseline gap-1 mt-0.5">
-                      <span className="text-lg font-bold font-mono text-emerald-600 dark:text-emerald-400">
-                        ${simPricePer1000Billing.toFixed(2)}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block mt-0.5 font-medium">
-                      Jami hisob: ${simTotalBillingPrice.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Profit contribution indicator */}
-                <div className="p-2.5 rounded-lg border border-purple-500/30 bg-purple-500/10 flex items-center justify-between mt-2">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
-                    <span className="text-xs font-semibold text-purple-700 dark:text-purple-300">
-                      Uskunadan Olingan Sof Yalpi Foyda:
-                    </span>
-                  </div>
-                  <span className="text-sm font-bold font-mono text-purple-600 dark:text-purple-400">
-                    +${(simTotalBillingPrice - simTotalBaseCost).toFixed(2)}
-                  </span>
-                </div>
+              <div className="flex items-center justify-between py-1.5 font-bold text-sm bg-muted/20 px-2 rounded">
+                <span className="text-primary">Tijoriy Taklif Narxi (Billing):</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                  ${simTotalBillingPrice.toFixed(2)}
+                </span>
               </div>
             </div>
           </div>

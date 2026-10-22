@@ -21,6 +21,7 @@ import {
   DeliveryActItem,
 } from "@/store/workspaceStore";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,7 +79,9 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
     warehouseShipments,
     clientSettlements,
     upsertDeliveryAct,
+    saveDeliveryActAsync,
     postDeliveryAct,
+    replaceTabId,
     setTabUnsaved,
     setLevel3Tab,
     openTab,
@@ -108,7 +111,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
       id: d.id || d.docNo || tab.id,
       date: d.date || new Date().toISOString().split("T")[0],
       orderId: d.orderId || "CO-00041",
-      workOrderId: d.workOrderId || "WO-00351",
+      workOrderId: d.workOrderId || "WOOF-26-0351",
       contractNo: d.contractNo || "CON-2026-101",
       customer: d.customer || "Alpha Media Group LLC",
       customerTin: d.customerTin || "305841920",
@@ -460,15 +463,38 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
+  const isDraft = !form.id || form.id.startsWith("draft-") || form.id.startsWith("new-") || form.id === "NEW";
+
   const handleSave = () => {
+    let finalId = form.id;
+    if (isDraft) {
+      const yearSuffix = new Date().getFullYear().toString().slice(-2);
+      let maxSf = 0;
+      for (const a of deliveryActs) {
+        const m = a.id?.match(new RegExp(`^SF-${yearSuffix}-(\\d+)$`, "i"));
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n > maxSf) maxSf = n;
+        }
+      }
+      finalId = `SF-${yearSuffix}-${String(maxSf + 1).padStart(4, "0")}`;
+    }
     const updated: DeliveryActRecord = {
       ...form,
+      id: finalId,
       quantity: totals.totalQty,
       subtotal: totals.subtotal,
       vatAmount: totals.vatAmount,
       totalAmount: totals.totalAmount,
     };
     upsertDeliveryAct(updated);
+    if (saveDeliveryActAsync) {
+      saveDeliveryActAsync(updated);
+    }
+    if (isDraft) {
+      replaceTabId(tab.id, finalId, `${finalId}: ${updated.customer || "Dalolatnoma"}`, updated);
+      setForm(updated);
+    }
     setTabUnsaved(tab.id, false);
   };
 
@@ -482,6 +508,9 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
     };
     upsertDeliveryAct(updated);
     postDeliveryAct(updated.id);
+    if (saveDeliveryActAsync) {
+      saveDeliveryActAsync({ ...updated, status: "Signed & Stamped" });
+    }
     setTabUnsaved(tab.id, false);
   };
 
@@ -656,8 +685,8 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                   <Building2 className="w-3.5 h-3.5 text-primary" />
                   <span>{t("requisitesTitle")}</span>
                 </div>
-                <span className="font-mono text-[11px] font-semibold text-primary">
-                  {form.id}
+                <span className={cn("font-mono text-[11px] font-semibold text-primary", isDraft && "text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded")}>
+                  {isDraft ? "Yangi (Avtomatik)" : form.id}
                 </span>
               </div>
 
@@ -665,7 +694,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                 <div className="space-y-1">
                   <Label className="text-[11px] text-muted-foreground">{t("docNo")}</Label>
                   <Input
-                    value={form.id}
+                    value={isDraft ? "Yangi (Avtomatik)" : form.id}
                     readOnly
                     className="h-7 text-xs font-mono bg-muted/50"
                   />
@@ -721,7 +750,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                       value={form.workOrderId}
                       readOnly={isPosted}
                       onChange={(e) => handleFieldChange("workOrderId", e.target.value)}
-                      placeholder="Masalan: WO-00351"
+                      placeholder="Masalan: WOOF-26-0351"
                       className="h-7 text-xs font-mono font-semibold"
                     />
                     <Button
@@ -985,7 +1014,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                 {t("officialTitle")}
               </div>
               <div className="font-mono text-xs font-semibold">
-                № {form.id} • {form.date} yil
+                № {isDraft ? "Yangi (Avtomatik)" : form.id} • {form.date} yil
               </div>
               <div className="text-[11px] text-muted-foreground">
                 Shartnoma: {form.contractNo} | Ish buyurtmasi (WO): {form.workOrderId}

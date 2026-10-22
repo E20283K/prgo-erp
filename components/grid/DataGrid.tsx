@@ -54,6 +54,9 @@ import {
   Image as ImageIcon,
   CalendarDays,
   Table as TableIcon,
+  ChevronLeft,
+  ChevronRight,
+  Camera,
 } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -111,6 +114,8 @@ export const GLIDE_DARK_THEME: Partial<Theme> = {
 export interface OrderRow {
   id: string;
   preview: string[];
+  allPhotos?: string[];
+  rawOrder?: any;
   department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
   site: "Building 1" | "Building 2";
   customer: string;
@@ -125,9 +130,6 @@ export interface OrderRow {
   deadline: string;
   responsible: string;
 }
-
-// Real photographic proof sample (publication / catalog proof) used for all mock rows
-const REAL_PROOF_IMAGE = "/sample-proof.jpg";
 
 const INITIAL_COLUMNS: GridColumn[] = [
   { id: "id", title: "Doc No.", width: 120, icon: GridColumnIcon.HeaderReference, hasMenu: true },
@@ -146,77 +148,18 @@ const INITIAL_COLUMNS: GridColumn[] = [
   { id: "responsible", title: "Manager / Lead", width: 150, icon: GridColumnIcon.HeaderString, hasMenu: true },
 ];
 
-const MOCK_CUSTOMERS = [
-  "Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging", 
-  "Global Apparel Brand", "Zenith Publishing", "Vanguard Fashion", "Metropolis Books"
-];
-
-const MACHINE_MAP: Record<string, string[]> = {
-  Offset: ["Heidelberg XL 106", "Komori Lithrone G40", "Heidelberg SX 74"],
-  Flexo: ["Mark Andy Performance", "Nilpeter FA-Line", "Gallus ECS 340"],
-  Jacquard: ["Staubli Jacquard Loom", "Muller Martini Loom", "Dornier PTV"],
-  "Post-press": ["Kolbus BF 513", "Bobst Novacut 106"]
-};
-
-const PRODUCT_MAP: Record<string, string[]> = {
-  Offset: ["Hardcover Catalog 96p", "Folding Carton Box 350g", "Glossy Paper Hangtags", "A5 Booklet 32p"],
-  Flexo: ["Satin Care Labels", "Nylon Wash Labels", "Self-Adhesive Roll Labels", "Tyvek Labels"],
-  Jacquard: ["Premium Woven Neck Labels", "Woven Patches", "Taffeta Side Labels", "Damask Woven Labels"],
-  "Post-press": ["Folding", "Die-cutting", "Laminating"]
-};
-
-const DEPARTMENTS = ["Offset", "Flexo", "Jacquard", "Post-press"] as const;
-
-export function generateMockOrders(count: number): OrderRow[] {
-  const statuses: OrderRow["status"][] = ["Active", "Completed", "Draft", "Cancelled"];
-  const priorities: OrderRow["priority"][] = ["Normal", "High", "Urgent"];
-
-  return Array.from({ length: count }, (_, i) => {
-    const idNum = 350 + i;
-    const docNo = `WO-${String(idNum).padStart(5, "0")}`;
-    const qty = [500, 1000, 2500, 5000, 10000, 20000][i % 6];
-    const unitPrice = [0.45, 1.20, 2.80, 4.50, 12.00][i % 5];
-    const total = qty * unitPrice;
-
-    const department = DEPARTMENTS[i % DEPARTMENTS.length];
-    const site = (department === "Offset" || department === "Post-press") ? "Building 1" : "Building 2";
-    
-    const prodList = PRODUCT_MAP[department];
-    const prod = prodList[i % prodList.length];
-    
-    const machList = MACHINE_MAP[department];
-    const mach = machList[i % machList.length];
-
-    return {
-      id: docNo,
-      preview: [REAL_PROOF_IMAGE],
-      department,
-      site,
-      customer: MOCK_CUSTOMERS[i % MOCK_CUSTOMERS.length],
-      product: prod,
-      machine: mach,
-      qty,
-      unit: department === "Jacquard" ? "pcs" : department === "Flexo" ? "rolls" : "sheets",
-      priceTotal: total,
-      status: statuses[i % statuses.length],
-      priority: priorities[i % priorities.length],
-      startDate: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
-      deadline: `2026-10-${String((i % 28) + 1).padStart(2, "0")}`,
-      responsible: ["K. Anderson", "M. Ivanova", "S. Petrov", "A. Becker"][i % 4],
-    };
-  });
-}
-
-
-
 export function DataGrid() {
   const tGrid = useTranslations("DataGrid");
   const tCommon = useTranslations("Common");
   const tWork = useTranslations("Workspace");
   const tTasks = useTranslations("Tasks");
-  const { openTab, updateGridStats, theme, setCreateWorkOrderOpen } = useWorkspaceStore();
+  const { openTab, updateGridStats, theme, setCreateWorkOrderOpen, productionQueue, loadProductionQueue, isProductionQueueLoading } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [columns, setColumns] = useState<GridColumn[]>(INITIAL_COLUMNS);
+
+  useEffect(() => {
+    loadProductionQueue();
+  }, [loadProductionQueue]);
 
   const localizedColumns = React.useMemo(() => {
     const colMap: Record<string, string> = {
@@ -239,7 +182,42 @@ export function DataGrid() {
     }));
   }, [columns, tGrid]);
 
-  const [rows, setRows] = useState<OrderRow[]>(() => generateMockOrders(1250));
+  // Convert real productionQueue from workspaceStore/DB into OrderRow format
+  const rows = React.useMemo<OrderRow[]>(() => {
+    return (productionQueue || []).map((wo: any) => {
+      // Collect ONLY real photographic proof photos from DB (no mock fallback!)
+      const photos: string[] = [];
+      if (Array.isArray(wo.photoUrls) && wo.photoUrls.length > 0) {
+        wo.photoUrls.forEach((u: any) => {
+          if (typeof u === "string" && u.trim().length > 0) {
+            photos.push(u.trim());
+          }
+        });
+      } else if (wo.photoUrl && typeof wo.photoUrl === "string" && wo.photoUrl.trim().length > 0) {
+        photos.push(wo.photoUrl.trim());
+      }
+
+      return {
+        id: wo.id,
+        preview: photos,
+        allPhotos: photos,
+        department: (wo.department as any) || "Offset",
+        site: wo.site || "Building 1",
+        customer: wo.customer,
+        product: wo.product,
+        machine: wo.pressMachine,
+        qty: wo.quantity,
+        unit: wo.unit || "pcs",
+        priceTotal: wo.priceTotal || 0,
+        status: wo.status || "Draft",
+        priority: (wo.priority as any) || "Normal",
+        startDate: wo.startDate || "",
+        deadline: wo.deadline || "",
+        responsible: wo.operator || "Prepress Dept",
+        rawOrder: wo,
+      };
+    });
+  }, [productionQueue]);
   const [viewMode, setViewMode] = useState<"grid" | "calendar">("grid");
   const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
   const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
@@ -289,6 +267,7 @@ export function DataGrid() {
 
   const [hoveredPreview, setHoveredPreview] = useState<{
     url: string;
+    totalPhotos: number;
     docNo: string;
     product: string;
     customer: string;
@@ -297,6 +276,7 @@ export function DataGrid() {
     y: number;
   } | null>(null);
   const [selectedPreviewRow, setSelectedPreviewRow] = useState<OrderRow | null>(null);
+  const [previewPhotoIndex, setPreviewPhotoIndex] = useState(0);
 
   const onItemHovered = useCallback((args: GridMouseEventArgs) => {
     if (args.kind === "cell") {
@@ -304,7 +284,8 @@ export function DataGrid() {
       const column = columns[col];
       if (column?.id === "preview") {
         const rowData = filteredRows[row];
-        if (rowData) {
+        // Only trigger hover preview if there is at least one real photo
+        if (rowData && rowData.preview.length > 0) {
           let clientX = mouseCoordsRef.current.x;
           let clientY = mouseCoordsRef.current.y;
           if (clientX === 0 && clientY === 0 && typeof document !== "undefined") {
@@ -320,6 +301,7 @@ export function DataGrid() {
 
           setHoveredPreview({
             url: rowData.preview[0],
+            totalPhotos: rowData.allPhotos?.length || rowData.preview.length,
             docNo: rowData.id,
             product: rowData.product,
             customer: rowData.customer,
@@ -334,13 +316,14 @@ export function DataGrid() {
     setHoveredPreview(null);
   }, [columns, filteredRows, getCursorCardPosition]);
 
-
   const onCellClicked = useCallback((cell: Item) => {
     const [col, row] = cell;
     const column = columns[col];
     if (column?.id === "preview") {
       const rowData = filteredRows[row];
-      if (rowData) {
+      // Only open image preview dialog if there is at least one real photo
+      if (rowData && rowData.preview.length > 0) {
+        setPreviewPhotoIndex(0);
         setSelectedPreviewRow(rowData);
       }
     }
@@ -383,9 +366,9 @@ export function DataGrid() {
       case "preview":
         return {
           kind: GridCellKind.Image,
-          data: rowData.preview,
-          displayData: rowData.preview,
-          allowOverlay: true,
+          data: rowData.preview.length > 0 ? [rowData.preview[0]] : [],
+          displayData: rowData.preview.length > 0 ? [rowData.preview[0]] : [],
+          allowOverlay: false,
           rounding: 4,
           contentAlign: "center",
         };
@@ -518,6 +501,12 @@ export function DataGrid() {
     const [, row] = cell;
     const rowData = filteredRows[row];
     if (rowData) {
+      const raw = rowData.rawOrder || {};
+      const photos = rowData.allPhotos && rowData.allPhotos.length > 0
+        ? rowData.allPhotos
+        : (rowData.preview && rowData.preview.length > 0 ? rowData.preview : (raw.photoUrls || []));
+      const primaryPhoto = photos[0] || raw.photoUrl || "";
+
       openTab({
         id: rowData.id,
         title: `${rowData.id}: ${rowData.product}`,
@@ -526,6 +515,7 @@ export function DataGrid() {
         isUnsaved: false,
         activeLevel3Tab: "overview",
         documentData: {
+          ...raw,
           docNo: rowData.id,
           customer: rowData.customer,
           product: rowData.product,
@@ -539,8 +529,11 @@ export function DataGrid() {
           startDate: rowData.startDate,
           deadline: rowData.deadline,
           priceTotal: rowData.priceTotal,
-          currency: "USD",
+          currency: raw.currency || "USD",
           responsible: rowData.responsible,
+          photoUrl: primaryPhoto,
+          photoUrls: photos,
+          attachments: raw.attachments || [],
         },
       });
     }
@@ -559,17 +552,11 @@ export function DataGrid() {
     const rowData = filteredRows[row];
     if (!rowData || !column) return;
 
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.id === rowData.id) {
-          return {
-            ...r,
-            [column.id!]: newValue.data,
-          };
-        }
-        return r;
-      })
-    );
+    // Persist cell edit to workspaceStore item
+    useWorkspaceStore.getState().upsertProductionQueueItem({
+      id: rowData.id,
+      [column.id!]: newValue.data,
+    });
   }, [columns, filteredRows]);
 
 
@@ -581,20 +568,55 @@ export function DataGrid() {
   }, []);
 
   const handleCreateNew = useCallback(() => {
-    setCreateWorkOrderOpen(true);
-  }, [setCreateWorkOrderOpen]);
+    const draftId = `draft-wo-${Date.now()}`;
+    const today = new Date().toISOString().split("T")[0];
+
+    openTab({
+      id: draftId,
+      title: "Yangi buyruq (Qoralama)",
+      type: "work-order",
+      module: "production",
+      isUnsaved: true,
+      activeLevel3Tab: "overview",
+      documentData: {
+        docNo: "",
+        customer: "",
+        product: "",
+        quantity: 0,
+        unit: "pcs",
+        department: "Offset",
+        site: "",
+        pressMachine: "",
+        recipe: "",
+        status: "Draft",
+        priority: "Normal",
+        startDate: today,
+        deadline: "",
+        paperStock: "",
+        coating: "",
+        lamination: "",
+        embellishment: "",
+        priceTotal: 0,
+        currency: "UZS",
+        operations: [],
+        shiftEvents: [],
+        attachments: [],
+        sampleData: {},
+      },
+    });
+  }, [openTab]);
 
   // 1C Industrial UX: Insert key triggers new document creation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Insert") {
         e.preventDefault();
-        setCreateWorkOrderOpen(true);
+        handleCreateNew();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setCreateWorkOrderOpen]);
+  }, [handleCreateNew]);
 
   return (
     <ContextMenu>
@@ -750,6 +772,12 @@ export function DataGrid() {
                   <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 text-white font-mono text-[9px] font-bold backdrop-blur-xs">
                     {hoveredPreview.docNo}
                   </div>
+                  {hoveredPreview.totalPhotos > 1 && (
+                    <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 text-white font-mono text-[9px] font-semibold backdrop-blur-xs flex items-center gap-1">
+                      <Camera className="w-2.5 h-2.5" />
+                      <span>{hoveredPreview.totalPhotos} ta rasm</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -794,36 +822,95 @@ export function DataGrid() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-1">
-            <div className="relative w-full h-48 rounded-lg overflow-hidden bg-muted border border-border flex items-center justify-center">
-              {selectedPreviewRow && (
-                <img
-                  src={selectedPreviewRow.preview[0]}
-                  alt={selectedPreviewRow.product}
-                  className="w-full h-full object-cover"
-                />
-              )}
-            </div>
+          {selectedPreviewRow && (
+            <div className="space-y-3 py-1">
+              {/* Photo Gallery Viewer */}
+              {(() => {
+                const photos = selectedPreviewRow.allPhotos && selectedPreviewRow.allPhotos.length > 0 
+                  ? selectedPreviewRow.allPhotos 
+                  : selectedPreviewRow.preview;
+                const activePhoto = photos[previewPhotoIndex] || photos[0];
+                const total = photos.length;
 
-            <div className="grid grid-cols-2 gap-2 text-xs bg-muted/40 p-2.5 rounded-lg border border-border/50">
-              <div>
-                <span className="text-[10px] text-muted-foreground block">Product</span>
-                <span className="font-medium text-foreground truncate block">{selectedPreviewRow?.product}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-muted-foreground block">Quantity</span>
-                <span className="font-medium text-foreground">{selectedPreviewRow?.qty.toLocaleString()} {selectedPreviewRow?.unit}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-muted-foreground block">Machine</span>
-                <span className="font-medium text-foreground truncate block">{selectedPreviewRow?.machine}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-muted-foreground block">Deadline</span>
-                <span className="font-medium text-foreground">{selectedPreviewRow?.deadline}</span>
+                return (
+                  <div className="space-y-2">
+                    <div className="relative w-full h-52 rounded-lg overflow-hidden bg-muted border border-border flex items-center justify-center group">
+                      <img
+                        src={activePhoto}
+                        alt={`${selectedPreviewRow.product} ${previewPhotoIndex + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                      {total > 1 && (
+                        <>
+                          <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/70 text-white font-mono text-[10px] font-medium backdrop-blur-xs flex items-center gap-1">
+                            <Camera className="w-3 h-3" />
+                            <span>{previewPhotoIndex + 1} / {total}</span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setPreviewPhotoIndex((prev) => (prev > 0 ? prev - 1 : total - 1))}
+                            className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white transition-opacity opacity-80 group-hover:opacity-100"
+                            title="Oldingi rasm"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setPreviewPhotoIndex((prev) => (prev < total - 1 ? prev + 1 : 0))}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white transition-opacity opacity-80 group-hover:opacity-100"
+                            title="Keyingi rasm"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Thumbnail Strip if multiple photos */}
+                    {total > 1 && (
+                      <div className="flex items-center gap-2 overflow-x-auto py-1">
+                        {photos.map((p, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setPreviewPhotoIndex(idx)}
+                            className={`relative w-12 h-12 rounded-md overflow-hidden border-2 transition-all shrink-0 ${
+                              idx === previewPhotoIndex
+                                ? "border-primary ring-2 ring-primary/30"
+                                : "border-border/60 opacity-60 hover:opacity-100"
+                            }`}
+                          >
+                            <img src={p} alt={`thumb-${idx}`} className="w-full h-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="grid grid-cols-2 gap-2 text-xs bg-muted/40 p-2.5 rounded-lg border border-border/50">
+                <div>
+                  <span className="text-[10px] text-muted-foreground block">Product</span>
+                  <span className="font-medium text-foreground truncate block">{selectedPreviewRow.product}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground block">Quantity</span>
+                  <span className="font-medium text-foreground">{selectedPreviewRow.qty.toLocaleString()} {selectedPreviewRow.unit}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground block">Machine</span>
+                  <span className="font-medium text-foreground truncate block">{selectedPreviewRow.machine}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground block">Deadline</span>
+                  <span className="font-medium text-foreground">{selectedPreviewRow.deadline}</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <DialogFooter className="flex flex-row justify-end gap-2 pt-2">
             <Button

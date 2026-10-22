@@ -7,11 +7,13 @@ import { useWorkspaceStore } from "@/store/workspaceStore";
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
-  const { isAuthenticated } = useWorkspaceStore();
+  const { isAuthenticated, checkAuthSession } = useWorkspaceStore();
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    checkAuthSession().finally(() => {
+      setMounted(true);
+    });
+  }, [checkAuthSession]);
 
   if (!mounted) {
     return (
@@ -32,4 +34,3 @@ export default function Home() {
     </AppLayout>
   );
 }
-

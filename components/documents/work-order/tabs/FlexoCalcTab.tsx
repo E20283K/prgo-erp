@@ -12,6 +12,7 @@ import {
   ZoomOut,
   Maximize2,
   AlertTriangle,
+  FlaskConical,
   Cog,
   Ruler,
   Eye,
@@ -60,6 +61,10 @@ interface Props {
   defaultProdW?: number;
   defaultProdH?: number;
   defaultBleed?: number;
+  shapeType?: any;
+  customShape?: any;
+  customSvgPath?: string;
+  cornerType?: string;
   onAuditLog?: (action: string, detail: string) => void;
   onFlexoSave?: (result: FlexoLayoutResult) => void;
   onSwitchTab?: (tabKey: string) => void;
@@ -350,8 +355,13 @@ export function FlexoCalcTab({
           <div className="flex items-center gap-2">
             <Cog className="w-4 h-4 text-blue-600" />
             <div>
-              <h2 className="font-semibold text-foreground text-xs leading-none">Flexo Layout Engine</h2>
-              <span className="text-[10px] text-muted-foreground font-mono">Narrow-Web Cylinder Repeat</span>
+              <div className="flex items-center gap-1.5">
+                <h2 className="font-semibold text-foreground text-xs leading-none">Flexo Layout Engine</h2>
+                <Badge variant="outline" className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 text-[9px] font-normal py-0 px-1">
+                  Reja &amp; Simulyatsiya
+                </Badge>
+              </div>
+              <span className="text-[10px] text-muted-foreground font-mono">Narrow-Web Cylinder Repeat (Faqat rejalashtirish)</span>
             </div>
           </div>
           <Badge variant="outline" className={`text-[10px] ${layoutResult.acrossCount > 0 ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-red-50 text-red-700 border-red-200"}`}>

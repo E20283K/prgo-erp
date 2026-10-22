@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
-import { useWorkspaceStore, DEMO_USERS, UserProfile } from "@/store/workspaceStore";
+import { useWorkspaceStore, UserProfile } from "@/store/workspaceStore";
 import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { useTranslations } from "next-intl";
 
@@ -22,34 +22,93 @@ export function LoginScreen() {
   const t = useTranslations("Auth");
   const tTop = useTranslations("Topbar");
 
-  const [email, setEmail] = useState("a.kovalev@printgoo.com");
-  const [password, setPassword] = useState("••••••••");
+  const [email, setEmail] = useState("admin");
+  const [password, setPassword] = useState("admin");
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent, customUser?: UserProfile) => {
-    if (e) e.preventDefault();
+  const performLogin = async (identifier: string, pass: string) => {
     if (isLoading) return;
-
     setIsLoading(true);
-    const userToLogin = customUser || DEMO_USERS.operator;
 
-    setTimeout(() => {
-      setIsLoading(false);
-      login(userToLogin);
+    try {
+      const res = await fetch("/api/v1/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          usernameOrEmail: identifier.trim(),
+          password: pass,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        toast.add({
+          title: "Kirishda xatolik",
+          description: data.error || "Login yoki parol noto'g'ri",
+          type: "danger",
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      const u = data.user;
+      const userProfile: UserProfile = {
+        id: u.id,
+        code: u.code,
+        username: u.username,
+        name: u.fullName,
+        fullName: u.fullName,
+        email: u.email,
+        phone: u.phone,
+        role: u.role,
+        department: u.department,
+        plant: u.plant,
+        initials: u.initials,
+        defaultModule: u.defaultModule,
+        avatar: u.avatar,
+        permissions: u.permissions,
+        scope: u.scope,
+        security: u.security,
+      };
+
+      login(userProfile);
 
       toast.add({
-        title: t("welcomeToastTitle", { name: userToLogin.name }),
-        description: t("welcomeToastDesc", { role: userToLogin.role }),
+        title: t("welcomeToastTitle", { name: userProfile.name }),
+        description: t("welcomeToastDesc", { role: userProfile.role }),
         type: "success",
       });
-    }, 600);
+    } catch (err: any) {
+      toast.add({
+        title: "Server xatosi",
+        description: err.message || "Tizimga ulanishda xatolik yuz berdi",
+        type: "danger",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    if (e) e.preventDefault();
+    performLogin(email, password);
   };
 
   const handleQuickDemo = (roleKey: "operator" | "sales" | "admin") => {
-    const user = DEMO_USERS[roleKey];
-    setEmail(user.email);
-    setPassword("password123");
-    handleSubmit(null as any, user);
+    if (roleKey === "admin") {
+      setEmail("admin");
+      setPassword("admin");
+      performLogin("admin", "admin");
+    } else if (roleKey === "sales") {
+      setEmail("manager");
+      setPassword("manager");
+      performLogin("manager", "manager");
+    } else {
+      setEmail("operator");
+      setPassword("operator");
+      performLogin("operator", "operator");
+    }
   };
 
   return (
@@ -61,7 +120,7 @@ export function LoginScreen() {
           variant="ghost"
           size="sm"
           onClick={toggleTheme}
-          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
           title={tTop("toggleTheme")}
         >
           {theme === "dark" ? (
@@ -76,14 +135,14 @@ export function LoginScreen() {
       <Card className="w-full max-w-sm sm:max-w-md shadow-lg border-border bg-card pt-2">
         <CardContent className="space-y-4 pt-2">
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email Field */}
+            {/* Username / Email Field */}
             <div className="space-y-1.5 text-left">
               <Label htmlFor="email" className="text-xs font-medium">
-                {t("emailLabel")}
+                {t("emailLabel")} / Login
               </Label>
               <Input
                 id="email"
-                type="email"
+                type="text"
                 placeholder={t("emailPlaceholder")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -104,7 +163,7 @@ export function LoginScreen() {
                     e.preventDefault();
                     toast.add({
                       title: t("forgotPasswordTitle"),
-                      description: t("forgotPasswordDesc"),
+                      description: "Parolingizni unutgan bo'lsangiz, administratorga murojaat qiling.",
                       type: "info",
                     });
                   }}
@@ -158,9 +217,10 @@ export function LoginScreen() {
               type="button"
               variant="outline"
               size="sm"
+              disabled={isLoading}
               onClick={() => handleQuickDemo("operator")}
-              className="text-[11px] h-8 px-2 truncate"
-              title="Sign in as Production Operator"
+              className="text-[11px] h-8 px-2 truncate cursor-pointer"
+              title="Operator: operator / operator"
             >
               {t("demoProduction")}
             </Button>
@@ -168,9 +228,10 @@ export function LoginScreen() {
               type="button"
               variant="outline"
               size="sm"
+              disabled={isLoading}
               onClick={() => handleQuickDemo("sales")}
-              className="text-[11px] h-8 px-2 truncate"
-              title="Sign in as Sales Manager"
+              className="text-[11px] h-8 px-2 truncate cursor-pointer"
+              title="Manager: manager / manager"
             >
               {t("demoSales")}
             </Button>
@@ -178,9 +239,10 @@ export function LoginScreen() {
               type="button"
               variant="outline"
               size="sm"
+              disabled={isLoading}
               onClick={() => handleQuickDemo("admin")}
-              className="text-[11px] h-8 px-2 truncate"
-              title="Sign in as Administrator"
+              className="text-[11px] h-8 px-2 truncate cursor-pointer"
+              title="Admin: admin / admin"
             >
               {t("demoAdmin")}
             </Button>

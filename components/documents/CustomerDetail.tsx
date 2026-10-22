@@ -8,6 +8,7 @@ import {
   CustomerContactPerson,
   CustomerContractRecord,
 } from "@/store/workspaceStore";
+import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
 import {
   DocumentHeader,
   DocumentSidebar,
@@ -39,90 +40,11 @@ import { CustomerToolingTab } from "./customer/tabs/CustomerToolingTab";
 import { AktSverkaPrintModal } from "./customer/components/AktSverkaPrintModal";
 
 function ensureCustomerContracts(customer: Partial<CrmCustomerRecord>): CustomerContractRecord[] {
-  if (customer.contracts && customer.contracts.length > 0) {
-    return customer.contracts;
-  }
-  const defaultNo = customer.contractNo || "CON-2026-101";
-  const numMatch = defaultNo.match(/\d+$/);
-  const numPart = numMatch ? numMatch[0] : "101";
-  return [
-    {
-      id: `${customer.id || "cust"}-cnt-2026`,
-      contractNo: defaultNo,
-      title: "Bosh yetkazib berish va poligrafiya shartnomasi",
-      type: "annual",
-      startDate: customer.contractDate || "2026-01-01",
-      endDate: customer.contractExpiry || "2026-12-31",
-      status: "active",
-      isDefault: true,
-      paymentTerms: customer.paymentTerms || "50% Advance / 50% Net 15",
-      notes: "2026-moliyaviy yili uchun Didox va Soliq orqali tasdiqlangan bosh ramkali shartnoma.",
-    },
-    {
-      id: `${customer.id || "cust"}-cnt-2025`,
-      contractNo: `CON-2025-${numPart}`,
-      title: "2025-yilgi mahsulot yetkazib berish shartnomasi",
-      type: "annual",
-      startDate: "2025-01-01",
-      endDate: "2025-12-31",
-      status: "expired",
-      isDefault: false,
-      paymentTerms: "100% Oldindan to'lov",
-      notes: "Arxiv shartnoma. Barcha majburiyatlar va to'lovlar to'liq bajarilgan.",
-    },
-  ];
+  return customer.contracts || [];
 }
 
 function ensureCustomerContacts(customer: Partial<CrmCustomerRecord>): CustomerContactPerson[] {
-  if (customer.contacts && customer.contacts.length > 0) {
-    return customer.contacts;
-  }
-  return [
-    {
-      id: `${customer.id || "cust"}-cont-1`,
-      role: "director",
-      roleLabel: "Bosh direktor",
-      name: "Sherzod Toshmatov",
-      phone: "+998 90 333-44-55",
-      email: "director@client.uz",
-      telegram: "sherzod_director",
-      isPrimary: false,
-      notes: "Shartnoma va strategik masalalar",
-    },
-    {
-      id: `${customer.id || "cust"}-cont-2`,
-      role: "accountant",
-      roleLabel: "Bosh buxgalter",
-      name: "Dilnoza Rahimova",
-      phone: "+998 91 777-66-55",
-      email: "finance@client.uz",
-      telegram: "dilnoza_finance",
-      isPrimary: false,
-      notes: "To'lovlar, schyot-faktura va akt sverka",
-    },
-    {
-      id: `${customer.id || "cust"}-cont-3`,
-      role: "procurement",
-      roleLabel: "Ta'minot / Buyurtmachi",
-      name: customer.contactPerson || "Kamola Rustamova",
-      phone: customer.phone || "+998 93 551-20-10",
-      email: customer.email || "supply@client.uz",
-      telegram: "kamola_procurement",
-      isPrimary: true,
-      notes: "Poligrafiya buyurtmalari, maketlar va tiraj",
-    },
-    {
-      id: `${customer.id || "cust"}-cont-4`,
-      role: "warehouse",
-      roleLabel: "Ombor mudiri",
-      name: "Jasur Aliyev",
-      phone: "+998 99 770-88-99",
-      email: "warehouse@client.uz",
-      telegram: "jasur_ombor",
-      isPrimary: false,
-      notes: "Tayyor mahsulotni qabul qilish va ishonchnoma",
-    },
-  ];
+  return customer.contacts || [];
 }
 
 export function CustomerDetail({ tab }: { tab: DocumentTab }) {
@@ -132,8 +54,12 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
     deliveryActs,
     productionQueue,
     customerTooling,
+    diesTooling,
+    loadDiesToolingAsync,
     finishedGoods,
     upsertCustomer,
+    upsertCustomerAsync,
+    replaceTabId,
     upsertProductionQueueItem,
     setTabUnsaved,
     setLevel3Tab,
@@ -172,31 +98,32 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
     }
     const d = tab.documentData || {};
     const baseCust: CrmCustomerRecord = {
-      id: d.id || (tab.id.startsWith("CUST-") ? tab.id : `CUST-${Math.floor(100 + Math.random() * 899)}`),
-      name: d.name || d.customer || "Alpha Media Group LLC",
-      tin: d.tin || d.customerTin || "305841920",
-      industry: d.industry || "Publishing & Packaging",
-      contactPerson: d.contactPerson || "Azizbek Rahimov",
-      phone: d.phone || "+998 90 123-45-67",
-      email: d.email || "info@client.uz",
-      contractNo: d.contractNo || `CON-2026-${Math.floor(100 + Math.random() * 899)}`,
-      paymentTerms: d.paymentTerms || "50% Prepay / 50% Ship",
-      manager: d.manager || "Elena Voronina",
-      status: d.status === "VIP" || d.status === "Active" || d.status === "New" || d.status === "Blocked" ? d.status : "Active",
-      legalAddress: d.legalAddress || "Toshkent sh., Chilonzor tumani, Bunyodkor shoh ko'chasi 42",
-      deliveryAddress: d.deliveryAddress || "Toshkent vil., Zangiota tumani, Ombor №3",
-      bankName: d.bankName || "ATB Ipoteka Bank Bosh amaliyot filiali",
-      bankAccount: d.bankAccount || "20208000900501234001",
-      mfo: d.mfo || "00450",
-      oked: d.oked || "18120",
-      vatPayer: d.vatPayer ?? true,
-      creditLimitUsd: d.creditLimitUsd ?? 10000,
-      contractDate: d.contractDate || "2026-01-10",
-      contractExpiry: d.contractExpiry || "2026-12-31",
-      receivingHours: d.receivingHours || "Dush-Juma: 09:00 - 18:00 (Tushlik 13:00 - 14:00)",
-      requiresPowerOfAttorney: d.requiresPowerOfAttorney ?? true,
-      deliveryTransportNote: d.deliveryTransportNote || "Fura va Gazel bemalol kiradi, rampa bor",
-      specialRequirements: d.specialRequirements || "Mijoz talablari bo'yicha sifat nazorati va qadoqlash",
+      id: d.id || (tab.id.startsWith("CUST-") ? tab.id : (tab.id.startsWith("draft-") ? tab.id : `draft-cust-${Date.now()}`)),
+      name: d.name || d.customer || "",
+      tin: d.tin || d.customerTin || "",
+      industry: d.industry || "",
+      contactPerson: d.contactPerson || "",
+      phone: d.phone || "",
+      email: d.email || "",
+      contractNo: d.contractNo || "",
+      paymentTerms: d.paymentTerms || "",
+      manager: d.manager || "",
+      status: d.status === "VIP" || d.status === "Active" || d.status === "New" || d.status === "Blocked" ? d.status : "New",
+      currency: d.currency || "UZS",
+      legalAddress: d.legalAddress || "",
+      deliveryAddress: d.deliveryAddress || "",
+      bankName: d.bankName || "",
+      bankAccount: d.bankAccount || "",
+      mfo: d.mfo || "",
+      oked: d.oked || "",
+      vatPayer: d.vatPayer ?? false,
+      creditLimitUsd: d.creditLimitUsd ?? 0,
+      contractDate: d.contractDate || "",
+      contractExpiry: d.contractExpiry || "",
+      receivingHours: d.receivingHours || "",
+      requiresPowerOfAttorney: d.requiresPowerOfAttorney ?? false,
+      deliveryTransportNote: d.deliveryTransportNote || "",
+      specialRequirements: d.specialRequirements || "",
     };
     baseCust.contacts = ensureCustomerContacts(baseCust);
     baseCust.contracts = ensureCustomerContracts(baseCust);
@@ -226,12 +153,12 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   // Match live Client Settlement (Akt Sverka)
   const settlement = useMemo(() => {
     const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
+    if (!cleanName && !form.tin) return null;
     return (
       clientSettlements.find(
         (s) =>
-          s.customer.toLowerCase() === form.name.toLowerCase() ||
-          s.customer.toLowerCase().includes(cleanName) ||
-          form.name.toLowerCase().includes(s.customer.toLowerCase()) ||
+          (cleanName && s.customer.toLowerCase() === cleanName) ||
+          (cleanName && s.customer.toLowerCase().includes(cleanName)) ||
           (form.tin && s.customerTin === form.tin)
       ) || null
     );
@@ -240,25 +167,27 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   // Customer Orders count (Work Orders + Delivery Acts)
   const ordersCount = useMemo(() => {
     const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
+    if (!cleanName) return 0;
     const acts = deliveryActs.filter(
       (a) =>
         a.customer.toLowerCase().includes(cleanName) ||
-        form.name.toLowerCase().includes(a.customer.toLowerCase())
+        cleanName.includes(a.customer.toLowerCase())
     ).length;
     const queues = productionQueue.filter(
       (q) =>
         q.customer.toLowerCase().includes(cleanName) ||
-        form.name.toLowerCase().includes(q.customer.toLowerCase())
+        cleanName.includes(q.customer.toLowerCase())
     ).length;
-    return acts + (queues > 0 ? queues : 1);
+    return acts + queues;
   }, [deliveryActs, productionQueue, form.name]);
 
   // Customer Tooling count
   const toolingCount = useMemo(() => {
     const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
-    const matched = customerTooling.filter((t) => {
+    if (!cleanName && !form.id) return 0;
+    const matchedLegacy = customerTooling.filter((t) => {
       if (t.customerId && t.customerId === form.id) return true;
-      if (!t.customerName) return false;
+      if (!t.customerName || !cleanName) return false;
       const tName = t.customerName.toLowerCase();
       return (
         tName === cleanName ||
@@ -266,15 +195,29 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
         cleanName.includes(tName)
       );
     });
-    return matched.length > 0 ? matched.length : 1;
-  }, [customerTooling, form.id, form.name]);
+
+    const matchedDies = (diesTooling || []).filter((t) => {
+      if (t.customerId && t.customerId === form.id) return true;
+      if (!t.customerName || !cleanName) return false;
+      const tName = t.customerName.toLowerCase();
+      return (
+        tName === cleanName ||
+        tName.includes(cleanName) ||
+        cleanName.includes(tName)
+      );
+    });
+
+    return matchedLegacy.length + matchedDies.length;
+  }, [customerTooling, diesTooling, form.id, form.name]);
 
   // Customer Dedicated Finished Goods Stock (Zaxira)
   const customerStockQty = useMemo(() => {
     const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
+    if (!cleanName && !form.tin) return 0;
     const matched = finishedGoods.filter((fg) => {
       if (fg.customerId && fg.customerId === form.id) return true;
       if (form.tin && fg.customerTin === form.tin) return true;
+      if (!cleanName) return false;
       const fgName = fg.customerName.toLowerCase();
       return (
         fgName === cleanName ||
@@ -287,59 +230,50 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
 
   const closingBalance = settlement?.closingBalance ?? 0;
 
+  const isDraft = !form.id || form.id.startsWith("draft-") || form.id.startsWith("new-") || form.id.startsWith("CUST-NEW-");
+
   // Actions
-  const handleSave = () => {
-    upsertCustomer(form);
+  const handleSave = async () => {
+    let savedClient: any = null;
+    if (upsertCustomerAsync) {
+      savedClient = await upsertCustomerAsync(form);
+    } else {
+      upsertCustomer(form);
+    }
+    if (savedClient && savedClient.id) {
+      setForm(savedClient);
+      if (isDraft || tab.id !== savedClient.id) {
+        replaceTabId(tab.id, savedClient.id, `${savedClient.id}: ${savedClient.name || "Mijoz"}`, savedClient);
+      }
+    }
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Mijoz kartochkasi saqlandi",
-      description: `${form.name} (STIR: ${form.tin}) rekvizitlari muvaffaqiyatli yangilandi.`,
+      description: `${form.name || "Mijoz"} rekvizitlari muvaffaqiyatli saqlandi.`,
       severity: "success",
       link: { module: "crm", subModule: "customers" },
     });
   };
 
-  const handleSaveAndClose = () => {
-    upsertCustomer(form);
-    setTabUnsaved(tab.id, false);
-    addNotification({
-      title: "Mijoz kartochkasi saqlandi",
-      description: `${form.name} ma'lumotlari bazaga yozildi.`,
-      severity: "success",
-      link: { module: "crm", subModule: "customers" },
-    });
+  const handleSaveAndClose = async () => {
+    await handleSave();
     closeTab(tab.id);
   };
 
   const handleCreateClientOrder = () => {
     upsertCustomer(form);
-    const newWoId = `WO-${String(Math.floor(100 + Math.random() * 899)).padStart(5, "0")}`;
+    const newWoId = `draft-wo-${Date.now()}`;
     const newCoId = `CO-${String(Math.floor(10 + Math.random() * 89)).padStart(5, "0")}`;
-
-    // Add directly to production queue so it reflects instantly across the ERP
-    upsertProductionQueueItem({
-      id: newWoId,
-      clientOrderId: newCoId,
-      customer: form.name,
-      product: `${form.name} — Yangi buyurtma`,
-      quantity: 5000,
-      unit: "pcs",
-      pressMachine: "Heidelberg Speedmaster XL 106",
-      department: "Offset Printing",
-      priority: "Normal",
-      stage: "Queue",
-      deadline: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
-    });
 
     openTab({
       id: newWoId,
-      title: `${newWoId}: ${form.name}`,
+      title: `Yangi: ${form.name}`,
       type: "work-order",
       module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
-        docNo: newWoId,
+        docNo: "",
         clientOrderId: newCoId,
         customer: form.name,
         customerTin: form.tin,
@@ -388,19 +322,19 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleReorderWorkOrder = (order: any) => {
-    const newWoId = `WO-00${Math.floor(300 + Math.random() * 699)}`;
+    const newWoId = `draft-wo-${Date.now()}`;
     const today = new Date().toISOString().split("T")[0];
     const deadlineDate = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
 
     openTab({
       id: newWoId,
-      title: `${newWoId}: ${order.product}`,
+      title: `Yangi: ${order.product}`,
       type: "work-order",
       module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
-        docNo: newWoId,
+        docNo: "",
         parentWorkOrderId: order.docId,
         isReorder: true,
         customer: form.name,
@@ -462,7 +396,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
         <DocumentHeader
           icon={Building2}
           title={form.name}
-          docNo={form.id}
+          docNo={isDraft ? "Yangi (Avtomatik)" : form.id}
           status={form.status}
           actions={
             <>
@@ -526,6 +460,12 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
                   <span className="font-mono text-[10px]">{form.contractNo}</span>
                 </InfoRow>
 
+                <InfoRow label="Valyuta:">
+                  <Badge variant="secondary" className="text-[10px] h-4 font-mono font-bold">
+                    {form.currency === "USD" ? "🇺🇸 USD ($)" : "🇺🇿 UZS (so'm)"}
+                  </Badge>
+                </InfoRow>
+
                 <InfoRow label="Joriy Saldo:">
                   <div className="flex items-center gap-1.5 justify-end">
                     <span
@@ -537,7 +477,9 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
                           : "text-emerald-600 dark:text-emerald-400"
                       }`}
                     >
-                      ${Math.abs(closingBalance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {form.currency === "USD" ? "$" : ""}
+                      {Math.abs(closingBalance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {form.currency !== "USD" ? " so'm" : ""}
                     </span>
                     <Badge
                       variant="outline"

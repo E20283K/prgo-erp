@@ -54,6 +54,31 @@ services:
       timeout: 5s
       retries: 10
 
+  doc-service:
+    build:
+      context: ./doc-service
+    container_name: printgoo-doc-service-dev
+    restart: unless-stopped
+    environment:
+      S3_INTERNAL_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-printgoo_minio}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-printgoo_minio_secret_key}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET_DOCS: ${S3_BUCKET_DOCS:-printgoo-docs}
+      TZ: Asia/Tashkent
+    ports:
+      - "${DOC_SERVICE_PORT:-8000}:8000"
+    volumes:
+      - ./doc-service:/app
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   pgdata_dev:
   redisdata_dev:

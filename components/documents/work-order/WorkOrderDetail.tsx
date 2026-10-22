@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { cn } from "cn";
 import {
   FileText,
@@ -53,6 +53,7 @@ import {
 } from "../common/DocumentShell";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
 import { useWorkspaceStore, DocumentTab } from "@/store/workspaceStore";
+import { useLookupStore } from "@/store/lookupStore";
 import { useTranslations } from "next-intl";
 import { CompactSelection, GridSelection } from "@glideapps/glide-data-grid";
 
@@ -61,9 +62,11 @@ import {
   WorkOrderSampleData,
   SampleRevisionRecord,
   SizeDistribution,
+  SkuArtwork,
   OrderAttachment,
   RouteStep,
   ShiftEvent,
+  MasterSpecification,
   MASTER_SPECIFICATIONS,
   SITE_OPTIONS,
   TECHNOLOGY_OPTIONS,
@@ -71,9 +74,11 @@ import {
   RECIPE_MATERIALS,
   MACHINE_MAP,
   getInitialOperations,
+  getNextWorkOrderNo,
+  type WorkOrderDepartment,
 } from "./types";
 import { EXAMPLE_ATTACHMENTS } from "@/components/file-viewer/file-utils";
-import { OverviewTab } from "./tabs/OverviewTab";
+import { OverviewTab, getDisplayImageUrl } from "./tabs/OverviewTab";
 import { SpecificationsTab } from "./tabs/SpecificationsTab";
 import { MaterialsTab } from "./tabs/MaterialsTab";
 import { OperationsTab } from "./tabs/OperationsTab";
@@ -90,7 +95,7 @@ import { JobTicketDialog } from "./dialogs/JobTicketDialog";
 import { PackagingDialog } from "./dialogs/PackagingDialog";
 import { BoxLabelPrintModal } from "./dialogs/BoxLabelPrintModal";
 import { SaveSpecDialog } from "./dialogs/SaveSpecDialog";
-import { BomItem } from "../BomMaterialsGrid";
+import { BomItem, RECIPE_BOM_MAP } from "../BomMaterialsGrid";
 import { WorkOrderPackagingSummary } from "./types";
 import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEngine";
 
@@ -102,7 +107,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     currentUser,
     setTabUnsaved,
     updateTabData,
+    replaceTabId,
     upsertProductionQueueItem,
+    upsertWorkOrderAsync,
+    loadProductionQueue,
     closeTab,
     requestCloseTab,
     setLevel3Tab,
@@ -112,103 +120,163 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     createDeliveryActFromOrder,
     masterSpecifications,
     upsertMasterSpecification,
+    loadCrmCustomers,
+    machines: storeMachines,
+    loadMachines,
   } = useWorkspaceStore();
+
+  useEffect(() => {
+    loadCrmCustomers();
+    loadMachines();
+  }, [loadCrmCustomers, loadMachines]);
   const isDark = theme === "dark";
   const data = tab.documentData || {};
+
+  // Find real queue item from workspaceStore to ensure all photos and attachments are 100% available
+  const initialDocNo = data.docNo || (tab.id.startsWith("draft-") || tab.id.startsWith("temp-") ? "" : tab.id);
+  const [docNo, setDocNo] = useState(initialDocNo);
+  const isDraft = !docNo || tab.id.startsWith("draft-") || tab.id.startsWith("temp-");
+
+  const queueLookupKey = docNo || tab.id;
+  const initialQueueItem = useWorkspaceStore.getState().productionQueue.find((q) => q.id === queueLookupKey);
+  const queueItem = useWorkspaceStore(
+    useCallback((s) => s.productionQueue.find((q) => q.id === queueLookupKey), [queueLookupKey])
+  );
+
+  const effectivePhotoUrl = data.photoUrl || (data.photoUrls && data.photoUrls[0]) || initialQueueItem?.photoUrl || (initialQueueItem?.photoUrls && initialQueueItem?.photoUrls[0]) || "";
+  const effectivePhotoUrls: string[] = (data.photoUrls && data.photoUrls.length > 0)
+    ? data.photoUrls
+    : (data.photoUrl
+        ? [data.photoUrl]
+        : (initialQueueItem?.photoUrls && initialQueueItem?.photoUrls.length > 0
+            ? initialQueueItem.photoUrls
+            : (initialQueueItem?.photoUrl ? [initialQueueItem.photoUrl] : [])));
+  const initialAttachments = (data.attachments && data.attachments.length > 0)
+    ? data.attachments
+    : (initialQueueItem?.attachments && initialQueueItem.attachments.length > 0 ? initialQueueItem.attachments : []);
 
   const [viewMode, setViewMode] = useState<"manager" | "operator">("manager");
   const isOperator = viewMode === "operator";
 
   const [formData, setFormData] = useState<WorkOrderFormData>({
-    customer: data.customer || "Alpha Media Group",
-    product: data.product || "A4 Catalog 96 pages",
-    department: data.department || "Offset",
-    site: data.site || "Building 1",
-    recipe: data.recipe || (data.department === "Flexo" ? "FLEXO_NYLON_V1" : data.department === "Jacquard" ? "JACQ_WOVEN_V1" : "OFFSET_STD_V1"),
-    quantity: data.quantity || 5000,
-    unit: data.unit || "pcs",
-    status: data.status || "Active",
-    priority: data.priority || "High",
-    pressMachine: data.pressMachine || "Heidelberg Speedmaster XL 106",
-    startDate: data.startDate || "2026-09-30",
-    deadline: data.deadline || "2026-10-06",
-    paperStock: data.paperStock || "Galerie Art Silk 150g/m²",
-    coating: data.coating || "Soft-Touch Matte + Spot UV",
-    lamination: data.lamination || "Soft-Touch Matte",
+    customer: data.customer || initialQueueItem?.customer || "",
+    product: data.product || initialQueueItem?.product || "",
+    department: data.department || initialQueueItem?.department || "Offset",
+    site: data.site || initialQueueItem?.site || "",
+    recipe: data.recipe || "",
+    quantity: data.quantity || initialQueueItem?.quantity || 0,
+    unit: data.unit || initialQueueItem?.unit || "pcs",
+    status: data.status || initialQueueItem?.stage || "Draft",
+    priority: data.priority || initialQueueItem?.priority || "Normal",
+    pressMachine: data.pressMachine || initialQueueItem?.pressMachine || "",
+    startDate: data.startDate || "",
+    deadline: data.deadline || initialQueueItem?.deadline || "",
+    paperStock: data.paperStock || "",
+    coating: data.coating || "",
+    lamination: data.lamination || "",
     laminationSides: data.laminationSides || "1s",
-    laminationMicron: data.laminationMicron || 28,
-    embellishment: data.embellishment || "Spot UV (3D)",
-    priceTotal: data.priceTotal || 14850.0,
-    currency: data.currency || "USD",
-    photoUrl: data.photoUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
-    photoUrls: data.photoUrls || [
-      data.photoUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
-      "/sample-proof.jpg",
-      "/files_example/PrintGoo CMYK Label Logo.png"
-    ],
-    itemCategory: data.itemCategory || "Hangtag",
-    width: data.width || 50,
-    height: data.height || 90,
+    laminationMicron: data.laminationMicron || 0,
+    embellishment: data.embellishment || "",
+    priceTotal: data.priceTotal || 0,
+    currency: data.currency || "UZS",
+    photoUrl: effectivePhotoUrl,
+    photoUrls: effectivePhotoUrls,
+    artworkFront: data.artworkFront || "",
+    itemCategory: data.itemCategory || "",
+    width: data.width || 0,
+    height: data.height || 0,
     dimensionUnit: data.dimensionUnit || "mm",
     cornerType: data.cornerType || "Square",
-    bleed: data.bleed || 2,
-    shapeType: data.shapeType || (data.itemCategory === "Carton" ? "carton_box" : data.itemCategory === "Flyer" ? "folded" : "rectangle"),
-    foldType: data.foldType || "half_vertical",
-    boxType: data.boxType || "tuck_end",
-    boxDepth: data.boxDepth || 40,
-    customShape: data.customShape || "arch",
+    bleed: data.bleed || 0,
+    shapeType: data.shapeType || "rectangle",
+    foldType: data.foldType || "",
+    boxType: data.boxType || "",
+    boxDepth: data.boxDepth || 0,
+    customShape: data.customShape || "",
     customSvgPath: data.customSvgPath || "",
-    colorsConfig: data.colorsConfig || "4+0 (CMYK)",
-    frontColors: data.frontColors || { c: true, m: true, y: true, k: true },
+    colorsConfig: data.colorsConfig || initialQueueItem?.colors || "",
+    frontColors: data.frontColors || { c: false, m: false, y: false, k: false },
     backColors: data.backColors || { c: false, m: false, y: false, k: false },
-    spotColors: data.spotColors || ["PANTONE 021 C (Neon Orange)"],
-    spotColorItems: data.spotColorItems || [
-      { id: "spot-1", name: "PANTONE 021 C (Neon Orange)", code: "021 C", hex: "#fe5000", side: "front" }
-    ],
-    holeSize: data.holeSize ?? (data.itemCategory === "Hangtag" ? 4 : 0),
-    holePosition: data.holePosition || (data.itemCategory === "Hangtag" ? "top-center" : "none"),
-    holeOffset: data.holeOffset ?? 6,
-    sizes: data.sizes || [
-      { id: "1", size: "S", quantity: 1500 },
-      { id: "2", size: "M", quantity: 2000 },
-      { id: "3", size: "L", quantity: 1500 },
-    ],
+    spotColors: data.spotColors || initialQueueItem?.spotColors || [],
+    spotColorItems: data.spotColorItems || [],
+    holeSize: data.holeSize ?? 0,
+    holePosition: data.holePosition || "none",
+    holeOffset: data.holeOffset ?? 0,
+    sizes: data.sizes || [],
     kashirovkaMode: data.kashirovkaMode || "none",
     kashirovkaStrategy: data.kashirovkaStrategy || "split_half_sheet",
     kashirovkaLayers: data.kashirovkaLayers || [],
-    kashirovkaGlueGsm: data.kashirovkaGlueGsm ?? 25,
-    kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets ?? 50,
-    kashirovkaCuringHours: data.kashirovkaCuringHours ?? 12,
-    milestones: data.milestones || [
-      { id: "m1", name: "Preflight File", department: "Prepress", status: "Done", assignedTo: "Prepress Dept", dueDate: "2026-10-01 10:00" },
-      { id: "m2", name: "Materials", department: "Warehouse", status: "Done", assignedTo: "Warehouse Dept", dueDate: "2026-10-02 14:00" },
-      { id: "m3", name: "CTP Plates", department: "Prepress", status: "In Progress", assignedTo: "K. Anderson (Prepress)", dueDate: "2026-10-05 16:30" },
-      { id: "m4", name: "Printing", department: "Offset", status: "Pending", assignedTo: "Press Dept", dueDate: "2026-10-06 11:30" },
-      { id: "m5", name: "Post-press", department: "Finishing", status: "Pending", assignedTo: "Finishing Dept", dueDate: "2026-10-06 18:00" }
-    ],
+    kashirovkaGlueGsm: data.kashirovkaGlueGsm ?? 0,
+    kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets ?? 0,
+    kashirovkaCuringHours: data.kashirovkaCuringHours ?? 0,
+    milestones: data.milestones || [],
     parentWorkOrderId: data.parentWorkOrderId || data.linkedWoId || undefined,
     isReorder: data.isReorder ?? Boolean(data.parentWorkOrderId),
   });
 
-  const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(
-    data.attachments || EXAMPLE_ATTACHMENTS
-  );
+  const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(() => {
+    const list = initialAttachments && Array.isArray(initialAttachments) ? [...initialAttachments] : [];
+    const existingUrls = new Set(list.map((a: any) => a.url));
+    const allPhotos: string[] = effectivePhotoUrls;
+
+    allPhotos.forEach((url, idx) => {
+      if (url && !existingUrls.has(url)) {
+        list.push({
+          id: `att-initial-photo-${idx}`,
+          name: `Sample_Proof_${idx + 1}.jpg`,
+          size: "Sample Proof",
+          type: "image/jpeg",
+          date: new Date().toISOString().slice(0, 16).replace("T", " "),
+          isImage: true,
+          url,
+        });
+        existingUrls.add(url);
+      }
+    });
+    return list;
+  });
+
+  // Keep state synchronized with queueItem if loaded asynchronously
+  useEffect(() => {
+    if (queueItem && !tab.isUnsaved) {
+      if (!formData.photoUrl && (queueItem.photoUrl || (queueItem.photoUrls && queueItem.photoUrls.length > 0))) {
+        const qUrl = queueItem.photoUrl || queueItem.photoUrls![0];
+        const qUrls = queueItem.photoUrls && queueItem.photoUrls.length > 0 ? queueItem.photoUrls : [qUrl];
+        setFormData((prev) => ({
+          ...prev,
+          photoUrl: qUrl,
+          photoUrls: qUrls,
+          artworkFront: prev.artworkFront || data.artworkFront || "",
+        }));
+      }
+      if (queueItem.attachments && queueItem.attachments.length > 0 && orderAttachments.length === 0) {
+        setOrderAttachments(queueItem.attachments);
+      }
+    }
+  }, [queueItem, tab.isUnsaved, formData.photoUrl, orderAttachments.length]);
+
+  const [skuArtworks, setSkuArtworks] = useState<SkuArtwork[]>(data.skuArtworks || []);
+
+  const handleSkuArtworksChange = (artworks: SkuArtwork[]) => {
+    setSkuArtworks(artworks);
+    setFormData((prev) => ({ ...prev, skuArtworks: artworks }));
+    updateTabData(tab.id, { skuArtworks: artworks });
+    setTabUnsaved(tab.id, true);
+  };
 
   const [sampleData, setSampleData] = useState<WorkOrderSampleData>({
     isRequired: data.orderType === "Sample" || data.sampleRequired === true,
-    sampleQty: data.sampleQty || 5,
+    sampleQty: data.sampleQty || 0,
     testPurpose: data.sampleTestPurpose || "color_proof",
-    testMachine: data.sampleTestMachine || data.pressMachine || "Heidelberg Speedmaster XL 106",
+    testMachine: data.sampleTestMachine || "",
     substrateSource: data.sampleSubstrateSource || "precut",
-    technicalNotes: data.sampleTechNotes || "CMYK spektral zichlik va pantone rang solishtirilsin",
+    technicalNotes: data.sampleTechNotes || "",
     isProduced: data.sampleProduced || false,
     producedAt: data.sampleProducedAt || undefined,
     producedBy: data.sampleProducedBy || undefined,
     qcPassed: data.sampleQcPassed || false,
     qcNotes: data.sampleQcNotes || undefined,
-    approvalStatus:
-      data.sampleApprovalStatus ||
-      (data.orderType === "Sample" ? "pending_production" : "approved"),
+    approvalStatus: data.sampleApprovalStatus || "none",
     approvedAt: data.sampleApprovedAt || undefined,
     approvedBy: data.sampleApprovedBy || undefined,
     revisions: data.sampleRevisions || [],
@@ -216,11 +284,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   });
 
   const handleSampleChange = (field: keyof WorkOrderSampleData, val: any) => {
-    setSampleData((prev) => {
-      const next = { ...prev, [field]: val };
-      updateTabData(tab.id, { sampleData: next, [field]: val });
-      return next;
-    });
+    setSampleData((prev) => ({ ...prev, [field]: val }));
+    updateTabData(tab.id, { [field]: val });
     setTabUnsaved(tab.id, true);
   };
 
@@ -309,7 +374,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   // Operations Route State
   const [operations, setOperations] = useState<RouteStep[]>(
-    data.operations || getInitialOperations(formData.recipe, formData.pressMachine, formData.department, formData.quantity)
+    data.operations || []
   );
 
   const prevRecipeRef = React.useRef(formData.recipe);
@@ -330,28 +395,22 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const [opDialogForm, setOpDialogForm] = useState<Omit<RouteStep, "id">>({
     stepNumber: 10,
     name: "",
-    machine: formData.pressMachine,
-    operator: "K. Anderson",
+    machine: formData.pressMachine || "",
+    operator: "",
     duration: 1,
-    qtyCompleted: "0 / 5,000",
+    qtyCompleted: `0 / ${formData.quantity || 0}`,
     status: "Queued",
   });
 
   // Save As Specification State
   const [isSaveSpecDialogOpen, setIsSaveSpecDialogOpen] = useState(false);
-  const [currentBomItems, setCurrentBomItems] = useState<BomItem[]>([]);
+  const [currentBomItems, setCurrentBomItems] = useState<BomItem[]>(data.materials || []);
 
   // Shift Timeline & Log Events State
-  const [selectedTimelineOpId, setSelectedTimelineOpId] = useState<string>("2");
-  const [shiftEvents, setShiftEvents] = useState<ShiftEvent[]>([
-    { id: "e1", opId: "1", time: "13:30", type: "Setup", note: "Plate imaging RIP calibration and density check", operator: "K. Anderson" },
-    { id: "e2", opId: "1", time: "13:55", type: "Run", note: "Laser exposure and automated plate chemical rinse completed", operator: "K. Anderson" },
-    { id: "e3", opId: "2", time: "14:00", type: "Setup", note: "Machine setup & plates loaded", operator: "M. Ivanova" },
-    { id: "e4", opId: "2", time: "14:15", type: "Delay", note: "Waiting for paper delivery from warehouse", operator: "M. Ivanova" },
-    { id: "e5", opId: "2", time: "14:40", type: "Run", note: "Print run started", operator: "M. Ivanova" },
-    { id: "e6", opId: "3", time: "16:00", type: "Setup", note: "Heating thermal lamination rollers to 115°C", operator: "A. Becker" },
-    { id: "e7", opId: "4", time: "17:15", type: "Setup", note: "Die matrix mounting and pressure alignment", operator: "S. Petrov" },
-  ]);
+  const [selectedTimelineOpId, setSelectedTimelineOpId] = useState<string>("1");
+  const [shiftEvents, setShiftEvents] = useState<ShiftEvent[]>(
+    data.events || data.shiftEvents || []
+  );
 
   const [isLogEventDialogOpen, setIsLogEventDialogOpen] = useState(false);
   const [logEventForm, setLogEventForm] = useState<{
@@ -405,8 +464,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   // Action: Create Repeat / Reorder Work Order from current order
   const handleReorderWorkOrder = () => {
-    const currentDocNo = data.docNo || tab.id;
-    const newWoId = `WO-00${Math.floor(300 + Math.random() * 699)}`;
+    const currentDocNo = docNo || data.docNo || tab.id;
+    const draftId = `draft-wo-${Date.now()}`;
     const today = new Date().toISOString().split("T")[0];
     const deadlineDate = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
 
@@ -421,7 +480,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const reorderPayload = {
       ...data,
       ...formData,
-      docNo: newWoId,
+      docNo: "",
       parentWorkOrderId: currentDocNo,
       isReorder: true,
       status: "Draft",
@@ -446,18 +505,49 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     };
 
     openTab({
-      id: newWoId,
-      title: `${newWoId}: ${formData.product}`,
+      id: draftId,
+      title: `Yangi: ${formData.product} (Takroriy)`,
       type: "work-order",
       module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
-      documentData: reorderPayload,
+      documentData: {
+        ...reorderPayload,
+        id: draftId,
+        docNo: "",
+      },
     });
 
     addNotification({
       title: "Qayta buyurtma ochildi",
-      description: `${currentDocNo} asosida yangi ${newWoId} takroriy hujjati yaratildi. Barcha texnik parametrlar nusxalandi.`,
+      description: `${currentDocNo} asosida yangi takroriy buyurtma qoralamasi ochildi. Barcha texnik parametrlar nusxalandi.`,
+      severity: "success",
+    });
+  };
+
+
+  const handleSelectProductTemplate = (spec: MasterSpecification) => {
+    handleFieldChange("product", spec.name);
+    handleFieldChange("recipe", spec.code);
+    if (spec.department && spec.department !== formData.department) {
+      handleDepartmentChange(spec.department);
+    }
+    // Load associated BOM materials
+    if (RECIPE_BOM_MAP[spec.code]) {
+      const newItems = RECIPE_BOM_MAP[spec.code];
+      setCurrentBomItems(newItems);
+      handleFieldChange("materials", newItems);
+    }
+    // Load technological route operations
+    const initialOps = getInitialOperations(spec.code, formData.pressMachine, spec.department || formData.department, formData.quantity);
+    if (initialOps && initialOps.length > 0) {
+      setOperations(initialOps);
+      handleFieldChange("operations", initialOps);
+    }
+    setTabUnsaved(tab.id, true);
+    addNotification({
+      title: "Mahsulot va Texkarta biriktirildi",
+      description: `${spec.code}: ${spec.name} retsepti, xomashyo va marshruti buyurtmaga to'liq yuklandi.`,
       severity: "success",
     });
   };
@@ -465,7 +555,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleSaveAsNewSpec = (specData: {
     code: string;
     name: string;
-    department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+    department: WorkOrderDepartment;
     description: string;
     materials: BomItem[];
     operations: RouteStep[];
@@ -530,27 +620,64 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   };
 
   // Derived Values
+  const { machines: dbMachines, specifications: dbSpecs, sites: dbSites } = useLookupStore();
+
   const activeSpec = useMemo(
     () =>
-      (masterSpecifications || MASTER_SPECIFICATIONS).find((s) => s.code === formData.recipe) ||
-      MASTER_SPECIFICATIONS.find((s) => s.code === formData.recipe),
-    [masterSpecifications, formData.recipe]
+      (masterSpecifications || []).find((s) => s.code === formData.recipe) ||
+      (dbSpecs && dbSpecs.find((s: any) => s.code === formData.recipe)),
+    [masterSpecifications, dbSpecs, formData.recipe]
   );
   const activeSite = useMemo(
-    () => SITE_OPTIONS.find((s) => s.id === formData.site || s.name === formData.site) || SITE_OPTIONS[0],
-    [formData.site]
+    () =>
+      (dbSites && dbSites.find((s: any) => s.id === formData.site || s.name === formData.site)) ||
+      SITE_OPTIONS.find((s) => s.id === formData.site || s.name === formData.site) || {
+        id: formData.site || "site-1",
+        name: formData.site || "Bosh sex",
+        label: formData.site || "Bosh sex",
+        location: "Asosiy bino",
+        facilities: "Ishlab chiqarish",
+        status: "Active",
+      },
+    [dbSites, formData.site]
   );
   const activeTech = useMemo(
     () => TECHNOLOGY_OPTIONS.find((t) => t.id === formData.department) || TECHNOLOGY_OPTIONS[0],
     [formData.department]
   );
+  const allDbMachines = useMemo(() => {
+    if (storeMachines && storeMachines.length > 0) return storeMachines;
+    if (dbMachines && dbMachines.length > 0) return dbMachines;
+    return [];
+  }, [storeMachines, dbMachines]);
+
   const activeMachine = useMemo(
-    () => MACHINE_OPTIONS.find((m) => m.name === formData.pressMachine || m.code === formData.pressMachine),
-    [formData.pressMachine]
+    () =>
+      (allDbMachines && allDbMachines.find((m: any) => m.name === formData.pressMachine || m.code === formData.pressMachine || m.id === formData.pressMachine)) ||
+      (formData.pressMachine ? {
+        id: "m-custom",
+        code: "M-ASSIGNED",
+        name: formData.pressMachine,
+        department: formData.department,
+        speed: "Standart",
+        format: "Standart",
+        features: "Maxsus uskuna",
+        status: "Running",
+        isAvailable: true,
+      } : undefined),
+    [allDbMachines, formData.pressMachine, formData.department]
   );
   const currentDeptMachines = useMemo(
-    () => MACHINE_OPTIONS.filter((m) => m.department === formData.department),
-    [formData.department]
+    () => {
+      const fromDb = (allDbMachines || []).filter((m: any) => {
+        if (!m.department) return false;
+        if (m.department.toLowerCase() === formData.department.toLowerCase()) return true;
+        return false;
+      });
+      if (fromDb.length > 0) return fromDb;
+      return allDbMachines;
+    },
+    [allDbMachines, formData.department]
   );
 
   const currentRecipeMaterials = RECIPE_MATERIALS[formData.recipe] || [];
@@ -571,14 +698,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const selectedOp = useMemo(() => {
     return operations.find((op) => op.id === selectedTimelineOpId) || operations[0] || {
-      id: "1",
-      stepNumber: 10,
-      name: "Operation",
-      machine: formData.pressMachine,
-      operator: "K. Anderson",
-      duration: 2.5,
-      qtyCompleted: "0 / 5,000",
-      status: "In Progress" as const,
+      id: "",
+      stepNumber: 0,
+      name: "Operatsiya kiritilmagan",
+      machine: formData.pressMachine || "—",
+      operator: "—",
+      duration: 0,
+      qtyCompleted: "0 / 0",
+      status: "Queued" as const,
     };
   }, [operations, selectedTimelineOpId, formData.pressMachine]);
 
@@ -588,33 +715,27 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   // Actions
   const handleFieldChange = (field: string, val: any) => {
-    setFormData((prev) => {
-      const next = { ...prev, [field]: val };
-      updateTabData(tab.id, { [field]: val });
-      return next;
-    });
+    setFormData((prev) => ({ ...prev, [field]: val }));
+    updateTabData(tab.id, { [field]: val });
     setTabUnsaved(tab.id, true);
   };
 
   const handleSizesChange = (newSizes: SizeDistribution[]) => {
     const total = newSizes.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
-    setFormData((prev) => {
-      const next = {
-        ...prev,
-        sizes: newSizes,
-        ...(newSizes.length > 0 ? { quantity: total } : {}),
-      };
-      updateTabData(tab.id, {
-        sizes: newSizes,
-        ...(newSizes.length > 0 ? { quantity: total } : {}),
-      });
-      return next;
-    });
+    const updates = {
+      sizes: newSizes,
+      ...(newSizes.length > 0 ? { quantity: total } : {}),
+    };
+    setFormData((prev) => ({
+      ...prev,
+      ...updates,
+    }));
+    updateTabData(tab.id, updates);
     setTabUnsaved(tab.id, true);
   };
 
   const handleDepartmentChange = (newDept: string) => {
-    const defaultRecipe = newDept === "Flexo" ? "FLEXO_NYLON_V1" : newDept === "Jacquard" ? "JACQ_WOVEN_V1" : newDept === "Post-press" ? "POST_GENERIC_V1" : "OFFSET_STD_V1";
+    const defaultRecipe = newDept === "Flexo" ? "FLEXO_NYLON_V1" : newDept === "Jacquard" ? "JACQ_WOVEN_V1" : "OFFSET_STD_V1";
     const available = MACHINE_MAP[newDept] || [];
     const defaultMachine = available[0] || formData.pressMachine;
     setFormData((prev) => ({
@@ -631,16 +752,48 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  const persistOrderDetails = () => {
-    const docNo = data.docNo || tab.id;
+  const persistOrderDetails = async (): Promise<string> => {
+    let currentDocNo = docNo;
+    const isCurrentlyDraft = isDraft || !currentDocNo || tab.id.startsWith("draft-") || tab.id.startsWith("temp-");
+
+    if (upsertWorkOrderAsync) {
+      const savedResult = await upsertWorkOrderAsync({
+        ...formData,
+        docNo: isCurrentlyDraft ? undefined : currentDocNo,
+        operations,
+        sampleData,
+        attachments: orderAttachments,
+        skuArtworks,
+      });
+
+      if (savedResult && typeof savedResult === "object" && savedResult.docNo) {
+        currentDocNo = savedResult.docNo;
+        setDocNo(currentDocNo);
+        if (isCurrentlyDraft) {
+          replaceTabId(
+            tab.id,
+            currentDocNo,
+            `${currentDocNo}: ${formData.product || "Yangi buyruq"}`,
+            {
+              ...data,
+              ...formData,
+              docNo: currentDocNo,
+            }
+          );
+        }
+      }
+    }
+
+    const effectiveId = currentDocNo || tab.id;
+
     updateTabData(
-      tab.id,
+      effectiveId,
       {
         ...data,
         ...formData,
         operations,
         shiftEvents,
-        docNo,
+        docNo: currentDocNo,
         sampleData,
         sampleQty: sampleData.sampleQty,
         sampleRequired: formData.orderType === "Sample",
@@ -651,11 +804,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         sampleQcPassed: sampleData.qcPassed,
         sampleRevisions: sampleData.revisions,
         attachments: orderAttachments,
+        skuArtworks,
       },
-      `${docNo}: ${formData.product}`
+      `${effectiveId}: ${formData.product || "Yangi buyruq"}`
     );
+
     upsertProductionQueueItem({
-      id: docNo,
+      id: effectiveId,
       customer: formData.customer,
       product: formData.product,
       quantity:
@@ -680,21 +835,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           : "none",
       sampleQty: sampleData.sampleQty,
     });
-    setTabUnsaved(tab.id, false);
+
+    setTabUnsaved(effectiveId, false);
+    return effectiveId;
   };
 
-  const handleSave = () => {
-    persistOrderDetails();
+  const handleSave = async () => {
+    const savedId = await persistOrderDetails();
     addNotification({
-      title: "Order Details Saved",
-      description: `${data.docNo || tab.id} — ${formData.product} (${formData.customer}) updated.`,
+      title: "Buyurtma saqlandi",
+      description: `${savedId} — ${formData.product || "Buyurtma"} (${formData.customer || "Mijoz"}) muvaffaqiyatli saqlandi.`,
       severity: "success",
     });
   };
 
-  const handleSaveAndClose = () => {
-    persistOrderDetails();
-    closeTab(tab.id);
+  const handleSaveAndClose = async () => {
+    const savedId = await persistOrderDetails();
+    closeTab(savedId);
   };
 
   const handleSaveAndCloseRef = React.useRef(handleSaveAndClose);
@@ -908,8 +1065,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         {/* 1C Level-3 Document Workspace Header Bar */}
         <DocumentHeader
           icon={Factory}
-          title={formData.product}
-          docNo={data.docNo || tab.id}
+          title={formData.product || "Yangi buyruq"}
+          docNo={docNo || "Yangi (Avtomatik)"}
           date={formData.startDate || "2026-09-30"}
           status={formData.status}
           priority={formData.priority}
@@ -1111,6 +1268,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   </div>
                 </InfoRow>
 
+                {/* 1.1 Jami Summa */}
+                <InfoRow label="Jami summa">
+                  <span className="font-mono font-bold text-foreground">
+                    {formatMoney(formData.priceTotal, formData.currency, 0)}
+                  </span>
+                </InfoRow>
+
                 {/* 2. Qog'oz / Xomashyo */}
                 <InfoRow label="Qog'oz" title={formData.paperStock}>
                   <span className="truncate max-w-[125px] font-medium text-foreground" title={formData.paperStock}>
@@ -1121,7 +1285,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 {/* 3. Ranglilik (CMYK / Pantones) */}
                 <InfoRow label="Ranglilik">
                   <span className="font-mono font-medium text-foreground">
-                    {formData.colorsConfig || "4+0 (CMYK)"}
+                    {formData.colorsConfig || "—"}
                   </span>
                 </InfoRow>
 
@@ -1191,7 +1355,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 id: "specs",
                 label: tShell("specsAndDrawing"),
                 icon: Ruler,
-                badge: `${formData.width || 50}×${formData.height || 90}`,
+                badge: formData.width && formData.height ? `${formData.width}×${formData.height}` : null,
               },
               ...(isOffset ? [{ id: "layout", label: tOrder("tabPlanning"), icon: LayoutTemplate }] : []),
               ...(isFlexo ? [{ id: "flexo", label: "Flexo Imposition", icon: Disc }] : []),
@@ -1253,7 +1417,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
             {/* Tab 1: Overview */}
             <OverviewTab
-              formData={formData}
+              onSelectProductTemplate={handleSelectProductTemplate}
+              formData={{ ...formData, skuArtworks }}
               handleFieldChange={handleFieldChange}
               handleSizesChange={handleSizesChange}
               handleDepartmentChange={handleDepartmentChange}
@@ -1265,6 +1430,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               activeMachine={activeMachine}
               currentDeptMachines={currentDeptMachines}
               currentRecipeMaterials={currentRecipeMaterials}
+              materials={currentBomItems}
+              operations={operations}
               hasShortage={hasShortage}
               orderAttachments={orderAttachments}
               setOrderAttachments={setOrderAttachments}
@@ -1281,7 +1448,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
             {/* Tab 2: Specifications & Die-Line (Extracted & Enhanced) */}
             <SpecificationsTab
-              formData={formData}
+              formData={{ ...formData, skuArtworks }}
               handleFieldChange={handleFieldChange}
               handleSizesChange={handleSizesChange}
               onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
@@ -1289,6 +1456,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               isOperator={isOperator}
               sampleData={sampleData}
               onSampleChange={handleSampleChange}
+              orderAttachments={orderAttachments}
+              setOrderAttachments={setOrderAttachments}
             />
 
             {/* Tab: Imposition / Layout for Offset & Front-Back Print Planning */}
@@ -1372,6 +1541,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               department={formData.department}
               recipe={formData.recipe}
               activeSpec={activeSpec}
+              initialItems={currentBomItems}
               onRecipeChange={(code, dept) => {
                 handleFieldChange("recipe", code);
                 if (dept && formData.department !== dept) {
@@ -1380,7 +1550,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               }}
               onOpenTab={openTab}
               isOperator={isOperator}
-              onItemsChange={(newItems) => setCurrentBomItems(newItems)}
+              onItemsChange={(newItems) => {
+                setCurrentBomItems(newItems);
+                handleFieldChange("materials", newItems);
+              }}
               onSaveAsSpec={(items) => {
                 setCurrentBomItems(items);
                 setIsSaveSpecDialogOpen(true);
@@ -1424,36 +1597,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               setSelectedTimelineOpId={setSelectedTimelineOpId}
               selectedOp={selectedOp}
               selectedOpEvents={selectedOpEvents}
-              onOpenLogEvent={handleOpenLogEvent}
-              onUpdateStepOutput={(opId, newCompleted, target, unitSuffix, logNote, wasteQty, wasteReason) => {
-                setOperations((prev) =>
-                  prev.map((op) => {
-                    if (op.id !== opId) return op;
-                    const formatted = `${newCompleted.toLocaleString()} / ${target.toLocaleString()}${unitSuffix}`;
-                    const nextStatus =
-                      newCompleted >= target ? "Finished" : newCompleted > 0 ? "In Progress" : "Queued";
-                    return {
-                      ...op,
-                      qtyCompleted: formatted,
-                      status: nextStatus,
-                    };
-                  })
-                );
-                const now = new Date();
-                const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-                const newEvent: ShiftEvent = {
-                  id: "e_" + Date.now(),
-                  opId,
-                  time: timeStr,
-                  type: wasteQty && wasteQty > 0 ? "Waste" : "Run",
-                  note: logNote,
-                  operator: selectedOp.operator,
-                  wasteQty,
-                  wasteReason,
-                };
-                setShiftEvents((prev) => [newEvent, ...prev]);
-                setTabUnsaved(tab.id, true);
-              }}
+              onOpenQuickPalletLog={handleOpenLogEvent}
               onChangeStepStatus={(opId, status) => {
                 setOperations((prev) =>
                   prev.map((op) => (op.id === opId ? { ...op, status } : op))
@@ -1466,7 +1610,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             {!isOperator && (
               <TabsContent value="sample" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
                 <SampleTab
-                  formData={formData}
+                  formData={{ ...formData, skuArtworks }}
                   sampleData={sampleData}
                   handleSampleChange={handleSampleChange}
                   handleFieldChange={handleFieldChange}
@@ -1481,9 +1625,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             {!isOperator && (
               <FinancialsTab
                 shiftEvents={shiftEvents}
-                formData={formData}
+                formData={{ ...formData, skuArtworks }}
                 printPlan={activePrintPlan}
                 operations={operations}
+                materials={currentBomItems}
                 docNo={data.docNo || tab.id}
                 onPriceChange={(newPrice, fin) => {
                   handleFieldChange("priceTotal", newPrice);
@@ -1501,12 +1646,25 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               setOrderAttachments={setOrderAttachments}
               onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
               docNo={data.docNo || tab.id}
+              onFileUploaded={(newAtt) => {
+                if (newAtt.isImage) {
+                  if (!formData.photoUrl) {
+                    handleFieldChange("photoUrl", newAtt.url);
+                  }
+                  if (!formData.photoUrls || formData.photoUrls.length === 0) {
+                    handleFieldChange("photoUrls", [newAtt.url]);
+                  }
+                  if (!formData.artworkFront) {
+                    handleFieldChange("artworkFront", newAtt.url);
+                  }
+                }
+              }}
             />
 
             {/* Tab 8: History */}
             <HistoryTab
               docNo={data.docNo || tab.id}
-              formData={formData}
+              formData={{ ...formData, skuArtworks }}
             />
           </div>
         </div>
@@ -1538,7 +1696,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         isOpen={isJobTicketOpen}
         onOpenChange={setIsJobTicketOpen}
         workOrderId={data.docNo || tab.id}
-        formData={formData}
+        formData={{ ...formData, skuArtworks }}
         activeSpec={activeSpec}
         activeMachine={activeMachine}
         operations={operations}
@@ -1588,7 +1746,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       <ImageLightbox
         isOpen={isLightboxOpen}
         onClose={() => setIsLightboxOpen(false)}
-        src={formData.photoUrl}
+        src={getDisplayImageUrl(formData.photoUrl)}
         alt={formData.product || "Sample Proof"}
         title={`${tab.documentData?.docNo || tab.id}: Sample Proof`}
         subtitle={`${formData.product} • ${formData.customer} (${formData.department})`}

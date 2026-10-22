@@ -1,3 +1,16 @@
+﻿export {
+  type WorkOrderDepartment,
+  WO_DEPT_PREFIXES,
+  WO_PREFIX_TO_DEPT,
+  getCurrentYearSuffix,
+  normalizeDepartment,
+  formatWorkOrderNo,
+  getNextWorkOrderNo,
+  parseWorkOrderNo,
+  migrateLegacyWorkOrderNo,
+} from "./utils/workOrderNumbering";
+import type { WorkOrderDepartment } from "./utils/workOrderNumbering";
+
 export type KashirovkaMode = "none" | "duplex" | "triplex";
 export type KashirovkaImpositionStrategy = "split_half_sheet" | "separate_sheets";
 
@@ -127,6 +140,27 @@ export interface WorkOrderSampleData {
 
 export type ClientOrderSampleData = WorkOrderSampleData;
 
+/**
+ * Per-SKU artwork attachment (front + back PDF/SVG).
+ * skuId must match the corresponding SizeDistribution.id.
+ * Files are stored at /public/artwork/{workOrderId}/{skuId}-{side}.{ext}
+ */
+export interface SkuArtwork {
+  /** Must match SizeDistribution.id for the corresponding SKU */
+  skuId: string;
+  model?: string;
+  sizeCode: string;
+  /** Server-relative URL, e.g. /artwork/WO-26-0001/sku-abc-front.pdf */
+  frontArtworkUrl?: string;
+  backArtworkUrl?: string;
+  /** Original file name shown in the UI */
+  frontArtworkName?: string;
+  backArtworkName?: string;
+  /** Base64-encoded PNG thumbnail (first page) for quick preview */
+  frontArtworkThumb?: string;
+  backArtworkThumb?: string;
+}
+
 export interface SizeDistribution {
   id: string;
   size: string;
@@ -242,7 +276,7 @@ export function autoGeneratePackagingBoxes(params: {
   const { workOrderNo, targetQuantity, standardCapacity, sizes, defaultPacker = "N. Fedorov (Packaging)" } = params;
   const capacity = Math.max(1, standardCapacity || 500);
   const now = new Date().toISOString();
-  const cleanWo = (workOrderNo || "WO-00000").replace(/[^a-zA-Z0-9_-]/g, "");
+  const cleanWo = (workOrderNo || "WOOF-26-0001").replace(/[^a-zA-Z0-9_-]/g, "");
 
   const validSizes = (sizes || []).filter((s) => Number(s.quantity) > 0);
 
@@ -304,7 +338,7 @@ export interface MasterSpecification {
   id: string;
   code: string;
   name: string;
-  department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  department: WorkOrderDepartment;
   description: string;
   materialsCount: number;
   estimatedCost: string;
@@ -321,7 +355,7 @@ export interface SiteOption {
 }
 
 export interface TechOption {
-  id: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  id: WorkOrderDepartment | 'Post-press';
   name: string;
   code: string;
   description: string;
@@ -332,7 +366,7 @@ export interface TechOption {
 export interface MachineOption {
   code: string;
   name: string;
-  department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  department: WorkOrderDepartment;
   speed: string;
   format: string;
   features: string;
@@ -371,6 +405,9 @@ export interface OrderAttachment {
   type: string;
   date: string;
   isImage?: boolean;
+  category?: "proofs" | "artwork" | "dieline" | "docs";
+  storagePath?: string;
+  uploadedBy?: string;
   /** Public or blob URL of the file contents (used for preview & download) */
   url?: string;
 }
@@ -442,7 +479,7 @@ export type ProductCustomShape = "arch" | "star" | "hexagon" | "pillow" | "vecto
 export interface WorkOrderFormData {
   customer: string;
   product: string;
-  department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  department: WorkOrderDepartment;
   site: string;
   recipe: string;
   quantity: number;
@@ -508,8 +545,13 @@ export interface WorkOrderFormData {
   spotColorItems?: SpotColorItem[];
   frontColors?: SideColorConfig;
   backColors?: SideColorConfig;
+  artworkFront?: string;
+  artworkBack?: string;
+  artworkBleedIncluded?: boolean;
+  artworkDielineOpacity?: number;
+  artworkRotation?: number;
   holeSize?: number;
-  holePosition?: "top-center" | "top-left" | "top-right" | "left-center" | "right-center" | "none";
+  holePosition?: "top-center" | "top-left" | "top-right" | "left-center" | "right-center" | "both-sides-fold" | "none";
   holeOffset?: number;
   printMethod?: "single_sided" | "sheetwise" | "work_and_turn" | "work_and_tumble" | "kashirovka";
   parentSheetW?: number;
@@ -544,6 +586,8 @@ export interface WorkOrderFormData {
   lurexColor?: "gold" | "silver" | "copper" | "none";
   sampleTargetSize?: string;
   sampleQty?: number;
+  /** Per-SKU artwork files (front + back PDF/SVG). Key: SizeDistribution.id */
+  skuArtworks?: SkuArtwork[];
   packagingData?: WorkOrderPackagingSummary;
 }
 
@@ -559,18 +603,7 @@ export const FLOOR_OPERATORS = [
   "N. Fedorov (Packaging)",
 ];
 
-export const MOCK_CUSTOMERS = [
-  "Alpha Media Group",
-  "Nordic Print Co",
-  "Baltic Press LLC",
-  "Apex Packaging",
-  "Global Apparel Brand",
-  "Zenith Publishing",
-  "Vanguard Fashion",
-  "Metropolis Books",
-  "Urban Outfit Labels",
-  "Pacific Craft Goods",
-];
+export const MOCK_CUSTOMERS: string[] = [];
 
 export const MACHINE_MAP: Record<string, string[]> = {
   Offset: ["Heidelberg XL 106", "Komori Lithrone G40", "Heidelberg SX 74"],
@@ -750,7 +783,7 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
     id: "SPEC-PST-01",
     code: "POST_GENERIC_V1",
     name: "Standard Die-cutting & Folder Gluer",
-    department: "Post-press",
+    department: "Offset",
     description: "Automated Bobst die-cutting and carton assembly boxing",
     materialsCount: 2,
     estimatedCost: "$580",
@@ -812,142 +845,7 @@ export const TECHNOLOGY_OPTIONS: TechOption[] = [
   },
 ];
 
-export const MACHINE_OPTIONS: MachineOption[] = [
-  // Offset
-  {
-    code: "M-OFF-106",
-    name: "Heidelberg Speedmaster XL 106",
-    department: "Offset",
-    speed: "18,000 sheets/hr",
-    format: "B1 (750 × 1050 mm)",
-    features: "6-Color + Inline Coater • Inpress Control 3",
-    status: "Ready for shift",
-    isAvailable: true,
-  },
-  {
-    code: "M-OFF-G40",
-    name: "Komori Lithrone G40",
-    department: "Offset",
-    speed: "16,500 sheets/hr",
-    format: "B1 (720 × 1030 mm)",
-    features: "5-Color + H-UV Curing • KHS-AI Automation",
-    status: "Busy (Job #WO-00278)",
-    isAvailable: true,
-  },
-  {
-    code: "M-OFF-SX74",
-    name: "Heidelberg Speedmaster SX 74",
-    department: "Offset",
-    speed: "15,000 sheets/hr",
-    format: "B2 (530 × 740 mm)",
-    features: "4-Color Perfector (2/2 or 4/0)",
-    status: "Available",
-    isAvailable: true,
-  },
-  // Flexo
-  {
-    code: "M-FLX-01",
-    name: "Mark Andy Performance P7",
-    department: "Flexo",
-    speed: "300 m/min",
-    format: "Web width 330 mm",
-    features: "8 UV Flexo Units + Cold Foil + Rotary Die",
-    status: "Available",
-    isAvailable: true,
-  },
-  {
-    code: "M-FLX-02",
-    name: "Nilpeter FA-Line",
-    department: "Flexo",
-    speed: "200 m/min",
-    format: "Web width 420 mm",
-    features: "Multi-substrate Sleeve Technology • 6-Color",
-    status: "Ready",
-    isAvailable: true,
-  },
-  {
-    code: "M-FLX-03",
-    name: "Gallus ECS 340",
-    department: "Flexo",
-    speed: "165 m/min",
-    format: "Web width 340 mm",
-    features: "Granite Core • 8-Color UV & LED Curing",
-    status: "Ready",
-    isAvailable: true,
-  },
-  // Jacquard
-  {
-    code: "M-JCQ-01",
-    name: "Staubli Jacquard Loom DX",
-    department: "Jacquard",
-    speed: "1,200 rpm",
-    format: "16 Harness Taffeta",
-    features: "Electronic Jacquard • 2,688 Hooks",
-    status: "Available",
-    isAvailable: true,
-  },
-  {
-    code: "M-JCQ-02",
-    name: "Muller Martini Loom",
-    department: "Jacquard",
-    speed: "950 rpm",
-    format: "Narrow Woven Ribbons",
-    features: "16 Shafts Needle Loom • Thermal Selvedge",
-    status: "Available",
-    isAvailable: true,
-  },
-  {
-    code: "M-JCQ-03",
-    name: "Dornier PTV Weaving Loom",
-    department: "Jacquard",
-    speed: "800 rpm",
-    format: "High-density Damask",
-    features: "Airjet Weft Insertion • Electronic Dobby",
-    status: "Available",
-    isAvailable: true,
-  },
-  // Post-press
-  {
-    code: "M-PST-01",
-    name: "Bobst Novacut 106 E",
-    department: "Post-press",
-    speed: "8,000 sheets/hr",
-    format: "B1 (760 × 1060 mm)",
-    features: "Autoplaten Die-cutter & Stripping station",
-    status: "Ready",
-    isAvailable: true,
-  },
-  {
-    code: "M-PST-02",
-    name: "Kolbus BF 513 Casing Line",
-    department: "Post-press",
-    speed: "30 cycles/min",
-    format: "Hardcover Book Binding",
-    features: "Rounding, Backing, Headbanding & Casing-in",
-    status: "Available",
-    isAvailable: true,
-  },
-  {
-    code: "M-PST-03",
-    name: "Bobst Visionfold 110",
-    department: "Post-press",
-    speed: "450 m/min",
-    format: "Carton folding & gluing",
-    features: "Straight-line, Crash-lock bottom & 4/6-corners",
-    status: "Available",
-    isAvailable: true,
-  },
-  {
-    code: "M-PST-04",
-    name: "Meiguang Sheet Laminator (Кашировка)",
-    department: "Post-press",
-    speed: "4,500 sheets/hr",
-    format: "B1 (720 × 1040 mm)",
-    features: "Sheet-to-sheet duplex/triplex mounting & hydraulic pile press",
-    status: "Ready",
-    isAvailable: true,
-  },
-];
+export const MACHINE_OPTIONS: MachineOption[] = [];
 
 export const getInitialOperations = (
   recipeId: string,

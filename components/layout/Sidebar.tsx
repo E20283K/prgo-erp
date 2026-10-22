@@ -99,7 +99,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     lastInspectedElement,
     tabs,
     activeTabId,
+    currentUser,
   } = useWorkspaceStore();
+
+  // Filter modules based on user permissions
+  const allowedModules = React.useMemo(() => {
+    if (!currentUser || currentUser.role === "admin" || !currentUser.permissions) {
+      return MODULE_NAV;
+    }
+    return MODULE_NAV.filter((mod) => {
+      const perm = (currentUser.permissions as any)?.[mod.id];
+      return perm ? perm.view === true : true;
+    });
+  }, [currentUser]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const resolvedComponent = resolveActiveComponent(activeTab, activeModule, currentSubModule);
@@ -145,14 +157,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }, []);
 
   // Resolve the currently active module definition
-  const activeMod = MODULE_NAV.find((m) => m.id === activeModule) ?? MODULE_NAV[0];
+  const activeMod = allowedModules.find((m) => m.id === activeModule) ?? allowedModules[0] ?? MODULE_NAV[0];
   const ActiveModIcon = activeMod.icon;
   const activeModColor = MODULE_COLORS[activeMod.id] ?? "bg-zinc-600";
   const activeModLabel = tMod.has(activeMod.id) ? tMod(activeMod.id) : activeMod.label;
 
   const handleModuleSelect = (modId: string) => {
     setModuleMenuOpen(false);
-    const mod = MODULE_NAV.find((m) => m.id === modId);
+    const mod = allowedModules.find((m) => m.id === modId) ?? MODULE_NAV.find((m) => m.id === modId);
     const firstItem = mod?.sections[0]?.items[0];
     const modLabel = tMod.has(modId) ? tMod(modId) : (mod?.label ?? modId);
     setActiveModule(modId);
@@ -167,6 +179,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       });
     }
   };
+
+  React.useEffect(() => {
+    if (allowedModules.length > 0 && !allowedModules.some((m) => m.id === activeModule)) {
+      handleModuleSelect(allowedModules[0].id);
+    }
+  }, [allowedModules, activeModule]);
 
   const handleSubItemClick = (subId: string, defaultLabel: string) => {
     const subLabel = tMod.has(subId) ? tMod(subId) : defaultLabel;
@@ -232,10 +250,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   const codeMatch = e.code.match(/^(?:Digit|Numpad)([1-6])$/);
                   const keyMatch = e.key.match(/^[1-6]$/);
                   const digit = codeMatch ? parseInt(codeMatch[1], 10) : (keyMatch ? parseInt(keyMatch[0], 10) : null);
-                  if (digit !== null && digit >= 1 && digit <= MODULE_NAV.length) {
+                  if (digit !== null && digit >= 1 && digit <= allowedModules.length) {
                     e.preventDefault();
                     e.stopPropagation();
-                    handleModuleSelect(MODULE_NAV[digit - 1].id);
+                    handleModuleSelect(allowedModules[digit - 1].id);
                   }
                 }}
               >
@@ -243,7 +261,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
                     {tSide("modules")}
                   </DropdownMenuLabel>
-                  {MODULE_NAV.map((mod, index) => {
+                  {allowedModules.map((mod, index) => {
                     const ModIcon = mod.icon;
                     const color = MODULE_COLORS[mod.id] ?? "bg-zinc-600";
                     const modName = tMod.has(mod.id) ? tMod(mod.id) : mod.label;

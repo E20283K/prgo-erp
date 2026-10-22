@@ -11,18 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Wrench,
   Clock,
-  CheckCircle2,
-  AlertTriangle,
   Plus,
-  Calendar,
-  DollarSign,
   Activity,
   Gauge,
   Thermometer,
   Flame,
-  ShieldCheck,
   Save,
-  RotateCcw,
 } from "lucide-react";
 
 interface MachineMaintenanceTabProps {
@@ -34,33 +28,37 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
   const [isAddingLog, setIsAddingLog] = useState(false);
   const [logType, setLogType] = useState<MachineMaintenanceRecord["type"]>("Routine Oil/Lube");
   const [technician, setTechnician] = useState("");
-  const [downtime, setDowntime] = useState<number>(2);
-  const [cost, setCost] = useState<number>(150);
+  const [downtime, setDowntime] = useState<number>(1);
+  const [cost, setCost] = useState<number>(0);
   const [description, setDescription] = useState("");
   const [nextDue, setNextDue] = useState("");
 
   const handleSaveNewLog = () => {
     if (!description.trim()) return;
 
+    const logs = machine.maintenanceLogs || [];
     const newRecord: MachineMaintenanceRecord = {
-      id: `MNT-0${830 + machine.maintenanceLogs.length}`,
+      id: `MNT-0${101 + logs.length}`,
       date: new Date().toISOString().split("T")[0],
       type: logType,
-      meterReading: `${machine.totalLifetimeCounter.toLocaleString()} ${machine.counterUnit}`,
-      technician: technician.trim() || machine.leadOperator,
+      meterReading: `${(machine.totalLifetimeCounter || 0).toLocaleString()} ${machine.counterUnit || "sheets"}`,
+      technician: technician.trim() || machine.leadOperator || "Mexanik",
       costUsd: cost,
       downtimeHours: downtime,
       description: description.trim(),
-      nextDueAt: nextDue.trim() || "Navbatdagi tekshiruv 3 oydan so'ng",
+      nextDueAt: nextDue.trim() || "",
     };
 
     onUpdate({
-      maintenanceLogs: [newRecord, ...machine.maintenanceLogs],
+      maintenanceLogs: [newRecord, ...logs],
     });
 
     setIsAddingLog(false);
     setDescription("");
     setTechnician("");
+    setCost(0);
+    setDowntime(1);
+    setNextDue("");
   };
 
   return (
@@ -70,40 +68,39 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
         <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              Umumiy Resurs / Odometer
+              Umumiy Odometer
             </span>
             <Gauge className="w-4 h-4 text-primary" />
           </div>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-xl font-bold font-mono text-foreground">
-              {(machine.totalLifetimeCounter / 1000000).toFixed(1)}M
+              {(((machine.totalLifetimeCounter || 0) / 1000000)).toFixed(1)}M
             </span>
-            <span className="text-xs text-muted-foreground">{machine.counterUnit}</span>
+            <span className="text-xs text-muted-foreground">{machine.counterUnit || "sheets"}</span>
           </div>
           <div className="text-[10px] text-muted-foreground mt-0.5">
-            Jami: {machine.totalLifetimeCounter.toLocaleString()} {machine.counterUnit}
+            Jami: {(machine.totalLifetimeCounter || 0).toLocaleString()} {machine.counterUnit || "sheets"}
           </div>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              Moylash Bosimi (Lubrication)
+              Moylash Bosimi
             </span>
             <Activity className="w-4 h-4 text-emerald-500" />
           </div>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
-              {machine.telemetry.oilPressureBar} bar
+              {machine.telemetry?.oilPressureBar || 0} bar
             </span>
           </div>
-          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" />
-            Normal ishchi bosim (4.0 - 5.5 bar)
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            Gidravlika & moy tizimi
           </div>
         </div>
 
-        {machine.telemetry.uvLampHoursUsed !== undefined && (
+        {machine.telemetry?.uvLampHoursUsed !== undefined && (
           <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
@@ -113,21 +110,14 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
             </div>
             <div className="flex items-baseline gap-1 mt-1">
               <span className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">
-                {machine.telemetry.uvLampHoursUsed}
+                {machine.telemetry?.uvLampHoursUsed}
               </span>
               <span className="text-xs text-muted-foreground">
-                / {machine.telemetry.uvLampMaxHours} soat
+                / {machine.telemetry?.uvLampMaxHours || 1000} soat
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              Qolgan resurs:{" "}
-              {Math.round(
-                (1 -
-                  (machine.telemetry.uvLampHoursUsed || 0) /
-                    (machine.telemetry.uvLampMaxHours || 1)) *
-                  100
-              )}
-              %
+              Ishlatilgan soatlar
             </div>
           </div>
         )}
@@ -141,15 +131,14 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
           </div>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-xl font-bold font-mono text-foreground">
-              {machine.telemetry.temperatureC}°C
+              {machine.telemetry?.temperatureC ?? 0}°C
             </span>
             <span className="text-xs text-muted-foreground">
-              / {machine.telemetry.vibrationMmS} mm/s
+              / {machine.telemetry?.vibrationMmS ?? 0} mm/s
             </span>
           </div>
-          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3" />
-            Vibratsiya me'yorda (&lt; 2.5 mm/s)
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            Datchik telemetriyasi
           </div>
         </div>
       </div>
@@ -198,7 +187,7 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
               <div className="space-y-1">
                 <Label className="text-xs">Usta / Texnik Xodim:</Label>
                 <Input
-                  placeholder="Ism sharif yoki servis kompaniya"
+                  placeholder="Texnik F.I.Sh."
                   value={technician}
                   onChange={(e) => setTechnician(e.target.value)}
                   className="h-8 text-xs"
@@ -206,22 +195,22 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
               </div>
 
               <div className="space-y-1">
-                <Label className="text-xs">To'xtash Vaqti (Downtime soat):</Label>
+                <Label className="text-xs">To'xtab Qolish (soat):</Label>
                 <Input
                   type="number"
                   step="0.5"
-                  value={downtime}
+                  value={downtime || ""}
                   onChange={(e) => setDowntime(Number(e.target.value) || 0)}
                   className="h-8 text-xs font-mono"
                 />
               </div>
 
               <div className="space-y-1">
-                <Label className="text-xs">Ehtiyot Qism & Xizmat Narxi ($):</Label>
+                <Label className="text-xs">Xarajat ($):</Label>
                 <Input
                   type="number"
                   step="10"
-                  value={cost}
+                  value={cost || ""}
                   onChange={(e) => setCost(Number(e.target.value) || 0)}
                   className="h-8 text-xs font-mono"
                 />
@@ -229,12 +218,12 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs">Bajarilgan Ishlar Tavsifi:</Label>
+              <Label className="text-xs">Bajarilgan Ish Tavsifi / Almashtirilgan Ehtiyot Qismlar:</Label>
               <Textarea
-                placeholder="Almashtirilgan qismlar, moy markasi, kalibrlash tafsilotlari..."
+                placeholder="Amalga oshirilgan servis ishlari, almashtirilgan detallar yoki moy turlari..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="text-xs h-16 resize-none"
+                className="text-xs min-h-[60px]"
               />
             </div>
 
@@ -242,7 +231,7 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
               <div className="space-y-1">
                 <Label className="text-xs">Keyingi Xizmat Ko'rsatish Ko'rsatkichi:</Label>
                 <Input
-                  placeholder="Masalan: 88,000,000 varaq yoki 2026-12-01"
+                  placeholder="Masalan: 3 oydan so'ng yoki +500,000 varaq"
                   value={nextDue}
                   onChange={(e) => setNextDue(e.target.value)}
                   className="h-8 text-xs"
@@ -279,7 +268,7 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
           <div className="flex items-center gap-2">
             <Wrench className="w-4 h-4 text-primary" />
             <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
-              Texnik Xizmat va Ta'mirlash Tarixi ({machine.maintenanceLogs.length})
+              Texnik Xizmat va Ta'mirlash Tarixi ({(machine.maintenanceLogs || []).length})
             </span>
           </div>
           {!isAddingLog && (
@@ -295,9 +284,9 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
           )}
         </div>
         <div>
-          {machine.maintenanceLogs.length > 0 ? (
+          {(machine.maintenanceLogs || []).length > 0 ? (
             <div className="divide-y divide-border">
-              {machine.maintenanceLogs.map((log) => (
+              {(machine.maintenanceLogs || []).map((log) => (
                 <div key={log.id} className="p-3 hover:bg-muted/30 transition-colors text-xs space-y-1.5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -308,43 +297,31 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
                         {log.type}
                       </Badge>
                       <span className="text-muted-foreground flex items-center gap-1 font-mono text-[11px]">
-                        <Calendar className="w-3 h-3" />
+                        <Clock className="w-3 h-3" />
                         {log.date}
                       </span>
-                      <span className="text-muted-foreground">•</span>
-                      <span className="font-mono text-muted-foreground text-[11px]">
-                        {log.meterReading}
-                      </span>
                     </div>
-
                     <div className="flex items-center gap-3 text-muted-foreground text-[11px]">
-                      <span>
-                        To'xtash: <strong className="text-foreground">{log.downtimeHours} soat</strong>
-                      </span>
-                      <span>
-                        Xarajat: <strong className="text-foreground font-mono">${log.costUsd}</strong>
-                      </span>
-                      <span>
-                        Mutaxassis: <strong className="text-foreground">{log.technician}</strong>
-                      </span>
+                      <span>Usta: <strong className="text-foreground">{log.technician}</strong></span>
+                      <span>To'xtash: <strong className="text-foreground font-mono">{log.downtimeHours}h</strong></span>
+                      <span>Xarajat: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">${log.costUsd}</strong></span>
                     </div>
                   </div>
-
-                  <p className="text-foreground text-xs leading-relaxed">
+                  <p className="text-foreground text-[11px] bg-muted/20 p-2 rounded">
                     {log.description}
                   </p>
-
-                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                    <Clock className="w-3 h-3 text-blue-500" />
-                    <span>Rejalashtirilgan keyingi servis:</span>
-                    <strong className="text-foreground">{log.nextDueAt}</strong>
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>Odometer: <span className="font-mono">{log.meterReading}</span></span>
+                    {log.nextDueAt && (
+                      <span>Rejadagi keyingi servis: <strong className="text-primary">{log.nextDueAt}</strong></span>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="p-6 text-center text-muted-foreground text-xs">
-              Ushbu uskuna uchun texnik xizmat yozuvlari kiritilmagan.
+            <div className="py-8 text-center text-xs text-muted-foreground">
+              Hozircha ushbu uskuna bo'yicha texnik xizmat ko'rsatish yozuvlari kiritilmagan.
             </div>
           )}
         </div>

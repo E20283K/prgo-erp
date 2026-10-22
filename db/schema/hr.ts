@@ -121,6 +121,7 @@ export interface EmployeeMetadata {
   address?: string;
   education?: string;
   uniformSize?: string;
+  skills?: string[];
   [key: string]: unknown;
 }
 
@@ -169,7 +170,61 @@ export const employees = pgTable(
   ]
 );
 
-// ─── 4. Attendance & Timesheet (T-13 Tabel Hisobi) ────────────────────────────
+// ─── 4. Shifts (Smenalar Rejimi) ──────────────────────────────────────────────
+
+export const shifts = pgTable(
+  "shifts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    branchId: uuid("branch_id").references(() => branches.id, {
+      onDelete: "set null",
+    }),
+    code: varchar("code", { length: 32 }).notNull(), // masalan: "SHIFT-DAY-12", "SHIFT-OFFICE-8"
+    name: varchar("name", { length: 255 }).notNull(),
+    startTime: varchar("start_time", { length: 8 }).notNull(), // "08:00"
+    endTime: varchar("end_time", { length: 8 }).notNull(), // "20:00"
+    durationHours: numeric("duration_hours", { precision: 4, scale: 2 }).default("12.00").notNull(),
+    shiftType: varchar("shift_type", { length: 16 }).default("day").notNull(), // "day" | "night" | "daily"
+    activeWorkers: integer("active_workers").default(0).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("shifts_company_code_uq").on(table.companyId, table.code),
+    index("shifts_company_idx").on(table.companyId),
+  ]
+);
+
+// ─── 5. Employee Shift Assignments (Xodimlarni Smenaga Biriktirish) ───────────
+
+export const employeeShiftAssignments = pgTable(
+  "employee_shift_assignments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    shiftId: uuid("shift_id")
+      .notNull()
+      .references(() => shifts.id, { onDelete: "restrict" }),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("emp_shift_employee_idx").on(table.employeeId),
+    index("emp_shift_shift_idx").on(table.shiftId),
+  ]
+);
+
+// ─── 6. Attendance & Timesheet (T-13 Tabel Hisobi) ────────────────────────────
 
 export const attendanceLogs = pgTable(
   "attendance_logs",
@@ -199,7 +254,7 @@ export const attendanceLogs = pgTable(
   ]
 );
 
-// ─── 5. Piecework Wages (Ishlab Chiqarishdan Ishbay Hisobi - Сдельный Наряд) ───
+// ─── 7. Piecework Wages (Ishlab Chiqarishdan Ishbay Hisobi - Сдельный Наряд) ───
 
 export const pieceworkLogs = pgTable(
   "piecework_logs",
@@ -211,12 +266,12 @@ export const pieceworkLogs = pgTable(
     employeeId: uuid("employee_id")
       .notNull()
       .references(() => employees.id, { onDelete: "restrict" }),
-    workOrderId: varchar("work_order_id", { length: 64 }).notNull(), // Bog'langan naryad raqami (masalan: WO-00351)
+    workOrderId: varchar("work_order_id", { length: 64 }).notNull(), // Bog'langan naryad raqami (masalan: WOOF-26-0351)
     workDate: date("work_date").notNull(),
     machineCode: varchar("machine_code", { length: 64 }), // masalan: "FLEXO-MARKANDY-01"
     operationCode: varchar("operation_code", { length: 64 }).notNull(), // masalan: "PRINT_FLEXO", "DIE_CUT", "SEW_LABEL"
     operationName: varchar("operation_name", { length: 255 }).notNull(),
-    completedQuantity: numeric("completed_quantity", { precision: 12, scale: 2 }).notNull(), // Masalan: 25000 dona yoki 1500 metr
+    completedQuantity: numeric("completed_quantity", { precision: 12, scale: 2 }).notNull(),
     unit: varchar("unit", { length: 16 }).default("dona").notNull(),
     pieceRate: numeric("piece_rate", { precision: 12, scale: 4 }).notNull(), // 1 birlik uchun to'lov summasi
     totalAmount: numeric("total_amount", { precision: 15, scale: 2 }).notNull(),
@@ -234,7 +289,56 @@ export const pieceworkLogs = pgTable(
   ]
 );
 
-// ─── 6. Monthly Payroll Records (Oylik Ish Haqi Hisob-Kitobi - Расчетный Листок) ─
+// ─── 8. Employee Advances & Loans (Avans va Qarzlar) ──────────────────────────
+
+export const employeeAdvances = pgTable(
+  "employee_advances",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+    advanceDate: date("advance_date").notNull(),
+    period: varchar("period", { length: 7 }).notNull(), // "2026-10"
+    status: varchar("status", { length: 16 }).default("pending").notNull(), // "pending" | "deducted" | "cancelled"
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("advances_emp_period_idx").on(table.employeeId, table.period),
+    index("advances_company_idx").on(table.companyId),
+  ]
+);
+
+// ─── 9. Payroll Adjustments (Bonus, Jarima, Soliq, Ta'til) ────────────────────
+
+export const payrollAdjustments = pgTable(
+  "payroll_adjustments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    period: varchar("period", { length: 7 }).notNull(), // "2026-10"
+    adjustmentType: varchar("adjustment_type", { length: 32 }).notNull(), // "bonus" | "penalty" | "tax_inps" | "tax_income" | "vacation_pay"
+    amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("payroll_adj_emp_period_idx").on(table.employeeId, table.period),
+    index("payroll_adj_company_idx").on(table.companyId),
+  ]
+);
+
+// ─── 10. Monthly Payroll Records (Oylik Ish Haqi Hisob-Kitobi) ────────────────
 
 export const payrollRecords = pgTable(
   "payroll_records",
@@ -254,7 +358,7 @@ export const payrollRecords = pgTable(
     grossPay: numeric("gross_pay", { precision: 15, scale: 2 }).notNull(), // Jami hisoblangan
     advanceDeduction: numeric("advance_deduction", { precision: 15, scale: 2 }).default("0").notNull(),
     taxDeduction: numeric("tax_deduction", { precision: 15, scale: 2 }).default("0").notNull(),
-    penaltyDeduction: numeric("penalty_deduction", { precision: 15, scale: 2 }).default("0").notNull(), // Brak yoki jarima
+    penaltyDeduction: numeric("penalty_deduction", { precision: 15, scale: 2 }).default("0").notNull(),
     totalDeductions: numeric("total_deductions", { precision: 15, scale: 2 }).notNull(),
     netPay: numeric("net_pay", { precision: 15, scale: 2 }).notNull(), // Qo'lga tegadigan summa
     currency: varchar("currency", { length: 3 }).default("UZS").notNull(),
@@ -269,6 +373,26 @@ export const payrollRecords = pgTable(
     uniqueIndex("payroll_emp_period_uq").on(table.employeeId, table.period),
     index("payroll_period_idx").on(table.companyId, table.period),
     index("payroll_status_idx").on(table.status),
+  ]
+);
+
+// ─── 11. Employee History (Kadrlar Harakati Tarixi) ───────────────────────────
+
+export const employeeHistory = pgTable(
+  "employee_history",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    changeType: varchar("change_type", { length: 32 }).notNull(), // "position_change" | "salary_change" | "department_change" | "status_change"
+    oldValue: jsonb("old_value"),
+    newValue: jsonb("new_value"),
+    changedBy: varchar("changed_by", { length: 128 }),
+    changedAt: timestamp("changed_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("emp_history_emp_idx").on(table.employeeId),
   ]
 );
 
@@ -295,6 +419,29 @@ export const positionsRelations = relations(positions, ({ one, many }) => ({
   employees: many(employees),
 }));
 
+export const shiftsRelations = relations(shifts, ({ one, many }) => ({
+  company: one(companies, {
+    fields: [shifts.companyId],
+    references: [companies.id],
+  }),
+  branch: one(branches, {
+    fields: [shifts.branchId],
+    references: [branches.id],
+  }),
+  assignments: many(employeeShiftAssignments),
+}));
+
+export const employeeShiftAssignmentsRelations = relations(employeeShiftAssignments, ({ one }) => ({
+  employee: one(employees, {
+    fields: [employeeShiftAssignments.employeeId],
+    references: [employees.id],
+  }),
+  shift: one(shifts, {
+    fields: [employeeShiftAssignments.shiftId],
+    references: [shifts.id],
+  }),
+}));
+
 export const employeesRelations = relations(employees, ({ one, many }) => ({
   company: one(companies, {
     fields: [employees.companyId],
@@ -315,6 +462,10 @@ export const employeesRelations = relations(employees, ({ one, many }) => ({
   attendanceLogs: many(attendanceLogs),
   pieceworkLogs: many(pieceworkLogs),
   payrollRecords: many(payrollRecords),
+  advances: many(employeeAdvances),
+  payrollAdjustments: many(payrollAdjustments),
+  shiftAssignments: many(employeeShiftAssignments),
+  history: many(employeeHistory),
 }));
 
 export const attendanceLogsRelations = relations(attendanceLogs, ({ one }) => ({
@@ -338,15 +489,46 @@ export const payrollRecordsRelations = relations(payrollRecords, ({ one }) => ({
   }),
 }));
 
+export const employeeAdvancesRelations = relations(employeeAdvances, ({ one }) => ({
+  employee: one(employees, {
+    fields: [employeeAdvances.employeeId],
+    references: [employees.id],
+  }),
+}));
+
+export const payrollAdjustmentsRelations = relations(payrollAdjustments, ({ one }) => ({
+  employee: one(employees, {
+    fields: [payrollAdjustments.employeeId],
+    references: [employees.id],
+  }),
+}));
+
+export const employeeHistoryRelations = relations(employeeHistory, ({ one }) => ({
+  employee: one(employees, {
+    fields: [employeeHistory.employeeId],
+    references: [employees.id],
+  }),
+}));
+
+// ─── Schema Inferred Types ────────────────────────────────────────────────────
+
 export type Department = typeof departments.$inferSelect;
 export type NewDepartment = typeof departments.$inferInsert;
 export type Position = typeof positions.$inferSelect;
 export type NewPosition = typeof positions.$inferInsert;
+export type Shift = typeof shifts.$inferSelect;
+export type NewShift = typeof shifts.$inferInsert;
 export type Employee = typeof employees.$inferSelect;
 export type NewEmployee = typeof employees.$inferInsert;
 export type AttendanceLog = typeof attendanceLogs.$inferSelect;
 export type NewAttendanceLog = typeof attendanceLogs.$inferInsert;
 export type PieceworkLog = typeof pieceworkLogs.$inferSelect;
 export type NewPieceworkLog = typeof pieceworkLogs.$inferInsert;
+export type EmployeeAdvance = typeof employeeAdvances.$inferSelect;
+export type NewEmployeeAdvance = typeof employeeAdvances.$inferInsert;
+export type PayrollAdjustment = typeof payrollAdjustments.$inferSelect;
+export type NewPayrollAdjustment = typeof payrollAdjustments.$inferInsert;
 export type PayrollRecordDb = typeof payrollRecords.$inferSelect;
 export type NewPayrollRecordDb = typeof payrollRecords.$inferInsert;
+export type EmployeeHistoryRecord = typeof employeeHistory.$inferSelect;
+export type NewEmployeeHistoryRecord = typeof employeeHistory.$inferInsert;

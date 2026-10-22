@@ -6,9 +6,47 @@ interface PdfMeta {
   orderName?: string;
   customer?: string;
   productName?: string;
+  qrData?: string;
+  barcodeData?: string;
 }
 
-export function exportFlexoPDF(result: FlexoLayoutResult, meta: PdfMeta = {}) {
+/**
+ * Generates the Flexo Specification PDF via the Python ReportLab microservice (with QR & Barcode),
+ * and falls back to client-side jsPDF if the container is offline.
+ */
+export async function exportFlexoPDF(result: FlexoLayoutResult, meta: PdfMeta = {}) {
+  const filename = `Flexo_Spec_${meta.docNo || "Order"}_${result.gearTeeth}T.pdf`;
+
+  try {
+    const res = await fetch("/api/docs/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "flexo-pdf",
+        payload: {
+          ...result,
+          ...meta,
+          saveToS3: false,
+        },
+      }),
+    });
+
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+  } catch {
+    // Fallback to client-side jsPDF below if Python service is not running locally
+  }
+
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "mm",
@@ -359,6 +397,5 @@ export function exportFlexoPDF(result: FlexoLayoutResult, meta: PdfMeta = {}) {
   doc.text("Sign & Date", sigCol3, curY + 20);
 
   // Save PDF
-  const filename = `Flexo_Spec_${meta.docNo || "Order"}_${result.gearTeeth}T.pdf`;
   doc.save(filename);
 }

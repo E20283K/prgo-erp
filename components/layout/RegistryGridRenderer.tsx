@@ -11,8 +11,18 @@ const SalesGrid = dynamic(() => import("@/components/grid/SalesGrid").then((mod)
 const FinanceGrid = dynamic(() => import("@/components/grid/FinanceGrid").then((mod) => mod.FinanceGrid), { ssr: false });
 const TaskGrid = dynamic(() => import("@/components/grid/TaskGrid").then((mod) => mod.TaskGrid), { ssr: false });
 const SettingsGrid = dynamic(() => import("@/components/grid/SettingsGrid").then((mod) => mod.SettingsGrid), { ssr: false });
-const HrGrid = dynamic(() => import("@/components/grid/HrGrid").then((mod) => mod.HrGrid), { ssr: false });
 const TradingGrid = dynamic(() => import("@/components/grid/TradingGrid").then((mod) => mod.TradingGrid), { ssr: false });
+
+// HR Standalone High-Performance Grids
+const EmployeesGrid = dynamic(() => import("@/components/documents/hr/employees/EmployeesGrid").then((mod) => mod.EmployeesGrid), { ssr: false });
+const DepartmentsGrid = dynamic(() => import("@/components/documents/hr/departments/DepartmentsGrid").then((mod) => mod.DepartmentsGrid), { ssr: false });
+const PositionsGrid = dynamic(() => import("@/components/documents/hr/positions/PositionsGrid").then((mod) => mod.PositionsGrid), { ssr: false });
+const AttendanceGrid = dynamic(() => import("@/components/documents/hr/attendance/AttendanceGrid").then((mod) => mod.AttendanceGrid), { ssr: false });
+const ShiftsGrid = dynamic(() => import("@/components/documents/hr/shifts/ShiftsGrid").then((mod) => mod.ShiftsGrid), { ssr: false });
+const PieceworkGrid = dynamic(() => import("@/components/documents/hr/piecework/PieceworkGrid").then((mod) => mod.PieceworkGrid), { ssr: false });
+const PayrollGrid = dynamic(() => import("@/components/documents/hr/payroll/PayrollGrid").then((mod) => mod.PayrollGrid), { ssr: false });
+const TelegramInbox = dynamic(() => import("@/components/documents/crm/TelegramInbox").then((mod) => mod.TelegramInbox), { ssr: false });
+const TelegramSettingsView = dynamic(() => import("@/components/documents/settings/TelegramSettingsView").then((mod) => mod.TelegramSettingsView), { ssr: false });
 
 export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
   if (tab.id.includes("tasks")) {
@@ -20,20 +30,22 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
   }
 
   if (tab.module === "crm") {
+    if (tab.id.includes("telegram-inbox")) return <TelegramInbox />;
     let crmType = "customers";
     if (tab.id.includes("tasks")) return <TaskGrid />;
     else if (tab.id.includes("customers")) crmType = "customers";
+    else if (tab.id.includes("suppliers")) crmType = "suppliers";
     else if (tab.id.includes("leads")) crmType = "leads";
     return <CrmGrid type={crmType as any} />;
   } else if (tab.module === "production") {
     if (tab.id.includes("work-orders") || tab.id === "registry-work-orders") return <DataGrid />;
     if (tab.id.includes("planning")) return <ProductionGrid type="planning" />;
     if (tab.id.includes("machines")) return <ProductionGrid type="machines" />;
-    if (tab.id.includes("bom")) return <ProductionGrid type="bom" />;
+    if (tab.id.includes("bom") || tab.id.includes("products")) return <ProductionGrid type="bom" />;
     if (tab.id.includes("tooling")) return <ProductionGrid type="tooling" />;
-    if (tab.id.includes("products")) return <SalesGrid type="products" />;
     return <DataGrid />;
   } else if (tab.module === "warehouse") {
+    if (tab.id.includes("requirements") || tab.id.includes("deficits")) return <WarehouseGrid type="requirements" />;
     if (tab.id.includes("finished-goods")) return <WarehouseGrid type="finished-goods" />;
     if (tab.id.includes("stock-balance")) return <WarehouseGrid type="stock-balance" />;
     if (tab.id.includes("movements")) return <WarehouseGrid type="movements" />;
@@ -49,16 +61,18 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("accounts")) return <FinanceGrid type="accounts" />;
     return <FinanceGrid type="settlements" />;
   } else if (tab.module === "settings") {
+    if (tab.id.includes("telegram-settings")) return <TelegramSettingsView />;
     if (tab.id.includes("users")) return <SettingsGrid type="users" />;
     if (tab.id.includes("tariffs")) return <SettingsGrid type="tariffs" />;
     return <SettingsGrid type="plants" />;
   } else if (tab.module === "hr") {
-    if (tab.id.includes("departments")) return <HrGrid type="departments" />;
-    if (tab.id.includes("attendance")) return <HrGrid type="attendance" />;
-    if (tab.id.includes("shifts")) return <HrGrid type="shifts" />;
-    if (tab.id.includes("piecework")) return <HrGrid type="piecework" />;
-    if (tab.id.includes("payroll")) return <HrGrid type="payroll" />;
-    return <HrGrid type="employees" />;
+    if (tab.id.includes("departments")) return <DepartmentsGrid />;
+    if (tab.id.includes("positions")) return <PositionsGrid />;
+    if (tab.id.includes("attendance")) return <AttendanceGrid />;
+    if (tab.id.includes("shifts")) return <ShiftsGrid />;
+    if (tab.id.includes("piecework")) return <PieceworkGrid />;
+    if (tab.id.includes("payroll")) return <PayrollGrid />;
+    return <EmployeesGrid />;
   } else if (tab.module === "trading") {
     if (tab.id.includes("trading-orders")) return <TradingGrid type="orders" />;
     if (tab.id.includes("trading-ytt-limits")) return <TradingGrid type="ytt-limits" />;

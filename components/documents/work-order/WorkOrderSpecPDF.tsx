@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import {
   Document,
   Page,
@@ -10,6 +10,7 @@ import {
   Rect,
   Circle,
   Line,
+  Image,
 } from "@react-pdf/renderer";
 import {
   WorkOrderFormData,
@@ -21,6 +22,7 @@ import {
   parseModelAndSize,
   calculateKashirovkaTotals,
   getDefaultKashirovkaLayers,
+  SkuArtwork,
 } from "./types";
 
 // Register local Unicode Roboto font supporting Latin, Uzbek, Turkish, and Cyrillic
@@ -588,6 +590,10 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
   const rows = Math.max(1, Math.floor(660 / (itemH + 2)));
   const yieldPerSheet = Math.max(1, cols * rows);
   const netQuantity = orderData.quantity || 5000;
+  const skuArtworks = orderData.skuArtworks || [];
+  const skuArtworksMap: Record<string, SkuArtwork> = {};
+  skuArtworks.forEach((a) => { skuArtworksMap[a.skuId] = a; });
+  const hasSkuArtworks = skuArtworks.length > 0;
   const grossSheets = Math.ceil((netQuantity / yieldPerSheet) * 1.05) + (orderData.kashirovkaMakeReadySheets || 50);
 
   // Hole specs
@@ -651,7 +657,7 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           },
         ];
 
-  const qrModules = buildQrModules(docNo || "WO-00772");
+  const qrModules = buildQrModules(docNo || "WOOF-26-0351");
 
   // 2D Schematic proportional scaling inside a 90x72 viewport
   const maxBoxW = 54;
@@ -662,20 +668,26 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
   const trimX = Math.round((86 - drawW) / 2);
   const trimY = Math.round((64 - drawH) / 2);
 
-  let holeCx = trimX + drawW / 2;
-  let holeCy = trimY + 6;
-  if (holePos === "top-left") {
-    holeCx = trimX + 6;
-    holeCy = trimY + 6;
+  type PdfHole = { cx: number; cy: number };
+  const pdfHoles: PdfHole[] = [];
+  if (holePos === "both-sides-fold") {
+    if (orderData.foldType === "half_horizontal") {
+      pdfHoles.push({ cx: trimX + drawW / 2, cy: trimY + drawH / 2 - 5 });
+      pdfHoles.push({ cx: trimX + drawW / 2, cy: trimY + drawH / 2 + 5 });
+    } else {
+      pdfHoles.push({ cx: trimX + drawW / 2 - 6, cy: trimY + 6 });
+      pdfHoles.push({ cx: trimX + drawW / 2 + 6, cy: trimY + 6 });
+    }
+  } else if (holePos === "top-left") {
+    pdfHoles.push({ cx: trimX + 6, cy: trimY + 6 });
   } else if (holePos === "top-right") {
-    holeCx = trimX + drawW - 6;
-    holeCy = trimY + 6;
+    pdfHoles.push({ cx: trimX + drawW - 6, cy: trimY + 6 });
   } else if (holePos === "left-center") {
-    holeCx = trimX + 6;
-    holeCy = trimY + drawH / 2;
+    pdfHoles.push({ cx: trimX + 6, cy: trimY + drawH / 2 });
   } else if (holePos === "right-center") {
-    holeCx = trimX + drawW - 6;
-    holeCy = trimY + drawH / 2;
+    pdfHoles.push({ cx: trimX + drawW - 6, cy: trimY + drawH / 2 });
+  } else {
+    pdfHoles.push({ cx: trimX + drawW / 2, cy: trimY + 6 });
   }
 
   return (
@@ -702,7 +714,7 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
 
           <View style={styles.headerRight}>
             <View style={styles.docMetaBox}>
-              <Text style={styles.docNoText}>{docNo || "WO-00772"}</Text>
+              <Text style={styles.docNoText}>{docNo || "WOOF-26-0351"}</Text>
               <Text style={styles.docSubText}>
                 {orderData.status || "Active"} • {new Date().toISOString().slice(0, 10)}
               </Text>
@@ -790,77 +802,157 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
             </View>
 
             <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-              {/* 2D Vector Cut & Bleed Schematic */}
-              <View
-                style={{
-                  width: 86,
-                  height: 76,
-                  borderWidth: 0.6,
-                  borderColor: "#cbd5e1",
-                  backgroundColor: "#f8fafc",
-                  borderRadius: 2,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Svg viewBox="0 0 86 66" style={{ width: 82, height: 62 }}>
-                  {/* Outer Bleed Box */}
-                  <Rect
-                    x={trimX - 3}
-                    y={trimY - 3}
-                    width={drawW + 6}
-                    height={drawH + 6}
-                    fill="#fef2f2"
-                    stroke="#ef4444"
-                    strokeWidth={0.7}
-                    strokeDasharray="2,2"
-                  />
-                  {/* Trim Cut Box */}
-                  <Rect
-                    x={trimX}
-                    y={trimY}
-                    width={drawW}
-                    height={drawH}
-                    rx={orderData.cornerType?.toLowerCase().includes("round") ? 3 : 0}
-                    fill="#ffffff"
-                    stroke="#1d4ed8"
-                    strokeWidth={1.1}
-                  />
-                  {/* Center Crosshair */}
-                  <Line
-                    x1={trimX + 4}
-                    y1={trimY + drawH / 2}
-                    x2={trimX + drawW - 4}
-                    y2={trimY + drawH / 2}
-                    stroke="#cbd5e1"
-                    strokeWidth={0.5}
-                    strokeDasharray="1.5,1.5"
-                  />
-                  <Line
-                    x1={trimX + drawW / 2}
-                    y1={trimY + 4}
-                    x2={trimX + drawW / 2}
-                    y2={trimY + drawH - 4}
-                    stroke="#cbd5e1"
-                    strokeWidth={0.5}
-                    strokeDasharray="1.5,1.5"
-                  />
-                  {/* Drill Hole if present */}
-                  {holeSize > 0 && holePos !== "none" && (
-                    <Circle
-                      cx={holeCx}
-                      cy={holeCy}
-                      r={2.5}
-                      fill="#eff6ff"
-                      stroke="#2563eb"
-                      strokeWidth={0.9}
+              {/* Real Artwork Proof (Front & Back Side-by-Side) */}
+              {orderData.artworkFront ? (
+                <View
+                  style={{
+                    width: 126,
+                    minHeight: 80,
+                    borderWidth: 0.6,
+                    borderColor: "#cbd5e1",
+                    backgroundColor: "#f8fafc",
+                    borderRadius: 3,
+                    padding: 3,
+                    flexDirection: "row",
+                    justifyContent: "space-around",
+                    alignItems: "flex-end",
+                  }}
+                >
+                  {/* Front Side */}
+                  <View style={{ alignItems: "center", width: 56 }}>
+                    {holeSize > 0 && holePos !== "none" && (
+                      <Text style={{ fontSize: 4.2, color: "#dc2626", fontWeight: "bold", marginBottom: 1 }}>
+                        ↓ {holeOffset || 5.5}mm (Ø{holeSize}mm)
+                      </Text>
+                    )}
+                    <View
+                      style={{
+                        width: 50,
+                        height: 60,
+                        borderWidth: 0.6,
+                        borderColor: "#10b981",
+                        borderRadius: orderData.cornerType?.toLowerCase().includes("round") ? 3 : 1,
+                        overflow: "hidden",
+                        backgroundColor: "#18181b",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Image
+                        src={orderData.artworkFront}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                    </View>
+                    <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
+                      front
+                    </Text>
+                    <Text style={{ fontSize: 3.6, color: "#64748b" }}>
+                      передняя часть
+                    </Text>
+                  </View>
+
+                  {/* Back Side */}
+                  <View style={{ alignItems: "center", width: 56 }}>
+                    <View
+                      style={{
+                        width: 50,
+                        height: 60,
+                        borderWidth: 0.6,
+                        borderColor: "#10b981",
+                        borderRadius: orderData.cornerType?.toLowerCase().includes("round") ? 3 : 1,
+                        overflow: "hidden",
+                        backgroundColor: "#18181b",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Image
+                        src={orderData.artworkBack || orderData.artworkFront}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                    </View>
+                    <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
+                      back
+                    </Text>
+                    <Text style={{ fontSize: 3.6, color: "#64748b" }}>
+                      задняя часть
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                /* 2D Vector Cut & Bleed Schematic (Fallback when no artwork) */
+                <View
+                  style={{
+                    width: 86,
+                    height: 76,
+                    borderWidth: 0.6,
+                    borderColor: "#cbd5e1",
+                    backgroundColor: "#f8fafc",
+                    borderRadius: 2,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Svg viewBox="0 0 86 66" style={{ width: 82, height: 62 }}>
+                    {/* Outer Bleed Box */}
+                    <Rect
+                      x={trimX - 3}
+                      y={trimY - 3}
+                      width={drawW + 6}
+                      height={drawH + 6}
+                      fill="#fef2f2"
+                      stroke="#ef4444"
+                      strokeWidth={0.7}
+                      strokeDasharray="2,2"
                     />
-                  )}
-                </Svg>
-                <Text style={{ fontSize: 5.5, fontWeight: "bold", color: "#334155" }}>
-                  {width}×{height} {dimUnit} {holeSize > 0 && holePos !== "none" ? `• Ø${holeSize}mm` : ""}
-                </Text>
-              </View>
+                    {/* Trim Cut Box */}
+                    <Rect
+                      x={trimX}
+                      y={trimY}
+                      width={drawW}
+                      height={drawH}
+                      rx={orderData.cornerType?.toLowerCase().includes("round") ? 3 : 0}
+                      fill="#ffffff"
+                      stroke="#1d4ed8"
+                      strokeWidth={1.1}
+                    />
+                    {/* Center Crosshair */}
+                    <Line
+                      x1={trimX + 4}
+                      y1={trimY + drawH / 2}
+                      x2={trimX + drawW - 4}
+                      y2={trimY + drawH / 2}
+                      stroke="#cbd5e1"
+                      strokeWidth={0.5}
+                      strokeDasharray="1.5,1.5"
+                    />
+                    <Line
+                      x1={trimX + drawW / 2}
+                      y1={trimY + 4}
+                      x2={trimX + drawW / 2}
+                      y2={trimY + drawH - 4}
+                      stroke="#cbd5e1"
+                      strokeWidth={0.5}
+                      strokeDasharray="1.5,1.5"
+                    />
+                    {/* Drill Hole if present */}
+                    {holeSize > 0 && holePos !== "none" && pdfHoles.map((ph, phIdx) => (
+                      <Circle
+                        key={phIdx}
+                        cx={ph.cx}
+                        cy={ph.cy}
+                        r={2.5}
+                        fill="#eff6ff"
+                        stroke="#2563eb"
+                        strokeWidth={0.9}
+                      />
+                    ))}
+                  </Svg>
+                  <Text style={{ fontSize: 5.5, fontWeight: "bold", color: "#334155" }}>
+                    {width}×{height} {dimUnit} {holeSize > 0 && holePos !== "none" ? `• Ø${holeSize}mm` : ""}
+                  </Text>
+                </View>
+              )}
 
               {/* Specs List */}
               <View style={{ flex: 1 }}>

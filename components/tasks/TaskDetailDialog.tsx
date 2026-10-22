@@ -139,7 +139,7 @@ export function TaskDetailDialog() {
   const handleJumpToEntity = () => {
     if (!task.relatedId) return;
 
-    if (task.relatedType === "work-order" || task.relatedId.startsWith("WO-")) {
+    if (task.relatedType === "work-order" || task.relatedId.startsWith("WO")) {
       openTab({
         id: task.relatedId,
         title: `${task.relatedId}: ${task.relatedName || "Work Order"}`,

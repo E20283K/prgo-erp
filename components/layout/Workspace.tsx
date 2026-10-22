@@ -40,7 +40,6 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { WorkOrderDetail } from "@/components/documents/WorkOrderDetail";
 import { ProductSpecDetail } from "@/components/documents/ProductSpecDetail";
-import { SalesRecordDetail } from "@/components/documents/SalesRecordDetail";
 import { DeliveryActDetail } from "@/components/documents/DeliveryActDetail";
 import { CustomerDetail } from "@/components/documents/CustomerDetail";
 import { WarehouseReceiptDetail } from "@/components/documents/WarehouseReceiptDetail";
@@ -49,7 +48,12 @@ import { PlanningSlotDetail } from "@/components/documents/PlanningSlotDetail";
 import { MachineDetail } from "@/components/documents/MachineDetail";
 import { WarehouseStockDetail } from "@/components/documents/WarehouseStockDetail";
 import { PlantDetail } from "@/components/documents/PlantDetail";
-import { EmployeeDetail } from "@/components/documents/hr/EmployeeDetail";
+import { UserDetail } from "@/components/documents/UserDetail";
+import { EmployeeDetail } from "@/components/documents/hr/employees/EmployeeDetail";
+import { DepartmentDetail } from "@/components/documents/hr/departments/DepartmentDetail";
+import { PositionDetail } from "@/components/documents/hr/positions/PositionDetail";
+import { ShiftDetail } from "@/components/documents/hr/shifts/ShiftDetail";
+import { PayrollDetail } from "@/components/documents/hr/payroll/PayrollDetail";
 import { TradingSaleDetail } from "@/components/documents/trading/TradingSaleDetail";
 import { TradingOrderDetail } from "@/components/documents/trading/TradingOrderDetail";
 import { TradingSettlementDetail } from "@/components/documents/trading/TradingSettlementDetail";
@@ -83,7 +87,6 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     setCreateWorkOrderOpen,
   } = useWorkspaceStore();
   const activeTab = tabs.find((t) => t.id === activeTabId);
-  const isPOSActive = activeTabId.includes("pos");
 
   const tabBarRef = React.useRef<HTMLDivElement>(null);
   const [maxVisibleTabs, setMaxVisibleTabs] = React.useState<number>(7);
@@ -168,9 +171,8 @@ export function Workspace({ children }: { children: React.ReactNode }) {
   };
 
   const renderTabType = (tab: DocumentTab) => {
-    if (tab.type === "work-order" || tab.type === "client-order") return <WorkOrderDetail tab={tab} />;
+    if (tab.type === "work-order") return <WorkOrderDetail tab={tab} />;
     if (tab.type === "product-spec") return <ProductSpecDetail tab={tab} />;
-    if (tab.type === "sales-record") return <SalesRecordDetail tab={tab} />;
     if (tab.type === "delivery-act") return <DeliveryActDetail tab={tab} />;
     if (tab.type === "customer") return <CustomerDetail tab={tab} />;
     if (tab.type === "warehouse-receipt") return <WarehouseReceiptDetail tab={tab} />;
@@ -179,7 +181,12 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     if (tab.type === "planning-slot") return <PlanningSlotDetail tab={tab} />;
     if (tab.type === "machine-detail") return <MachineDetail tab={tab} />;
     if (tab.type === "plant-detail") return <PlantDetail tab={tab} />;
+    if (tab.type === "user-detail") return <UserDetail tab={tab} />;
     if (tab.type === "employee-detail") return <EmployeeDetail tab={tab} />;
+    if (tab.type === "department-detail") return <DepartmentDetail tab={tab} />;
+    if (tab.type === "position-detail") return <PositionDetail tab={tab} />;
+    if (tab.type === "shift-detail") return <ShiftDetail tab={tab} />;
+    if (tab.type === "payroll-detail") return <PayrollDetail tab={tab} />;
     if (tab.type === "trading-sale") return <TradingSaleDetail tab={tab} />;
     if (tab.type === "trading-order") return <TradingOrderDetail tab={tab} />;
     if (tab.type === "trading-settlement") return <TradingSettlementDetail tab={tab} />;
@@ -194,9 +201,8 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     <TooltipProvider delay={300}>
       <div className="flex-1 flex flex-col min-w-0 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
         {/* VS Code + 1C Document Tab Bar (Fluid Widths, No Scrollbar, Overflow Dropdown) */}
-        {!isPOSActive && (
-          <div
-            ref={tabBarRef}
+        <div
+          ref={tabBarRef}
             className="flex items-end h-9 bg-zinc-200/90 dark:bg-zinc-950 px-1.5 gap-1 overflow-hidden no-scrollbar shrink-0 border-b border-zinc-300 dark:border-zinc-800 select-none"
           >
             {/* Sidebar Toggle Button */}
@@ -473,8 +479,6 @@ export function Workspace({ children }: { children: React.ReactNode }) {
               <UserNav />
             </div>
           </div>
-        )}
-
 
       {/* Main Workspace Body */}
       <div className="flex-1 overflow-hidden relative">
@@ -493,7 +497,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
           if (!open) setTabToConfirmClose(null);
         }}
       >
-        <DialogContent className="max-w-md p-5">
+        <DialogContent className="sm:max-w-[490px] p-5 overflow-hidden">
           <DialogHeader className="gap-2">
             <div className="flex items-center gap-2.5 text-amber-600 dark:text-amber-500">
               <div className="w-8 h-8 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
@@ -510,13 +514,13 @@ export function Workspace({ children }: { children: React.ReactNode }) {
             </DialogDescription>
           </DialogHeader>
 
-          <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-3">
+          <DialogFooter className="-mx-5 -mb-5 mt-2 flex flex-row items-center justify-end gap-2 p-3 bg-muted/40 border-t border-border">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => setTabToConfirmClose(null)}
-              className="text-xs h-8 cursor-pointer"
+              className="text-xs h-8 cursor-pointer shrink-0"
             >
               {t("cancel")}
             </Button>
@@ -531,7 +535,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
                   setTabToConfirmClose(null);
                 }
               }}
-              className="text-xs h-8 cursor-pointer"
+              className="text-xs h-8 cursor-pointer shrink-0"
             >
               {t("discardAndClose")}
             </Button>
@@ -548,7 +552,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
                   setTabToConfirmClose(null);
                 }
               }}
-              className="text-xs h-8 cursor-pointer"
+              className="text-xs h-8 bg-blue-600 hover:bg-blue-700 text-white font-medium cursor-pointer shrink-0 shadow-none"
             >
               {t("saveAndClose")}
             </Button>

@@ -14,141 +14,38 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Plus,
   Download,
   Printer,
   Search,
   ExternalLink,
-  Building2,
-  UserCheck,
-  FilePlus2,
-  Scale,
-  Save,
-  ArrowUpRight,
   Sparkles,
-  Mail,
-  Phone,
-  MessageSquare,
-  Copy,
-  Check,
-  FileText,
 } from "lucide-react";
 
 import { useWorkspaceStore, CrmCustomerRecord } from "@/store/workspaceStore";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
-import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu";
+import { LeadDetailModal, LeadRecord } from "@/components/crm/LeadDetailModal";
+import {
+  SupplierDetailModal,
+  SUPPLIER_CATEGORY_LABELS,
+} from "@/components/crm/SupplierDetailModal";
+import type { SupplierRecord, SupplierCategory } from "@/lib/server/supplierService";
+
+export type { LeadRecord, SupplierRecord };
 
 interface CrmGridProps {
-  type: string; // "customers" | "leads"
+  type: string; // "customers" | "leads" | "suppliers"
 }
-
-interface LeadRecord {
-  id: string;
-  company: string;
-  tin: string;
-  contact: string;
-  phone: string;
-  email?: string;
-  productInterest: string;
-  estimatedOrderUsd: number;
-  source: string;
-  manager: string;
-  notes?: string;
-  status: "New" | "Contacted" | "Sample Sent" | "Qualified" | "Converted";
-}
-
-const INITIAL_LEADS: LeadRecord[] = [
-  {
-    id: "LD-1001",
-    company: "Tashkent Tea & Spices LLC",
-    tin: "309881240",
-    contact: "Javlonbek Orifov",
-    phone: "+998 90 944-11-22",
-    email: "procurement@tea-spices.uz",
-    productInterest: "300g Coated Tea Packaging Box + Hot Foil (25,000 pcs)",
-    estimatedOrderUsd: 6400,
-    source: "UzPrint Expo 2026",
-    manager: "Elena Voronina",
-    notes: "Ko'rgazmada tanishdik. 25,000 dona quti uchun qolip (die-cut) va oltin folga namunalarini taqdim etish so'ralgan. To'lov shartlari: 50% oldindan.",
-    status: "Qualified",
-  },
-  {
-    id: "LD-1002",
-    company: "Silk Road Boutique Hotel",
-    tin: "307612398",
-    contact: "Malika Karimova",
-    phone: "+998 93 380-55-66",
-    email: "sales@silkroadhotel.uz",
-    productInterest: "600g Duplex Kashirovka VIP Keycard Holder & Welcome Folder",
-    estimatedOrderUsd: 3200,
-    source: "Instagram / Website",
-    manager: "Elena Voronina",
-    notes: "Mehmonxona ochilishiga brendlashtirilgan VIP kartochka qutisi va papka kerak. Namunalar kuryer orqali yuborildi.",
-    status: "Sample Sent",
-  },
-  {
-    id: "LD-1003",
-    company: "Bukhara Textile Cluster",
-    tin: "304119872",
-    contact: "Rustamjon Sobirov",
-    phone: "+998 97 301-77-88",
-    email: "info@bukhara-textile.com",
-    productInterest: "Woven Satin 60mm Care Labels + Hangtags (100,000 pcs)",
-    estimatedOrderUsd: 8900,
-    source: "Tavsiya (Referral)",
-    manager: "T. Alimov",
-    notes: "Eksport uchun to'qimachilik yorliqlari (satin lentali pechat). O'lchamlari: 60x30mm, 4 rangli pechat. Qayta aloqaga chiqish: Dushanba 14:00.",
-    status: "Contacted",
-  },
-  {
-    id: "LD-1004",
-    company: "Samarkand Sweets Factory",
-    tin: "305229104",
-    contact: "Sherzod Normatov",
-    phone: "+998 99 512-00-99",
-    email: "supply@samarkand-sweets.uz",
-    productInterest: "E-Flute Laminated Gift Box 350g + Matte Lamination",
-    estimatedOrderUsd: 14500,
-    source: "Sovuq qo'ng'iroq",
-    manager: "M. Ivanova",
-    notes: "Yangi yil va bayram shirinliklari uchun mikrogofrali sovg'a qutilari. Namunaviy maket va narx taklifi tayyorlanmoqda.",
-    status: "New",
-  },
-  {
-    id: "LD-1005",
-    company: "OrienPharma Med",
-    tin: "308771203",
-    contact: "Dilnoza Rahimova",
-    phone: "+998 71 277-88-99",
-    email: "purchasing@orienpharma.uz",
-    productInterest: "Medicine Folding Cartons + 80g Instructions Insert",
-    estimatedOrderUsd: 11200,
-    source: "Tender Portal",
-    manager: "Elena Voronina",
-    notes: "Farmatsevtika dori qutilari va ichki yo'riqnoma qog'ozlari (80g ofset). Sertifikatlar va gigiyenik xulosalar talab qilinadi.",
-    status: "Qualified",
-  },
-];
 
 export function CrmGrid({ type }: CrmGridProps) {
   const tCommon = useTranslations("Common");
@@ -160,22 +57,50 @@ export function CrmGrid({ type }: CrmGridProps) {
     crmCustomers,
     clientSettlements,
     upsertCustomer,
+    loadCrmCustomers,
+    isCrmCustomersLoading,
+    suppliers,
+    loadSuppliers,
+    isSuppliersLoading,
+    upsertSupplierAsync,
+    deleteSupplierAsync,
     addNotification,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
 
-  const [leads, setLeads] = useState<LeadRecord[]>(INITIAL_LEADS);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<CrmCustomerRecord | null>(null);
-  const [editingLead, setEditingLead] = useState<LeadRecord | null>(null);
-  const [copiedPhone, setCopiedPhone] = useState(false);
+  const [leads, setLeads] = useState<LeadRecord[]>([]);
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierRecord | null>(null);
 
-  const handleCopyPhone = (text: string) => {
-    if (!text) return;
-    navigator.clipboard.writeText(text);
-    setCopiedPhone(true);
-    setTimeout(() => setCopiedPhone(false), 2000);
-  };
+  const fetchLeads = useCallback(async () => {
+    try {
+      const res = await fetch("/api/v1/crm/leads");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setLeads(json.data);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch CRM leads from server:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (type === "leads") {
+      fetchLeads();
+    } else if (type === "suppliers") {
+      loadSuppliers();
+    }
+  }, [type, fetchLeads, loadSuppliers]);
+
+  useEffect(() => {
+    if (loadCrmCustomers) {
+      loadCrmCustomers();
+    }
+  }, [loadCrmCustomers]);
+  const [leadModalOpen, setLeadModalOpen] = useState(false);
+  const [selectedLead, setSelectedLead] = useState<LeadRecord | null>(null);
 
   const customerRows = useMemo(() => {
     return crmCustomers.map((c) => {
@@ -207,6 +132,25 @@ export function CrmGrid({ type }: CrmGridProps) {
       return { columns: cols, rows: leads };
     }
 
+    if (type === "suppliers") {
+      const cols: GridColumn[] = [
+        { id: "code", title: "Ta'minotchi ID", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "name", title: "Ta'minotchi / Hamkor", width: 230, icon: GridColumnIcon.HeaderString },
+        { id: "categoryLabel", title: "Yo'nalishi / Toifasi", width: 185, icon: GridColumnIcon.HeaderLookup },
+        { id: "contactPerson", title: "Mas'ul shaxs", width: 145, icon: GridColumnIcon.HeaderString },
+        { id: "phone", title: "Telefon", width: 140, icon: GridColumnIcon.HeaderString },
+        { id: "tin", title: "STIR / INN", width: 110, icon: GridColumnIcon.HeaderCode },
+        { id: "currentBalance", title: "Bizning qarzimiz (Saldo)", width: 155, icon: GridColumnIcon.HeaderNumber },
+        { id: "paymentTerms", title: "To'lov shartlari", width: 160, icon: GridColumnIcon.HeaderString },
+        { id: "status", title: "Holati", width: 100, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+      const suppRows = suppliers.map((s) => ({
+        ...s,
+        categoryLabel: SUPPLIER_CATEGORY_LABELS[s.category]?.label || s.category,
+      }));
+      return { columns: cols, rows: suppRows };
+    }
+
     // Default: "customers"
     const cols: GridColumn[] = [
       { id: "id", title: "Cust ID", width: 95, icon: GridColumnIcon.HeaderReference },
@@ -220,7 +164,7 @@ export function CrmGrid({ type }: CrmGridProps) {
       { id: "status", title: "Status", width: 105, icon: GridColumnIcon.HeaderSingleValue },
     ];
     return { columns: cols, rows: customerRows };
-  }, [type, customerRows, leads]);
+  }, [type, customerRows, leads, suppliers]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -261,7 +205,7 @@ export function CrmGrid({ type }: CrmGridProps) {
       const colId = column?.id || "";
       const val = rowData[colId];
 
-      if (colId === "id" || colId === "tin" || colId === "contractNo") {
+      if (colId === "id" || colId === "code" || colId === "tin" || colId === "contractNo") {
         return {
           kind: GridCellKind.Text,
           data: String(val ?? ""),
@@ -274,10 +218,13 @@ export function CrmGrid({ type }: CrmGridProps) {
         };
       }
 
-      if (column.id === "balance") {
+      if (column.id === "balance" || column.id === "currentBalance") {
         const num = Number(val ?? 0);
+        const curr = rowData.currency || (column.id === "currentBalance" ? "UZS" : "USD");
         const formatted =
-          num > 0
+          curr === "UZS"
+            ? `${num.toLocaleString("uz-UZ")} UZS`
+            : num > 0
             ? `+$${num.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
             : num < 0
             ? `-$${Math.abs(num).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
@@ -370,9 +317,11 @@ export function CrmGrid({ type }: CrmGridProps) {
     if (!rowData) return;
 
     if (type === "leads") {
-      setEditingLead({ ...rowData });
-      setEditingCustomer(null);
-      setInspectorOpen(true);
+      setSelectedLead({ ...rowData });
+      setLeadModalOpen(true);
+    } else if (type === "suppliers") {
+      setSelectedSupplier({ ...rowData });
+      setSupplierModalOpen(true);
     } else {
       const custRecord: CrmCustomerRecord = {
         id: rowData.id,
@@ -401,7 +350,7 @@ export function CrmGrid({ type }: CrmGridProps) {
   const handleCreateNew = () => {
     if (type === "leads") {
       const nextNum = 1001 + leads.length;
-      setEditingLead({
+      setSelectedLead({
         id: `LD-${nextNum}`,
         company: "",
         tin: "",
@@ -415,26 +364,43 @@ export function CrmGrid({ type }: CrmGridProps) {
         notes: "",
         status: "New",
       });
-      setEditingCustomer(null);
-      setInspectorOpen(true);
-    } else {
-      const nextNum = 101 + crmCustomers.length;
-      const newCust: CrmCustomerRecord = {
-        id: `CUST-${nextNum}`,
-        name: `Yangi Mijoz MCHJ #${nextNum}`,
-        tin: "309500100",
-        industry: "FMCG & Packaging",
+      setLeadModalOpen(true);
+    } else if (type === "suppliers") {
+      const nextCode = `SUP-${101 + suppliers.length}`;
+      setSelectedSupplier({
+        id: "",
+        code: nextCode,
+        name: "",
+        category: "raw_materials",
+        tin: "",
         contactPerson: "",
-        phone: "+998 90 ",
-        email: "",
-        contractNo: `CON-2026-${nextNum}`,
-        paymentTerms: "50% Prepay / 50% Ship",
-        manager: "Elena Voronina",
+        phone: "+998 ",
+        currentBalance: 0,
+        currency: "UZS",
+        paymentTerms: "100% Shartnoma bo'yicha",
         status: "Active",
+      });
+      setSupplierModalOpen(true);
+    } else {
+      const draftId = `draft-cust-${Date.now()}`;
+      const newCust: CrmCustomerRecord = {
+        id: draftId,
+        name: "",
+        tin: "",
+        industry: "",
+        contactPerson: "",
+        phone: "",
+        email: "",
+        contractNo: "",
+        paymentTerms: "",
+        manager: "",
+        status: "New",
+        contacts: [],
+        contracts: [],
       };
       openTab({
-        id: newCust.id,
-        title: `${newCust.id}: ${newCust.name}`,
+        id: draftId,
+        title: "Yangi Mijoz (Qoralama)",
         type: "customer",
         module: "crm",
         isUnsaved: true,
@@ -453,68 +419,80 @@ export function CrmGrid({ type }: CrmGridProps) {
     }
   };
 
-  const handleSaveCustomer = () => {
-    if (!editingCustomer || !editingCustomer.name.trim()) return;
-    upsertCustomer(editingCustomer);
-    addNotification({
-      title: `Mijoz kartochkasi saqlandi (${editingCustomer.id})`,
-      description: `${editingCustomer.name} (STIR: ${editingCustomer.tin}) CRM va Moliya bazasida yangilandi.`,
-      severity: "success",
-      link: { module: "crm", subModule: "customers" },
-    });
-    setInspectorOpen(false);
-  };
-
-  const handleCreateOrderForCustomer = (cust: CrmCustomerRecord) => {
-    upsertCustomer(cust);
-    const newOrderNo = `ORD-2026-${Math.floor(195 + Math.random() * 700)}`;
-    openTab({
-      id: newOrderNo,
-      title: `${newOrderNo}: ${cust.name}`,
-      type: "work-order",
-      module: "production",
-      isUnsaved: true,
-      activeLevel3Tab: "overview",
-      documentData: {
-        docNo: newOrderNo,
-        customer: cust.name,
-        product: "New Print Specification",
-        quantity: 5000,
-        unit: "pcs",
-        orderType: "Production",
-        approvalStatus: "Draft",
-        currency: "USD",
-        recipe: "OFFSET_STD_V1",
-        department: "Offset",
-        deadline: "2026-10-25",
-        responsible: cust.manager || "Elena Voronina",
-      },
-    });
-    setInspectorOpen(false);
-  };
-
-  const handleSaveLead = () => {
-    if (!editingLead || !editingLead.company.trim()) return;
+  const handleSaveLead = async (leadToSave: LeadRecord) => {
+    if (!leadToSave || !leadToSave.company.trim()) return;
     setLeads((prev) => {
-      const exists = prev.some((l) => l.id === editingLead.id);
+      const exists = prev.some((l) => l.id === leadToSave.id);
       return exists
-        ? prev.map((l) => (l.id === editingLead.id ? editingLead : l))
-        : [editingLead, ...prev];
+        ? prev.map((l) => (l.id === leadToSave.id ? leadToSave : l))
+        : [leadToSave, ...prev];
     });
-    setInspectorOpen(false);
+    addNotification({
+      title: `Lid saqlandi (${leadToSave.id})`,
+      description: `${leadToSave.company} (${leadToSave.status})`,
+      severity: "success",
+    });
+    setLeadModalOpen(false);
+
+    try {
+      await fetch("/api/v1/crm/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(leadToSave),
+      });
+      fetchLeads();
+    } catch (e) {
+      console.error("Failed to persist lead to DB:", e);
+    }
   };
 
-  const handleConvertLeadToOrder = (lead: LeadRecord) => {
-    const nextNum = 101 + crmCustomers.length;
+  const handleDeleteLead = async (leadId: string) => {
+    setLeads((prev) => prev.filter((l) => l.id !== leadId));
+    addNotification({
+      title: `Lid o'chirildi (${leadId})`,
+      severity: "info",
+    });
+    setLeadModalOpen(false);
+
+    try {
+      await fetch(`/api/v1/crm/leads/${encodeURIComponent(leadId)}`, {
+        method: "DELETE",
+      });
+    } catch (e) {
+      console.error("Failed to delete lead from DB:", e);
+    }
+  };
+
+  const handleSaveSupplier = async (suppToSave: Partial<SupplierRecord>) => {
+    if (!suppToSave || !suppToSave.name?.trim()) return;
+    await upsertSupplierAsync(suppToSave);
+    addNotification({
+      title: `Ta'minotchi saqlandi (${suppToSave.code || suppToSave.name})`,
+      severity: "success",
+    });
+    setSupplierModalOpen(false);
+  };
+
+  const handleDeleteSupplier = async (supplierId: string) => {
+    await deleteSupplierAsync(supplierId);
+    addNotification({
+      title: "Ta'minotchi o'chirildi",
+      severity: "info",
+    });
+    setSupplierModalOpen(false);
+  };
+
+  const handleConvertLeadToOrder = async (lead: LeadRecord) => {
+    const draftCustId = `draft-cust-${Date.now()}`;
     const newCust: CrmCustomerRecord = {
-      id: `CUST-${nextNum}`,
+      id: draftCustId,
       name: lead.company || "New Client LLC",
       tin: lead.tin || "309112233",
       industry: "Commercial & Packaging",
       contactPerson: lead.contact || "Procurement Lead",
       phone: lead.phone || "+998 90 000-00-00",
       email: lead.email || "orders@client.uz",
-      contractNo: `CON-2026-${nextNum}`,
+      contractNo: "",
       paymentTerms: "50% Advance / 50% Before Dispatch",
       manager: lead.manager || "Elena Voronina",
       status: "Active",
@@ -523,6 +501,16 @@ export function CrmGrid({ type }: CrmGridProps) {
     setLeads((prev) =>
       prev.map((l) => (l.id === lead.id ? { ...l, status: "Converted" } : l))
     );
+
+    try {
+      await fetch(`/api/v1/crm/leads/${encodeURIComponent(lead.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...lead, status: "Converted" }),
+      });
+    } catch (e) {
+      console.error("Failed to update converted lead status:", e);
+    }
 
     const newOrderNo = `ORD-2026-${Math.floor(200 + Math.random() * 600)}`;
     openTab({
@@ -548,17 +536,16 @@ export function CrmGrid({ type }: CrmGridProps) {
         notes: lead.notes || "",
       },
     });
-    setInspectorOpen(false);
-  };
 
-  const activeCustomerSettlement = useMemo(() => {
-    if (!editingCustomer) return null;
-    return clientSettlements.find(
-      (s) =>
-        s.customer.toLowerCase() === editingCustomer.name.toLowerCase() ||
-        s.customerTin === editingCustomer.tin
-    );
-  }, [editingCustomer, clientSettlements]);
+    addNotification({
+      title: `Lid buyurtmaga aylantirildi (${newOrderNo})`,
+      description: `${newCust.name} uchun yangi ishlab chiqarish buyurtmasi ochildi.`,
+      severity: "success",
+      link: { module: "production", subModule: "work-orders" },
+    });
+
+    setLeadModalOpen(false);
+  };
 
   return (
     <>
@@ -574,7 +561,13 @@ export function CrmGrid({ type }: CrmGridProps) {
                   className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>{type === "leads" ? "New Lead" : "New Customer"}</span>
+                  <span>
+                    {type === "leads"
+                      ? "New Lead"
+                      : type === "suppliers"
+                      ? "Yangi Ta'minotchi"
+                      : "New Customer"}
+                  </span>
                 </Button>
                 <Separator orientation="vertical" className="h-4 mx-1" />
 
@@ -657,549 +650,67 @@ export function CrmGrid({ type }: CrmGridProps) {
             </div>
           </div>
         </ContextMenuTrigger>
+        <ContextMenuContent className="w-56 text-xs">
+          <ContextMenuItem onClick={handleOpenSelected} className="gap-2">
+            <ExternalLink className="w-3.5 h-3.5 text-blue-500" />
+            <span>
+              {type === "leads"
+                ? "Lidni ko'rish / ochish"
+                : type === "suppliers"
+                ? "Ta'minotchini ko'rish / ochish"
+                : "Mijozni ochish"}{" "}
+              (F12)
+            </span>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={handleCreateNew} className="gap-2">
+            <Plus className="w-3.5 h-3.5 text-emerald-500" />
+            <span>
+              {type === "leads"
+                ? "Yangi lid qo'shish"
+                : type === "suppliers"
+                ? "Yangi ta'minotchi qo'shish"
+                : "Yangi mijoz qo'shish"}{" "}
+              (Ins)
+            </span>
+          </ContextMenuItem>
+          {type === "leads" && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={() => {
+                  const indices = selection.rows.toArray();
+                  const targetRow = indices.length > 0 ? (filteredRows[indices[0]] as LeadRecord) : null;
+                  if (targetRow) handleConvertLeadToOrder(targetRow);
+                }}
+                disabled={selection.rows.length === 0}
+                className="gap-2 text-emerald-600"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Buyurtmaga aylantirish</span>
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
       </ContextMenu>
 
-      {/* 360° Customer / Lead Inspector Drawer */}
-      <Sheet open={inspectorOpen} onOpenChange={setInspectorOpen}>
-        <SheetContent className="w-[520px] sm:max-w-[540px] p-0 flex flex-col h-full bg-card overflow-hidden">
-          {editingCustomer && (
-            <div className="flex flex-col h-full overflow-hidden">
-              <SheetHeader className="px-6 pt-5 pb-3 border-b border-border pr-12 bg-muted/20 shrink-0 text-left">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="font-mono text-xs bg-background">
-                    {editingCustomer.id}
-                  </Badge>
-                  <Badge
-                    className={
-                      editingCustomer.status === "VIP"
-                        ? "bg-amber-500/15 text-amber-500 border-amber-500/30 font-medium"
-                        : "bg-emerald-500/15 text-emerald-500 border-emerald-500/30 font-medium"
-                    }
-                  >
-                    {editingCustomer.status}
-                  </Badge>
-                </div>
-                <SheetTitle className="flex items-center gap-2 text-base pt-1 truncate">
-                  <Building2 className="w-4 h-4 text-blue-500 shrink-0" />
-                  <span className="truncate">{editingCustomer.name || "Customer Card (360°)"}</span>
-                </SheetTitle>
-                <SheetDescription className="text-xs">
-                  Mijoz rekvizitlari (STIR, Shartnoma), o&apos;zaro hisob-kitob saldosi va tezkor buyurtma ochish.
-                </SheetDescription>
-              </SheetHeader>
+      {/* Separate Compact Modal Window for Viewing and Managing Leads */}
+      <LeadDetailModal
+        open={leadModalOpen}
+        onOpenChange={setLeadModalOpen}
+        lead={selectedLead}
+        onSave={handleSaveLead}
+        onConvertToOrder={handleConvertLeadToOrder}
+        onDelete={handleDeleteLead}
+      />
 
-              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-                {/* Live Financial Settlement Card */}
-                <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                      <Scale className="w-3.5 h-3.5 text-blue-500" />
-                      Akt Sverka / Hisob-kitob Saldosi
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[11px] text-blue-500 hover:text-blue-600 gap-1"
-                      onClick={() => {
-                        setInspectorOpen(false);
-                        setModule("finance", "settlements");
-                      }}
-                    >
-                      <span>Moliya reestriga o&apos;tish</span>
-                      <ArrowUpRight className="w-3 h-3" />
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 pt-1">
-                    <div className="bg-background rounded p-2 border border-border/60">
-                      <div className="text-[10px] text-muted-foreground">Jami yuklangan (Debit)</div>
-                      <div className="text-xs font-mono font-semibold text-foreground">
-                        ${(activeCustomerSettlement?.totalDebit ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div className="bg-background rounded p-2 border border-border/60">
-                      <div className="text-[10px] text-muted-foreground">To&apos;langan (Credit)</div>
-                      <div className="text-xs font-mono font-semibold text-emerald-500">
-                        ${(activeCustomerSettlement?.totalCredit ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div className="bg-background rounded p-2 border border-border/60">
-                      <div className="text-[10px] text-muted-foreground">Joriy Saldo</div>
-                      <div
-                        className={`text-xs font-mono font-bold ${
-                          (activeCustomerSettlement?.closingBalance ?? 0) > 0
-                            ? "text-red-500"
-                            : (activeCustomerSettlement?.closingBalance ?? 0) < 0
-                            ? "text-emerald-500"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        ${(activeCustomerSettlement?.closingBalance ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Editable Requisites */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2 space-y-1">
-                    <Label className="text-xs">Korxona nomi (Company Name)</Label>
-                    <Input
-                      value={editingCustomer.name}
-                      onChange={(e) =>
-                        setEditingCustomer({ ...editingCustomer, name: e.target.value })
-                      }
-                      placeholder="e.g. Alpha Media Group LLC"
-                      className="h-8 text-xs"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">STIR / INN (9 digits)</Label>
-                    <Input
-                      value={editingCustomer.tin}
-                      onChange={(e) =>
-                        setEditingCustomer({ ...editingCustomer, tin: e.target.value })
-                      }
-                      className="h-8 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">Asosiy Shartnoma № (Contract)</Label>
-                    <Input
-                      value={editingCustomer.contractNo}
-                      onChange={(e) =>
-                        setEditingCustomer({ ...editingCustomer, contractNo: e.target.value })
-                      }
-                      className="h-8 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">Mas&apos;ul shaxs (Contact Person)</Label>
-                    <Input
-                      value={editingCustomer.contactPerson}
-                      onChange={(e) =>
-                        setEditingCustomer({
-                          ...editingCustomer,
-                          contactPerson: e.target.value,
-                        })
-                      }
-                      className="h-8 text-xs"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">Telefon raqami</Label>
-                    <Input
-                      value={editingCustomer.phone}
-                      onChange={(e) =>
-                        setEditingCustomer({ ...editingCustomer, phone: e.target.value })
-                      }
-                      className="h-8 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">Soha (Industry)</Label>
-                    <Input
-                      value={editingCustomer.industry}
-                      onChange={(e) =>
-                        setEditingCustomer({ ...editingCustomer, industry: e.target.value })
-                      }
-                      className="h-8 text-xs"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">Status</Label>
-                    <Select
-                      value={editingCustomer.status}
-                      onValueChange={(val) =>
-                        val && setEditingCustomer({ ...editingCustomer, status: val as CrmCustomerRecord["status"] })
-                      }
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="VIP">VIP</SelectItem>
-                        <SelectItem value="Active">Active</SelectItem>
-                        <SelectItem value="New">New</SelectItem>
-                        <SelectItem value="Blocked">Blocked</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="col-span-2 space-y-1">
-                    <Label className="text-xs">To&apos;lov shartlari (Payment Terms)</Label>
-                    <Input
-                      value={editingCustomer.paymentTerms}
-                      onChange={(e) =>
-                        setEditingCustomer({
-                          ...editingCustomer,
-                          paymentTerms: e.target.value,
-                        })
-                      }
-                      className="h-8 text-xs"
-                    />
-                  </div>
-
-                  <div className="col-span-2 space-y-1">
-                    <Label className="text-xs">Account Manager</Label>
-                    <Input
-                      value={editingCustomer.manager}
-                      onChange={(e) =>
-                        setEditingCustomer({ ...editingCustomer, manager: e.target.value })
-                      }
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                </div>
-
-                <Separator />
-
-              </div>
-
-              <div className="p-4 border-t border-border bg-muted/20 shrink-0 flex items-center justify-between gap-3">
-                <Button
-                  size="sm"
-                  className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                  onClick={() => handleCreateOrderForCustomer(editingCustomer)}
-                >
-                  <FilePlus2 className="w-3.5 h-3.5" />
-                  <span>Yangi Buyurtma Ochish</span>
-                </Button>
-
-                <Button
-                  size="sm"
-                  className="h-8 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={handleSaveCustomer}
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Saqlash</span>
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {editingLead && (
-            <div className="flex flex-col h-full overflow-hidden">
-              <SheetHeader className="px-6 pt-5 pb-3 border-b border-border pr-12 bg-muted/20 shrink-0 text-left">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="font-mono text-xs bg-background">
-                    {editingLead.id}
-                  </Badge>
-                  <Badge
-                    className={
-                      editingLead.status === "New"
-                        ? "bg-sky-500/15 text-sky-500 border-sky-500/30 font-medium"
-                        : editingLead.status === "Qualified"
-                        ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30 font-medium"
-                        : editingLead.status === "Sample Sent"
-                        ? "bg-purple-500/15 text-purple-500 border-purple-500/30 font-medium"
-                        : editingLead.status === "Contacted"
-                        ? "bg-amber-500/15 text-amber-500 border-amber-500/30 font-medium"
-                        : "bg-blue-500/15 text-blue-500 border-blue-500/30 font-medium"
-                    }
-                  >
-                    {editingLead.status}
-                  </Badge>
-                  {editingLead.source && (
-                    <Badge variant="secondary" className="text-[11px] font-normal">
-                      {editingLead.source}
-                    </Badge>
-                  )}
-                </div>
-                <SheetTitle className="flex items-center gap-2 text-base pt-1 truncate">
-                  <UserCheck className="w-4 h-4 text-primary shrink-0" />
-                  <span className="truncate">{editingLead.company || "Yangi Lead / So'rov"}</span>
-                </SheetTitle>
-                <SheetDescription className="text-xs">
-                  Kiruvchi so&apos;rov ma&apos;lumotlari, mijoz talabi va muzokara bosqichi.
-                </SheetDescription>
-              </SheetHeader>
-
-              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3.5">
-                {/* 1. Kompaniya va Bog'lanish */}
-                <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-blue-500" />
-                    <span>Kompaniya va Aloqa Rekvizitlari</span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-xs">Kompaniya / Brend nomi</Label>
-                      <Input
-                        value={editingLead.company}
-                        onChange={(e) =>
-                          setEditingLead({ ...editingLead, company: e.target.value })
-                        }
-                        placeholder="Masalan: Silk Road LLC"
-                        className="h-8 text-xs font-medium"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">STIR / INN</Label>
-                      <Input
-                        value={editingLead.tin || ""}
-                        onChange={(e) =>
-                          setEditingLead({ ...editingLead, tin: e.target.value })
-                        }
-                        placeholder="309..."
-                        className="h-8 text-xs font-mono"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Muloqotdagi shaxs</Label>
-                      <Input
-                        value={editingLead.contact}
-                        onChange={(e) =>
-                          setEditingLead({ ...editingLead, contact: e.target.value })
-                        }
-                        placeholder="Ism Familiya"
-                        className="h-8 text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs">Telefon</Label>
-                        {editingLead.phone && (
-                          <button
-                            type="button"
-                            onClick={() => handleCopyPhone(editingLead.phone)}
-                            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5"
-                          >
-                            {copiedPhone ? (
-                              <Check className="w-2.5 h-2.5 text-emerald-500" />
-                            ) : (
-                              <Copy className="w-2.5 h-2.5" />
-                            )}
-                            <span>{copiedPhone ? "Nusxalandi" : "Nusxalash"}</span>
-                          </button>
-                        )}
-                      </div>
-                      <div className="relative">
-                        <Phone className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-2.5" />
-                        <Input
-                          value={editingLead.phone}
-                          onChange={(e) =>
-                            setEditingLead({ ...editingLead, phone: e.target.value })
-                          }
-                          className="h-8 text-xs font-mono pl-8"
-                          placeholder="+998 90 123-45-67"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">Email pochta</Label>
-                    <div className="relative">
-                      <Mail className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-2.5" />
-                      <Input
-                        value={editingLead.email || ""}
-                        onChange={(e) =>
-                          setEditingLead({ ...editingLead, email: e.target.value })
-                        }
-                        placeholder="procurement@company.uz"
-                        className="h-8 text-xs pl-8"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* 2. Spetsifikatsiya va Baholash */}
-                <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-blue-500" />
-                    <span>Poligrafiya Buyurtmasi va Baholash</span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">So&apos;ralayotgan poligrafiya mahsuloti (Print Spec)</Label>
-                    <Input
-                      value={editingLead.productInterest}
-                      onChange={(e) =>
-                        setEditingLead({ ...editingLead, productInterest: e.target.value })
-                      }
-                      placeholder="Masalan: 300g Coated Tea Packaging Box + Hot Foil (25,000 dona)"
-                      className="h-8 text-xs"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Taxminiy buyurtma qiymati ($)</Label>
-                      <Input
-                        type="number"
-                        value={editingLead.estimatedOrderUsd}
-                        onChange={(e) =>
-                          setEditingLead({
-                            ...editingLead,
-                            estimatedOrderUsd: Number(e.target.value) || 0,
-                          })
-                        }
-                        className="h-8 text-xs font-mono font-semibold"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-xs">Bosqich (Stage)</Label>
-                      <Select
-                        value={editingLead.status}
-                        onValueChange={(val) =>
-                          val && setEditingLead({ ...editingLead, status: val as LeadRecord["status"] })
-                        }
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="New">New (Yangi so&apos;rov)</SelectItem>
-                          <SelectItem value="Contacted">Contacted (Bog&apos;lanildi)</SelectItem>
-                          <SelectItem value="Sample Sent">Sample Sent (Namuna yuborildi)</SelectItem>
-                          <SelectItem value="Qualified">Qualified (Kelishildi)</SelectItem>
-                          <SelectItem value="Converted">Converted (Buyurtmaga aylandi)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Kelib tushish manbasi (Source)</Label>
-                      <Select
-                        value={editingLead.source}
-                        onValueChange={(val) =>
-                          val && setEditingLead({ ...editingLead, source: val })
-                        }
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="UzPrint Expo 2026">UzPrint Expo 2026</SelectItem>
-                          <SelectItem value="Instagram / Website">Instagram / Website</SelectItem>
-                          <SelectItem value="Telegram">Telegram</SelectItem>
-                          <SelectItem value="Tavsiya (Referral)">Tavsiya (Referral)</SelectItem>
-                          <SelectItem value="Sovuq qo'ng'iroq">Sovuq qo&apos;ng&apos;iroq</SelectItem>
-                          <SelectItem value="Tender Portal">Tender Portal</SelectItem>
-                          <SelectItem value="Direct Inquiry">Boshqa / To&apos;g&apos;ridan-to&apos;g&apos;ri</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-xs">Mas&apos;ul menejer</Label>
-                      <Select
-                        value={editingLead.manager}
-                        onValueChange={(val) =>
-                          val && setEditingLead({ ...editingLead, manager: val })
-                        }
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Elena Voronina">Elena Voronina</SelectItem>
-                          <SelectItem value="T. Alimov">T. Alimov</SelectItem>
-                          <SelectItem value="M. Ivanova">M. Ivanova</SelectItem>
-                          <SelectItem value="Bobur Shokirov">Bobur Shokirov</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3. Muzokara Tarixi va Izohlar */}
-                <div className="rounded-lg border border-border bg-card p-3.5 space-y-2.5">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
-                      Muzokara Izohi va Eslatmalar
-                    </span>
-                    <span className="text-[10px] text-muted-foreground font-normal">
-                      Menejer kundaligi
-                    </span>
-                  </div>
-
-                  <Textarea
-                    value={editingLead.notes || ""}
-                    onChange={(e) =>
-                      setEditingLead({ ...editingLead, notes: e.target.value })
-                    }
-                    placeholder="Mijoz talablari, so'ralgan namunalar, muddatlar va qayta qo'ng'iroq vaqti..."
-                    className="min-h-[85px] text-xs resize-none leading-relaxed"
-                  />
-
-                  {/* Tezkor teglar */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span className="text-[10px] text-muted-foreground mr-1">Tezkor:</span>
-                    {[
-                      "+ Namunalar yuborildi",
-                      "+ Maket kutilmoqda",
-                      "+ Narx kelishilmoqda",
-                      "+ Shoshilinch tiraj",
-                      "+ Qayta qo'ng'iroq",
-                    ].map((tag) => (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => {
-                          const current = editingLead.notes || "";
-                          const updated = current
-                            ? `${current}\n${tag.replace("+ ", "• ")}`
-                            : tag.replace("+ ", "• ");
-                          setEditingLead({ ...editingLead, notes: updated });
-                        }}
-                        className="text-[10px] px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors border border-border/50"
-                      >
-                        {tag}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Pinned Footer */}
-              <div className="p-4 border-t border-border bg-muted/20 shrink-0 flex items-center justify-between gap-3">
-                <Button
-                  size="sm"
-                  className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-xs"
-                  onClick={() => handleConvertLeadToOrder(editingLead)}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Mijozga aylantirish va Buyurtma ochish</span>
-                </Button>
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 text-xs"
-                    onClick={() => setInspectorOpen(false)}
-                  >
-                    Bekor qilish
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="h-8 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium"
-                    onClick={handleSaveLead}
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Saqlash</span>
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
+      {/* Supplier & Partner Detail Modal */}
+      <SupplierDetailModal
+        open={supplierModalOpen}
+        onOpenChange={setSupplierModalOpen}
+        supplier={selectedSupplier}
+        onSave={handleSaveSupplier}
+        onDelete={handleDeleteSupplier}
+      />
     </>
   );
 }

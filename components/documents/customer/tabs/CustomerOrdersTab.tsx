@@ -180,7 +180,7 @@ export function CustomerOrdersTab({
     if (all.length === 0) {
       return [
         {
-          docId: `WO-${customer.id.replace("CUST-", "3")}`,
+          docId: `WOOF-26-${customer.id.replace("CUST-", "").padStart(4, "0")}`,
           docType: "Work Order (WO)",
           date: "2026-10-15",
           pressMachine: "Heidelberg Speedmaster XL 106-8P",
@@ -328,23 +328,23 @@ export function CustomerOrdersTab({
   );
 
   const handleCreateShipmentFromStock = (selectedItem?: any) => {
-    const nextNum = 6010 + warehouseShipments.length;
-    const newId = `SHP-${nextNum}`;
+    const draftId = `draft-shp-${Date.now()}`;
     const targetProduct = selectedItem?.product || (customerFinishedGoods[0]?.productName ?? `${customer.name} Mahsuloti`);
     const targetQty = selectedItem?.remainingStock || (totalRemainingStock > 0 ? totalRemainingStock : 1000);
 
     openTab({
-      id: newId,
-      title: `${newId}: ${customer.name}`,
+      id: draftId,
+      title: `Yangi Chiqim: ${customer.name} (Qoralama)`,
       type: "warehouse-shipment",
       module: "warehouse",
       isUnsaved: true,
       documentData: {
-        id: newId,
+        id: draftId,
+        shipmentNumber: "",
         date: new Date().toISOString().split("T")[0],
         customer: customer.name,
         customerTin: customer.tin,
-        workOrder: selectedItem?.docId || customerFinishedGoods[0]?.workOrderId || "WO-00351",
+        workOrder: selectedItem?.docId || customerFinishedGoods[0]?.workOrderId || "WOOF-26-0351",
         product: targetProduct,
         quantity: targetQty,
         unit: "pcs",

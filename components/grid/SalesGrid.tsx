@@ -38,161 +38,25 @@ export function SalesGrid({ type }: SalesGridProps) {
   const isDark = theme === "dark";
 
   const { columns, rows } = useMemo(() => {
-    let cols: GridColumn[] = [];
-    let mockRows: any[] = [];
+    const cols: GridColumn[] = [
+      { id: "id", title: "Schet-faktura №", width: 120, icon: GridColumnIcon.HeaderReference },
+      { id: "date", title: "Date", width: 110, icon: GridColumnIcon.HeaderDate },
+      { id: "orderId", title: "Order Ref", width: 105, icon: GridColumnIcon.HeaderReference },
+      { id: "workOrderId", title: "Work Order", width: 105, icon: GridColumnIcon.HeaderReference },
+      { id: "customer", title: "Customer Organization", width: 210, icon: GridColumnIcon.HeaderString },
+      { id: "product", title: "Delivered Print Goods", width: 230, icon: GridColumnIcon.HeaderTextTemplate },
+      { id: "quantity", title: "Delivered Qty", width: 110, icon: GridColumnIcon.HeaderNumber },
+      { id: "totalAmount", title: "Total w/ VAT ($)", width: 130, icon: GridColumnIcon.HeaderNumber },
+      { id: "linkedShipment", title: "Warehouse Ref", width: 120, icon: GridColumnIcon.HeaderReference },
+      { id: "status", title: "Status", width: 145, icon: GridColumnIcon.HeaderSingleValue },
+    ];
+    const dataRows = deliveryActs.map((act) => ({
+      ...act,
+      linkedShipment: act.linkedShipmentId || "Pending Post",
+    }));
 
-    if (type === "client-orders") {
-      cols = [
-        { id: "id", title: "Order ID", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: "Date", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "customer", title: "Customer", width: 220, icon: GridColumnIcon.HeaderString },
-        { id: "product", title: "Print Job Description", width: 260, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "quantity", title: "Run Qty", width: 100, icon: GridColumnIcon.HeaderNumber },
-        { id: "orderType", title: "Type", width: 120, icon: GridColumnIcon.HeaderSingleValue },
-        { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
-      ];
-      mockRows = Array.from({ length: 50 }, (_, i) => ({
-        id: `CO-${String(41 + i).padStart(5, "0")}`,
-        date: `2026-10-${String((i % 30) + 1).padStart(2, "0")}`,
-        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging"][i % 4],
-        product: ["Offset Catalogs 100p (A4)", "Woven Satin Labels 30x50", "Nylon Taffeta Roll", "E-Flute Packaging Boxes"][i % 4],
-        quantity: [1000, 5000, 200, 10000][i % 4],
-        orderType: ["Sample", "Production", "Production", "Urgent Run"][i % 4],
-        status: ["Prepress", "Pending Approval", "In Production", "Completed"][i % 4],
-      }));
-    } else if (type === "quotations") {
-      cols = [
-        { id: "id", title: "Quote ID", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: "Date", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "customer", title: "Prospect / Client", width: 220, icon: GridColumnIcon.HeaderString },
-        { id: "subject", title: "Scope of Work", width: 260, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "amount", title: "Est. Total ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
-        { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
-        { id: "validity", title: "Valid Until", width: 120, icon: GridColumnIcon.HeaderDate },
-      ];
-      mockRows = Array.from({ length: 80 }, (_, i) => ({
-        id: `QT-${String(501 + i).padStart(4, "0")}`,
-        date: `2026-10-${String((i % 28) + 1).padStart(2, "0")}`,
-        customer: ["Global Retailers Ltd", "Workwear Supply Co", "Hotel Chains Inc", "Uniforms Direct", "Boutique Threads"][i % 5],
-        subject: ["Annual Catalog Print 10k", "Corrugated Carton Run 50k", "Self-Adhesive Foil Labels", "Hardcover Restaurant Menus", "Custom Paper Bags 5k"][i % 5],
-        amount: [8500, 42000, 6200, 14500, 11800][i % 5],
-        status: ["Draft", "Sent", "Accepted", "Rejected", "Under Review"][i % 5],
-        validity: `2026-11-${String((i % 28) + 1).padStart(2, "0")}`,
-      }));
-    } else if (type === "contracts") {
-      cols = [
-        { id: "id", title: "Contract No", width: 120, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: "Sign Date", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "customer", title: "Organization", width: 220, icon: GridColumnIcon.HeaderString },
-        { id: "contractType", title: "Contract Type", width: 160, icon: GridColumnIcon.HeaderLookup },
-        { id: "creditTerms", title: "Payment Terms", width: 170, icon: GridColumnIcon.HeaderSingleValue },
-        { id: "validUntil", title: "Valid Until", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "status", title: "Status", width: 120, icon: GridColumnIcon.HeaderSingleValue },
-      ];
-      mockRows = Array.from({ length: 40 }, (_, i) => ({
-        id: `CON-2026-${String(101 + i).padStart(3, "0")}`,
-        date: `2026-01-${String((i % 28) + 1).padStart(2, "0")}`,
-        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging", "City Publishing House"][i % 5],
-        contractType: ["Annual Framework", "High Volume Tier", "Agency Agreement", "One-Off Project"][i % 4],
-        creditTerms: ["50% Prepay / 50% Post", "14 Days Net", "100% Prepayment", "30 Days Net"][i % 4],
-        validUntil: `2026-12-31`,
-        status: ["Active", "Active", "Under Review", "Draft"][i % 4],
-      }));
-    } else if (type === "invoices") {
-      cols = [
-        { id: "id", title: "Proforma ID", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "orderId", title: "Order Ref", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: "Issue Date", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "customer", title: "B2B Client", width: 220, icon: GridColumnIcon.HeaderString },
-        { id: "amount", title: "Total ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
-        { id: "status", title: "Status", width: 130, icon: GridColumnIcon.HeaderSingleValue },
-        { id: "dueDate", title: "Due Date", width: 120, icon: GridColumnIcon.HeaderDate },
-      ];
-      mockRows = Array.from({ length: 120 }, (_, i) => ({
-        id: `INV-${String(2001 + i).padStart(5, "0")}`,
-        orderId: `CO-${String(1001 + i).padStart(5, "0")}`,
-        date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
-        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging", "City Publishing House"][i % 5],
-        amount: [7500, 42000, 4500, 30000, 3000][i % 5],
-        status: ["Unpaid", "Paid", "Overdue", "Pending Advance"][i % 4],
-        dueDate: `2026-10-${String((i % 28) + 1).padStart(2, "0")}`,
-      }));
-    } else if (type === "delivery-acts") {
-      cols = [
-        { id: "id", title: "Schet-faktura №", width: 120, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: "Date", width: 110, icon: GridColumnIcon.HeaderDate },
-        { id: "orderId", title: "Order Ref", width: 105, icon: GridColumnIcon.HeaderReference },
-        { id: "workOrderId", title: "Work Order", width: 105, icon: GridColumnIcon.HeaderReference },
-        { id: "customer", title: "Customer Organization", width: 210, icon: GridColumnIcon.HeaderString },
-        { id: "product", title: "Delivered Print Goods", width: 230, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "quantity", title: "Delivered Qty", width: 110, icon: GridColumnIcon.HeaderNumber },
-        { id: "totalAmount", title: "Total w/ VAT ($)", width: 130, icon: GridColumnIcon.HeaderNumber },
-        { id: "linkedShipment", title: "Warehouse Ref", width: 120, icon: GridColumnIcon.HeaderReference },
-        { id: "status", title: "Status", width: 145, icon: GridColumnIcon.HeaderSingleValue },
-      ];
-      mockRows = deliveryActs.map((act) => ({
-        ...act,
-        linkedShipment: act.linkedShipmentId || "Pending Post",
-      }));
-    } else if (type === "returns") {
-      cols = [
-        { id: "id", title: "Claim ID", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "date", title: "Date Filed", width: 120, icon: GridColumnIcon.HeaderDate },
-        { id: "orderId", title: "Order Ref", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "customer", title: "Customer", width: 200, icon: GridColumnIcon.HeaderString },
-        { id: "defect", title: "Reported Defect", width: 240, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "resolution", title: "Resolution", width: 160, icon: GridColumnIcon.HeaderLookup },
-        { id: "status", title: "Status", width: 140, icon: GridColumnIcon.HeaderSingleValue },
-      ];
-      mockRows = Array.from({ length: 30 }, (_, i) => ({
-        id: `CLM-${String(101 + i).padStart(4, "0")}`,
-        date: `2026-10-${String((i % 20) + 1).padStart(2, "0")}`,
-        orderId: `CO-${String(30 + i).padStart(5, "0")}`,
-        customer: ["Alpha Media Group", "Nordic Print Co", "Baltic Press LLC", "Apex Packaging"][i % 4],
-        defect: [
-          "Color Mismatch (Delta E > 4.5 on Cover)",
-          "Cut Misalignment (2.5mm shift on margins)",
-          "Lamination Peeling on spine crease",
-          "Paper Weight Error (115g instead of 130g)",
-          "Glue binding flaw on page block"
-        ][i % 5],
-        resolution: ["Free Reprint Authorized", "15% Credit Note", "Rework Binding", "Under Technical Review"][i % 4],
-        status: ["Approved for Reprint", "Investigating", "Settled", "Rejected"][i % 4],
-      }));
-    } else if (type === "products") {
-      cols = [
-        { id: "id", title: "Template Code", width: 120, icon: GridColumnIcon.HeaderReference },
-        { id: "name", title: "Print Service / Template", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
-        { id: "category", title: "Category", width: 160, icon: GridColumnIcon.HeaderLookup },
-        { id: "specs", title: "Default Specifications", width: 280, icon: GridColumnIcon.HeaderString },
-        { id: "basePrice", title: "Base / 1k ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
-        { id: "status", title: "Status", width: 110, icon: GridColumnIcon.HeaderSingleValue },
-      ];
-      mockRows = [
-        { id: "PRN-CAT-01", name: "Offset Catalogs (A4)", category: "Commercial Print", specs: "A4, 16-128p, 115-150g Silk, Perfect/Saddle", basePrice: 1200, status: "Active" },
-        { id: "PRN-BOX-02", name: "Corrugated Carton Box", category: "Packaging", specs: "E-Flute, 4-color UV print + Matt Varnish", basePrice: 850, status: "Active" },
-        { id: "PRN-LBL-03", name: "Roll Labels (Waterproof)", category: "Labels & Tags", specs: "Gloss White PP, 76mm Core, Die-Cut", basePrice: 320, status: "Active" },
-        { id: "PRN-BOK-04", name: "Hardcover Book (A5)", category: "Publishing", specs: "Case Bound, 80g Book Offset, Foil Stamped", basePrice: 2400, status: "Active" },
-        { id: "PRN-BAG-05", name: "Kraft Paper Shopping Bag", category: "Packaging", specs: "170g Brown/White Kraft, Twisted Paper Handles", basePrice: 450, status: "Active" },
-        { id: "PRN-FLY-06", name: "Promotional Flyers (A6)", category: "Commercial Print", specs: "A6 Double-sided, 130g Gloss, 4/4 Color", basePrice: 85, status: "Active" },
-        { id: "PRN-FOL-07", name: "Presentation Folders (A4)", category: "Stationery", specs: "300g Coated Board, Die-Cut Pocket + Card Slot", basePrice: 550, status: "Active" },
-        { id: "PRN-TAG-08", name: "Garment Hang Tags", category: "Labels & Tags", specs: "350g Matt Board, Eyelet Punch, Matt Lamination", basePrice: 160, status: "Active" },
-      ];
-    } else {
-      cols = [
-        { id: "id", title: "ID", width: 100, icon: GridColumnIcon.HeaderReference },
-        { id: "name", title: "Description", width: 300, icon: GridColumnIcon.HeaderString },
-        { id: "status", title: "Status", width: 120, icon: GridColumnIcon.HeaderSingleValue },
-      ];
-      mockRows = Array.from({ length: 50 }, (_, i) => ({
-        id: `REC-${String(100 + i).padStart(4, "0")}`,
-        name: `Record ${i} for ${type}`,
-        status: ["Active", "Inactive"][i % 2],
-      }));
-    }
-
-    return { columns: cols, rows: mockRows };
-  }, [type, deliveryActs]);
+    return { columns: cols, rows: dataRows };
+  }, [deliveryActs]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -276,60 +140,24 @@ export function SalesGrid({ type }: SalesGridProps) {
   }, [rows]);
 
   const handleCreateNew = () => {
-    if (type === "delivery-acts") {
-      const newAct = createDeliveryActFromOrder({
-        orderId: "CO-00041",
-        workOrderId: "WO-00351",
-        customer: "Alpha Media Group LLC",
-        product: "A4 Hardcover Catalog 96p",
-        quantity: 5000,
-        unit: "pcs",
-        priceTotal: 14850,
-        currency: "USD",
-      });
-      openTab({
-        id: newAct.id,
-        title: `${newAct.id}: ${newAct.customer}`,
-        type: "delivery-act",
-        module: "finance",
-        isUnsaved: true,
-        activeLevel3Tab: "overview",
-        documentData: newAct,
-      });
-      return;
-    }
-
-    let prefix = "DOC";
-    let titleSuffix = "Document";
-    if (type === "quotations") { prefix = "QT"; titleSuffix = "Quotation"; }
-    else if (type === "client-orders") { prefix = "CO"; titleSuffix = "Client Order"; }
-    else if (type === "contracts") { prefix = "CON"; titleSuffix = "Contract"; }
-    else if (type === "invoices") { prefix = "INV"; titleSuffix = "Invoice"; }
-    else if (type === "returns") { prefix = "CLM"; titleSuffix = "Customer Claim"; }
-    
-    const newDocNo = `${prefix}-${String(Math.floor(1000 + Math.random() * 9000))}`;
+    const newAct = createDeliveryActFromOrder({
+      orderId: "CO-00041",
+      workOrderId: "WOOF-26-0351",
+      customer: "Alpha Media Group LLC",
+      product: "A4 Hardcover Catalog 96p",
+      quantity: 5000,
+      unit: "pcs",
+      priceTotal: 14850,
+      currency: "USD",
+    });
     openTab({
-      id: newDocNo,
-      title: `${newDocNo}: New ${titleSuffix}`,
-      type: "work-order",
-      module: "production",
+      id: newAct.id,
+      title: "Yangi Dalolatnoma / Faktura (Qoralama)",
+      type: "delivery-act",
+      module: "finance",
       isUnsaved: true,
       activeLevel3Tab: "overview",
-      documentData: {
-        docNo: newDocNo,
-        customer: "",
-        product: "",
-        quantity: 1000,
-        unit: "pcs",
-        status: "Draft",
-        orderType: type === "quotations" ? "Sample" : "Production",
-        recipe: "OFFSET_STD_V1",
-        department: "Offset",
-        site: "Building 1",
-        deadline: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
-        responsible: "Admin",
-        linkedWoId: "",
-      },
+      documentData: newAct,
     });
   };
 
@@ -343,49 +171,14 @@ export function SalesGrid({ type }: SalesGridProps) {
   const handleOpenRow = (rowIndex: number) => {
     const row = filteredRows[rowIndex];
     if (row) {
-      if (type === "delivery-acts") {
-        openTab({
-          id: row.id,
-          title: `${row.id}: ${row.customer}`,
-          type: "delivery-act",
-          module: "finance",
-          activeLevel3Tab: "overview",
-          documentData: row,
-        });
-      } else if (type === "client-orders") {
-        const isFlexoProduct = row.product?.includes("Satin") || row.product?.includes("Nylon") || row.product?.includes("Roll");
-        const dept = isFlexoProduct ? "Flexo" : "Offset";
-        const rec = row.product?.includes("Satin") ? "FLEXO_SATIN_V2" : row.product?.includes("Nylon") ? "FLEXO_NYLON_V1" : isFlexoProduct ? "FLEXO_SATIN_V2" : "OFFSET_STD_V1";
-        const pW = row.product?.includes("30x50") ? 30 : isFlexoProduct ? 35 : 50;
-        const pH = row.product?.includes("30x50") ? 50 : isFlexoProduct ? 65 : 90;
-
-        openTab({
-          id: row.id,
-          title: `${row.id}: ${row.product}`,
-          type: "work-order",
-          module: "production",
-          documentData: {
-            docNo: row.id,
-            customer: row.customer,
-            product: row.product,
-            quantity: row.quantity,
-            orderType: row.orderType,
-            status: row.status,
-            department: dept,
-            recipe: rec,
-            width: pW,
-            height: pH,
-            deadline: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-          }
-        });
-      } else {
-        openTab({
-          id: row.id,
-          title: `${row.id}`,
-          type: "work-order",
-          module: "production",
-        });
-      }
+      openTab({
+        id: row.id,
+        title: `${row.id}: ${row.customer}`,
+        type: "delivery-act",
+        module: "finance",
+        activeLevel3Tab: "overview",
+        documentData: row,
+      });
     }
   };
 

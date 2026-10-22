@@ -109,7 +109,7 @@ export function FieldCombobox({
           />
           <CommandList className="max-h-56">
             <CommandEmpty>
-              {allowCustom && searchValue.trim() ? (
+              {allowCustom && !onAction && searchValue.trim() ? (
                 <button
                   type="button"
                   onClick={() => handleAddCustom(searchValue)}
@@ -150,7 +150,7 @@ export function FieldCombobox({
                 </CommandItem>
               ))}
 
-              {allowCustom && searchValue.trim() && !exactMatch && (
+              {allowCustom && !onAction && searchValue.trim() && !exactMatch && (
                 <CommandItem
                   value={searchValue.trim()}
                   onSelect={() => handleAddCustom(searchValue)}

@@ -20,6 +20,7 @@ import {
   BadgeCheck,
   AlertOctagon,
   // CRM icons
+  MessageSquare,
   Contact,
   Building2,
   UserPlus,
@@ -42,6 +43,7 @@ import {
   Send,
   MapPin,
   PackageCheck,
+  AlertTriangle,
   // Finance icons
   Calculator,
   CreditCard,
@@ -105,7 +107,9 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Contact,
         defaultOpen: true,
         items: [
+          { id: "telegram-inbox", label: "Telegram Inbox", icon: MessageSquare },
           { id: "customers", label: "Customers", icon: Building2 },
+          { id: "suppliers", label: "Suppliers & Partners", icon: Truck },
           { id: "leads", label: "Leads & Requests", icon: UserPlus },
         ],
       },
@@ -169,9 +173,8 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Database,
         defaultOpen: true,
         items: [
-          { id: "products", label: "Print Services & Templates", icon: Layers },
+          { id: "products", label: "Products & BOMs", icon: Layers },
           { id: "machines", label: "Machines & Rates", icon: Cpu },
-          { id: "bom", label: "BOM & Recipes", icon: Layers },
           { id: "tooling", label: "Dies & Tooling", icon: Stamp },
         ],
       },
@@ -189,6 +192,7 @@ export const MODULE_NAV: ModuleDef[] = [
         defaultOpen: true,
         items: [
           { id: "stock-balance", label: "Stock Balance", icon: Layers },
+          { id: "requirements", label: "Ehtiyojlar va Defitsit", icon: AlertTriangle },
           { id: "finished-goods", label: "Tayyor Mahsulotlar (Zaxira)", icon: PackageCheck },
           { id: "movements", label: "Movements & Transfers", icon: ArrowLeftRight },
         ],
@@ -237,6 +241,7 @@ export const MODULE_NAV: ModuleDef[] = [
         items: [
           { id: "employees", label: "Employees Registry", icon: UserCheck },
           { id: "departments", label: "Departments & Workshops", icon: Building2 },
+          { id: "positions", label: "Positions & Rates", icon: Briefcase },
         ],
       },
       {
@@ -275,6 +280,15 @@ export const MODULE_NAV: ModuleDef[] = [
           { id: "plants", label: "Company & Branches", icon: Building },
           { id: "users", label: "Users & Roles", icon: Shield },
           { id: "tariffs", label: "Tariffs & Pricing Rules", icon: Coins },
+        ],
+      },
+      {
+        id: "integrations",
+        label: "Integrations & API",
+        icon: Plug,
+        defaultOpen: true,
+        items: [
+          { id: "telegram-settings", label: "Telegram Bot & API", icon: Send },
         ],
       },
     ],

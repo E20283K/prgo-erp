@@ -145,9 +145,12 @@ export async function getFlexoMachinesWithCylinders(companyCode = "PRINTGOO") {
  */
 export async function getDiesTooling(
   companyCode = "PRINTGOO",
-  shape?: "rectangle" | "rounded_rect" | "circle" | "oval" | "custom"
+  shape?: "rectangle" | "rounded_rect" | "circle" | "oval" | "custom",
+  search?: string,
+  customerId?: string,
+  isDedicated?: boolean
 ) {
-  const cacheKey = `master:tooling:${companyCode}:${shape ?? "all"}`;
+  const cacheKey = `master:tooling:${companyCode}:${shape ?? "all"}:${search ?? "all"}:${customerId ?? "all"}:${isDedicated ?? "all"}`;
   return cacheGetOrSet(cacheKey, TTL_TOOLING, async () => {
     const [company] = await db
       .select({ id: companies.id })
@@ -166,12 +169,197 @@ export async function getDiesTooling(
       conditions.push(eq(diesTooling.shape, shape));
     }
 
+    if (customerId) {
+      conditions.push(eq(diesTooling.customerId, customerId));
+    }
+
+    if (isDedicated !== undefined) {
+      conditions.push(eq(diesTooling.isDedicated, isDedicated));
+    }
+
+    if (search && search.trim().length > 0) {
+      const q = `%${search.trim()}%`;
+      conditions.push(
+        or(
+          ilike(diesTooling.code, q),
+          ilike(diesTooling.name, q),
+          ilike(diesTooling.customerName, q),
+          ilike(diesTooling.location, q),
+          ilike(diesTooling.notes, q)
+        )!
+      );
+    }
+
     return db
       .select()
       .from(diesTooling)
       .where(and(...conditions))
       .orderBy(diesTooling.code);
   });
+}
+
+/**
+ * Keyingi mavjud shtamp/pichoq kodini olish (masalan: DIE-0001)
+ */
+export async function getNextDieCode(companyCode = "PRINTGOO"): Promise<string> {
+  const [company] = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(eq(companies.code, companyCode))
+    .limit(1);
+
+  if (!company) return "DIE-0001";
+
+  const rows = await db
+    .select({ code: diesTooling.code })
+    .from(diesTooling)
+    .where(eq(diesTooling.companyId, company.id));
+
+  let maxNum = 0;
+  for (const r of rows) {
+    const match = r.code?.match(/^DIE-(\d+)$/i);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
+  }
+
+  return `DIE-${String(maxNum + 1).padStart(4, "0")}`;
+}
+
+/**
+ * Yangi shtamp/pichoq (Dies & Tooling) yaratish
+ */
+export async function createDieTooling(data: any, companyCode = "PRINTGOO") {
+  const [company] = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(eq(companies.code, companyCode))
+    .limit(1);
+
+  if (!company) {
+    throw new Error(`Company with code ${companyCode} not found`);
+  }
+
+  const code = (data.code && data.code.trim()) ? data.code.trim().toUpperCase() : await getNextDieCode(companyCode);
+
+  const [inserted] = await db
+    .insert(diesTooling)
+    .values({
+      companyId: company.id,
+      code,
+      name: data.name || "Yangi Shtamp",
+      dieType: data.dieType || "rotary_magnetic",
+      shape: data.shape || "rectangle",
+      widthMm: String(data.widthMm || 50),
+      heightMm: String(data.heightMm || 50),
+      cornerRadiusMm: String(data.cornerRadiusMm || 0),
+      acrossCount: Number(data.acrossCount) || 1,
+      aroundCount: Number(data.aroundCount) || 1,
+      gapXMm: String(data.gapXMm ?? 3.0),
+      gapYMm: String(data.gapYMm ?? 3.0),
+      repeatLengthMm: data.repeatLengthMm !== undefined && data.repeatLengthMm !== null ? String(data.repeatLengthMm) : null,
+      cylinderTeeth: data.cylinderTeeth ? Number(data.cylinderTeeth) : null,
+      location: data.location || null,
+      status: data.status || "available",
+      totalImpressions: Number(data.totalImpressions) || 0,
+      maxImpressions: data.maxImpressions ? Number(data.maxImpressions) : null,
+      notes: data.notes || null,
+
+      customerId: data.customerId || null,
+      customerName: data.customerName || null,
+      ownership: data.ownership || (data.customerId ? "customer_owned" : "in_house"),
+      isDedicated: data.isDedicated !== undefined ? Boolean(data.isDedicated) : Boolean(data.customerId),
+
+      isActive: true,
+    })
+    .returning();
+
+  await invalidateCacheByPrefix("master:tooling");
+  return inserted;
+}
+
+/**
+ * Mavjud shtamp/pichoqni yangilash (Update)
+ */
+export async function updateDieTooling(id: string, data: any, companyCode = "PRINTGOO") {
+  const [company] = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(eq(companies.code, companyCode))
+    .limit(1);
+
+  if (!company) {
+    throw new Error(`Company with code ${companyCode} not found`);
+  }
+
+  const updatePayload: Record<string, any> = {
+    updatedAt: new Date(),
+  };
+
+  if (data.code !== undefined) updatePayload.code = String(data.code).toUpperCase().trim();
+  if (data.name !== undefined) updatePayload.name = data.name;
+  if (data.dieType !== undefined) updatePayload.dieType = data.dieType;
+  if (data.shape !== undefined) updatePayload.shape = data.shape;
+  if (data.widthMm !== undefined) updatePayload.widthMm = String(data.widthMm);
+  if (data.heightMm !== undefined) updatePayload.heightMm = String(data.heightMm);
+  if (data.cornerRadiusMm !== undefined) updatePayload.cornerRadiusMm = String(data.cornerRadiusMm);
+  if (data.acrossCount !== undefined) updatePayload.acrossCount = Number(data.acrossCount);
+  if (data.aroundCount !== undefined) updatePayload.aroundCount = Number(data.aroundCount);
+  if (data.gapXMm !== undefined) updatePayload.gapXMm = String(data.gapXMm);
+  if (data.gapYMm !== undefined) updatePayload.gapYMm = String(data.gapYMm);
+  if (data.repeatLengthMm !== undefined) updatePayload.repeatLengthMm = data.repeatLengthMm ? String(data.repeatLengthMm) : null;
+  if (data.cylinderTeeth !== undefined) updatePayload.cylinderTeeth = data.cylinderTeeth ? Number(data.cylinderTeeth) : null;
+  if (data.location !== undefined) updatePayload.location = data.location;
+  if (data.status !== undefined) updatePayload.status = data.status;
+  if (data.totalImpressions !== undefined) updatePayload.totalImpressions = Number(data.totalImpressions);
+  if (data.maxImpressions !== undefined) updatePayload.maxImpressions = data.maxImpressions ? Number(data.maxImpressions) : null;
+  if (data.notes !== undefined) updatePayload.notes = data.notes;
+  if (data.customerId !== undefined) updatePayload.customerId = data.customerId || null;
+  if (data.customerName !== undefined) updatePayload.customerName = data.customerName || null;
+  if (data.ownership !== undefined) updatePayload.ownership = data.ownership;
+  if (data.isDedicated !== undefined) updatePayload.isDedicated = Boolean(data.isDedicated);
+  if (data.isActive !== undefined) updatePayload.isActive = Boolean(data.isActive);
+
+  const [updated] = await db
+    .update(diesTooling)
+    .set(updatePayload)
+    .where(
+      and(
+        eq(diesTooling.companyId, company.id),
+        or(eq(diesTooling.id, id), eq(diesTooling.code, id))
+      )
+    )
+    .returning();
+
+  await invalidateCacheByPrefix("master:tooling");
+  return updated;
+}
+
+/**
+ * Shtamp/pichoqni o'chirish (Delete)
+ */
+export async function deleteDieTooling(id: string, companyCode = "PRINTGOO") {
+  const [company] = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(eq(companies.code, companyCode))
+    .limit(1);
+
+  if (!company) return false;
+
+  const [deleted] = await db
+    .delete(diesTooling)
+    .where(
+      and(
+        eq(diesTooling.companyId, company.id),
+        or(eq(diesTooling.id, id), eq(diesTooling.code, id))
+      )
+    )
+    .returning();
+
+  await invalidateCacheByPrefix("master:tooling");
+  return Boolean(deleted);
 }
 
 /**

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/command";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { MODULE_NAV } from "@/lib/modules";
+import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
 import { toggleAppFullscreen } from "@/lib/fullscreen";
 import { 
   Sun, 
@@ -83,16 +84,16 @@ export function CommandPalette() {
   };
 
   const handleNewOrder = () => {
-    const newId = `WO-00${Math.floor(100 + Math.random() * 900)}`;
+    const newId = `draft-wo-${Date.now()}`;
     openTab({
       id: newId,
-      title: `${newId}: ${tCmd("newWorkOrder")}`,
+      title: "Yangi buyruq (Qoralama)",
       type: "work-order",
       module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
-        docNo: newId,
+        docNo: "",
         customer: "Express Client",
         product: "Flyer A6 4+4",
         quantity: 5000,

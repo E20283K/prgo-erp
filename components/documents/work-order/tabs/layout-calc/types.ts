@@ -6,6 +6,8 @@ import {
   SideColorConfig,
   SpotColorItem,
   RouteStep,
+  ProductShapeType,
+  ProductCustomShape,
 } from "../../types";
 import { PrintMethod, PrintPlanningResult } from "../../planningEngine";
 
@@ -17,6 +19,12 @@ export interface LayoutCalcTabProps {
   defaultProdW?: number;
   defaultProdH?: number;
   defaultBleed?: number;
+  shapeType?: ProductShapeType;
+  customShape?: ProductCustomShape;
+  customSvgPath?: string;
+  cornerType?: string;
+  artworkFront?: string;
+  artworkBack?: string;
   frontColors?: SideColorConfig;
   backColors?: SideColorConfig;
   spotColors?: SpotColorItem[];
@@ -61,7 +69,35 @@ export interface KashirovkaSummary {
   splitCutAxisX?: number;
 }
 
-export type PlatePartitionStrategy = "gang_capacity" | "by_model" | "by_volume";
+export type PlatePartitionStrategy =
+  | "gang_capacity"
+  | "by_model"
+  | "by_volume"
+  | "smart_gang_optimizer";
+
+export type CtpSideRelation =
+  | "shared_front_variable_back"
+  | "independent_per_plate"
+  | "work_and_turn";
+
+export type OptimizerGoal = "min_waste" | "min_plates";
+
+export type LayoutCalcViewMode =
+  | "phoenix"
+  | "planning"
+  | "visualizer"
+  | "print_economics"
+  | "matrix"
+  | "split";
+
+export type ActivePlateSide = "front" | "back";
+
+export interface SmartOptimizerParams {
+  capacity: number;
+  goal: OptimizerGoal;
+  targetPlateCount?: number;
+  maxSlotsPerItem?: number;
+}
 
 export interface SlotAssignment {
   sizeId: string;
@@ -70,6 +106,10 @@ export interface SlotAssignment {
   sizeCode?: string;
   targetQuantity: number;
   slots: number;
+  yieldQuantity?: number;
+  overproduction?: number;
+  overproductionPercent?: number;
+  sheetsNeeded?: number;
 }
 
 export interface PlateConfig {
@@ -77,6 +117,7 @@ export interface PlateConfig {
   name: string;
   manualSlots: Record<string, number>;
   assignedSizeIds?: string[];
+  customSheetRun?: number;
 }
 
 export interface CalculatedPlate extends PlateConfig {
@@ -84,6 +125,13 @@ export interface CalculatedPlate extends PlateConfig {
   requiredSheets: number;
   unassignedSlots: number;
   overflowSkusCount?: number;
+  totalTarget?: number;
+  totalYield?: number;
+  totalOverproduction?: number;
+  totalOverproductionPercent?: number;
+  ctpFrontPlates?: number;
+  ctpBackPlates?: number;
+  totalCtpPlates?: number;
 }
 
 export interface PrepressMargins {
@@ -117,6 +165,7 @@ export interface GridCell {
   color: string;
   sizeId: string;
   sideBadge?: "FRONT" | "BACK";
+  artworkUrl?: string;
 }
 
 export interface TrimMarkSegment {

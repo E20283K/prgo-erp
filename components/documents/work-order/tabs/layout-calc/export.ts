@@ -16,6 +16,9 @@ interface DrawPlateToPdfOptions {
   bleed: number;
   gap: number;
   outerTrimMarks: TrimMarkSegment[];
+  artworkFront?: string;
+  artworkBack?: string;
+  previewMode?: "schematic" | "artwork";
 }
 
 export function drawPlateToPdf(doc: jsPDF, opts: DrawPlateToPdfOptions) {

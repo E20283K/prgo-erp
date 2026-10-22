@@ -20,6 +20,10 @@ import {
   ParentCutResult,
   KashirovkaSummary,
   PlatePartitionStrategy,
+  CtpSideRelation,
+  OptimizerGoal,
+  LayoutCalcViewMode,
+  ActivePlateSide,
 } from "./types";
 import {
   calculatePrepressMargins, 
@@ -28,6 +32,7 @@ import {
   calculateOuterTrimMarks,
   calculateParentSheetCuts,
   buildPartitionedPlates,
+  smartGangRunOptimizer,
 } from "./engine";
 import { exportSvg, exportPdf } from "./export";
 import {
@@ -79,9 +84,27 @@ export function useLayoutCalc({
   onKashirovkaChange,
   sampleQty: propSampleQty,
   onSampleQtyChange,
+  artworkFront,
+  artworkBack,
 }: LayoutCalcTabProps) {
+  // View Mode: Phoenix (Default Visual Studio) vs Master Matrix vs Visualizer vs Economics
+  const [viewMode, setViewMode] = useState<LayoutCalcViewMode>("phoenix");
+
+  // Active Side: Front (Oldi) vs Back (Orqa)
+  const [activeSide, setActiveSide] = useState<ActivePlateSide>("back");
+
   // Mode: Production vs Sample
   const [calcMode, setCalcMode] = useState<LayoutCalcMode>("production");
+
+  // CTP Side Relation: Shared Front + Variable Back vs Independent vs Work & Turn
+  const [ctpSideRelation, setCtpSideRelation] = useState<CtpSideRelation>("shared_front_variable_back");
+
+  // Optimizer Goal: Min Waste vs Min Plates
+  const [optimizerGoal, setOptimizerGoal] = useState<OptimizerGoal>("min_waste");
+  const [targetPlateCount, setTargetPlateCount] = useState<number | undefined>(undefined);
+
+  // Job Ticket Modal Open state
+  const [isJobTicketOpen, setIsJobTicketOpen] = useState(false);
 
   // Kashirovka (Multi-Layer Mounting) state
   const [kashMode, setKashModeState] = useState<KashirovkaMode>(propKashMode);
@@ -150,8 +173,8 @@ export function useLayoutCalc({
   // Active Parameters that drive the imposition engine
   const [sheetW, setSheetW] = useState(1000);
   const [sheetH, setSheetH] = useState(700);
-  const [prodW, setProdW] = useState(defaultProdW || 210);
-  const [prodH, setProdH] = useState(defaultProdH || 297);
+  const [prodW, setProdW] = useState(defaultProdW || 75);
+  const [prodH, setProdH] = useState(defaultProdH || 120);
   const [baseQuantity, setBaseQuantity] = useState(defaultQuantity || 1000);
 
   const [bleed, setBleed] = useState(defaultBleed !== undefined ? defaultBleed : 2);
@@ -165,20 +188,24 @@ export function useLayoutCalc({
 
   const [orientation, setOrientation] = useState<Orientation>("A");
 
-  // Auto-derive active color stations per plate from Specs & Drawing (SSOT)
-  const derivedColorsPerPlate = useMemo(() => {
+  // Front & Back color stations count
+  const frontColorsCount = useMemo(() => {
     const fProc = (frontColors.c ? 1 : 0) + (frontColors.m ? 1 : 0) + (frontColors.y ? 1 : 0) + (frontColors.k ? 1 : 0);
     const fSpot = spotColors.filter((s) => s.side === "front" || s.side === "both").length;
+    return Math.max(1, fProc + fSpot);
+  }, [frontColors, spotColors]);
+
+  const backColorsCount = useMemo(() => {
     const bProc = (backColors.c ? 1 : 0) + (backColors.m ? 1 : 0) + (backColors.y ? 1 : 0) + (backColors.k ? 1 : 0);
     const bSpot = spotColors.filter((s) => s.side === "back" || s.side === "both").length;
-    return Math.max(1, fProc + fSpot, bProc + bSpot);
-  }, [frontColors, backColors, spotColors]);
+    return bProc + bSpot;
+  }, [backColors, spotColors]);
 
-  const [cmykColors, setCmykColors] = useState<number>(derivedColorsPerPlate);
+  const [cmykColors, setCmykColors] = useState<number>(Math.max(frontColorsCount, backColorsCount));
 
   useEffect(() => {
-    setCmykColors(derivedColorsPerPlate);
-  }, [derivedColorsPerPlate]);
+    setCmykColors(Math.max(frontColorsCount, backColorsCount));
+  }, [frontColorsCount, backColorsCount]);
 
   // Overproduction
   const [overproductionMode, setOverproductionMode] = useState<OverproductionMode>("percent");
@@ -186,7 +213,7 @@ export function useLayoutCalc({
 
   // Multi-Plate State
   const [plates, setPlates] = useState<PlateConfig[]>([
-    { id: "plate-1", name: "Plate 1", manualSlots: {} },
+    { id: "plate-1", name: "Forma 1", manualSlots: {} },
   ]);
   const [activePlateIndex, setActivePlateIndex] = useState(0);
 
@@ -375,15 +402,28 @@ export function useLayoutCalc({
     return Math.max(0, halfCols * layout.rows);
   }, [isSplitHalfKashirovka, halfCols, layout.rows, layout.pieces]);
 
-  // Plate distributions
+  // Plate distributions with full accounting
   const plateCalculations = useMemo(() => {
     return calculatePlateDistribution(
       effectivePieces,
       plates,
       adjustedSizes,
-      adjustedGeneralQuantity
+      adjustedGeneralQuantity,
+      {
+        ctpSideRelation,
+        frontColorsCount,
+        backColorsCount,
+      }
     );
-  }, [effectivePieces, plates, adjustedSizes, adjustedGeneralQuantity]);
+  }, [
+    effectivePieces,
+    plates,
+    adjustedSizes,
+    adjustedGeneralQuantity,
+    ctpSideRelation,
+    frontColorsCount,
+    backColorsCount,
+  ]);
 
   const activePlate = plateCalculations[activePlateIndex] || plateCalculations[0];
 
@@ -399,7 +439,7 @@ export function useLayoutCalc({
     );
   }, [parentSheetW, parentSheetH, sampleCutW, sampleCutH, activePlate]);
 
-  const [partitionStrategy, setPartitionStrategy] = useState<PlatePartitionStrategy>("gang_capacity");
+  const [partitionStrategy, setPartitionStrategy] = useState<PlatePartitionStrategy>("smart_gang_optimizer");
 
   const uniqueModels = useMemo(() => {
     const set = new Set<string>();
@@ -417,7 +457,7 @@ export function useLayoutCalc({
     const newIdx = plates.length + 1;
     const newPlate: PlateConfig = {
       id: `plate-${Date.now()}`,
-      name: `Plate ${newIdx}`,
+      name: `Forma ${newIdx}`,
       manualSlots: {},
     };
     setPlates([...plates, newPlate]);
@@ -433,13 +473,51 @@ export function useLayoutCalc({
     }
   };
 
-  const handleAutoPartitionPlates = (strategyOverride?: PlatePartitionStrategy) => {
+  const handleRenamePlate = (plateIdx: number, newName: string) => {
+    setPlates((prev) =>
+      prev.map((p, idx) => (idx === plateIdx ? { ...p, name: newName } : p))
+    );
+  };
+
+  const handleDuplicatePlate = (plateIdx: number) => {
+    const target = plates[plateIdx];
+    if (!target) return;
+    const newIdx = plates.length + 1;
+    const copy: PlateConfig = {
+      id: `plate-${Date.now()}`,
+      name: `Forma ${newIdx} (Copy)`,
+      manualSlots: { ...target.manualSlots },
+      assignedSizeIds: target.assignedSizeIds ? [...target.assignedSizeIds] : undefined,
+    };
+    setPlates([...plates, copy]);
+    setActivePlateIndex(plates.length);
+  };
+
+  const handleAutoPartitionPlates = (
+    strategyOverride?: PlatePartitionStrategy,
+    goalOverride?: OptimizerGoal,
+    targetCountOverride?: number
+  ) => {
     if (effectivePieces === 0 || adjustedSizes.length === 0) return;
     const strat = strategyOverride || partitionStrategy;
+    const goal = goalOverride || optimizerGoal;
+    const count = targetCountOverride !== undefined ? targetCountOverride : targetPlateCount;
+
     if (strategyOverride) {
       setPartitionStrategy(strategyOverride);
     }
-    const newPlatesList = buildPartitionedPlates(strat, effectivePieces, adjustedSizes);
+    if (goalOverride) {
+      setOptimizerGoal(goalOverride);
+    }
+    if (targetCountOverride !== undefined) {
+      setTargetPlateCount(targetCountOverride);
+    }
+
+    const newPlatesList = buildPartitionedPlates(strat, effectivePieces, adjustedSizes, {
+      capacity: effectivePieces,
+      goal,
+      targetPlateCount: count,
+    });
     setPlates(newPlatesList);
     setActivePlateIndex(0);
   };
@@ -460,7 +538,86 @@ export function useLayoutCalc({
     );
   };
 
-  // Grid cells for SVG preview
+  // Move an SKU to a specific plate (or a new plate)
+  const handleReassignSkuPlate = (sizeId: string, targetPlateIdx: number) => {
+    setPlates((prev) => {
+      let currentPlates = [...prev];
+
+      // If moving to a new plate (targetPlateIdx >= length)
+      if (targetPlateIdx >= currentPlates.length) {
+        const newPlateNum = currentPlates.length + 1;
+        const newPlate: PlateConfig = {
+          id: `plate-${Date.now()}`,
+          name: `Forma ${newPlateNum}`,
+          assignedSizeIds: [sizeId],
+          manualSlots: { [sizeId]: 1 },
+        };
+        // Remove from all existing plates
+        currentPlates = currentPlates.map((p) => {
+          const filtered = (p.assignedSizeIds || []).filter((id) => id !== sizeId);
+          const newManual = { ...p.manualSlots };
+          delete newManual[sizeId];
+          return {
+            ...p,
+            assignedSizeIds: filtered,
+            manualSlots: newManual,
+          };
+        });
+        return [...currentPlates, newPlate];
+      }
+
+      // Reassign to existing targetPlateIdx
+      return currentPlates.map((p, pIdx) => {
+        const currentAssigned = p.assignedSizeIds || [];
+        const isTarget = pIdx === targetPlateIdx;
+        const contains = currentAssigned.includes(sizeId);
+
+        if (isTarget) {
+          const nextAssigned = contains ? currentAssigned : [...currentAssigned, sizeId];
+          const currentSlot = p.manualSlots[sizeId] ?? 1;
+          return {
+            ...p,
+            assignedSizeIds: nextAssigned,
+            manualSlots: {
+              ...p.manualSlots,
+              [sizeId]: Math.max(1, currentSlot),
+            },
+          };
+        } else if (contains) {
+          const filtered = currentAssigned.filter((id) => id !== sizeId);
+          const newManual = { ...p.manualSlots };
+          delete newManual[sizeId];
+          return {
+            ...p,
+            assignedSizeIds: filtered,
+            manualSlots: newManual,
+          };
+        }
+        return p;
+      });
+    });
+  };
+
+  // Change SKU slots directly in the table for whatever plate it belongs to
+  const handleSetSkuSlots = (sizeId: string, slots: number, plateIdx?: number) => {
+    const safeSlots = Math.max(0, slots);
+    setPlates((prev) =>
+      prev.map((p, pIndex) => {
+        if (plateIdx !== undefined && pIndex !== plateIdx) return p;
+        const hasSku = p.assignedSizeIds ? p.assignedSizeIds.includes(sizeId) : pIndex === activePlateIndex;
+        if (!hasSku) return p;
+        return {
+          ...p,
+          manualSlots: {
+            ...p.manualSlots,
+            [sizeId]: safeSlots,
+          },
+        };
+      })
+    );
+  };
+
+  // Grid cells for SVG preview: fully supports FRONT vs BACK view!
   const gridCells = useMemo<GridCell[]>(() => {
     if (!activePlate) return [];
 
@@ -498,24 +655,21 @@ export function useLayoutCalc({
           if (c < halfCols) {
             const slotIdx = r * halfCols + c;
             const base = halfPool[slotIdx] || { label: "Empty", color: "#f4f4f5", sizeId: "empty" };
-            fullGrid.push({ ...base, sideBadge: "FRONT" });
-          } else if (c >= layout.cols - halfCols) {
-            // Mirrored column index so Side Lay (Верный угол) matches when folded/mounted back-to-back
-            const rightLocalCol = c - (layout.cols - halfCols);
-            const mirroredCol = halfCols - 1 - rightLocalCol;
-            const slotIdx = r * halfCols + mirroredCol;
+            fullGrid.push({
+              ...base,
+              label: base.sizeCode ? `${base.sizeCode} (F)` : base.label,
+              sideBadge: "FRONT",
+              artworkUrl: artworkFront,
+            });
+          } else {
+            const mirrorCol = layout.cols - 1 - c;
+            const slotIdx = r * halfCols + mirrorCol;
             const base = halfPool[slotIdx] || { label: "Empty", color: "#f4f4f5", sizeId: "empty" };
             fullGrid.push({
               ...base,
-              color: base.sizeId === "empty" ? "#f4f4f5" : "#ede9fe",
+              label: base.sizeCode ? `${base.sizeCode} (B)` : base.label,
               sideBadge: "BACK",
-            });
-          } else {
-            // Odd middle column reserved for split cut trim
-            fullGrid.push({
-              label: "✂ SPLIT MARGIN",
-              color: "#fef3c7",
-              sizeId: "split-margin",
+              artworkUrl: artworkBack,
             });
           }
         }
@@ -523,80 +677,167 @@ export function useLayoutCalc({
       return fullGrid;
     }
 
-    const cells: GridCell[] = [];
+    // ── 2-SIDED SHEETWISE PRINTING ──
+    // FRONT SIDE VIEW:
+    if (activeSide === "front") {
+      if (ctpSideRelation === "shared_front_variable_back") {
+        // Universal Front Plate (all 12 slots have the universal front art)
+        const frontCells: GridCell[] = [];
+        for (let i = 0; i < layout.pieces; i++) {
+          frontCells.push({
+            label: "Umumiy Oldi Tomon",
+            model: orderName || "Oldi Yuz",
+            sizeCode: "OLDI / FRONT",
+            color: "#dbeafe",
+            sizeId: "shared-front",
+            sideBadge: "FRONT",
+            artworkUrl: artworkFront,
+          });
+        }
+        return frontCells;
+      }
+
+      // Independent Front Plate for this plate
+      const frontPool: GridCell[] = [];
+      activePlate.assignments.forEach((assignment, index) => {
+        for (let i = 0; i < assignment.slots; i++) {
+          frontPool.push({
+            label: assignment.sizeLabel,
+            model: assignment.model,
+            sizeCode: assignment.model ? `${assignment.model} (Oldi)` : "Oldi (Front)",
+            color: getCellColor(assignment, index),
+            sizeId: assignment.sizeId,
+            sideBadge: "FRONT",
+            artworkUrl: artworkFront,
+          });
+        }
+      });
+      while (frontPool.length < layout.pieces) {
+        frontPool.push({ label: "Empty", color: "#f4f4f5", sizeId: "empty" });
+      }
+      return frontPool.slice(0, layout.pieces);
+    }
+
+    // BACK SIDE VIEW (The variable SKUs & sizes!):
+    // In offset sheetwise printing, back columns are horizontally mirrored to align upon flip
+    const backPool: GridCell[] = [];
     activePlate.assignments.forEach((assignment, index) => {
       for (let i = 0; i < assignment.slots; i++) {
-        cells.push({
+        backPool.push({
           label: assignment.sizeLabel,
           model: assignment.model,
-          sizeCode: assignment.sizeCode,
+          sizeCode: assignment.sizeCode || assignment.sizeLabel,
           color: getCellColor(assignment, index),
           sizeId: assignment.sizeId,
+          sideBadge: "BACK",
+          artworkUrl: artworkBack,
         });
       }
     });
 
-    while (cells.length < layout.pieces) {
-      cells.push({ label: "Empty", color: "#f4f4f5", sizeId: "empty" });
+    while (backPool.length < layout.pieces) {
+      backPool.push({ label: "Empty", color: "#f4f4f5", sizeId: "empty" });
     }
 
-    return cells;
-  }, [activePlate, layout.pieces, layout.cols, layout.rows, isSplitHalfKashirovka, halfCols, effectivePieces, hasMultipleModels, uniqueModels]);
+    if (layout.cols >= 2 && layout.rows >= 1) {
+      const mirroredBackGrid: GridCell[] = [];
+      for (let r = 0; r < layout.rows; r++) {
+        for (let c = 0; c < layout.cols; c++) {
+          const mirrorCol = layout.cols - 1 - c;
+          const sourceIdx = r * layout.cols + mirrorCol;
+          const cell = backPool[sourceIdx] || { label: "Empty", color: "#f4f4f5", sizeId: "empty" };
+          mirroredBackGrid.push(cell);
+        }
+      }
+      return mirroredBackGrid.slice(0, layout.pieces);
+    }
 
-  // Overall Statistics
-  const baseSheetsRun = plateCalculations.reduce((sum, p) => sum + p.requiredSheets, 0);
+    return backPool.slice(0, layout.pieces);
+  }, [
+    activePlate,
+    activeSide,
+    ctpSideRelation,
+    layout.pieces,
+    layout.cols,
+    layout.rows,
+    hasMultipleModels,
+    uniqueModels,
+    isSplitHalfKashirovka,
+    halfCols,
+    effectivePieces,
+    artworkFront,
+    artworkBack,
+    orderName,
+  ]);
 
+  // Overall Production totals
+  const baseSheetsRun = useMemo(() => {
+    return plateCalculations.reduce((sum, p) => sum + p.requiredSheets, 0);
+  }, [plateCalculations]);
+
+  const totalProducedYield = useMemo(() => {
+    return plateCalculations.reduce((sum, p) => sum + (p.totalYield || 0), 0);
+  }, [plateCalculations]);
+
+  const totalOverproduction = useMemo(() => {
+    return plateCalculations.reduce((sum, p) => sum + (p.totalOverproduction || 0), 0);
+  }, [plateCalculations]);
+
+  const overallOverproductionPercent = useMemo(() => {
+    const totalTarget = plateCalculations.reduce((sum, p) => sum + (p.totalTarget || 0), 0);
+    return totalTarget > 0 ? (totalOverproduction / totalTarget) * 100 : 0;
+  }, [plateCalculations, totalOverproduction]);
+
+  // Kashirovka Material Consumptions
   const kashirovkaSummary = useMemo<KashirovkaSummary>(() => {
-    const resolvedLayers =
-      propKashLayers && propKashLayers.length > 0
-        ? propKashLayers
-        : getDefaultKashirovkaLayers(kashMode);
-    const totals = calculateKashirovkaTotals(kashMode, resolvedLayers, kashGlueGsmOrDefault(kashirovkaGlueGsm));
-
     if (!isKashirovkaEnabled) {
       return {
         enabled: false,
         mode: "none",
-        strategy: kashStrategy,
-        netPaperGsm: 300,
-        totalMountedGsm: 300,
-        estimatedCaliperMm: 0.4,
-        effectiveCardsPerPressSheet: layout.pieces,
-        mountedSheetsRequired: baseSheetsRun,
+        strategy: "split_half_sheet",
+        netPaperGsm: 0,
+        totalMountedGsm: 0,
+        estimatedCaliperMm: 0,
+        effectiveCardsPerPressSheet: effectivePieces,
+        mountedSheetsRequired: 0,
         makeReadySheets: 0,
-        rawPrintedLinerSheets: baseSheetsRun,
+        rawPrintedLinerSheets: 0,
         rawCoreSheets: 0,
-        totalRawBoardSheets: baseSheetsRun,
-        totalCtpPlates: plates.length * cmykColors,
+        totalRawBoardSheets: 0,
+        totalCtpPlates: 0,
         glueKgRequired: 0,
       };
     }
 
-    const makeReady = calcMode === "sample" ? 5 : kashMakeReady;
-    const mountedSheetsRequired = baseSheetsRun + makeReady;
+    const defaultLayers = getDefaultKashirovkaLayers(kashMode);
+    const layersToUse =
+      propKashLayers && propKashLayers.length > 0 ? propKashLayers : defaultLayers;
+    const totals = calculateKashirovkaTotals(
+      kashMode,
+      layersToUse,
+      kashirovkaGlueGsm
+    );
 
-    // In split_half_sheet: 1 full press sheet is cut in half (Left=Front, Right=Back) and glued into 1 half-size mounted board
-    // In separate_sheets: 1 full Front sheet + 1 full Back sheet are glued into 1 full-size mounted board
-    const rawPrintedLinerSheets =
-      kashStrategy === "split_half_sheet"
-        ? mountedSheetsRequired
-        : mountedSheetsRequired * 2;
+    const mountedSheetsRequired = baseSheetsRun;
+    const makeReady = kashMakeReady;
+    const totalBoardPerLayer = mountedSheetsRequired + makeReady;
 
-    const rawCoreSheets =
-      kashMode === "triplex"
-        ? kashStrategy === "split_half_sheet"
-          ? Math.ceil(mountedSheetsRequired / 2)
-          : mountedSheetsRequired
-        : 0;
+    let rawPrintedLinerSheets = 0;
+    let totalCtp = 0;
 
-    const totalRawBoardSheets = rawPrintedLinerSheets + rawCoreSheets;
+    if (kashStrategy === "split_half_sheet") {
+      rawPrintedLinerSheets = totalBoardPerLayer;
+      totalCtp = plates.length * cmykColors;
+    } else {
+      rawPrintedLinerSheets = totalBoardPerLayer * 2;
+      totalCtp = plates.length * cmykColors * 2;
+    }
 
-    const totalCtp =
-      kashStrategy === "split_half_sheet"
-        ? plates.length * cmykColors // 1 CTP set prints both Front (left) and Back (right)
-        : plates.length * cmykColors * 2; // 2 CTP sets (Front set + Back set)
+    const rawCoreSheets = kashMode === "triplex" ? totalBoardPerLayer : 0;
+    const totalRawBoardSheets =
+      rawPrintedLinerSheets + (kashMode === "triplex" ? rawCoreSheets : 0);
 
-    const sheetAreaM2 = (sheetW / 1000) * (sheetH / 1000);
+    const sheetAreaM2 = (sheetW * sheetH) / 1_000_000;
     const singleMountedAreaM2 =
       kashStrategy === "split_half_sheet" ? sheetAreaM2 * 0.5 : sheetAreaM2;
     const glueBonds = kashMode === "triplex" ? 2 : 1;
@@ -646,7 +887,6 @@ export function useLayoutCalc({
     baseSheetsRun,
     plates.length,
     cmykColors,
-    calcMode,
     sheetW,
     sheetH,
     effectivePieces,
@@ -657,6 +897,7 @@ export function useLayoutCalc({
   const totalSheetsRun = isKashirovkaEnabled
     ? kashirovkaSummary.totalRawBoardSheets
     : baseSheetsRun;
+
   const [selectedPrintMethod, setSelectedPrintMethod] = useState<PrintMethod | undefined>(propPrintMethod);
 
   useEffect(() => {
@@ -695,9 +936,34 @@ export function useLayoutCalc({
     sheetH,
   ]);
 
-  const totalCtpPlates = isKashirovkaEnabled
-    ? kashirovkaSummary.totalCtpPlates
-    : printPlan.totalCtpPlates;
+  // Accurate CTP plate counting according to ctpSideRelation
+  const totalCtpPlates = useMemo(() => {
+    if (calcMode === "sample") return 0;
+    if (isKashirovkaEnabled) {
+      return kashirovkaSummary.totalCtpPlates;
+    }
+    const numPlates = plates.length;
+    if (numPlates === 0) return 0;
+
+    if (ctpSideRelation === "work_and_turn") {
+      return numPlates * Math.max(frontColorsCount, backColorsCount);
+    }
+    if (ctpSideRelation === "shared_front_variable_back") {
+      // 1 front set + numPlates * back set
+      return frontColorsCount + numPlates * backColorsCount;
+    }
+    // Independent per plate
+    return numPlates * (frontColorsCount + backColorsCount);
+  }, [
+    calcMode,
+    isKashirovkaEnabled,
+    kashirovkaSummary.totalCtpPlates,
+    plates.length,
+    ctpSideRelation,
+    frontColorsCount,
+    backColorsCount,
+  ]);
+
   const paperAreaWastePercent = Math.max(0, 100 - layout.utilization);
 
   // Outer crop marks
@@ -708,7 +974,8 @@ export function useLayoutCalc({
   // Export handlers
   const handleExportSVG = () => {
     const prefix = calcMode === "sample" ? `${docNo}_SAMPLE` : docNo;
-    exportSvg(svgRef.current, `${prefix}_${activePlate.name.replace(/\s+/g, "_")}.svg`);
+    const sideSuffix = activeSide === "back" ? "BACK" : "FRONT";
+    exportSvg(svgRef.current, `${prefix}_${activePlate.name.replace(/\s+/g, "_")}_${sideSuffix}.svg`);
   };
 
   const handleExportPDF = (exportAll = false) => {
@@ -738,9 +1005,21 @@ export function useLayoutCalc({
   };
 
   return {
-    // Mode
+    // Mode & Views
+    viewMode,
+    setViewMode,
+    activeSide,
+    setActiveSide,
     calcMode,
     setCalcMode: handleModeSwitch,
+    ctpSideRelation,
+    setCtpSideRelation,
+    optimizerGoal,
+    setOptimizerGoal,
+    targetPlateCount,
+    setTargetPlateCount,
+    isJobTicketOpen,
+    setIsJobTicketOpen,
 
     // Kashirovka (Multi-Layer Mounting)
     kashMode,
@@ -763,6 +1042,7 @@ export function useLayoutCalc({
     setProdH,
     baseQuantity,
     setBaseQuantity,
+    adjustedSizes,
     bleed,
     setBleed,
     gap,
@@ -783,6 +1063,8 @@ export function useLayoutCalc({
     switchOrientation,
     cmykColors,
     setCmykColors,
+    frontColorsCount,
+    backColorsCount,
     overproductionMode,
     setOverproductionMode,
     overproductionValue,
@@ -821,8 +1103,12 @@ export function useLayoutCalc({
     uniqueModelsCount: uniqueModels.length,
     handleAddPlate,
     handleRemovePlate,
+    handleRenamePlate,
+    handleDuplicatePlate,
     handleAutoPartitionPlates,
     handleManualSlotChange,
+    handleReassignSkuPlate,
+    handleSetSkuSlots,
 
     // Print Planning Result & Actions
     printPlan,
@@ -832,6 +1118,7 @@ export function useLayoutCalc({
     backColors,
     spotColors,
     pressMachine,
+    paperStock,
     lamination,
     embellishment,
     isOperator,
@@ -843,6 +1130,9 @@ export function useLayoutCalc({
     gridCells,
     outerTrimMarks,
     totalSheetsRun,
+    totalProducedYield,
+    totalOverproduction,
+    overallOverproductionPercent,
     totalCtpPlates,
     paperAreaWastePercent,
 

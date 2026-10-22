@@ -1,26 +1,28 @@
 "use client";
 
 import React from "react";
-import { MachineRecord } from "../types";
+import { MachineRecord, MachineCategory } from "../types";
+import { getDefaultCounterUnit, getDefaultDepartmentForCategory } from "../cleanBlankMachine";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Cpu,
   Gauge,
   Clock,
-  Layers,
-  Wrench,
   Zap,
   DollarSign,
-  MapPin,
-  Calendar,
   Building,
-  User,
-  CheckCircle2,
-  AlertCircle,
-  FileText,
   Activity,
   Sliders,
-  Sparkles,
 } from "lucide-react";
 
 interface MachineOverviewTabProps {
@@ -32,66 +34,100 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
   const getSpeedLabel = () => {
     switch (machine.category) {
       case "flexo":
+        return machine.flexoSpecs?.practicalSpeedMpm
+          ? `${machine.flexoSpecs.practicalSpeedMpm} m/min`
+          : "—";
       case "lamination":
-        return `${machine.flexoSpecs?.practicalSpeedMpm || machine.laminationSpecs?.practicalSpeedMpm || 100} m/min`;
+        return machine.laminationSpecs?.practicalSpeedMpm
+          ? `${machine.laminationSpecs.practicalSpeedMpm} m/min`
+          : "—";
       case "jacquard":
-        return `${machine.jacquardSpecs?.practicalRpm || 720} RPM (picks/min)`;
+        return machine.jacquardSpecs?.practicalRpm
+          ? `${machine.jacquardSpecs.practicalRpm} RPM`
+          : "—";
       case "die-cutting":
+        return machine.dieCuttingSpecs?.practicalSpeedSph
+          ? `${machine.dieCuttingSpecs.practicalSpeedSph.toLocaleString()} varaq/soat`
+          : "—";
       case "offset":
+        return machine.offsetSpecs?.practicalSpeedSph
+          ? `${machine.offsetSpecs.practicalSpeedSph.toLocaleString()} varaq/soat`
+          : "—";
       case "mounting":
-        return `${(
-          machine.offsetSpecs?.practicalSpeedSph ||
-          machine.dieCuttingSpecs?.practicalSpeedSph ||
-          machine.mountingSpecs?.practicalSpeedSph ||
-          10000
-        ).toLocaleString()} varaq/soat`;
+        return machine.mountingSpecs?.practicalSpeedSph
+          ? `${machine.mountingSpecs.practicalSpeedSph.toLocaleString()} varaq/soat`
+          : "—";
       case "guillotine":
-        return `${machine.guillotineSpecs?.cycleTimeSec || 1.8} soniya / kesim`;
+        return machine.guillotineSpecs?.cycleTimeSec
+          ? `${machine.guillotineSpecs.cycleTimeSec} soniya / kesim`
+          : "—";
       case "casing-in":
-        return `${(machine.casingInSpecs?.speedCyclesPerHour || 2400).toLocaleString()} kitob/soat`;
+        return machine.casingInSpecs?.speedCyclesPerHour
+          ? `${machine.casingInSpecs.speedCyclesPerHour.toLocaleString()} kitob/soat`
+          : "—";
       default:
-        return "10,000 / soat";
+        return "—";
     }
   };
 
   const getFormatLabel = () => {
     switch (machine.category) {
       case "offset":
-        return machine.offsetSpecs?.maxSheetMm || "750 × 1060 mm";
+        return machine.offsetSpecs?.maxSheetMm || "—";
       case "flexo":
-        return `${machine.flexoSpecs?.maxWebWidthMm} mm Web (Z=${machine.flexoSpecs?.gearPitch.slice(0, 10)})`;
+        return machine.flexoSpecs?.maxWebWidthMm ? `${machine.flexoSpecs.maxWebWidthMm} mm Web` : "—";
       case "die-cutting":
-        return machine.dieCuttingSpecs?.maxSheetMm || "760 × 1060 mm";
+        return machine.dieCuttingSpecs?.maxSheetMm || "—";
       case "lamination":
-        return machine.laminationSpecs?.maxSheetMm || "760 × 1020 mm";
+        return machine.laminationSpecs?.maxSheetMm || "—";
       case "guillotine":
-        return `${machine.guillotineSpecs?.cuttingWidthMm} mm kesim kengligi`;
+        return machine.guillotineSpecs?.cuttingWidthMm ? `${machine.guillotineSpecs.cuttingWidthMm} mm kesim` : "—";
       case "jacquard":
-        return `${machine.jacquardSpecs?.reedWidthMm} mm / ${machine.jacquardSpecs?.hooksCount} Hooks`;
+        return machine.jacquardSpecs?.reedWidthMm ? `${machine.jacquardSpecs.reedWidthMm} mm` : "—";
       case "mounting":
-        return machine.mountingSpecs?.maxSheetMm || "1000 × 1400 mm";
+        return machine.mountingSpecs?.maxSheetMm || "—";
       case "casing-in":
-        return machine.casingInSpecs?.maxBookFormatMm || "310 × 380 × 80 mm";
+        return machine.casingInSpecs?.maxBookFormatMm || "—";
       default:
-        return "Standart";
+        return "—";
     }
   };
 
   const getMakeReadyLabel = () => {
     switch (machine.category) {
       case "offset":
-        return `${machine.offsetSpecs?.makeReadyMinutes} daq (${machine.offsetSpecs?.makeReadyWasteSheets} varaq chiqindi)`;
+        return machine.offsetSpecs?.makeReadyMinutes
+          ? `${machine.offsetSpecs.makeReadyMinutes} daq (${machine.offsetSpecs.makeReadyWasteSheets || 0} varaq)`
+          : "—";
       case "flexo":
-        return `${machine.flexoSpecs?.makeReadyMinutes} daq (${machine.flexoSpecs?.makeReadyWasteMeters} m chiqindi)`;
+        return machine.flexoSpecs?.makeReadyMinutes
+          ? `${machine.flexoSpecs.makeReadyMinutes} daq (${machine.flexoSpecs.makeReadyWasteMeters || 0} m)`
+          : "—";
       case "die-cutting":
-        return `${machine.dieCuttingSpecs?.makeReadyMinutes} daq (${machine.dieCuttingSpecs?.makeReadyWasteSheets} varaq chiqindi)`;
+        return machine.dieCuttingSpecs?.makeReadyMinutes
+          ? `${machine.dieCuttingSpecs.makeReadyMinutes} daq (${machine.dieCuttingSpecs.makeReadyWasteSheets || 0} varaq)`
+          : "—";
       case "lamination":
-        return `${machine.laminationSpecs?.makeReadyMinutes} daq (${machine.laminationSpecs?.makeReadyWasteSheets} varaq chiqindi)`;
+        return machine.laminationSpecs?.makeReadyMinutes
+          ? `${machine.laminationSpecs.makeReadyMinutes} daq (${machine.laminationSpecs.makeReadyWasteSheets || 0} varaq)`
+          : "—";
       case "jacquard":
-        return `${machine.jacquardSpecs?.makeReadyMinutes} daq (${machine.jacquardSpecs?.wasteMeters} m chiqindi)`;
+        return machine.jacquardSpecs?.makeReadyMinutes
+          ? `${machine.jacquardSpecs.makeReadyMinutes} daq (${machine.jacquardSpecs.wasteMeters || 0} m)`
+          : "—";
       default:
-        return "20-30 daqiqa";
+        return "—";
     }
+  };
+
+  const handleCategoryChange = (newCat: MachineCategory) => {
+    const nextDept = getDefaultDepartmentForCategory(newCat);
+    const nextUnit = getDefaultCounterUnit(newCat);
+    onUpdate({
+      category: newCat,
+      department: nextDept,
+      counterUnit: nextUnit,
+    });
   };
 
   return (
@@ -105,12 +141,12 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
             </p>
             <div className="flex items-baseline gap-1.5 mt-0.5">
               <span className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
-                ${machine.costing.standardHourlyRateUsd.toFixed(2)}
+                ${(machine.costing?.standardHourlyRateUsd || 0).toFixed(2)}
               </span>
               <span className="text-xs text-muted-foreground">/ soat</span>
             </div>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Tannarx: ${machine.costing.totalBaseCostPerHourUsd.toFixed(2)}/soat
+              Tannarx: ${(machine.costing?.totalBaseCostPerHourUsd || 0).toFixed(2)}/soat
             </p>
           </div>
           <div className="h-9 w-9 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
@@ -121,7 +157,7 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
         <div className="rounded-lg border border-border bg-card p-3.5 flex items-center justify-between shadow-xs">
           <div>
             <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              O'rtacha Ish Tezligi
+              Ish Tezligi
             </p>
             <div className="flex items-baseline gap-1.5 mt-0.5">
               <span className="text-xl font-bold font-mono text-foreground">
@@ -129,7 +165,7 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
               </span>
             </div>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              OEE Samaradorlik: {machine.overallEfficiency}%
+              OEE Samaradorlik: {machine.overallEfficiency ?? 90}%
             </p>
           </div>
           <div className="h-9 w-9 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
@@ -140,16 +176,15 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
         <div className="rounded-lg border border-border bg-card p-3.5 flex items-center justify-between shadow-xs">
           <div>
             <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              Elektr Quvvati & Sarfi
+              Elektr Quvvati
             </p>
             <div className="flex items-baseline gap-1.5 mt-0.5">
               <span className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">
-                {machine.energy.activePowerKw} kW
+                {machine.energy?.activePowerKw || 0} kW
               </span>
-              <span className="text-xs text-muted-foreground">faol</span>
             </div>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Soatiga: ${machine.energy.hourlyElectricityCostUsd.toFixed(2)} (${machine.energy.electricityTariffUsd}/kWh)
+              Soatiga: ${(machine.energy?.hourlyElectricityCostUsd || 0).toFixed(2)}
             </p>
           </div>
           <div className="h-9 w-9 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
@@ -160,14 +195,14 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
         <div className="rounded-lg border border-border bg-card p-3.5 flex items-center justify-between shadow-xs">
           <div>
             <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-              Priladka & Chiqindi
+              Priladka / Chiqindi
             </p>
             <div className="flex items-baseline gap-1.5 mt-0.5">
               <span className="text-sm font-bold text-foreground">
                 {getMakeReadyLabel()}
               </span>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
+            <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
               Format: {getFormatLabel()}
             </p>
           </div>
@@ -181,56 +216,245 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* General Hardware Specs */}
         <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
-          <div className="py-2.5 px-3.5 border-b border-border bg-muted/30 flex items-center gap-2">
-            <Building className="w-4 h-4 text-primary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
-              Umumiy Uskuna Ma'lumotlari
-            </span>
-          </div>
-          <div className="p-3.5 space-y-2 text-xs">
-            <div className="flex items-center justify-between py-1 border-b border-border/50">
-              <span className="text-muted-foreground">Uskuna Nomi & Modeli:</span>
-              <span className="font-semibold text-foreground">{machine.name}</span>
-            </div>
-            <div className="flex items-center justify-between py-1 border-b border-border/50">
-              <span className="text-muted-foreground">Ichki ERP Koding:</span>
-              <span className="font-mono font-medium text-foreground">{machine.code}</span>
-            </div>
-            <div className="flex items-center justify-between py-1 border-b border-border/50">
-              <span className="text-muted-foreground">Ishlab Chiqaruvchi & Mamlakat:</span>
-              <span className="font-medium text-foreground">{machine.manufacturer} ({machine.country})</span>
-            </div>
-            <div className="flex items-center justify-between py-1 border-b border-border/50">
-              <span className="text-muted-foreground">Ishlab Chiqarilgan Yili:</span>
-              <span className="font-medium text-foreground">{machine.year}-yil</span>
-            </div>
-            <div className="flex items-center justify-between py-1 border-b border-border/50">
-              <span className="text-muted-foreground">Zavod Seriya Raqami:</span>
-              <span className="font-mono text-muted-foreground">{machine.serialNo}</span>
-            </div>
-            <div className="flex items-center justify-between py-1 border-b border-border/50">
-              <span className="text-muted-foreground">Tsex / Joylashuvi:</span>
-              <span className="flex items-center gap-1 font-medium text-foreground">
-                <MapPin className="w-3.5 h-3.5 text-rose-500" />
-                {machine.location}
+          <div className="py-2.5 px-3.5 border-b border-border bg-muted/30 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Building className="w-4 h-4 text-primary" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                Umumiy Uskuna Pasporti
               </span>
             </div>
-            <div className="flex items-center justify-between py-1 border-b border-border/50">
-              <span className="text-muted-foreground">Smena Tartibi:</span>
-              <span className="font-medium text-foreground">{machine.shiftPattern}</span>
+            <Badge variant="outline" className="text-[10px] font-mono">
+              {machine.code || "KODSIZ"}
+            </Badge>
+          </div>
+
+          <div className="p-3.5 space-y-3 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Uskuna Nomi & Modeli *
+                </Label>
+                <Input
+                  value={machine.name}
+                  onChange={(e) => onUpdate({ name: e.target.value })}
+                  placeholder="Uskuna nomini kiriting"
+                  className="h-8 text-xs font-medium"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Ichki ERP Koding *
+                </Label>
+                <Input
+                  value={machine.code}
+                  onChange={(e) => onUpdate({ code: e.target.value.toUpperCase() })}
+                  placeholder="Masalan: MAC-0001"
+                  className="h-8 text-xs font-mono font-medium"
+                />
+              </div>
             </div>
-            <div className="flex items-center justify-between py-1">
-              <span className="text-muted-foreground">Joriy Mas'ul Operator:</span>
-              <div className="text-right">
-                <span className="font-semibold text-foreground flex items-center justify-end gap-1">
-                  <User className="w-3.5 h-3.5 text-blue-500" />
-                  {machine.leadOperator}
-                </span>
-                {machine.assistantOperator && machine.assistantOperator !== "—" && (
-                  <span className="text-[11px] text-muted-foreground block">
-                    Yordamchi: {machine.assistantOperator}
-                  </span>
-                )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Texnologik Kategoriya *
+                </Label>
+                <Select
+                  value={machine.category}
+                  onValueChange={(val: any) => {
+                    if (val) handleCategoryChange(val);
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs font-semibold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="offset">Ofset chop etish (Offset)</SelectItem>
+                    <SelectItem value="flexo">Ruloli flekso chop etish (Flexo)</SelectItem>
+                    <SelectItem value="die-cutting">Shtampli qirqish (Die-cutting)</SelectItem>
+                    <SelectItem value="guillotine">Gilotinli qog'oz kesish (Guillotine)</SelectItem>
+                    <SelectItem value="lamination">Laminatsiya va laklash (Lamination)</SelectItem>
+                    <SelectItem value="mounting">Kashirovka qilish (Mounting)</SelectItem>
+                    <SelectItem value="casing-in">Muqovalash & tikish (Casing-in)</SelectItem>
+                    <SelectItem value="jacquard">To'qimachilik / Jakkard (Jacquard)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Bo'lim / Sex
+                </Label>
+                <Select
+                  value={machine.department}
+                  onValueChange={(val: any) => onUpdate({ department: val })}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Offset">Offset (Ofset Sexi)</SelectItem>
+                    <SelectItem value="Flexo">Flexo (Flekso Sexi)</SelectItem>
+                    <SelectItem value="Post-press">Post-press (Kesim & Pardozlash)</SelectItem>
+                    <SelectItem value="Packaging">Packaging (Qadoqlash)</SelectItem>
+                    <SelectItem value="Jacquard">Jacquard (Jakkard Sexi)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Ishlab Chiqaruvchi Zavod (Brend)
+                </Label>
+                <Input
+                  value={machine.manufacturer}
+                  onChange={(e) => onUpdate({ manufacturer: e.target.value })}
+                  placeholder="Ishlab chiqaruvchi nomi"
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Ishlab Chiqarilgan Davlat
+                </Label>
+                <Input
+                  value={machine.country}
+                  onChange={(e) => onUpdate({ country: e.target.value })}
+                  placeholder="Mamlakat"
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Ishlab Chiqarilgan Yili
+                </Label>
+                <Input
+                  type="number"
+                  value={machine.year || ""}
+                  onChange={(e) => onUpdate({ year: Number(e.target.value) || new Date().getFullYear() })}
+                  placeholder="Yil"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Zavod Seriya Raqami
+                </Label>
+                <Input
+                  value={machine.serialNo}
+                  onChange={(e) => onUpdate({ serialNo: e.target.value })}
+                  placeholder="Seriya raqami"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Sex / Joylashuvi
+                </Label>
+                <Input
+                  value={machine.location}
+                  onChange={(e) => onUpdate({ location: e.target.value })}
+                  placeholder="Joylashuv manzili"
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Smena Tartibi
+                </Label>
+                <Input
+                  value={machine.shiftPattern}
+                  onChange={(e) => onUpdate({ shiftPattern: e.target.value })}
+                  placeholder="Masalan: 2 smena"
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Mas'ul Bosh Operator
+                </Label>
+                <Input
+                  value={machine.leadOperator}
+                  onChange={(e) => onUpdate({ leadOperator: e.target.value })}
+                  placeholder="Operator F.I.Sh."
+                  className="h-8 text-xs font-medium"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Yordamchi Operator
+                </Label>
+                <Input
+                  value={machine.assistantOperator}
+                  onChange={(e) => onUpdate({ assistantOperator: e.target.value })}
+                  placeholder="Yordamchi F.I.Sh."
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1 border-t border-border/50">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  OEE Samaradorlik (%)
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={machine.overallEfficiency ?? 90}
+                  onChange={(e) => onUpdate({ overallEfficiency: Number(e.target.value) || 0 })}
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Odometer Hisoblagich
+                </Label>
+                <Input
+                  type="number"
+                  value={machine.totalLifetimeCounter ?? 0}
+                  onChange={(e) => onUpdate({ totalLifetimeCounter: Number(e.target.value) || 0 })}
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Hisoblagich Birligi
+                </Label>
+                <Select
+                  value={machine.counterUnit || "sheets"}
+                  onValueChange={(val: any) => onUpdate({ counterUnit: val })}
+                >
+                  <SelectTrigger className="h-8 text-xs font-mono">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sheets">varaq (sheets)</SelectItem>
+                    <SelectItem value="meters">metr (meters)</SelectItem>
+                    <SelectItem value="cuts">kesim (cuts)</SelectItem>
+                    <SelectItem value="picks">zarb (picks)</SelectItem>
+                    <SelectItem value="books">kitob (books)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
@@ -242,310 +466,731 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
             <div className="flex items-center gap-2">
               <Sliders className="w-4 h-4 text-primary" />
               <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
-                Texnologik Xususiyatlar ({machine.department})
+                Texnologik Parametrlar ({machine.category.toUpperCase()})
               </span>
             </div>
             <Badge variant="secondary" className="text-[10px] uppercase font-mono">
               {machine.category}
             </Badge>
           </div>
-          <div className="p-3.5 space-y-2 text-xs">
-            {/* OFFSET PRESS SPECIFIC */}
-            {machine.category === "offset" && machine.offsetSpecs && (
+
+          <div className="p-3.5 space-y-3 text-xs">
+            {/* 1. OFFSET PRESS SPECIFIC */}
+            {machine.category === "offset" && (
               <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Format Diapazoni (Min / Max):</span>
-                  <span className="font-medium text-foreground">
-                    {machine.offsetSpecs.minSheetMm} — {machine.offsetSpecs.maxSheetMm}
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Maksimal Varaq Formati (mm)
+                    </Label>
+                    <Input
+                      value={machine.offsetSpecs?.maxSheetMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          offsetSpecs: {
+                            ...(machine.offsetSpecs || ({} as any)),
+                            maxSheetMm: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="Masalan: 750 × 1060 mm"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Minimal Varaq Formati (mm)
+                    </Label>
+                    <Input
+                      value={machine.offsetSpecs?.minSheetMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          offsetSpecs: {
+                            ...(machine.offsetSpecs || ({} as any)),
+                            minSheetMm: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="Masalan: 340 × 480 mm"
+                      className="h-8 text-xs"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Maksimal Bosma Maydoni:</span>
-                  <span className="font-medium text-foreground">{machine.offsetSpecs.maxPrintAreaMm}</span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Sektsiyalar Soni
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.offsetSpecs?.printingUnits || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          offsetSpecs: {
+                            ...(machine.offsetSpecs || ({} as any)),
+                            printingUnits: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="4, 5, 8..."
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Qog'oz Grammaji Diapazoni
+                    </Label>
+                    <Input
+                      value={machine.offsetSpecs?.grammageRange || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          offsetSpecs: {
+                            ...(machine.offsetSpecs || ({} as any)),
+                            grammageRange: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="60 - 450 g/m²"
+                      className="h-8 text-xs"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Qog'oz Qalinligi / Grammaj:</span>
-                  <span className="font-medium text-foreground">{machine.offsetSpecs.grammageRange}</span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      CTP Forma O'lchami (mm)
+                    </Label>
+                    <Input
+                      value={machine.offsetSpecs?.plateSizeMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          offsetSpecs: {
+                            ...(machine.offsetSpecs || ({} as any)),
+                            plateSizeMm: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="Masalan: 790 × 1030 mm"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Quritish Turi
+                    </Label>
+                    <Input
+                      value={machine.offsetSpecs?.dryerType || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          offsetSpecs: {
+                            ...(machine.offsetSpecs || ({} as any)),
+                            dryerType: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="IR / Hot Air / UV"
+                      className="h-8 text-xs"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Sektsiyalar Soni & Rejim:</span>
-                  <span className="font-medium text-foreground">
-                    {machine.offsetSpecs.printingUnits} ta sektsiya ({machine.offsetSpecs.perfectingMode})
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">CTP Forma O'lchami:</span>
-                  <span className="font-mono text-blue-600 dark:text-blue-400 font-medium">
-                    {machine.offsetSpecs.plateSizeMm}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Rezina Matosi (Blanket):</span>
-                  <span className="font-mono text-muted-foreground">{machine.offsetSpecs.blanketSizeMm}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Namlovchi Sistema & Spirt:</span>
-                  <span className="font-medium text-foreground">
-                    {machine.offsetSpecs.dampeningSystem} ({machine.offsetSpecs.alcoholDosingPercent})
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Quritish / Fiksatsiya:</span>
-                  <span className="font-medium text-foreground">{machine.offsetSpecs.dryerType}</span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Amaliy Tezlik (varaq/soat)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.offsetSpecs?.practicalSpeedSph || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          offsetSpecs: {
+                            ...(machine.offsetSpecs || ({} as any)),
+                            practicalSpeedSph: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="11000"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Priladka Chiqindisi (varaq)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.offsetSpecs?.makeReadyWasteSheets || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          offsetSpecs: {
+                            ...(machine.offsetSpecs || ({} as any)),
+                            makeReadyWasteSheets: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="100"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
               </>
             )}
 
-            {/* FLEXO SPECIFIC */}
-            {machine.category === "flexo" && machine.flexoSpecs && (
+            {/* 2. FLEXO PRESS SPECIFIC */}
+            {machine.category === "flexo" && (
               <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Maksimal / Minimal Polotno Kengligi:</span>
-                  <span className="font-medium text-foreground">
-                    {machine.flexoSpecs.minWebWidthMm} mm — {machine.flexoSpecs.maxWebWidthMm} mm Web
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Maksimal Polotno Kengligi (mm)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.flexoSpecs?.maxWebWidthMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          flexoSpecs: {
+                            ...(machine.flexoSpecs || ({} as any)),
+                            maxWebWidthMm: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="Masalan: 430"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Shesternya Qadami (Gear pitch)
+                    </Label>
+                    <Input
+                      value={machine.flexoSpecs?.gearPitch || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          flexoSpecs: {
+                            ...(machine.flexoSpecs || ({} as any)),
+                            gearPitch: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="1/8 in CP"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Takrorlanish Diapazoni (Repeat):</span>
-                  <span className="font-medium text-foreground">
-                    {machine.flexoSpecs.repeatMinMm} mm — {machine.flexoSpecs.repeatMaxMm} mm
-                  </span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Bosma Sektsiyalari Soni
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.flexoSpecs?.printingStations || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          flexoSpecs: {
+                            ...(machine.flexoSpecs || ({} as any)),
+                            printingStations: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="6, 8..."
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Aylanma Shtamplar (Rotary Die) Soni
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.flexoSpecs?.rotaryDieStations || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          flexoSpecs: {
+                            ...(machine.flexoSpecs || ({} as any)),
+                            rotaryDieStations: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="1, 2..."
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Shesternya Qadami & Tishlar:</span>
-                  <span className="font-mono font-medium text-foreground">{machine.flexoSpecs.gearPitch}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Rulon Diametri (Unwind / Rewind):</span>
-                  <span className="font-medium text-foreground">
-                    Ø{machine.flexoSpecs.maxUnwindDiamMm} mm / Ø{machine.flexoSpecs.maxRewindDiamMm} mm (Vtulka: {machine.flexoSpecs.coreDiameterMm} mm)
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Rangli Sektsiyalar Soni:</span>
-                  <span className="font-semibold text-foreground">
-                    {machine.flexoSpecs.printingStations} ta flexo sektsiya + {machine.flexoSpecs.rotaryDieStations} ta shtamp stansiyasi
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Klayshe Qalinligi & Skotch:</span>
-                  <span className="font-mono text-foreground">
-                    {machine.flexoSpecs.plateThicknessMm} mm photopolymer / {machine.flexoSpecs.cushionTapeMm} mm cushion
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Anilox Vallari Soni:</span>
-                  <span className="font-medium text-foreground">{machine.flexoSpecs.aniloxCount} ta sopol anilox vallar</span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Quritish Tizimi:</span>
-                  <span className="font-medium text-foreground">{machine.flexoSpecs.curingSystem}</span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Ish Tezligi (m/min)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.flexoSpecs?.practicalSpeedMpm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          flexoSpecs: {
+                            ...(machine.flexoSpecs || ({} as any)),
+                            practicalSpeedMpm: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="120"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Priladka Chiqindisi (metr)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.flexoSpecs?.makeReadyWasteMeters || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          flexoSpecs: {
+                            ...(machine.flexoSpecs || ({} as any)),
+                            makeReadyWasteMeters: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="50"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
               </>
             )}
 
-            {/* DIE-CUTTING SPECIFIC */}
-            {machine.category === "die-cutting" && machine.dieCuttingSpecs && (
+            {/* 3. DIE-CUTTING SPECIFIC */}
+            {machine.category === "die-cutting" && (
               <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Maksimal / Minimal Varaq:</span>
-                  <span className="font-medium text-foreground">
-                    {machine.dieCuttingSpecs.minSheetMm} — {machine.dieCuttingSpecs.maxSheetMm}
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Maksimal Varaq Formati (mm)
+                    </Label>
+                    <Input
+                      value={machine.dieCuttingSpecs?.maxSheetMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          dieCuttingSpecs: {
+                            ...(machine.dieCuttingSpecs || ({} as any)),
+                            maxSheetMm: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="760 × 1060 mm"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Bosim Kuchi (Tonna)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.dieCuttingSpecs?.maxPressureTons || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          dieCuttingSpecs: {
+                            ...(machine.dieCuttingSpecs || ({} as any)),
+                            maxPressureTons: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="260"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Maksimal Zarb Bosimi (Pressure):</span>
-                  <span className="font-bold text-amber-600 dark:text-amber-400 font-mono">
-                    {machine.dieCuttingSpecs.maxPressureTons} tonna (2.6 MN)
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Mos Materiallar Turi:</span>
-                  <span className="font-medium text-foreground">{machine.dieCuttingSpecs.substrateRange}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Klapan / Tutqich Maydoni:</span>
-                  <span className="font-mono text-foreground">{machine.dieCuttingSpecs.gripperMarginMm}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Shtanz Pichoq Standart Balandligi:</span>
-                  <span className="font-mono text-foreground">{machine.dieCuttingSpecs.cuttingRuleHeightMm} mm</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Avtomatik Tozalash (Stripping):</span>
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                    {machine.dieCuttingSpecs.strippingStation ? "Mavjud (Yuqori & Pastki ramkalar)" : "Yo'q"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Optik Centerline Tizimi:</span>
-                  <span className="font-medium text-foreground">
-                    {machine.dieCuttingSpecs.centerlineSystem ? "Ha (Mikrometrik sozlash)" : "Yo'q"}
-                  </span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Ish Tezligi (varaq/soat)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.dieCuttingSpecs?.practicalSpeedSph || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          dieCuttingSpecs: {
+                            ...(machine.dieCuttingSpecs || ({} as any)),
+                            practicalSpeedSph: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="6500"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Priladka Chiqindisi (varaq)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.dieCuttingSpecs?.makeReadyWasteSheets || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          dieCuttingSpecs: {
+                            ...(machine.dieCuttingSpecs || ({} as any)),
+                            makeReadyWasteSheets: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="30"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
               </>
             )}
 
-            {/* LAMINATION SPECIFIC */}
-            {machine.category === "lamination" && machine.laminationSpecs && (
+            {/* 4. GUILLOTINE SPECIFIC */}
+            {machine.category === "guillotine" && (
               <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Varaq Formati (Min / Max):</span>
-                  <span className="font-medium text-foreground">
-                    {machine.laminationSpecs.minSheetMm} — {machine.laminationSpecs.maxSheetMm}
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Kesish Kengligi (mm)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.guillotineSpecs?.cuttingWidthMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          guillotineSpecs: {
+                            ...(machine.guillotineSpecs || ({} as any)),
+                            cuttingWidthMm: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="1150"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Sikl Vaqti (soniya / kesim)
+                    </Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={machine.guillotineSpecs?.cycleTimeSec || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          guillotineSpecs: {
+                            ...(machine.guillotineSpecs || ({} as any)),
+                            cycleTimeSec: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="1.8"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Material Grammaji:</span>
-                  <span className="font-medium text-foreground">{machine.laminationSpecs.grammageRange}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Xrom Kalandr Diametri:</span>
-                  <span className="font-mono text-foreground">Ø{machine.laminationSpecs.calenderDiameterMm} mm ko'zgu silliqligida</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Isitish Tizimi:</span>
-                  <span className="font-medium text-foreground">{machine.laminationSpecs.calenderHeating}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Gidravlik Siqish Bosimi:</span>
-                  <span className="font-mono text-foreground">{machine.laminationSpecs.nipPressureBar} bar</span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Qo'llab-quvvatlanadigan Plyonkalar:</span>
-                  <span className="font-medium text-foreground">{machine.laminationSpecs.supportedFilms}</span>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Pichoq Turi & Resursi
+                  </Label>
+                  <Input
+                    value={machine.guillotineSpecs?.knifeType || ""}
+                    onChange={(e) =>
+                      onUpdate({
+                        guillotineSpecs: {
+                          ...(machine.guillotineSpecs || ({} as any)),
+                          knifeType: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="Qotishma pichoq turi"
+                    className="h-8 text-xs"
+                  />
                 </div>
               </>
             )}
 
-            {/* GUILLOTINE CUTTING SPECIFIC */}
-            {machine.category === "guillotine" && machine.guillotineSpecs && (
+            {/* 5. LAMINATION SPECIFIC */}
+            {machine.category === "lamination" && (
               <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Maksimal Kesish Kengligi:</span>
-                  <span className="font-bold text-foreground font-mono">{machine.guillotineSpecs.cuttingWidthMm} mm (45")</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Maksimal Format (mm)
+                    </Label>
+                    <Input
+                      value={machine.laminationSpecs?.maxSheetMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          laminationSpecs: {
+                            ...(machine.laminationSpecs || ({} as any)),
+                            maxSheetMm: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="760 × 1020 mm"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Tezlik (m/min)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.laminationSpecs?.practicalSpeedMpm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          laminationSpecs: {
+                            ...(machine.laminationSpecs || ({} as any)),
+                            practicalSpeedMpm: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="45"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Stol Chuqurligi & Balandligi:</span>
-                  <span className="font-mono text-foreground">
-                    {machine.guillotineSpecs.feedDepthMm} mm chuqurlik / {machine.guillotineSpecs.tableHeightMm} mm
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Pichoq Ostidagi Maksimal Balandlik:</span>
-                  <span className="font-mono text-foreground">{machine.guillotineSpecs.clampOpeningMm} mm</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Gidravlik Siqish Bosimi Diapazoni:</span>
-                  <span className="font-mono text-foreground">{machine.guillotineSpecs.clampingPressureRangeDaN}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Havo Yostiqchali Stol (Air bed):</span>
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                    {machine.guillotineSpecs.airCushionTable ? "Mavjud (Yuqori hajm puflagich)" : "Yo'q"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Pichoq Turi & O'tkirlash Resursi:</span>
-                  <span className="font-medium text-foreground">
-                    {machine.guillotineSpecs.knifeType} (~{machine.guillotineSpecs.cutsPerKnifeChange.toLocaleString()} kesim)
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Optik Kesish Ko'rsatkichi:</span>
-                  <span className="font-medium text-foreground">LED Lazer chizig'i</span>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Qo'llab-quvvatlanadigan Plyonkalar
+                  </Label>
+                  <Input
+                    value={machine.laminationSpecs?.supportedFilms || ""}
+                    onChange={(e) =>
+                      onUpdate({
+                        laminationSpecs: {
+                          ...(machine.laminationSpecs || ({} as any)),
+                          supportedFilms: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="BOPP Gloss / Matt / Soft-Touch / PET"
+                    className="h-8 text-xs"
+                  />
                 </div>
               </>
             )}
 
-            {/* JACQUARD SPECIFIC */}
-            {machine.category === "jacquard" && machine.jacquardSpecs && (
+            {/* 6. MOUNTING / KASHIROVKA SPECIFIC */}
+            {machine.category === "mounting" && (
               <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Dastgoh Berdo Kengligi:</span>
-                  <span className="font-bold text-foreground font-mono">{machine.jacquardSpecs.reedWidthMm} mm (2.4 m)</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Kashirovka Formati (mm)
+                    </Label>
+                    <Input
+                      value={machine.mountingSpecs?.maxSheetMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          mountingSpecs: {
+                            ...(machine.mountingSpecs || ({} as any)),
+                            maxSheetMm: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="1000 × 1400 mm"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Yelimlash Turi
+                    </Label>
+                    <Input
+                      value={machine.mountingSpecs?.glueType || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          mountingSpecs: {
+                            ...(machine.mountingSpecs || ({} as any)),
+                            glueType: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="PVA / Kraxmal dispersiya"
+                      className="h-8 text-xs"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Elektron Jakkard Ilgaklari (Hooks):</span>
-                  <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">
-                    {machine.jacquardSpecs.hooksCount} ta ilgak (Staubli elektron modullari)
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Bir Vaqtda To'qiladigan Lentalar:</span>
-                  <span className="font-medium text-foreground">{machine.jacquardSpecs.simultaneousRibbons} ta tasma</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Tuxum / Urish Zichligi:</span>
-                  <span className="font-mono text-foreground">{machine.jacquardSpecs.densityRangePicksCm}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Arqon Tashlash Mexanizmi:</span>
-                  <span className="font-medium text-foreground">{machine.jacquardSpecs.weftInsertionType}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Ultratovushli Kesgichlar:</span>
-                  <span className="font-medium text-foreground">{machine.jacquardSpecs.ultrasonicCutters} ta ultratovushli qirqish</span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Ip O'rash Barabani (Warp beam):</span>
-                  <span className="font-mono text-foreground">Ø{machine.jacquardSpecs.warpBeamDiamMm} mm</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Tezlik (varaq/soat)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.mountingSpecs?.practicalSpeedSph || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          mountingSpecs: {
+                            ...(machine.mountingSpecs || ({} as any)),
+                            practicalSpeedSph: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="4000"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Qo'shish Aniqligi
+                    </Label>
+                    <Input
+                      value={machine.mountingSpecs?.accuracyMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          mountingSpecs: {
+                            ...(machine.mountingSpecs || ({} as any)),
+                            accuracyMm: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="±0.5 mm"
+                      className="h-8 text-xs"
+                    />
+                  </div>
                 </div>
               </>
             )}
 
-            {/* MOUNTING SPECIFIC */}
-            {machine.category === "mounting" && machine.mountingSpecs && (
+            {/* 7. CASING-IN / MUQOVA SPECIFIC */}
+            {machine.category === "casing-in" && (
               <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Kashirovka Formati (Min / Max):</span>
-                  <span className="font-medium text-foreground">
-                    {machine.mountingSpecs.minSheetMm} — {machine.mountingSpecs.maxSheetMm}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Yelimlash Turi:</span>
-                  <span className="font-medium text-foreground">{machine.mountingSpecs.glueType}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Asosiy Qatlam Materiali:</span>
-                  <span className="font-medium text-foreground">{machine.mountingSpecs.baseSubstrate}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Ustki Layner Qog'ozi:</span>
-                  <span className="font-medium text-foreground">{machine.mountingSpecs.topSheetGrammage}</span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Qo'shish Aniqligi (Accuracy):</span>
-                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">
-                    {machine.mountingSpecs.accuracyMm}
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Kitob Blok Formati (mm)
+                    </Label>
+                    <Input
+                      value={machine.casingInSpecs?.maxBookFormatMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          casingInSpecs: {
+                            ...(machine.casingInSpecs || ({} as any)),
+                            maxBookFormatMm: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="310 × 380 × 80 mm"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Tezlik (kitob/soat)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.casingInSpecs?.speedCyclesPerHour || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          casingInSpecs: {
+                            ...(machine.casingInSpecs || ({} as any)),
+                            speedCyclesPerHour: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="2000"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
               </>
             )}
 
-            {/* CASING-IN SPECIFIC */}
-            {machine.category === "casing-in" && machine.casingInSpecs && (
+            {/* 8. JACQUARD SPECIFIC */}
+            {machine.category === "jacquard" && (
               <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Kitob Blok Formati:</span>
-                  <span className="font-medium text-foreground">{machine.casingInSpecs.maxBookFormatMm}</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Berdo Kengligi (mm)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.jacquardSpecs?.reedWidthMm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          jacquardSpecs: {
+                            ...(machine.jacquardSpecs || ({} as any)),
+                            reedWidthMm: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="2400"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Ilgaklar Soni (Hooks)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.jacquardSpecs?.hooksCount || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          jacquardSpecs: {
+                            ...(machine.jacquardSpecs || ({} as any)),
+                            hooksCount: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="6144"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Kushatka Isitish Stansiyalari:</span>
-                  <span className="font-medium text-foreground">{machine.casingInSpecs.jointFormingStations} ta isitiladigan press</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Lenta Qadash (Bookmark ribbon):</span>
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                    {machine.casingInSpecs.ribbonInserting ? "Avtomatlashtirilgan" : "Qo'lda"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Kaptal Yopishtirish Mexanizmi:</span>
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                    {machine.casingInSpecs.headBandAttachment ? "Mavjud" : "Yo'q"}
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Aylanma Tezligi (RPM)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.jacquardSpecs?.practicalRpm || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          jacquardSpecs: {
+                            ...(machine.jacquardSpecs || ({} as any)),
+                            practicalRpm: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="720"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Bir Vaqtdagi Lentalar Soni
+                    </Label>
+                    <Input
+                      type="number"
+                      value={machine.jacquardSpecs?.simultaneousRibbons || ""}
+                      onChange={(e) =>
+                        onUpdate({
+                          jacquardSpecs: {
+                            ...(machine.jacquardSpecs || ({} as any)),
+                            simultaneousRibbons: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      placeholder="16"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
                 </div>
               </>
             )}
@@ -554,15 +1199,18 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
       </div>
 
       {/* Production Notes Alert / Banner */}
-      {machine.notes && (
-        <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs flex items-start gap-2.5 shadow-xs">
-          <Activity className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
-          <div>
-            <span className="font-semibold text-foreground">Texnologik Ko'rsatma / Izoh: </span>
-            <span className="text-muted-foreground">{machine.notes}</span>
-          </div>
-        </div>
-      )}
+      <div className="rounded-lg border border-border bg-card p-3.5 space-y-1.5 shadow-xs">
+        <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+          <Activity className="w-4 h-4 text-primary" />
+          Texnologik Ko'rsatma / Uskuna Izohi
+        </Label>
+        <Textarea
+          value={machine.notes || ""}
+          onChange={(e) => onUpdate({ notes: e.target.value })}
+          placeholder="Uskunaning texnik holati, texnologik talablar yoki qo'shimcha eslatmalar..."
+          className="text-xs min-h-[60px] resize-y"
+        />
+      </div>
     </div>
   );
 }

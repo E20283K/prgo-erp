@@ -95,7 +95,20 @@ export function PlanningSlotDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved,
     setLevel3Tab,
     addNotification,
+    machines,
   } = useWorkspaceStore();
+
+  const machineOptions = useMemo(() => {
+    if (machines && machines.length > 0) {
+      return machines.map((m) => ({
+        id: m.id,
+        name: m.name,
+        code: m.code,
+        label: m.code ? `[${m.code}] ${m.name} (${m.department})` : m.name,
+      }));
+    }
+    return PLANT_MACHINES.map((m) => ({ id: m, name: m, code: "", label: m }));
+  }, [machines]);
 
   const activeTab = tab.activeLevel3Tab || "task";
 
@@ -105,7 +118,7 @@ export function PlanningSlotDetail({ tab }: { tab: DocumentTab }) {
       id: d.id || tab.id,
       queuePos: d.queuePos || "#1",
       orderType: d.orderType === "Sample" ? "Sample" : "Production",
-      workOrder: d.workOrder || "WO-00351",
+      workOrder: d.workOrder || "WOOF-26-0351",
       parentOrder: d.parentOrder || "CO-00041",
       customer: d.customer || "Alpha Media Group LLC",
       product: d.product || "A4 Hardcover Catalog 96p (150g Silk)",
@@ -501,9 +514,9 @@ export function PlanningSlotDetail({ tab }: { tab: DocumentTab }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {PLANT_MACHINES.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            {m}
+                        {machineOptions.map((m) => (
+                          <SelectItem key={m.id || m.name} value={m.name}>
+                            {m.label}
                           </SelectItem>
                         ))}
                       </SelectContent>

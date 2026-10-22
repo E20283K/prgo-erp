@@ -44,135 +44,7 @@ import {
 /**
  * 8 ta realistik sanoat audit yozuvlari (10 tadan oshmaydi)
  */
-const DEFAULT_MOCK_HISTORY: WorkOrderHistoryEntry[] = [
-  {
-    id: "hist-1",
-    timestamp: "2026-10-14 09:15:00",
-    author: {
-      name: "S. Alimov",
-      role: "Sales Account Lead",
-      initials: "SA",
-    },
-    category: "status",
-    action: "Document Registered in ERP",
-    details: "New production work order received from client. Technical specifications, preliminary artwork, and order contract registered.",
-    badgeText: "Draft",
-    badgeVariant: "secondary",
-  },
-  {
-    id: "hist-2",
-    timestamp: "2026-10-14 11:30:25",
-    author: {
-      name: "K. Anderson",
-      role: "Prepress Lead",
-      initials: "KA",
-    },
-    category: "spec",
-    action: "Prepress Verified & Die-Line Approved",
-    details: "Structural cutting die-line and CAD layout checked against printing plate cylinders. Bleed and margins adjusted.",
-    diffs: [
-      { field: "bleed", fieldLabel: "Bleed / Chiqish", oldValue: "2 mm", newValue: "3 mm" },
-      { field: "paperStock", fieldLabel: "Substrate / Qog'oz", oldValue: "Standard Gloss 130g", newValue: "Galerie Art Silk 150g" },
-    ],
-    badgeText: "Prepress OK",
-    badgeVariant: "outline",
-  },
-  {
-    id: "hist-3",
-    timestamp: "2026-10-14 14:10:45",
-    author: {
-      name: "M. Rustamov",
-      role: "Account Manager",
-      initials: "MR",
-    },
-    category: "spec",
-    action: "Volume & Commercial Price Updated",
-    details: "Client requested an additional volume allocation for regional retail distribution branches.",
-    diffs: [
-      { field: "quantity", fieldLabel: "Run Quantity / Tiraj", oldValue: "5,000 pcs", newValue: "7,500 pcs" },
-      { field: "priceTotal", fieldLabel: "Order Total / Summa", oldValue: "$3,250", newValue: "$4,680" },
-    ],
-    badgeText: "Spec Updated",
-    badgeVariant: "outline",
-  },
-  {
-    id: "hist-4",
-    timestamp: "2026-10-14 16:20:00",
-    author: {
-      name: "D. Qodirov",
-      role: "Warehouse Logistics Lead",
-      initials: "DQ",
-    },
-    category: "material",
-    action: "Raw Materials Reserved in Central Stock",
-    details: "16 reams of Galerie Art Silk 150g (64x90 cm) and Huber Group Process CMYK inks allocated and frozen in Warehouse DB.",
-    badgeText: "Stock Reserved",
-    badgeVariant: "outline",
-  },
-  {
-    id: "hist-5",
-    timestamp: "2026-10-15 08:45:10",
-    author: {
-      name: "J. Sobirov",
-      role: "Production Dispatcher",
-      initials: "JS",
-    },
-    category: "planning",
-    action: "Press Machine & Shift Assigned",
-    details: "Work order scheduled into Press Hall #1 timeline based on capacity planning and sheet size optimization.",
-    diffs: [
-      { field: "pressMachine", fieldLabel: "Assigned Machine", oldValue: "Unscheduled", newValue: "Heidelberg Speedmaster XL 106" },
-      { field: "shiftStart", fieldLabel: "Assigned Shift", oldValue: "Pending", newValue: "Shift 1 (08:00 - 20:00)" },
-    ],
-    badgeText: "Scheduled",
-    badgeVariant: "secondary",
-  },
-  {
-    id: "hist-6",
-    timestamp: "2026-10-15 10:30:00",
-    author: {
-      name: "A. Valiev",
-      role: "CTP Operator",
-      initials: "AV",
-    },
-    category: "system",
-    action: "CTP Thermal Offset Plates Imaged",
-    details: "8 thermal B1 offset printing plates laser-exposed and chemically processed. Dot gain verified on transmission densitometer.",
-    badgeText: "Plates Ready",
-    badgeVariant: "default",
-  },
-  {
-    id: "hist-7",
-    timestamp: "2026-10-15 11:15:00",
-    author: {
-      name: "B. Rahmatov",
-      role: "Shift Supervisor",
-      initials: "BR",
-    },
-    category: "status",
-    action: "Order Status Changed: In Production",
-    details: "Make-ready approved. Golden proof sheet signed by supervisor. High-speed offset press run launched.",
-    diffs: [
-      { field: "status", fieldLabel: "Document Status", oldValue: "Active", newValue: "In Production" },
-    ],
-    badgeText: "In Production",
-    badgeVariant: "default",
-  },
-  {
-    id: "hist-8",
-    timestamp: "2026-10-15 15:40:12",
-    author: {
-      name: "N. Karimova",
-      role: "Quality Control Lead",
-      initials: "NK",
-    },
-    category: "system",
-    action: "QC Spectrophotometric Inspection Passed",
-    details: "Color deviation Delta-E < 1.4 within ISO 12647-2 standards. Registration accuracy < 0.05 mm. Waste factor recorded at 1.1%.",
-    badgeText: "QC Passed",
-    badgeVariant: "outline",
-  },
-];
+const DEFAULT_MOCK_HISTORY: WorkOrderHistoryEntry[] = [];
 
 interface HistoryTabProps {
   docNo?: string;
@@ -180,14 +52,36 @@ interface HistoryTabProps {
   customEntries?: WorkOrderHistoryEntry[];
 }
 
-export function HistoryTab({ docNo, customEntries }: HistoryTabProps) {
+export function HistoryTab({ docNo, customEntries, formData }: HistoryTabProps) {
   const t = useTranslations("WorkOrderHistory");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<HistoryEventCategory | "all">("all");
   const [copied, setCopied] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const rawEntries = customEntries && customEntries.length > 0 ? customEntries : DEFAULT_MOCK_HISTORY;
+  // Real initial creation event if document has docNo
+  const rawEntries = useMemo(() => {
+    if (customEntries && customEntries.length > 0) return customEntries;
+    if (docNo) {
+      return [
+        {
+          id: `hist-${docNo}-init`,
+          timestamp: formData?.startDate || new Date().toISOString().slice(0, 19).replace("T", " "),
+          author: {
+            name: "Tizim / Operator",
+            role: "Yaratuvchi",
+            initials: "SYS",
+          },
+          category: "status" as const,
+          action: `Buyurtma yaratildi: ${docNo}`,
+          details: formData?.customer ? `Mijoz: ${formData.customer} • Mahsulot: ${formData.product || "Noma'lum"}` : "Yangi bo'sh buyurtma hujjati ochildi.",
+          badgeText: formData?.status || "Draft",
+          badgeVariant: "default" as const,
+        },
+      ];
+    }
+    return [];
+  }, [customEntries, docNo, formData]);
 
   // Filter entries by category & search query
   const filteredEntries = useMemo(() => {

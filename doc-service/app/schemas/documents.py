@@ -1,0 +1,165 @@
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
+
+class PositionItem(BaseModel):
+    x: float
+    y: float
+    width: float
+    height: float
+
+class MarkItem(BaseModel):
+    type: str
+    x: float
+    y: float
+    width: float
+    height: float
+
+class ColorItem(BaseModel):
+    name: str
+    hex: Optional[str] = None
+
+class FlexoPdfRequest(BaseModel):
+    docNo: str = "CO-FLEXO"
+    orderName: str = "Flexo Order"
+    customer: str = "General Client"
+    productName: str = "Flexo Printed Label"
+    machineName: str = "Flexo Press"
+    materialName: str = "Satin"
+    webWidth: float
+    usablePrintWidth: float
+    sideWasteWidth: float = 0
+    productWidth: float
+    productHeight: float
+    orientation: str = "normal"
+    gearTeeth: int
+    cylinderDiameter: float
+    plateThickness: float
+    printingLength: float
+    filmLength: float
+    pitchCircleDiameter: float
+    acrossCount: int
+    aroundCount: int
+    requiredQuantity: int
+    overproductionValue: float = 0
+    overproductionMode: str = "percent"
+    productionTargetQuantity: int
+    actualYieldQuantity: int
+    repeatCount: int
+    materialConsumptionMeters: float
+    materialConsumptionSqM: float
+    yieldPercent: float
+    wasteSqM: float
+    colors: List[ColorItem] = Field(default_factory=list)
+    positions: List[PositionItem] = Field(default_factory=list)
+    marks: List[MarkItem] = Field(default_factory=list)
+    qrData: Optional[str] = None
+    barcodeData: Optional[str] = None
+    saveToS3: bool = False
+    s3Key: Optional[str] = None
+
+class TableExportRequest(BaseModel):
+    title: str = "PrintGoo ERP Report"
+    subtitle: Optional[str] = None
+    headers: List[str]
+    rows: List[List[Any]]
+    saveToS3: bool = False
+    s3Key: Optional[str] = None
+
+class JobTicketSizeItem(BaseModel):
+    id: Optional[str] = None
+    size: str = "ALL"
+    model: Optional[str] = None
+    quantity: int = 0
+
+class JobTicketMaterialItem(BaseModel):
+    name: str
+    req: float
+    unit: str = "pcs"
+    stock: float = 0
+
+class JobTicketOperationItem(BaseModel):
+    id: Optional[str] = None
+    stepNumber: int = 10
+    name: str
+    machine: str = "Standard"
+    operator: str = "—"
+    duration: float = 1.0
+    qtyCompleted: Optional[str] = None
+    status: str = "Queued"
+
+class JobTicketSpotColor(BaseModel):
+    id: Optional[str] = None
+    name: str
+    code: Optional[str] = None
+    hex: str = "#fe5000"
+    side: str = "front"
+
+class JobTicketKashirovkaLayer(BaseModel):
+    id: Optional[str] = None
+    paperStock: str
+    grammage: float = 250
+    colors: str = "4+0"
+
+class JobTicketShiftNote(BaseModel):
+    id: Optional[str] = None
+    author: str
+    shift: str = "Morning"
+    time: str = ""
+    text: str
+
+class JobTicketPdfRequest(BaseModel):
+    docNo: str = "WO-00772"
+    orderData: Dict[str, Any] = Field(default_factory=dict)
+    operations: List[JobTicketOperationItem] = Field(default_factory=list)
+    materials: List[JobTicketMaterialItem] = Field(default_factory=list)
+    shiftNotes: List[JobTicketShiftNote] = Field(default_factory=list)
+    labels: Dict[str, str] = Field(default_factory=dict)
+    saveToS3: bool = False
+    s3Key: Optional[str] = None
+
+class PalletPassportItemData(BaseModel):
+    id: Optional[str] = None
+    palletNumber: int
+    palletCode: str
+    totalPallets: int
+    plannedSheets: int
+
+class PalletPassportPdfRequest(BaseModel):
+    workOrderNo: str = "WO-00772"
+    clientOrderNo: Optional[str] = None
+    customer: str = "—"
+    product: str = "—"
+    department: str = "Offset"
+    deadline: Optional[str] = "—"
+    paperStock: str = "—"
+    pressSheetW: Optional[float] = None
+    pressSheetH: Optional[float] = None
+    colorsConfig: Optional[str] = "4+0"
+    totalQuantity: int = 5000
+    pallets: List[PalletPassportItemData] = Field(default_factory=list)
+    operations: List[JobTicketOperationItem] = Field(default_factory=list)
+    saveToS3: bool = False
+    s3Key: Optional[str] = None
+
+class BoxLabelItemData(BaseModel):
+    id: Optional[str] = None
+    boxNumber: int
+    boxCode: str
+    model: Optional[str] = None
+    sizeCode: Optional[str] = None
+    quantity: int = 0
+    grossWeightKg: Optional[float] = None
+    packerName: Optional[str] = None
+    packedAt: Optional[str] = None
+    barcode: Optional[str] = None
+    notes: Optional[str] = None
+
+class BoxLabelsPdfRequest(BaseModel):
+    workOrderNo: str = "WO-00351"
+    clientOrderNo: Optional[str] = None
+    customer: str = "—"
+    product: str = "—"
+    totalBoxes: int = 1
+    boxes: List[BoxLabelItemData] = Field(default_factory=list)
+    saveToS3: bool = False
+    s3Key: Optional[str] = None

@@ -12,16 +12,32 @@ import { cn } from "cn"
 import { Button } from "@/components/ui/button"
 import { ArrowDownIcon } from "lucide-react"
 
+const MessageScrollerContext = React.createContext<boolean>(false)
+
 function MessageScrollerProvider(
   props: React.ComponentProps<typeof MessageScrollerPrimitive.Provider>
 ) {
-  return <MessageScrollerPrimitive.Provider {...props} />
+  return (
+    <MessageScrollerContext.Provider value={true}>
+      <MessageScrollerPrimitive.Provider {...props} />
+    </MessageScrollerContext.Provider>
+  )
 }
 
 function MessageScroller({
   className,
   ...props
 }: React.ComponentProps<typeof MessageScrollerPrimitive.Root>) {
+  const hasProvider = React.useContext(MessageScrollerContext)
+
+  if (!hasProvider) {
+    return (
+      <MessageScrollerProvider>
+        <MessageScroller className={className} {...props} />
+      </MessageScrollerProvider>
+    )
+  }
+
   return (
     <MessageScrollerPrimitive.Root
       data-slot="message-scroller"

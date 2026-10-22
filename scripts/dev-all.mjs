@@ -7,10 +7,10 @@ function runStep(title, command) {
 
 async function main() {
   try {
-    // 1. Docker konteynerlarni (PostgreSQL 17, Redis 7, MinIO S3) ishga tushirish
+    // 1. Docker konteynerlarni (PostgreSQL 17, Redis 7, MinIO S3, Python Doc-Service) ishga tushirish
     runStep(
-      "1/4 Docker konteynerlar (PostgreSQL 17, Redis 7, MinIO S3) yoqilmoqda",
-      "docker compose -f docker-compose.dev.yml up -d --wait"
+      "1/4 Docker konteynerlar (PostgreSQL 17, Redis 7, MinIO S3, Python Doc-Service) yoqilmoqda",
+      "docker compose -f docker-compose.dev.yml up -d --build --wait"
     );
 
     // 2. Ma'lumotlar bazasi sxemasini (Drizzle ORM) sinxronlash

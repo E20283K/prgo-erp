@@ -551,6 +551,37 @@ export function CustomerOverviewTab({
             </span>
           </div>
 
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] text-muted-foreground flex items-center gap-1 font-semibold text-foreground">
+                <span>Hisob-kitob Valyutasi</span>
+              </Label>
+              <Select
+                value={form.currency || "UZS"}
+                onValueChange={(v) => onChange("currency", v as "UZS" | "USD")}
+              >
+                <SelectTrigger className="h-8 text-xs bg-background font-semibold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="UZS">🇺🇿 So&apos;m (UZS) — Milliy valyuta</SelectItem>
+                  <SelectItem value="USD">🇺🇸 AQSH Dollari (USD) — Valyuta</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[11px] text-muted-foreground">
+                Kredit Limiti ({form.currency === "USD" ? "$ USD" : "so'm UZS"})
+              </Label>
+              <Input
+                value={form.creditLimitUsd !== undefined ? String(form.creditLimitUsd) : "0"}
+                onChange={(e) => onChange("creditLimitUsd", Number(e.target.value) || 0)}
+                placeholder="0"
+                className="h-8 text-xs font-mono bg-background"
+              />
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground">
               Xizmat ko&apos;rsatuvchi Bank nomi
@@ -578,12 +609,13 @@ export function CustomerOverviewTab({
             </div>
             <div className="space-y-1.5">
               <Label className="text-[11px] text-muted-foreground">
-                Kredit Limiti ($ USD)
+                OKED kodi (5 xona)
               </Label>
               <Input
-                value={form.creditLimitUsd !== undefined ? String(form.creditLimitUsd) : "10000"}
-                onChange={(e) => onChange("creditLimitUsd", Number(e.target.value) || 0)}
-                placeholder="10000"
+                value={form.oked || ""}
+                onChange={(e) => onChange("oked", e.target.value)}
+                placeholder="18120"
+                maxLength={5}
                 className="h-8 text-xs font-mono bg-background"
               />
             </div>
@@ -673,12 +705,12 @@ export function CustomerOverviewTab({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <span className="font-mono font-bold text-sm text-foreground">
-                  {form.contractNo || "CON-2026-101"}
+                  {form.contractNo || "Mavjud emas"}
                 </span>
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(form.contractNo || "CON-2026-101");
+                    if (form.contractNo) navigator.clipboard.writeText(form.contractNo);
                     setCopiedText("contractNo");
                     setTimeout(() => setCopiedText(null), 2000);
                   }}
@@ -700,7 +732,7 @@ export function CustomerOverviewTab({
             <div className="text-[11px] text-muted-foreground flex items-center justify-between pt-1 border-t border-border/50">
               <span>Amal qilish davri:</span>
               <span className="font-mono text-foreground font-medium">
-                {form.contractDate || "2026-01-01"} — {form.contractExpiry || "2026-12-31"}
+                {form.contractDate ? `${form.contractDate} — ${form.contractExpiry || "Muddatsiz"}` : "Shartnoma tuzilmagan"}
               </span>
             </div>
           </div>

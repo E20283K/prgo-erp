@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useMemo } from "react";
 import {
@@ -18,6 +18,8 @@ import {
   Stamp,
   Wrench,
   Boxes,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -41,10 +43,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useTranslations } from "next-intl";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { SmartCombobox } from "@/components/ui/smart-combobox";
 import { DieLinePreview } from "../DieLinePreview";
 import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
+import { extractSvgDimensions } from "../utils/svgContour";
 import { useLookupStore } from "@/store/lookupStore";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import {
@@ -56,6 +64,7 @@ import {
   getDefaultKashirovkaLayers,
   calculateKashirovkaTotals,
   WorkOrderSampleData,
+  OrderAttachment,
 } from "../types";
 import { SizeMatrixCard } from "./SizeMatrixCard";
 
@@ -68,6 +77,8 @@ interface SpecificationsTabProps {
   onSwitchTab?: (tabKey: string) => void;
   sampleData?: WorkOrderSampleData;
   onSampleChange?: (field: keyof WorkOrderSampleData, val: any) => void;
+  orderAttachments?: OrderAttachment[];
+  setOrderAttachments?: React.Dispatch<React.SetStateAction<OrderAttachment[]>>;
 }
 
 export function SpecificationsTab({
@@ -79,6 +90,8 @@ export function SpecificationsTab({
   onSwitchTab,
   sampleData,
   onSampleChange,
+  orderAttachments,
+  setOrderAttachments,
 }: SpecificationsTabProps) {
   const tDie = useTranslations("DieLine");
   const { paperStocks, addPaperStock, coatings, addCoating } = useLookupStore();
@@ -87,6 +100,25 @@ export function SpecificationsTab({
   const [pantoneTargetSide, setPantoneTargetSide] = useState<"front" | "back" | "both">("front");
   const [isSvgModalOpen, setIsSvgModalOpen] = useState(false);
   const [svgInputDraft, setSvgInputDraft] = useState(formData.customSvgPath || "");
+  const detectedSvgDims = useMemo(() => extractSvgDimensions(svgInputDraft), [svgInputDraft]);
+
+  // Aspect ratio lock (Proportional dimension scaling)
+  const [isAspectLocked, setIsAspectLocked] = useState(false);
+  const lockedRatioRef = React.useRef<number | null>(null);
+
+  const toggleAspectLock = () => {
+    setIsAspectLocked((prev) => {
+      const next = !prev;
+      if (next) {
+        const w = Number(formData.width) || 0;
+        const h = Number(formData.height) || 0;
+        lockedRatioRef.current = w > 0 && h > 0 ? h / w : 1;
+      } else {
+        lockedRatioRef.current = null;
+      }
+      return next;
+    });
+  };
   const [isNewToolingModalOpen, setIsNewToolingModalOpen] = useState(false);
   const [newToolForm, setNewToolForm] = useState({
     name: "",
@@ -117,7 +149,7 @@ export function SpecificationsTab({
     const newToolId = `DIE-${Math.floor(100 + Math.random() * 899)}`;
     const createdTool = {
       id: newToolId,
-      customerName: formData.customer || "Alpha Media Group LLC",
+      customerName: formData.customer || "Buyurtmachi",
       name: newToolForm.name || `${formData.product || "Buyurtma"} Shtansformasi`,
       toolType: newToolForm.toolType,
       format: newToolForm.format || `${formData.width || 700}×${formData.height || 1000} mm`,
@@ -147,11 +179,22 @@ export function SpecificationsTab({
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-      const text = event.target?.result as string;
-      const pathMatch = text.match(/<path[^>]*d=["']([^"']+)["']/i);
-      const val = pathMatch && pathMatch[1] ? pathMatch[1] : text;
-      handleFieldChange("customSvgPath", val);
-      setSvgInputDraft(val);
+      const text = (event.target?.result as string || "").trim();
+      handleFieldChange("customSvgPath", text);
+      setSvgInputDraft(text);
+
+      const dims = extractSvgDimensions(text);
+      if (dims && dims.width > 0 && dims.height > 0) {
+        handleFieldChange("width", dims.width);
+        handleFieldChange("height", dims.height);
+        lockedRatioRef.current = dims.height / dims.width;
+        setIsAspectLocked(true);
+        addNotification({
+          title: "SVG o'lchamlari yangilandi",
+          description: `Mahsulot o'lchami SVG fayldan olindi: ${dims.width} × ${dims.height} mm`,
+          severity: "success",
+        });
+      }
       onMarkUnsaved();
     };
     reader.readAsText(file);
@@ -178,6 +221,7 @@ export function SpecificationsTab({
     | "top-right"
     | "left-center"
     | "right-center"
+    | "both-sides-fold"
     | "none";
   const effectiveHoleOffset = formData.holeOffset ?? 6;
 
@@ -185,15 +229,23 @@ export function SpecificationsTab({
   const currentLamination = formData.lamination || "Soft-Touch Matte";
   const isLaminationActive = currentLamination !== "none" && currentLamination !== "None / Uncoated";
   const laminationSides = formData.laminationSides || "1s";
-  const laminationMicron = formData.laminationMicron || 28;
-  const embellishment = formData.embellishment || "Spot UV (3D)";
+  const laminationMicron = formData.laminationMicron || 0;
+  const embellishment = formData.embellishment || "";
 
   // Color config helpers
-  const frontColors = formData.frontColors || { c: true, m: true, y: true, k: true };
+  const frontColors = formData.frontColors || { c: false, m: false, y: false, k: false };
   const backColors = formData.backColors || { c: false, m: false, y: false, k: false };
-  const spotColorItems: SpotColorItem[] = formData.spotColorItems || [
-    { id: "spot-1", name: "PANTONE 021 C (Neon Orange)", code: "021 C", hex: "#fe5000", side: "front" },
-  ];
+  const spotColorItems: SpotColorItem[] = formData.spotColorItems || (
+    formData.spotColors && formData.spotColors.length > 0
+      ? formData.spotColors.map((name, i) => ({
+          id: `spot-${i}`,
+          name,
+          code: name.split(" ")[1] || "PMS",
+          hex: name.includes("021") ? "#fe5000" : name.includes("871") ? "#84754e" : "#2563eb",
+          side: "front" as const,
+        }))
+      : []
+  );
 
   const frontSpots = spotColorItems.filter((s) => s.side === "front" || s.side === "both");
   const backSpots = spotColorItems.filter((s) => s.side === "back" || s.side === "both");
@@ -330,6 +382,25 @@ export function SpecificationsTab({
                 className="w-full p-2 rounded-md border border-input bg-background font-mono text-[11px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
+
+            {detectedSvgDims && detectedSvgDims.width > 0 && detectedSvgDims.height > 0 && (
+              <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <Ruler className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <div>
+                    <div className="font-semibold text-emerald-800 dark:text-emerald-300">
+                      Aniqlangan SVG o&apos;lchami:
+                    </div>
+                    <div className="text-[11px] text-muted-foreground font-mono">
+                      Eni (Width): <span className="font-bold text-foreground">{detectedSvgDims.width} mm</span>, Bo&apos;yi (Height): <span className="font-bold text-foreground">{detectedSvgDims.height} mm</span>
+                    </div>
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-[10px] font-mono bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                  {detectedSvgDims.unit || "mm"}
+                </Badge>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
@@ -354,7 +425,19 @@ export function SpecificationsTab({
               size="sm"
               className="h-7 text-xs cursor-pointer"
               onClick={() => {
-                handleFieldChange("customSvgPath", svgInputDraft.trim());
+                const trimmed = svgInputDraft.trim();
+                handleFieldChange("customSvgPath", trimmed);
+                if (detectedSvgDims && detectedSvgDims.width > 0 && detectedSvgDims.height > 0) {
+                  handleFieldChange("width", detectedSvgDims.width);
+                  handleFieldChange("height", detectedSvgDims.height);
+                  lockedRatioRef.current = detectedSvgDims.height / detectedSvgDims.width;
+                  setIsAspectLocked(true);
+                  addNotification({
+                    title: "SVG o'lchamlari yangilandi",
+                    description: `Mahsulot o'lchami SVG dan olindi: ${detectedSvgDims.width} × ${detectedSvgDims.height} mm`,
+                    severity: "success",
+                  });
+                }
                 setIsSvgModalOpen(false);
                 onMarkUnsaved();
               }}
@@ -370,7 +453,17 @@ export function SpecificationsTab({
         sizes={sizes}
         unit={formData.unit || "pcs"}
         totalQuantity={formData.quantity}
+        width={formData.width}
+        height={formData.height}
+        printSides={
+          formData.labelPrintSides ||
+          (formData.colorsConfig && !formData.colorsConfig.endsWith("+0") ? "2s" : "1s")
+        }
         isOperator={isOperator}
+        onQuantityChange={(qty) => {
+          handleFieldChange("quantity", qty);
+          onMarkUnsaved();
+        }}
         onSwitchTab={isJacquard ? undefined : onSwitchTab}
         impositionTabKey={isFlexo ? "flexo" : "layout"}
         impositionLabel={isFlexo ? "Flexo Imposition (Silindr & Tasma)" : "Spusk / Qoliplarga bo'lish (Imposition)"}
@@ -935,43 +1028,121 @@ export function SpecificationsTab({
                 </Select>
               </div>
 
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">
-                  {formData.shapeType === "circle" ? `Diameter (${formData.dimensionUnit || "mm"})` : `Width (${formData.dimensionUnit || "mm"})`}
-                </label>
-                <Input
-                  type="number"
-                  value={formData.width ?? 50}
-                  disabled={isOperator}
-                  onChange={(e) => {
-                    const num = Number(e.target.value);
-                    handleFieldChange("width", num);
-                    if (formData.shapeType === "circle") {
-                      handleFieldChange("height", num);
-                    }
-                    onMarkUnsaved();
-                  }}
-                  className="h-8 text-xs bg-muted/20 font-mono font-semibold"
-                />
-              </div>
+              <div className="col-span-2 grid grid-cols-[1fr_auto_1fr] items-end gap-1.5">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    {formData.shapeType === "circle" ? `Diameter (${formData.dimensionUnit || "mm"})` : `Width (${formData.dimensionUnit || "mm"})`}
+                  </label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={formData.width ?? 50}
+                    disabled={isOperator}
+                    onChange={(e) => {
+                      const valStr = e.target.value;
+                      if (valStr === "") {
+                        handleFieldChange("width", 0);
+                        onMarkUnsaved();
+                        return;
+                      }
+                      const num = Number(valStr);
+                      if (isNaN(num)) return;
 
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">
-                  Height ({formData.dimensionUnit || "mm"})
-                </label>
-                <Input
-                  type="number"
-                  value={formData.shapeType === "circle" ? (formData.width ?? 50) : (formData.height ?? 90)}
-                  disabled={isOperator || formData.shapeType === "circle"}
-                  onChange={(e) => {
-                    handleFieldChange("height", Number(e.target.value));
-                    onMarkUnsaved();
-                  }}
-                  className={cn(
-                    "h-8 text-xs font-mono font-semibold",
-                    formData.shapeType === "circle" ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-muted/20"
-                  )}
-                />
+                      const prevW = Number(formData.width) || 0;
+                      const prevH = Number(formData.height) || 0;
+                      handleFieldChange("width", num);
+
+                      if (formData.shapeType === "circle") {
+                        handleFieldChange("height", num);
+                      } else if (isAspectLocked && num > 0) {
+                        const ratio = lockedRatioRef.current || (prevW > 0 && prevH > 0 ? prevH / prevW : 1);
+                        lockedRatioRef.current = ratio;
+                        const rawH = num * ratio;
+                        const newH = Math.round(rawH * 10) / 10;
+                        handleFieldChange("height", newH);
+                      }
+                      onMarkUnsaved();
+                    }}
+                    className="h-8 text-xs bg-muted/20 font-mono font-semibold"
+                  />
+                </div>
+
+                <div className="pb-0.5">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant={isAspectLocked ? "secondary" : "ghost"}
+                          size="icon"
+                          disabled={isOperator || formData.shapeType === "circle"}
+                          onClick={toggleAspectLock}
+                          className={cn(
+                            "h-8 w-8 rounded-md transition-all cursor-pointer",
+                            isAspectLocked
+                              ? "bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 shadow-2xs"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-transparent"
+                          )}
+                          title={isAspectLocked ? tDie("unlockAspectRatio") : tDie("lockAspectRatio")}
+                        >
+                          {isAspectLocked ? (
+                            <Lock className="w-3.5 h-3.5" />
+                          ) : (
+                            <Unlock className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="top">
+                      <span className="text-xs">
+                        {formData.shapeType === "circle"
+                          ? "Doira o'lchamlari doim 1:1 nisbatda"
+                          : isAspectLocked
+                          ? `${tDie("unlockAspectRatio")} (${Number(formData.width) || 0} : ${Number(formData.height) || 0})`
+                          : tDie("lockAspectRatio")}
+                      </span>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    Height ({formData.dimensionUnit || "mm"})
+                  </label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={formData.shapeType === "circle" ? (formData.width ?? 50) : (formData.height ?? 90)}
+                    disabled={isOperator || formData.shapeType === "circle"}
+                    onChange={(e) => {
+                      const valStr = e.target.value;
+                      if (valStr === "") {
+                        handleFieldChange("height", 0);
+                        onMarkUnsaved();
+                        return;
+                      }
+                      const num = Number(valStr);
+                      if (isNaN(num)) return;
+
+                      const prevW = Number(formData.width) || 0;
+                      const prevH = Number(formData.height) || 0;
+                      handleFieldChange("height", num);
+
+                      if (isAspectLocked && num > 0) {
+                        const ratio = lockedRatioRef.current || (prevW > 0 && prevH > 0 ? prevH / prevW : 1);
+                        lockedRatioRef.current = ratio;
+                        const rawW = ratio > 0 ? num / ratio : num;
+                        const newW = Math.round(rawW * 10) / 10;
+                        handleFieldChange("width", newW);
+                      }
+                      onMarkUnsaved();
+                    }}
+                    className={cn(
+                      "h-8 text-xs font-mono font-semibold",
+                      formData.shapeType === "circle" ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-muted/20"
+                    )}
+                  />
+                </div>
               </div>
             </div>
 
@@ -1169,7 +1340,7 @@ export function SpecificationsTab({
                     className="h-8 w-full text-xs gap-1.5 cursor-pointer justify-start font-mono truncate"
                   >
                     <FileCode className="w-3.5 h-3.5 text-primary shrink-0" />
-                    <span className="truncate">{formData.customSvgPath ? "SVG OK" : tDie("uploadSvg")}</span>
+                    <span className="truncate">{formData.customSvgPath ? `SVG OK (${formData.width || 0}×${formData.height || 0} mm)` : tDie("uploadSvg")}</span>
                   </Button>
                 </div>
               ) : (
@@ -1374,6 +1545,7 @@ export function SpecificationsTab({
                       <SelectItem value="top-right">Tepada o&apos;ngda (Top Right)</SelectItem>
                       <SelectItem value="left-center">Yon chapda (Left Center)</SelectItem>
                       <SelectItem value="right-center">Yon o&apos;ngda (Right Center)</SelectItem>
+                      <SelectItem value="both-sides-fold">Buklama atrofida juft (Both Sides / Fold)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1423,7 +1595,7 @@ export function SpecificationsTab({
                 Paper / material
               </label>
               <SmartCombobox
-                value={formData.paperStock || "Galerie Art Silk 150g/m²"}
+                value={formData.paperStock || ""}
                 disabled={isOperator}
                 onChange={(val) => {
                   handleFieldChange("paperStock", val);
@@ -1693,23 +1865,60 @@ export function SpecificationsTab({
               bleed={formData.bleed ?? 2}
               dimensionUnit={formData.dimensionUnit || "mm"}
               cornerType={formData.cornerType || "Square"}
-              itemCategory={formData.itemCategory || "Hangtag"}
+              itemCategory={formData.itemCategory || ""}
               shapeType={formData.shapeType || "rectangle"}
-              foldType={formData.foldType || "half_vertical"}
-              boxType={formData.boxType || "tuck_end"}
-              boxDepth={formData.boxDepth || 40}
-              customShape={formData.customShape || "arch"}
+              foldType={formData.foldType || undefined}
+              boxType={formData.boxType || undefined}
+              boxDepth={formData.boxDepth || 0}
+              customShape={formData.customShape || undefined}
               customSvgPath={formData.customSvgPath || ""}
-              totalQuantity={formData.quantity || 5000}
-              paperStock={formData.paperStock || "Galerie Art Silk 150g/m²"}
+              totalQuantity={formData.quantity || 0}
+              paperStock={formData.paperStock || ""}
               holeSize={effectiveHoleSize}
               holePosition={effectiveHolePos}
               holeOffset={effectiveHoleOffset}
+              artworkFront={formData.artworkFront || (formData.skuArtworks && formData.skuArtworks[0]?.frontArtworkUrl) || undefined}
+              artworkBack={formData.artworkBack || (formData.skuArtworks && formData.skuArtworks[0]?.backArtworkUrl) || undefined}
+              artworkBleedIncluded={formData.artworkBleedIncluded}
+              artworkDielineOpacity={formData.artworkDielineOpacity}
+              onArtworkChange={(front, back, sourcePdf, detectedW, detectedH, rawFile) => {
+                handleFieldChange("artworkFront", front);
+                if (back) handleFieldChange("artworkBack", back);
+                if (sourcePdf) handleFieldChange("artworkSourcePdf", sourcePdf);
+                // Keep photoUrl and production artwork cleanly separated
+                if (rawFile && setOrderAttachments) {
+                  setOrderAttachments((prev) => [
+                    {
+                      id: `att-art-${Date.now()}`,
+                      name: rawFile.name,
+                      size: `${(rawFile.size / 1024).toFixed(1)} KB`,
+                      type: rawFile.type || "application/pdf",
+                      date: new Date().toISOString().slice(0, 16).replace("T", " "),
+                      isImage: rawFile.type.startsWith("image/"),
+                      url: front,
+                    },
+                    ...prev,
+                  ]);
+                }
+                if (detectedW && detectedH && detectedW > 0 && detectedH > 0) {
+                  handleFieldChange("width", detectedW);
+                  handleFieldChange("height", detectedH);
+                  addNotification({
+                    severity: "success",
+                    title: "PDF o'lchami qo'llandi",
+                    description: `Yuklangan fayldan o'lchamlar aniqlandi: ${detectedW} × ${detectedH} mm`,
+                  });
+                }
+                onMarkUnsaved();
+              }}
               onFlipOrientation={!isOperator && formData.shapeType !== "circle" ? () => {
                 const currentW = formData.width ?? 50;
                 const currentH = formData.height ?? 90;
                 handleFieldChange("width", currentH);
                 handleFieldChange("height", currentW);
+                if (lockedRatioRef.current && lockedRatioRef.current > 0) {
+                  lockedRatioRef.current = 1 / lockedRatioRef.current;
+                }
                 onMarkUnsaved();
               } : undefined}
             />

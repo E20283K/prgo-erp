@@ -1,5 +1,24 @@
 "use client";
 
+export function getDisplayImageUrl(src?: string | null): string {
+  if (!src) return "";
+  if (src.startsWith("/api/v1/storage/file") || src.startsWith("blob:") || src.startsWith("data:") || src.startsWith("/")) {
+    return src;
+  }
+  if (src.includes(":9000/") || src.includes("X-Amz-Signature") || src.includes("printgoo-prepress")) {
+    try {
+      const parsed = new URL(src.startsWith("http") ? src : `http://localhost:9000${src.startsWith("/") ? "" : "/"}${src}`);
+      let key = parsed.pathname.replace(/^\/+/, "");
+      if (key.startsWith("printgoo-prepress/")) {
+        key = key.replace(/^printgoo-prepress\//, "");
+      }
+      return `/api/v1/storage/file?path=${encodeURIComponent(key)}`;
+    } catch (_) {}
+    return `/api/v1/storage/file?path=${encodeURIComponent(src.split("?")[0])}`;
+  }
+  return src;
+}
+
 import React, { useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -721,10 +740,10 @@ export function OverviewTab({
       <div className="grid grid-cols-1 @7xl:grid-cols-3 gap-4">
         {/* Left Column (2/3 width on xl screens) */}
         <div className="@container @7xl:col-span-2 space-y-4">
-          <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-4">
-        {/* Card 1: Order Photo & Sample Reference */}
-        <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 flex flex-col">
-          <div className="flex items-center justify-between pb-2 border-b border-border">
+          <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-4 items-start">
+        {/* Card 1: Order Photo & Sample Reference (Strict Square Aspect Ratio) */}
+        <div className="@container p-4 bg-card border border-border rounded-lg flex flex-col w-full aspect-square self-start">
+          <div className="flex items-center justify-between pb-2 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
               <Camera className="w-4 h-4 text-primary shrink-0" />
               <span className="font-semibold text-sm text-foreground truncate">{tOrder("sampleProofTitle")}</span>
@@ -748,9 +767,9 @@ export function OverviewTab({
             )}
           </div>
 
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 min-h-0 flex flex-col pt-2">
             {photos.length > 0 ? (
-              <div className="relative group w-full flex-1 min-h-[156px] rounded overflow-hidden bg-muted/30 border border-border/80">
+              <div className="relative group w-full h-full flex-1 min-h-0 rounded overflow-hidden bg-muted/30 border border-border/80">
                 <Carousel
                   setApi={setCarouselApi}
                   className="w-full h-full"
@@ -760,9 +779,15 @@ export function OverviewTab({
                     {photos.map((src, index) => (
                       <CarouselItem key={`${src}-${index}`} className="pl-0 h-full relative flex items-center justify-center">
                         <img
-                          src={src}
+                          src={getDisplayImageUrl(src)}
                           alt={`${tOrder("sampleProofTitle")} ${index + 1}`}
                           className="w-full h-full object-cover select-none cursor-pointer"
+                          onError={(e) => {
+                            const target = e.currentTarget as HTMLImageElement;
+                            if (target.src !== "/sample-proof.jpg" && !target.src.endsWith("/sample-proof.jpg")) {
+                              target.src = "/sample-proof.jpg";
+                            }
+                          }}
                           onClick={() => {
                             handleFieldChange("photoUrl", photos[activePhotoIndex] || photos[0]);
                             onOpenLightbox();
@@ -832,7 +857,17 @@ export function OverviewTab({
                             : "border-transparent opacity-50 hover:opacity-90"
                         )}
                       >
-                        <img src={src} alt="" className="w-full h-full object-cover" />
+                        <img
+                          src={getDisplayImageUrl(src)}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const target = e.currentTarget as HTMLImageElement;
+                            if (target.src !== "/sample-proof.jpg" && !target.src.endsWith("/sample-proof.jpg")) {
+                              target.src = "/sample-proof.jpg";
+                            }
+                          }}
+                        />
                       </button>
                     ))}
                   </div>
@@ -841,12 +876,12 @@ export function OverviewTab({
             ) : (
               <div
                 className={cn(
-                  "border border-dashed border-border rounded p-4 flex flex-col items-center justify-center text-center bg-muted/20 transition-colors flex-1 min-h-[156px]",
+                  "border border-dashed border-border rounded p-4 flex flex-col items-center justify-center text-center bg-muted/20 transition-colors w-full h-full flex-1",
                   !isOperator && "hover:border-border/80 cursor-pointer"
                 )}
                 onClick={!isOperator ? () => document.getElementById("wo-photo-add-input")?.click() : undefined}
               >
-                <ImageIcon className="w-4 h-4 text-muted-foreground mb-1.5" />
+                <ImageIcon className="w-5 h-5 text-muted-foreground mb-1.5" />
                 <p className="text-xs text-muted-foreground">{tOrder("attachSamplePhoto")}</p>
               </div>
             )}
@@ -862,9 +897,12 @@ export function OverviewTab({
                   const files = e.target.files;
                   if (files && files.length > 0) {
                     const uploadedUrls: string[] = [];
-                    for (const file of Array.from(files)) {
+                    const newAttachments: OrderAttachment[] = [];
+                    for (let i = 0; i < files.length; i++) {
+                      const file = files[i];
+                      let finalUrl = "";
                       try {
-                        const res = await fetch(`/api/v1/production/work-orders/${tabId}/files`, {
+                        const res = await fetch(`/api/v1/production/work-orders/${data?.docNo || tabId}/files`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
@@ -882,19 +920,45 @@ export function OverviewTab({
                             headers: { "Content-Type": file.type },
                             body: file,
                           });
-                          uploadedUrls.push(resData.downloadUrl);
+                          finalUrl = resData.downloadUrl;
+                          uploadedUrls.push(finalUrl);
                         } else {
-                          uploadedUrls.push(URL.createObjectURL(file));
+                          finalUrl = URL.createObjectURL(file);
+                          uploadedUrls.push(finalUrl);
                         }
                       } catch {
-                        uploadedUrls.push(URL.createObjectURL(file));
+                        // Fallback to durable base64 DataURL if S3/network is unreachable
+                        finalUrl = await new Promise((resolve) => {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => resolve(ev.target?.result as string || "");
+                          reader.readAsDataURL(file);
+                        });
+                        uploadedUrls.push(finalUrl);
                       }
+
+                      newAttachments.push({
+                        id: `att-proof-${Date.now()}-${i}`,
+                        name: file.name,
+                        size: `${(file.size / 1024).toFixed(1)} KB`,
+                        type: file.type || "image/jpeg",
+                        date: new Date().toISOString().slice(0, 16).replace("T", " "),
+                        isImage: true,
+                        url: finalUrl,
+                      });
                     }
+
+                    // 1. Yangilangan rasmlar galereyasi
                     const updatedPhotos = [...photos, ...uploadedUrls];
                     handleFieldChange("photoUrls", updatedPhotos);
                     if (!formData.photoUrl && uploadedUrls[0]) {
                       handleFieldChange("photoUrl", uploadedUrls[0]);
                     }
+
+                    // 2. "Fayllar va hujjatlar" (FilesTab) bo'limiga biriktirish
+                    if (setOrderAttachments) {
+                      setOrderAttachments((prev) => [...newAttachments, ...prev]);
+                    }
+
                     onMarkUnsaved();
                   }
                 }}
@@ -917,80 +981,23 @@ export function OverviewTab({
 
           <div className="space-y-3">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-muted-foreground">{tOrder("customerLabel")}</label>
-                {!isOperator && (
-                  <div className="flex items-center gap-1.5">
-                    {formData.customer && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={handleOpenCurrentCustomer}
-                        className="h-5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground gap-1 font-normal cursor-pointer"
-                        title={tOrder("openCustomerCard") || "Mijoz kartasini ochish"}
-                      >
-                        <ExternalLink className="w-3 h-3 text-muted-foreground" />
-                        <span>{tOrder("openCard") || "Kartani ochish"}</span>
-                      </Button>
-                    )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => handleOpenNewCustomer()}
-                      className="h-5 px-1.5 text-[11px] text-primary hover:text-primary hover:bg-primary/10 gap-1 font-medium cursor-pointer"
-                      title={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>{tOrder("addCustomer") || "Yangi mijoz"}</span>
-                    </Button>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="flex-1 min-w-0">
-                  <FieldCombobox
-                    value={formData.customer}
-                    onChange={(val) => {
-                      handleFieldChange("customer", val);
-                      onMarkUnsaved();
-                    }}
-                    disabled={isOperator}
-                    allowCustom={!isOperator}
-                    onAddNew={handleAddNewCustomer}
-                    options={customerOptions}
-                    placeholder={tOrder("selectCustomer") || "Select customer..."}
-                    searchPlaceholder={tOrder("searchCustomer") || "Search or type new customer..."}
-                    actionLabel={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
-                    onAction={(search) => handleOpenNewCustomer(search)}
-                    addCustomLabel={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
-                    className="h-8 text-xs bg-muted/30"
-                    popoverClassName="w-auto min-w-[300px]"
-                  />
-                </div>
-                {!isOperator && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleOpenNewCustomer()}
-                          className="h-8 w-8 shrink-0 cursor-pointer text-primary hover:bg-primary/10 hover:text-primary border-border"
-                          title={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </Button>
-                      }
-                    />
-                    <TooltipContent side="top">
-                      <span>{tOrder("addCustomer") || "Yangi mijoz qo'shish"}</span>
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("customerLabel")}</label>
+              <FieldCombobox
+                value={formData.customer}
+                onChange={(val) => {
+                  handleFieldChange("customer", val);
+                  onMarkUnsaved();
+                }}
+                disabled={isOperator}
+                onAddNew={handleAddNewCustomer}
+                options={customerOptions}
+                placeholder={tOrder("selectCustomer") || "Select customer..."}
+                searchPlaceholder={tOrder("searchCustomer") || "Search or type new customer..."}
+                actionLabel={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
+                onAction={(search) => handleOpenNewCustomer(search)}
+                className="h-8 text-xs bg-muted/30 w-full"
+                popoverClassName="w-auto min-w-[280px]"
+              />
             </div>
 
             <div>

@@ -48,7 +48,7 @@ export const INITIAL_TASKS: TaskItem[] = [
     dueDate: "2026-10-06 14:00",
     shift: "Morning",
     relatedType: "work-order",
-    relatedId: "WO-00351",
+    relatedId: "WOOF-26-0351",
     relatedName: "Hardcover Catalog 96p",
     checklist: [
       { id: "c1", text: "Inspect spectrophotometer Delta-E readings", completed: true },
@@ -59,7 +59,7 @@ export const INITIAL_TASKS: TaskItem[] = [
   {
     id: "TSK-0102",
     title: "Inspect doctor blades & blanket wash on Heidelberg XL 106",
-    description: "Routine 50,000 imp check and solvent residue inspection before catalog run #WO-00351.",
+    description: "Routine 50,000 imp check and solvent residue inspection before catalog run #WOOF-26-0351.",
     roleCategory: "operator",
     status: "pending",
     priority: "high",
@@ -113,7 +113,7 @@ export const INITIAL_TASKS: TaskItem[] = [
     dueDate: "2026-10-06 13:00",
     shift: "Morning",
     relatedType: "work-order",
-    relatedId: "WO-00351",
+    relatedId: "WOOF-26-0351",
     relatedName: "Hardcover Catalog 96p",
     checklist: [
       { id: "c1", text: "Verify viscosimeter reading (25s DIN 4)", completed: true },
@@ -186,7 +186,7 @@ export const INITIAL_TASKS: TaskItem[] = [
   {
     id: "TSK-0108",
     title: "Paper Stock Shortage Verification: Arctic Silk 150g",
-    description: "Warehouse indicates discrepancy of 4 reams for scheduled WO-00352 print job. Physical audit required.",
+    description: "Warehouse indicates discrepancy of 4 reams for scheduled WOOF-26-0352 print job. Physical audit required.",
     roleCategory: "manager",
     status: "blocked",
     priority: "urgent",
@@ -197,7 +197,7 @@ export const INITIAL_TASKS: TaskItem[] = [
     dueDate: "2026-10-06 12:00",
     shift: "Morning",
     relatedType: "work-order",
-    relatedId: "WO-00351",
+    relatedId: "WOOF-26-0351",
     relatedName: "Arctic Silk 150g/m² Discrepancy",
     checklist: [
       { id: "c1", text: "Physically count pallet bays A3-12 and A3-14", completed: true },

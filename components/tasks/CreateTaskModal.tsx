@@ -64,12 +64,12 @@ export const ASSIGNEE_COMBOBOX_OPTIONS: ComboboxItem[] = [
 
 export const ERP_ENTITY_COMBOBOX_OPTIONS: Record<string, ComboboxItem[]> = {
   "work-order": [
-    { value: "WO-00351", label: "WO-00351", description: "A4 Hardcover Catalog 96p • Alpha Media Group", badge: "Active", icon: FileText },
-    { value: "WO-00352", label: "WO-00352", description: "Retail Folded Brochures • Nordic Print Co", badge: "Planning", icon: FileText },
-    { value: "WO-00355", label: "WO-00355", description: "Self-Adhesive Wine Bottle Labels • Apex Packaging", badge: "Active", icon: FileText },
-    { value: "WO-00358", label: "WO-00358", description: "Cardboard Packaging Sleeves • MegaCorp", badge: "Queue", icon: FileText },
-    { value: "WO-00360", label: "WO-00360", description: "Luxury Embossed Cosmetic Boxes • Velvet Line", badge: "Prepress", icon: FileText },
-    { value: "WO-00362", label: "WO-00362", description: "Quarterly Magazine 128p • Capital Publishing", badge: "Proofing", icon: FileText },
+    { value: "WOOF-26-0351", label: "WOOF-26-0351", description: "A4 Hardcover Catalog 96p • Alpha Media Group", badge: "Active", icon: FileText },
+    { value: "WOOF-26-0352", label: "WOOF-26-0352", description: "Retail Folded Brochures • Nordic Print Co", badge: "Planning", icon: FileText },
+    { value: "WOFL-26-0355", label: "WOFL-26-0355", description: "Self-Adhesive Wine Bottle Labels • Apex Packaging", badge: "Active", icon: FileText },
+    { value: "WOOF-26-0358", label: "WOOF-26-0358", description: "Cardboard Packaging Sleeves • MegaCorp", badge: "Queue", icon: FileText },
+    { value: "WOOF-26-0360", label: "WOOF-26-0360", description: "Luxury Embossed Cosmetic Boxes • Velvet Line", badge: "Prepress", icon: FileText },
+    { value: "WOJC-26-0362", label: "WOJC-26-0362", description: "Quarterly Magazine 128p • Capital Publishing", badge: "Proofing", icon: FileText },
   ],
   "client-order": [
     { value: "CO-00041", label: "CO-00041", description: "Alpha Media Group — 5,000 Hardcover Catalogs", badge: "Confirmed", icon: ShoppingCart },
@@ -140,7 +140,7 @@ export function CreateTaskModal() {
   
   // Linked ERP entity
   const [relatedType, setRelatedType] = useState<"work-order" | "client-order" | "machine" | "customer" | "general">("work-order");
-  const [selectedEntityId, setSelectedEntityId] = useState("WO-00351");
+  const [selectedEntityId, setSelectedEntityId] = useState("WOOF-26-0351");
 
   // Initial checklist items
   const [checklistItems, setChecklistItems] = useState<string[]>([
@@ -181,7 +181,7 @@ export function CreateTaskModal() {
         setAssignedTo("Alexey Kovalev");
         setShift("Morning");
         setRelatedType("work-order");
-        setSelectedEntityId("WO-00351");
+        setSelectedEntityId("WOOF-26-0351");
         setChecklistItems([
           "Check Delta-E values on CMYK and PMS 871 patches",
           "Confirm client signed physical sheet vs digital PDF",
@@ -196,7 +196,7 @@ export function CreateTaskModal() {
         setAssignedTo("Dmitry Morozov");
         setShift("Morning");
         setRelatedType("work-order");
-        setSelectedEntityId("WO-00351");
+        setSelectedEntityId("WOOF-26-0351");
         setChecklistItems([
           "Physical count of reams in pallet rack A3-12",
           "Cross-reference barcode in 1C Warehouse Registry",
@@ -226,7 +226,7 @@ export function CreateTaskModal() {
         setAssignedTo("K. Anderson (Prepress)");
         setShift("Morning");
         setRelatedType("work-order");
-        setSelectedEntityId("WO-00351");
+        setSelectedEntityId("WOOF-26-0351");
         setChecklistItems([
           "Inspect dot percentage on 25%, 50%, 75% control strips",
           "Verify plate notch alignment and zero scratch defects",

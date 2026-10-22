@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { MachineRecord } from "@/components/documents/machine/types";
-import { INITIAL_MACHINES_RECORD } from "@/components/documents/machine/data";
 import { PlantRecord } from "@/components/documents/plant/types";
 import { INITIAL_PLANTS_RECORD } from "@/components/documents/plant/data";
 import {
@@ -9,23 +8,20 @@ import {
   PieceworkRecord,
   PayrollRecord,
   DepartmentRecord,
+  PositionRecord,
   ShiftRecord,
 } from "@/components/documents/hr/types";
-import {
-  INITIAL_EMPLOYEES,
-  INITIAL_ATTENDANCE,
-  INITIAL_PIECEWORK,
-  INITIAL_PAYROLL,
-  INITIAL_DEPARTMENTS,
-  INITIAL_SHIFTS,
-} from "@/components/documents/hr/data";
 import { getMaterialImage } from "@/lib/materialImages";
-import { MASTER_SPECIFICATIONS } from "@/components/documents/work-order/types";
+import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
+import type { SystemUserRecord } from "@/components/documents/user/types";
+import { INITIAL_SYSTEM_USERS } from "@/components/documents/user/data";
+import type { SupplierRecord } from "@/lib/server/supplierService";
+export type { SupplierRecord };
 
 export interface DocumentTab {
   id: string;
   title: string;
-  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "invoice" | "client-order" | "sales-record" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "employee-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog" | "trading-ytt-limit";
+  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "supplier" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "employee-detail" | "department-detail" | "position-detail" | "shift-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog" | "trading-ytt-limit" | "user-detail";
   module: string;
   isUnsaved?: boolean;
   documentData?: any;
@@ -149,6 +145,33 @@ export interface CustomerToolingItem {
   status: "Ready" | "Re-knifing Soon" | "Damaged" | "In Maintenance";
 }
 
+export interface DieToolingRecord {
+  id: string;
+  code: string;
+  name: string;
+  dieType: "rotary_magnetic" | "solid_rotary" | "flatbed" | "hot_stamp" | "embossing";
+  shape: "rectangle" | "rounded_rect" | "circle" | "oval" | "custom";
+  widthMm: number | string;
+  heightMm: number | string;
+  cornerRadiusMm?: number | string;
+  acrossCount: number;
+  aroundCount: number;
+  gapXMm?: number | string;
+  gapYMm?: number | string;
+  repeatLengthMm?: number | string;
+  cylinderTeeth?: number;
+  location?: string;
+  status: "available" | "in_use" | "sharpening" | "retired";
+  totalImpressions?: number;
+  maxImpressions?: number;
+  notes?: string;
+  customerId?: string | null;
+  customerName?: string | null;
+  ownership?: "in_house" | "customer_owned";
+  isDedicated?: boolean;
+  isActive?: boolean;
+}
+
 export interface CustomerContactPerson {
   id: string;
   role: "director" | "accountant" | "procurement" | "warehouse" | "manager" | "other";
@@ -187,6 +210,7 @@ export interface CrmCustomerRecord {
   paymentTerms: string;
   manager: string;
   status: "VIP" | "Active" | "New" | "Blocked";
+  currency?: "UZS" | "USD";
   legalAddress?: string;
   deliveryAddress?: string;
   bankName?: string;
@@ -211,13 +235,28 @@ export interface MasterSpecificationRecord {
   id: string;
   code: string;
   name: string;
+  category?: string;
   department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
-  description: string;
+  status?: string;
+  version?: string;
+  basePrice?: number | string;
+  currency?: string;
+  unit: string;
+  description?: string;
+  baseMaterial?: string;
+  dimensions?: {
+    width?: number;
+    height?: number;
+    depth?: number;
+    dimensionUnit?: string;
+  };
+  techSpecs?: Record<string, any>;
   materialsCount: number;
   estimatedCost: string;
-  unit: string;
-  materials?: Array<{ id?: string; name: string; quantity: number; unit: string; spec?: string; unitPrice?: number }>;
-  operations?: Array<{ id?: string; name: string; machineStr: string }>;
+  materials?: Array<{ id?: string; name: string; quantity: number; unit: string; spec?: string; unitPrice?: number; wastePercent?: number }>;
+  operations?: Array<{ id?: string; name: string; machineStr: string; durationHours?: number; operator?: string }>;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface WarehouseStockRecord {
@@ -271,7 +310,7 @@ export interface WarehouseMovementRecord {
 
 export interface FinishedGoodStockRecord {
   id: string; // e.g. "FG-3001"
-  workOrderId: string; // "WO-00351"
+  workOrderId: string; // "WOOF-26-0351"
   clientOrderId?: string; // "CO-0041"
   customerId: string; // "CUST-101"
   customerName: string; // "Alpha Media Group LLC"
@@ -322,7 +361,7 @@ export interface ProductionReadinessChecks {
 export type ProductionQueueStage = "Queue" | "Ready to Print" | "In Production" | "Completed";
 
 export interface ProductionQueueItem {
-  id: string; // e.g. "WO-00351"
+  id: string; // e.g. "WOOF-26-0351"
   clientOrderId?: string; // e.g. "CO-00041"
   customer: string;
   product: string;
@@ -344,6 +383,18 @@ export interface ProductionQueueItem {
   sampleRequired?: boolean;
   sampleStatus?: "none" | "in_production" | "awaiting_approval" | "approved" | "revision_requested";
   sampleQty?: number;
+  photoUrl?: string;
+  photoUrls?: string[];
+  attachments?: any[];
+  site?: string;
+  priceTotal?: number;
+  status?: string;
+  startDate?: string;
+  recipe?: string;
+  dimensions?: any;
+  colorsConfig?: any;
+  operations?: any[];
+  events?: any[];
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -369,32 +420,98 @@ export interface UserProfile {
   initials: string;
   defaultModule: string;
   avatar?: string;
+  id?: string;
+  code?: string;
+  username?: string;
+  fullName?: string;
+  phone?: string;
+  department?: string;
+  plant?: string;
+  status?: string;
+  language?: "uz" | "ru" | "en" | "tr";
+  permissions?: import("@/components/documents/user/types").UserPermissions;
+  scope?: import("@/components/documents/user/types").UserScope;
+  security?: import("@/components/documents/user/types").UserSecurity;
 }
 
 export const DEMO_USERS: Record<string, UserProfile> = {
   operator: {
+    id: "operator",
     name: "Alexey Kovalev",
     email: "a.kovalev@printgoo.com",
     role: "Production Shift Lead",
     initials: "AK",
     defaultModule: "production",
     avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+    permissions: {
+      crm: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
+      trading: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
+      production: { view: true, create: true, edit: true, delete: false, approve: false, export: false },
+      warehouse: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
+      finance: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
+      hr: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
+      settings: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
+    },
+    scope: {
+      allPlants: false,
+      plantIds: [],
+      viewCostPrice: false,
+      viewMargin: false,
+      maxDiscountPercent: 0,
+      ownDocumentsOnly: true,
+    },
   },
   sales: {
+    id: "manager",
     name: "Elena Voronina",
     email: "e.voronina@printgoo.com",
     role: "Commercial & Order Manager",
     initials: "EV",
-    defaultModule: "production",
+    defaultModule: "trading",
     avatar: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
+    permissions: {
+      crm: { view: true, create: true, edit: true, delete: false, approve: false, export: true },
+      trading: { view: true, create: true, edit: true, delete: false, approve: false, export: true },
+      production: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
+      warehouse: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
+      finance: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
+      hr: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
+      settings: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
+    },
+    scope: {
+      allPlants: true,
+      plantIds: [],
+      viewCostPrice: false,
+      viewMargin: false,
+      maxDiscountPercent: 15,
+      ownDocumentsOnly: false,
+    },
   },
   admin: {
+    id: "admin",
     name: "Dmitry Morozov",
     email: "admin@printgoo.com",
     role: "System Administrator",
     initials: "DM",
     defaultModule: "settings",
     avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+    permissions: {
+      crm: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
+      trading: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
+      production: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
+      warehouse: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
+      finance: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
+      hr: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
+      settings: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
+    },
+    scope: {
+      allPlants: true,
+      plantIds: [],
+      viewCostPrice: true,
+      viewMargin: true,
+      maxDiscountPercent: 100,
+      ownDocumentsOnly: false,
+    },
   },
 };
 
@@ -448,13 +565,26 @@ interface WorkspaceState {
   warehouseShipments: WarehouseShipmentRecord[];
   clientSettlements: ClientSettlementRecord[];
   crmCustomers: CrmCustomerRecord[];
+  isCrmCustomersLoading?: boolean;
+  loadCrmCustomers: (companyCode?: string) => Promise<void>;
+  upsertCustomerAsync: (customer: CrmCustomerRecord, companyCode?: string) => Promise<any>;
+
+  suppliers: SupplierRecord[];
+  isSuppliersLoading: boolean;
+  loadSuppliers: (companyCode?: string) => Promise<void>;
+  upsertSupplierAsync: (supplier: Partial<SupplierRecord>, companyCode?: string) => Promise<any>;
+  deleteSupplierAsync: (id: string, companyCode?: string) => Promise<boolean>;
   warehouseStock: WarehouseStockRecord[];
+  isWarehouseStockLoading: boolean;
+  loadWarehouseStock: (companyCode?: string) => Promise<void>;
+  upsertWarehouseStockAsync: (stock: any, companyCode?: string) => Promise<boolean>;
   upsertCustomer: (customer: CrmCustomerRecord) => void;
   upsertWarehouseStock: (stock: WarehouseStockRecord) => void;
   reserveStockForOrder: (materialQuery: string, qty: number, orderDocNo: string) => void;
   upsertDeliveryAct: (act: DeliveryActRecord) => void;
   postDeliveryAct: (actId: string) => DeliveryActRecord | undefined;
   createDeliveryActFromOrder: (payload: {
+    id?: string;
     orderId?: string;
     workOrderId?: string;
     customer: string;
@@ -467,7 +597,30 @@ interface WorkspaceState {
   addWarehouseShipment: (shipment: WarehouseShipmentRecord) => void;
   upsertWarehouseShipment: (shipment: WarehouseShipmentRecord) => void;
   updateWarehouseShipmentStatus: (shipmentId: string, status: WarehouseShipmentRecord["status"]) => void;
+  isWarehouseShipmentsLoading: boolean;
+  loadWarehouseShipments: (companyCode?: string) => Promise<void>;
+  upsertWarehouseShipmentAsync: (shipment: any, companyCode?: string) => Promise<any>;
+
+  warehouseReceipts: any[];
+  isWarehouseReceiptsLoading: boolean;
+  loadWarehouseReceipts: (companyCode?: string) => Promise<void>;
+  upsertWarehouseReceiptAsync: (receipt: any, companyCode?: string) => Promise<any>;
+
+  warehousesList: any[];
+  isWarehousesLoading: boolean;
+  loadWarehouses: (companyCode?: string) => Promise<void>;
+  upsertWarehouseAsync: (wh: any, companyCode?: string) => Promise<boolean>;
+  deleteWarehouseAsync: (id: string, companyCode?: string) => Promise<boolean>;
+
+  inventoryCounts: any[];
+  isInventoryCountsLoading: boolean;
+  loadInventoryCounts: (companyCode?: string) => Promise<void>;
+  upsertInventoryCountAsync: (count: any, companyCode?: string) => Promise<boolean>;
+
   warehouseMovements: WarehouseMovementRecord[];
+  isWarehouseMovementsLoading: boolean;
+  loadWarehouseMovements: (companyCode?: string) => Promise<void>;
+  upsertWarehouseMovementAsync: (mov: any, companyCode?: string) => Promise<boolean>;
   addWarehouseMovement: (movement: WarehouseMovementRecord) => void;
   returnOffcutToStock: (payload: {
     parentSku: string;
@@ -481,23 +634,65 @@ interface WorkspaceState {
     unitPriceUsd?: number;
   }) => void;
   recordClientPayment: (customer: string, amount: number, docNo?: string, note?: string) => void;
+  isFinanceLoading: boolean;
+  loadFinanceData: (companyCode?: string) => Promise<void>;
+  recordPaymentAsync: (payload: {
+    customer: string;
+    amount: number;
+    docNo?: string;
+    note?: string;
+    currency?: string;
+    exchangeRate?: number;
+    method?: "bank_transfer" | "cash" | "corporate_card" | "offset";
+    contractNo?: string;
+  }, companyCode?: string) => Promise<boolean>;
+  saveDeliveryActAsync: (act: DeliveryActRecord, companyCode?: string) => Promise<boolean>;
   customerTooling: CustomerToolingItem[];
   upsertCustomerTooling: (tool: CustomerToolingItem) => void;
 
   // ── Customer Dedicated Finished Goods Stock (Mas'ul Saqlov / Zaxira) ──────
   finishedGoods: FinishedGoodStockRecord[];
+  isFinishedGoodsLoading: boolean;
+  loadFinishedGoods: (companyCode?: string) => Promise<void>;
+  upsertFinishedGoodAsync: (item: any, companyCode?: string) => Promise<boolean>;
   upsertFinishedGood: (item: FinishedGoodStockRecord) => void;
   shipFromFinishedGood: (id: string, shipQty: number, shipmentDocNo?: string) => void;
 
   // ── Workshop Equipment Registry & Specifications ─────────────────────────
   masterSpecifications: MasterSpecificationRecord[];
+  isSpecificationsLoading: boolean;
+  loadSpecificationsAsync: () => Promise<void>;
   upsertMasterSpecification: (spec: MasterSpecificationRecord) => void;
+  upsertSpecificationAsync: (spec: any) => Promise<any>;
+  deleteSpecificationAsync: (idOrCode: string) => Promise<boolean>;
   machines: MachineRecord[];
+  isMachinesLoading: boolean;
+  loadMachines: () => Promise<void>;
   upsertMachine: (machine: MachineRecord) => void;
+  upsertMachineAsync: (machine: MachineRecord) => Promise<any>;
+  deleteMachineAsync: (id: string) => Promise<boolean>;
+
+  // ── Dies & Tooling (Shtamplar, Pichoqlar va Qoliplar) ──────────────────────
+  diesTooling: DieToolingRecord[];
+  isDiesToolingLoading: boolean;
+  loadDiesToolingAsync: (companyCode?: string) => Promise<void>;
+  upsertDieToolingAsync: (tool: Partial<DieToolingRecord>, companyCode?: string) => Promise<DieToolingRecord | null>;
+  deleteDieToolingAsync: (id: string, companyCode?: string) => Promise<boolean>;
 
   // ── Enterprise Branches & Plants ──────────────────────────────────────────
   plants: PlantRecord[];
   upsertPlant: (plant: PlantRecord) => void;
+
+  // ── Users & Roles (Settings Module) ────────────────────────────────────────
+  users: SystemUserRecord[];
+  isUsersLoading: boolean;
+  upsertUser: (user: SystemUserRecord) => void;
+  deleteUser: (id: string) => void;
+  fetchUsers: () => Promise<void>;
+  saveUserToDb: (user: SystemUserRecord) => Promise<boolean>;
+  deleteUserFromDb: (id: string) => Promise<boolean>;
+  resetUserPasswordInDb: (id: string, newPassword: string) => Promise<boolean>;
+  checkAuthSession: () => Promise<boolean>;
 
   // ── HR, Staff, Attendance & Payroll ───────────────────────────────────────
   employees: EmployeeRecord[];
@@ -505,11 +700,15 @@ interface WorkspaceState {
   piecework: PieceworkRecord[];
   payrolls: PayrollRecord[];
   departmentsList: DepartmentRecord[];
+  positionsList: PositionRecord[];
   shiftsList: ShiftRecord[];
   upsertEmployee: (emp: EmployeeRecord) => void;
   upsertAttendance: (att: AttendanceRecord) => void;
   upsertPiecework: (pw: PieceworkRecord) => void;
   upsertPayroll: (pay: PayrollRecord) => void;
+  upsertDepartment: (dept: DepartmentRecord) => void;
+  upsertPosition: (pos: PositionRecord) => void;
+  upsertShift: (shift: ShiftRecord) => void;
 
   // ── Unified Production Queue & Readiness ─────────────────────────────────
   productionQueue: ProductionQueueItem[];
@@ -521,6 +720,9 @@ interface WorkspaceState {
   setProductionStage: (idOrWoOrCo: string, stage: ProductionQueueStage) => void;
   updateQueueMachine: (idOrWoOrCo: string, machine: string) => void;
   reorderQueueOrder: (idOrWoOrCo: string, direction: "up" | "down") => void;
+  isProductionQueueLoading?: boolean;
+  loadProductionQueue: (companyCode?: string) => Promise<void>;
+  upsertWorkOrderAsync: (payload: any, companyCode?: string) => Promise<any>;
   upsertProductionQueueItem: (item: Partial<ProductionQueueItem> & { id: string }) => void;
 
   // ── Notifications ──────────────────────────────────────────────────────────
@@ -557,6 +759,7 @@ interface WorkspaceState {
   setSubModule: (subMod: string) => void;
   setTabUnsaved: (id: string, isUnsaved: boolean) => void;
   updateTabData: (id: string, documentData: Record<string, any>, title?: string) => void;
+  replaceTabId: (oldId: string, newId: string, title?: string, documentData?: Record<string, any>) => void;
   setLevel3Tab: (tabId: string, level3Tab: string) => void;
   updateGridStats: (selectedCount: number, totalCount: number, cellCoords?: string) => void;
   setTheme: (theme: AppTheme) => void;
@@ -572,1769 +775,25 @@ interface WorkspaceState {
 export const MAX_OPEN_TABS = 8;
 
 // ─── Seed Data for Schet-fakturas, Shipments & Settlements ────────────────────
-const INITIAL_DELIVERY_ACTS: DeliveryActRecord[] = [
-  {
-    id: "SF-8001",
-    date: "2026-10-12",
-    orderId: "CO-00041",
-    workOrderId: "WO-00351",
-    contractNo: "CON-2026-101",
-    customer: "Alpha Media Group LLC",
-    customerTin: "305841920",
-    product: "A4 Hardcover Catalog 96p",
-    quantity: 5000,
-    unit: "pcs",
-    subtotal: 13258.93,
-    vatRate: 12,
-    vatAmount: 1591.07,
-    totalAmount: 14850.0,
-    currency: "USD",
-    warehouse: "Main Factory — Tashkent",
-    carrier: "PrintGoo Fleet #1",
-    driverName: "R. Ismoilov (01 A 772 BB)",
-    recipientName: "J. Rahimov (Ombor mudiri)",
-    status: "Signed & Stamped",
-    linkedShipmentId: "SHP-6000",
-    notes: "To'liq tiraj (5000 dona) sifat nazoratidan o'tdi va palletsiz qadoqda topshirildi.",
-    items: [
-      {
-        id: "item-1",
-        sku: "PRN-CAT-01",
-        name: "A4 Hardcover Catalog 96p (Galerie Art Silk 150g + Soft-Touch)",
-        unit: "pcs",
-        quantity: 5000,
-        unitPrice: 2.6518,
-        vatRate: 12,
-      },
-    ],
-  },
-  {
-    id: "SF-8002",
-    date: "2026-10-11",
-    orderId: "CO-00042",
-    workOrderId: "WO-00352",
-    contractNo: "CON-2026-102",
-    customer: "Nordic Print Co",
-    customerTin: "308112450",
-    product: "Woven Satin Labels 30x50",
-    quantity: 15000,
-    unit: "pcs",
-    subtotal: 4200.0,
-    vatRate: 12,
-    vatAmount: 504.0,
-    totalAmount: 4704.0,
-    currency: "USD",
-    warehouse: "Main Factory — Tashkent",
-    carrier: "Customer Pickup",
-    driverName: "Mijoz transporti",
-    recipientName: "S. Lindqvist",
-    status: "Pending Signature",
-    notes: "Mijoz imzosi (E-faktura tasdig'i) kutilmoqda.",
-    items: [
-      {
-        id: "item-2",
-        sku: "PRN-LBL-03",
-        name: "Woven Satin Labels 30x50mm (Ultrasonic Cut)",
-        unit: "pcs",
-        quantity: 15000,
-        unitPrice: 0.28,
-        vatRate: 12,
-      },
-    ],
-  },
-  {
-    id: "SF-8003",
-    date: "2026-10-09",
-    orderId: "CO-00043",
-    workOrderId: "WO-00353",
-    contractNo: "CON-2026-103",
-    customer: "Baltic Press LLC",
-    customerTin: "309445112",
-    product: "Nylon Taffeta Roll",
-    quantity: 400,
-    unit: "rolls",
-    subtotal: 6800.0,
-    vatRate: 12,
-    vatAmount: 816.0,
-    totalAmount: 7616.0,
-    currency: "USD",
-    warehouse: "Branch Warehouse — Samarkand",
-    carrier: "Express Logistics UZ",
-    driverName: "A. Toshmatov (30 B 410 AA)",
-    recipientName: "M. Kovalenko",
-    status: "Signed & Stamped",
-    linkedShipmentId: "SHP-6002",
-    items: [
-      {
-        id: "item-3",
-        sku: "PRN-TAF-02",
-        name: "Printed Nylon Taffeta Roll 40mmx200m",
-        unit: "rolls",
-        quantity: 400,
-        unitPrice: 17.0,
-        vatRate: 12,
-      },
-    ],
-  },
-  {
-    id: "SF-8004",
-    date: "2026-10-08",
-    orderId: "CO-00044",
-    workOrderId: "WO-00354",
-    contractNo: "CON-2026-104",
-    customer: "Apex Packaging",
-    customerTin: "302998741",
-    product: "E-Flute Packaging Boxes",
-    quantity: 10000,
-    unit: "pcs",
-    subtotal: 11500.0,
-    vatRate: 12,
-    vatAmount: 1380.0,
-    totalAmount: 12880.0,
-    currency: "USD",
-    warehouse: "Main Factory — Tashkent",
-    carrier: "PrintGoo Fleet #2",
-    driverName: "D. Karimov (01 Z 889 KA)",
-    recipientName: "B. Alimov",
-    status: "Signed & Stamped",
-    linkedShipmentId: "SHP-6003",
-    items: [
-      {
-        id: "item-4",
-        sku: "PRN-BOX-02",
-        name: "E-Flute Corrugated Packaging Boxes (4C UV + Matt)",
-        unit: "pcs",
-        quantity: 10000,
-        unitPrice: 1.15,
-        vatRate: 12,
-      },
-    ],
-  },
-  ...Array.from({ length: 26 }, (_, i) => {
-    const idx = i + 5;
-    const customers = [
-      { name: "Alpha Media Group LLC", tin: "305841920", contract: "CON-2026-101" },
-      { name: "Nordic Print Co", tin: "308112450", contract: "CON-2026-102" },
-      { name: "Baltic Press LLC", tin: "309445112", contract: "CON-2026-103" },
-      { name: "Apex Packaging", tin: "302998741", contract: "CON-2026-104" },
-    ];
-    const c = customers[i % customers.length];
-    const prod = ["Offset Catalogs 100p (A4)", "Woven Satin Labels 30x50", "Nylon Taffeta Roll", "E-Flute Packaging Boxes"][i % 4];
-    const qty = [1000, 5000, 200, 10000][i % 4];
-    const sub = [3200, 1800, 3400, 9500][i % 4];
-    const vat = Number((sub * 0.12).toFixed(2));
-    const tot = Number((sub + vat).toFixed(2));
-    const st = (["Signed & Stamped", "Pending Signature", "Signed & Stamped", "Draft"] as const)[i % 4];
-    return {
-      id: `SF-${String(8000 + idx).padStart(4, "0")}`,
-      date: `2026-09-${String((i % 25) + 1).padStart(2, "0")}`,
-      orderId: `CO-${String(41 + idx).padStart(5, "0")}`,
-      workOrderId: `WO-${String(351 + idx).padStart(5, "0")}`,
-      contractNo: c.contract,
-      customer: c.name,
-      customerTin: c.tin,
-      product: prod,
-      quantity: qty,
-      unit: "pcs",
-      subtotal: sub,
-      vatRate: 12,
-      vatAmount: vat,
-      totalAmount: tot,
-      currency: "USD",
-      warehouse: "Main Factory — Tashkent",
-      carrier: ["PrintGoo Fleet #1", "Customer Pickup", "Express Logistics UZ", "PrintGoo Fleet #2"][i % 4],
-      driverName: "R. Ismoilov (01 A 772 BB)",
-      recipientName: "Vakil (Ishonchnoma asosida)",
-      status: st,
-      linkedShipmentId: st === "Signed & Stamped" ? `SHP-${String(6000 + idx).padStart(4, "0")}` : undefined,
-      items: [
-        {
-          id: `item-${idx}`,
-          sku: `PRN-0${(i % 4) + 1}`,
-          name: prod,
-          unit: "pcs",
-          quantity: qty,
-          unitPrice: Number((sub / qty).toFixed(4)),
-          vatRate: 12,
-        },
-      ],
-    };
-  }),
-];
+const INITIAL_DELIVERY_ACTS: DeliveryActRecord[] = [];
 
-const INITIAL_WAREHOUSE_SHIPMENTS: WarehouseShipmentRecord[] = [
-  {
-    id: "SHP-6000",
-    date: "2026-10-12",
-    customer: "Alpha Media Group LLC",
-    deliveryActId: "SF-8001",
-    workOrder: "WO-00351",
-    product: "A4 Hardcover Catalog 96p",
-    quantity: 5000,
-    unit: "pcs",
-    from: "Main Factory — Tashkent",
-    carrier: "PrintGoo Fleet #1",
-    trackingNo: "TRK900001",
-    driverName: "R. Ismoilov (+998 90 123-45-67)",
-    vehicleNo: "01 A 772 BB (ISUZU Furgon)",
-    recipientName: "Karimova M. (Bosh hisobchi)",
-    powerOfAttorney: "№ 184 / 12.10.2026 dan",
-    packagesCount: 10,
-    grossWeightKg: 145,
-    volumeM3: 0.85,
-    status: "Delivered",
-    shipmentType: "CustomerDelivery",
-  },
-  {
-    id: "SHP-6002",
-    date: "2026-10-09",
-    customer: "Baltic Press LLC",
-    deliveryActId: "SF-8003",
-    workOrder: "WO-00353",
-    product: "Nylon Taffeta Roll",
-    quantity: 400,
-    unit: "rolls",
-    from: "Main Factory — Tashkent",
-    carrier: "Express Logistics UZ",
-    trackingNo: "TRK900014",
-    status: "In Transit",
-    shipmentType: "CustomerDelivery",
-  },
-  {
-    id: "SHP-6003",
-    date: "2026-10-08",
-    customer: "Apex Packaging",
-    deliveryActId: "SF-8004",
-    workOrder: "WO-00354",
-    product: "E-Flute Packaging Boxes",
-    quantity: 10000,
-    unit: "pcs",
-    from: "Main Factory — Tashkent",
-    carrier: "PrintGoo Fleet #2",
-    trackingNo: "TRK900021",
-    status: "Dispatched",
-    shipmentType: "CustomerDelivery",
-  },
-  {
-    id: "SHP-6005",
-    date: "2026-10-11",
-    customer: "Samarkand Branch (Filial ombori)",
-    deliveryActId: "TRN-901",
-    workOrder: "—",
-    product: "Gold Foil — Hot Stamp 220mm (FIN-001)",
-    quantity: 4,
-    unit: "rolls",
-    from: "Main Factory — Tashkent",
-    carrier: "Express Logistics UZ",
-    trackingNo: "TRK900015",
-    driverName: "K. Boboyev (+998 93 456-78-90)",
-    vehicleNo: "01 845 VAA (Furgon)",
-    recipientName: "B. Salimov (Samarqand filiali mudiri)",
-    powerOfAttorney: "Ichki yuk xati № 41/26",
-    packagesCount: 1,
-    grossWeightKg: 28,
-    volumeM3: 0.15,
-    status: "In Transit",
-    shipmentType: "BranchTransfer",
-    items: [
-      {
-        id: "line-tr-1",
-        sku: "FIN-001",
-        name: "Gold Foil — Hot Stamp 220mm",
-        orderQty: 4,
-        shippedQty: 4,
-        unit: "rolls",
-        packageCount: 1,
-        packageType: "Karton quti",
-        palletNo: "Pallet T-01",
-        notes: "Samarqand filialiga ehtiyoj uchun yuborildi",
-      },
-    ],
-  },
-  {
-    id: "SHP-6006",
-    date: "2026-10-09",
-    customer: "Bukhara Finishing Shop (Buxoro filiali)",
-    deliveryActId: "TRN-902",
-    workOrder: "—",
-    product: "CTP Plate Fuji Brillia 790×1030 (PLT-001)",
-    quantity: 50,
-    unit: "pcs",
-    from: "Main Factory — Tashkent",
-    carrier: "PrintGoo Fleet #1",
-    trackingNo: "TRK900018",
-    driverName: "R. Ismoilov (+998 90 123-45-67)",
-    vehicleNo: "01 A 772 BB",
-    recipientName: "Sh. Qodirov (Buxoro sexi mudiri)",
-    powerOfAttorney: "Ichki yuk xati № 42/26",
-    packagesCount: 2,
-    grossWeightKg: 65,
-    volumeM3: 0.35,
-    status: "Delivered",
-    shipmentType: "BranchTransfer",
-    items: [
-      {
-        id: "line-tr-2",
-        sku: "PLT-001",
-        name: "CTP Plate Fuji Brillia 790×1030",
-        orderQty: 50,
-        shippedQty: 50,
-        unit: "pcs",
-        packageCount: 2,
-        packageType: "Maxsus qadoq (Plastinka)",
-        palletNo: "Pallet B-02",
-        notes: "Oylik ehtiyoj uchun Buxoroga yetkazildi",
-      },
-    ],
-  },
-  {
-    id: "SHP-6007",
-    date: "2026-10-14",
-    customer: "Master UV & Foil Co (Subpudrat)",
-    deliveryActId: "SUB-104",
-    workOrder: "WO-00351",
-    product: "A4 Katalog muqovasi (Tilla folga va UF-lak uchun)",
-    quantity: 5200,
-    unit: "sheets",
-    from: "Main Factory — Tashkent",
-    carrier: "PrintGoo Fleet #2",
-    trackingNo: "TRK900028",
-    driverName: "A. Xalilov (+998 90 987-65-43)",
-    vehicleNo: "01 B 334 CC",
-    recipientName: "N. Sobirov (Autsorsing ustasi)",
-    powerOfAttorney: "Subpudrat dalolatnomasi № 12",
-    packagesCount: 6,
-    grossWeightKg: 110,
-    volumeM3: 0.6,
-    status: "Dispatched",
-    shipmentType: "Outsourcing",
-    items: [
-      {
-        id: "line-out-1",
-        sku: "PRN-WO-00351-COV",
-        name: "A4 Katalog muqovasi (Qisman bosilgan B2 varaqlar)",
-        orderQty: 5200,
-        shippedQty: 5200,
-        unit: "sheets",
-        packageCount: 6,
-        packageType: "Gofroquti",
-        palletNo: "Pallet O-01",
-        notes: "Tilla folga bosish uchun autsorserga yuborildi",
-      },
-    ],
-  },
-  ...Array.from({ length: 37 }, (_, i) => {
-    const idx = i + 4;
-    const customers = [
-      "Alpha Media Group LLC", "Nordic Print Co", "Baltic Press LLC",
-      "Apex Packaging", "Zenith Publishing", "Vanguard Fashion",
-    ];
-    const products = [
-      { name: "A4 Hardcover Catalog 96p", qty: 5000, unit: "pcs" },
-      { name: "A5 Wire-O Booklet 32p", qty: 3000, unit: "pcs" },
-      { name: "Custom Folding Carton 350g", qty: 10000, unit: "pcs" },
-      { name: "Offset Magazine Gloss 64p", qty: 8000, unit: "pcs" },
-    ];
-    const prod = products[i % products.length];
-    const locs = ["Main Factory — Tashkent", "Branch Warehouse — Samarkand", "Finishing Shop — Bukhara"];
-    const carriers = ["Express Logistics UZ", "DHL Freight", "Own Vehicle", "Customer Pickup"];
-    return {
-      id: `SHP-${String(6000 + idx).padStart(4, "0")}`,
-      date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
-      customer: customers[i % customers.length],
-      deliveryActId: `SF-${String(8000 + idx).padStart(4, "0")}`,
-      workOrder: `WO-${String(350 + (i % 30)).padStart(5, "0")}`,
-      product: prod.name,
-      quantity: prod.qty,
-      unit: prod.unit,
-      from: locs[i % 3],
-      carrier: carriers[i % 4],
-      trackingNo: i % 4 === 3 ? "—" : `TRK${String(900000 + idx * 7)}`,
-      status: (["Packed", "Dispatched", "In Transit", "Delivered"] as const)[i % 4],
-    };
-  }),
-];
+const INITIAL_WAREHOUSE_SHIPMENTS: WarehouseShipmentRecord[] = [];
 
-export const INITIAL_FINISHED_GOODS: FinishedGoodStockRecord[] = [
-  {
-    id: "FG-3001",
-    workOrderId: "WO-00351",
-    clientOrderId: "CO-0041",
-    customerId: "CUST-101",
-    customerName: "Alpha Media Group LLC",
-    customerTin: "305841920",
-    productName: "A4 Hardcover Catalog 96p",
-    batchNo: "B-2026-108",
-    orderDate: "2026-10-05",
-    completionDate: "2026-10-11",
-    orderedQty: 10000,
-    producedQty: 15000,
-    shippedQty: 10000,
-    stockQty: 5000,
-    unit: "pcs",
-    costPricePerUnit: 0.42,
-    totalStockValue: 2100.0,
-    location: "Tayyor Mahsulot Ombori — Rampa 2, Pallet P-04",
-    palletCount: 3,
-    daysInStock: 7,
-    status: "In Stock",
-    notes: "Ortiqcha tiraj mijoz talabnomasi (call-off) bo'yicha mas'ul saqlovda saqlanmoqda.",
-  },
-  {
-    id: "FG-3002",
-    workOrderId: "WO-00368",
-    clientOrderId: "CO-0055",
-    customerId: "CUST-101",
-    customerName: "Alpha Media Group LLC",
-    customerTin: "305841920",
-    productName: "Korporativ Buklet A5 (Soft-touch)",
-    batchNo: "B-2026-114",
-    orderDate: "2026-10-12",
-    completionDate: "2026-10-15",
-    orderedQty: 5000,
-    producedQty: 6200,
-    shippedQty: 5000,
-    stockQty: 1200,
-    unit: "pcs",
-    costPricePerUnit: 0.38,
-    totalStockValue: 456.0,
-    location: "Tayyor Mahsulot Ombori — Rampa 1, Pallet P-11",
-    palletCount: 1,
-    daysInStock: 3,
-    status: "In Stock",
-    notes: "Tirajdan ortgan qoldiq, navbatdagi yetkazib berish uchun saqlanmoqda.",
-  },
-  {
-    id: "FG-3003",
-    workOrderId: "WO-00362",
-    clientOrderId: "CO-0049",
-    customerId: "CUST-102",
-    customerName: "Nordic Print Co",
-    customerTin: "307192834",
-    productName: "Shokolad qutilari 250g (Zarhal & Kongrev)",
-    batchNo: "B-2026-099",
-    orderDate: "2026-10-01",
-    completionDate: "2026-10-06",
-    orderedQty: 20000,
-    producedQty: 23500,
-    shippedQty: 15000,
-    stockQty: 8500,
-    unit: "pcs",
-    costPricePerUnit: 0.45,
-    totalStockValue: 3825.0,
-    location: "Tayyor Mahsulot Ombori — Rampa 3, Pallet FG-09",
-    palletCount: 4,
-    daysInStock: 12,
-    status: "Partially Shipped",
-    notes: "15,000 dona topshirilgan, qolgan 8,500 dona talabnoma bo'yicha yetkaziladi.",
-  },
-  {
-    id: "FG-3004",
-    workOrderId: "WO-00354",
-    clientOrderId: "CO-0044",
-    customerId: "CUST-103",
-    customerName: "Apex Packaging",
-    customerTin: "308291045",
-    productName: "E-Flute Kraft Quti 350x250x120",
-    batchNo: "B-2026-102",
-    orderDate: "2026-10-03",
-    completionDate: "2026-10-08",
-    orderedQty: 10000,
-    producedQty: 11800,
-    shippedQty: 10000,
-    stockQty: 1800,
-    unit: "pcs",
-    costPricePerUnit: 0.7,
-    totalStockValue: 1260.0,
-    location: "Tayyor Mahsulot Ombori — Bino 2, Sektor C, Pallet P-02",
-    palletCount: 2,
-    daysInStock: 10,
-    status: "In Stock",
-    notes: "Mijoz zaxirasi: mas'ul saqlov shartnomasi asosida omborda saqlanmoqda.",
-  },
-  {
-    id: "FG-3005",
-    workOrderId: "WO-00375",
-    clientOrderId: "CO-0060",
-    customerId: "CUST-104",
-    customerName: "Zenith Publishing",
-    customerTin: "309384756",
-    productName: "Maktab darsligi 160 bet (Ofset)",
-    batchNo: "B-2026-118",
-    orderDate: "2026-10-08",
-    completionDate: "2026-10-13",
-    orderedQty: 50000,
-    producedQty: 52400,
-    shippedQty: 50000,
-    stockQty: 2400,
-    unit: "pcs",
-    costPricePerUnit: 0.8,
-    totalStockValue: 1920.0,
-    location: "Asosiy Ombor — Sektor D, Pallet P-22",
-    palletCount: 2,
-    daysInStock: 5,
-    status: "In Stock",
-    notes: "Ofset mashinasida texnologik ortiqcha chiqqan tiraj.",
-  },
-  {
-    id: "FG-3006",
-    workOrderId: "WO-00380",
-    clientOrderId: "CO-0063",
-    customerId: "CUST-106",
-    customerName: "Vanguard Fashion",
-    customerTin: "311502938",
-    productName: "Premium Brending Paketlar (Laminatsiya)",
-    batchNo: "B-2026-121",
-    orderDate: "2026-10-10",
-    completionDate: "2026-10-14",
-    orderedQty: 8000,
-    producedQty: 9500,
-    shippedQty: 6000,
-    stockQty: 3500,
-    unit: "pcs",
-    costPricePerUnit: 0.45,
-    totalStockValue: 1575.0,
-    location: "Tayyor Mahsulot Ombori — Rampa 1, Pallet FG-18",
-    palletCount: 2,
-    daysInStock: 4,
-    status: "Ready for Dispatch",
-    notes: "Ishonchnoma olindi, navbatdagi reysda yuklanadi.",
-  },
-];
+export const INITIAL_FINISHED_GOODS: FinishedGoodStockRecord[] = [];
 
-const INITIAL_CLIENT_SETTLEMENTS: ClientSettlementRecord[] = [
-  {
-    id: "STL-001",
-    customer: "Alpha Media Group LLC",
-    customerTin: "305841920",
-    contractNo: "CON-2026-101",
-    openingBalance: 2400.0,
-    totalDebit: 14850.0,
-    totalCredit: 10000.0,
-    closingBalance: 7250.0,
-    currency: "USD",
-    lastActivityDate: "2026-10-12",
-    status: "Debt",
-    ledger: [
-      {
-        id: "led-1",
-        date: "2026-10-01",
-        docNo: "OPEN-2026",
-        docType: "Opening Balance",
-        description: "Oy boshiga qoldiq (Saldo)",
-        debit: 2400.0,
-        credit: 0,
-      },
-      {
-        id: "led-2",
-        date: "2026-10-03",
-        docNo: "PAY-4091",
-        docType: "Payment",
-        description: "Shartnoma CON-2026-101 bo'yicha avans to'lovi (Bank o'tkazmasi)",
-        debit: 0,
-        credit: 10000.0,
-      },
-      {
-        id: "led-3",
-        date: "2026-10-12",
-        docNo: "SF-8001",
-        docType: "Schet-faktura",
-        description: "Mahsulot realizatsiyasi: A4 Hardcover Catalog 96p (5,000 pcs)",
-        debit: 14850.0,
-        credit: 0,
-      },
-    ],
-  },
-  {
-    id: "STL-002",
-    customer: "Nordic Print Co",
-    customerTin: "308112450",
-    contractNo: "CON-2026-102",
-    openingBalance: 0,
-    totalDebit: 12400.0,
-    totalCredit: 12400.0,
-    closingBalance: 0,
-    currency: "USD",
-    lastActivityDate: "2026-10-10",
-    status: "Settled",
-    ledger: [
-      {
-        id: "led-201",
-        date: "2026-09-25",
-        docNo: "SF-7982",
-        docType: "Schet-faktura",
-        description: "Mahsulot realizatsiyasi: Woven Satin Labels (30,000 pcs)",
-        debit: 12400.0,
-        credit: 0,
-      },
-      {
-        id: "led-202",
-        date: "2026-10-10",
-        docNo: "PAY-4105",
-        docType: "Payment",
-        description: "SF-7982 bo'yicha yakuniy hisob-kitob",
-        debit: 0,
-        credit: 12400.0,
-      },
-    ],
-  },
-  {
-    id: "STL-003",
-    customer: "Baltic Press LLC",
-    customerTin: "309445112",
-    contractNo: "CON-2026-103",
-    openingBalance: 1200.0,
-    totalDebit: 7616.0,
-    totalCredit: 4000.0,
-    closingBalance: 4816.0,
-    currency: "USD",
-    lastActivityDate: "2026-10-09",
-    status: "Debt",
-    ledger: [
-      {
-        id: "led-301",
-        date: "2026-10-01",
-        docNo: "OPEN-2026",
-        docType: "Opening Balance",
-        description: "Oy boshiga qoldiq",
-        debit: 1200.0,
-        credit: 0,
-      },
-      {
-        id: "led-302",
-        date: "2026-10-05",
-        docNo: "PAY-4098",
-        docType: "Payment",
-        description: "Qisman to'lov (Bank ko'chirmasi №882)",
-        debit: 0,
-        credit: 4000.0,
-      },
-      {
-        id: "led-303",
-        date: "2026-10-09",
-        docNo: "SF-8003",
-        docType: "Schet-faktura",
-        description: "Mahsulot realizatsiyasi: Nylon Taffeta Roll (400 rolls)",
-        debit: 7616.0,
-        credit: 0,
-      },
-    ],
-  },
-  {
-    id: "STL-004",
-    customer: "Apex Packaging",
-    customerTin: "302998741",
-    contractNo: "CON-2026-104",
-    openingBalance: 0,
-    totalDebit: 12880.0,
-    totalCredit: 15000.0,
-    closingBalance: -2120.0,
-    currency: "USD",
-    lastActivityDate: "2026-10-08",
-    status: "Advance",
-    ledger: [
-      {
-        id: "led-401",
-        date: "2026-10-02",
-        docNo: "PAY-4088",
-        docType: "Payment",
-        description: "100% oldindan to'lov va keyingi buyurtma uchun avans",
-        debit: 0,
-        credit: 15000.0,
-      },
-      {
-        id: "led-402",
-        date: "2026-10-08",
-        docNo: "SF-8004",
-        docType: "Schet-faktura",
-        description: "Mahsulot realizatsiyasi: E-Flute Packaging Boxes (10,000 pcs)",
-        debit: 12880.0,
-        credit: 0,
-      },
-    ],
-  },
-  {
-    id: "STL-005",
-    customer: "City Publishing House",
-    customerTin: "304519823",
-    contractNo: "CON-2026-105",
-    openingBalance: 5400.0,
-    totalDebit: 9200.0,
-    totalCredit: 6000.0,
-    closingBalance: 8600.0,
-    currency: "USD",
-    lastActivityDate: "2026-10-04",
-    status: "Debt",
-    ledger: [
-      {
-        id: "led-501",
-        date: "2026-10-01",
-        docNo: "OPEN-2026",
-        docType: "Opening Balance",
-        description: "Oy boshiga qoldiq",
-        debit: 5400.0,
-        credit: 0,
-      },
-      {
-        id: "led-502",
-        date: "2026-10-03",
-        docNo: "SF-7995",
-        docType: "Schet-faktura",
-        description: "Hardcover Book (A5) — 3,000 pcs",
-        debit: 9200.0,
-        credit: 0,
-      },
-      {
-        id: "led-503",
-        date: "2026-10-04",
-        docNo: "PAY-4092",
-        docType: "Payment",
-        description: "Bank o'tkazmasi",
-        debit: 0,
-        credit: 6000.0,
-      },
-    ],
-  },
-];
+const INITIAL_CLIENT_SETTLEMENTS: ClientSettlementRecord[] = [];
 
-export const INITIAL_CRM_CUSTOMERS: CrmCustomerRecord[] = [
-  {
-    id: "CUST-101",
-    name: "Alpha Media Group LLC",
-    tin: "305841920",
-    industry: "Publishing & Media",
-    contactPerson: "Sardor Alimov",
-    phone: "+998 90 912-34-56",
-    email: "procurement@alphamedia.uz",
-    contractNo: "CON-2026-101",
-    paymentTerms: "50% Advance / 50% Net 15",
-    manager: "Elena Voronina",
-    status: "VIP",
-    legalAddress: "Toshkent sh., Mirobod tumani, Nukus ko'chasi 77",
-    deliveryAddress: "Toshkent sh., Sergeli tumani, Yangi Sergeli 14-ombor",
-    receivingHours: "Dush-Juma: 09:00 - 18:00 (Tushlik 13:00 - 14:00)",
-    requiresPowerOfAttorney: true,
-    deliveryTransportNote: "Fura va Gazel bemalol kiradi, rampa mavjud",
-    specialRequirements: "Mijoz logotipi Pantone 286C rangida qat'iy tekshirilsin. Qadoqlash 50 tadan bo'lsin.",
-    contacts: [
-      {
-        id: "CONT-101-1",
-        role: "director",
-        roleLabel: "Bosh direktor",
-        name: "Farhod Karimov",
-        phone: "+998 90 111-22-33",
-        email: "director@alphamedia.uz",
-        telegram: "farhod_karimov",
-        isPrimary: false,
-        notes: "Shartnoma va strategik masalalar",
-      },
-      {
-        id: "CONT-101-2",
-        role: "accountant",
-        roleLabel: "Bosh buxgalter",
-        name: "Nigora Umarova",
-        phone: "+998 97 450-11-22",
-        email: "bux@alphamedia.uz",
-        telegram: "nigora_bux",
-        isPrimary: false,
-        notes: "Akt sverka, hisob-faktura va to'lovlar",
-      },
-      {
-        id: "CONT-101-3",
-        role: "procurement",
-        roleLabel: "Ta'minot boshlig'i",
-        name: "Sardor Alimov",
-        phone: "+998 90 912-34-56",
-        email: "procurement@alphamedia.uz",
-        telegram: "sardor_alimov",
-        isPrimary: true,
-        notes: "Buyurtmalar, maketlar va tiraj tasdiqlash",
-      },
-      {
-        id: "CONT-101-4",
-        role: "warehouse",
-        roleLabel: "Ombor mudiri",
-        name: "Bahodir Mirzayev",
-        phone: "+998 93 888-99-00",
-        email: "ombor@alphamedia.uz",
-        telegram: "bahodir_ombor",
-        isPrimary: false,
-        notes: "Mahsulot qabul qilish va ishonchnoma (doverennost)",
-      },
-    ],
-  },
-  {
-    id: "CUST-102",
-    name: "Vanguard Fashion",
-    tin: "308112459",
-    industry: "Apparel & Textile",
-    contactPerson: "Kamola Rustamova",
-    phone: "+998 93 551-20-10",
-    email: "supply@vanguardfashion.uz",
-    contractNo: "CON-2026-102",
-    paymentTerms: "100% Prepayment",
-    manager: "Elena Voronina",
-    status: "VIP",
-    legalAddress: "Toshkent sh., Chilonzor tumani, Bunyodkor shoh ko'chasi",
-    deliveryAddress: "Toshkent vil., Zangiota tumani, Markaziy ombor №3",
-    receivingHours: "Dush-Shanba: 08:30 - 17:30 (Tushlik 12:30 - 13:30)",
-    requiresPowerOfAttorney: true,
-    deliveryTransportNote: "Faqat Gazel yoki Isuzu (Darvoza balandligi 3.2m), rampa yo'q (qo'lda tushiriladi)",
-    specialRequirements: "Trikotaj qadoq yorliqlari 100 tadan rezinka lenta bilan bog'lansin, namlikdan himoya qiluvchi plyonka shart.",
-    contacts: [
-      {
-        id: "CONT-102-1",
-        role: "director",
-        roleLabel: "Bosh direktor",
-        name: "Sherzod Toshmatov",
-        phone: "+998 90 333-44-55",
-        email: "ceo@vanguardfashion.uz",
-        telegram: "sherzod_vanguard",
-        isPrimary: false,
-        notes: "Yillik shartnomalar va narx siyosati",
-      },
-      {
-        id: "CONT-102-2",
-        role: "accountant",
-        roleLabel: "Bosh buxgalter",
-        name: "Malika Sobirova",
-        phone: "+998 91 777-66-55",
-        email: "finance@vanguardfashion.uz",
-        telegram: "malika_finance",
-        isPrimary: false,
-        notes: "To'lovlar, schyot-fakturalar va akt sverka",
-      },
-      {
-        id: "CONT-102-3",
-        role: "procurement",
-        roleLabel: "Buyurtmalar koordinatori",
-        name: "Kamola Rustamova",
-        phone: "+998 93 551-20-10",
-        email: "supply@vanguardfashion.uz",
-        telegram: "kamola_rustamova",
-        isPrimary: true,
-        notes: "Kiyim yorliqlari va qadoq buyurtmalari",
-      },
-      {
-        id: "CONT-102-4",
-        role: "warehouse",
-        roleLabel: "Markaziy ombor mudiri",
-        name: "Jasur Aliyev",
-        phone: "+998 99 770-88-99",
-        email: "warehouse@vanguardfashion.uz",
-        telegram: "jasur_zangiota",
-        isPrimary: false,
-        notes: "Markaziy ombor №3, tayyor mahsulotni qabul qilish",
-      },
-    ],
-  },
-  {
-    id: "CUST-103",
-    name: "Baltic Press LLC",
-    tin: "309445102",
-    industry: "Retail & Garments",
-    contactPerson: "Artur Kovalenko",
-    phone: "+998 97 701-88-44",
-    email: "orders@balticpress.com",
-    contractNo: "CON-2026-103",
-    paymentTerms: "Net 30 Days",
-    manager: "T. Alimov",
-    status: "Active",
-  },
-  {
-    id: "CUST-104",
-    name: "Apex Packaging",
-    tin: "302998741",
-    industry: "FMCG & Cosmetics",
-    contactPerson: "Dilshod Karimov",
-    phone: "+998 90 175-99-00",
-    email: "d.karimov@apexpack.uz",
-    contractNo: "CON-2026-104",
-    paymentTerms: "100% Advance",
-    manager: "M. Ivanova",
-    status: "VIP",
-  },
-  {
-    id: "CUST-105",
-    name: "City Publishing House",
-    tin: "304519823",
-    industry: "Book Publishing",
-    contactPerson: "Otabek Nazarov",
-    phone: "+998 71 234-56-78",
-    email: "print@citypub.uz",
-    contractNo: "CON-2026-105",
-    paymentTerms: "30% Advance / 70% Upon Delivery",
-    manager: "K. Anderson",
-    status: "Active",
-  },
-  {
-    id: "CUST-106",
-    name: "Nordic Print Co",
-    tin: "306772310",
-    industry: "Commercial Print Broker",
-    contactPerson: "Henrik Lindqvist",
-    phone: "+998 99 811-22-33",
-    email: "henrik@nordicprint.io",
-    contractNo: "CON-2026-106",
-    paymentTerms: "Net 15 Days",
-    manager: "Elena Voronina",
-    status: "Active",
-  },
-  {
-    id: "CUST-107",
-    name: "Luxury Cosmetics Ltd",
-    tin: "307881209",
-    industry: "Perfumery & Cosmetics",
-    contactPerson: "Madina Umarova",
-    phone: "+998 90 330-45-67",
-    email: "m.umarova@luxcosmetics.uz",
-    contractNo: "CON-2026-107",
-    paymentTerms: "50% Advance / 50% Before Dispatch",
-    manager: "Elena Voronina",
-    status: "VIP",
-  },
-  {
-    id: "CUST-108",
-    name: "Continental Pharma",
-    tin: "301994827",
-    industry: "Pharmaceuticals",
-    contactPerson: "Ulugbek Toshmatov",
-    phone: "+998 71 200-11-22",
-    email: "qa.packaging@continentalpharma.uz",
-    contractNo: "CON-2026-108",
-    paymentTerms: "Net 30 Days",
-    manager: "T. Alimov",
-    status: "Active",
-  },
-];
+export const INITIAL_CRM_CUSTOMERS: CrmCustomerRecord[] = [];
 
-export const INITIAL_CUSTOMER_TOOLING: CustomerToolingItem[] = [
-  {
-    id: "FOIL-301",
-    customerName: "Alpha Media Group LLC",
-    name: "Hot Foil Brass Cliché — Luxury Perfume & Catalog Cover",
-    toolType: "Hot Foil Cliché (Brass 7mm)",
-    format: "180×120 mm",
-    cavities: "2-up",
-    location: "Cabinet C-01",
-    impressionsUsed: 18500,
-    maxLife: 300000,
-    status: "Ready",
-  },
-  {
-    id: "DIE-004",
-    customerName: "Alpha Media Group LLC",
-    name: "A4 Presentation Folder Die w/ Business Card Slot",
-    toolType: "Flatbed Die (Штанцформа)",
-    format: "640×460 mm (B2)",
-    cavities: "2-up",
-    location: "Rack A-05",
-    impressionsUsed: 42000,
-    maxLife: 150000,
-    status: "Ready",
-  },
-  {
-    id: "DIE-001",
-    customerName: "Apex Packaging",
-    name: "FEFCO 0201 Master Carton Die (400×300×250)",
-    toolType: "Flatbed Die (Штанцформа)",
-    format: "1020×720 mm (B1)",
-    cavities: "2-up",
-    location: "Rack A-01",
-    impressionsUsed: 64200,
-    maxLife: 150000,
-    status: "Ready",
-  },
-  {
-    id: "DIE-002",
-    customerName: "Apex Packaging",
-    name: "Pharma Folding Box 60×40×110 (Tuck-End)",
-    toolType: "Flatbed Die (Штанцформа)",
-    format: "700×1000 mm",
-    cavities: "18-up",
-    location: "Rack A-02",
-    impressionsUsed: 138500,
-    maxLife: 150000,
-    status: "Re-knifing Soon",
-  },
-  {
-    id: "CL-204",
-    customerName: "Nordic Print Co",
-    name: "Flexo Photopolymer Plate Set (CMYK + White) — Satin Label",
-    toolType: "Flexo Cliché (Флексоклише 1.14mm)",
-    format: "Z=96 (304.8 mm)",
-    cavities: "6-up",
-    location: "Cabinet B-04",
-    impressionsUsed: 210000,
-    maxLife: 500000,
-    status: "Ready",
-  },
-  {
-    id: "DIE-008",
-    customerName: "Baltic Press LLC",
-    name: "Retail Hanging Box Die with Euro-Slot",
-    toolType: "Flatbed Die (Штанцформа)",
-    format: "500×700 mm (B2)",
-    cavities: "6-up",
-    location: "Rack B-02",
-    impressionsUsed: 31000,
-    maxLife: 150000,
-    status: "Ready",
-  },
-  {
-    id: "DIE-005",
-    customerName: "Vanguard Fashion",
-    name: "Garment Swing Tag 50×90 with Eyelet Hole",
-    toolType: "Steel Rule Die (Штанцформа)",
-    format: "350×500 mm (B3)",
-    cavities: "12-up",
-    location: "Cabinet A-03",
-    impressionsUsed: 12000,
-    maxLife: 100000,
-    status: "Ready",
-  },
-];
+export const INITIAL_CUSTOMER_TOOLING: CustomerToolingItem[] = [];
 
-const RAW_INITIAL_WAREHOUSE_STOCK: WarehouseStockRecord[] = [
-  {
-    sku: "MAT-1010",
-    name: "Galerie Art Silk 150g/m²",
-    category: "Paper & Board",
-    grammage: 150,
-    sheetFormat: "700×1000",
-    unit: "sheets",
-    location: "Rack A-01 (Main Paper Hall)",
-    stockLevel: 38500,
-    reserved: 12000,
-    available: 26500,
-    reorder: 8000,
-    unitPriceUsd: 0.19,
-    lastReceived: "2026-10-08",
-    status: "In Stock",
-    supplier: "Antalis Central Asia",
-    grainDirection: "Long Grain",
-  },
-  {
-    sku: "MAT-1015",
-    name: "Galerie Art Gloss 200g/m²",
-    category: "Paper & Board",
-    grammage: 200,
-    sheetFormat: "700×1000",
-    unit: "sheets",
-    location: "Rack A-02 (Main Paper Hall)",
-    stockLevel: 19200,
-    reserved: 4500,
-    available: 14700,
-    reorder: 5000,
-    unitPriceUsd: 0.25,
-    lastReceived: "2026-10-05",
-    status: "In Stock",
-    supplier: "Igepa Group GmbH",
-    grainDirection: "Long Grain",
-  },
-  {
-    sku: "MAT-1020",
-    name: "Coated Cardboard 300g/m²",
-    category: "Paper & Board",
-    grammage: 300,
-    sheetFormat: "700×1000",
-    unit: "sheets",
-    location: "Rack A-04 (Heavy Board Zone)",
-    stockLevel: 44000,
-    reserved: 9500,
-    available: 34500,
-    reorder: 6000,
-    unitPriceUsd: 0.36,
-    lastReceived: "2026-10-10",
-    status: "In Stock",
-    supplier: "Mondi Syktyvkar",
-    grainDirection: "Short Grain",
-  },
-  {
-    sku: "MAT-1025",
-    name: "Kraft Board 350g/m²",
-    category: "Paper & Board",
-    grammage: 350,
-    sheetFormat: "700×1000",
-    unit: "sheets",
-    location: "Rack B-01 (Heavy Board Zone)",
-    stockLevel: 16500,
-    reserved: 4000,
-    available: 12500,
-    reorder: 4000,
-    unitPriceUsd: 0.42,
-    lastReceived: "2026-10-03",
-    status: "In Stock",
-    supplier: "Segezha Group",
-    grainDirection: "Long Grain",
-  },
-  {
-    sku: "MAT-1030",
-    name: "Colorplan Ebony 270g/m²",
-    category: "Paper & Board",
-    grammage: 270,
-    sheetFormat: "700×1000",
-    unit: "sheets",
-    location: "Rack B-04 (Designer Substrates)",
-    stockLevel: 4800,
-    reserved: 1800,
-    available: 3000,
-    reorder: 2500,
-    unitPriceUsd: 0.88,
-    lastReceived: "2026-09-29",
-    status: "Low Stock",
-    supplier: "GF Smith London",
-    grainDirection: "Long Grain",
-  },
-  {
-    sku: "MAT-1035",
-    name: "Offset Uncoated 80g/m²",
-    category: "Paper & Board",
-    grammage: 80,
-    sheetFormat: "640×900",
-    unit: "sheets",
-    location: "Rack A-06 (Main Paper Hall)",
-    stockLevel: 65000,
-    reserved: 15000,
-    available: 50000,
-    reorder: 10000,
-    unitPriceUsd: 0.08,
-    lastReceived: "2026-10-11",
-    status: "In Stock",
-    supplier: "Sylvamo Svetogorsk",
-    grainDirection: "Long Grain",
-  },
-  {
-    sku: "MAT-2010",
-    name: "White Satin Ribbon 60mm",
-    category: "Roll & Label",
-    unit: "rolls",
-    location: "Rack C-01 (Ribbon & Narrow Web)",
-    stockLevel: 420,
-    reserved: 110,
-    available: 310,
-    reorder: 100,
-    unitPriceUsd: 6.50,
-    lastReceived: "2026-10-07",
-    status: "In Stock",
-    rollWidthMm: 60,
-    rollLengthM: 200,
-    supplier: "Zhejiang Narrow Fabrics Co",
-    batchNo: "SAT-2026-09B",
-  },
-  {
-    sku: "MAT-2020",
-    name: "Nylon Taffeta Tape 50mm",
-    category: "Roll & Label",
-    unit: "rolls",
-    location: "Rack C-02 (Ribbon & Narrow Web)",
-    stockLevel: 540,
-    reserved: 140,
-    available: 400,
-    reorder: 120,
-    unitPriceUsd: 4.80,
-    lastReceived: "2026-10-09",
-    status: "In Stock",
-    rollWidthMm: 50,
-    rollLengthM: 250,
-    supplier: "Zhejiang Narrow Fabrics Co",
-    batchNo: "TAF-4011-A",
-  },
-  {
-    sku: "MAT-3010",
-    name: "PVA Dispersion Glue (Kashirovka)",
-    category: "Adhesives & Binding",
-    unit: "kg",
-    location: "Chem Store D-01",
-    stockLevel: 620,
-    reserved: 95,
-    available: 525,
-    reorder: 150,
-    unitPriceUsd: 3.40,
-    lastReceived: "2026-10-06",
-    status: "In Stock",
-    supplier: "Henkel Adhesives",
-    batchNo: "HNK-PVA-8812",
-    expiryDate: "2027-04-15",
-  },
-  {
-    sku: "MAT-4010",
-    name: "CTP Thermal Plates 1030×790mm",
-    category: "Inks & Plates",
-    unit: "pcs",
-    location: "Prepress Vault E-01",
-    stockLevel: 380,
-    reserved: 64,
-    available: 316,
-    reorder: 100,
-    unitPriceUsd: 7.20,
-    lastReceived: "2026-10-10",
-    status: "In Stock",
-    sheetFormat: "1030×790",
-    supplier: "Fujifilm CIS",
-    batchNo: "FJ-CTP-2026-4",
-    expiryDate: "2027-10-01",
-  },
-  {
-    sku: "MAT-4020",
-    name: "Process CMYK Ink Set (Sheetfed Offset)",
-    category: "Inks & Plates",
-    unit: "kg",
-    location: "Chem Store D-02",
-    stockLevel: 290,
-    reserved: 45,
-    available: 245,
-    reorder: 80,
-    unitPriceUsd: 11.50,
-    lastReceived: "2026-10-04",
-    status: "In Stock",
-    supplier: "Toyo Ink Uzbekistan",
-    batchNo: "TY-CMYK-9910",
-    expiryDate: "2028-01-20",
-  },
-  {
-    sku: "MAT-5010",
-    name: "Soft-Touch Matte Lamination Film 28μm",
-    category: "Foil & Film",
-    unit: "rolls",
-    location: "Finishing Store F-01",
-    stockLevel: 28,
-    reserved: 18,
-    available: 10,
-    reorder: 15,
-    unitPriceUsd: 68.00,
-    lastReceived: "2026-09-25",
-    status: "Critical",
-    rollWidthMm: 320,
-    rollLengthM: 1000,
-    supplier: "Cosmo Films Europe",
-    batchNo: "CSM-ST-28-09",
-  },
-  {
-    sku: "MAT-1010-OFF",
-    name: "Galerie Art Silk 150g/m² (470×700) [Delovoy otxod]",
-    category: "Offcuts & Scraps",
-    grammage: 150,
-    sheetFormat: "470×700",
-    unit: "sheets",
-    location: "Rack A-01-B (Offcuts / Qoldiqlar zonasi)",
-    stockLevel: 2400,
-    reserved: 400,
-    available: 2000,
-    reorder: 500,
-    unitPriceUsd: 0.11,
-    lastReceived: "2026-10-12",
-    status: "In Stock",
-    isOffcut: true,
-    parentMaterialSku: "MAT-1010",
-    cutDimensions: "470×700",
-    sourceWorkOrder: "WO-00351",
-    supplier: "Ichki kesim sexi (Polar 115)",
-  },
-  {
-    sku: "MAT-1020-OFF",
-    name: "Coated Cardboard 300g/m² (350×700) [Delovoy otxod]",
-    category: "Offcuts & Scraps",
-    grammage: 300,
-    sheetFormat: "350×700",
-    unit: "sheets",
-    location: "Rack A-04-B (Offcuts / Qoldiqlar zonasi)",
-    stockLevel: 3100,
-    reserved: 0,
-    available: 3100,
-    reorder: 600,
-    unitPriceUsd: 0.18,
-    lastReceived: "2026-10-14",
-    status: "In Stock",
-    isOffcut: true,
-    parentMaterialSku: "MAT-1020",
-    cutDimensions: "350×700",
-    sourceWorkOrder: "WO-00365",
-    supplier: "Ichki kesim sexi (Wohlenberg)",
-  },
-  {
-    sku: "MAT-1025-OFF",
-    name: "Kraft Board 350g/m² (500×700) [Delovoy otxod]",
-    category: "Offcuts & Scraps",
-    grammage: 350,
-    sheetFormat: "500×700",
-    unit: "sheets",
-    location: "Rack B-01-B (Offcuts / Qoldiqlar zonasi)",
-    stockLevel: 1200,
-    reserved: 300,
-    available: 900,
-    reorder: 300,
-    unitPriceUsd: 0.22,
-    lastReceived: "2026-10-15",
-    status: "In Stock",
-    isOffcut: true,
-    parentMaterialSku: "MAT-1025",
-    cutDimensions: "500×700",
-    sourceWorkOrder: "WO-00370",
-    supplier: "Ichki kesim sexi (Wohlenberg)",
-  },
-];
+const RAW_INITIAL_WAREHOUSE_STOCK: WarehouseStockRecord[] = [];
 
-export const INITIAL_WAREHOUSE_STOCK: WarehouseStockRecord[] = RAW_INITIAL_WAREHOUSE_STOCK.map((item) => ({
-  ...item,
-  imageUrl: item.imageUrl || getMaterialImage(item),
-}));
+export const INITIAL_WAREHOUSE_STOCK: WarehouseStockRecord[] = [];
 
-export const INITIAL_WAREHOUSE_MOVEMENTS: WarehouseMovementRecord[] = [
-  {
-    id: "MOV-4018",
-    date: "2026-10-16",
-    material: "Galerie Art Silk 150g/m² (470×700) [Delovoy otxod]",
-    materialSku: "MAT-1010-OFF",
-    sheetFormat: "470×700",
-    quantity: 400,
-    receivedQty: 400,
-    unit: "sheets",
-    from: "Rack A-01-B (Offcuts / Qoldiqlar zonasi)",
-    to: "Digital Press Room — Canon imagePRESS V1000",
-    reason: "Delovoy otxodni qayta ishlatish: WO-00378 kiyim yorliqlari uchun sarf (Tejaldi: $44)",
-    status: "Completed",
-    operator: "N. Yusupova",
-    isOffcut: true,
-    movementType: "ProductionIssue",
-    parentMaterialSku: "MAT-1010",
-    cutDimensions: "470×700",
-    workOrderId: "WO-00378",
-  },
-  {
-    id: "MOV-4017",
-    date: "2026-10-16",
-    material: "White Satin Ribbon 60mm",
-    materialSku: "MAT-2010",
-    quantity: 80,
-    receivedQty: 80,
-    unit: "rolls",
-    from: "Rack C-01 (Ribbon & Narrow Web)",
-    to: "Label Weaving Dept — Muller Barudan",
-    reason: "Sexga sarf: WO-00352 (Woven Satin Labels) uchun to'qima lenta berildi",
-    status: "Completed",
-    operator: "S. Abdullayev",
-    movementType: "ProductionIssue",
-    workOrderId: "WO-00352",
-  },
-  {
-    id: "MOV-4016",
-    date: "2026-10-15",
-    material: "CTP Thermal Plates 1030×790mm",
-    materialSku: "MAT-4010",
-    sheetFormat: "1030×790",
-    quantity: 32,
-    receivedQty: 32,
-    unit: "pcs",
-    from: "Prepress Vault E-01",
-    to: "CTP Room — Heidelberg Suprasetter 106",
-    reason: "Prepress sarfi: WO-00353 (Perfume Folding Box) qoliplar komplekti (4C)",
-    status: "Completed",
-    operator: "D. Alimov",
-    movementType: "ProductionIssue",
-    workOrderId: "WO-00353",
-  },
-  {
-    id: "MOV-4015",
-    date: "2026-10-15",
-    material: "Kraft Board 350g/m² (500×700) [Delovoy otxod]",
-    materialSku: "MAT-1025-OFF",
-    sheetFormat: "500×700",
-    quantity: 1200,
-    receivedQty: 1200,
-    unit: "sheets",
-    from: "Cutting Section — Wohlenberg Guillotine",
-    to: "Rack B-01-B (Offcuts / Qoldiqlar zonasi)",
-    reason: "Kesimdan qolgan qog'oz (Delovoy otxod) kirimi — WO-00370",
-    status: "Completed",
-    operator: "D. Karimov",
-    isOffcut: true,
-    movementType: "CuttingReturn",
-    parentMaterialSku: "MAT-1025",
-    cutDimensions: "500×700",
-    workOrderId: "WO-00370",
-  },
-  {
-    id: "MOV-4014",
-    date: "2026-10-15",
-    material: "Toyo Hyplus Cyan (Process)",
-    materialSku: "INK-001",
-    quantity: 15,
-    receivedQty: 15,
-    unit: "kg",
-    from: "Main Factory — Tashkent (Rack C-02)",
-    to: "Press Room — Heidelberg XL 106",
-    reason: "Production issue for WO-00351",
-    status: "Completed",
-    operator: "S. Abdullayev",
-    movementType: "ProductionIssue",
-    workOrderId: "WO-00351",
-  },
-  {
-    id: "MOV-4013",
-    date: "2026-10-14",
-    material: "Soft-Touch Matte Lamination Film 28μm",
-    materialSku: "MAT-5010",
-    quantity: 6,
-    receivedQty: 6,
-    unit: "rolls",
-    from: "Finishing Store F-01",
-    to: "Laminating Line — Autobond Mini 76",
-    reason: "Laminatsiya sarfi: WO-00351 Hardcover Catalog muqovasi uchun",
-    status: "Completed",
-    operator: "R. Ismoilov",
-    movementType: "ProductionIssue",
-    workOrderId: "WO-00351",
-  },
-  {
-    id: "MOV-4012",
-    date: "2026-10-14",
-    material: "Coated Cardboard 300g/m² (350×700) [Delovoy otxod]",
-    materialSku: "MAT-1020-OFF",
-    sheetFormat: "350×700",
-    quantity: 3100,
-    receivedQty: 3100,
-    unit: "sheets",
-    from: "Cutting Section — Wohlenberg Guillotine",
-    to: "Rack A-04-B (Offcuts / Qoldiqlar zonasi)",
-    reason: "Kesimdan qolgan qog'oz (Delovoy otxod) kirimi — WO-00365",
-    status: "Completed",
-    operator: "S. Abdullayev",
-    isOffcut: true,
-    movementType: "CuttingReturn",
-    parentMaterialSku: "MAT-1020",
-    cutDimensions: "350×700",
-    workOrderId: "WO-00365",
-  },
-  {
-    id: "MOV-4011",
-    date: "2026-10-13",
-    material: "PVA Dispersion Glue (Kashirovka)",
-    materialSku: "MAT-3010",
-    quantity: 45,
-    receivedQty: 45,
-    unit: "kg",
-    from: "Chem Store D-01",
-    to: "Casing-in & Bindery — Kolbus BF 513",
-    reason: "Muqovalash sarfi: WO-00351 kitob bloklarini yelimlash",
-    status: "Completed",
-    operator: "N. Yusupova",
-    movementType: "ProductionIssue",
-    workOrderId: "WO-00351",
-  },
-  {
-    id: "MOV-4010",
-    date: "2026-10-13",
-    material: "Galerie Art Silk 150g/m²",
-    materialSku: "MAT-1010",
-    sheetFormat: "700×1000",
-    quantity: 10000,
-    receivedQty: 10000,
-    unit: "sheets",
-    from: "Main Factory — Tashkent (Rack A-01)",
-    to: "Cutting Section — Polar 115",
-    reason: "Transfer for slitting to WO-00351",
-    status: "Completed",
-    operator: "D. Karimov",
-    movementType: "Transfer",
-    workOrderId: "WO-00351",
-  },
-  {
-    id: "MOV-4008",
-    date: "2026-10-12",
-    material: "Galerie Art Silk 150g/m² (470×700) [Delovoy otxod]",
-    materialSku: "MAT-1010-OFF",
-    sheetFormat: "470×700",
-    quantity: 2400,
-    receivedQty: 2400,
-    unit: "sheets",
-    from: "Cutting Section — Polar 115 Guillotine",
-    to: "Rack A-01-B (Offcuts / Qoldiqlar zonasi)",
-    reason: "Kesimdan qolgan qog'oz (Delovoy otxod) kirimi — WO-00351",
-    status: "Completed",
-    operator: "N. Yusupova",
-    isOffcut: true,
-    movementType: "CuttingReturn",
-    parentMaterialSku: "MAT-1010",
-    cutDimensions: "470×700",
-    workOrderId: "WO-00351",
-  },
-  {
-    id: "MOV-4005",
-    date: "2026-10-11",
-    material: "Munken Polar Rough 120g/m² (A4)",
-    materialSku: "PAP-002",
-    quantity: 150,
-    receivedQty: 150,
-    unit: "sheets",
-    from: "Offset Press Room — Heidelberg XL 106",
-    to: "Scrap & Waste Area (Makulatura)",
-    reason: "Pritirka va sozlash jarayonidagi texnologik chiqindi (Akt spisaniya #14)",
-    status: "Completed",
-    operator: "A. Kovalev",
-    movementType: "WriteOff",
-  },
-  {
-    id: "MOV-4003",
-    date: "2026-10-10",
-    material: "Toyo Hyplus Black (Process)",
-    materialSku: "INK-004",
-    quantity: 10,
-    receivedQty: 10,
-    unit: "kg",
-    from: "Rack C-02 (Central Ink Storage)",
-    to: "Mixing Station M-01 (Ichki ko'chirish)",
-    reason: "Rang qorish stansiyasiga ichki ko'chirish",
-    status: "Completed",
-    operator: "S. Abdullayev",
-    movementType: "Transfer",
-  },
-  {
-    id: "MOV-4001",
-    date: "2026-10-09",
-    material: "CTP Plate Fuji Brillia 790×1030",
-    materialSku: "PLT-001",
-    quantity: 24,
-    receivedQty: 24,
-    unit: "pcs",
-    from: "Main Paper Hall (Rack A-01)",
-    to: "Prepress & CTP Room",
-    reason: "Sexga sarf: WO-00351 uchun CTP qoliplar chiqarish",
-    status: "Completed",
-    operator: "D. Alimov",
-    movementType: "ProductionIssue",
-    workOrderId: "WO-00351",
-  },
-];
+export const INITIAL_WAREHOUSE_MOVEMENTS: WarehouseMovementRecord[] = [];
 
-export const INITIAL_PRODUCTION_QUEUE: ProductionQueueItem[] = [
-  {
-    id: "WO-00351",
-    clientOrderId: "CO-00041",
-    customer: "Alpha Media Group LLC",
-    product: "A4 Hardcover Catalog 96p",
-    quantity: 5000,
-    unit: "pcs",
-    pressMachine: "Heidelberg Speedmaster XL 106-8P",
-    department: "Offset",
-    priority: "High",
-    stage: "In Production",
-    queueOrder: 1,
-    checks: {
-      designReady: true,
-      paperReady: true,
-      platesReady: true,
-      toolingReady: true,
-      audit: {
-        designReady: { status: "ready", verifiedBy: "D. Alimov (Prepress)", verifiedAt: "09:15" },
-        paperReady: { status: "ready", verifiedBy: "S. Karimov (Warehouse)", verifiedAt: "09:40" },
-        platesReady: { status: "ready", verifiedBy: "A. Kovalev (Press)", verifiedAt: "10:05" },
-        toolingReady: { status: "ready", verifiedBy: "N. Rakhimov (Die Shop)", verifiedAt: "10:20" },
-      },
-    },
-    deadline: "2026-10-18",
-    plannedSheets: 12500,
-    completedSheets: 8125,
-    operator: "A. Kovalev (1-smena)",
-    shift: "Day Shift (08:00–20:00)",
-    colors: "4+4",
-    spotColors: [],
-  },
-  {
-    id: "WO-00353",
-    clientOrderId: "CO-00043",
-    customer: "Apex Packaging",
-    product: "E-Flute Perfume Folding Box",
-    quantity: 8000,
-    unit: "pcs",
-    pressMachine: "Heidelberg Speedmaster XL 106-8P",
-    department: "Offset",
-    priority: "Urgent",
-    stage: "Ready to Print",
-    queueOrder: 2,
-    checks: {
-      designReady: true,
-      paperReady: true,
-      platesReady: true,
-      toolingReady: true,
-      audit: {
-        designReady: { status: "ready", verifiedBy: "D. Alimov (Prepress)", verifiedAt: "08:30" },
-        paperReady: { status: "ready", verifiedBy: "S. Karimov (Warehouse)", verifiedAt: "08:45" },
-        platesReady: { status: "ready", verifiedBy: "A. Kovalev (Press)", verifiedAt: "09:10" },
-        toolingReady: { status: "ready", verifiedBy: "N. Rakhimov (Die Shop)", verifiedAt: "09:20" },
-      },
-    },
-    deadline: "2026-10-15",
-    plannedSheets: 8000,
-    completedSheets: 0,
-    operator: "A. Kovalev (1-smena)",
-    shift: "Day Shift (08:00–20:00)",
-    colors: "5+0",
-    spotColors: ["PANTONE 021 C (Neon Orange)"],
-  },
-  {
-    id: "WO-00357",
-    clientOrderId: "CO-00047",
-    customer: "Grand Retail Group",
-    product: "Kraft Shopping Bags Medium",
-    quantity: 25000,
-    unit: "pcs",
-    pressMachine: "Heidelberg Speedmaster XL 106-8P",
-    department: "Offset",
-    priority: "Normal",
-    stage: "Queue",
-    queueOrder: 3,
-    checks: {
-      designReady: true,
-      paperReady: true,
-      platesReady: false,
-      toolingReady: false,
-      audit: {
-        designReady: { status: "ready", verifiedBy: "D. Alimov (Prepress)", verifiedAt: "11:00" },
-        paperReady: { status: "ready", verifiedBy: "S. Karimov (Warehouse)", verifiedAt: "11:25" },
-        platesReady: { status: "pending" },
-        toolingReady: { status: "blocked", verifiedBy: "N. Rakhimov (Die Shop)", verifiedAt: "11:40", note: "Awaiting knife replacement" },
-      },
-    },
-    deadline: "2026-10-22",
-    plannedSheets: 25000,
-    completedSheets: 0,
-    operator: "A. Kovalev (1-smena)",
-    shift: "Day Shift (08:00–20:00)",
-    colors: "1+0",
-    spotColors: [],
-  },
-  {
-    id: "WO-00354",
-    clientOrderId: "CO-00044",
-    customer: "Vanguard Fashion",
-    product: "600g Duplex VIP Hangtags",
-    quantity: 20000,
-    unit: "pcs",
-    pressMachine: "Komori Lithrone G40 (4-Color)",
-    department: "Offset",
-    priority: "High",
-    stage: "Ready to Print",
-    queueOrder: 1,
-    checks: {
-      designReady: true,
-      paperReady: true,
-      platesReady: true,
-      toolingReady: true,
-    },
-    deadline: "2026-10-20",
-    plannedSheets: 6000,
-    completedSheets: 0,
-    operator: "D. Karimov (2-smena)",
-    shift: "Night Shift (20:00–08:00)",
-    colors: "4+1",
-    spotColors: [],
-  },
-  {
-    id: "WO-00355",
-    clientOrderId: "CO-00045",
-    customer: "Baltic Press LLC",
-    product: "A5 Promotional Brochure 16p",
-    quantity: 10000,
-    unit: "pcs",
-    pressMachine: "Komori Lithrone G40 (4-Color)",
-    department: "Offset",
-    priority: "Normal",
-    stage: "Queue",
-    queueOrder: 2,
-    checks: {
-      designReady: true,
-      paperReady: false,
-      platesReady: true,
-      toolingReady: false,
-    },
-    deadline: "2026-10-19",
-    plannedSheets: 10000,
-    completedSheets: 0,
-    operator: "D. Karimov (2-smena)",
-    shift: "Day Shift (08:00–20:00)",
-    colors: "4+0",
-    spotColors: [],
-  },
-  {
-    id: "WO-00352",
-    clientOrderId: "CO-00042",
-    customer: "Nordic Print Co",
-    product: "Woven Satin Labels 30x50",
-    quantity: 15000,
-    unit: "pcs",
-    pressMachine: "Mark Andy Performance Series P7",
-    department: "Flexo",
-    priority: "Normal",
-    stage: "Ready to Print",
-    queueOrder: 1,
-    checks: {
-      designReady: true,
-      paperReady: true,
-      platesReady: true,
-      toolingReady: true,
-    },
-    deadline: "2026-10-16",
-    plannedSheets: 15000,
-    completedSheets: 0,
-    operator: "R. Ismoilov (1-smena)",
-    shift: "Day Shift (08:00–20:00)",
-    colors: "6+0",
-    spotColors: ["PANTONE 871 Gold", "Pantone Reflex Blue"],
-  },
-  {
-    id: "WO-00356",
-    clientOrderId: "CO-00046",
-    customer: "Apex Packaging",
-    product: "Die-Cut Perfume Box blanks",
-    quantity: 8000,
-    unit: "pcs",
-    pressMachine: "Bobst Novacut 106 E Autoplaten",
-    department: "Post-press",
-    priority: "Normal",
-    stage: "Queue",
-    queueOrder: 1,
-    checks: {
-      designReady: true,
-      paperReady: false,
-      platesReady: true,
-      toolingReady: true,
-    },
-    deadline: "2026-10-21",
-    plannedSheets: 8000,
-    completedSheets: 0,
-    operator: "B. Rahimov (1-smena)",
-    shift: "Day Shift (08:00–20:00)",
-    colors: "4+0",
-    spotColors: [],
-  },
-  {
-    id: "WO-00358",
-    clientOrderId: "CO-00048",
-    customer: "Vanguard Fashion",
-    product: "Woven Damask Garment Neck Labels 25×60",
-    quantity: 50000,
-    unit: "pcs",
-    pressMachine: "Staubli LX 3202 High-Speed Jacquard Loom",
-    department: "Jacquard",
-    priority: "High",
-    stage: "Ready to Print",
-    queueOrder: 1,
-    checks: {
-      designReady: true,
-      paperReady: true,
-      platesReady: true,
-      toolingReady: true,
-    },
-    deadline: "2026-10-23",
-    plannedSheets: 50000,
-    completedSheets: 0,
-    operator: "N. Turgunov (1-smena)",
-    shift: "Day Shift (08:00–20:00)",
-    colors: "4-Weft",
-    spotColors: [],
-  },
-];
+export const INITIAL_PRODUCTION_QUEUE: ProductionQueueItem[] = [];
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   tabs: [
@@ -2344,33 +803,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       type: "registry",
       module: "production",
       isUnsaved: false,
-    },
-    {
-      id: "WO-00351",
-      title: "WO-00351: Hardcover Catalog (5k)",
-      type: "work-order",
-      module: "production",
-      isUnsaved: true,
-      activeLevel3Tab: "overview",
-      documentData: {
-        docNo: "WO-00351",
-        customer: "Alpha Media Group LLC",
-        product: "A4 Hardcover Catalog 96p",
-        quantity: 5000,
-        unit: "pcs",
-        status: "Active",
-        priority: "High",
-        orderType: "Production",
-        pressMachine: "Heidelberg Speedmaster XL 106",
-        startDate: "2026-09-30",
-        deadline: "2026-10-06",
-        prepressStatus: "Approved by Client",
-        paperStock: "Galerie Art Silk 150g/m²",
-        coating: "Soft-Touch Matte + Spot UV",
-        priceTotal: 14850.00,
-        currency: "USD",
-        responsible: "K. Anderson (Prepress Lead)",
-      },
     },
   ],
   activeTabId: "registry-work-orders",
@@ -2392,20 +824,683 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   warehouseShipments: INITIAL_WAREHOUSE_SHIPMENTS,
   clientSettlements: INITIAL_CLIENT_SETTLEMENTS,
   crmCustomers: INITIAL_CRM_CUSTOMERS,
+  isCrmCustomersLoading: false,
+  suppliers: [],
+  isSuppliersLoading: false,
+  isFinanceLoading: false,
+
+  loadFinanceData: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isFinanceLoading: true });
+      const [actsRes, stlRes] = await Promise.all([
+        fetch("/api/v1/finance/delivery-acts?company=" + encodeURIComponent(companyCode)),
+        fetch("/api/v1/finance/settlements?company=" + encodeURIComponent(companyCode)),
+      ]);
+      if (actsRes.ok) {
+        const actsJson = await actsRes.json();
+        if (actsJson.success && Array.isArray(actsJson.data)) {
+          set({ deliveryActs: actsJson.data });
+        }
+      }
+      if (stlRes.ok) {
+        const stlJson = await stlRes.json();
+        if (stlJson.success && Array.isArray(stlJson.data)) {
+          set({ clientSettlements: stlJson.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load Finance data from server:", e);
+    } finally {
+      set({ isFinanceLoading: false });
+    }
+  },
+
+  recordPaymentAsync: async (payload, companyCode = "PRINTGOO") => {
+    try {
+      get().recordClientPayment(payload.customer, payload.amount, payload.docNo, payload.note);
+      const res = await fetch("/api/v1/finance/payments?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        // Balansni qayta yuklash
+        await get().loadFinanceData(companyCode);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to record payment on server:", e);
+      return false;
+    }
+  },
+
+  saveDeliveryActAsync: async (act: DeliveryActRecord, companyCode = "PRINTGOO") => {
+    try {
+      get().upsertDeliveryAct(act);
+      const res = await fetch("/api/v1/finance/delivery-acts?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(act),
+      });
+      if (res.ok) {
+        await get().loadFinanceData(companyCode);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to persist delivery act to DB:", e);
+      return false;
+    }
+  },
+
+  loadCrmCustomers: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isCrmCustomersLoading: true });
+      const res = await fetch("/api/v1/crm/clients?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ crmCustomers: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load CRM clients from server:", e);
+    } finally {
+      set({ isCrmCustomersLoading: false });
+    }
+  },
+
+  upsertCustomerAsync: async (customer: CrmCustomerRecord, companyCode = "PRINTGOO") => {
+    get().upsertCustomer(customer);
+    try {
+      const res = await fetch("/api/v1/crm/clients?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(customer),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.client) {
+          get().upsertCustomer(json.client);
+          return json.client;
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to persist customer to database:", e);
+      return null;
+    }
+  },
+
+  loadSuppliers: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isSuppliersLoading: true });
+      const res = await fetch("/api/v1/crm/suppliers?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ suppliers: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load suppliers from server:", e);
+    } finally {
+      set({ isSuppliersLoading: false });
+    }
+  },
+
+  upsertSupplierAsync: async (supplier: Partial<SupplierRecord>, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/crm/suppliers?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(supplier),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          await get().loadSuppliers(companyCode);
+          return json.supplier;
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to persist supplier to database:", e);
+      return null;
+    }
+  },
+
+  deleteSupplierAsync: async (id: string, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/crm/suppliers/${encodeURIComponent(id)}?company=` + encodeURIComponent(companyCode), {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        await get().loadSuppliers(companyCode);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to delete supplier:", e);
+      return false;
+    }
+  },
   warehouseStock: INITIAL_WAREHOUSE_STOCK,
+  isWarehouseStockLoading: false,
+
+  loadWarehouseStock: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isWarehouseStockLoading: true });
+      const res = await fetch("/api/v1/warehouse/stock?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ warehouseStock: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load warehouse stock from DB:", e);
+    } finally {
+      set({ isWarehouseStockLoading: false });
+    }
+  },
+
+  upsertWarehouseStockAsync: async (stock: any, companyCode = "PRINTGOO") => {
+    get().upsertWarehouseStock(stock);
+    try {
+      const res = await fetch("/api/v1/warehouse/stock?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(stock),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadWarehouseStock(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to save warehouse stock:", e);
+      return false;
+    }
+  },
+
   warehouseMovements: INITIAL_WAREHOUSE_MOVEMENTS,
+  isWarehouseMovementsLoading: false,
+
+  loadWarehouseMovements: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isWarehouseMovementsLoading: true });
+      const res = await fetch("/api/v1/warehouse/movements?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ warehouseMovements: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load warehouse movements from DB:", e);
+    } finally {
+      set({ isWarehouseMovementsLoading: false });
+    }
+  },
+
+  upsertWarehouseMovementAsync: async (mov: any, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/movements?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mov),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadWarehouseMovements(companyCode);
+          get().loadWarehouseStock(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to save warehouse movement:", e);
+      return false;
+    }
+  },
+
+  warehouseReceipts: [],
+  isWarehouseReceiptsLoading: false,
+
+  loadWarehouseReceipts: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isWarehouseReceiptsLoading: true });
+      const res = await fetch("/api/v1/warehouse/receipts?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ warehouseReceipts: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load warehouse receipts:", e);
+    } finally {
+      set({ isWarehouseReceiptsLoading: false });
+    }
+  },
+
+  upsertWarehouseReceiptAsync: async (receipt: any, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/receipts?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(receipt),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadWarehouseReceipts(companyCode);
+          get().loadWarehouseStock(companyCode);
+          return {
+            success: true,
+            receipt: json.receipt,
+            receiptNumber: json.receiptNumber || json.receipt?.receiptNumber,
+          };
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to save warehouse receipt:", e);
+      return null;
+    }
+  },
+
+  isWarehouseShipmentsLoading: false,
+
+  loadWarehouseShipments: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isWarehouseShipmentsLoading: true });
+      const res = await fetch("/api/v1/warehouse/shipments?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ warehouseShipments: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load warehouse shipments:", e);
+    } finally {
+      set({ isWarehouseShipmentsLoading: false });
+    }
+  },
+
+  upsertWarehouseShipmentAsync: async (shipment: any, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/shipments?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(shipment),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadWarehouseShipments(companyCode);
+          get().loadWarehouseStock(companyCode);
+          return {
+            success: true,
+            shipment: json.shipment,
+            shipmentNumber: json.shipmentNumber || json.shipment?.shipmentNumber,
+          };
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to save warehouse shipment:", e);
+      return null;
+    }
+  },
+
+  warehousesList: [],
+  isWarehousesLoading: false,
+
+  loadWarehouses: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isWarehousesLoading: true });
+      const res = await fetch("/api/v1/warehouse/locations?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ warehousesList: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load warehouses list:", e);
+    } finally {
+      set({ isWarehousesLoading: false });
+    }
+  },
+
+  upsertWarehouseAsync: async (wh: any, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/locations?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(wh),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadWarehouses(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to save warehouse:", e);
+      return false;
+    }
+  },
+
+  deleteWarehouseAsync: async (id: string, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/warehouse/locations?id=${encodeURIComponent(id)}&company=${encodeURIComponent(companyCode)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadWarehouses(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to delete warehouse:", e);
+      return false;
+    }
+  },
+
+  isFinishedGoodsLoading: false,
+
+  loadFinishedGoods: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isFinishedGoodsLoading: true });
+      const res = await fetch("/api/v1/warehouse/finished-goods?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ finishedGoods: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load finished goods:", e);
+    } finally {
+      set({ isFinishedGoodsLoading: false });
+    }
+  },
+
+  upsertFinishedGoodAsync: async (item: any, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/finished-goods?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadFinishedGoods(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to save finished good:", e);
+      return false;
+    }
+  },
+
+  inventoryCounts: [],
+  isInventoryCountsLoading: false,
+
+  loadInventoryCounts: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isInventoryCountsLoading: true });
+      const res = await fetch("/api/v1/warehouse/inventory?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ inventoryCounts: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load inventory counts:", e);
+    } finally {
+      set({ isInventoryCountsLoading: false });
+    }
+  },
+
+  upsertInventoryCountAsync: async (count: any, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/inventory?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(count),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadInventoryCounts(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to save inventory count:", e);
+      return false;
+    }
+  },
   productionQueue: INITIAL_PRODUCTION_QUEUE,
-  machines: INITIAL_MACHINES_RECORD,
+  isProductionQueueLoading: false,
+
+  loadProductionQueue: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isProductionQueueLoading: true });
+      const res = await fetch("/api/v1/production/work-orders?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ productionQueue: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load production queue from DB:", e);
+    } finally {
+      set({ isProductionQueueLoading: false });
+    }
+  },
+
+  upsertWorkOrderAsync: async (payload: any, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/production/work-orders?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadProductionQueue(companyCode);
+          return json.workOrder || true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to persist work order to DB:", e);
+      return false;
+    }
+  },
+  machines: [],
+  isMachinesLoading: false,
+  loadMachines: async () => {
+    set({ isMachinesLoading: true });
+    try {
+      const res = await fetch("/api/v1/production/machines");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        set({ machines: json.data, isMachinesLoading: false });
+      } else {
+        set({ isMachinesLoading: false });
+      }
+    } catch (err) {
+      console.error("loadMachines error:", err);
+      set({ isMachinesLoading: false });
+    }
+  },
+  upsertMachineAsync: async (machine: MachineRecord) => {
+    try {
+      const isExisting = Boolean(machine.id && !machine.id.startsWith("new-") && !machine.id.startsWith("MAC-NEW-"));
+      const method = isExisting ? "PUT" : "POST";
+      const url = isExisting
+        ? `/api/v1/production/machines/${machine.id}`
+        : `/api/v1/production/machines`;
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(machine),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        const savedMachine = json.data;
+        set((state) => {
+          const exists = state.machines.some((m) => m.id === savedMachine.id || (machine.id && m.id === machine.id));
+          return {
+            machines: exists
+              ? state.machines.map((m) => (m.id === savedMachine.id || m.id === machine.id ? savedMachine : m))
+              : [savedMachine, ...state.machines],
+          };
+        });
+        return savedMachine;
+      }
+    } catch (err) {
+      console.error("upsertMachineAsync error:", err);
+    }
+    return null;
+  },
+  deleteMachineAsync: async (id: string) => {
+    try {
+      const res = await fetch(`/api/v1/production/machines/${id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        set((state) => ({
+          machines: state.machines.filter((m) => m.id !== id),
+        }));
+        return true;
+      }
+    } catch (err) {
+      console.error("deleteMachineAsync error:", err);
+    }
+    return false;
+  },
+  diesTooling: [],
+  isDiesToolingLoading: false,
+  loadDiesToolingAsync: async (companyCode = "PRINTGOO") => {
+    set({ isDiesToolingLoading: true });
+    try {
+      const res = await fetch(`/api/v1/master/printing/dies?company=${companyCode}`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        set({ diesTooling: json.data, isDiesToolingLoading: false });
+      } else {
+        set({ isDiesToolingLoading: false });
+      }
+    } catch (err) {
+      console.error("loadDiesToolingAsync error:", err);
+      set({ isDiesToolingLoading: false });
+    }
+  },
+  upsertDieToolingAsync: async (tool: Partial<DieToolingRecord>, companyCode = "PRINTGOO") => {
+    try {
+      const isExisting = Boolean(tool.id && !tool.id.startsWith("new-") && !tool.id.startsWith("DIE-NEW-"));
+      const method = isExisting ? "PUT" : "POST";
+      const url = `/api/v1/master/printing/dies`;
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...tool, companyCode }),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        const savedTool = json.data;
+        set((state) => {
+          const exists = state.diesTooling.some(
+            (t) => t.id === savedTool.id || (tool.id && t.id === tool.id)
+          );
+          return {
+            diesTooling: exists
+              ? state.diesTooling.map((t) => (t.id === savedTool.id || t.id === tool.id ? savedTool : t))
+              : [savedTool, ...state.diesTooling],
+          };
+        });
+        return savedTool;
+      }
+    } catch (err) {
+      console.error("upsertDieToolingAsync error:", err);
+    }
+    return null;
+  },
+  deleteDieToolingAsync: async (id: string, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/master/printing/dies?id=${id}&company=${companyCode}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        set((state) => ({
+          diesTooling: state.diesTooling.filter((t) => t.id !== id && t.code !== id),
+        }));
+        return true;
+      }
+    } catch (err) {
+      console.error("deleteDieToolingAsync error:", err);
+    }
+    return false;
+  },
   plants: INITIAL_PLANTS_RECORD,
-  employees: INITIAL_EMPLOYEES,
-  attendance: INITIAL_ATTENDANCE,
-  piecework: INITIAL_PIECEWORK,
-  payrolls: INITIAL_PAYROLL,
-  departmentsList: INITIAL_DEPARTMENTS,
-  shiftsList: INITIAL_SHIFTS,
+  users: INITIAL_SYSTEM_USERS,
+  isUsersLoading: false,
+  employees: [],
+  attendance: [],
+  piecework: [],
+  payrolls: [],
+  departmentsList: [],
+  positionsList: [],
+  shiftsList: [],
   customerTooling: INITIAL_CUSTOMER_TOOLING,
   finishedGoods: INITIAL_FINISHED_GOODS,
-  masterSpecifications: MASTER_SPECIFICATIONS as MasterSpecificationRecord[],
+  masterSpecifications: [],
+  isSpecificationsLoading: false,
+
+  loadSpecificationsAsync: async () => {
+    set({ isSpecificationsLoading: true });
+    try {
+      const res = await fetch("/api/v1/production/specifications");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        set({ masterSpecifications: json.data, isSpecificationsLoading: false });
+      } else {
+        set({ isSpecificationsLoading: false });
+      }
+    } catch (err) {
+      console.error("loadSpecificationsAsync error:", err);
+      set({ isSpecificationsLoading: false });
+    }
+  },
 
   upsertMasterSpecification: (spec) =>
     set((state) => {
@@ -2416,6 +1511,65 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           : [spec, ...state.masterSpecifications],
       };
     }),
+
+  upsertSpecificationAsync: async (spec: any) => {
+    try {
+      const isExisting = Boolean(
+        spec.id &&
+        !String(spec.id).startsWith("new-") &&
+        !String(spec.id).startsWith("SPEC-NEW-") &&
+        !String(spec.id).startsWith("SPEC-00") &&
+        String(spec.id).length > 20
+      );
+
+      const targetId = spec.id;
+      const res = await fetch(`/api/v1/production/specifications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(spec),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        const savedSpec = json.data;
+        set((state) => {
+          const exists = state.masterSpecifications.some(
+            (s) => s.id === savedSpec.id || s.code === savedSpec.code || (targetId && s.id === targetId)
+          );
+          return {
+            masterSpecifications: exists
+              ? state.masterSpecifications.map((s) =>
+                  s.id === savedSpec.id || s.code === savedSpec.code || (targetId && s.id === targetId) ? savedSpec : s
+                )
+              : [savedSpec, ...state.masterSpecifications],
+          };
+        });
+        return savedSpec;
+      }
+    } catch (err) {
+      console.error("upsertSpecificationAsync error:", err);
+    }
+    return null;
+  },
+
+  deleteSpecificationAsync: async (idOrCode: string) => {
+    try {
+      const res = await fetch(`/api/v1/production/specifications/${encodeURIComponent(idOrCode)}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        set((state) => ({
+          masterSpecifications: state.masterSpecifications.filter(
+            (s) => s.id !== idOrCode && s.code !== idOrCode
+          ),
+        }));
+        return true;
+      }
+    } catch (err) {
+      console.error("deleteSpecificationAsync error:", err);
+    }
+    return false;
+  },
 
   upsertFinishedGood: (item) =>
     set((state) => {
@@ -2469,6 +1623,127 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       };
     }),
 
+  upsertUser: (user) =>
+    set((state) => {
+      const exists = state.users.some((u) => u.id === user.id);
+      return {
+        users: exists
+          ? state.users.map((u) => (u.id === user.id ? user : u))
+          : [user, ...state.users],
+      };
+    }),
+
+  deleteUser: (id) =>
+    set((state) => ({
+      users: state.users.filter((u) => u.id !== id),
+    })),
+
+  fetchUsers: async () => {
+    set({ isUsersLoading: true });
+    try {
+      const res = await fetch("/api/v1/settings/users");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.users)) {
+        set({ users: json.users, isUsersLoading: false });
+      } else {
+        set({ isUsersLoading: false });
+      }
+    } catch {
+      set({ isUsersLoading: false });
+    }
+  },
+
+  saveUserToDb: async (user) => {
+    try {
+      const isExisting = Boolean(user.id && !user.id.startsWith("user-new-"));
+      const url = isExisting
+        ? `/api/v1/settings/users/${encodeURIComponent(user.id)}`
+        : "/api/v1/settings/users";
+      const method = isExisting ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(user),
+      });
+
+      const json = await res.json();
+      if (json.success && json.user) {
+        get().upsertUser(json.user);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("[saveUserToDb error]:", e);
+      return false;
+    }
+  },
+
+  deleteUserFromDb: async (id) => {
+    try {
+      const res = await fetch(`/api/v1/settings/users/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        get().deleteUser(id);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("[deleteUserFromDb error]:", e);
+      return false;
+    }
+  },
+
+  resetUserPasswordInDb: async (id, newPassword) => {
+    try {
+      const res = await fetch(`/api/v1/settings/users/${encodeURIComponent(id)}/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword }),
+      });
+      const json = await res.json();
+      return Boolean(json.success);
+    } catch (e) {
+      console.error("[resetUserPasswordInDb error]:", e);
+      return false;
+    }
+  },
+
+  checkAuthSession: async () => {
+    try {
+      const res = await fetch("/api/v1/auth/me");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.user) {
+          const u = json.user;
+          const userProfile: UserProfile = {
+            id: u.id,
+            code: u.code,
+            username: u.username,
+            name: u.fullName,
+            fullName: u.fullName,
+            email: u.email,
+            phone: u.phone,
+            role: u.role,
+            department: u.department,
+            plant: u.plant,
+            initials: u.initials,
+            defaultModule: u.defaultModule,
+            avatar: u.avatar,
+            permissions: u.permissions,
+            scope: u.scope,
+            security: u.security,
+          };
+          get().login(userProfile);
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  },
+
   upsertEmployee: (emp) =>
     set((state) => {
       const exists = state.employees.some((e) => e.id === emp.id);
@@ -2506,6 +1781,36 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         payrolls: exists
           ? state.payrolls.map((p) => (p.id === pay.id ? pay : p))
           : [pay, ...state.payrolls],
+      };
+    }),
+
+  upsertDepartment: (dept) =>
+    set((state) => {
+      const exists = state.departmentsList.some((d) => d.id === dept.id);
+      return {
+        departmentsList: exists
+          ? state.departmentsList.map((d) => (d.id === dept.id ? dept : d))
+          : [dept, ...state.departmentsList],
+      };
+    }),
+
+  upsertPosition: (pos) =>
+    set((state) => {
+      const exists = state.positionsList.some((p) => p.id === pos.id);
+      return {
+        positionsList: exists
+          ? state.positionsList.map((p) => (p.id === pos.id ? pos : p))
+          : [pos, ...state.positionsList],
+      };
+    }),
+
+  upsertShift: (shift) =>
+    set((state) => {
+      const exists = state.shiftsList.some((s) => s.id === shift.id);
+      return {
+        shiftsList: exists
+          ? state.shiftsList.map((s) => (s.id === shift.id ? shift : s))
+          : [shift, ...state.shiftsList],
       };
     }),
 
@@ -2644,8 +1949,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   createDeliveryActFromOrder: (payload) => {
     const state = get();
-    const nextNum = 8031 + state.deliveryActs.length;
-    const newId = `SF-${nextNum}`;
+    const newId = payload.id || `draft-sf-${Date.now()}`;
     const today = new Date().toISOString().split("T")[0];
     const qty = payload.quantity || 1000;
     const totalWithVat = payload.priceTotal && payload.priceTotal > 0 ? payload.priceTotal : qty * 2.5;
@@ -2663,7 +1967,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       id: newId,
       date: today,
       orderId: payload.orderId || "CO-00041",
-      workOrderId: payload.workOrderId || "WO-00351",
+      workOrderId: payload.workOrderId || "WOOF-26-0351",
       contractNo: existingClient?.contractNo || "CON-2026-101",
       customer: payload.customer || "Alpha Media Group LLC",
       customerTin: existingClient?.customerTin || "305841920",
@@ -2711,14 +2015,42 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return target;
     }
 
-    const shipmentId = target.linkedShipmentId || `SHP-${6050 + state.warehouseShipments.length}`;
+    const yearSuffix = new Date().getFullYear().toString().slice(-2);
+
+    // If target has a draft ID, assign formal sequential SF-26-XXXX
+    let finalActId = target.id;
+    if (target.id.startsWith("draft-") || target.id.startsWith("new-") || target.id === "NEW") {
+      let maxSf = 0;
+      for (const a of state.deliveryActs) {
+        const m = a.id?.match(new RegExp(`^SF-${yearSuffix}-(\\d+)$`, "i"));
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n > maxSf) maxSf = n;
+        }
+      }
+      finalActId = `SF-${yearSuffix}-${String(maxSf + 1).padStart(4, "0")}`;
+    }
+
+    let shipmentId = target.linkedShipmentId;
+    if (!shipmentId) {
+      let maxShp = 0;
+      for (const s of state.warehouseShipments) {
+        const m = s.id?.match(new RegExp(`^SHP-${yearSuffix}-(\\d+)$`, "i"));
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n > maxShp) maxShp = n;
+        }
+      }
+      shipmentId = `SHP-${yearSuffix}-${String(maxShp + 1).padStart(4, "0")}`;
+    }
+
     const today = target.date || new Date().toISOString().split("T")[0];
 
     const newShipment: WarehouseShipmentRecord = {
       id: shipmentId,
       date: today,
       customer: target.customer,
-      deliveryActId: target.id,
+      deliveryActId: finalActId,
       workOrder: target.workOrderId || "—",
       product: target.product,
       quantity: target.quantity,
@@ -2731,6 +2063,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     const postedAct: DeliveryActRecord = {
       ...target,
+      id: finalActId,
       status: "Signed & Stamped",
       linkedShipmentId: shipmentId,
     };
@@ -2745,7 +2078,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (!isMatch) return c;
       matchedClient = true;
 
-      const alreadyInLedger = c.ledger.some((l) => l.docNo === target.id);
+      const alreadyInLedger = c.ledger.some((l) => l.docNo === finalActId);
       if (alreadyInLedger) return c;
 
       const newDebit = Number((c.totalDebit + target.totalAmount).toFixed(2));
@@ -2753,7 +2086,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const newEntry: SettlementLedgerEntry = {
         id: `led-${Date.now()}`,
         date: today,
-        docNo: target.id,
+        docNo: finalActId,
         docType: "Schet-faktura",
         description: `Mahsulot realizatsiyasi: ${target.product} (${target.quantity.toLocaleString()} ${target.unit})`,
         debit: target.totalAmount,
@@ -2786,7 +2119,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           {
             id: `led-${Date.now()}`,
             date: today,
-            docNo: target.id,
+            docNo: finalActId,
             docType: "Schet-faktura",
             description: `Mahsulot realizatsiyasi: ${target.product} (${target.quantity.toLocaleString()} ${target.unit})`,
             debit: target.totalAmount,
@@ -2805,8 +2138,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         : [newShipment, ...s.warehouseShipments],
       clientSettlements: updatedSettlements,
       tabs: s.tabs.map((t) =>
-        t.id === actId ? { ...t, documentData: postedAct, isUnsaved: false } : t
+        t.id === actId
+          ? {
+              ...t,
+              id: finalActId,
+              title: `${finalActId}: ${postedAct.customer}`,
+              documentData: postedAct,
+              isUnsaved: false,
+            }
+          : t
       ),
+      activeTabId: s.activeTabId === actId ? finalActId : s.activeTabId,
       notifications: [
         {
           id: `notif-${Date.now()}`,
@@ -3273,7 +2615,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   notifications: [
     {
       id: "notif-1",
-      title: "WO-00351 deadline approaching",
+      title: "WOOF-26-0351 deadline approaching",
       description: "Hardcover Catalog is due in 6 days. Prepress: Approved.",
       severity: "warning",
       timestamp: Date.now() - 1000 * 60 * 8,
@@ -3354,18 +2696,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({ isCreateWorkOrderOpen: false });
       return;
     }
-    const newWoId = `WO-00${Math.floor(360 + Math.random() * 639)}`;
+    const draftId = `draft-wo-${Date.now()}`;
     const today = new Date().toISOString().split("T")[0];
     const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
     get().openTab({
-      id: newWoId,
-      title: `${newWoId}: New Work Order`,
+      id: draftId,
+      title: "Yangi buyruq (Qoralama)",
       type: "work-order",
       module: "production",
       isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
-        docNo: newWoId,
+        docNo: "",
         orderType: "Production",
         customer: "",
         product: "New Print Order",
@@ -3405,9 +2747,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         };
       }
 
-      // 2. If document tab already exists, activate it
+      // 2. If document tab already exists, activate it (and refresh documentData if not unsaved)
       const exists = state.tabs.find((t) => t.id === normalizedTab.id);
       if (exists) {
+        if (!exists.isUnsaved && normalizedTab.documentData) {
+          return {
+            tabs: state.tabs.map((t) =>
+              t.id === normalizedTab.id
+                ? {
+                    ...t,
+                    title: normalizedTab.title || t.title,
+                    documentData: { ...t.documentData, ...normalizedTab.documentData },
+                  }
+                : t
+            ),
+            activeTabId: normalizedTab.id,
+          };
+        }
         return { activeTabId: normalizedTab.id };
       }
 
@@ -3541,6 +2897,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       ),
     })),
 
+  replaceTabId: (oldId, newId, title, documentData) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === oldId
+          ? {
+              ...t,
+              id: newId,
+              title: title || t.title,
+              documentData: { ...(t.documentData || {}), ...(documentData || {}) },
+              isUnsaved: false,
+            }
+          : t
+      ),
+      activeTabId: state.activeTabId === oldId ? newId : state.activeTabId,
+    })),
+
   setLevel3Tab: (tabId, level3Tab) =>
     set((state) => ({
       tabs: state.tabs.map((t) =>
@@ -3549,11 +2921,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     })),
 
   updateGridStats: (selectedCount, totalCount, cellCoords) =>
-    set((state) => ({
-      selectedCount,
-      totalCount,
-      activeCellCoords: cellCoords || state.activeCellCoords,
-    })),
+    set((state) => {
+      const targetCoords = cellCoords || state.activeCellCoords;
+      if (
+        state.selectedCount === selectedCount &&
+        state.totalCount === totalCount &&
+        state.activeCellCoords === targetCoords
+      ) {
+        return state;
+      }
+      return {
+        selectedCount,
+        totalCount,
+        activeCellCoords: targetCoords,
+      };
+    }),
 
   setTheme: (theme) => {
     if (typeof document !== "undefined") {
@@ -3668,7 +3050,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   logout: () => {
     try {
+      fetch("/api/v1/auth/logout", { method: "POST" });
       localStorage.removeItem("printgoo_auth");
+      localStorage.removeItem("printgoo_user");
     } catch (e) {}
     set({ isAuthenticated: false });
   },

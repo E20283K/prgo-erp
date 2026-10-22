@@ -15,6 +15,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
   Plus,
@@ -37,9 +38,22 @@ import {
   Palette,
   LayoutGrid,
   Table as TableIcon,
+  Boxes,
+  Trash2,
+  Building,
+  ShieldCheck,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { MachineQueueBoard } from "./MachineQueueBoard";
@@ -74,6 +88,7 @@ import {
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { formatMoney } from "@/components/documents/common/DocumentShell";
 
 interface ProductionGridProps {
   type: string; // "planning" | "machines" | "bom" | "tooling"
@@ -109,115 +124,61 @@ export interface PlanningSlotRecord {
   colors?: string;
 }
 
-const INITIAL_MACHINES = [
-  { id: "MAC-101", name: "Heidelberg Speedmaster XL 106-8P", type: "Offset Printing", maxFormat: "750×1060 mm (B1)", maxGrammage: "400 g/m²", makeReadySheets: 150, hourlyRate: 185, status: "Running", efficiency: 92 },
-  { id: "MAC-102", name: "Komori Lithrone G40 (4-Color)", type: "Offset Printing", maxFormat: "720×1030 mm (B1)", maxGrammage: "350 g/m²", makeReadySheets: 120, hourlyRate: 145, status: "Running", efficiency: 88 },
-  { id: "MAC-103", name: "Heidelberg Printmaster GTO 52", type: "Offset Printing", maxFormat: "360×520 mm (B3)", maxGrammage: "300 g/m²", makeReadySheets: 60, hourlyRate: 65, status: "Idle", efficiency: 84 },
-  { id: "MAC-104", name: "Mark Andy Performance Series P7", type: "Flexo Roll Printing", maxFormat: "430 mm Web (Z=64..120)", maxGrammage: "250 g/m²", makeReadySheets: 50, hourlyRate: 130, status: "Running", efficiency: 91 },
-  { id: "MAC-105", name: "Stock Sheet-to-Sheet Kashirovka Line", type: "Kashirovka / Mounting", maxFormat: "1000×1400 mm", maxGrammage: "1200 g/m² (Triplex)", makeReadySheets: 50, hourlyRate: 75, status: "Running", efficiency: 89 },
-  { id: "MAC-106", name: "Bobst Novacut 106 E Autoplaten", type: "Flatbed Die-Cutting", maxFormat: "760×1060 mm", maxGrammage: "1500 g/m²", makeReadySheets: 40, hourlyRate: 110, status: "Idle", efficiency: 94 },
-  { id: "MAC-107", name: "Autobond Mini 76 TH Thermal", type: "Lamination & Coating", maxFormat: "760×1020 mm", maxGrammage: "450 g/m²", makeReadySheets: 25, hourlyRate: 60, status: "Running", efficiency: 90 },
-  { id: "MAC-108", name: "Kolbus BF 513 Hardcover Line", type: "Bindery & Casing-In", maxFormat: "310×380×80 mm", maxGrammage: "N/A", makeReadySheets: 30, hourlyRate: 125, status: "Maintenance", efficiency: 76 },
-  { id: "MAC-109", name: "Polar N 115 Plus High-Speed Guillotine", type: "Guillotine Cutting", maxFormat: "1150 mm Cut Width", maxGrammage: "1200 g/m²", makeReadySheets: 10, hourlyRate: 45, status: "Running", efficiency: 96 },
-  { id: "MAC-110", name: "Staubli LX 3202 High-Speed Jacquard Loom", type: "Jacquard Weaving", maxFormat: "2400 mm / 6144 Hooks", maxGrammage: "Polyester / Taffeta", makeReadySheets: 15, hourlyRate: 115, status: "Running", efficiency: 94 },
-  { id: "MAC-111", name: "Nilpeter FA-Line Multi-Substrate", type: "Flexo Roll Printing", maxFormat: "420 mm Web (8-Color)", maxGrammage: "300 g/m²", makeReadySheets: 45, hourlyRate: 140, status: "Running", efficiency: 92 },
-];
-
-const INITIAL_TOOLING = [
-  { id: "DIE-0101", name: "VIP Hangtag & Card Duplex Die (Rounded 3mm + Ø5mm Eyelet)", toolType: "Flatbed Steel-Rule Die (Штанцформа)", itemSize: "90×50 mm", cavitiesUp: "24-up (4×6)", format: "B2 (500×707 mm)", customer: "Vanguard Fashion", rack: "Rack A-04", strikesUsed: 14500, maxStrikes: 100000, status: "Ready" },
-  { id: "DIE-0102", name: "E-Flute Perfume Folding Box FEFCO 0215", toolType: "Flatbed Steel-Rule Die (Штанцформа)", itemSize: "85×85×140 mm", cavitiesUp: "6-up (2×3)", format: "B1 (700×1000 mm)", customer: "Apex Packaging", rack: "Rack A-11", strikesUsed: 68200, maxStrikes: 120000, status: "In Press" },
-  { id: "DIE-0103", name: "A4 Presentation Folder w/ 5mm Spine & Business Card Slot", toolType: "Flatbed Steel-Rule Die (Штанцформа)", itemSize: "220×310 mm (Closed)", cavitiesUp: "2-up", format: "B1 (700×1000 mm)", customer: "Alpha Media Group", rack: "Rack B-02", strikesUsed: 94000, maxStrikes: 100000, status: "Needs Re-knifing" },
-  { id: "DIE-0104", name: "Kraft Shopping Bag Medium (260×320×120 mm)", toolType: "Flatbed Steel-Rule Die (Штанцформа)", itemSize: "780×460 mm (Open)", cavitiesUp: "1-up", format: "B1 (700×1000 mm)", customer: "Global Retailers Ltd", rack: "Rack B-09", strikesUsed: 31000, maxStrikes: 100000, status: "Ready" },
-  { id: "ROT-0201", name: "Rotary Magnetic Die — Waterproof PP Roll Label", toolType: "Rotary Die (Магнитный штамп)", itemSize: "60×40 mm (R=2mm)", cavitiesUp: "12-up (3×4)", format: "Z=88 (279.4 mm)", customer: "Nordic Print Co", rack: "Cabinet M-02", strikesUsed: 145000, maxStrikes: 500000, status: "Ready" },
-  { id: "FLX-0301", name: "DuPont Cyrel 1.14mm Photopolymer Set (5 Colors)", toolType: "Flexo Plate Set (Флексоклише)", itemSize: "30×50 mm Satin", cavitiesUp: "8-up", format: "Z=76 (241.3 mm)", customer: "Boutique Threads", rack: "Archive C-15", strikesUsed: 42000, maxStrikes: 150000, status: "Ready" },
-  { id: "CLH-0401", name: "Brass 7mm Hot-Foil & Blind Emboss Cliché (Logo)", toolType: "Brass Cliché (Латунное клише)", itemSize: "65×35 mm", cavitiesUp: "4-up", format: "B2 / SRA3", customer: "Vanguard Fashion", rack: "Safe D-01", strikesUsed: 8000, maxStrikes: 250000, status: "Ready" },
-  { id: "JAC-0501", name: "Staubli 6144-Hook Harness & Ultrasonic Slitter Cassette", toolType: "Jacquard Harness & Cassette (Жаккардовая оснастка)", itemSize: "15-50 mm Woven Tape", cavitiesUp: "16-tape ribbon", format: "6144 Hooks", customer: "Vanguard Fashion", rack: "Loom Bay 01", strikesUsed: 125000, maxStrikes: 600000, status: "Ready" },
-];
-
-const INITIAL_PLANNING_SLOTS: PlanningSlotRecord[] = Array.from({ length: 40 }, (_, i) => {
-  const isSample = i % 5 === 0;
-  const customers = ["Alpha Media Group", "Apex Packaging", "Nordic Print Co", "Vanguard Fashion", "Baltic Press LLC"];
-  const products = [
-    "A4 Hardcover Catalog 96p (150g Silk)",
-    "E-Flute Perfume Box + Kashirovka",
-    "Woven Satin Roll Labels (30×50)",
-    "600g Duplex VIP Hangtag + Hot Foil",
-    "350g Pharma Folding Carton Box",
-  ];
-
-  const operationsList = [
-    { op: "1-bosqich: Qirqish & Formatlash", mac: "Polar N 115 Plus High-Speed Guillotine" },
-    { op: "2-bosqich: 4+4 CMYK Ofset Bosma", mac: "Heidelberg Speedmaster XL 106-8P" },
-    { op: "3-bosqich: Soft-Touch Matte Laminatsiya", mac: "Autobond Mini 76 TH Thermal" },
-    { op: "4-bosqich: Sheet-to-Sheet Kashirovka (300g+300g)", mac: "Stock Sheet-to-Sheet Kashirovka Line" },
-    { op: "5-bosqich: Bobst Shtansovka & Vyrubka", mac: "Bobst Novacut 106 E Autoplaten" },
-    { op: "2-bosqich: 4+0 Ofset Bosma (Komori)", mac: "Komori Lithrone G40 (4-Color)" },
-  ];
-
-  const samplePairs = [
-    { op: "Raqamli Express Namuna (Proof)", mac: "Xerox Iridesse Digital" },
-    { op: "Plotter Qirqish Namuna (Mockup)", mac: "Ricoh Pro C9200" },
-    { op: "Rang Namunasi (Color Proof)", mac: "Epson SureColor Proofer" },
-  ];
-
-  const pair = isSample ? samplePairs[i % samplePairs.length] : operationsList[i % operationsList.length];
-  const operators = ["A. Kovalev (1-smena)", "R. Ismoilov (1-smena)", "D. Karimov (2-smena)", "B. Rahimov (1-smena)"];
-  const planned = isSample ? 50 : [12500, 8000, 15000, 6000, 20000][i % 5];
-  const status = isSample
-    ? ["Printing Sample", "Ready for Client", "Approved"][i % 3]
-    : i % 7 === 1
-    ? "Awaiting Sample Approval"
-    : ["Running", "Scheduled", "Make-Ready", "Delayed", "Completed"][i % 5];
-
-  const completed =
-    status === "Completed" || status === "Approved"
-      ? planned
-      : status === "Running" || status === "Printing Sample"
-      ? Math.round(planned * 0.65)
-      : 0;
-
-  return {
-    id: `SCH-${String(1000 + i).padStart(4, "0")}`,
-    queuePos: `#${(i % 4) + 1}`,
-    orderType: isSample ? "Sample" : "Production",
-    workOrder: `WO-${String(350 + (i % 20)).padStart(5, "0")}${isSample ? "-SMP" : ""}`,
-    parentOrder: `CO-${String(41 + (i % 20)).padStart(5, "0")}`,
-    customer: customers[i % customers.length],
-    product: products[i % products.length],
-    operation: pair.op,
-    machine: pair.mac,
-    shift: isSample ? "Express Run" : ["Day Shift (08:00–20:00)", "Night Shift (20:00–08:00)"][i % 2],
-    operator: operators[i % operators.length],
-    startTime: `2026-10-${String((i % 10) + 10).padStart(2, "0")} 08:00`,
-    endTime: `2026-10-${String((i % 10) + 10).padStart(2, "0")} ${isSample ? "10:30" : "15:30"}`,
-    makeReadyMin: isSample ? 15 : 45,
-    runTimeHrs: isSample ? 1.0 : 4.5,
-    washUpMin: isSample ? 10 : 20,
-    plannedSheets: planned,
-    makeReadySheets: isSample ? 15 : 150,
-    completedSheets: completed,
-    wasteSheets: completed > 0 ? Math.round(completed * 0.012) : 0,
-    paperReady: status !== "Delayed",
-    platesReady: true,
-    toolingReady: i % 4 !== 3,
-    sampleApproved: status !== "Awaiting Sample Approval",
-    downtimeReason:
-      status === "Delayed"
-        ? "Qog'oz namligi / akklimatizatsiya kutilmoqda"
-        : status === "Awaiting Sample Approval"
-        ? "Mijoz etalon namuna tasdig'ini kutish"
-        : "Yo'q (Me'yorda ishlamoqda)",
-    status,
-    colors: ["4+4", "4+0", "5+0", "1+0", "4+1"][i % 5],
-  };
-});
+const INITIAL_MACHINES: any[] = [];
+const INITIAL_TOOLING: any[] = [];
+const INITIAL_PLANNING_SLOTS: PlanningSlotRecord[] = [];
 
 export function ProductionGrid({ type }: ProductionGridProps) {
   const tCommon = useTranslations("Common");
   const tGrid = useTranslations("DataGrid");
-  const { updateGridStats, theme, openTab, addNotification, productionQueue, setCreateWorkOrderOpen, machines } = useWorkspaceStore();
+  const {
+    updateGridStats,
+    theme,
+    openTab,
+    addNotification,
+    productionQueue,
+    loadProductionQueue,
+    isProductionQueueLoading,
+    setCreateWorkOrderOpen,
+    machines,
+    loadMachines,
+    isMachinesLoading,
+    upsertMachineAsync,
+    diesTooling,
+    loadDiesToolingAsync,
+    isDiesToolingLoading,
+    upsertDieToolingAsync,
+    deleteDieToolingAsync,
+    crmCustomers,
+    loadCrmCustomers,
+    masterSpecifications,
+    loadSpecificationsAsync,
+    isSpecificationsLoading,
+    deleteSpecificationAsync,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [viewMode, setViewMode] = useState<"board" | "table">("board");
+  const [specToDelete, setSpecToDelete] = useState<any | null>(null);
+  const [toolModalOpen, setToolModalOpen] = useState(false);
+  const [toolFormData, setToolFormData] = useState<any>(null);
+  const [toolToDelete, setToolToDelete] = useState<any>(null);
+  const [isToolSaving, setIsToolSaving] = useState(false);
+
+  useEffect(() => {
+    if (loadProductionQueue) {
+      loadProductionQueue();
+    }
+    if (loadMachines) {
+      loadMachines();
+    }
+    if (type === "bom" && loadSpecificationsAsync) {
+      loadSpecificationsAsync();
+    }
+    if (type === "tooling") {
+      if (loadDiesToolingAsync) loadDiesToolingAsync();
+      if (loadCrmCustomers) loadCrmCustomers();
+    }
+  }, [loadProductionQueue, loadMachines, loadSpecificationsAsync, loadDiesToolingAsync, loadCrmCustomers, type]);
 
   // Status colorful rows toggle (persisted in localStorage, default true)
   const [enableStatusColors, setEnableStatusColors] = useState<boolean>(() => {
@@ -238,7 +199,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
   }, []);
 
   const [planningData, setPlanningData] = useState<PlanningSlotRecord[]>(INITIAL_PLANNING_SLOTS);
-  const [machinesData, setMachinesData] = useState(INITIAL_MACHINES);
+  const [machinesData, setMachinesData] = useState<any[]>(INITIAL_MACHINES);
   const [toolingData, setToolingData] = useState(INITIAL_TOOLING);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -247,121 +208,246 @@ export function ProductionGrid({ type }: ProductionGridProps) {
   const [editParam2, setEditParam2] = useState("");
 
   const mappedMachines = useMemo(() => {
-    if (!machines || machines.length === 0) return machinesData;
-    return machines.map((m) => {
-      let maxFormat = "Standart";
+    const list = machines || [];
+    return list.map((m: any) => {
+      let maxFormat = m.format || "Standart";
       let maxGrammage = "Standart";
       let makeReady = 50;
 
       if (m.offsetSpecs) {
-        maxFormat = m.offsetSpecs.maxSheetMm;
-        maxGrammage = m.offsetSpecs.grammageRange;
-        makeReady = m.offsetSpecs.makeReadyWasteSheets;
+        maxFormat = m.offsetSpecs.maxSheetMm || maxFormat;
+        maxGrammage = m.offsetSpecs.grammageRange || maxGrammage;
+        makeReady = m.offsetSpecs.makeReadyWasteSheets || makeReady;
       } else if (m.flexoSpecs) {
-        maxFormat = `${m.flexoSpecs.maxWebWidthMm} mm Web`;
+        maxFormat = `${m.flexoSpecs.maxWebWidthMm || 0} mm Web`;
         maxGrammage = "BOPP / Film";
-        makeReady = m.flexoSpecs.makeReadyWasteMeters;
+        makeReady = m.flexoSpecs.makeReadyWasteMeters || makeReady;
       } else if (m.dieCuttingSpecs) {
-        maxFormat = m.dieCuttingSpecs.maxSheetMm;
-        maxGrammage = m.dieCuttingSpecs.substrateRange.slice(0, 20);
-        makeReady = m.dieCuttingSpecs.makeReadyWasteSheets;
+        maxFormat = m.dieCuttingSpecs.maxSheetMm || maxFormat;
+        maxGrammage = (m.dieCuttingSpecs.substrateRange || "").slice(0, 20) || maxGrammage;
+        makeReady = m.dieCuttingSpecs.makeReadyWasteSheets || makeReady;
       } else if (m.laminationSpecs) {
-        maxFormat = m.laminationSpecs.maxSheetMm;
-        maxGrammage = m.laminationSpecs.grammageRange;
-        makeReady = m.laminationSpecs.makeReadyWasteSheets;
+        maxFormat = m.laminationSpecs.maxSheetMm || maxFormat;
+        maxGrammage = m.laminationSpecs.grammageRange || maxGrammage;
+        makeReady = m.laminationSpecs.makeReadyWasteSheets || makeReady;
       } else if (m.guillotineSpecs) {
-        maxFormat = `${m.guillotineSpecs.cuttingWidthMm} mm Cut`;
+        maxFormat = `${m.guillotineSpecs.cuttingWidthMm || 0} mm Cut`;
         maxGrammage = "1200 g/m²";
         makeReady = 10;
       } else if (m.jacquardSpecs) {
-        maxFormat = `${m.jacquardSpecs.reedWidthMm} mm / ${m.jacquardSpecs.hooksCount} H`;
+        maxFormat = `${m.jacquardSpecs.reedWidthMm || 0} mm / ${m.jacquardSpecs.hooksCount || 0} H`;
         maxGrammage = "Damask / Yarn";
-        makeReady = m.jacquardSpecs.wasteMeters;
+        makeReady = m.jacquardSpecs.wasteMeters || makeReady;
       } else if (m.mountingSpecs) {
-        maxFormat = m.mountingSpecs.maxSheetMm;
+        maxFormat = m.mountingSpecs.maxSheetMm || maxFormat;
         maxGrammage = "Corrugated";
-        makeReady = m.mountingSpecs.makeReadyWasteSheets;
+        makeReady = m.mountingSpecs.makeReadyWasteSheets || makeReady;
       } else if (m.casingInSpecs) {
-        maxFormat = m.casingInSpecs.maxBookFormatMm;
+        maxFormat = m.casingInSpecs.maxBookFormatMm || maxFormat;
         maxGrammage = "Hardcover";
-        makeReady = m.casingInSpecs.makeReadyWasteBooks;
+        makeReady = m.casingInSpecs.makeReadyWasteBooks || makeReady;
       }
 
+      const hourlyRate = m.costing?.standardHourlyRateUsd ?? Number(m.hourlyRate ?? 0);
+      const efficiency = m.overallEfficiency ?? 90;
+
       return {
-        id: m.id,
+        id: m.code || m.id,
+        realId: m.id,
+        code: m.code,
         name: m.name,
-        type: `${m.department} (${m.category})`,
+        type: `${m.department || "Production"} (${m.category || "machine"})`,
         maxFormat,
         maxGrammage,
         makeReadySheets: makeReady,
-        hourlyRate: m.costing.standardHourlyRateUsd,
-        efficiency: m.overallEfficiency,
-        status: m.status,
+        hourlyRate,
+        efficiency,
+        status: m.status || "Idle",
         rawMachine: m,
       };
     });
   }, [machines, machinesData]);
 
+  const mappedTooling = useMemo(() => {
+    return (diesTooling || []).map((t: any) => {
+      const across = Number(t.acrossCount) || 1;
+      const around = Number(t.aroundCount) || 1;
+      const typeLabels: Record<string, string> = {
+        rotary_magnetic: "Rotary Magnetic (Магнитный)",
+        solid_rotary: "Solid Rotary (Цельный)",
+        flatbed: "Flatbed Die (Штанцформа)",
+        hot_stamp: "Hot-Foil Stamp (Тиснение)",
+        embossing: "Embossing Cliché (Конгрев)",
+      };
+      const shapeLabels: Record<string, string> = {
+        rectangle: "To'rtburchak (Rect)",
+        rounded_rect: `Radiusli (R=${t.cornerRadiusMm || 0}mm)`,
+        circle: `Aylana (Ø ${t.widthMm}mm)`,
+        oval: "Oval",
+        custom: "Figurali kontur",
+      };
+      const statusLabels: Record<string, string> = {
+        available: "Available (Tayyor)",
+        in_use: "In Press (Stanokda)",
+        sharpening: "Sharpening (Ta'mirda)",
+        retired: "Retired (Chiqarilgan)",
+      };
+
+      const customerDisplay = t.customerName
+        ? `${t.customerName}${t.isDedicated ? " (Eksklyuziv)" : ""}`
+        : "Universal (Umumiy)";
+      const ownershipDisplay =
+        t.ownership === "customer_owned"
+          ? "Mijoz mulki"
+          : "In-House (Bizniki)";
+
+      return {
+        id: t.code || t.id,
+        realId: t.id,
+        code: t.code,
+        name: t.name,
+        customer: customerDisplay,
+        customerName: t.customerName || "",
+        customerId: t.customerId || null,
+        ownership: ownershipDisplay,
+        rawOwnership: t.ownership || "in_house",
+        isDedicated: Boolean(t.isDedicated),
+        toolType: typeLabels[t.dieType] || t.dieType || "Flatbed Die",
+        shape: shapeLabels[t.shape] || t.shape || "rectangle",
+        itemSize: `${t.widthMm} × ${t.heightMm} mm`,
+        cavitiesUp: `${across}×${around} (${across * around}-up)`,
+        format: t.cylinderTeeth ? `Z=${t.cylinderTeeth} (${t.repeatLengthMm || "-"} mm)` : "Flatbed",
+        cylinderTeeth: t.cylinderTeeth || "-",
+        rack: t.location || "-",
+        location: t.location || "-",
+        strikesUsed: Number(t.totalImpressions) || 0,
+        maxStrikes: Number(t.maxImpressions) || 0,
+        status: statusLabels[t.status] || t.status || "Ready",
+        notes: t.notes || "",
+        rawTool: t,
+      };
+    });
+  }, [diesTooling]);
+
   const handleCreateNew = useCallback(() => {
     if (type === "bom") {
-      const newId = `SPEC-00${Math.floor(100 + Math.random() * 900)}`;
+      const draftTabId = `draft-spec-${Date.now()}`;
       openTab({
-        id: newId,
-        title: `New Spec`,
+        id: draftTabId,
+        title: "Yangi Shablon (Qoralama)",
         type: "product-spec",
         module: "production",
         isUnsaved: true,
         activeLevel3Tab: "overview",
         documentData: {
-          code: newId,
-          name: "New Master Recipe",
+          code: "",
+          name: "",
           department: "Offset",
+          category: "Commercial Print",
           status: "Draft",
           version: "1.0",
+          basePrice: 0,
+          currency: "USD",
+          unit: "1k pcs",
+          description: "",
+          baseMaterial: "",
+          materials: [],
+          operations: [],
         },
       });
     } else if (type === "planning") {
-      setCreateWorkOrderOpen(true);
-    } else if (type === "tooling") {
-      const newTool = {
-        id: `DIE-0${105 + toolingData.length}`,
-        name: "New Custom Die-Cut Shtamp / Cliché",
-        toolType: "Flatbed Steel-Rule Die (Штанцформа)",
-        itemSize: "100×100 mm",
-        cavitiesUp: "8-up (2×4)",
-        format: "B2 (500×707 mm)",
-        customer: "Alpha Media Group",
-        rack: "Rack A-15",
-        strikesUsed: 0,
-        maxStrikes: 100000,
-        status: "Ready",
-      };
-      setToolingData((prev) => [newTool, ...prev]);
-      setSelectedRecordId(newTool.id);
-      setEditTitle(newTool.name);
-      setEditParam1(newTool.itemSize);
-      setEditParam2(newTool.rack);
-      setIsDrawerOpen(true);
-    } else if (type === "machines") {
-      const newId = `MAC-${101 + (machines ? machines.length : machinesData.length)}`;
+      const draftId = `draft-wo-${Date.now()}`;
       openTab({
-        id: `machine-${newId}`,
-        title: "Yangi Uskuna Pasporti",
+        id: draftId,
+        title: "Yangi buyruq (Qoralama)",
+        type: "work-order",
+        module: "production",
+        isUnsaved: true,
+        activeLevel3Tab: "overview",
+        documentData: {
+          id: draftId,
+          docNo: "",
+          customer: "",
+          product: "",
+          department: "Offset",
+          quantity: 0,
+          unit: "pcs",
+          status: "Draft",
+          priority: "Normal",
+          pressMachine: "",
+          deadline: "",
+          paperStock: "",
+          priceTotal: 0,
+          currency: "UZS",
+        },
+      });
+    } else if (type === "tooling") {
+      let maxNum = 0;
+      for (const d of (diesTooling || [])) {
+        const match = d.code?.match(/^DIE-(\d+)$/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
+      }
+      const nextCode = `DIE-${String(maxNum + 1).padStart(4, "0")}`;
+      setToolFormData({
+        isNew: true,
+        code: nextCode,
+        name: "",
+        dieType: "rotary_magnetic",
+        shape: "rectangle",
+        widthMm: 50,
+        heightMm: 90,
+        cornerRadiusMm: 0,
+        acrossCount: 2,
+        aroundCount: 1,
+        gapXMm: 3,
+        gapYMm: 3,
+        repeatLengthMm: "",
+        cylinderTeeth: "",
+        location: "",
+        status: "available",
+        totalImpressions: 0,
+        maxImpressions: 100000,
+        notes: "",
+        customerId: "",
+        customerName: "",
+        ownership: "in_house",
+        isDedicated: false,
+      });
+      setToolModalOpen(true);
+    } else if (type === "machines") {
+      let maxNum = 0;
+      for (const m of (machines || [])) {
+        const match = m.code?.match(/^MAC-(\d+)$/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
+      }
+      const nextCode = `MAC-${String(maxNum + 1).padStart(4, "0")}`;
+
+      openTab({
+        id: `machine-new-${Date.now()}`,
+        title: `Yangi Uskuna (${nextCode})`,
         type: "machine-detail",
         module: "production",
         isUnsaved: true,
         activeLevel3Tab: "overview",
         documentData: {
-          id: newId,
-          name: "Yangi Chop Etish / Pardozlash Uskunasi",
-          code: `EQ-${newId}`,
+          isNew: true,
+          name: "",
+          code: nextCode,
           department: "Offset",
+          category: "offset",
+          status: "Idle",
         },
       });
     } else {
       setCreateWorkOrderOpen(true);
     }
-  }, [type, openTab, setCreateWorkOrderOpen, planningData.length, toolingData.length, machinesData.length, machines]);
+  }, [type, openTab, setCreateWorkOrderOpen, planningData.length, diesTooling, machinesData.length, machines]);
 
   // Keyboard shortcut: Ins to Create New
   useEffect(() => {
@@ -437,50 +523,87 @@ export function ProductionGrid({ type }: ProductionGridProps) {
       mockRows = mappedMachines;
     } else if (type === "bom") {
       cols = [
-        { id: "id", title: "BOM ID", width: 100, icon: GridColumnIcon.HeaderReference },
-        { id: "productName", title: "Product Template", width: 250, icon: GridColumnIcon.HeaderString },
-        { id: "version", title: "Version", width: 100, icon: GridColumnIcon.HeaderNumber },
-        { id: "baseMaterial", title: "Base Material", width: 200, icon: GridColumnIcon.HeaderLookup },
-        { id: "componentsCount", title: "Components", width: 120, icon: GridColumnIcon.HeaderNumber },
-        { id: "status", title: "Status", width: 120, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "id", title: "Shablon / BOM Kodi", width: 135, icon: GridColumnIcon.HeaderReference },
+        { id: "productName", title: "Mahsulot & Xizmat Nomi", width: 270, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: "category", title: "Kategoriya", width: 150, icon: GridColumnIcon.HeaderLookup },
+        { id: "department", title: "Sex / Texnologiya", width: 135, icon: GridColumnIcon.HeaderLookup },
+        { id: "baseMaterial", title: "Asosiy Xomashyo", width: 200, icon: GridColumnIcon.HeaderString },
+        { id: "componentsCount", title: "BOM (moddalar)", width: 120, icon: GridColumnIcon.HeaderNumber },
+        { id: "basePrice", title: "Narx / 1k", width: 120, icon: GridColumnIcon.HeaderNumber },
+        { id: "status", title: "Status", width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      mockRows = [
-        { id: "OFFSET_KASHIROVKA_V1", productName: "Duplex / Triplex Mounted Card & Box (Kashirovka 300g+300g)", version: "v2.0", baseMaterial: "2× 300g Coated Matt + PVA Glue", componentsCount: 7, status: "Active" },
-        { id: "OFFSET_STD_V1", productName: "Standard Sheetfed Offset Commercial Print", version: "v1.4", baseMaterial: "Galerie Art Silk 150g", componentsCount: 5, status: "Active" },
-        { id: "FLEXO_SATIN_V2", productName: "Woven Satin Garment Care Label (Rotary Flexo)", version: "v2.1", baseMaterial: "Satin Ribbon 30mm White", componentsCount: 4, status: "Active" },
-        { id: "FLEXO_NYLON_V1", productName: "Coated Nylon Taffeta Wash-Care Roll", version: "v1.2", baseMaterial: "Nylon Taffeta 40mm", componentsCount: 4, status: "Active" },
-        ...Array.from({ length: 20 }, (_, i) => ({
-          id: `BOM-${String(1001 + i).padStart(4, "0")}`,
-          productName: ["Hardcover Catalog 96p", "A5 Booklet 32p", "Offset Magazine", "Folding Carton Box 350g"][i % 4] + ` - Type ${i + 1}`,
-          version: `v1.${i % 5}`,
-          baseMaterial: ["Galerie Art Silk 150g", "Munken Polar 120g", "Kraft Board 350g"][i % 3],
-          componentsCount: 4 + (i % 5),
-          status: ["Active", "Draft", "Obsolete"][i % 3],
-        })),
-      ];
+      mockRows = (masterSpecifications || []).map((s) => ({
+        id: s.code || s.id,
+        realId: s.id,
+        productName: s.name,
+        category: s.category || "Commercial Print",
+        department: s.department || "Offset",
+        version: s.version || "1.0",
+        baseMaterial: s.baseMaterial || (s.techSpecs as any)?.baseMaterial || "-",
+        componentsCount: s.materialsCount ?? (s.materials?.length || 0),
+        basePrice: Number(s.basePrice) || 0,
+        currency: s.currency || "USD",
+        status: s.status || "Active",
+        width: s.dimensions?.width,
+        height: s.dimensions?.height,
+        depth: s.dimensions?.depth,
+        dimensionUnit: s.dimensions?.dimensionUnit,
+        unit: s.unit,
+        description: s.description,
+        techSpecs: s.techSpecs,
+        materials: s.materials,
+        operations: s.operations,
+      }));
     } else {
       cols = [
-        { id: "id", title: "Tool Code", width: 105, icon: GridColumnIcon.HeaderReference },
-        { id: "name", title: "Die / Cliché Description", width: 290, icon: GridColumnIcon.HeaderString },
-        { id: "toolType", title: "Tooling Type", width: 220, icon: GridColumnIcon.HeaderLookup },
-        { id: "itemSize", title: "Cut Size (W×H)", width: 135, icon: GridColumnIcon.HeaderString },
-        { id: "cavitiesUp", title: "Imposition (Up)", width: 115, icon: GridColumnIcon.HeaderString },
-        { id: "format", title: "Sheet / Cylinder", width: 145, icon: GridColumnIcon.HeaderString },
-        { id: "customer", title: "Client Owner", width: 175, icon: GridColumnIcon.HeaderString },
-        { id: "rack", title: "Storage Rack", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "strikesUsed", title: "Strikes Used", width: 115, icon: GridColumnIcon.HeaderNumber },
-        { id: "status", title: "Status", width: 135, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "id", title: "Tool Code", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "name", title: "Die / Cliché Description", width: 260, icon: GridColumnIcon.HeaderString },
+        { id: "customer", title: "Mijoz (Client / Dedicated)", width: 190, icon: GridColumnIcon.HeaderLookup },
+        { id: "ownership", title: "Egalik Turi", width: 130, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "toolType", title: "Tooling Type", width: 200, icon: GridColumnIcon.HeaderLookup },
+        { id: "shape", title: "Shape (Forma)", width: 135, icon: GridColumnIcon.HeaderLookup },
+        { id: "itemSize", title: "Cut Size (W×H mm)", width: 140, icon: GridColumnIcon.HeaderString },
+        { id: "cavitiesUp", title: "Imposition (Across×Around)", width: 160, icon: GridColumnIcon.HeaderString },
+        { id: "format", title: "Format / Teeth", width: 135, icon: GridColumnIcon.HeaderString },
+        { id: "rack", title: "Storage Rack", width: 120, icon: GridColumnIcon.HeaderReference },
+        { id: "strikesUsed", title: "Strikes Used", width: 120, icon: GridColumnIcon.HeaderNumber },
+        { id: "maxStrikes", title: "Max Strikes", width: 120, icon: GridColumnIcon.HeaderNumber },
+        { id: "status", title: "Status", width: 140, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      mockRows = toolingData;
+      mockRows = mappedTooling;
     }
 
     return { columns: cols, rows: mockRows };
-  }, [type, planningData, machinesData, mappedMachines, toolingData, productionQueue]);
+  }, [type, planningData, machinesData, mappedMachines, mappedTooling, productionQueue, masterSpecifications]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [orderTypeFilter, setOrderTypeFilter] = useState<string>("ALL");
   const [machineFilter, setMachineFilter] = useState<string>("ALL");
+
+  const availableMachines = useMemo(() => {
+    const map = new Map<string, { id: string; code?: string; name: string; department?: string }>();
+    (machines || []).forEach((m) => {
+      if (m.name) {
+        map.set(m.name, {
+          id: m.id,
+          code: m.code,
+          name: m.name,
+          department: m.department,
+        });
+      }
+    });
+    productionQueue.forEach((q) => {
+      if (q.pressMachine && !map.has(q.pressMachine)) {
+        map.set(q.pressMachine, {
+          id: q.pressMachine,
+          name: q.pressMachine,
+          department: q.department || "Production",
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [machines, productionQueue]);
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
@@ -524,20 +647,36 @@ export function ProductionGrid({ type }: ProductionGridProps) {
       if (!selectedRow) return;
 
       if (type === "bom") {
+        const specItem = (masterSpecifications || []).find(
+          (s) => s.id === selectedRow.realId || s.code === selectedRow.id || s.id === selectedRow.id
+        );
         openTab({
           id: selectedRow.id,
-          title: selectedRow.id,
+          title: `${selectedRow.id}: ${selectedRow.productName}`,
           type: "product-spec",
           module: "production",
           isUnsaved: false,
           activeLevel3Tab: "overview",
-          documentData: {
+          documentData: specItem || {
+            id: selectedRow.realId || selectedRow.id,
             code: selectedRow.id,
             name: selectedRow.productName,
-            department: "Offset",
+            category: selectedRow.category,
+            department: selectedRow.department,
             status: selectedRow.status,
             version: selectedRow.version,
             baseMaterial: selectedRow.baseMaterial,
+            basePrice: selectedRow.basePrice,
+            currency: (selectedRow as any).currency || "USD",
+            width: selectedRow.width,
+            height: selectedRow.height,
+            depth: selectedRow.depth,
+            dimensionUnit: selectedRow.dimensionUnit,
+            unit: selectedRow.unit,
+            description: selectedRow.description,
+            techSpecs: selectedRow.techSpecs || {},
+            materials: selectedRow.materials || [],
+            operations: selectedRow.operations || [],
           },
         });
       } else if (type === "planning") {
@@ -551,6 +690,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           module: "production",
           activeLevel3Tab: "overview",
           documentData: {
+            ...item,
             id: docId,
             docNo: docId,
             customer: cust,
@@ -567,8 +707,8 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         });
       } else if (type === "machines") {
         openTab({
-          id: `machine-${selectedRow.id}`,
-          title: selectedRow.name,
+          id: `machine-${selectedRow.realId || selectedRow.id}`,
+          title: selectedRow.name || selectedRow.id,
           type: "machine-detail",
           module: "production",
           activeLevel3Tab: "overview",
@@ -576,29 +716,120 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         });
         addNotification({
           title: "Uskuna Pasporti Ochildi",
-          description: `${selectedRow.name} (${selectedRow.id}) texnik pasporti ochildi`,
+          description: `${selectedRow.name || selectedRow.id} (${selectedRow.id}) texnik pasporti ochildi`,
           severity: "info",
         });
       } else if (type === "tooling") {
-        setSelectedRecordId(selectedRow.id);
-        setEditTitle(selectedRow.name);
-        setEditParam1(selectedRow.itemSize);
-        setEditParam2(selectedRow.rack);
-        setIsDrawerOpen(true);
+        const raw = selectedRow.rawTool || selectedRow;
+        setToolFormData({
+          ...raw,
+          isNew: false,
+          widthMm: raw.widthMm || "",
+          heightMm: raw.heightMm || "",
+          cornerRadiusMm: raw.cornerRadiusMm ?? "",
+          acrossCount: raw.acrossCount || 1,
+          aroundCount: raw.aroundCount || 1,
+          gapXMm: raw.gapXMm ?? 3,
+          gapYMm: raw.gapYMm ?? 3,
+          repeatLengthMm: raw.repeatLengthMm || "",
+          cylinderTeeth: raw.cylinderTeeth || "",
+          location: raw.location || "",
+          status: raw.status || "available",
+          totalImpressions: raw.totalImpressions || 0,
+          maxImpressions: raw.maxImpressions || 100000,
+          notes: raw.notes || "",
+          customerId: raw.customerId || "",
+          customerName: raw.customerName || "",
+          ownership: raw.ownership || "in_house",
+          isDedicated: Boolean(raw.isDedicated),
+        });
+        setToolModalOpen(true);
       }
     },
-    [filteredRows, type, openTab, planningData, productionQueue, addNotification]
+    [filteredRows, type, openTab, planningData, productionQueue, addNotification, masterSpecifications]
   );
 
-  const handleOpen = useCallback(() => {
-    if (selection.rows.length === 0) return;
-    const rowIndex = selection.rows.toArray()[0];
-    handleOpenRow(rowIndex);
-  }, [selection.rows, handleOpenRow]);
+  const handleSaveToolModal = async () => {
+    if (!toolFormData) return;
+    if (!toolFormData.name?.trim()) {
+      addNotification({
+        title: "Xatolik",
+        description: "Iltimos, shtamp/pichoq tavsifi yoki nomini kiriting.",
+        severity: "warning",
+      });
+      return;
+    }
+    setIsToolSaving(true);
+    try {
+      if (upsertDieToolingAsync) {
+        const saved = await upsertDieToolingAsync(toolFormData);
+        if (saved) {
+          addNotification({
+            title: "Shtamp Saqlandi",
+            description: `${saved.name} (${saved.code}) muvaffaqiyatli saqlandi.`,
+            severity: "success",
+          });
+          setToolModalOpen(false);
+          setToolFormData(null);
+        } else {
+          addNotification({
+            title: "Saqlashda Xatolik",
+            description: "Serverdan kutilmagan javob qaytdi.",
+            severity: "error",
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error("Save tool error:", err);
+      addNotification({
+        title: "Xatolik",
+        description: err?.message || "Shtampni saqlashda xatolik yuz berdi.",
+        severity: "error",
+      });
+    } finally {
+      setIsToolSaving(false);
+    }
+  };
+
+  const handleDeleteTool = async () => {
+    if (!toolToDelete) return;
+    try {
+      const targetId = toolToDelete.realId || toolToDelete.id;
+      if (deleteDieToolingAsync) {
+        await deleteDieToolingAsync(targetId);
+        addNotification({
+          title: "Shtamp O'chirildi",
+          description: `${toolToDelete.code || toolToDelete.id} bazadan butunlay o'chirildi.`,
+          severity: "info",
+        });
+        setToolToDelete(null);
+        setToolModalOpen(false);
+      }
+    } catch (err: any) {
+      console.error("Delete tool error:", err);
+      addNotification({
+        title: "O'chirishda Xatolik",
+        description: err?.message || "Shtampni o'chirishda xatolik yuz berdi.",
+        severity: "error",
+      });
+    }
+  };
 
   const handleSaveDrawer = () => {
     if (!selectedRecord) return;
     if (type === "machines") {
+      const existing = machines.find((m) => m.id === selectedRecord.id);
+      if (existing && upsertMachineAsync) {
+        const updated = {
+          ...existing,
+          name: editTitle || existing.name,
+          costing: {
+            ...existing.costing,
+            standardHourlyRateUsd: Number(editParam1) || existing.costing.standardHourlyRateUsd,
+          },
+        };
+        upsertMachineAsync(updated);
+      }
       setMachinesData((prev) =>
         prev.map((m) =>
           m.id === selectedRecord.id
@@ -728,6 +959,18 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         };
       }
 
+      if (column.id === "basePrice") {
+        const num = Number(val) || 0;
+        const curr = (rowData as any).currency || "USD";
+        return {
+          kind: GridCellKind.Number,
+          data: num,
+          displayData: formatMoney(num, curr),
+          allowOverlay: true,
+          contentAlign: "right",
+        };
+      }
+
       return {
         kind: typeof val === "number" ? GridCellKind.Number : GridCellKind.Text,
         data: val,
@@ -836,6 +1079,18 @@ export function ProductionGrid({ type }: ProductionGridProps) {
               <div className="flex items-center gap-1.5 min-w-0 shrink overflow-x-auto no-scrollbar">
                 {type === "planning" ? (
                   <>
+                    {/* Primary Action: Create Work Order */}
+                    <Button
+                      onClick={handleCreateNew}
+                      size="sm"
+                      className="h-6.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded shrink-0 whitespace-nowrap cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{tCommon("create")}</span>
+                    </Button>
+
+                    <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
+
                     {/* View Mode Toggle (Machine Queues vs Data Table) */}
                     <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
                       <button
@@ -866,39 +1121,43 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       </button>
                     </div>
 
-                    <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
-
-                    {/* Machine Dispatch Selector */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium pl-0.5 shrink-0">
-                        <Cpu className="w-3.5 h-3.5 text-blue-500" />
-                        <span className="hidden md:inline">Stanok:</span>
-                      </span>
-                      <Select value={machineFilter} onValueChange={(val) => setMachineFilter(val ?? "ALL")}>
-                        <SelectTrigger className="h-6.5 text-xs w-[140px] sm:w-[160px] bg-background shrink-0">
-                          <SelectValue placeholder="Barcha stanoklar" />
-                        </SelectTrigger>
-                        <SelectContent className="text-xs">
-                          <SelectItem value="ALL">Barcha Stanoklar (All)</SelectItem>
-                          <SelectItem value="Heidelberg Speedmaster XL 106-8P">Heidelberg XL 106 (Ofset)</SelectItem>
-                          <SelectItem value="Komori Lithrone G40 (4-Color)">Komori Lithrone G40 (Ofset)</SelectItem>
-                          <SelectItem value="Mark Andy Performance Series P7">Mark Andy P7 (Flexo)</SelectItem>
-                          <SelectItem value="Staubli LX 3202 High-Speed Jacquard Loom">Staubli Loom (Jakkard)</SelectItem>
-                          <SelectItem value="Bobst Novacut 106 E Autoplaten">Bobst Novacut 106 (Shtans)</SelectItem>
-                          <SelectItem value="Stock Sheet-to-Sheet Kashirovka Line">Kashirovka Line (Duplex)</SelectItem>
-                          <SelectItem value="Autobond Mini 76 TH Thermal">Autobond Mini 76 (Laminatsiya)</SelectItem>
-                          <SelectItem value="Polar N 115 Plus High-Speed Guillotine">Polar N 115 (Qirqish)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {/* Machine Selector: Only in Table Mode (in Board mode, machine cards are on the board) */}
+                    {viewMode === "table" && (
+                      <>
+                        <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium pl-0.5 shrink-0">
+                            <Cpu className="w-3.5 h-3.5 text-blue-500" />
+                            <span className="hidden md:inline">Stanok:</span>
+                          </span>
+                          <Select
+                            value={machineFilter}
+                            onValueChange={(val) => setMachineFilter(val ?? "ALL")}
+                          >
+                            <SelectTrigger className="h-6.5 text-xs w-[130px] sm:w-[150px] bg-background shrink-0">
+                              <SelectValue placeholder="Barcha stanoklar" />
+                            </SelectTrigger>
+                            <SelectContent className="text-xs">
+                              <SelectItem value="ALL">Barcha Stanoklar (All)</SelectItem>
+                              {(machines || []).map((m) => (
+                                <SelectItem key={m.code || m.id} value={m.name}>
+                                  {m.code ? `[${m.code}] ` : ""}{m.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    )}
 
                     <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
 
                     {/* Operational Status Filters */}
                     <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
                       <button
+                        type="button"
                         onClick={() => setStatusFilter("ALL")}
-                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "ALL"
                             ? "bg-background text-foreground font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -907,8 +1166,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                         Barchasi
                       </button>
                       <button
+                        type="button"
                         onClick={() => setStatusFilter("Running")}
-                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "Running"
                             ? "bg-background text-amber-600 dark:text-amber-400 font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -917,8 +1177,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                         Jarayonda
                       </button>
                       <button
+                        type="button"
                         onClick={() => setStatusFilter("Ready to Print")}
-                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "Ready to Print"
                             ? "bg-background text-emerald-600 dark:text-emerald-400 font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -927,8 +1188,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                         Chopga tayyor
                       </button>
                       <button
+                        type="button"
                         onClick={() => setStatusFilter("Queue")}
-                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "Queue"
                             ? "bg-background text-blue-600 dark:text-blue-400 font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -937,8 +1199,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                         Navbatda
                       </button>
                       <button
+                        type="button"
                         onClick={() => setStatusFilter("Completed")}
-                        className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           statusFilter === "Completed"
                             ? "bg-background text-zinc-600 dark:text-zinc-300 font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
@@ -948,12 +1211,12 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       </button>
                     </div>
 
+                    {/* Color Rows Feature Toggle: Only in Table Mode */}
                     {viewMode === "table" && (
                       <>
                         <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
-                        {/* Color Rows Feature Toggle */}
                         <div
-                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors cursor-pointer select-none whitespace-nowrap shrink-0 ${
+                          className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors cursor-pointer select-none whitespace-nowrap shrink-0 ${
                             enableStatusColors
                               ? "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 font-medium"
                               : "bg-muted/50 border-border/60 text-muted-foreground hover:text-foreground"
@@ -984,15 +1247,6 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>{tCommon("create")}</span>
-                    </Button>
-                    <Button
-                      onClick={handleOpen}
-                      variant="outline"
-                      size="sm"
-                      className="h-6.5 px-2 text-xs font-medium gap-1 rounded shrink-0 whitespace-nowrap"
-                    >
-                      <ExternalLink className="w-3 h-3 text-muted-foreground" />
-                      <span>Open</span>
                     </Button>
                     <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
 
@@ -1103,6 +1357,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                 searchFilter={searchFilter}
                 statusFilter={statusFilter}
                 machineFilter={machineFilter}
+                onMachineFilterChange={setMachineFilter}
                 onOpenWorkOrder={(woId, item) => {
                   openTab({
                     id: woId,
@@ -1111,6 +1366,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     module: "production",
                     activeLevel3Tab: "overview",
                     documentData: {
+                      ...item,
                       id: woId,
                       docNo: woId,
                       customer: item.customer,
@@ -1120,6 +1376,26 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       status: item.stage,
                     },
                   });
+                }}
+                onOpenMachineDetail={(machineName) => {
+                  const mac = (machines || []).find(
+                    (m) => m.name === machineName || m.code === machineName
+                  );
+                  if (mac) {
+                    openTab({
+                      id: `machine-${mac.id}`,
+                      title: mac.name || mac.code,
+                      type: "machine-detail",
+                      module: "production",
+                      activeLevel3Tab: "overview",
+                      documentData: mac,
+                    });
+                    addNotification({
+                      title: "Uskuna Pasporti Ochildi",
+                      description: `${mac.name} (${mac.code}) texnik pasporti ochildi`,
+                      severity: "info",
+                    });
+                  }
                 }}
               />
             ) : (
@@ -1153,11 +1429,6 @@ export function ProductionGrid({ type }: ProductionGridProps) {
             <span>{tCommon("create")}</span>
             <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ins</span>
           </ContextMenuItem>
-          <ContextMenuItem onClick={handleOpen} className="gap-2 cursor-pointer">
-            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
-            <span>Open Selected</span>
-            <span className="ml-auto text-[10px] text-muted-foreground font-mono">Enter</span>
-          </ContextMenuItem>
           {type === "planning" && (
             <>
               <ContextMenuSeparator />
@@ -1171,6 +1442,26 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     ? "Hide " + tGrid("statusColors")
                     : "Show " + tGrid("statusColors")}
                 </span>
+              </ContextMenuItem>
+            </>
+          )}
+          {type === "bom" && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={() => {
+                  const selectedRowIdx = selection.rows.toArray()[0];
+                  const targetRow = filteredRows[selectedRowIdx];
+                  if (targetRow) {
+                    setSpecToDelete(targetRow);
+                  }
+                }}
+                disabled={selection.rows.toArray().length === 0}
+                className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Bazadan o'chirish</span>
+                <span className="ml-auto text-[10px] text-muted-foreground font-mono">Del</span>
               </ContextMenuItem>
             </>
           )}
@@ -1309,6 +1600,525 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* BOM Shablonini o'chirish dialogi */}
+      <Dialog open={Boolean(specToDelete)} onOpenChange={(open) => !open && setSpecToDelete(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="w-5 h-5 text-destructive" />
+              Shablonni butunlay o'chirish
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Haqiqatan ham <strong className="font-semibold text-foreground">{specToDelete?.id}: {specToDelete?.productName}</strong> shablonini bazadan butunlay o'chirmoqchimisiz?
+              Bu amalni orqaga qaytarib bo'lmaydi.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setSpecToDelete(null)}
+              className="h-8 text-xs"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={async () => {
+                if (specToDelete) {
+                  const target = specToDelete.realId || specToDelete.id;
+                  await deleteSpecificationAsync(target);
+                  setSpecToDelete(null);
+                  addNotification({
+                    title: "O'chirildi",
+                    description: `${specToDelete.id} bazadan butunlay o'chirildi`,
+                    severity: "info",
+                  });
+                }
+              }}
+              className="h-8 text-xs gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Ha, o'chirilsin</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dies & Tooling Yaratish / Tahrirlash Dialogi ── */}
+      <Dialog open={toolModalOpen} onOpenChange={(open) => !open && setToolModalOpen(false)}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Stamp className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+              {toolFormData?.isNew
+                ? "Yangi Shtamp / Pichoq Ro'yxatdan O'tkazish"
+                : `Shtamp / Pichoq Pasporti: ${toolFormData?.code || ""}`}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Texnologik pichoq, magnit shtamp yoki klishe parametrlarini real bazada saqlash.
+            </DialogDescription>
+          </DialogHeader>
+
+          {toolFormData && (
+            <div className="space-y-4 py-1 text-xs">
+              {/* Asosiy ma'lumotlar */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Shtamp Kodi *
+                  </Label>
+                  <Input
+                    value={toolFormData.code || ""}
+                    onChange={(e) =>
+                      setToolFormData({ ...toolFormData, code: e.target.value.toUpperCase() })
+                    }
+                    placeholder="DIE-0001"
+                    className="h-8 text-xs font-mono font-medium"
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Nomi & Tavsifi *
+                  </Label>
+                  <Input
+                    value={toolFormData.name || ""}
+                    onChange={(e) => setToolFormData({ ...toolFormData, name: e.target.value })}
+                    placeholder="Masalan: VIP Hangtag 50×90mm R3 magnit pichoq"
+                    className="h-8 text-xs font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Turi va Shakli */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Shtamp Turi (Technology)
+                  </Label>
+                  <Select
+                    value={toolFormData.dieType || "rotary_magnetic"}
+                    onValueChange={(val) => setToolFormData({ ...toolFormData, dieType: val })}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="rotary_magnetic">Rotary Magnetic (Магнитный)</SelectItem>
+                      <SelectItem value="solid_rotary">Solid Rotary (Цельный ротационный)</SelectItem>
+                      <SelectItem value="flatbed">Flatbed (Tekis shtansforma)</SelectItem>
+                      <SelectItem value="hot_stamp">Hot Foil Cliché (Zarb klishesi)</SelectItem>
+                      <SelectItem value="embossing">Embossing (Kongrev / Bo'rtma)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Shakli (Die Shape)
+                  </Label>
+                  <Select
+                    value={toolFormData.shape || "rectangle"}
+                    onValueChange={(val) => setToolFormData({ ...toolFormData, shape: val })}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="rectangle">To'rtburchak (Rectangle)</SelectItem>
+                      <SelectItem value="rounded_rect">Radiusli to'rtburchak</SelectItem>
+                      <SelectItem value="circle">Aylana / Doira (Circle)</SelectItem>
+                      <SelectItem value="oval">Oval</SelectItem>
+                      <SelectItem value="custom">Maxsus figurali (Custom)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Holati (Status)
+                  </Label>
+                  <Select
+                    value={toolFormData.status || "available"}
+                    onValueChange={(val) => setToolFormData({ ...toolFormData, status: val })}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="available">Available (Tayyor / Omborda)</SelectItem>
+                      <SelectItem value="in_use">In Press (Stanokda o'rnatilgan)</SelectItem>
+                      <SelectItem value="sharpening">Sharpening (O'tkirlashda)</SelectItem>
+                      <SelectItem value="retired">Retired (Hisobdan chiqarilgan)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Mijozga biriktirish & Egalik huquqi */}
+              <div className="p-3 rounded-lg border border-indigo-200/60 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-950 dark:text-indigo-200">
+                    <Building className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Mijozga biriktirish & Egalik Huquqi</span>
+                  </div>
+                  {toolFormData.customerId ? (
+                    <Badge variant="outline" className="text-[10px] bg-indigo-100/60 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700">
+                      Mijoz pichog'i
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                      Universal (Umumiy)
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Biriktirilgan Mijoz (CRM)
+                    </Label>
+                    <Select
+                      value={toolFormData.customerId || "none"}
+                      onValueChange={(val) => {
+                        if (val === "none") {
+                          setToolFormData({
+                            ...toolFormData,
+                            customerId: "",
+                            customerName: "",
+                            ownership: "in_house",
+                            isDedicated: false,
+                          });
+                        } else {
+                          const client = (crmCustomers || []).find((c) => c.id === val);
+                          setToolFormData({
+                            ...toolFormData,
+                            customerId: val,
+                            customerName: client?.name || "",
+                            ownership: "customer_owned",
+                            isDedicated: true,
+                          });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-background">
+                        <SelectValue placeholder="Mijozni tanlang yoki Universal" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">
+                          <span className="font-medium text-muted-foreground">
+                            Universal (Barcha mijozlar uchun ochiq)
+                          </span>
+                        </SelectItem>
+                        {(crmCustomers || []).map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            <span className="font-medium">{c.name}</span>
+                            {c.tin && <span className="font-mono text-muted-foreground ml-1.5 text-[10px]">({c.tin})</span>}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      Egalik Turi (Ownership)
+                    </Label>
+                    <Select
+                      value={toolFormData.ownership || "in_house"}
+                      onValueChange={(val) => setToolFormData({ ...toolFormData, ownership: val })}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="in_house">
+                          Bizning mulkimiz (In-House / Korxona aktivi)
+                        </SelectItem>
+                        <SelectItem value="customer_owned">
+                          Mijoz mulki (Customer Owned / Mas'ul saqlov)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {toolFormData.customerId && (
+                  <div className="flex items-center gap-2 pt-1 text-[11px]">
+                    <input
+                      type="checkbox"
+                      id="isDedicatedCheck"
+                      checked={Boolean(toolFormData.isDedicated)}
+                      onChange={(e) => setToolFormData({ ...toolFormData, isDedicated: e.target.checked })}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                    />
+                    <label htmlFor="isDedicatedCheck" className="text-muted-foreground cursor-pointer select-none">
+                      Faqat shu mijoz buyurtmalari uchun eksklyuziv cheklansin (Boshqa buyurtmalarda ko'rinmaydi)
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              {/* O'lchamlar */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Eni (Width mm) *
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.widthMm ?? ""}
+                    onChange={(e) => setToolFormData({ ...toolFormData, widthMm: e.target.value })}
+                    placeholder="50"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Bo'yi (Height mm) *
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.heightMm ?? ""}
+                    onChange={(e) => setToolFormData({ ...toolFormData, heightMm: e.target.value })}
+                    placeholder="90"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Radius (Corner R mm)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.cornerRadiusMm ?? ""}
+                    onChange={(e) =>
+                      setToolFormData({ ...toolFormData, cornerRadiusMm: e.target.value })
+                    }
+                    placeholder="0"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Stellaj / Quti (Rack)
+                  </Label>
+                  <Input
+                    value={toolFormData.location || ""}
+                    onChange={(e) => setToolFormData({ ...toolFormData, location: e.target.value })}
+                    placeholder="Masalan: SHELF-A2"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Ruxlar va Oraliqlar (Imposition) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Ko'ndalang rux (Across)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.acrossCount ?? 1}
+                    onChange={(e) =>
+                      setToolFormData({ ...toolFormData, acrossCount: Number(e.target.value) || 1 })
+                    }
+                    min={1}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Bo'ylama rux (Around)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.aroundCount ?? 1}
+                    onChange={(e) =>
+                      setToolFormData({ ...toolFormData, aroundCount: Number(e.target.value) || 1 })
+                    }
+                    min={1}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Oraliq X (Gap X mm)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.gapXMm ?? 3}
+                    onChange={(e) => setToolFormData({ ...toolFormData, gapXMm: e.target.value })}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Oraliq Y (Gap Y mm)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.gapYMm ?? 3}
+                    onChange={(e) => setToolFormData({ ...toolFormData, gapYMm: e.target.value })}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Silindr & Resurs */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Silindr Tishlari (Z)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.cylinderTeeth ?? ""}
+                    onChange={(e) =>
+                      setToolFormData({ ...toolFormData, cylinderTeeth: e.target.value })
+                    }
+                    placeholder="Masalan: 70"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Takrorlanish (Repeat mm)
+                  </Label>
+                  <Input
+                    value={toolFormData.repeatLengthMm ?? ""}
+                    onChange={(e) =>
+                      setToolFormData({ ...toolFormData, repeatLengthMm: e.target.value })
+                    }
+                    placeholder="93.000"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Zarblar Soni (Ishlagan)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.totalImpressions ?? 0}
+                    onChange={(e) =>
+                      setToolFormData({ ...toolFormData, totalImpressions: e.target.value })
+                    }
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Maksimal Zarblar (Resurs)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={toolFormData.maxImpressions ?? 100000}
+                    onChange={(e) =>
+                      setToolFormData({ ...toolFormData, maxImpressions: e.target.value })
+                    }
+                    placeholder="100000"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Izohlar */}
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  Qo'shimcha Izohlar (Notes)
+                </Label>
+                <Textarea
+                  value={toolFormData.notes || ""}
+                  onChange={(e) => setToolFormData({ ...toolFormData, notes: e.target.value })}
+                  placeholder="Pichoq xususiyatlari, qaysi qog'oz va mahsulotlarga mosligi..."
+                  rows={2}
+                  className="text-xs resize-none"
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-0 justify-between items-center pt-2 border-t border-border">
+            <div>
+              {!toolFormData?.isNew && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setToolToDelete(toolFormData)}
+                  className="h-8 text-xs gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>O'chirish</span>
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setToolModalOpen(false)}
+                className="h-8 text-xs"
+              >
+                Bekor qilish
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSaveToolModal}
+                disabled={isToolSaving}
+                className="h-8 text-xs bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isToolSaving ? "Saqlanmoqda..." : "Bazaga Saqlash"}</span>
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Shtampni o'chirish tasdiqlash dialogi */}
+      <Dialog open={Boolean(toolToDelete)} onOpenChange={(open) => !open && setToolToDelete(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="w-5 h-5 text-destructive" />
+              Shtampni bazadan butunlay o'chirish
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Haqiqatan ham <strong className="font-semibold text-foreground">{toolToDelete?.code}: {toolToDelete?.name}</strong> shtampini bazadan o'chirmoqchimisiz?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setToolToDelete(null)}
+              className="h-8 text-xs"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleDeleteTool}
+              className="h-8 text-xs gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Ha, o'chirilsin</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

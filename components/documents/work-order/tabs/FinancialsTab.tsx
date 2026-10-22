@@ -32,12 +32,14 @@ import { ShiftEvent, WorkOrderFormData, RouteStep } from "../types";
 import { PrintPlanningResult } from "../planningEngine";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { formatMoney } from "../../common/DocumentShell";
+import { BomItem } from "../../BomMaterialsGrid";
 
 interface FinancialsTabProps {
   shiftEvents: ShiftEvent[];
   formData?: WorkOrderFormData;
   printPlan?: PrintPlanningResult;
   operations?: RouteStep[];
+  materials?: BomItem[];
   docNo?: string;
   onPriceChange?: (newPrice: number, financials?: any) => void;
 }
@@ -49,7 +51,8 @@ export function FinancialsTab({
   formData,
   printPlan,
   operations = [],
-  docNo = "WO-00000",
+  materials = [],
+  docNo = "WOOF-26-0001",
   onPriceChange,
 }: FinancialsTabProps) {
   const { warehouseStock, addNotification } = useWorkspaceStore();
@@ -57,9 +60,10 @@ export function FinancialsTab({
   const [viewMode, setViewMode] = useState<"internal" | "quotation">("internal");
   const [copied, setCopied] = useState(false);
 
-  const targetQty = formData?.quantity || 5000;
-  const currentSellingPrice = formData?.priceTotal || 14850;
+  const targetQty = formData?.quantity || 0;
+  const currentSellingPrice = formData?.priceTotal || 0;
   const currency = formData?.currency || "USD";
+  const hasQty = targetQty > 0;
 
   // ─── 1. REAL COST DRIVERS (TANNARX MODELI) ───────────────────────────────────
 
@@ -70,49 +74,51 @@ export function FinancialsTab({
     return warehouseStock.find((s) => clean.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(clean));
   }, [formData?.paperStock, warehouseStock]);
 
-  const requiredSheets = printPlan?.requiredParentSheets || Math.ceil((targetQty * 1.1) / (formData?.sizes?.length || 10));
-  const paperSheetPrice = paperStockItem?.unitPriceUsd || (printPlan ? printPlan.estimatedPaperCost / Math.max(1, requiredSheets) : 0.19);
-  const paperTotalCost = Number((requiredSheets * paperSheetPrice).toFixed(2));
-  const paperWeightKg = printPlan?.totalPaperWeightKg || Number(((requiredSheets * 0.7 * 150) / 1000).toFixed(1));
+  const bomTotalCost = useMemo(() => {
+    return (materials || []).reduce((sum, item) => sum + (Number(item.totalPrice) || 0), 0);
+  }, [materials]);
+
+  const requiredSheets = hasQty ? (printPlan?.requiredParentSheets || Math.ceil((targetQty * 1.1) / (formData?.sizes?.length || 10))) : 0;
+  const paperSheetPrice = paperStockItem?.unitPriceUsd || (printPlan && requiredSheets > 0 ? printPlan.estimatedPaperCost / requiredSheets : 0);
+  const calculatedPaperCost = hasQty ? Number((requiredSheets * paperSheetPrice).toFixed(2)) : 0;
+  const paperTotalCost = bomTotalCost > 0 ? bomTotalCost : calculatedPaperCost;
+  const paperWeightKg = hasQty ? (printPlan?.totalPaperWeightKg || Number(((requiredSheets * 0.7 * 150) / 1000).toFixed(1))) : 0;
 
   // B. CTP Qoliplari (Plates & Prepress)
-  const ctpPlatesCount = printPlan?.totalCtpPlates || 4;
+  const ctpPlatesCount = hasQty ? (printPlan?.totalCtpPlates || 0) : 0;
   const plateStockItem = warehouseStock.find((s) => s.category === "Inks & Plates" && s.unit === "pcs");
-  const plateUnitPrice = plateStockItem?.unitPriceUsd || 7.20;
-  const platesTotalCost = Number((ctpPlatesCount * plateUnitPrice).toFixed(2));
+  const plateUnitPrice = plateStockItem?.unitPriceUsd || (ctpPlatesCount > 0 ? 7.20 : 0);
+  const platesTotalCost = hasQty ? Number((ctpPlatesCount * plateUnitPrice).toFixed(2)) : 0;
 
   // C. Kraska va Kimyoviy materiallar (Inks & Chemistry)
-  const totalInksCount = printPlan?.totalUniqueInks || 4;
+  const totalInksCount = hasQty ? (printPlan?.totalUniqueInks || 0) : 0;
   const inkStockItem = warehouseStock.find((s) => s.category === "Inks & Plates" && s.unit === "kg");
-  const inkUnitPrice = inkStockItem?.unitPriceUsd || 11.50;
-  // Approximating ink usage: ~1.2 kg per 5000 impressions per 4 colors
-  const estimatedInkKg = Number((((printPlan?.totalImpressions || targetQty) / 5000) * (totalInksCount * 0.35)).toFixed(2));
-  const inkTotalCost = Number((estimatedInkKg * inkUnitPrice).toFixed(2));
+  const inkUnitPrice = inkStockItem?.unitPriceUsd || (totalInksCount > 0 ? 11.50 : 0);
+  const estimatedInkKg = hasQty && totalInksCount > 0 ? Number((((printPlan?.totalImpressions || targetQty) / 5000) * (totalInksCount * 0.35)).toFixed(2)) : 0;
+  const inkTotalCost = hasQty ? Number((estimatedInkKg * inkUnitPrice).toFixed(2)) : 0;
 
   // D. Bosma Mashinasi va Uskunalar Amortizatsiyasi (Machine Runtime & Depreciation)
-  // Base machine hourly rate without labor
   const machineHourRate = 40.0;
-  const totalMachineHours = printPlan?.totalPressHours || 2.5;
-  const machineTotalCost = Number((totalMachineHours * machineHourRate).toFixed(2));
+  const totalMachineHours = hasQty ? (printPlan?.totalPressHours || 0) : 0;
+  const machineTotalCost = hasQty ? Number((totalMachineHours * machineHourRate).toFixed(2)) : 0;
 
-  // E. Ishchilar Oyligi / Mehnat haqi fondi (Direct Labor Cost)
-  // Press operator ($15/hr) + Post-press staff ($10/hr)
+  // E. Direct Labor Cost
   const operatorHourRate = 15.0;
-  const pressLaborCost = Number((totalMachineHours * operatorHourRate).toFixed(2));
-  const postPressHours = Math.max(1.0, operations.length * 0.5);
-  const postPressLaborCost = Number((postPressHours * 10.0).toFixed(2));
-  const totalLaborCost = Number((pressLaborCost + postPressLaborCost).toFixed(2));
+  const pressLaborCost = hasQty ? Number((totalMachineHours * operatorHourRate).toFixed(2)) : 0;
+  const postPressHours = hasQty && operations.length > 0 ? operations.length * 0.5 : 0;
+  const postPressLaborCost = hasQty ? Number((postPressHours * 10.0).toFixed(2)) : 0;
+  const totalLaborCost = hasQty ? Number((pressLaborCost + postPressLaborCost).toFixed(2)) : 0;
 
   // F. Pardozlash va Qadoqlash (Lamination, Die-cut, Packing)
   const isLaminated = formData?.lamination && formData.lamination.toLowerCase() !== "none";
-  const laminationCost = isLaminated ? Number((targetQty * 0.025).toFixed(2)) : 0;
-  const packagingCost = Number((Math.ceil(targetQty / 500) * 2.5).toFixed(2)); // $2.5 per box of 500
+  const laminationCost = (hasQty && isLaminated) ? Number((targetQty * 0.025).toFixed(2)) : 0;
+  const packagingCost = hasQty ? Number((Math.ceil(targetQty / 500) * 2.5).toFixed(2)) : 0;
   const finishingTotalCost = Number((laminationCost + packagingCost).toFixed(2));
 
   // G. Sifat Nuqsoni va Brak (Cost of Poor Quality - COPQ)
   const wasteEvents = shiftEvents.filter((ev) => ev.type === "Waste" && ev.wasteQty);
   const totalWasteQty = wasteEvents.reduce((sum, ev) => sum + (ev.wasteQty || 0), 0);
-  const approxUnitBaseCost = (paperTotalCost + platesTotalCost + inkTotalCost + machineTotalCost + totalLaborCost + finishingTotalCost) / targetQty;
+  const approxUnitBaseCost = hasQty ? (paperTotalCost + platesTotalCost + inkTotalCost + machineTotalCost + totalLaborCost + finishingTotalCost) / targetQty : 0;
   const wasteLossCost = Number((totalWasteQty * approxUnitBaseCost).toFixed(2));
 
   // ─── 2. TOTAL PRODUCTION BASE COST (JAMI ISHLAB CHIQARISH TANNARXI) ──────────
@@ -529,7 +535,7 @@ To'lov shartlari: 50% avans to'lovi, 50% mahsulot tayyor bo'lgach.`;
                     </Badge>
                   </div>
                   <div className="text-[11px] text-muted-foreground font-mono">
-                    Bosmachi operatori ({totalMachineHours}h × {formatMoney(operatorHourRate, currency)}) + Pardozlash ustasi ({postPressHours}h × $10)
+                    Bosmachi operatori ({totalMachineHours}h × {formatMoney(operatorHourRate, currency)}) + Pardozlash ustasi ({postPressHours}h × {formatMoney(10, currency)})
                   </div>
                 </div>
                 <div className="text-right">

@@ -301,15 +301,38 @@ export function InfoRow({
   );
 }
 
-export function formatMoney(value: number | undefined, currency = "USD", fractionDigits = 2) {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-      minimumFractionDigits: fractionDigits,
-      maximumFractionDigits: fractionDigits,
-    }).format(value || 0);
-  } catch {
-    return `${(value || 0).toLocaleString()} ${currency}`;
+export function getCurrencySymbol(currency: string = "USD"): string {
+  switch (currency?.toUpperCase()) {
+    case "UZS":
+      return "so'm";
+    case "EUR":
+      return "€";
+    case "RUB":
+      return "₽";
+    case "USD":
+    default:
+      return "$";
+  }
+}
+
+export function formatMoney(value: number | undefined, currency = "USD", fractionDigits = 2): string {
+  const num = Number(value) || 0;
+  const curr = (currency || "USD").toUpperCase();
+  const decimals = curr === "UZS" ? 0 : fractionDigits;
+  const numStr = num.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+
+  switch (curr) {
+    case "UZS":
+      return `${numStr} so'm`;
+    case "EUR":
+      return `€${numStr}`;
+    case "RUB":
+      return `${numStr} ₽`;
+    case "USD":
+    default:
+      return `$${numStr}`;
   }
 }

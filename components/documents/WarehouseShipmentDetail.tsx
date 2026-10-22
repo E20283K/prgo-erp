@@ -877,6 +877,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const {
     warehouseShipments,
     upsertWarehouseShipment,
+    upsertWarehouseShipmentAsync,
+    replaceTabId,
     productionQueue,
     crmCustomers,
     warehouseStock,
@@ -892,11 +894,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   // Initialize or read existing document
   const initialDoc = useMemo<WarehouseShipmentRecord>(() => {
     const d = tab.documentData || {};
-    const defaultProduct = d.product || "A4 Hardcover Catalog 96p";
-    const defaultQty = Number(d.quantity) || 5000;
+    const defaultProduct = d.product || "";
+    const defaultQty = Number(d.quantity) || 0;
     const defaultUnit = d.unit || "pcs";
-    const defaultCustomer = d.customer || crmCustomers[0]?.name || "Alpha Media Group LLC";
-    const defaultWo = d.workOrder || productionQueue[0]?.id || "WO-00351";
+    const defaultCustomer = d.customer || crmCustomers[0]?.name || "";
+    const defaultWo = d.workOrder || "";
     const defaultShipmentType: ShipmentType = d.shipmentType || "CustomerDelivery";
 
     const defaultItems: ShipmentLineItem[] = d.items && d.items.length > 0
@@ -976,13 +978,13 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       defaultWo = "— (Filiallararo)";
     } else if (st === "Outsourcing") {
       defaultRecipient = SUBCONTRACTORS[0];
-      defaultWo = productionQueue[0]?.id || "WO-00351";
+      defaultWo = productionQueue[0]?.id || "WOOF-26-0351";
     } else if (st === "VendorReturn") {
       defaultRecipient = VENDORS[0];
       defaultWo = "— (Reklamatsiya)";
     } else if (st === "CustomerDelivery") {
       defaultRecipient = crmCustomers[0]?.name || "Alpha Media Group LLC";
-      defaultWo = productionQueue[0]?.id || "WO-00351";
+      defaultWo = productionQueue[0]?.id || "WOOF-26-0351";
     }
 
     setDoc((prev) => ({
@@ -1169,30 +1171,41 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     setIsStockPickerOpen(false);
   };
 
-  const handleSave = () => {
-    upsertWarehouseShipment(doc);
+  const isDraft = !doc.id || doc.id.startsWith("draft-") || doc.id.startsWith("new-") || doc.id.startsWith("SHP-NEW-");
+
+  const saveShipmentInternal = async (overrideStatus?: WarehouseShipmentRecord["status"]) => {
+    const status = overrideStatus || doc.status;
+    const payload = {
+      ...doc,
+      status,
+      shipmentNumber: isDraft ? "" : doc.id,
+      quantity: totalShippedQty,
+    };
+    const res = await upsertWarehouseShipmentAsync(payload);
+    if (res && res.shipmentNumber) {
+      const realId = res.shipmentNumber;
+      const updated = { ...doc, id: realId, status, quantity: totalShippedQty };
+      setDoc(updated);
+      upsertWarehouseShipment(updated);
+      replaceTabId(tab.id, realId, `${realId}: ${updated.customer || "Chiqim"}`, updated);
+    } else {
+      const updated = { ...doc, status, quantity: totalShippedQty };
+      setDoc(updated);
+      upsertWarehouseShipment(updated);
+    }
     setTabUnsaved(tab.id, false);
+  };
+
+  const handleSave = () => {
+    saveShipmentInternal();
   };
 
   const handleDispatch = () => {
-    const updated: WarehouseShipmentRecord = {
-      ...doc,
-      status: "Dispatched",
-      quantity: totalShippedQty,
-    };
-    setDoc(updated);
-    upsertWarehouseShipment(updated);
-    setTabUnsaved(tab.id, false);
+    saveShipmentInternal("Dispatched");
   };
 
   const handleMarkDelivered = () => {
-    const updated: WarehouseShipmentRecord = {
-      ...doc,
-      status: "Delivered",
-    };
-    setDoc(updated);
-    upsertWarehouseShipment(updated);
-    setTabUnsaved(tab.id, false);
+    saveShipmentInternal("Delivered");
   };
 
   // ─── Glide Data Grid Columns ──────────────────────────────────────────────
@@ -1376,10 +1389,12 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             <Truck className="size-3.5" />
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-xs tracking-tight truncate">
-            <span>{doc.id}</span>
+            <span className={cn(isDraft && "font-mono text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded")}>
+              {isDraft ? "Yangi (Avtomatik)" : doc.id}
+            </span>
             <span className="text-muted-foreground">—</span>
             <span className="truncate text-foreground">
-              {doc.customer ? `${doc.customer} (${doc.product})` : "Yangi Ombor Chiqimi"}
+              {doc.customer ? `${doc.customer} (${doc.product})` : (isDraft ? "Yangi Ombor Chiqimi (Qoralama)" : "Ombor Chiqimi")}
             </span>
           </div>
 

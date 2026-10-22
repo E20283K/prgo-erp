@@ -31,11 +31,21 @@ export const auditActionEnum = pgEnum("audit_action", [
 
 // ─── 1. Companies (Xolding tarkibidagi korxonalar) ────────────────────────────
 
+export interface TelegramCompanySettings {
+  botToken?: string;
+  botUsername?: string;
+  webhookUrl?: string;
+  isWebhookActive?: boolean;
+  defaultNotificationLanguage?: "uz" | "ru" | "en";
+  autoCreateLeadsFromUnknownGroups?: boolean;
+}
+
 export interface CompanySettings {
   timezone?: string;
   defaultTaxPercent?: number;
   allowNegativeStock?: boolean;
   workOrderPrefix?: string;
+  telegram?: TelegramCompanySettings;
 }
 
 export const companies = pgTable(

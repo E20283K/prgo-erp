@@ -27,13 +27,17 @@ import {
   X,
   Scissors,
   Camera,
+  ArrowDownToLine,
+  Truck,
+  Boxes,
+  Building2,
+  DollarSign,
 } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { ReturnOffcutDialog } from "./ReturnOffcutDialog";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
-import { getMaterialImage } from "@/lib/materialImages";
 import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/documents/MaterialImageModal";
 import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -59,294 +63,24 @@ import {
 } from "@/components/ui/alert-dialog";
 import { FieldCombobox, type ComboboxOption } from "@/components/ui/field-combobox";
 
-// ─── Real-world printing warehouse data ──────────────────────────────────────
+// ─── Standard Units & Classifiers ───────────────────────────────────────────
 
-const LOCATIONS = ["Main Factory — Tashkent", "Branch Warehouse — Samarkand", "Finishing Shop — Bukhara"];
-
-function generateStockBalance() {
-  const items = [
-    { sku: "PAP-001", name: "Galerie Art Silk 150g/m² (SRA3)", category: "Paper", unit: "sheets", reorder: 10000 },
-    { sku: "PAP-002", name: "Munken Polar Rough 120g/m² (A4)", category: "Paper", unit: "sheets", reorder: 8000 },
-    { sku: "PAP-003", name: "Kraft Board 350g/m² (700×1000)", category: "Board", unit: "sheets", reorder: 3000 },
-    { sku: "PAP-004", name: "Chromolux Cast Coated 250g (B1)", category: "Paper", unit: "sheets", reorder: 5000 },
-    { sku: "PAP-005", name: "Colorplan Ebony 270g/m² (SRA2)", category: "Specialty", unit: "sheets", reorder: 2000 },
-    { sku: "INK-001", name: "Toyo Hyplus Cyan (Process)", category: "Ink", unit: "kg", reorder: 20 },
-    { sku: "INK-002", name: "Toyo Hyplus Magenta (Process)", category: "Ink", unit: "kg", reorder: 20 },
-    { sku: "INK-003", name: "Toyo Hyplus Yellow (Process)", category: "Ink", unit: "kg", reorder: 20 },
-    { sku: "INK-004", name: "Toyo Hyplus Black (Process)", category: "Ink", unit: "kg", reorder: 30 },
-    { sku: "INK-005", name: "Pantone 186 C (Spot Red)", category: "Ink", unit: "kg", reorder: 5 },
-    { sku: "INK-006", name: "Pantone 877 C (Silver Metallic)", category: "Ink", unit: "kg", reorder: 3 },
-    { sku: "CON-001", name: "Heidelberg Wash-Up Solution 5L", category: "Consumable", unit: "bottles", reorder: 10 },
-    { sku: "CON-002", name: "Offset Dampening Additive IPA-Free", category: "Consumable", unit: "liters", reorder: 50 },
-    { sku: "CON-003", name: "Rubber Blanket (Heidelberg XL 106)", category: "Consumable", unit: "pcs", reorder: 4 },
-    { sku: "CON-004", name: "UV Varnish — Gloss (20L drum)", category: "Coating", unit: "drums", reorder: 3 },
-    { sku: "CON-005", name: "Soft-Touch Matte Lamination Film 320mm", category: "Coating", unit: "rolls", reorder: 5 },
-    { sku: "CON-006", name: "Hot Melt Glue PUR (Kolbus)", category: "Adhesive", unit: "kg", reorder: 25 },
-    { sku: "CON-007", name: "Stitching Wire 0.55mm (Galvanized)", category: "Bindery", unit: "spools", reorder: 10 },
-    { sku: "CON-008", name: "Shrink Wrap Film 450mm", category: "Packaging", unit: "rolls", reorder: 8 },
-    { sku: "FIN-001", name: "Gold Foil — Hot Stamp 220mm", category: "Foil", unit: "rolls", reorder: 6 },
-    { sku: "FIN-002", name: "Holographic Foil 160mm", category: "Foil", unit: "rolls", reorder: 3 },
-    { sku: "FIN-003", name: "Die-Cut Matrix Board 2mm", category: "Tooling", unit: "sheets", reorder: 50 },
-    { sku: "PLT-001", name: "CTP Plate Fuji Brillia 790×1030", category: "Plate", unit: "pcs", reorder: 100 },
-    { sku: "PLT-002", name: "CTP Plate Developer Concentrate", category: "Plate", unit: "liters", reorder: 20 },
-    { sku: "THR-001", name: "Polyester Thread (White) — Smyth Sewing", category: "Bindery", unit: "cones", reorder: 12 },
-  ];
-
-  return items.map((item, i) => {
-    const stocks = LOCATIONS.map(() => Math.floor(Math.random() * item.reorder * 3));
-    const totalStock = stocks.reduce((a, b) => a + b, 0);
-    return {
-      ...item,
-      location: LOCATIONS[i % LOCATIONS.length],
-      stockLevel: totalStock,
-      reserved: Math.floor(totalStock * 0.3),
-      available: totalStock - Math.floor(totalStock * 0.3),
-      lastReceived: `2026-09-${String(15 + (i % 15)).padStart(2, "0")}`,
-      status: totalStock > item.reorder * 1.5 ? "In Stock" : totalStock > item.reorder * 0.3 ? "Low Stock" : "Critical",
-    };
-  });
-}
-
-function generateMovements() {
-  const reasons = [
-    "Production order WO-00351 — Hardcover Catalog",
-    "Restock from Samarkand branch",
-    "Transfer for WO-00365 — Calendar print",
-    "Urgent pull for WO-00370 — A4 Booklet rush",
-    "Monthly rebalance between warehouses",
-    "Return defective stock — supplier claim",
-    "Quality hold release — ink batch verified",
-    "Branch request — Bukhara finishing shop",
-  ];
-  const materials = [
-    "Galerie Art Silk 150g (SRA3)", "Munken Polar 120g (A4)", "Toyo Cyan Ink",
-    "Toyo Black Ink", "Hot Melt Glue PUR", "UV Varnish Gloss", "Gold Foil 220mm",
-    "CTP Plate 790×1030", "Soft-Touch Lamination Film",
-  ];
-  return Array.from({ length: 120 }, (_, i) => {
-    const status = ["Completed", "In Transit", "Pending"][i % 3];
-    const quantity = [500, 1000, 25, 50, 10, 2, 3, 20, 4][i % 9];
-    
-    // If it's In Transit or Pending, nothing has been received yet (0).
-    // If Completed, mostly full quantity is received, occasionally with a shortage/discrepancy (e.g. 95% received)
-    let receivedQty = status === "Completed" ? quantity : 0;
-    if (status === "Completed" && i % 8 === 0) {
-      receivedQty = Math.floor(quantity * 0.9); // Discrepancy simulation
-    }
-
-    return {
-      id: `MOV-${String(4000 + i).padStart(4, "0")}`,
-      date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
-      material: materials[i % materials.length],
-      quantity,
-      receivedQty,
-      unit: ["sheets", "sheets", "kg", "kg", "kg", "drums", "rolls", "pcs", "rolls"][i % 9],
-      from: LOCATIONS[i % 3],
-      to: LOCATIONS[(i + 1) % 3],
-      reason: reasons[i % reasons.length],
-      status,
-      operator: ["D. Karimov", "S. Abdullayev", "N. Yusupova", "R. Ismoilov"][i % 4],
-    };
-  });
-}
-
-function generateInventoryCounts() {
-  const materials = [
-    "Galerie Art Silk 150g", "Kraft Board 350g", "Toyo Cyan", "Toyo Magenta",
-    "Toyo Yellow", "Toyo Black", "UV Varnish Gloss", "Hot Melt Glue PUR",
-    "CTP Plate Fuji", "Stitching Wire 0.55mm",
-  ];
-  return Array.from({ length: 60 }, (_, i) => {
-    const systemQty = Math.floor(1000 + Math.random() * 5000);
-    const variance = Math.floor((Math.random() - 0.5) * 200);
-    const actualQty = systemQty + variance;
-    return {
-      id: `IC-${String(2026090 + i)}`,
-      date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
-      location: LOCATIONS[i % 3],
-      material: materials[i % materials.length],
-      systemQty,
-      actualQty,
-      variance,
-      unit: i < 5 ? "sheets" : ["kg", "drums", "pcs", "spools"][i % 4],
-      status: Math.abs(variance) < 50 ? "Matched" : variance > 0 ? "Surplus" : "Shortage",
-      countedBy: ["D. Karimov", "S. Abdullayev", "N. Yusupova"][i % 3],
-    };
-  });
-}
-
-function generateReceipts() {
-  const suppliers = [
-    "Antalis Central Asia", "Igepa Group GmbH", "Toyo Ink Uzbekistan",
-    "Fujifilm CIS", "Kolbus Parts Europe", "KURZ Foils Asia",
-  ];
-  const materials = [
-    { name: "Galerie Art Silk 150g/m² (SRA3)", qty: 10000, unit: "sheets" },
-    { name: "Munken Polar 120g/m² (A4)", qty: 15000, unit: "sheets" },
-    { name: "Kraft Board 350g (700×1000)", qty: 5000, unit: "sheets" },
-    { name: "Toyo Hyplus Cyan (Process)", qty: 50, unit: "kg" },
-    { name: "Toyo Hyplus Black (Process)", qty: 80, unit: "kg" },
-    { name: "UV Varnish Gloss 20L drum", qty: 5, unit: "drums" },
-    { name: "CTP Plate Fuji Brillia 790×1030", qty: 200, unit: "pcs" },
-    { name: "Gold Foil Hot Stamp 220mm", qty: 10, unit: "rolls" },
-    { name: "Hot Melt Glue PUR (Kolbus)", qty: 100, unit: "kg" },
-    { name: "Soft-Touch Matte Film 320mm", qty: 8, unit: "rolls" },
-  ];
-  return Array.from({ length: 90 }, (_, i) => {
-    const mat = materials[i % materials.length];
-    return {
-      id: `RCV-${String(3000 + i).padStart(4, "0")}`,
-      date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
-      supplier: suppliers[i % suppliers.length],
-      material: mat.name,
-      quantity: mat.qty + Math.floor(Math.random() * mat.qty * 0.2),
-      unit: mat.unit,
-      location: LOCATIONS[i % 3],
-      poNumber: `PO-2026-${String(800 + i).padStart(4, "0")}`,
-      status: ["Received", "Inspecting", "Quarantine", "Accepted"][i % 4],
-      receivedBy: ["D. Karimov", "S. Abdullayev", "N. Yusupova", "R. Ismoilov"][i % 4],
-    };
-  });
-}
-
-function generateShipments() {
-  const customers = [
-    "Alpha Media Group LLC", "Nordic Print Co", "Baltic Press LLC",
-    "Apex Packaging", "Zenith Publishing", "Vanguard Fashion",
-  ];
-  const products = [
-    { name: "A4 Hardcover Catalog 96p", qty: 5000, unit: "pcs" },
-    { name: "A5 Wire-O Booklet 32p", qty: 3000, unit: "pcs" },
-    { name: "Custom Folding Carton 350g", qty: 10000, unit: "pcs" },
-    { name: "Offset Magazine Gloss 64p", qty: 8000, unit: "pcs" },
-    { name: "Tri-fold Calendar 2027", qty: 2000, unit: "pcs" },
-    { name: "Self-Adhesive Labels (Roll)", qty: 50000, unit: "pcs" },
-  ];
-  const carriers = ["Express Logistics UZ", "DHL Freight", "Own Vehicle", "Customer Pickup"];
-  return Array.from({ length: 70 }, (_, i) => {
-    const prod = products[i % products.length];
-    return {
-      id: `SHP-${String(6000 + i).padStart(4, "0")}`,
-      date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
-      customer: customers[i % customers.length],
-      workOrder: `WO-${String(350 + (i % 30)).padStart(5, "0")}`,
-      product: prod.name,
-      quantity: prod.qty,
-      unit: prod.unit,
-      from: LOCATIONS[i % 3],
-      carrier: carriers[i % carriers.length],
-      trackingNo: i % 4 === 3 ? "—" : `TRK${String(900000 + i * 7)}`,
-      status: ["Packed", "Dispatched", "In Transit", "Delivered"][i % 4],
-    };
-  });
-}
-
-function generateLocations() {
-  return [
-    { id: "LOC-001", name: "Main Factory — Tashkent", type: "Factory", address: "12 Amir Temur St, Tashkent 100000", zones: 8, totalSKUs: 142, capacity: "85%", manager: "D. Karimov", status: "Active" },
-    { id: "LOC-002", name: "Branch Warehouse — Samarkand", type: "Warehouse", address: "45 Registan Ave, Samarkand 140100", zones: 4, totalSKUs: 67, capacity: "62%", manager: "S. Abdullayev", status: "Active" },
-    { id: "LOC-003", name: "Finishing Shop — Bukhara", type: "Workshop", address: "8 Ismoil Somoni St, Bukhara 200100", zones: 3, totalSKUs: 38, capacity: "71%", manager: "N. Yusupova", status: "Active" },
-    { id: "LOC-004", name: "Outdoor Paper Storage", type: "Storage", address: "Main Factory Yard, Building C", zones: 2, totalSKUs: 18, capacity: "90%", manager: "R. Ismoilov", status: "Active" },
-    { id: "LOC-005", name: "Ink & Chemical Store", type: "Hazmat", address: "Main Factory, Block D (Climate Controlled)", zones: 1, totalSKUs: 24, capacity: "55%", manager: "D. Karimov", status: "Active" },
-    { id: "LOC-006", name: "Finished Goods — Dispatch Bay", type: "Staging", address: "Main Factory, Gate 2", zones: 2, totalSKUs: 31, capacity: "78%", manager: "R. Ismoilov", status: "Active" },
-    { id: "LOC-007", name: "Archive Warehouse (Cold)", type: "Archive", address: "Industrial Zone, Lot 14", zones: 1, totalSKUs: 5, capacity: "22%", manager: "S. Abdullayev", status: "Inactive" },
-  ];
-}
-
-// ─── Combobox option datasets ─────────────────────────────────────────────────
-
-const MATERIALS_OPTIONS: ComboboxOption[] = [
-  { value: "Galerie Art Silk 150g/m² (SRA3)", label: "Galerie Art Silk 150g/m² (SRA3)" },
-  { value: "Munken Polar Rough 120g/m² (A4)", label: "Munken Polar Rough 120g/m² (A4)" },
-  { value: "Kraft Board 350g/m² (700×1000)", label: "Kraft Board 350g/m² (700×1000)" },
-  { value: "Chromolux Cast Coated 250g (B1)", label: "Chromolux Cast Coated 250g (B1)" },
-  { value: "Colorplan Ebony 270g/m² (SRA2)", label: "Colorplan Ebony 270g/m² (SRA2)" },
-  { value: "Toyo Hyplus Cyan (Process)", label: "Toyo Hyplus Cyan (Process)" },
-  { value: "Toyo Hyplus Magenta (Process)", label: "Toyo Hyplus Magenta (Process)" },
-  { value: "Toyo Hyplus Yellow (Process)", label: "Toyo Hyplus Yellow (Process)" },
-  { value: "Toyo Hyplus Black (Process)", label: "Toyo Hyplus Black (Process)" },
-  { value: "Pantone 186 C (Spot Red)", label: "Pantone 186 C (Spot Red)" },
-  { value: "Pantone 877 C (Silver Metallic)", label: "Pantone 877 C (Silver Metallic)" },
-  { value: "UV Varnish — Gloss (20L drum)", label: "UV Varnish — Gloss (20L drum)" },
-  { value: "Soft-Touch Matte Lamination Film 320mm", label: "Soft-Touch Matte Lamination Film 320mm" },
-  { value: "Hot Melt Glue PUR (Kolbus)", label: "Hot Melt Glue PUR (Kolbus)" },
-  { value: "Stitching Wire 0.55mm (Galvanized)", label: "Stitching Wire 0.55mm (Galvanized)" },
-  { value: "CTP Plate Fuji Brillia 790×1030", label: "CTP Plate Fuji Brillia 790×1030" },
-  { value: "Gold Foil — Hot Stamp 220mm", label: "Gold Foil — Hot Stamp 220mm" },
-  { value: "Holographic Foil 160mm", label: "Holographic Foil 160mm" },
-  { value: "Rubber Blanket (Heidelberg XL 106)", label: "Rubber Blanket (Heidelberg XL 106)" },
-  { value: "Shrink Wrap Film 450mm", label: "Shrink Wrap Film 450mm" },
+const DEFAULT_UNITS: ComboboxOption[] = [
+  { value: "sheets", label: "sheets (varaq)" },
+  { value: "kg", label: "kg (kilogramm)" },
+  { value: "pcs", label: "pcs (dona)" },
+  { value: "rolls", label: "rolls (rulon)" },
+  { value: "drums", label: "drums (bochka)" },
+  { value: "liters", label: "liters (litr)" },
+  { value: "bottles", label: "bottles (flakon)" },
+  { value: "spools", label: "spools (bobina)" },
+  { value: "m²", label: "m² (kvadrat metr)" },
 ];
-
-const LOCATIONS_OPTIONS: ComboboxOption[] = LOCATIONS.map((l) => ({ value: l, label: l }));
-
-const SUPPLIERS_OPTIONS: ComboboxOption[] = [
-  { value: "Antalis Central Asia", label: "Antalis Central Asia" },
-  { value: "Igepa Group GmbH", label: "Igepa Group GmbH" },
-  { value: "Toyo Ink Uzbekistan", label: "Toyo Ink Uzbekistan" },
-  { value: "Fujifilm CIS", label: "Fujifilm CIS" },
-  { value: "Kolbus Parts Europe", label: "Kolbus Parts Europe" },
-  { value: "KURZ Foils Asia", label: "KURZ Foils Asia" },
-  { value: "Heidelberg CIS", label: "Heidelberg CIS" },
-  { value: "BASF Printing Chemicals", label: "BASF Printing Chemicals" },
-];
-
-const CUSTOMERS_OPTIONS: ComboboxOption[] = [
-  { value: "Alpha Media Group LLC", label: "Alpha Media Group LLC" },
-  { value: "Nordic Print Co", label: "Nordic Print Co" },
-  { value: "Baltic Press LLC", label: "Baltic Press LLC" },
-  { value: "Apex Packaging", label: "Apex Packaging" },
-  { value: "Zenith Publishing", label: "Zenith Publishing" },
-  { value: "Vanguard Fashion", label: "Vanguard Fashion" },
-  { value: "Central Asia Retail Group", label: "Central Asia Retail Group" },
-  { value: "Silk Road Books", label: "Silk Road Books" },
-];
-
-const UNITS_OPTIONS: ComboboxOption[] = [
-  { value: "sheets", label: "sheets" },
-  { value: "kg", label: "kg" },
-  { value: "pcs", label: "pcs" },
-  { value: "rolls", label: "rolls" },
-  { value: "drums", label: "drums" },
-  { value: "liters", label: "liters" },
-  { value: "bottles", label: "bottles" },
-  { value: "spools", label: "spools" },
-  { value: "cones", label: "cones" },
-];
-
-const OPERATORS_OPTIONS: ComboboxOption[] = [
-  { value: "D. Karimov", label: "D. Karimov" },
-  { value: "S. Abdullayev", label: "S. Abdullayev" },
-  { value: "N. Yusupova", label: "N. Yusupova" },
-  { value: "R. Ismoilov", label: "R. Ismoilov" },
-];
-
-const CARRIERS_OPTIONS: ComboboxOption[] = [
-  { value: "Express Logistics UZ", label: "Express Logistics UZ" },
-  { value: "DHL Freight", label: "DHL Freight" },
-  { value: "Own Vehicle", label: "Own Vehicle" },
-  { value: "Customer Pickup", label: "Customer Pickup" },
-];
-
-// Which fields render as combobox (key → options list)
-const COMBOBOX_FIELDS: Record<string, ComboboxOption[]> = {
-  material:    MATERIALS_OPTIONS,
-  from:        LOCATIONS_OPTIONS,
-  to:          LOCATIONS_OPTIONS,
-  location:    LOCATIONS_OPTIONS,
-  supplier:    SUPPLIERS_OPTIONS,
-  customer:    CUSTOMERS_OPTIONS,
-  carrier:     CARRIERS_OPTIONS,
-  unit:        UNITS_OPTIONS,
-  operator:    OPERATORS_OPTIONS,
-  receivedBy:  OPERATORS_OPTIONS,
-  countedBy:   OPERATORS_OPTIONS,
-};
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
 interface WarehouseGridProps {
-  type: string; // "stock-balance" | "movements" | "inventory" | "receipts" | "shipments" | "locations" | "finished-goods"
+  type: string; // "stock-balance" | "requirements" | "movements" | "inventory" | "receipts" | "shipments" | "locations" | "finished-goods"
 }
 
 export function WarehouseGrid({ type }: WarehouseGridProps) {
@@ -357,13 +91,31 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     warehouseShipments,
     warehouseStock,
     warehouseMovements,
+    warehouseReceipts,
+    warehousesList,
     finishedGoods,
+    inventoryCounts,
     crmCustomers,
+    loadWarehouseStock,
+    loadWarehouseMovements,
+    loadWarehouseReceipts,
+    loadWarehouseShipments,
+    loadWarehouses,
+    loadFinishedGoods,
+    loadInventoryCounts,
+    upsertWarehouseStockAsync,
+    upsertWarehouseMovementAsync,
+    upsertWarehouseReceiptAsync,
+    upsertWarehouseShipmentAsync,
+    upsertWarehouseAsync,
+    upsertFinishedGoodAsync,
+    upsertInventoryCountAsync,
     upsertWarehouseStock,
     addWarehouseShipment,
     updateWarehouseShipmentStatus,
     deliveryActs,
     openTab,
+    productionQueue,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
 
@@ -377,6 +129,30 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const [previewMaterial, setPreviewMaterial] = useState<MaterialImagePreviewData | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState<boolean>(false);
   const [uploadTargetRecord, setUploadTargetRecord] = useState<any | null>(null);
+
+  const comboboxFields: Record<string, ComboboxOption[]> = useMemo(() => {
+    const locOptions: ComboboxOption[] = warehousesList.map((w: any) => ({
+      value: w.name,
+      label: w.name,
+    }));
+    const custOptions: ComboboxOption[] = crmCustomers.map((c: any) => ({
+      value: c.name,
+      label: c.name,
+    }));
+    const matOptions: ComboboxOption[] = warehouseStock.map((s: any) => ({
+      value: s.name,
+      label: `${s.name} (${s.sku})`,
+    }));
+
+    return {
+      material: matOptions,
+      from: locOptions,
+      to: locOptions,
+      location: locOptions,
+      customer: custOptions,
+      unit: DEFAULT_UNITS,
+    };
+  }, [warehousesList, crmCustomers, warehouseStock]);
 
   // Blank templates for each record type
   const blankTemplates: Record<string, Record<string, string>> = {
@@ -454,33 +230,35 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
   const handleCreateNew = () => {
     if (type === "receipts") {
-      const newId = `RCV-${String(Date.now()).slice(-4)}`;
+      const draftId = `draft-rcv-${Date.now()}`;
       openTab({
-        id: newId,
-        title: `${newId}: Yangi Kirim Hujjati`,
+        id: draftId,
+        title: "Yangi Kirim Hujjati (Qoralama)",
         type: "warehouse-receipt",
         module: "warehouse",
         isUnsaved: true,
         documentData: {
-          id: newId,
+          id: draftId,
+          receiptNumber: "",
           date: new Date().toISOString().split("T")[0],
-          supplier: "Tashkent Paper Trade LLC",
+          supplier: "",
           status: "Draft",
+          items: [],
         },
       });
       return;
     }
     if (type === "shipments") {
-      const nextNum = 6010 + warehouseShipments.length;
-      const newId = `SHP-${nextNum}`;
+      const draftId = `draft-shp-${Date.now()}`;
       openTab({
-        id: newId,
-        title: `${newId}: Yangi Ombor Chiqimi`,
+        id: draftId,
+        title: "Yangi Ombor Chiqimi (Qoralama)",
         type: "warehouse-shipment",
         module: "warehouse",
         isUnsaved: true,
         documentData: {
-          id: newId,
+          id: draftId,
+          shipmentNumber: "",
           date: new Date().toISOString().split("T")[0],
           status: "Draft",
         },
@@ -488,19 +266,46 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       return;
     }
     if (type === "finished-goods") {
-      const nextNum = 6010 + warehouseShipments.length;
-      const newId = `SHP-${nextNum}`;
+      const draftId = `draft-shp-${Date.now()}`;
       openTab({
-        id: newId,
-        title: `${newId}: Zaxiradan Chiqim`,
+        id: draftId,
+        title: "Zaxiradan Chiqim (Qoralama)",
         type: "warehouse-shipment",
         module: "warehouse",
         isUnsaved: true,
         documentData: {
-          id: newId,
+          id: draftId,
+          shipmentNumber: "",
           date: new Date().toISOString().split("T")[0],
           status: "Draft",
           notes: "Tayyor mahsulot (mijoz zaxirasi) omboridan chiqim",
+        },
+      });
+      return;
+    }
+    if (type === "stock-balance") {
+      const newSku = `MAT-${Date.now().toString().slice(-4)}`;
+      openTab({
+        id: `stock-${newSku}`,
+        title: `${newSku}: Yangi Xomashyo`,
+        type: "warehouse-stock",
+        module: "warehouse",
+        isUnsaved: true,
+        documentData: {
+          sku: newSku,
+          name: "",
+          category: "Paper & Board",
+          unit: "sheets",
+          sheetFormat: "",
+          grammage: undefined,
+          stockLevel: 0,
+          reserved: 0,
+          available: 0,
+          reorder: 0,
+          unitPriceUsd: 0,
+          location: warehousesList[0]?.name || "",
+          status: "In Stock",
+          imageUrl: undefined,
         },
       });
       return;
@@ -511,70 +316,47 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     setSheetMode('create');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const prefixes: Record<string, string> = {
       movements: 'MOV', receipts: 'RCV', shipments: 'SHP',
       inventory: 'IC', locations: 'LOC', 'stock-balance': 'MAT',
+      'finished-goods': 'FG',
     };
     const prefix = prefixes[type] ?? 'REC';
     const newId = `${prefix}-${String(Date.now()).slice(-4)}`;
     const newRow = { id: newId, ...formData };
+
     if (type === 'shipments') {
-      addWarehouseShipment({
-        id: newId,
-        date: formData.date || new Date().toISOString().split('T')[0],
-        customer: formData.customer || 'Alpha Media Group LLC',
-        deliveryActId: formData.deliveryActId || '—',
-        workOrder: formData.workOrder || '—',
-        product: formData.product || 'Printed Goods',
-        quantity: Number(formData.quantity) || 1000,
-        unit: formData.unit || 'pcs',
-        from: formData.from || 'Main Factory — Tashkent',
-        carrier: formData.carrier || 'Own Vehicle',
-        trackingNo: formData.trackingNo || '—',
-        status: 'Packed',
-      });
+      await upsertWarehouseShipmentAsync(newRow);
     } else if (type === 'stock-balance') {
-      const stockNum = Number(formData.stockLevel) || 5000;
-      const resNum = Number(formData.reserved) || 0;
-      upsertWarehouseStock({
-        sku: formData.sku || newId,
-        name: formData.name || 'New Printing Substrate',
-        category: (formData.category as any) || 'Paper & Board',
-        unit: (formData.unit as any) || 'sheets',
-        location: formData.location || 'Rack A-01 (Main Paper Hall)',
-        stockLevel: stockNum,
-        reserved: resNum,
-        available: Math.max(0, stockNum - resNum),
-        reorder: 2000,
-        unitPriceUsd: 0.25,
-        lastReceived: formData.lastReceived || new Date().toISOString().split('T')[0],
-        status: 'In Stock',
-        imageUrl: formData.imageUrl || getMaterialImage({ name: formData.name, sku: formData.sku, category: formData.category }),
-      });
+      await upsertWarehouseStockAsync(newRow);
     } else if (type === 'receipts') {
-      setRowsData(prev => [newRow, ...prev]);
-      const rcvQty = Number(formData.quantity) || 0;
-      const matName = (formData.material || '').toLowerCase();
-      const existingStock = warehouseStock.find(
-        (s) => s.name.toLowerCase().includes(matName) || matName.includes(s.name.toLowerCase())
-      );
-      if (existingStock && rcvQty > 0) {
-        upsertWarehouseStock({
-          ...existingStock,
-          stockLevel: existingStock.stockLevel + rcvQty,
-          lastReceived: formData.date || new Date().toISOString().split('T')[0],
-        });
-      }
-    } else {
-      setRowsData(prev => [newRow, ...prev]);
+      await upsertWarehouseReceiptAsync(newRow);
+    } else if (type === 'movements') {
+      await upsertWarehouseMovementAsync(newRow);
+    } else if (type === 'inventory') {
+      await upsertInventoryCountAsync(newRow);
+    } else if (type === 'locations') {
+      await upsertWarehouseAsync(newRow);
+    } else if (type === 'finished-goods') {
+      await upsertFinishedGoodAsync(newRow);
     }
+
     setSheetMode('view');
     setFormData({});
     setSelectedRecord(newRow);
   };
 
   const handleOpenSheet = (record: any) => {
+    if (type === "requirements") {
+      openTab({
+        id: record.workOrderId,
+        title: `${record.workOrderId}: Buyurtma`,
+        type: "work-order",
+        module: "production",
+      });
+      return;
+    }
     if (type === "receipts") {
       openTab({
         id: record.id,
@@ -645,6 +427,42 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     setSelectedRecord(record);
   };
 
+  const handleCreateReceiptFromRequirements = () => {
+    const selectedIndices = selection.rows.toArray();
+    const targetRows = selectedIndices.length > 0 
+      ? selectedIndices.map((idx) => rowsData[idx]).filter(Boolean)
+      : rowsData.filter((r) => r.deficitQty > 0);
+
+    if (targetRows.length === 0) return;
+
+    const newId = `RCV-${Date.now().toString().slice(-4)}`;
+    openTab({
+      id: newId,
+      title: `${newId}: Defitsit Kirim Hujjati`,
+      type: "warehouse-receipt",
+      module: "warehouse",
+      isUnsaved: true,
+      documentData: {
+        id: newId,
+        date: new Date().toISOString().split("T")[0],
+        supplier: "",
+        status: "Draft",
+        items: targetRows.map((r, idx) => ({
+          id: `line-${Date.now()}-${idx}`,
+          workOrderId: r.workOrderId,
+          sku: r.materialSku || `MAT-${100 + idx}`,
+          name: r.materialName,
+          category: r.category || "Paper & Board",
+          sheetFormat: r.sheetFormat || "",
+          grammage: r.grammage || 0,
+          quantity: r.deficitQty || r.requiredQty || 0,
+          unit: r.unit || "sheets",
+          unitPriceUsd: 0,
+        })),
+      },
+    });
+  };
+
 
   const columns = useMemo(() => {
     let cols: GridColumn[] = [];
@@ -707,6 +525,19 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         { id: 'countedBy', title: 'Counted By', width: 140, icon: GridColumnIcon.HeaderString },
         { id: 'status', title: 'Result', width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
+    } else if (type === 'requirements') {
+      cols = [
+        { id: 'workOrderId', title: 'Buyurtma № (WO)', width: 135, icon: GridColumnIcon.HeaderReference },
+        { id: 'customer', title: 'Mijoz', width: 180, icon: GridColumnIcon.HeaderString },
+        { id: 'product', title: 'Mahsulot', width: 220, icon: GridColumnIcon.HeaderString },
+        { id: 'materialName', title: 'Talab Qilingan Xomashyo', width: 260, icon: GridColumnIcon.HeaderString },
+        { id: 'requiredQty', title: 'Reja Miqdori', width: 115, icon: GridColumnIcon.HeaderNumber },
+        { id: 'availableQty', title: 'Omborda Bor', width: 110, icon: GridColumnIcon.HeaderNumber },
+        { id: 'deficitQty', title: 'Yetishmayotgan (Defitsit)', width: 145, icon: GridColumnIcon.HeaderNumber },
+        { id: 'unit', title: 'Birlik', width: 75, icon: GridColumnIcon.HeaderString },
+        { id: 'deadline', title: 'Muddati (Deadline)', width: 115, icon: GridColumnIcon.HeaderDate },
+        { id: 'status', title: 'Holati', width: 115, icon: GridColumnIcon.HeaderSingleValue },
+      ];
     } else if (type === 'receipts') {
       cols = [
         { id: 'id', title: 'Receipt ID', width: 110, icon: GridColumnIcon.HeaderReference },
@@ -751,29 +582,91 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     return cols;
   }, [type]);
 
+  // 1. Data Fetching Effect: ONLY runs when 'type' changes or on mount (NEVER loops)
   useEffect(() => {
+    loadWarehouses();
     if (type === 'finished-goods') {
+      loadFinishedGoods();
+    } else if (type === 'shipments') {
+      loadWarehouseShipments();
+    } else if (type === 'stock-balance') {
+      loadWarehouseStock();
+    } else if (type === 'movements') {
+      loadWarehouseMovements();
+    } else if (type === 'receipts') {
+      loadWarehouseReceipts();
+    } else if (type === 'inventory') {
+      loadInventoryCounts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type]);
+
+  // 2. Data Synchronization Effect: ONLY copies store data into rowsData without calling any fetch
+  useEffect(() => {
+    if (type === 'requirements') {
+      const defs: any[] = [];
+      productionQueue.forEach((q) => {
+        if (q.stage === "Completed") return;
+
+        const matchedStock = warehouseStock.find(
+          (s) =>
+            s.name.toLowerCase().includes(q.product.toLowerCase()) ||
+            q.product.toLowerCase().includes(s.name.toLowerCase())
+        ) || warehouseStock.find((s) => s.category === "Paper & Board");
+
+        const neededQty = q.plannedSheets || q.quantity || 1000;
+        const avail = matchedStock?.available || 0;
+        const deficit = Math.max(0, neededQty - avail);
+
+        // Faqat haqiqiy defitsit mavjud bo'lganda (xomashyo yetishmayotganda) ro'yxatda aks etadi
+        if (deficit > 0) {
+          defs.push({
+            id: `DEF-${q.id}`,
+            workOrderId: q.id,
+            customer: q.customer,
+            product: q.product,
+            materialSku: matchedStock?.sku || `PAP-${q.id.replace(/\D/g, "").slice(-3) || "REQ"}`,
+            materialName: matchedStock?.name || `${q.product} Xomashyosi`,
+            category: matchedStock?.category || "Paper & Board",
+            sheetFormat: matchedStock?.sheetFormat || "700×1000",
+            grammage: matchedStock?.grammage || 250,
+            requiredQty: neededQty,
+            availableQty: avail,
+            deficitQty: deficit,
+            unit: matchedStock?.unit || q.unit || "sheets",
+            deadline: q.deadline,
+            priority: q.priority,
+            status: "Deficit",
+          });
+        }
+      });
+      setRowsData(defs);
+    } else if (type === 'finished-goods') {
       setRowsData(finishedGoods);
-      return;
-    }
-    if (type === 'shipments') {
+    } else if (type === 'shipments') {
       setRowsData(warehouseShipments);
-      return;
-    }
-    if (type === 'stock-balance') {
+    } else if (type === 'stock-balance') {
       setRowsData(warehouseStock);
-      return;
-    }
-    if (type === 'movements') {
+    } else if (type === 'movements') {
       setRowsData(warehouseMovements);
-      return;
+    } else if (type === 'receipts') {
+      setRowsData(warehouseReceipts);
+    } else if (type === 'inventory') {
+      setRowsData(inventoryCounts);
+    } else if (type === 'locations') {
+      setRowsData(warehousesList);
     }
-    let mockRows = [];
-    if (type === 'inventory') mockRows = generateInventoryCounts();
-    else if (type === 'receipts') mockRows = generateReceipts();
-    else mockRows = generateLocations();
-    setRowsData(mockRows);
-  }, [type, warehouseShipments, warehouseStock, warehouseMovements, finishedGoods]);
+  }, [
+    type,
+    productionQueue,
+    finishedGoods,
+    warehouseShipments,
+    warehouseStock,
+    warehouseMovements,
+    warehouseReceipts,
+    inventoryCounts,
+    warehousesList,
+  ]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -834,18 +727,23 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     const column = columns[col];
     if (rowData) {
       if (column?.id === "image") {
-        setPreviewMaterial({
-          imageUrl: rowData.imageUrl || getMaterialImage(rowData),
-          title: rowData.name || rowData.sku,
-          sku: rowData.sku,
-          category: rowData.category,
-          spec: rowData.sheetFormat ? `${rowData.sheetFormat} mm` : rowData.cutDimensions,
-          stock: rowData.available !== undefined ? rowData.available.toLocaleString() : rowData.stockLevel,
-          unit: rowData.unit,
-          location: rowData.location,
-          supplier: rowData.supplier,
-          status: rowData.status,
-        });
+        if (rowData.imageUrl) {
+          setPreviewMaterial({
+            imageUrl: rowData.imageUrl,
+            title: rowData.name || rowData.sku,
+            sku: rowData.sku,
+            category: rowData.category,
+            spec: rowData.sheetFormat ? `${rowData.sheetFormat} mm` : rowData.cutDimensions,
+            stock: rowData.available !== undefined ? rowData.available.toLocaleString() : rowData.stockLevel,
+            unit: rowData.unit,
+            location: rowData.location,
+            supplier: rowData.supplier,
+            status: rowData.status,
+          });
+        } else {
+          setUploadTargetRecord(rowData);
+          setIsUploadDialogOpen(true);
+        }
         return;
       }
       handleOpenSheet(rowData);
@@ -887,19 +785,26 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
     // Image column for stock-balance
     if (column.id === "image") {
-      const img = rowData.imageUrl || getMaterialImage(rowData);
+      if (rowData.imageUrl) {
+        return {
+          kind: GridCellKind.Image,
+          data: [rowData.imageUrl],
+          displayData: [rowData.imageUrl],
+          allowOverlay: true,
+        };
+      }
       return {
-        kind: GridCellKind.Image,
-        data: [img],
-        displayData: [img],
-        allowOverlay: true,
+        kind: GridCellKind.Text,
+        data: "",
+        displayData: "",
+        allowOverlay: false,
       };
     }
 
     // Status column — color-coded
     if (column.id === "status") {
-      const positives = ["In Stock", "Completed", "Received", "Accepted", "Delivered", "Matched", "Active", "Ready for Dispatch", "Partially Shipped"];
-      const negatives = ["Critical", "Out of Stock", "Shortage", "Quarantine", "Inactive"];
+      const positives = ["In Stock", "Completed", "Received", "Accepted", "Delivered", "Matched", "Active", "Ready for Dispatch", "Partially Shipped", "Covered"];
+      const negatives = ["Critical", "Out of Stock", "Shortage", "Quarantine", "Inactive", "Deficit"];
       const warnings = ["Low Stock", "In Transit", "Pending", "Inspecting", "Packed", "Dispatched", "Surplus", "Reserved"];
 
       let color = isDark ? "#facc15" : "#a16207"; // default warning
@@ -1045,6 +950,33 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       };
     }
 
+    // Requirements & Deficit columns
+    if (column.id === "deficitQty") {
+      const num = Number(val || 0);
+      return {
+        kind: GridCellKind.Number,
+        data: num,
+        displayData: num > 0 ? `-${num.toLocaleString()} ${rowData.unit || ""}` : "0",
+        allowOverlay: false,
+        contentAlign: "right",
+        themeOverride: {
+          textDark: num > 0 ? (isDark ? "#f87171" : "#dc2626") : (isDark ? "#4ade80" : "#15803d"),
+          baseFontStyle: "bold 12px monospace",
+        },
+      };
+    }
+
+    if (column.id === "requiredQty" || column.id === "availableQty") {
+      const num = Number(val || 0);
+      return {
+        kind: GridCellKind.Number,
+        data: num,
+        displayData: `${num.toLocaleString()} ${rowData.unit || ""}`,
+        allowOverlay: false,
+        contentAlign: "right",
+      };
+    }
+
     if (column.id === "totalStockValue") {
       const num = Number(val || 0);
       return {
@@ -1091,6 +1023,36 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     };
   }, [filteredRows, columns, isDark]);
 
+  const finishedGoodsStats = useMemo(() => {
+    const totalStockQty = finishedGoods.reduce((sum, g) => sum + (Number(g.stockQty) || 0), 0);
+    const totalShippedQty = finishedGoods.reduce((sum, g) => sum + (Number(g.shippedQty) || 0), 0);
+    const totalProducedQty = finishedGoods.reduce((sum, g) => sum + (Number(g.producedQty) || 0), 0);
+    const totalStockValue = finishedGoods.reduce(
+      (sum, g) =>
+        sum +
+        (Number(g.totalStockValue) ||
+          (Number(g.stockQty) || 0) * (Number(g.costPricePerUnit) || 0)),
+      0
+    );
+    const customersWithStock = new Set(
+      finishedGoods
+        .filter((g) => (Number(g.stockQty) || 0) > 0)
+        .map((g) => g.customerName)
+    );
+    const totalProducts = new Set(finishedGoods.map((g) => g.productName)).size;
+    const activeBatches = finishedGoods.filter((g) => (Number(g.stockQty) || 0) > 0).length;
+
+    return {
+      totalStockQty,
+      totalShippedQty,
+      totalProducedQty,
+      totalStockValue,
+      customerCount: customersWithStock.size,
+      totalProducts,
+      activeBatches,
+    };
+  }, [finishedGoods]);
+
   const availableStatuses = useMemo(() => {
     const statuses = new Set<string>();
     rowsData.forEach(r => {
@@ -1116,14 +1078,59 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
           {/* Toolbar */}
           <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-1.5">
-              <Button 
-                size="sm" 
-                onClick={handleCreateNew}
-                className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Create New</span>
-              </Button>
+              {type !== 'requirements' && type !== 'finished-goods' && (
+                <Button 
+                  size="sm" 
+                  onClick={handleCreateNew}
+                  className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create New</span>
+                </Button>
+              )}
+
+              {type === 'finished-goods' && selection.rows.toArray().length > 0 && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const selIdx = selection.rows.toArray()[0];
+                    const record = filteredRows[selIdx];
+                    if (!record) return;
+                    const nextNum = 6010 + warehouseShipments.length;
+                    const newId = `SHP-${nextNum}`;
+                    openTab({
+                      id: newId,
+                      title: `${newId}: Zaxiradan Chiqim`,
+                      type: "warehouse-shipment",
+                      module: "warehouse",
+                      isUnsaved: true,
+                      documentData: {
+                        id: newId,
+                        date: new Date().toISOString().split("T")[0],
+                        status: "Draft",
+                        customerName: record.customerName || record.customer,
+                        workOrderId: record.workOrderId,
+                        notes: `Mijoz zaxirasidan chiqim: ${record.productName}`,
+                        items: [
+                          {
+                            id: `item-${Date.now()}`,
+                            sku: record.sku || `PRD-${record.id}`,
+                            name: record.productName,
+                            quantity: record.stockQty,
+                            unit: record.unit || "pcs",
+                            unitPrice: record.costPricePerUnit || 0,
+                            totalPrice: record.totalStockValue || 0,
+                          }
+                        ]
+                      },
+                    });
+                  }}
+                  className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1.5 shadow-none rounded cursor-pointer"
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  <span>Zaxiradan chiqim qilish</span>
+                </Button>
+              )}
 
               {type === 'movements' && (
                 <Button
@@ -1136,29 +1143,27 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 </Button>
               )}
 
-              <Separator orientation="vertical" className="h-4 mx-1" />
-
-              {/* Finished Goods KPI Summary Strip */}
-              {type === 'finished-goods' && (
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center bg-muted/80 px-2.5 py-0.5 rounded text-[11px] gap-2 border border-border">
-                    <span className="text-muted-foreground">📦 Mas&apos;ul Saqlovdagi Zaxira:</span>
-                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                      {finishedGoods.reduce((sum, g) => sum + g.stockQty, 0).toLocaleString()} dona
-                    </span>
-                    <span className="text-muted-foreground/60">•</span>
-                    <span className="text-muted-foreground">Mijozlar:</span>
-                    <span className="font-semibold text-foreground">
-                      {new Set(finishedGoods.map((g) => g.customerName)).size} ta
-                    </span>
-                    <span className="text-muted-foreground/60">•</span>
-                    <span className="text-muted-foreground">Umumiy Qiymati:</span>
-                    <span className="font-mono font-semibold text-foreground">
-                      ${finishedGoods.reduce((sum, g) => sum + g.totalStockValue, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
+              {type === 'requirements' && (
+                <Button
+                  onClick={handleCreateReceiptFromRequirements}
+                  size="sm"
+                  title={
+                    selection.rows.toArray().length > 0
+                      ? `${selection.rows.toArray().length} ta tanlangan xomashyo bo'yicha kirim hujjati yaratish`
+                      : "Barcha defitsitlar bo'yicha kirim hujjati yaratish"
+                  }
+                  className="h-7 px-2.5 text-xs font-medium gap-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white shadow-none cursor-pointer"
+                >
+                  <ArrowDownToLine className="w-3.5 h-3.5" />
+                  <span>
+                    {selection.rows.toArray().length > 0
+                      ? `Kirim qilish (${selection.rows.toArray().length})`
+                      : "Kirim qilish"}
+                  </span>
+                </Button>
               )}
+
+              <Separator orientation="vertical" className="h-4 mx-1" />
 
               {/* Stock Balance Category Filters */}
               {type === 'stock-balance' && (
@@ -1285,7 +1290,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 </div>
               )}
 
-              {availableStatuses.length > 0 && (
+              {type !== 'requirements' && availableStatuses.length > 1 && (
                 <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
                   <button
                     onClick={() => setStatusFilter("ALL")}
@@ -1325,6 +1330,86 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               </Button>
             </div>
           </div>
+
+          {/* Finished Goods Standalone KPI Cards (Alohida Kartalar) */}
+          {type === 'finished-goods' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 px-3 py-2.5 border-b border-border bg-muted/20 shrink-0">
+              {/* Card 1: Mas'ul Saqlovdagi Zaxira */}
+              <div className="bg-card border border-border rounded-lg p-2.5 flex items-center justify-between shadow-2xs">
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+                    <span>Mas&apos;ul Saqlovdagi Zaxira</span>
+                  </div>
+                  <div className="font-mono text-base font-bold text-emerald-600 dark:text-emerald-400">
+                    {finishedGoodsStats.totalStockQty.toLocaleString()}{" "}
+                    <span className="text-xs font-normal text-muted-foreground font-sans">dona</span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate">
+                    Jami chiqarildi: {finishedGoodsStats.totalProducedQty.toLocaleString()} dona
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Boxes className="w-4 h-4" />
+                </div>
+              </div>
+
+              {/* Card 2: Jo'natilgan / Yuklangan Mahsulot */}
+              <div className="bg-card border border-border rounded-lg p-2.5 flex items-center justify-between shadow-2xs">
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+                    <span>Yuklandi (Chiqim qilingan)</span>
+                  </div>
+                  <div className="font-mono text-base font-bold text-blue-600 dark:text-blue-400">
+                    {finishedGoodsStats.totalShippedQty.toLocaleString()}{" "}
+                    <span className="text-xs font-normal text-muted-foreground font-sans">dona</span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate">
+                    Hisob-faktura (SF) asosida yetkazildi
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                  <Truck className="w-4 h-4" />
+                </div>
+              </div>
+
+              {/* Card 3: Zaxirali Mijozlar */}
+              <div className="bg-card border border-border rounded-lg p-2.5 flex items-center justify-between shadow-2xs">
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+                    <span>Zaxirali Mijozlar</span>
+                  </div>
+                  <div className="font-mono text-base font-bold text-foreground">
+                    {finishedGoodsStats.customerCount}{" "}
+                    <span className="text-xs font-normal text-muted-foreground font-sans">ta mijoz</span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate">
+                    {finishedGoodsStats.totalProducts} turdagi tayyor mahsulot
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                  <Building2 className="w-4 h-4" />
+                </div>
+              </div>
+
+              {/* Card 4: Zaxira Balansi Qiymati */}
+              <div className="bg-card border border-border rounded-lg p-2.5 flex items-center justify-between shadow-2xs">
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+                    <span>Zaxira Balansi Qiymati</span>
+                  </div>
+                  <div className="font-mono text-base font-bold text-emerald-600 dark:text-emerald-400">
+                    ${finishedGoodsStats.totalStockValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate">
+                    {finishedGoodsStats.activeBatches} ta faol partiya balansi
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <DollarSign className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Grid */}
           <div className="flex-1 w-full h-full relative" id="warehouse-grid-root">
@@ -1392,16 +1477,20 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 {Object.entries(formData).map(([key, val]) => {
                   if (key === 'status') return null;
                   if (key === 'imageUrl') {
-                    const currentImg = val || getMaterialImage({ name: formData.name, sku: formData.sku, category: formData.category });
+                    const currentImg = val;
                     return (
                       <div key={key} className="flex flex-col gap-1.5">
                         <Label className="text-xs font-semibold text-muted-foreground">
-                          Material Rasmi (Image)
+                          Haqiqiy fotosurat
                         </Label>
                         <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
                           <div className="size-14 rounded-md border border-border bg-background overflow-hidden p-1 shrink-0 flex items-center justify-center">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={currentImg} alt="Preview" className="size-full object-contain" />
+                            {currentImg ? (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img src={currentImg} alt="Preview" className="size-full object-contain" />
+                            ) : (
+                              <Camera className="size-6 text-muted-foreground/40" />
+                            )}
                           </div>
                           <div className="flex-1 min-w-0 flex flex-col gap-1">
                             <Button
@@ -1415,17 +1504,17 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                               className="h-7 text-xs gap-1.5 w-full justify-center"
                             >
                               <Camera className="size-3.5 text-muted-foreground" />
-                              <span>Rasm yuklash / tanlash</span>
+                              <span>{currentImg ? "Rasmni almashtirish" : "Haqiqiy rasm yuklash"}</span>
                             </Button>
                             <span className="text-[10px] text-muted-foreground truncate">
-                              {val ? "Maxsus rasm biriktirilgan" : "Avtomatik vektor shablon"}
+                              {currentImg ? "Haqiqiy rasm biriktirilgan" : "Rasm yuklanmagan"}
                             </span>
                           </div>
                         </div>
                       </div>
                     );
                   }
-                  const comboOptions = COMBOBOX_FIELDS[key];
+                  const comboOptions = comboboxFields[key];
                   const label = key.replace(/([A-Z])/g, ' $1').trim();
                   return (
                     <div key={key} className="flex flex-col gap-1.5">
@@ -1542,34 +1631,46 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 </div>
 
                 <div className="flex-1 p-5 overflow-y-auto flex flex-col gap-4">
-                  {(type === 'stock-balance' || selectedRecord.imageUrl || selectedRecord.category) && (() => {
-                    const img = selectedRecord.imageUrl || getMaterialImage(selectedRecord);
+                  {(type === 'stock-balance' || selectedRecord.imageUrl) && (() => {
+                    const img = selectedRecord.imageUrl;
                     return (
                       <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
                         <div
                           className="size-16 rounded-md border border-border bg-background overflow-hidden p-1 shrink-0 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-blue-500/40 transition-all shadow-sm"
                           onClick={() => {
-                            setPreviewMaterial({
-                              imageUrl: img,
-                              title: selectedRecord.name || selectedRecord.sku || selectedRecord.id,
-                              sku: selectedRecord.sku,
-                              category: selectedRecord.category,
-                              spec: selectedRecord.sheetFormat || selectedRecord.cutDimensions,
-                              stock: selectedRecord.available !== undefined ? selectedRecord.available.toLocaleString() : selectedRecord.stockLevel,
-                              unit: selectedRecord.unit,
-                              location: selectedRecord.location,
-                              supplier: selectedRecord.supplier,
-                              status: selectedRecord.status,
-                            });
+                            if (img) {
+                              setPreviewMaterial({
+                                imageUrl: img,
+                                title: selectedRecord.name || selectedRecord.sku || selectedRecord.id,
+                                sku: selectedRecord.sku,
+                                category: selectedRecord.category,
+                                spec: selectedRecord.sheetFormat || selectedRecord.cutDimensions,
+                                stock: selectedRecord.available !== undefined ? selectedRecord.available.toLocaleString() : selectedRecord.stockLevel,
+                                unit: selectedRecord.unit,
+                                location: selectedRecord.location,
+                                supplier: selectedRecord.supplier,
+                                status: selectedRecord.status,
+                              });
+                            } else {
+                              setUploadTargetRecord(selectedRecord);
+                              setIsUploadDialogOpen(true);
+                            }
                           }}
-                          title="Rasmni kattalashtirish uchun bosing"
+                          title={img ? "Rasmni kattalashtirish uchun bosing" : "Haqiqiy rasm yuklash"}
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={img} alt="Preview" className="size-full object-contain select-none" />
+                          {img ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img src={img} alt="Preview" className="size-full object-contain select-none" />
+                          ) : (
+                            <Camera className="size-6 text-muted-foreground/40" />
+                          )}
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                           <span className="text-xs font-semibold text-foreground truncate">
                             {selectedRecord.name || selectedRecord.sku || "Material"}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground truncate">
+                            {img ? "Haqiqiy fotosurat yuklangan" : "Fotosurat yuklanmagan"}
                           </span>
                           <Button
                             type="button"
@@ -1582,7 +1683,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                             className="h-7 text-xs gap-1.5 w-full justify-center"
                           >
                             <Camera className="size-3.5 text-muted-foreground" />
-                            <span>Rasmni o'zgartirish</span>
+                            <span>{img ? "Rasmni almashtirish" : "Haqiqiy rasm yuklash"}</span>
                           </Button>
                         </div>
                       </div>
@@ -1629,7 +1730,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         currentImageUrl={
           uploadTargetRecord?.imageUrl ||
           formData?.imageUrl ||
-          (uploadTargetRecord ? getMaterialImage(uploadTargetRecord) : undefined)
+          undefined
         }
         onSave={(newUrl) => {
           if (uploadTargetRecord) {

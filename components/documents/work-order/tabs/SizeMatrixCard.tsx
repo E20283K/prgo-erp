@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useMemo, useEffect } from "react";
 import {
@@ -13,14 +13,28 @@ import {
   LayoutTemplate,
   Layers,
   ChevronDown,
+  ChevronUp,
   RotateCcw,
   FlaskConical,
   ArrowRight,
+  FileText,
+  Printer,
+  CheckCircle2,
+  Upload,
+  Eye,
+  Download,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -54,14 +68,19 @@ import {
   SIZE_SCALE_PRESETS,
   parseModelAndSize,
   formatModelAndSize,
+  SkuArtwork,
 } from "../types";
 
 interface SizeMatrixCardProps {
   sizes: SizeDistribution[];
   unit: string;
   totalQuantity: number;
+  width?: number;
+  height?: number;
+  printSides?: string;
   isOperator?: boolean;
   onSizesChange: (newSizes: SizeDistribution[]) => void;
+  onQuantityChange?: (qty: number) => void;
   onSwitchTab?: (tabKey: string) => void;
   impositionTabKey?: string;
   impositionLabel?: string;
@@ -70,14 +89,21 @@ interface SizeMatrixCardProps {
   onSampleTargetSizeChange?: (targetSize: string) => void;
   sampleQty?: number;
   onSampleQtyChange?: (qty: number) => void;
+  skuArtworks?: SkuArtwork[];
+  onSkuArtworksChange?: (artworks: SkuArtwork[]) => void;
+  workOrderId?: string;
 }
 
 export function SizeMatrixCard({
   sizes,
   unit = "pcs",
   totalQuantity,
+  width,
+  height,
+  printSides,
   isOperator = false,
   onSizesChange,
+  onQuantityChange,
   onSwitchTab,
   impositionTabKey = "layout",
   impositionLabel,
@@ -86,6 +112,9 @@ export function SizeMatrixCard({
   onSampleTargetSizeChange,
   sampleQty = 5,
   onSampleQtyChange,
+  skuArtworks = [],
+  onSkuArtworksChange,
+  workOrderId,
 }: SizeMatrixCardProps) {
   // Parse existing sizes to detect if multi-model data already exists
   const parsedItems = useMemo(() => {
@@ -169,13 +198,59 @@ export function SizeMatrixCard({
     return allAvailableSizes[0] || "M";
   }, [sampleTargetSize, allAvailableSizes]);
 
-  // Production scope: "full" (all sizes / serial) or "single_sample" (only 1 target size for sample run)
-  const [scope, setScope] = useState<"full" | "single_sample">(() => {
+  // Check if order has no sizes or is a single copy / generic item
+  const isInitiallyStandard = useMemo(() => {
+    if (orderType === "Sample" || (sampleTargetSize && sampleTargetSize !== "all")) {
+      return false;
+    }
+    if (!sizes || sizes.length === 0) return true;
+    if (sizes.length === 1) {
+      const s = (sizes[0].size || "").trim().toLowerCase();
+      if (!s || s === "standart" || s === "standard" || s === "std" || s === "yagona" || s === "-" || s === "1 dona" || s === "dona" || s === "n/a") {
+        return true;
+      }
+      if (Number(sizes[0].quantity) <= 1 && totalQuantity <= 1) {
+        return true;
+      }
+    }
+    return false;
+  }, [orderType, sampleTargetSize, sizes, totalQuantity]);
+
+  // Production scope: "standard" (1 copy, no sizes, 1+0), "full" (all sizes / serial), or "single_sample" (only 1 target size for sample run)
+  const [scope, setScope] = useState<"standard" | "full" | "single_sample">(() => {
     if (orderType === "Sample" || (sampleTargetSize && sampleTargetSize !== "all")) {
       return "single_sample";
     }
+    if (isInitiallyStandard) {
+      return "standard";
+    }
     return "full";
   });
+
+  const handleConvertToStandard = () => {
+    setScope("standard");
+    onSizesChange([
+      {
+        id: "size-std-1",
+        size: "Standart",
+        sizeCode: "STD",
+        quantity: totalQuantity || 1,
+      },
+    ]);
+  };
+
+  const handleConvertToMatrix = () => {
+    setScope("full");
+    onSampleTargetSizeChange?.("all");
+    if (!sizes || sizes.length === 0 || (sizes.length === 1 && (sizes[0].size === "Standart" || !sizes[0].size))) {
+      onSizesChange([
+        { id: `size-${Date.now()}-1`, size: "S", sizeCode: "S", quantity: 0 },
+        { id: `size-${Date.now()}-2`, size: "M", sizeCode: "M", quantity: 0 },
+        { id: `size-${Date.now()}-3`, size: "L", sizeCode: "L", quantity: 0 },
+        { id: `size-${Date.now()}-4`, size: "XL", sizeCode: "XL", quantity: 0 },
+      ]);
+    }
+  };
 
   // Popover state for adding size columns
   const [isAddSizeOpen, setIsAddSizeOpen] = useState(false);
@@ -489,6 +564,167 @@ export function SizeMatrixCard({
     onSizesChange(sizes.filter((s) => s.id !== id));
   };
 
+  // ── Artwork State ──
+  const [isArtworkOpen, setIsArtworkOpen] = React.useState(true);
+  const [uploadingKey, setUploadingKey] = React.useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
+  const [previewName, setPreviewName] = React.useState<string>("");
+
+  const artworkMap = React.useMemo(() => {
+    const map: Record<string, SkuArtwork> = {};
+    skuArtworks.forEach((a) => {
+      map[a.skuId] = a;
+    });
+    return map;
+  }, [skuArtworks]);
+
+  const handleArtworkUpload = async (
+    skuItem: { id: string; model?: string; sizeCode?: string; size?: string },
+    side: "front" | "back",
+    file: File
+  ) => {
+    const skuId = skuItem.id;
+    const key = `${skuId}-${side}`;
+    setUploadingKey(key);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("workOrderId", workOrderId || "WO");
+      fd.append("skuId", skuId);
+      fd.append("side", side);
+      const res = await fetch("/api/artwork/upload", { method: "POST", body: fd });
+      if (!res.ok) throw new Error("Upload failed");
+      const result: { url: string; name: string; thumbUrl?: string } = await res.json();
+      const existing = artworkMap[skuId] || {
+        skuId,
+        model: skuItem.model,
+        sizeCode: skuItem.sizeCode || skuItem.size || "",
+      };
+      const updated: SkuArtwork = {
+        ...existing,
+        model: skuItem.model || existing.model,
+        sizeCode: skuItem.sizeCode || skuItem.size || existing.sizeCode,
+        ...(side === "front"
+          ? {
+              frontArtworkUrl: result.url,
+              frontArtworkName: result.name,
+              frontArtworkThumb: result.thumbUrl,
+            }
+          : {
+              backArtworkUrl: result.url,
+              backArtworkName: result.name,
+              backArtworkThumb: result.thumbUrl,
+            }),
+      };
+      const newArtworks = skuArtworks.filter((a) => a.skuId !== skuId).concat(updated);
+      onSkuArtworksChange?.(newArtworks);
+    } catch (e) {
+      console.error("Artwork upload error:", e);
+    } finally {
+      setUploadingKey(null);
+    }
+  };
+
+  const handleArtworkRemove = async (skuId: string, side: "front" | "back") => {
+    const existing = artworkMap[skuId];
+    if (!existing) return;
+    const urlToDelete = side === "front" ? existing.frontArtworkUrl : existing.backArtworkUrl;
+    if (urlToDelete) {
+      try {
+        await fetch(`/api/artwork/upload?path=${encodeURIComponent(urlToDelete)}`, { method: "DELETE" });
+      } catch (_) {}
+    }
+    const updated: SkuArtwork = {
+      ...existing,
+      ...(side === "front"
+        ? { frontArtworkUrl: undefined, frontArtworkName: undefined, frontArtworkThumb: undefined }
+        : { backArtworkUrl: undefined, backArtworkName: undefined, backArtworkThumb: undefined }),
+    };
+    const hasFront = !!updated.frontArtworkUrl;
+    const hasBack = !!updated.backArtworkUrl;
+    const newArtworks = hasFront || hasBack
+      ? skuArtworks.filter((a) => a.skuId !== skuId).concat(updated)
+      : skuArtworks.filter((a) => a.skuId !== skuId);
+    onSkuArtworksChange?.(newArtworks);
+  };
+
+  // List of all SKUs available for artwork assignment
+  const artworkItems = useMemo(() => {
+    if (scope === "standard") {
+      return [
+        {
+          id: sizes[0]?.id || "size-std-1",
+          model: "Standart",
+          sizeCode: "STD",
+          size: "Standart",
+          quantity: totalQuantity || 1,
+        },
+      ];
+    }
+    const activeSizes = sizes.filter((s) => (Number(s.quantity) || 0) > 0);
+    const targetList = activeSizes.length > 0 ? activeSizes : sizes;
+    if (targetList.length > 0) {
+      return targetList.map((s) => {
+        const { model, sizeCode } = parseModelAndSize(s);
+        return {
+          id: s.id,
+          model,
+          sizeCode: sizeCode || s.size,
+          size: s.size,
+          quantity: Number(s.quantity) || 0,
+        };
+      });
+    }
+    // Fallback if matrix is not yet saved to sizes
+    const fallbackList: Array<{ id: string; model?: string; sizeCode: string; size: string; quantity: number }> = [];
+    models.forEach((m, mIdx) => {
+      sizeColumns.forEach((col, cIdx) => {
+        const qty = cellQuantities[`${m}___${col}`] || 0;
+        fallbackList.push({
+          id: `sku-${mIdx}-${cIdx}-${col}`,
+          model: models.length > 1 ? m : undefined,
+          sizeCode: col,
+          size: models.length > 1 ? formatModelAndSize(m, col) : col,
+          quantity: qty,
+        });
+      });
+    });
+    return fallbackList;
+  }, [scope, sizes, totalQuantity, models, sizeColumns, cellQuantities]);
+
+  // Copy first SKU's front artwork to all other SKUs (common front logo)
+  const handleApplyFrontToAll = () => {
+    if (artworkItems.length <= 1) return;
+    const firstItem = artworkItems[0];
+    const firstArt = artworkMap[firstItem.id];
+    if (!firstArt?.frontArtworkUrl) return;
+
+    const nextArtworks = [...skuArtworks];
+    artworkItems.slice(1).forEach((item) => {
+      const idx = nextArtworks.findIndex((a) => a.skuId === item.id);
+      if (idx >= 0) {
+        nextArtworks[idx] = {
+          ...nextArtworks[idx],
+          model: item.model || nextArtworks[idx].model,
+          sizeCode: item.sizeCode || nextArtworks[idx].sizeCode,
+          frontArtworkUrl: firstArt.frontArtworkUrl,
+          frontArtworkName: firstArt.frontArtworkName,
+          frontArtworkThumb: firstArt.frontArtworkThumb,
+        };
+      } else {
+        nextArtworks.push({
+          skuId: item.id,
+          model: item.model,
+          sizeCode: item.sizeCode || item.size || "",
+          frontArtworkUrl: firstArt.frontArtworkUrl,
+          frontArtworkName: firstArt.frontArtworkName,
+          frontArtworkThumb: firstArt.frontArtworkThumb,
+        });
+      }
+    });
+    onSkuArtworksChange?.(nextArtworks);
+  };
+
   const totalBatchQty = sizes.reduce((acc, s) => acc + (Number(s.quantity) || 0), 0);
   const activeSkusCount = sizes.filter((s) => (Number(s.quantity) || 0) > 0).length;
 
@@ -499,7 +735,11 @@ export function SizeMatrixCard({
         {/* Left: Title & Summary Stats */}
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <Tag className="w-3.5 h-3.5" />
+            {scope === "standard" ? (
+              <FileText className="w-3.5 h-3.5" />
+            ) : (
+              <Tag className="w-3.5 h-3.5" />
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -507,10 +747,22 @@ export function SizeMatrixCard({
                 Model &amp; O&apos;lchamlar taqsimoti
               </span>
               <Badge variant="secondary" className="text-[10px] font-mono h-4 px-1.5">
-                {scope === "single_sample" ? "1 SKU (Namuna)" : `${activeSkusCount} SKU`}
+                {scope === "standard"
+                  ? "Standart (Razmersiz)"
+                  : scope === "single_sample"
+                  ? "1 SKU (Namuna)"
+                  : `${activeSkusCount} SKU`}
               </Badge>
             </div>
-            {scope === "single_sample" ? (
+            {scope === "standard" ? (
+              <p className="text-[11px] text-muted-foreground font-mono">
+                Yagona ekzemplyar:{" "}
+                <strong className="text-foreground font-semibold">
+                  {totalQuantity || 1} {unit}
+                </strong>{" "}
+                <span className="text-muted-foreground">· 1-tomonlama (1+0)</span>
+              </p>
+            ) : scope === "single_sample" ? (
               <p className="text-[11px] text-amber-700 dark:text-amber-400 font-mono">
                 Sinov namunasi:{" "}
                 <strong className="text-foreground font-semibold">
@@ -531,14 +783,25 @@ export function SizeMatrixCard({
 
         {/* Right: Actions & View Switcher */}
         <div className="flex items-center gap-2">
-          {/* Scope Switcher: Full Matrix vs Single Size Sample */}
+          {/* Scope Switcher: Standard vs Full Matrix vs Single Size Sample */}
           <div className="flex items-center bg-muted/80 p-0.5 rounded-md border border-border">
             <button
               type="button"
-              onClick={() => {
-                setScope("full");
-                onSampleTargetSizeChange?.("all");
-              }}
+              onClick={handleConvertToStandard}
+              className={cn(
+                "h-6 px-2 text-[11px] font-medium rounded-sm flex items-center gap-1.5 transition-all cursor-pointer",
+                scope === "standard"
+                  ? "bg-background text-foreground shadow-2xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title="O'lchamsiz yagona ekzemplyar (1 dona, 1+0 bir tomonlama bosma)"
+            >
+              <FileText className="w-3 h-3 text-primary" />
+              <span>Standart (1 dona, 1+0)</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleConvertToMatrix}
               className={cn(
                 "h-6 px-2 text-[11px] font-medium rounded-sm flex items-center gap-1.5 transition-all cursor-pointer",
                 scope === "full"
@@ -565,11 +828,11 @@ export function SizeMatrixCard({
               title="Namuna / sinov uchun faqat bitta tanlangan razmerni chiqarish"
             >
               <FlaskConical className="w-3 h-3 text-amber-500" />
-              <span>Faqat bitta razmer (Namuna)</span>
+              <span>Namuna (1 razmer)</span>
             </button>
           </div>
 
-          {!isOperator && mode === "matrix" && (
+          {!isOperator && scope !== "standard" && mode === "matrix" && (
             <>
               {/* Shablonlar (Presets) Dropdown */}
               <DropdownMenu>
@@ -688,34 +951,36 @@ export function SizeMatrixCard({
           )}
 
           {/* Mode Switcher */}
-          <div className="flex items-center bg-muted p-0.5 rounded-md border border-border">
-            <button
-              type="button"
-              onClick={() => setMode("matrix")}
-              className={cn(
-                "h-6 px-2 text-[11px] font-medium rounded-sm flex items-center gap-1 transition-all cursor-pointer",
-                mode === "matrix"
-                  ? "bg-background text-foreground shadow-2xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Grid3X3 className="w-3 h-3" />
-              <span>Matritsa</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("list")}
-              className={cn(
-                "h-6 px-2 text-[11px] font-medium rounded-sm flex items-center gap-1 transition-all cursor-pointer",
-                mode === "list"
-                  ? "bg-background text-foreground shadow-2xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <List className="w-3 h-3" />
-              <span>Ro&apos;yxat</span>
-            </button>
-          </div>
+          {scope !== "standard" && (
+            <div className="flex items-center bg-muted p-0.5 rounded-md border border-border">
+              <button
+                type="button"
+                onClick={() => setMode("matrix")}
+                className={cn(
+                  "h-6 px-2 text-[11px] font-medium rounded-sm flex items-center gap-1 transition-all cursor-pointer",
+                  mode === "matrix"
+                    ? "bg-background text-foreground shadow-2xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Grid3X3 className="w-3 h-3" />
+                <span>Matritsa</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("list")}
+                className={cn(
+                  "h-6 px-2 text-[11px] font-medium rounded-sm flex items-center gap-1 transition-all cursor-pointer",
+                  mode === "list"
+                    ? "bg-background text-foreground shadow-2xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <List className="w-3 h-3" />
+                <span>Ro&apos;yxat</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -800,7 +1065,100 @@ export function SizeMatrixCard({
       )}
 
       {/* ── Main Content ── */}
-      {mode === "matrix" ? (
+      {scope === "standard" ? (
+        <div className="p-3.5 bg-background space-y-3">
+          {/* Main Informational Notice Banner */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-muted/20 border border-border/80 rounded-lg">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0 border border-primary/20">
+                <Printer className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-xs text-foreground">
+                    Yagona bosma ekzemplyar (Standart / Razmersiz)
+                  </span>
+                  <Badge variant="outline" className="text-[10px] font-mono h-4 px-1.5 border-primary/30 bg-primary/5 text-primary">
+                    1+0 (Bir tomonlama)
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Ushbu buyurtmada o&apos;lchamlar (S, M, L...) taqsimoti talab etilmaydi. Mahsulot 1 dona yagona nusxada, faqat bir tomoniga bosiladigan standart formatda ishlab chiqariladi.
+                </p>
+              </div>
+            </div>
+
+            {!isOperator && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleConvertToMatrix}
+                className="h-7 text-xs gap-1.5 shrink-0 cursor-pointer"
+              >
+                <Grid3X3 className="w-3.5 h-3.5 text-primary" />
+                <span>O&apos;lchamlar matritsasini kiritish (S, M, L...)</span>
+              </Button>
+            )}
+          </div>
+
+          {/* Key Parameters Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {/* 1: Bosma yuzi */}
+            <div className="p-2.5 bg-muted/10 border border-border rounded-md shadow-2xs space-y-1">
+              <span className="text-[11px] text-muted-foreground block font-medium">
+                Bosma tarafi (Print Side):
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Badge variant="secondary" className="font-mono text-[11px] font-semibold px-2 py-0.5">
+                  {printSides === "2s" ? "2-tomonlama (1+1)" : "1-tomonlama (1+0)"}
+                </Badge>
+                <span className="text-[11px] text-muted-foreground">
+                  {printSides === "2s" ? "Old & Orqa" : "Faqat old yuzi"}
+                </span>
+              </div>
+            </div>
+
+            {/* 2: Mahsulot o'lchami */}
+            <div className="p-2.5 bg-muted/10 border border-border rounded-md shadow-2xs space-y-1">
+              <span className="text-[11px] text-muted-foreground block font-medium">
+                Gabarit o&apos;lchami (W × H):
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-xs font-bold text-foreground">
+                  {width ?? 70} × {height ?? 30} mm
+                </span>
+                <span className="text-[10px] text-muted-foreground font-mono">(Dona format)</span>
+              </div>
+            </div>
+
+            {/* 3: Tiraj / Ekzemplyar */}
+            <div className="p-2.5 bg-muted/10 border border-border rounded-md shadow-2xs space-y-1">
+              <span className="text-[11px] text-muted-foreground block font-medium">
+                Ekzemplyar miqdori:
+              </span>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={totalQuantity || 1}
+                  disabled={isOperator}
+                  onChange={(e) => {
+                    const q = Math.max(1, parseInt(e.target.value, 10) || 1);
+                    onQuantityChange?.(q);
+                    onSizesChange([{ id: "size-std-1", size: "Standart", sizeCode: "STD", quantity: q }]);
+                  }}
+                  className="h-7 w-20 text-xs font-mono font-bold bg-background text-right"
+                />
+                <span className="text-xs font-mono font-semibold text-foreground">{unit}</span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {(totalQuantity || 1) === 1 ? "(1 ekzemplyar)" : ""}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : mode === "matrix" ? (
         <div>
           {/* 2D Table */}
           <div className="overflow-x-auto">
@@ -1234,6 +1592,264 @@ export function SizeMatrixCard({
           )}
         </div>
       )}
+
+      {/* ── Artwork (Model × Razmer SKU bo'yicha Fayllar) ── */}
+      <div className="border-t border-border bg-card">
+        {/* Header toggle */}
+        <div className="flex items-center justify-between p-2.5 px-3 bg-muted/30 border-b border-border/80">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+              <span>🎨 SKU Artwork fayllari (Old &amp; Orqa PDF / SVG)</span>
+            </span>
+            <Badge variant="outline" className="text-[10px] font-mono h-4 px-1.5">
+              {skuArtworks.length} ta yuklangan
+            </Badge>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {artworkItems.length > 1 && artworkMap[artworkItems[0]?.id]?.frontArtworkUrl && !isOperator && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleApplyFrontToAll}
+                className="h-6 px-2 text-[10px] gap-1 text-primary cursor-pointer"
+                title="1-SKU oldi tarafi artwork faylini barcha razmerlarga qo'llash"
+              >
+                <Copy className="w-3 h-3" />
+                <span>1-SKU oldini hammaga nusxalash</span>
+              </Button>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsArtworkOpen((v) => !v)}
+              className="text-muted-foreground hover:text-foreground p-1 rounded transition-colors cursor-pointer"
+            >
+              {isArtworkOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        {isArtworkOpen && (
+          <div className="p-3 space-y-2">
+            <div className="text-[11px] text-muted-foreground flex items-center justify-between">
+              <span>
+                Har bir Model va Razmer uchun 1:1 real masshtabdagi PDF yoki SVG faylini yuklang. Odatda old tarafi bir xil, orqa tarafi esa razmerga xos bo&apos;ladi.
+              </span>
+              <span className="font-mono text-[10px] text-muted-foreground shrink-0 ml-2">
+                PDF / SVG (Maks. 50MB)
+              </span>
+            </div>
+
+            <div className="border border-border rounded-md overflow-hidden bg-background">
+              <Table className="w-full text-xs">
+                <TableHeader className="bg-muted/40 border-b border-border">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="h-7 px-2.5 text-xs font-semibold text-foreground w-[160px]">
+                      Model / Artikul
+                    </TableHead>
+                    <TableHead className="h-7 px-2 text-center text-xs font-semibold text-foreground w-[80px]">
+                      Razmer
+                    </TableHead>
+                    <TableHead className="h-7 px-2 text-right text-xs font-semibold text-muted-foreground w-[80px]">
+                      Tiraj
+                    </TableHead>
+                    <TableHead className="h-7 px-3 text-xs font-semibold text-foreground">
+                      Oldi tarafi (Front Artwork)
+                    </TableHead>
+                    <TableHead className="h-7 px-3 text-xs font-semibold text-foreground">
+                      Orqa tarafi (Back Artwork)
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {artworkItems.map((item) => {
+                    const art = artworkMap[item.id];
+                    const frontKey = `${item.id}-front`;
+                    const backKey = `${item.id}-back`;
+                    const isUploadingFront = uploadingKey === frontKey;
+                    const isUploadingBack = uploadingKey === backKey;
+
+                    return (
+                      <TableRow key={item.id} className="border-b border-border/60 last:border-0 hover:bg-muted/20">
+                        {/* Model */}
+                        <TableCell className="px-2.5 py-1.5 font-medium text-foreground">
+                          {item.model || "—"}
+                        </TableCell>
+                        {/* Size code */}
+                        <TableCell className="px-2 py-1.5 text-center font-mono font-bold text-foreground">
+                          <Badge variant="secondary" className="font-mono text-[11px] h-5 px-1.5">
+                            {item.sizeCode}
+                          </Badge>
+                        </TableCell>
+                        {/* Qty */}
+                        <TableCell className="px-2 py-1.5 text-right font-mono text-muted-foreground">
+                          {item.quantity ? item.quantity.toLocaleString() : "—"}
+                        </TableCell>
+
+                        {/* Front Artwork Slot */}
+                        <TableCell className="px-3 py-1.5">
+                          {art?.frontArtworkUrl ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewUrl(art.frontArtworkUrl!);
+                                  setPreviewName(`${item.model || ""} ${item.sizeCode} (Oldi / Front)`);
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border bg-muted/40 hover:bg-muted text-[11px] font-mono text-foreground transition-colors cursor-pointer truncate max-w-[200px]"
+                                title="Ko'rish (Preview)"
+                              >
+                                <Eye className="w-3 h-3 text-primary shrink-0" />
+                                <span className="truncate">{art.frontArtworkName || "front.pdf"}</span>
+                              </button>
+                              {!isOperator && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleArtworkRemove(item.id, "front")}
+                                  className="text-muted-foreground hover:text-destructive p-0.5 rounded transition-colors cursor-pointer"
+                                  title="O'chirish"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div>
+                              <input
+                                type="file"
+                                accept=".pdf,.svg,application/pdf,image/svg+xml"
+                                id={`file-input-${item.id}-front`}
+                                className="hidden"
+                                disabled={isOperator || isUploadingFront}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleArtworkUpload(item, "front", file);
+                                  e.target.value = "";
+                                }}
+                              />
+                              <label
+                                htmlFor={`file-input-${item.id}-front`}
+                                className={cn(
+                                  "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border border-dashed transition-colors",
+                                  isOperator
+                                    ? "text-muted-foreground border-border cursor-not-allowed opacity-50"
+                                    : "text-muted-foreground hover:text-foreground border-border hover:border-primary cursor-pointer hover:bg-muted/40"
+                                )}
+                              >
+                                <Upload className="w-3 h-3" />
+                                <span>{isUploadingFront ? "Yuklanmoqda..." : "PDF / SVG yuklash"}</span>
+                              </label>
+                            </div>
+                          )}
+                        </TableCell>
+
+                        {/* Back Artwork Slot */}
+                        <TableCell className="px-3 py-1.5">
+                          {art?.backArtworkUrl ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewUrl(art.backArtworkUrl!);
+                                  setPreviewName(`${item.model || ""} ${item.sizeCode} (Orqa / Back)`);
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border bg-muted/40 hover:bg-muted text-[11px] font-mono text-foreground transition-colors cursor-pointer truncate max-w-[200px]"
+                                title="Ko'rish (Preview)"
+                              >
+                                <Eye className="w-3 h-3 text-primary shrink-0" />
+                                <span className="truncate">{art.backArtworkName || "back.pdf"}</span>
+                              </button>
+                              {!isOperator && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleArtworkRemove(item.id, "back")}
+                                  className="text-muted-foreground hover:text-destructive p-0.5 rounded transition-colors cursor-pointer"
+                                  title="O'chirish"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div>
+                              <input
+                                type="file"
+                                accept=".pdf,.svg,application/pdf,image/svg+xml"
+                                id={`file-input-${item.id}-back`}
+                                className="hidden"
+                                disabled={isOperator || isUploadingBack}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleArtworkUpload(item, "back", file);
+                                  e.target.value = "";
+                                }}
+                              />
+                              <label
+                                htmlFor={`file-input-${item.id}-back`}
+                                className={cn(
+                                  "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border border-dashed transition-colors",
+                                  isOperator
+                                    ? "text-muted-foreground border-border cursor-not-allowed opacity-50"
+                                    : "text-muted-foreground hover:text-foreground border-border hover:border-primary cursor-pointer hover:bg-muted/40"
+                                )}
+                              >
+                                <Upload className="w-3 h-3" />
+                                <span>{isUploadingBack ? "Yuklanmoqda..." : "PDF / SVG yuklash"}</span>
+                              </label>
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Artwork Preview Modal ── */}
+      <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>
+        <DialogContent className="max-w-4xl h-[85vh] p-0 flex flex-col overflow-hidden">
+          <DialogHeader className="p-3 px-4 border-b border-border flex flex-row items-center justify-between shrink-0">
+            <DialogTitle className="text-sm font-semibold truncate flex items-center gap-2">
+              <Eye className="w-4 h-4 text-primary" />
+              <span>Artwork Preview: {previewName}</span>
+            </DialogTitle>
+            <div className="flex items-center gap-2">
+              {previewUrl && (
+                <a
+                  href={previewUrl}
+                  download
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-border bg-background hover:bg-muted text-foreground transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Yuklab olish</span>
+                </a>
+              )}
+            </div>
+          </DialogHeader>
+          <div className="flex-1 bg-muted/20 overflow-auto flex items-center justify-center p-2">
+            {previewUrl && previewUrl.toLowerCase().endsWith(".svg") ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewUrl}
+                alt={previewName}
+                className="max-w-full max-h-full object-contain shadow-md rounded border border-border bg-white"
+              />
+            ) : previewUrl ? (
+              <iframe
+                src={`${previewUrl}#toolbar=1`}
+                title={previewName}
+                className="w-full h-full border-0 rounded"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

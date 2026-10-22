@@ -77,8 +77,8 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 
 const SUGGESTIONS = [
   {
-    label: "WO-00351 Status",
-    prompt: "What is the current status and deadline for WO-00351?",
+    label: "WOOF-26-0351 Status",
+    prompt: "What is the current status and deadline for WOOF-26-0351?",
     icon: FileText,
   },
   {
@@ -155,20 +155,20 @@ export function AiChatSheet() {
       return {
         role: "assistant",
         content:
-          "📋 **Work Order WO-00351: Hardcover Catalog 96p**\n\n• **Customer**: Alpha Media Group LLC\n• **Run Size**: 5,000 pcs (Hardcover, sewn)\n• **Status**: In Production (High Priority)\n• **Machine**: Heidelberg Speedmaster XL 106\n• **Deadline**: October 06, 2026 (6 days remaining)\n• **Prepress**: Approved by Client\n• **Stock**: Galerie Art Silk 150g/m²\n• **Total Value**: $14,850.00 USD (Paid)",
+          "📋 **Work Order WOOF-26-0351: Hardcover Catalog 96p**\n\n• **Customer**: Alpha Media Group LLC\n• **Run Size**: 5,000 pcs (Hardcover, sewn)\n• **Status**: In Production (High Priority)\n• **Machine**: Heidelberg Speedmaster XL 106\n• **Deadline**: October 06, 2026 (6 days remaining)\n• **Prepress**: Approved by Client\n• **Stock**: Galerie Art Silk 150g/m²\n• **Total Value**: $14,850.00 USD (Paid)",
         action: {
-          label: "Open WO-00351 Tab",
+          label: "Open WOOF-26-0351 Tab",
           icon: FileText,
           onClick: () => {
             openTab({
-              id: "WO-00351",
-              title: "WO-00351: Hardcover Catalog (5k)",
+              id: "WOOF-26-0351",
+              title: "WOOF-26-0351: Hardcover Catalog (5k)",
               type: "work-order",
               module: "production",
               isUnsaved: false,
               activeLevel3Tab: "overview",
               documentData: {
-                docNo: "WO-00351",
+                docNo: "WOOF-26-0351",
                 customer: "Alpha Media Group LLC",
                 product: "A4 Hardcover Catalog 96p",
                 quantity: 5000,
@@ -196,7 +196,7 @@ export function AiChatSheet() {
       return {
         role: "assistant",
         content:
-          "⚠️ **Warehouse Stock Alert: Galerie Art Silk 150g/m²**\n\n• **Current Balance**: 42 sheets on shelf (Pallet B-14)\n• **Safety Threshold**: 500 sheets\n• **Allocated to WO-00351**: 2,600 sheets required\n• **Status**: Critical Shortage. Replenishment PO-8812 was submitted to Stora Enso with expected ETA tomorrow 14:00.",
+          "⚠️ **Warehouse Stock Alert: Galerie Art Silk 150g/m²**\n\n• **Current Balance**: 42 sheets on shelf (Pallet B-14)\n• **Safety Threshold**: 500 sheets\n• **Allocated to WOOF-26-0351**: 2,600 sheets required\n• **Status**: Critical Shortage. Replenishment PO-8812 was submitted to Stora Enso with expected ETA tomorrow 14:00.",
         action: {
           label: "Go to Warehouse Registry",
           icon: Boxes,
@@ -213,7 +213,7 @@ export function AiChatSheet() {
       return {
         role: "assistant",
         content:
-          "🖨️ **Heidelberg Speedmaster XL 106 — Schedule & Telemetry**\n\n• **Current Status**: Running (14,200 sheets/hr)\n• **Active Job**: WO-00351 (Form 2 of 6)\n• **Next in Queue**: WO-00355 (Cosmetics Packaging 350g)\n• **Operator**: Alexey Kovalev (Shift 1)\n• **Drying Unit**: IR + Hot Air running at 62°C\n• **OEE Rating**: 89.4% this week",
+          "🖨️ **Heidelberg Speedmaster XL 106 — Schedule & Telemetry**\n\n• **Current Status**: Running (14,200 sheets/hr)\n• **Active Job**: WOOF-26-0351 (Form 2 of 6)\n• **Next in Queue**: WOFL-26-0355 (Cosmetics Packaging 350g)\n• **Operator**: Alexey Kovalev (Shift 1)\n• **Drying Unit**: IR + Hot Air running at 62°C\n• **OEE Rating**: 89.4% this week",
         action: {
           label: "View Production Registry",
           icon: Printer,
@@ -230,7 +230,7 @@ export function AiChatSheet() {
       return {
         role: "assistant",
         content:
-          "💵 **Payment Verification: Alpha Media Group LLC**\n\n• **Invoice**: INV-2026-0892\n• **Amount**: $14,850.00 USD\n• **Status**: Cleared (Wire Transfer via SWIFT)\n• **Reference**: WO-00351 Contract prepayment 100%\n• **Accounting Ledger**: Posted to 62.01 Accounts Receivable",
+          "💵 **Payment Verification: Alpha Media Group LLC**\n\n• **Invoice**: INV-2026-0892\n• **Amount**: $14,850.00 USD\n• **Status**: Cleared (Wire Transfer via SWIFT)\n• **Reference**: WOOF-26-0351 Contract prepayment 100%\n• **Accounting Ledger**: Posted to 62.01 Accounts Receivable",
         action: {
           label: "Open Invoices Registry",
           icon: DollarSign,

@@ -23,7 +23,7 @@ interface TextileLabelPreviewProps {
   cutType?: string;
   sewingMarginMm?: number;
   printSides?: string;
-  department?: "Flexo" | "Jacquard" | "Offset" | "Post-press";
+  department?: "Flexo" | "Jacquard" | "Offset";
   weaveQuality?: string;
   hasLurex?: boolean;
   lurexColor?: string;

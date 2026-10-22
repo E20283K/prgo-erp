@@ -159,15 +159,6 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     category: "registry-grid",
     description: "System parameters, plant configurations, and user RBAC security.",
   },
-  "grid-hr": {
-    componentName: "HrGrid",
-    fileName: "HrGrid.tsx",
-    relativePath: "components/grid/HrGrid.tsx",
-    linesOfCode: 720,
-    featureModule: "hr",
-    category: "registry-grid",
-    description: "Human resources, staff registry, T-13 timesheet, piecework wages, and payroll ledger.",
-  },
 
   // Document Detail Views
   "doc-employee-detail": {
@@ -290,15 +281,6 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     category: "document-editor",
     description: "Standard technical specification for repeat print packaging.",
   },
-  "doc-sales-record": {
-    componentName: "SalesRecordDetail",
-    fileName: "SalesRecordDetail.tsx",
-    relativePath: "components/documents/SalesRecordDetail.tsx",
-    linesOfCode: 450,
-    featureModule: "sales",
-    category: "document-editor",
-    description: "Commercial sales invoice and contract terms detail.",
-  },
   "doc-delivery-act": {
     componentName: "DeliveryActDetail",
     fileName: "DeliveryActDetail.tsx",
@@ -352,6 +334,15 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     featureModule: "settings",
     category: "document-editor",
     description: "Enterprise factory, workshops, bank requisites, and warehouse configurations.",
+  },
+  "doc-user-detail": {
+    componentName: "UserDetail",
+    fileName: "UserDetail.tsx",
+    relativePath: "components/documents/UserDetail.tsx",
+    linesOfCode: 450,
+    featureModule: "settings",
+    category: "document-editor",
+    description: "Enterprise system user card, role-based access control, granular CRUD matrix, and security audit.",
   },
 };
 

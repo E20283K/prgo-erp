@@ -85,6 +85,48 @@ export interface PrintPlanningResult {
 }
 
 export function calculatePrintPlanning(inputs: PrintPlanningInput): PrintPlanningResult {
+  if (!inputs.targetQuantity || inputs.targetQuantity <= 0) {
+    return {
+      frontProcessCount: 0,
+      frontSpotCount: 0,
+      frontTotalColors: 0,
+      backProcessCount: 0,
+      backSpotCount: 0,
+      backTotalColors: 0,
+      totalUniqueInks: 0,
+      colorNotation: "0+0",
+      recommendedMethod: "single_sided",
+      activeMethod: "single_sided",
+      piecesPerSheet: 1,
+      targetQuantity: 0,
+      frontPlates: 0,
+      backPlates: 0,
+      totalCtpPlates: 0,
+      savedPlatesFromWorkAndTurn: 0,
+      netPressSheets: 0,
+      makeReadySheets: 0,
+      runningWasteSheets: 0,
+      postPressWasteSheets: 0,
+      totalWasteSheets: 0,
+      grossPressSheets: 0,
+      totalWastePercent: 0,
+      pressSheetsPerParent: 1,
+      requiredParentSheets: 0,
+      parentSheetWastePercent: 0,
+      totalPaperWeightKg: 0,
+      pressPasses: 1,
+      totalImpressions: 0,
+      setupHours: 0,
+      runHours: 0,
+      totalPressHours: 0,
+      estimatedPaperCost: 0,
+      estimatedPlatesCost: 0,
+      estimatedPressCost: 0,
+      totalDirectProductionCost: 0,
+      costPerFinishedUnit: 0,
+    };
+  }
+
   const {
     targetQuantity = 1000,
     piecesPerSheet = 1,

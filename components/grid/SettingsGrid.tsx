@@ -15,6 +15,8 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { useTranslations } from "next-intl";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { PlantRecord } from "@/components/documents/plant/types";
+import { SystemUserRecord } from "@/components/documents/user/types";
+import { createEmptyUser } from "@/components/documents/user/data";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -272,10 +274,9 @@ const INITIAL_TARIFFS: TariffRecord[] = [
 export function SettingsGrid({ type }: SettingsGridProps) {
   const tCommon = useTranslations("Common");
   const tMod = useTranslations("Modules");
-  const { updateGridStats, theme, openTab, plants, upsertPlant } = useWorkspaceStore();
+  const { updateGridStats, theme, openTab, plants, upsertPlant, users, upsertUser } = useWorkspaceStore();
   const isDark = theme === "dark";
 
-  const [users, setUsers] = useState<UserRecord[]>(INITIAL_USERS);
   const [tariffs, setTariffs] = useState<TariffRecord[]>(INITIAL_TARIFFS);
 
   const [searchFilter, setSearchFilter] = useState("");
@@ -321,7 +322,10 @@ export function SettingsGrid({ type }: SettingsGridProps) {
         { id: "plant", title: "Assigned Branch", width: 240, icon: GridColumnIcon.HeaderString },
         { id: "status", title: "Status", width: 105, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      dataRows = users as unknown as SettingsRow[];
+      dataRows = users.map((u) => ({
+        ...u,
+        accessLevel: u.role || "Operator",
+      })) as unknown as SettingsRow[];
     } else {
       cols = [
         { id: "id", title: "Tariff Code", width: 100, icon: GridColumnIcon.HeaderReference },
@@ -448,6 +452,17 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       return;
     }
 
+    if (type === "users") {
+      openTab({
+        id: `user-${row.id}`,
+        title: row.fullName || row.email || "Foydalanuvchi",
+        type: "user-detail",
+        module: "settings",
+        documentData: row,
+      });
+      return;
+    }
+
     setSelectedRowId(row.id);
     if (type === "tariffs") {
       setEditName(row.operationName || "");
@@ -530,20 +545,17 @@ export function SettingsGrid({ type }: SettingsGridProps) {
         documentData: newPlant,
       });
     } else {
-      const newUser: UserRecord = {
-        id: `USR-${String(users.length + 1).padStart(3, "0")}`,
-        fullName: "New Operator",
-        email: `operator${users.length + 1}@printgoo.com`,
-        role: "Press Operator",
-        department: "Offset",
-        plant: "PrintGoo Main Factory — Tashkent (HQ)",
-        accessLevel: "Work Orders & Shift Log",
-        status: "Active",
-      };
-      setUsers((prev) => [newUser, ...prev]);
-      setSelectedRowId(newUser.id);
-      setEditName(newUser.fullName);
-      setIsDrawerOpen(true);
+      const nextNum = (users?.length || 0) + 1;
+      const newUserId = `USR-${String(nextNum).padStart(3, "0")}`;
+      const emptyUser = createEmptyUser(newUserId);
+      openTab({
+        id: `user-new-${Date.now()}`,
+        title: "Yangi foydalanuvchi *",
+        type: "user-detail",
+        module: "settings",
+        documentData: emptyUser,
+        isUnsaved: true,
+      });
     }
   };
 
@@ -565,14 +577,9 @@ export function SettingsGrid({ type }: SettingsGridProps) {
     } else if (type === "plants") {
       const plant = selectedRecord as unknown as PlantRecord;
       upsertPlant({ ...plant, name: editName || plant.name });
-    } else {
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === selectedRecord.id
-            ? { ...item, fullName: editName || item.fullName }
-            : item
-        )
-      );
+    } else if (type === "users") {
+      const user = selectedRecord as unknown as SystemUserRecord;
+      upsertUser({ ...user, fullName: editName || user.fullName });
     }
     setIsDrawerOpen(false);
   };

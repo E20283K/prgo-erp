@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { ComboboxItem } from "@/components/ui/smart-combobox";
-import { MOCK_CUSTOMERS, SITE_OPTIONS, SiteOption } from "@/components/documents/work-order/types";
+import { SITE_OPTIONS, SiteOption } from "@/components/documents/work-order/types";
 
 export interface LookupPresetItem extends ComboboxItem {
   width?: number;
@@ -66,6 +66,8 @@ const DEFAULT_SIZE_PRESETS: LookupPresetItem[] = [
 interface LookupStoreState {
   customers: string[];
   sites: SiteOption[];
+  machines: any[];
+  specifications: any[];
   formats: ComboboxItem[];
   cornerTypes: ComboboxItem[];
   paperStocks: ComboboxItem[];
@@ -79,6 +81,8 @@ interface LookupStoreState {
   syncWithServer: (companyCode?: string) => Promise<void>;
   addCustomer: (name: string) => void;
   addSite: (site: Partial<SiteOption> & { name: string }) => SiteOption;
+  addMachine: (mach: any) => void;
+  addSpecification: (spec: any) => void;
   addFormat: (item: string | ComboboxItem) => void;
   addCornerType: (item: string | ComboboxItem) => void;
   addPaperStock: (item: string | ComboboxItem) => void;
@@ -101,8 +105,10 @@ function normalizeItem(input: string | ComboboxItem, defaultBadge = "Custom"): C
 export const useLookupStore = create<LookupStoreState>()(
   persist(
     (set, get) => ({
-      customers: [...MOCK_CUSTOMERS],
-      sites: [...SITE_OPTIONS],
+      customers: [],
+      sites: [],
+      machines: [],
+      specifications: [],
       formats: [...DEFAULT_FORMATS],
       cornerTypes: [...DEFAULT_CORNER_TYPES],
       paperStocks: [...DEFAULT_PAPER_STOCKS],
@@ -114,10 +120,51 @@ export const useLookupStore = create<LookupStoreState>()(
       syncWithServer: async (companyCode = "PRINTGOO") => {
         set({ isSyncing: true, syncError: null });
         try {
-          const [itemsRes, diesRes] = await Promise.all([
+          const [clientsRes, machinesRes, specsRes, sitesRes, itemsRes, diesRes] = await Promise.all([
+            fetch(`/api/v1/crm/clients?company=${companyCode}`),
+            fetch(`/api/v1/production/machines?companyCode=${companyCode}`),
+            fetch(`/api/v1/production/specifications?companyCode=${companyCode}`),
+            fetch(`/api/v1/production/sites?companyCode=${companyCode}`),
             fetch(`/api/v1/master/items?company=${companyCode}`),
             fetch(`/api/v1/master/printing/dies?company=${companyCode}`),
           ]);
+
+          if (clientsRes.ok) {
+            const clJson = await clientsRes.json();
+            if (clJson.success && Array.isArray(clJson.data)) {
+              set({ customers: clJson.data.map((c: any) => c.name) });
+            }
+          }
+
+          if (machinesRes.ok) {
+            const machJson = await machinesRes.json();
+            if (machJson.success && Array.isArray(machJson.data)) {
+              set({ machines: machJson.data });
+            }
+          }
+
+          if (specsRes.ok) {
+            const specsJson = await specsRes.json();
+            if (specsJson.success && Array.isArray(specsJson.data)) {
+              set({ specifications: specsJson.data });
+            }
+          }
+
+          if (sitesRes.ok) {
+            const sitesJson = await sitesRes.json();
+            if (sitesJson.success && Array.isArray(sitesJson.data)) {
+              set({
+                sites: sitesJson.data.map((s: any) => ({
+                  id: s.id,
+                  name: s.name,
+                  label: s.name,
+                  location: s.address || "Main Site",
+                  facilities: s.isMain ? "Main Plant" : "Branch Facility",
+                  status: s.isActive ? "Active" : "Inactive",
+                })),
+              });
+            }
+          }
 
           if (itemsRes.ok) {
             const itemsJson = await itemsRes.json();
@@ -184,6 +231,12 @@ export const useLookupStore = create<LookupStoreState>()(
         if (!exists) {
           set((state) => ({ customers: [clean, ...state.customers] }));
         }
+        // Asynchronously persist to CRM clients DB
+        fetch("/api/v1/crm/clients?company=PRINTGOO", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: clean, status: "New", industry: "General" }),
+        }).catch((e) => console.error("Failed to persist client to DB:", e));
       },
 
       addSite: (siteInput) => {
@@ -202,6 +255,14 @@ export const useLookupStore = create<LookupStoreState>()(
 
         set((state) => ({ sites: [...state.sites, newSite] }));
         return newSite;
+      },
+
+      addMachine: (mach) => {
+        set((state) => ({ machines: [mach, ...state.machines] }));
+      },
+
+      addSpecification: (spec) => {
+        set((state) => ({ specifications: [spec, ...state.specifications] }));
       },
 
       addFormat: (item) => {
@@ -246,7 +307,7 @@ export const useLookupStore = create<LookupStoreState>()(
 
       resetToDefaults: () => {
         set({
-          customers: [...MOCK_CUSTOMERS],
+          customers: [],
           sites: [...SITE_OPTIONS],
           formats: [...DEFAULT_FORMATS],
           cornerTypes: [...DEFAULT_CORNER_TYPES],
@@ -257,7 +318,7 @@ export const useLookupStore = create<LookupStoreState>()(
       },
     }),
     {
-      name: "printgo_shared_lookups_v1",
+      name: "printgo_shared_lookups_v2",
     }
   )
 );

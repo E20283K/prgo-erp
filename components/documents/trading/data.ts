@@ -458,7 +458,7 @@ export const INITIAL_SETTLEMENT_LEDGERS: TradingSettlementLedgerEntry[] = [
   {
     id: "stl-4",
     date: "2026-10-08",
-    docNo: "WO-FLEXO-0912",
+    docNo: "WOFL-26-0912",
     docType: "Sotuv Hujjati",
     sellerEntityName: "'PRINTGOO SERVICES' MChJ",
     customer: "'REAL TEXTILE INVEST' MChJ",

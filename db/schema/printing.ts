@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { companies, branches } from "./core";
+import { clients } from "./crm";
 
 // ─── Enums: Bosmaxona Holatlari & Uskunalar ────────────────────────────────────
 
@@ -184,6 +185,13 @@ export const diesTooling = pgTable(
     totalImpressions: integer("total_impressions").default(0).notNull(), // Ishlagan zarblar soni
     maxImpressions: integer("max_impressions"), // Resurs chegarasi
     notes: text("notes"),
+
+    // Mijozga biriktirish & Egalik (Customer Dedicated / In-house)
+    customerId: uuid("customer_id").references(() => clients.id, { onDelete: "set null" }),
+    customerName: varchar("customer_name", { length: 255 }), // Qidiruv va ko'rinish qulayligi uchun mijoz nomi
+    ownership: varchar("ownership", { length: 32 }).default("in_house").notNull(), // "in_house" | "customer_owned"
+    isDedicated: boolean("is_dedicated").default(false).notNull(), // true = faqat shu mijozga tegishli
+
     isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -192,6 +200,7 @@ export const diesTooling = pgTable(
     uniqueIndex("dies_tooling_company_code_uq").on(table.companyId, table.code),
     index("dies_tooling_company_shape_idx").on(table.companyId, table.shape),
     index("dies_tooling_status_idx").on(table.status),
+    index("dies_tooling_customer_idx").on(table.customerId),
   ]
 );
 
@@ -224,6 +233,10 @@ export const diesToolingRelations = relations(diesTooling, ({ one }) => ({
   company: one(companies, {
     fields: [diesTooling.companyId],
     references: [companies.id],
+  }),
+  client: one(clients, {
+    fields: [diesTooling.customerId],
+    references: [clients.id],
   }),
 }));
 

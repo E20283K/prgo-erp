@@ -2,8 +2,15 @@ import React from "react";
 import { ArrowRight, Ruler } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { GripperEdge } from "../types";
+import { InfoTooltip } from "../components/InfoTooltip";
 
 interface Props {
   sheetW: number;
@@ -57,117 +64,119 @@ export function DimensionsSection({
   onSwitchTab,
 }: Props) {
   return (
-    <div className="space-y-2.5">
-      {/* Inherited Product Geometry & Color Stations (Read-Only SSOT from Specs & Drawing) */}
-      <div className="p-2 rounded-md bg-muted/40 border border-border space-y-1.5">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase font-semibold text-muted-foreground flex items-center gap-1">
-            <Ruler className="w-3 h-3 text-primary" />
-            <span>Product Specs (SSOT)</span>
-          </span>
-          {onSwitchTab && (
-            <button
-              type="button"
-              onClick={() => onSwitchTab("specs")}
-              className="text-[10px] text-primary hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
-            >
-              <span>Edit in Specs</span>
-              <ArrowRight className="w-2.5 h-2.5" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
-          <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono bg-background">
-            {prodW} × {prodH} mm
-          </Badge>
-          <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono bg-background">
-            Bleed: {bleed} mm
-          </Badge>
-          <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-mono">
-            {cmykColors} colors / plate
-          </Badge>
-        </div>
-      </div>
-
-      {/* Press Sheet Size */}
+    <div className="space-y-2.5 text-xs">
+      {/* Press Sheet Size (W × H) */}
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Sheet W (mm)</label>
+          <label className="text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-1">
+            <span>List eni (W mm)</span>
+            <InfoTooltip
+              title="Bosma qog'oz eni"
+              description="Bosma mashinasiga solinadigan xom qog'oz listining eni (millimetrda). Masalan: 700 mm yoki 520 mm."
+            />
+          </label>
           <Input
             type="number"
             value={sheetW}
             onChange={(e) => setSheetW(Number(e.target.value))}
-            className="h-7 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono"
+            className="h-7 text-xs bg-background font-mono"
           />
         </div>
         <div>
-          <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Sheet H (mm)</label>
+          <label className="text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-1">
+            <span>List bo&apos;yi (H mm)</span>
+            <InfoTooltip
+              title="Bosma qog'oz bo'yi"
+              description="Bosma mashinasiga solinadigan xom qog'oz listining bo'yi (millimetrda). Masalan: 1000 mm yoki 720 mm."
+            />
+          </label>
           <Input
             type="number"
             value={sheetH}
             onChange={(e) => setSheetH(Number(e.target.value))}
-            className="h-7 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono"
+            className="h-7 text-xs bg-background font-mono"
           />
         </div>
       </div>
 
-      {/* Imposition Margins T/B and L/R */}
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Margins T/B (mm)</label>
-          <div className="flex gap-1">
-            <Input
-              type="number"
-              value={marginTop}
-              onChange={(e) => setMarginTop(Number(e.target.value))}
-              className="h-7 text-xs px-1 text-center bg-zinc-50 dark:bg-zinc-950 font-mono"
+      {/* Margins: T, B, L, R in a single clean row */}
+      <div>
+        <label className="text-[11px] font-semibold text-muted-foreground mb-1 flex items-center justify-between">
+          <span className="flex items-center gap-1">
+            <span>Hoshiyalar (T / B / L / R mm)</span>
+            <InfoTooltip
+              title="Texnik Hoshiyalar (Margins)"
+              description="List chetlaridan mahsulotgacha bo'lgan texnik masofa (Top, Bottom, Left, Right)."
             />
-            <Input
-              type="number"
-              value={marginBottom}
-              onChange={(e) => setMarginBottom(Number(e.target.value))}
-              className="h-7 text-xs px-1 text-center bg-zinc-50 dark:bg-zinc-950 font-mono"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Margins L/R (mm)</label>
-          <div className="flex gap-1">
-            <Input
-              type="number"
-              value={marginLeft}
-              onChange={(e) => setMarginLeft(Number(e.target.value))}
-              className="h-7 text-xs px-1 text-center bg-zinc-50 dark:bg-zinc-950 font-mono"
-            />
-            <Input
-              type="number"
-              value={marginRight}
-              onChange={(e) => setMarginRight(Number(e.target.value))}
-              className="h-7 text-xs px-1 text-center bg-zinc-50 dark:bg-zinc-950 font-mono"
-            />
-          </div>
+          </span>
+          <span className="text-[10px] font-mono text-muted-foreground">T · B · L · R</span>
+        </label>
+        <div className="grid grid-cols-4 gap-1">
+          <Input
+            type="number"
+            value={marginTop}
+            onChange={(e) => setMarginTop(Number(e.target.value))}
+            className="h-7 text-xs text-center bg-background font-mono px-0.5"
+            title="Yuqori hoshiya (Top)"
+          />
+          <Input
+            type="number"
+            value={marginBottom}
+            onChange={(e) => setMarginBottom(Number(e.target.value))}
+            className="h-7 text-xs text-center bg-background font-mono px-0.5"
+            title="Pastki hoshiya (Bottom)"
+          />
+          <Input
+            type="number"
+            value={marginLeft}
+            onChange={(e) => setMarginLeft(Number(e.target.value))}
+            className="h-7 text-xs text-center bg-background font-mono px-0.5"
+            title="Chap hoshiya (Left)"
+          />
+          <Input
+            type="number"
+            value={marginRight}
+            onChange={(e) => setMarginRight(Number(e.target.value))}
+            className="h-7 text-xs text-center bg-background font-mono px-0.5"
+            title="O'ng hoshiya (Right)"
+          />
         </div>
       </div>
 
-      {/* Gap / Gutter & Gripper Edge */}
+      {/* Gap & Gripper */}
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-[10px] uppercase font-semibold text-zinc-500 mb-0.5 block">Gap / Gutter (mm)</label>
+          <label className="text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-1">
+            <span>Tirqish / Gap (mm)</span>
+            <InfoTooltip
+              title="Mahsulotlar orasidagi oraliq (Gap)"
+              description="Qo'shni qutichalar yoki yorliqlar orasidagi pichoq (kesish) masofasi. Odatda 3-4 mm qoldiriladi."
+            />
+          </label>
           <Input
             type="number"
             value={gap}
             onChange={(e) => setGap(Number(e.target.value))}
-            className="h-7 text-xs bg-zinc-50 dark:bg-zinc-950 font-mono"
+            className="h-7 text-xs bg-background font-mono"
           />
         </div>
-        <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] uppercase font-semibold text-zinc-500 block">Gripper Edge & Size</label>
+        <div>
+          <label className="text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-1">
+            <span>Klapin & Tomon</span>
+            <InfoTooltip
+              title="Mashina klapani (Gripper Margin)"
+              description="Bosma mashinasining metall ushlagichlari (lapkalari) qog'ozni ushlab tortib ketishi uchun kerak bo'ladigan bo'yoqsiz toza oq maydon (odatda 10-15 mm)."
+            />
+          </label>
           <div className="flex gap-1">
-            <Select value={gripperEdge} onValueChange={(v: any) => v && setGripperEdge(v as GripperEdge)}>
-              <SelectTrigger className="h-7 text-[10px] bg-zinc-50 dark:bg-zinc-950 px-2 w-[75px] shrink-0">
+            <Select
+              value={gripperEdge}
+              onValueChange={(v: any) => v && setGripperEdge(v as GripperEdge)}
+            >
+              <SelectTrigger className="h-7 text-xs bg-background px-2 w-[76px] shrink-0">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="text-xs">
                 <SelectItem value="Auto">Auto</SelectItem>
                 <SelectItem value="Bottom">Bottom</SelectItem>
                 <SelectItem value="Top">Top</SelectItem>
@@ -179,7 +188,7 @@ export function DimensionsSection({
               type="number"
               value={gripper}
               onChange={(e) => setGripper(Number(e.target.value))}
-              className="h-7 text-xs bg-zinc-50 dark:bg-zinc-950 flex-1 px-1.5 text-center font-mono"
+              className="h-7 text-xs text-center bg-background font-mono px-1 flex-1"
             />
           </div>
         </div>

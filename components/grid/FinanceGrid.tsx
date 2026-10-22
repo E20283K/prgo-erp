@@ -56,6 +56,9 @@ export function FinanceGrid({ type }: FinanceGridProps) {
     clientSettlements,
     crmCustomers,
     recordClientPayment,
+    recordPaymentAsync,
+    loadFinanceData,
+    isFinanceLoading,
     deliveryActs,
     openTab,
     setLevel3Tab,
@@ -67,6 +70,32 @@ export function FinanceGrid({ type }: FinanceGridProps) {
   const [isPaymentFormOpen, setIsPaymentFormOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState<string>("5000");
   const [paymentNote, setPaymentNote] = useState<string>("");
+  const [realPayments, setRealPayments] = useState<any[]>([]);
+
+  // Real DB dan Finance ma'lumotlarini yuklash
+  useEffect(() => {
+    loadFinanceData();
+  }, [loadFinanceData]);
+
+  const fetchPayments = useCallback(async () => {
+    try {
+      const res = await fetch("/api/v1/finance/payments");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setRealPayments(json.data);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch payments:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (type === "payments") {
+      fetchPayments();
+    }
+  }, [type, fetchPayments]);
 
   const selectedClient = useMemo<ClientSettlementRecord | null>(() => {
     if (!selectedClientId) return null;
@@ -117,7 +146,7 @@ export function FinanceGrid({ type }: FinanceGridProps) {
             });
           });
       });
-      dataRows = allPayments;
+      dataRows = realPayments.length > 0 ? realPayments : allPayments;
     } else if (type === "accounts") {
       cols = [
         { id: "code", title: "Acct Code (1C)", width: 120, icon: GridColumnIcon.HeaderReference },
@@ -153,7 +182,7 @@ export function FinanceGrid({ type }: FinanceGridProps) {
       dataRows = [
         {
           id: "ORD-2026-0193",
-          workOrderId: "WO-00356",
+          workOrderId: "WOOF-26-0356",
           customer: "Vanguard Fashion",
           product: "Luxury 600g Duplex Hangtag & VIP Business Card (Kashirovka 300g+300g)",
           materialCost: 618.4,
@@ -166,7 +195,7 @@ export function FinanceGrid({ type }: FinanceGridProps) {
         },
         {
           id: "CO-00041",
-          workOrderId: "WO-00351",
+          workOrderId: "WOOF-26-0351",
           customer: "Alpha Media Group LLC",
           product: "A4 Hardcover Catalog 96p (Galerie Art Silk 150g + Soft-Touch)",
           materialCost: 6420.0,
@@ -179,7 +208,7 @@ export function FinanceGrid({ type }: FinanceGridProps) {
         },
         {
           id: "CO-00042",
-          workOrderId: "WO-00352",
+          workOrderId: "WOFL-26-0352",
           customer: "Nordic Print Co",
           product: "Woven Satin Labels 30×50mm (Rotary Flexo + Ultrasonic Cut)",
           materialCost: 1490.0,
@@ -373,16 +402,17 @@ export function FinanceGrid({ type }: FinanceGridProps) {
     }
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
     if (!selectedClient) return;
     const amt = Number(paymentAmount);
     if (!amt || amt <= 0) return;
-    recordClientPayment(
-      selectedClient.customer,
-      amt,
-      undefined,
-      paymentNote.trim() || undefined
-    );
+    await recordPaymentAsync({
+      customer: selectedClient.customer,
+      amount: amt,
+      note: paymentNote.trim() || undefined,
+      contractNo: selectedClient.contractNo,
+    });
+    fetchPayments();
     setIsPaymentFormOpen(false);
     setPaymentNote("");
   };
