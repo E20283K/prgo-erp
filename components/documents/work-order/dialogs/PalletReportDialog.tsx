@@ -201,7 +201,7 @@ export function PalletReportDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[620px] p-0 text-xs gap-0 overflow-hidden border border-border">
+      <DialogContent className="sm:max-w-[680px] p-0 text-xs gap-0 overflow-hidden border border-border">
         {/* Header */}
         <DialogHeader className="p-3.5 bg-muted/40 border-b border-border">
           <div className="flex items-center justify-between pr-8">
@@ -235,10 +235,10 @@ export function PalletReportDialog({
         </DialogHeader>
 
         {/* Body Content */}
-        <div className="p-4 space-y-3.5 max-h-[80vh] overflow-y-auto">
+        <div className="p-4 space-y-4 max-h-[82vh] overflow-y-auto">
           {/* Cascade Context Banner (Previous Step Good Output Link) */}
           {previousOp && (
-            <div className="p-2.5 rounded-md bg-blue-500/5 border border-blue-500/20 flex items-center justify-between">
+            <div className="p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/20 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ArrowRight className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                 <div className="text-[11px]">
@@ -253,7 +253,7 @@ export function PalletReportDialog({
           )}
 
           {isTheoretical && (
-            <div className="p-2.5 rounded-md bg-amber-500/5 border border-amber-500/20 flex items-center gap-2 text-amber-700 dark:text-amber-400">
+            <div className="p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 flex items-center gap-2 text-amber-700 dark:text-amber-400">
               <Info className="w-3.5 h-3.5 shrink-0" />
               <span className="text-[11px]">
                 Gilotina / CTP bosqichi uchun hisoblagich datchiksiz (nazariy hisob). Haqiqiy aniq fakt hisobi Ofset bosma hisoblagichidan boshlanadi.
@@ -261,7 +261,7 @@ export function PalletReportDialog({
             </div>
           )}
 
-          {/* Row 1: Pallet Label, Time & Quick Operator Selection */}
+          {/* Row 1: Pallet Label, Time & Responsible Operator */}
           <div className="grid grid-cols-12 gap-2.5 items-center">
             <div className="col-span-5 space-y-1">
               <label className="text-[11px] font-medium text-muted-foreground">Partiya / Palet Nomi</label>
@@ -302,7 +302,7 @@ export function PalletReportDialog({
 
           {/* Quick Operator Selection (Larger cards with Avatar) */}
           {quickOperators.length > 0 && (
-            <div className="space-y-1.5 pt-1">
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-primary" />
@@ -367,84 +367,139 @@ export function PalletReportDialog({
             </div>
           )}
 
-          {/* Live Floor Quantities Panel */}
-          <div className="p-3 rounded-lg border border-border bg-card space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-border">
+          {/* Live Floor Quantities Panel (Main Operator Calculator - Enlarged & Prominent) */}
+          <div className="p-3.5 rounded-xl border border-border bg-card/70 shadow-xs space-y-3">
+            <div className="flex items-center justify-between pb-2.5 border-b border-border">
               <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-primary" />
-                <span>Qog&apos;oz Harakati va Isrof Balansi</span>
+                <Layers className="w-4 h-4 text-primary" />
+                <span className="text-sm font-bold">Qog&apos;oz Harakati va Isrof Balansi</span>
               </span>
-              <span className="text-[10px] font-mono text-muted-foreground">
-                Brak ulushi: <strong className={cn(Number(wastePercent) > 5 ? "text-rose-600" : "text-foreground")}>{wastePercent}%</strong>
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono text-muted-foreground">
+                  Isrof / Brak ulushi:
+                </span>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "font-mono text-xs font-bold px-2 py-0.5",
+                    Number(wastePercent) > 5
+                      ? "border-rose-500/40 text-rose-600 dark:text-rose-400 bg-rose-500/10"
+                      : "border-border text-foreground bg-muted"
+                  )}
+                >
+                  {wastePercent}%
+                </Badge>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2.5">
+            {/* Enlarged 3-Column Calculator */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* 1. Kirgan qog'oz */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground block">
-                  1. Kirgan (Brutto)
-                </label>
-                <div className="relative">
+              <div className="flex flex-col gap-1.5 p-3 rounded-lg border border-border bg-background shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5 text-foreground">
+                    <span className="w-4 h-4 rounded-full bg-muted border border-border/80 flex items-center justify-center text-[10px] font-mono font-bold">
+                      1
+                    </span>
+                    Kirgan
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold text-muted-foreground uppercase">
+                    (Brutto)
+                  </span>
+                </div>
+                <div className="relative flex items-center mt-0.5">
                   <Input
                     type="number"
-                    value={inputQty || ""}
+                    value={inputQty === 0 ? "" : inputQty}
                     onChange={(e) => {
                       setInputQty(parseInt(e.target.value, 10) || 0);
                       setCustomGoodQty(null);
                     }}
-                    className="h-8 text-xs font-mono font-bold pr-7"
-                    placeholder="10000"
+                    className="h-12 text-2xl font-mono font-bold pl-3 pr-11 text-foreground bg-background border-input tracking-tight"
+                    placeholder="0"
                   />
-                  <span className="absolute right-2 top-2 text-[10px] text-muted-foreground font-mono">l.</span>
+                  <span className="absolute right-3 text-xs font-semibold font-mono text-muted-foreground pointer-events-none uppercase">
+                    list
+                  </span>
                 </div>
+                <span className="text-[10px] text-muted-foreground leading-tight truncate">
+                  {previousOpGoodOutput > 0
+                    ? `Oldingi: ${previousOpGoodOutput.toLocaleString()} l.`
+                    : "Jarayonga kirgan umumiy qog'oz"}
+                </span>
               </div>
 
               {/* 2. Sozlash (Priladka) */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-amber-700 dark:text-amber-400 block">
-                  2. Priladka (Sozlash)
-                </label>
-                <div className="relative">
+              <div className="flex flex-col gap-1.5 p-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.04] shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                    <span className="w-4 h-4 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-[10px] font-mono font-bold">
+                      2
+                    </span>
+                    Priladka
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold text-amber-700/80 dark:text-amber-400/80 uppercase">
+                    Sozlash
+                  </span>
+                </div>
+                <div className="relative flex items-center mt-0.5">
                   <Input
                     type="number"
-                    value={makeReadyQty || ""}
+                    value={makeReadyQty === 0 ? "" : makeReadyQty}
                     onChange={(e) => {
                       setMakeReadyQty(parseInt(e.target.value, 10) || 0);
                       setCustomGoodQty(null);
                     }}
-                    className="h-8 text-xs font-mono font-semibold text-amber-700 dark:text-amber-400 bg-amber-500/5 border-amber-500/30 pr-7"
-                    placeholder="300"
+                    className="h-12 text-2xl font-mono font-bold pl-3 pr-11 text-amber-700 dark:text-amber-300 bg-background border-amber-500/40 focus-visible:ring-amber-500 tracking-tight"
+                    placeholder="0"
                   />
-                  <span className="absolute right-2 top-2 text-[10px] text-amber-700/70 font-mono">l.</span>
+                  <span className="absolute right-3 text-xs font-semibold font-mono text-amber-700/80 dark:text-amber-400 pointer-events-none uppercase">
+                    list
+                  </span>
                 </div>
+                <span className="text-[10px] text-amber-700/80 dark:text-amber-400/80 leading-tight">
+                  Mashinani to&apos;g&apos;irlash isrofi
+                </span>
               </div>
 
               {/* 3. Ishlab chiqarish braki */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-rose-600 dark:text-rose-400 block">
-                  3. Jarayon Braki
-                </label>
-                <div className="relative">
+              <div className="flex flex-col gap-1.5 p-3 rounded-lg border border-rose-500/30 bg-rose-500/[0.04] shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+                    <span className="w-4 h-4 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-[10px] font-mono font-bold">
+                      3
+                    </span>
+                    Jarayon Braki
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold text-rose-600/80 dark:text-rose-400/80 uppercase">
+                    Brak
+                  </span>
+                </div>
+                <div className="relative flex items-center mt-0.5">
                   <Input
                     type="number"
-                    value={defectQty || ""}
+                    value={defectQty === 0 ? "" : defectQty}
                     onChange={(e) => {
                       setDefectQty(parseInt(e.target.value, 10) || 0);
                       setCustomGoodQty(null);
                     }}
-                    className="h-8 text-xs font-mono font-semibold text-rose-600 dark:text-rose-400 bg-rose-500/5 border-rose-500/30 pr-7"
-                    placeholder="200"
+                    className="h-12 text-2xl font-mono font-bold pl-3 pr-11 text-rose-600 dark:text-rose-400 bg-background border-rose-500/40 focus-visible:ring-rose-500 tracking-tight"
+                    placeholder="0"
                   />
-                  <span className="absolute right-2 top-2 text-[10px] text-rose-600/70 font-mono">l.</span>
+                  <span className="absolute right-3 text-xs font-semibold font-mono text-rose-600/80 dark:text-rose-400 pointer-events-none uppercase">
+                    list
+                  </span>
                 </div>
+                <span className="text-[10px] text-rose-600/80 dark:text-rose-400/80 leading-tight">
+                  Nuqson va texnik brak
+                </span>
               </div>
             </div>
 
             {/* Waste Reason Selection (if defect > 0) */}
             {defectQty > 0 && (
-              <div className="space-y-1 pt-1 border-t border-border/40">
-                <label className="text-[11px] font-medium text-rose-600 dark:text-rose-400 block">
+              <div className="space-y-1.5 pt-2 border-t border-border/40">
+                <label className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 block">
                   Brak sababi (Defect Reason) *
                 </label>
                 <SmartCombobox
@@ -459,23 +514,39 @@ export function PalletReportDialog({
               </div>
             )}
 
-            {/* Result KPI Box: Good Output */}
-            <div className="p-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 tracking-wider block">
-                  Sof Yaroqli Chiqish (Topshiriladigan)
-                </span>
-                <span className="text-[11px] text-muted-foreground mt-0.5 block">
-                  {inputQty.toLocaleString()} kirish - ({makeReadyQty} priladka + {defectQty} brak)
-                </span>
+            {/* Result Hero Card: Good Output (Prominent & Clear) */}
+            <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-transparent border border-emerald-500/35 flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase font-extrabold text-emerald-700 dark:text-emerald-400 tracking-wider">
+                    Sof Yaroqli Chiqish (Topshiriladigan)
+                  </span>
+                  <Badge variant="outline" className="text-[10px] py-0 h-4 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 font-mono">
+                    Net Output
+                  </Badge>
+                </div>
+                <div className="text-xs text-muted-foreground font-mono flex items-center gap-1.5 flex-wrap">
+                  <span>{inputQty.toLocaleString()} kirish</span>
+                  <span className="text-muted-foreground/60">−</span>
+                  <span className="text-amber-700 dark:text-amber-400 font-semibold">{makeReadyQty.toLocaleString()} priladka</span>
+                  <span className="text-muted-foreground/60">−</span>
+                  <span className="text-rose-600 dark:text-rose-400 font-semibold">{defectQty.toLocaleString()} brak</span>
+                  <span className="text-muted-foreground/60">=</span>
+                  <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{calculatedGoodQty.toLocaleString()} list</strong>
+                </div>
               </div>
-              <div className="text-right">
-                <div className="text-lg font-black font-mono text-emerald-700 dark:text-emerald-400 leading-none">
-                  {calculatedGoodQty.toLocaleString()} <span className="text-xs font-normal">list</span>
+
+              <div className="text-right shrink-0 pl-3">
+                <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-700 dark:text-emerald-400 leading-none tracking-tight">
+                  {calculatedGoodQty.toLocaleString()}{" "}
+                  <span className="text-xs sm:text-sm font-semibold text-emerald-700/80 dark:text-emerald-400/80 uppercase">
+                    list
+                  </span>
                 </div>
                 {isMultipiece && multiplier > 1 && (
-                  <div className="text-[11px] font-mono font-bold text-primary mt-1">
-                    = {outputPieces.toLocaleString()} dona tayyor
+                  <div className="text-xs font-mono font-bold text-primary mt-1 flex items-center justify-end gap-1">
+                    <Package className="w-3.5 h-3.5 inline" />
+                    <span>= {outputPieces.toLocaleString()} dona tayyor</span>
                   </div>
                 )}
               </div>
@@ -483,7 +554,7 @@ export function PalletReportDialog({
 
             {/* Multi-piece conversion hint (Kesish / Tigel uchun) */}
             {isMultipiece && multiplier > 1 && (
-              <div className="p-2 rounded bg-muted/40 border border-border text-[11px] text-muted-foreground flex items-center justify-between font-mono">
+              <div className="p-2 rounded-lg bg-muted/40 border border-border text-[11px] text-muted-foreground flex items-center justify-between font-mono">
                 <span className="flex items-center gap-1.5">
                   <Package className="w-3.5 h-3.5 text-primary" />
                   <span>1 list = {multiplier} dona mahsulot (Imposition layout)</span>
