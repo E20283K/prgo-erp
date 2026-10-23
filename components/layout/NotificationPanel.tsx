@@ -20,8 +20,6 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Popover,
   PopoverContent,
@@ -136,9 +134,9 @@ function NotifItem({ notif, onOpen, onToggleRead, onDismiss }: NotifItemProps) {
       {/* Main Content */}
       <div className="flex-1 min-w-0 pr-12 space-y-1">
         {/* Top row: Entity code badge + Title */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1.5 min-w-0">
           {notif.entityCode && (
-            <span className="font-mono text-[9px] font-semibold px-1 py-0.2 rounded bg-muted border border-border/70 text-foreground shrink-0 leading-tight">
+            <span className="font-mono text-[9px] font-semibold px-1 py-0.5 rounded bg-muted border border-border/70 text-foreground shrink-0 leading-tight">
               {notif.entityCode}
             </span>
           )}
@@ -147,6 +145,7 @@ function NotifItem({ notif, onOpen, onToggleRead, onDismiss }: NotifItemProps) {
               "text-xs leading-snug truncate",
               notif.read ? "text-muted-foreground font-normal" : "text-foreground font-medium"
             )}
+            title={notif.title}
           >
             {notif.title}
           </span>
@@ -446,10 +445,10 @@ export function NotificationPanel() {
           side="bottom"
           align="end"
           sideOffset={6}
-          className="w-[380px] p-0 gap-0 shadow-lg border-border bg-card overflow-hidden"
+          className="w-[380px] p-0 gap-0 shadow-lg border border-border bg-card overflow-hidden flex flex-col max-h-[480px]"
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/20">
+          <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-border bg-muted/20">
             <div className="flex items-center gap-2">
               <Bell className="size-3.5 text-foreground" />
               <span className="text-xs font-semibold text-foreground">{t("title")}</span>
@@ -529,11 +528,13 @@ export function NotificationPanel() {
 
           {/* Conditional: Settings View or Main Notification List */}
           {showSettings ? (
-            <RulesSettingsView onBack={() => setShowSettings(false)} />
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <RulesSettingsView onBack={() => setShowSettings(false)} />
+            </div>
           ) : (
             <>
               {/* 3 Filter Tabs */}
-              <div className="flex items-center px-3 py-1.5 gap-1.5 border-b border-border/60 bg-muted/10">
+              <div className="shrink-0 flex items-center px-3 py-1.5 gap-1.5 border-b border-border/60 bg-muted/10">
                 <button
                   onClick={() => setActiveFilter("all")}
                   className={cn(
@@ -576,7 +577,7 @@ export function NotificationPanel() {
 
               {/* Body */}
               {filteredNotifications.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-1.5 py-10 px-4 text-center text-muted-foreground">
+                <div className="flex flex-col items-center justify-center gap-1.5 py-10 px-4 text-center text-muted-foreground flex-1">
                   <Bell className="size-7 opacity-20" />
                   <p className="text-xs font-medium text-foreground/80">{t("noNotifications")}</p>
                   <p className="text-[11px] text-muted-foreground/70 leading-normal max-w-[260px]">
@@ -584,39 +585,34 @@ export function NotificationPanel() {
                   </p>
                 </div>
               ) : (
-                <ScrollArea className="max-h-[380px]">
-                  <div>
-                    {filteredNotifications.map((notif) => (
-                      <NotifItem
-                        key={notif.id}
-                        notif={notif}
-                        onOpen={handleOpenNotification}
-                        onToggleRead={handleToggleRead}
-                        onDismiss={handleDismiss}
-                      />
-                    ))}
-                  </div>
-                </ScrollArea>
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden divide-y divide-border/40 overscroll-contain">
+                  {filteredNotifications.map((notif) => (
+                    <NotifItem
+                      key={notif.id}
+                      notif={notif}
+                      onOpen={handleOpenNotification}
+                      onToggleRead={handleToggleRead}
+                      onDismiss={handleDismiss}
+                    />
+                  ))}
+                </div>
               )}
 
               {/* Footer */}
               {notifications.length > 0 && (
-                <>
-                  <Separator />
-                  <div className="px-3 py-1.5 flex items-center justify-between text-[10px] text-muted-foreground font-mono bg-muted/15">
-                    <span>
-                      {notifications.length} · {t("unreadCount", { count: unreadCount })}
-                    </span>
-                    {unreadCount > 0 && (
-                      <button
-                        onClick={() => markAllRead()}
-                        className="text-primary hover:underline font-sans font-medium"
-                      >
-                        {t("markAllRead")}
-                      </button>
-                    )}
-                  </div>
-                </>
+                <div className="shrink-0 px-3 py-1.5 flex items-center justify-between text-[10px] text-muted-foreground font-mono bg-muted/20 border-t border-border/60">
+                  <span>
+                    {notifications.length} · {t("unreadCount", { count: unreadCount })}
+                  </span>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={() => markAllRead()}
+                      className="text-primary hover:underline font-sans font-medium"
+                    >
+                      {t("markAllRead")}
+                    </button>
+                  )}
+                </div>
               )}
             </>
           )}

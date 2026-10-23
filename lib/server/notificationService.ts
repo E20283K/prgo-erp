@@ -232,6 +232,8 @@ export async function syncBusinessAlerts(companyCode: string = "PRINTGOO") {
         });
 
         for (const stock of lowStocks) {
+          if (!stock.sku || stock.sku === "undefined") continue;
+          const materialName = stock.name || stock.sku || "Material";
           const avail = Number(stock.available) || 0;
           const reorder = Number(stock.reorder) || 50;
           if (avail <= reorder) {
@@ -242,17 +244,17 @@ export async function syncBusinessAlerts(companyCode: string = "PRINTGOO") {
                 category: "warehouse",
                 eventType: "stock_low",
                 entityCode: stock.sku,
-                title: `Ombor kam qoldiq: ${stock.name}`,
-                description: `Ombordagi qoldiq minimal me'yordan kam (${avail} ${stock.unit} qoldi). Xarid buyurtmasi kerak.`,
+                title: `Ombor kam qoldiq: ${materialName}`,
+                description: `Ombordagi qoldiq minimal me'yordan kam (${avail} ${stock.unit || "dona"} qoldi). Xarid buyurtmasi kerak.`,
                 i18nKey: "seed_stockLow_title",
-                i18nParams: { sku: stock.sku, name: stock.name, qty: avail, unit: stock.unit },
+                i18nParams: { sku: stock.sku, name: materialName, qty: avail, unit: stock.unit || "dona" },
                 link: { module: "warehouse", subModule: "stock-balance" },
                 targetTab: {
                   id: `stock-${stock.sku}`,
                   title: `${stock.sku} (Qoldiq)`,
                   type: "warehouse-stock",
                   module: "warehouse",
-                  documentData: { sku: stock.sku, name: stock.name },
+                  documentData: { sku: stock.sku, name: materialName },
                 },
               },
               companyCode
