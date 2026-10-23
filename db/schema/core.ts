@@ -4,6 +4,7 @@ import {
   uuid,
   varchar,
   text,
+  integer,
   boolean,
   timestamp,
   jsonb,
@@ -69,7 +70,7 @@ export const companies = pgTable(
   ]
 );
 
-// ─── 2. Branches (Filiallar va Ishlab chiqarish sexlari) ──────────────────────
+// ─── 2. Branches (Filiallar, korxonalar va ishlab chiqarish sexlari) ──────────
 
 export const branches = pgTable(
   "branches",
@@ -80,10 +81,36 @@ export const branches = pgTable(
       .references(() => companies.id, { onDelete: "restrict" }),
     code: varchar("code", { length: 32 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
+    shortName: varchar("short_name", { length: 128 }),
+    legalEntityName: varchar("legal_entity_name", { length: 255 }),
+    branchType: varchar("branch_type", { length: 128 }),
+    tin: varchar("tin", { length: 32 }),
+    vatNumber: varchar("vat_number", { length: 32 }),
+    oked: varchar("oked", { length: 32 }),
     address: text("address"),
+    legalAddress: text("legal_address"),
+    landmark: text("landmark"),
     phone: varchar("phone", { length: 64 }),
+    email: varchar("email", { length: 128 }),
+    director: varchar("director", { length: 128 }),
+    directorPhone: varchar("director_phone", { length: 64 }),
+    chiefAccountant: varchar("chief_accountant", { length: 128 }),
+    chiefAccountantPhone: varchar("chief_accountant_phone", { length: 64 }),
+    productionHead: varchar("production_head", { length: 128 }),
+    productionHeadPhone: varchar("production_head_phone", { length: 64 }),
+    shiftRegime: varchar("shift_regime", { length: 128 }),
+    workingHours: varchar("working_hours", { length: 128 }),
+    daysOfWeek: varchar("days_of_week", { length: 128 }),
+    totalFloorAreaM2: integer("total_floor_area_m2").default(0),
+    machinesCount: integer("machines_count").default(0),
+    status: varchar("status", { length: 32 }).default("Active").notNull(),
     isMain: boolean("is_main").default(false).notNull(),
     isActive: boolean("is_active").default(true).notNull(),
+    departments: jsonb("departments").default([]).notNull(),
+    warehouses: jsonb("warehouses").default([]).notNull(),
+    bankAccounts: jsonb("bank_accounts").default([]).notNull(),
+    integration: jsonb("integration").default({}).notNull(),
+    notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

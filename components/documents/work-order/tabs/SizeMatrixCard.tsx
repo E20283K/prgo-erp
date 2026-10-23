@@ -7,12 +7,10 @@ import {
   Trash2,
   X,
   Grid3X3,
-  List,
   Copy,
   Sparkles,
   LayoutTemplate,
   Layers,
-  Stamp,
   ChevronDown,
   ChevronUp,
   RotateCcw,
@@ -128,15 +126,6 @@ export function SizeMatrixCard({
       };
     });
   }, [sizes]);
-
-  const hasExistingModels = useMemo(
-    () => parsedItems.some((i) => Boolean(i.resolvedModel)),
-    [parsedItems]
-  );
-
-  const [mode, setMode] = useState<"list" | "matrix">(
-    hasExistingModels ? "matrix" : "matrix"
-  );
 
   // ── Matrix State (Models = Rows, SizeCodes = Columns) ──
   const [models, setModels] = useState<string[]>(() => {
@@ -261,17 +250,13 @@ export function SizeMatrixCard({
   const [isQuickFillOpen, setIsQuickFillOpen] = useState(false);
   const [quickFillQty, setQuickFillQty] = useState("500");
 
-  // Inputs for Simple List Mode
-  const [newListSize, setNewListSize] = useState("");
-  const [newListQty, setNewListQty] = useState("");
-
   // Sync matrix state -> SizeDistribution[]
   const commitMatrix = (
     nextModels: string[],
     nextCols: string[],
     nextMap: Record<string, number>
   ) => {
-    const useModelPrefix = nextModels.length > 1 || hasExistingModels;
+    const useModelPrefix = nextModels.length > 1 || parsedItems.some((i) => Boolean(i.resolvedModel));
     const result: SizeDistribution[] = [];
 
     nextModels.forEach((m, mIdx) => {
@@ -523,46 +508,6 @@ export function SizeMatrixCard({
       });
     });
     commitMatrix(models, sizeColumns, nextMap);
-  };
-
-  // ── Simple List Mode Handlers ──
-  const handleAddListItem = () => {
-    if (isOperator || !newListSize.trim() || !newListQty.trim()) return;
-    const qty = parseInt(newListQty, 10);
-    if (isNaN(qty) || qty <= 0) return;
-
-    const tokens = newListSize
-      .split(/[,;]+/)
-      .map((t) => t.trim())
-      .filter(Boolean);
-
-    const added: SizeDistribution[] = tokens.map((tok, idx) => {
-      const { model, sizeCode } = parseModelAndSize({ id: "", size: tok, quantity: qty });
-      return {
-        id: `size-${Date.now()}-${idx}`,
-        size: tok,
-        model: model || undefined,
-        sizeCode: sizeCode || tok,
-        quantity: qty,
-      };
-    });
-
-    onSizesChange([...sizes, ...added]);
-    setNewListSize("");
-    setNewListQty("");
-  };
-
-  const handleUpdateListItemQty = (id: string, valStr: string) => {
-    if (isOperator) return;
-    const qty = Math.max(0, parseInt(valStr, 10) || 0);
-    onSizesChange(
-      sizes.map((s) => (s.id === id ? { ...s, quantity: qty } : s))
-    );
-  };
-
-  const handleRemoveListItem = (id: string) => {
-    if (isOperator) return;
-    onSizesChange(sizes.filter((s) => s.id !== id));
   };
 
   // ── Artwork State ──
@@ -833,7 +778,7 @@ export function SizeMatrixCard({
             </button>
           </div>
 
-          {!isOperator && scope !== "standard" && mode === "matrix" && (
+          {!isOperator && scope !== "standard" && (
             <>
               {/* Shablonlar (Presets) Dropdown */}
               <DropdownMenu>
@@ -950,38 +895,6 @@ export function SizeMatrixCard({
               </Popover>
             </>
           )}
-
-          {/* Mode Switcher */}
-          {scope !== "standard" && (
-            <div className="flex items-center bg-muted p-0.5 rounded-md border border-border">
-              <button
-                type="button"
-                onClick={() => setMode("matrix")}
-                className={cn(
-                  "h-6 px-2 text-[11px] font-medium rounded-sm flex items-center gap-1 transition-all cursor-pointer",
-                  mode === "matrix"
-                    ? "bg-background text-foreground shadow-2xs font-semibold"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <Grid3X3 className="w-3 h-3" />
-                <span>Matritsa</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("list")}
-                className={cn(
-                  "h-6 px-2 text-[11px] font-medium rounded-sm flex items-center gap-1 transition-all cursor-pointer",
-                  mode === "list"
-                    ? "bg-background text-foreground shadow-2xs font-semibold"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <List className="w-3 h-3" />
-                <span>Ro&apos;yxat</span>
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1054,10 +967,10 @@ export function SizeMatrixCard({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => onSwitchTab("sample")}
+                onClick={() => onSwitchTab("overview")}
                 className="h-6.5 px-2 text-[10px] border-amber-500/40 hover:bg-amber-500/20 text-amber-900 dark:text-amber-200 cursor-pointer"
               >
-                <span>SampleTab</span>
+                <span>Overview</span>
                 <ArrowRight className="w-2.5 h-2.5 ml-1" />
               </Button>
             )}
@@ -1159,7 +1072,7 @@ export function SizeMatrixCard({
             </div>
           </div>
         </div>
-      ) : mode === "matrix" ? (
+      ) : (
         <div>
           {/* 2D Table */}
           <div className="overflow-x-auto">
@@ -1449,16 +1362,6 @@ export function SizeMatrixCard({
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onSwitchTab("prepress-tooling")}
-                  className="h-7 px-2.5 text-xs gap-1.5 font-medium text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer"
-                >
-                  <Stamp className="w-3.5 h-3.5" />
-                  <span>Prepress & Jihozlar</span>
-                </Button>
-                <Button
-                  type="button"
                   variant="secondary"
                   size="sm"
                   onClick={() => onSwitchTab(impositionTabKey)}
@@ -1470,139 +1373,6 @@ export function SizeMatrixCard({
               </div>
             )}
           </div>
-        </div>
-      ) : (
-        /* ── Simple 1D List View ── */
-        <div className="p-3 space-y-3">
-          {!isOperator && (
-            <div className="flex items-end gap-2 bg-muted/20 p-2.5 rounded-md border border-border">
-              <div className="flex-1">
-                <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">
-                  Model / O&apos;lcham (vergul bilan bir nechta yozish mumkin)
-                </label>
-                <Input
-                  value={newListSize}
-                  onChange={(e) => setNewListSize(e.target.value)}
-                  placeholder="Masalan: 112, 116, 122 yoki Model 1 · XL"
-                  className="h-7 text-xs bg-background"
-                  onKeyDown={(e) => e.key === "Enter" && handleAddListItem()}
-                />
-              </div>
-              <div className="w-28">
-                <label className="text-[10px] uppercase font-semibold text-muted-foreground mb-0.5 block">
-                  Tiraj (Qty)
-                </label>
-                <Input
-                  type="number"
-                  value={newListQty}
-                  onChange={(e) => setNewListQty(e.target.value)}
-                  placeholder="0"
-                  className="h-7 text-xs bg-background font-mono"
-                  onKeyDown={(e) => e.key === "Enter" && handleAddListItem()}
-                />
-              </div>
-              <Button
-                onClick={handleAddListItem}
-                type="button"
-                size="sm"
-                className="h-7 px-2.5 gap-1 cursor-pointer shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Qo&apos;shish</span>
-              </Button>
-            </div>
-          )}
-
-          {sizes.length > 0 ? (
-            <div className="border border-border rounded-md overflow-hidden max-h-[260px] overflow-y-auto bg-card">
-              <Table className="w-full text-xs">
-                <TableHeader className="bg-muted/50 border-b border-border sticky top-0 z-10">
-                  <TableRow className="hover:bg-transparent border-b border-border">
-                    <TableHead className="h-7 px-2.5 font-medium text-[11px] text-muted-foreground">
-                      Model / O&apos;lcham (SKU)
-                    </TableHead>
-                    <TableHead className="h-7 px-2.5 font-medium text-[11px] text-muted-foreground text-right w-32">
-                      Quantity ({unit})
-                    </TableHead>
-                    <TableHead className="h-7 px-2.5 font-medium text-[11px] text-muted-foreground text-right w-16">
-                      Ulushi
-                    </TableHead>
-                    {!isOperator && <TableHead className="h-7 px-2 w-8"></TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sizes.map((item) => {
-                    const sharePct =
-                      totalBatchQty > 0
-                        ? Math.round(((item.quantity || 0) / totalBatchQty) * 100)
-                        : 0;
-                    const { model, sizeCode } = parseModelAndSize(item);
-                    return (
-                      <TableRow
-                        key={item.id}
-                        className="border-b border-border/50 last:border-0 hover:bg-muted/40"
-                      >
-                        <TableCell className="px-2.5 py-1 font-semibold text-foreground">
-                          <div className="flex items-center gap-1.5">
-                            {model && (
-                              <Badge
-                                variant="secondary"
-                                className="text-[10px] h-4 px-1.5 font-medium"
-                              >
-                                {model}
-                              </Badge>
-                            )}
-                            <span className="font-mono">{sizeCode || item.size}</span>
-                            {scope === "single_sample" && (sizeCode === effectiveTargetSize || item.size === effectiveTargetSize) && (
-                              <Badge variant="outline" className="text-[9px] h-4 px-1 bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/40 font-mono">
-                                ★ Namuna ({sampleQty} {unit})
-                              </Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-2.5 py-1 text-right font-mono font-medium text-foreground">
-                          {isOperator ? (
-                            <span>
-                              {item.quantity.toLocaleString()} {unit}
-                            </span>
-                          ) : (
-                            <Input
-                              type="number"
-                              min={0}
-                              value={item.quantity}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) =>
-                                handleUpdateListItemQty(item.id, e.target.value)
-                              }
-                              className="h-6 w-24 ml-auto text-right font-mono text-xs px-1.5 bg-background"
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell className="px-2.5 py-1 text-right font-mono text-[10px] text-muted-foreground">
-                          {sharePct}%
-                        </TableCell>
-                        {!isOperator && (
-                          <TableCell className="px-2 py-1 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveListItem(item.id)}
-                              className="text-muted-foreground hover:text-destructive p-0.5 rounded transition-colors cursor-pointer"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="text-[11px] text-muted-foreground italic bg-muted/10 p-2.5 rounded border border-dashed border-border text-center">
-              O&apos;lchamlar taqsimotisiz yagona partiya ({(totalBatchQty || totalQuantity).toLocaleString()} {unit}).
-            </div>
-          )}
         </div>
       )}
 

@@ -19,6 +19,7 @@ import {
   MapPin,
   Clock,
   FileText,
+  ShieldCheck,
 } from "lucide-react";
 
 interface PlantOverviewTabProps {
@@ -33,7 +34,7 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
       <div className="rounded-lg border border-border bg-card p-4 space-y-3 shadow-xs">
         <div className="flex items-center gap-2 text-xs font-semibold text-foreground border-b border-border pb-2">
           <Building className="w-4 h-4 text-primary" />
-          <span>Asosiy Identifikatorlar va Filial Ma&apos;lumotlari</span>
+          <span>Asosiy Identifikatorlar va Tashkilot / Korxona Ma&apos;lumotlari</span>
           <Badge variant="outline" className="ml-auto text-[10px] font-mono">
             {plant.code}
           </Badge>
@@ -42,25 +43,25 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
           <div className="space-y-1">
             <Label className="text-[11px] font-medium text-muted-foreground">
-              Filial Koriq Nomi (ERP ichki nomi) *
+              Tashkilot / Korxona / Sex To&apos;liq Nomi *
             </Label>
             <Input
               value={plant.name}
               onChange={(e) => onUpdate({ name: e.target.value })}
               className="h-8 text-xs font-medium"
-              placeholder="Masalan: Tashkent Main Factory (HQ)"
+              placeholder="Masalan: ProMaxZangiota yoki PrintGoo Bosh Bosmaxona"
             />
           </div>
 
           <div className="space-y-1">
             <Label className="text-[11px] font-medium text-muted-foreground">
-              Qisqa Nomi (Hujjat va teglarda)
+              Qisqa Nomi (Teglar va hisobotlar uchun)
             </Label>
             <Input
               value={plant.shortName}
               onChange={(e) => onUpdate({ shortName: e.target.value })}
               className="h-8 text-xs"
-              placeholder="Masalan: Toshkent Bosh Zavod"
+              placeholder="Masalan: ProMax Zangiota"
             />
           </div>
 
@@ -72,13 +73,13 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
               value={plant.code}
               onChange={(e) => onUpdate({ code: e.target.value.toUpperCase() })}
               className="h-8 text-xs font-mono"
-              placeholder="TAS-HQ"
+              placeholder="BRN-06"
             />
           </div>
 
           <div className="space-y-1">
             <Label className="text-[11px] font-medium text-muted-foreground">
-              Filial Ixtisoslashuvi / Turi
+              Tashkiliy Maqomi va Faoliyat Yo&apos;nalishi *
             </Label>
             <Select
               value={plant.branchType}
@@ -87,23 +88,32 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
               }}
             >
               <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Ixtisoslashuvni tanlang" />
+                <SelectValue placeholder="Tashkiliy maqomini tanlang" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Offset & Packaging Plant">
-                  Offset & Packaging Plant (Bosh Ofset va Qadoqlash)
+                <SelectItem value="Mustaqil Ishlab Chiqaruvchi Tashkilot">
+                  Mustaqil Ishlab Chiqaruvchi Tashkilot (Alohida korxona / zavod)
                 </SelectItem>
-                <SelectItem value="Narrow-Web Flexo & Thermal">
-                  Narrow-Web Flexo & Thermal (Flekso va Yorliqlar)
+                <SelectItem value="Bosh Korxona (HQ / Asosiy korpus)">
+                  Bosh Korxona (HQ / Asosiy ishlab chiqarish korpusi)
                 </SelectItem>
-                <SelectItem value="Finishing & Mounting">
-                  Finishing & Mounting (Kashirovka va Qirqish)
+                <SelectItem value="Ofset va Qadoqlash Korxonasi">
+                  Ofset va Qadoqlash Korxonasi (Offset & Packaging Plant)
                 </SelectItem>
-                <SelectItem value="Climate-Controlled Storage">
-                  Climate-Controlled Storage (Markaziy Xom-ashyo Ombori)
+                <SelectItem value="Flekso va Yorliqlar Sexi">
+                  Flekso va Yorliqlar Sexi (Narrow-Web Flexo & Labels)
                 </SelectItem>
-                <SelectItem value="Regional Branch & Warehouse">
-                  Regional Branch & Warehouse (Mintaqaviy Xab)
+                <SelectItem value="To'qimachilik va Jakard Fabrikasi">
+                  To&apos;qimachilik va Jakard Fabrikasi (Textile & Weaving)
+                </SelectItem>
+                <SelectItem value="Post-press va Kashirovka Uchastkasi">
+                  Post-press va Kashirovka Uchastkasi (Finishing & Post-press)
+                </SelectItem>
+                <SelectItem value="Prepress va Repro Markazi">
+                  Prepress va Repro Markazi (Prepress & Design Lab)
+                </SelectItem>
+                <SelectItem value="Mintaqaviy Filial va Logistika Majmuasi">
+                  Mintaqaviy Xab va Logistika Majmuasi (Distribution & Hub)
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -157,6 +167,27 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
               placeholder="8500"
             />
           </div>
+
+          {/* Is Main HQ Flag */}
+          <div className="pt-1 md:col-span-3">
+            <label className="flex items-center gap-2 p-2 rounded bg-muted/40 border border-border cursor-pointer hover:bg-muted/70 transition-colors">
+              <input
+                type="checkbox"
+                checked={!!plant.isMain}
+                onChange={(e) => onUpdate({ isMain: e.target.checked })}
+                className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-primary/20"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="text-xs font-medium text-foreground">Asosiy bosh korxona (HQ / Markaziy tashkilot)</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Ushbu tashkilot butun kompaniyalar guruhi bo&apos;yicha bosh operatsion korxona sifatida qayd etiladi
+                </p>
+              </div>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -170,7 +201,7 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
           <div className="space-y-1">
             <Label className="text-[11px] font-medium text-muted-foreground">
-              Filial / Bosh Direktor
+              Tashkilot Rahbari / Bosh Mas&apos;ul
             </Label>
             <Input
               value={plant.director}
@@ -185,6 +216,7 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
               Direktor Telefoni
             </Label>
             <Input
+              type="tel"
               value={plant.directorPhone || ""}
               onChange={(e) => onUpdate({ directorPhone: e.target.value })}
               className="h-8 text-xs font-mono"
@@ -197,6 +229,7 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
               Umumiy Rasmiy Email
             </Label>
             <Input
+              type="email"
               value={plant.email}
               onChange={(e) => onUpdate({ email: e.target.value })}
               className="h-8 text-xs font-mono"
@@ -221,6 +254,7 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
               Bosh Buxgalter Telefoni
             </Label>
             <Input
+              type="tel"
               value={plant.chiefAccountantPhone || ""}
               onChange={(e) => onUpdate({ chiefAccountantPhone: e.target.value })}
               className="h-8 text-xs font-mono"
@@ -288,12 +322,33 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
             <Label className="text-[11px] font-medium text-muted-foreground">
               Smena Tartibi
             </Label>
-            <Input
+            <Select
               value={plant.shiftRegime}
-              onChange={(e) => onUpdate({ shiftRegime: e.target.value })}
-              className="h-8 text-xs"
-              placeholder="24/7 (2×12h Shifts)"
-            />
+              onValueChange={(val: string | null) => {
+                if (val) onUpdate({ shiftRegime: val });
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Smena tartibini tanlang" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="24/7 (2×12h Shifts)">
+                  24/7 (2 smena × 12 soatlik)
+                </SelectItem>
+                <SelectItem value="24/7 (3×8h Shifts)">
+                  24/7 (3 smena × 8 soatlik)
+                </SelectItem>
+                <SelectItem value="1×8h Standart (08:00–17:00)">
+                  1×8h Standart kunduzgi (08:00–17:00)
+                </SelectItem>
+                <SelectItem value="2×8h Ikki smena (08:00–00:00)">
+                  2×8h Ikki smena (08:00–00:00)
+                </SelectItem>
+                <SelectItem value="Moslashuvchan (Flexible)">
+                  Moslashuvchan / Maxsus tartib
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-1">
@@ -312,12 +367,30 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
             <Label className="text-[11px] font-medium text-muted-foreground">
               Hafta Kunlari
             </Label>
-            <Input
+            <Select
               value={plant.daysOfWeek}
-              onChange={(e) => onUpdate({ daysOfWeek: e.target.value })}
-              className="h-8 text-xs"
-              placeholder="Dushanba – Yakshanba (Uzluksiz)"
-            />
+              onValueChange={(val: string | null) => {
+                if (val) onUpdate({ daysOfWeek: val });
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Ish kunlarini tanlang" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Dushanba – Shanba">
+                  Dushanba – Shanba (6 kunlik ish haftasi)
+                </SelectItem>
+                <SelectItem value="Dushanba – Juma">
+                  Dushanba – Juma (5 kunlik ish haftasi)
+                </SelectItem>
+                <SelectItem value="Dushanba – Yakshanba (Uzluksiz)">
+                  Dushanba – Yakshanba (Uzluksiz 24/7)
+                </SelectItem>
+                <SelectItem value="Maxsus grafik bo'yicha">
+                  Maxsus navbatchilik grafigi
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </div>
@@ -333,7 +406,7 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
           onChange={(e) => onUpdate({ notes: e.target.value })}
           rows={3}
           className="text-xs resize-none"
-          placeholder="Filial faoliyatiga doir ichki qoidalar va maxsus qaydlar..."
+          placeholder="Tashkilot / korxona faoliyatiga doir ichki qoidalar va maxsus qaydlar..."
         />
       </div>
     </div>

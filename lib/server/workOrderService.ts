@@ -72,9 +72,12 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       platesReady: false,
       toolingReady: false,
     };
+    const dims = (wo.dimensions as any) || {};
+    const colorsCfg = (wo.colorsConfig as any) || {};
 
     return {
       id: wo.docNo,
+      docNo: wo.docNo,
       clientOrderId: wo.clientOrderId || undefined,
       customer: wo.customerName,
       product: wo.productName,
@@ -84,6 +87,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       department: wo.department || "Offset",
       priority: (wo.priority as any) || "Normal",
       stage: (wo.stage as any) || "Queue",
+      status: (wo.status as any) || "Draft",
       queueOrder: index + 1,
       checks: {
         designReady: !!checks.designReady,
@@ -92,16 +96,113 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
         toolingReady: !!checks.toolingReady,
         audit: checks.audit || {},
       },
+      startDate: wo.startDate || "",
       deadline: wo.deadline || "",
       plannedSheets: Number(wo.quantity) || 0,
       completedSheets: 0,
       operator: wo.operator || undefined,
       shift: wo.shift || undefined,
-      colors: (wo.colorsConfig as any)?.formula || undefined,
-      spotColors: (wo.colorsConfig as any)?.spotColors || [],
-      sampleRequired: wo.orderType === "Sample",
+      recipe: wo.recipeCode || "",
+      site: wo.site || "",
+      priceTotal: Number(wo.priceTotal) || 0,
+      currency: wo.currency || "UZS",
+
+      // Asosiy spetsifikatsiya materiallari va pardozlash
+      paperStock: wo.paperStock || dims.paperStock || "",
+      coating: wo.coating || dims.coating || "",
+      lamination: wo.lamination || dims.lamination || "",
+      laminationSides: dims.laminationSides || "1s",
+      laminationMicron: dims.laminationMicron ?? 0,
+      embellishment: wo.embellishment || dims.embellishment || "",
+
+      // Ranglar va Pantone
+      colors: colorsCfg?.formula || undefined,
+      colorsConfig: colorsCfg?.formula || "",
+      frontColors: colorsCfg?.frontColors || { c: false, m: false, y: false, k: false },
+      backColors: colorsCfg?.backColors || { c: false, m: false, y: false, k: false },
+      spotColors: colorsCfg?.spotColors || [],
+      spotColorItems: colorsCfg?.spotColorItems || [],
+
+      // O'lchamlar va geometriya
+      dimensions: dims,
+      width: dims.width ?? 0,
+      height: dims.height ?? 0,
+      dimensionUnit: dims.dimensionUnit || "mm",
+      bleed: dims.bleed ?? 0,
+      shapeType: dims.shapeType || "rectangle",
+      cornerType: dims.cornerType || "Square",
+      itemCategory: dims.itemCategory || "",
+      boxDepth: dims.boxDepth ?? 0,
+      foldType: dims.foldType || "",
+      boxType: dims.boxType || "",
+      customShape: dims.customShape || "",
+      customSvgPath: dims.customSvgPath || "",
+      holeSize: dims.holeSize ?? 0,
+      holePosition: dims.holePosition || "none",
+      holeOffset: dims.holeOffset ?? 0,
+      sizes: dims.sizes || [],
+      skuArtworks: dims.skuArtworks || [],
+
+      // Kashirovka
+      kashirovkaMode: dims.kashirovkaMode || "none",
+      kashirovkaStrategy: dims.kashirovkaStrategy || "split_half_sheet",
+      kashirovkaLayers: dims.kashirovkaLayers || [],
+      kashirovkaGlueGsm: dims.kashirovkaGlueGsm ?? 0,
+      kashirovkaMakeReadySheets: dims.kashirovkaMakeReadySheets ?? 0,
+      kashirovkaCuringHours: dims.kashirovkaCuringHours ?? 0,
+
+      // Shtansforma / Asbob-uskuna
+      toolingItems: dims.toolingItems || [],
+      selectedToolingId: dims.selectedToolingId || "",
+      selectedToolingName: dims.selectedToolingName || "",
+      toolingProcurementNeeded: !!dims.toolingProcurementNeeded,
+      toolingProcurementCost: dims.toolingProcurementCost ?? 0,
+
+      // Maket va die-line
+      artworkFront: dims.artworkFront || "",
+      artworkBack: dims.artworkBack || "",
+      artworkBleedIncluded: dims.artworkBleedIncluded,
+      artworkDielineOpacity: dims.artworkDielineOpacity,
+      artworkRotation: dims.artworkRotation,
+
+      // Bosma & Varaq
+      printMethod: dims.printMethod,
+      parentSheetW: dims.parentSheetW,
+      parentSheetH: dims.parentSheetH,
+      pressSheetW: dims.pressSheetW,
+      pressSheetH: dims.pressSheetH,
+      makeReadyPerPlate: dims.makeReadyPerPlate,
+      runWastePercent: dims.runWastePercent,
+
+      // To'qimachilik / Ribbon Label
+      labelFoldType: dims.labelFoldType,
+      labelCutType: dims.labelCutType,
+      labelMaterialType: dims.labelMaterialType,
+      labelEdgeType: dims.labelEdgeType,
+      labelWashResistance: dims.labelWashResistance,
+      labelSewingMarginMm: dims.labelSewingMarginMm,
+      labelPrintSides: dims.labelPrintSides,
+
+      // Flexo
+      flexoMachineId: dims.flexoMachineId,
+      flexoMaterialId: dims.flexoMaterialId,
+      flexoWebWidth: dims.flexoWebWidth,
+      flexoCylinderTeeth: dims.flexoCylinderTeeth,
+      flexoPlateThickness: dims.flexoPlateThickness,
+      flexoOrientation: dims.flexoOrientation,
+      flexoGapX: dims.flexoGapX,
+      flexoGapY: dims.flexoGapY,
+      flexoColors: dims.flexoColors,
+
+      financials: dims.financials,
+
+      orderType: wo.orderType || "Production",
+      sampleRequired: wo.orderType === "Sample" || !!(wo.sampleData as any)?.isRequired,
       sampleStatus: (wo.sampleData as any)?.approvalStatus || "none",
       sampleQty: (wo.sampleData as any)?.sampleQty || undefined,
+      sampleData: wo.sampleData || {},
+      packagingData: wo.packagingData || {},
+      notes: wo.notes || "",
       photoUrl: normalizePermanentMediaUrl(wo.photoUrl) || normalizePermanentMediaUrl(wo.attachments && wo.attachments.find((a: any) => a.category === "proofs" || a.fileType?.startsWith("image/"))?.url) || undefined,
       photoUrls: (wo.photoUrls && wo.photoUrls.length > 0
         ? wo.photoUrls
@@ -232,12 +333,63 @@ export async function upsertWorkOrder(
     dimensions: {
       width: data.width,
       height: data.height,
-      dimensionUnit: data.dimensionUnit,
+      dimensionUnit: data.dimensionUnit || "mm",
       bleed: data.bleed,
       shapeType: data.shapeType,
       cornerType: data.cornerType,
       itemCategory: data.itemCategory,
       boxDepth: data.boxDepth,
+      foldType: data.foldType,
+      boxType: data.boxType,
+      customShape: data.customShape,
+      customSvgPath: data.customSvgPath,
+      holeSize: data.holeSize,
+      holePosition: data.holePosition,
+      holeOffset: data.holeOffset,
+      sizes: data.sizes,
+      skuArtworks: (data as any).skuArtworks,
+      kashirovkaMode: data.kashirovkaMode,
+      kashirovkaStrategy: data.kashirovkaStrategy,
+      kashirovkaLayers: data.kashirovkaLayers,
+      kashirovkaGlueGsm: data.kashirovkaGlueGsm,
+      kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets,
+      kashirovkaCuringHours: data.kashirovkaCuringHours,
+      toolingItems: (data as any).toolingItems || (data as any).dimensions?.toolingItems || [],
+      selectedToolingId: data.selectedToolingId,
+      selectedToolingName: data.selectedToolingName,
+      toolingProcurementNeeded: data.toolingProcurementNeeded,
+      toolingProcurementCost: data.toolingProcurementCost,
+      laminationSides: data.laminationSides,
+      laminationMicron: data.laminationMicron,
+      artworkFront: data.artworkFront,
+      artworkBack: data.artworkBack,
+      artworkBleedIncluded: data.artworkBleedIncluded,
+      artworkDielineOpacity: data.artworkDielineOpacity,
+      artworkRotation: data.artworkRotation,
+      printMethod: data.printMethod,
+      parentSheetW: data.parentSheetW,
+      parentSheetH: data.parentSheetH,
+      pressSheetW: data.pressSheetW,
+      pressSheetH: data.pressSheetH,
+      makeReadyPerPlate: data.makeReadyPerPlate,
+      runWastePercent: data.runWastePercent,
+      labelFoldType: data.labelFoldType,
+      labelCutType: data.labelCutType,
+      labelMaterialType: data.labelMaterialType,
+      labelEdgeType: data.labelEdgeType,
+      labelWashResistance: data.labelWashResistance,
+      labelSewingMarginMm: data.labelSewingMarginMm,
+      labelPrintSides: data.labelPrintSides,
+      flexoMachineId: data.flexoMachineId,
+      flexoMaterialId: data.flexoMaterialId,
+      flexoWebWidth: data.flexoWebWidth,
+      flexoCylinderTeeth: data.flexoCylinderTeeth,
+      flexoPlateThickness: data.flexoPlateThickness,
+      flexoOrientation: data.flexoOrientation,
+      flexoGapX: data.flexoGapX,
+      flexoGapY: data.flexoGapY,
+      flexoColors: data.flexoColors,
+      financials: data.financials,
     },
     colorsConfig: {
       formula: data.colorsConfig,
@@ -703,19 +855,112 @@ export async function getProductionSites(companyCode: string = "PRINTGOO") {
 
 export async function createProductionSite(data: any, companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
+  const hasValidUuid = data.id && isUuid(String(data.id));
+
+  let existing = null;
+  if (hasValidUuid) {
+    existing = await db.query.branches.findFirst({
+      where: and(eq(branches.companyId, companyId), eq(branches.id, data.id)),
+    });
+  } else if (data.code) {
+    existing = await db.query.branches.findFirst({
+      where: and(eq(branches.companyId, companyId), eq(branches.code, data.code)),
+    });
+  }
+
+  const resolvedStatus = data.status || (data.isActive === false ? "Inactive" : "Active");
+  const resolvedIsActive = data.status ? data.status !== "Inactive" : (data.isActive ?? true);
+
+  if (existing) {
+    const [updated] = await db
+      .update(branches)
+      .set({
+        name: data.name ?? existing.name,
+        code: data.code ?? existing.code,
+        shortName: data.shortName !== undefined ? data.shortName : existing.shortName,
+        legalEntityName: data.legalEntityName !== undefined ? data.legalEntityName : existing.legalEntityName,
+        branchType: data.branchType !== undefined ? data.branchType : existing.branchType,
+        tin: data.tin !== undefined ? data.tin : existing.tin,
+        vatNumber: data.vatNumber !== undefined ? data.vatNumber : existing.vatNumber,
+        oked: data.oked !== undefined ? data.oked : existing.oked,
+        address: data.address !== undefined ? data.address : existing.address,
+        legalAddress: data.legalAddress !== undefined ? data.legalAddress : existing.legalAddress,
+        landmark: data.landmark !== undefined ? data.landmark : existing.landmark,
+        phone: data.phone !== undefined ? data.phone : existing.phone,
+        email: data.email !== undefined ? data.email : existing.email,
+        director: data.director !== undefined ? data.director : existing.director,
+        directorPhone: data.directorPhone !== undefined ? data.directorPhone : existing.directorPhone,
+        chiefAccountant: data.chiefAccountant !== undefined ? data.chiefAccountant : existing.chiefAccountant,
+        chiefAccountantPhone: data.chiefAccountantPhone !== undefined ? data.chiefAccountantPhone : existing.chiefAccountantPhone,
+        productionHead: data.productionHead !== undefined ? data.productionHead : existing.productionHead,
+        productionHeadPhone: data.productionHeadPhone !== undefined ? data.productionHeadPhone : existing.productionHeadPhone,
+        shiftRegime: data.shiftRegime !== undefined ? data.shiftRegime : existing.shiftRegime,
+        workingHours: data.workingHours !== undefined ? data.workingHours : existing.workingHours,
+        daysOfWeek: data.daysOfWeek !== undefined ? data.daysOfWeek : existing.daysOfWeek,
+        totalFloorAreaM2: data.totalFloorAreaM2 !== undefined ? Number(data.totalFloorAreaM2) || 0 : existing.totalFloorAreaM2,
+        machinesCount: data.machinesCount !== undefined ? Number(data.machinesCount) || 0 : existing.machinesCount,
+        status: data.status !== undefined ? data.status : existing.status,
+        isMain: data.isMain !== undefined ? Boolean(data.isMain) : existing.isMain,
+        isActive: resolvedIsActive,
+        departments: data.departments !== undefined ? data.departments : existing.departments,
+        warehouses: data.warehouses !== undefined ? data.warehouses : existing.warehouses,
+        bankAccounts: data.bankAccounts !== undefined ? data.bankAccounts : existing.bankAccounts,
+        integration: data.integration !== undefined ? data.integration : existing.integration,
+        notes: data.notes !== undefined ? data.notes : existing.notes,
+        updatedAt: new Date(),
+      })
+      .where(eq(branches.id, existing.id))
+      .returning();
+    return updated;
+  }
+
   const [inserted] = await db
     .insert(branches)
     .values({
       companyId,
-      code: data.code || `BR-${Date.now()}`,
+      code: data.code || `BR-${Date.now().toString().slice(-4)}`,
       name: data.name,
+      shortName: data.shortName || null,
+      legalEntityName: data.legalEntityName || null,
+      branchType: data.branchType || null,
+      tin: data.tin || null,
+      vatNumber: data.vatNumber || null,
+      oked: data.oked || null,
       address: data.address || null,
+      legalAddress: data.legalAddress || null,
+      landmark: data.landmark || null,
       phone: data.phone || null,
-      isMain: data.isMain ?? false,
-      isActive: true,
+      email: data.email || null,
+      director: data.director || null,
+      directorPhone: data.directorPhone || null,
+      chiefAccountant: data.chiefAccountant || null,
+      chiefAccountantPhone: data.chiefAccountantPhone || null,
+      productionHead: data.productionHead || null,
+      productionHeadPhone: data.productionHeadPhone || null,
+      shiftRegime: data.shiftRegime || null,
+      workingHours: data.workingHours || null,
+      daysOfWeek: data.daysOfWeek || null,
+      totalFloorAreaM2: Number(data.totalFloorAreaM2) || 0,
+      machinesCount: Number(data.machinesCount) || 0,
+      status: resolvedStatus,
+      isMain: Boolean(data.isMain),
+      isActive: resolvedIsActive,
+      departments: Array.isArray(data.departments) ? data.departments : [],
+      warehouses: Array.isArray(data.warehouses) ? data.warehouses : [],
+      bankAccounts: Array.isArray(data.bankAccounts) ? data.bankAccounts : [],
+      integration: data.integration || {},
+      notes: data.notes || null,
     })
     .returning();
   return inserted;
+}
+
+export async function deleteProductionSite(id: string) {
+  const [deleted] = await db
+    .delete(branches)
+    .where(eq(branches.id, id))
+    .returning();
+  return deleted;
 }
 
 // ─── Work Order Attachments CRUD ────────────────────────────────────────────

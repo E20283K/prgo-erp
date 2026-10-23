@@ -56,7 +56,13 @@
     "welcomeToastDesc": "{role} rolüyle giriş yapıldı.",
     "roleShiftLead": "Üretim Vardiya Amiri",
     "roleSalesDirector": "Satış ve Müşteri Direktörü",
-    "roleSysAdmin": "Sistem Yöneticisi"
+    "roleSysAdmin": "Sistem Yöneticisi",
+    "loginErrorTitle": "Giriş Hatası",
+    "invalidCredentials": "Geçersiz kullanıcı adı veya şifre",
+    "emptyCredentials": "Lütfen kullanıcı adı ve şifrenizi girin",
+    "accountInactive": "Hesap aktif değil veya engellenmiş",
+    "serverErrorTitle": "Sunucu Hatası",
+    "serverErrorDesc": "Sunucuya bağlanırken bir hata oluştu"
   },
   "Topbar": {
     "commands": "Komutlar",
@@ -123,6 +129,7 @@
     "contextCopy": "Değeri Kopyala",
     "contextDelete": "Silme İşareti Koy (Del)",
     "colId": "Sipariş No",
+    "colSampleStatus": "Numune Durumu",
     "colCustomer": "Müşteri / Cari",
     "colProduct": "Ürün Tanımı",
     "colMachine": "Baskı Makinesi",
@@ -1083,6 +1090,7 @@
     "seedDemoBtn": "Demo Grupları Yükle",
     "orderCreatedSuccess": "Taslak sipariş başarıyla oluşturuldu",
     "groupDetails": "Grup Bilgileri",
+    "groupSettings": "Grup Ayarları",
     "chatId": "Telegram Chat ID",
     "linkedCustomer": "Bağlı Müşteri",
     "linkSuccess": "Grup müşteriye başarıyla bağlandı",

@@ -165,16 +165,19 @@ interface OverviewTabProps {
   setOrderAttachments: React.Dispatch<React.SetStateAction<OrderAttachment[]>>;
   sampleData?: WorkOrderSampleData;
   onSampleChange?: (field: keyof WorkOrderSampleData, val: any) => void;
+  onApproveAndReleaseMassRun?: () => void;
+  onRejectSample?: (reasonCategory: SampleRevisionRecord["reasonCategory"], notes: string) => void;
   onOpenLightbox: () => void;
   onOpenTab: (tab: any) => void;
   onSwitchTab: (tabKey: string) => void;
   onMarkUnsaved: () => void;
   isOperator?: boolean;
-  onToggleOperatorMode?: (mode: "manager" | "operator") => void;
   tOrder: (key: string) => string;
 }
 
 import { OrderReadinessRouteCard } from "../OrderReadinessRouteCard";
+import { SampleCard } from "../cards/SampleCard";
+import type { SampleRevisionRecord } from "../types";
 import { FilePreviewDialog } from "@/components/file-viewer/FilePreviewDialog";
 import { FILE_KIND_ICON, getFileKind, isPreviewable, downloadFile, ViewableFile } from "@/components/file-viewer/file-utils";
 import { useLookupStore } from "@/store/lookupStore";
@@ -240,12 +243,13 @@ export function OverviewTab({
   setOrderAttachments,
   sampleData,
   onSampleChange,
+  onApproveAndReleaseMassRun,
+  onRejectSample,
   onOpenLightbox,
   onOpenTab,
   onSwitchTab,
   onMarkUnsaved,
-  isOperator: initialIsOperator,
-  onToggleOperatorMode,
+  isOperator = false,
   tOrder,
 }: OverviewTabProps) {
   const {
@@ -261,6 +265,7 @@ export function OverviewTab({
     loadCrmCustomers,
     upsertCustomerAsync,
     openTab,
+    openNewPlantTab,
   } = useWorkspaceStore();
 
   useEffect(() => {
@@ -433,11 +438,6 @@ export function OverviewTab({
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
 
   const tEnhance = useTranslations("OverviewEnhancements");
-
-  const [viewMode, setViewMode] = useState<"manager" | "operator">(
-    initialIsOperator ? "operator" : "manager"
-  );
-  const isOperator = viewMode === "operator";
 
   // Department technology flags
   const isFlexo = formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false);
@@ -697,42 +697,6 @@ export function OverviewTab({
             <span className="font-medium text-foreground">{formData.site || "Building 1"}</span>
             <span className="text-border mx-0.5">•</span>
             <span>{data.orderType === "Sample" ? "Sample Order" : "Production Order"}</span>
-          </div>
-
-          <div className="hidden md:block h-4 w-px bg-border" />
-
-          {/* View Mode Switcher (👔 Manager View vs 👷 Operator View) */}
-          <div className="inline-flex items-center p-0.5 rounded-full bg-muted border border-border shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                setViewMode("manager");
-                onToggleOperatorMode?.("manager");
-              }}
-              className={cn(
-                "px-2.5 py-0.5 text-[11px] font-semibold rounded-full transition-colors cursor-pointer flex items-center gap-1",
-                viewMode === "manager"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <span>👔 {tEnhance("managerView")}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setViewMode("operator");
-                onToggleOperatorMode?.("operator");
-              }}
-              className={cn(
-                "px-2.5 py-0.5 text-[11px] font-semibold rounded-full transition-colors cursor-pointer flex items-center gap-1",
-                viewMode === "operator"
-                  ? "bg-amber-500 text-white shadow-xs font-bold"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <span>👷 {tEnhance("operatorView")}</span>
-            </button>
           </div>
         </div>
       </div>
@@ -1310,35 +1274,6 @@ export function OverviewTab({
                 </div>
               </div>
             )}
-
-            {/* Active Sample Sync Banner (if Order is in Sample Mode or Sample Required) */}
-            {(formData.orderType === "Sample" || sampleData?.isRequired) && (
-              <div className="p-2 rounded-md bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <FlaskConical className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                  <div className="min-w-0">
-                    <span className="font-semibold text-amber-800 dark:text-amber-300 block truncate text-[11px]">
-                      Namuna rejimi faol
-                    </span>
-                    <span className="text-[10px] text-amber-700/90 dark:text-amber-400/90 block truncate">
-                      {sampleData?.sampleTargetSize && sampleData.sampleTargetSize !== "all"
-                        ? `Faqat ${sampleData.sampleTargetSize} razmeri sinovdan o'tmoqda (${sampleData?.sampleQty || 5} ${formData.unit})`
-                        : `Sinov tiraji: ${sampleData?.sampleQty || 5} ${formData.unit} (SampleTab)`}
-                    </span>
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onSwitchTab("sample")}
-                  className="h-6 px-2 text-[10px] border-amber-500/30 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20 shrink-0"
-                >
-                  <span>SampleTab</span>
-                  <ArrowRight className="w-2.5 h-2.5 ml-1" />
-                </Button>
-              </div>
-            )}
           </div>
         </div>
 
@@ -1807,27 +1742,22 @@ export function OverviewTab({
                         <CommandInput placeholder="Search production site..." className="h-8 text-xs" />
                         <CommandList className="max-h-60">
                           <CommandEmpty className="py-3 text-center text-xs text-muted-foreground flex flex-col items-center gap-1">
-                            <span>No site found.</span>
+                            <span>Mos filial topilmadi.</span>
                             {!isOperator && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const newName = window.prompt("Enter new facility site name (e.g. Building 3 — Digital Lab):");
-                                  if (newName && newName.trim()) {
-                                    const created = addSite({ name: newName.trim() });
-                                    handleFieldChange("site", created.id);
-                                    setIsSiteComboboxOpen(false);
-                                    onMarkUnsaved();
-                                  }
+                                  setIsSiteComboboxOpen(false);
+                                  openNewPlantTab();
                                 }}
                                 className="text-primary hover:underline flex items-center gap-1 text-[11px] font-medium mt-1 cursor-pointer"
                               >
                                 <Plus className="w-3 h-3" />
-                                <span>Add new facility site</span>
+                                <span>Yangi filial qo'shish</span>
                               </button>
                             )}
                           </CommandEmpty>
-                          <CommandGroup heading="Manufacturing Facilities">
+                          <CommandGroup heading="Ishlab chiqarish filiallari (Sexlar)">
                             {sites.map((site) => {
                               const isSelected = formData.site === site.id || formData.site === site.name;
                               return (
@@ -1857,18 +1787,13 @@ export function OverviewTab({
                               <CommandItem
                                 value="__add_new_facility_site_action__"
                                 onSelect={() => {
-                                  const newName = window.prompt("Enter new facility site name (e.g. Building 3 — Digital Lab):");
-                                  if (newName && newName.trim()) {
-                                    const created = addSite({ name: newName.trim() });
-                                    handleFieldChange("site", created.id);
-                                    setIsSiteComboboxOpen(false);
-                                    onMarkUnsaved();
-                                  }
+                                  setIsSiteComboboxOpen(false);
+                                  openNewPlantTab();
                                 }}
                                 className="py-1.5 px-2.5 cursor-pointer text-xs flex items-center gap-1.5 text-primary font-medium border-t border-border mt-1"
                               >
                                 <Plus className="h-3.5 w-3.5" />
-                                <span>Add new facility site...</span>
+                                <span>Yangi filial / sex qo'shish...</span>
                               </CommandItem>
                             )}
                           </CommandGroup>
@@ -2200,6 +2125,16 @@ export function OverviewTab({
 
         {/* Right Column (1/3 width on xl screens, stacks gracefully on smaller screens) */}
         <div className="grid grid-cols-1 @3xl:grid-cols-2 @7xl:grid-cols-1 gap-4 content-start">
+          {/* Card: Sample & Quality Inspection */}
+          <SampleCard
+            formData={formData}
+            sampleData={sampleData}
+            onSampleChange={onSampleChange}
+            onFieldChange={handleFieldChange}
+            onApproveAndReleaseMassRun={onApproveAndReleaseMassRun}
+            onRejectSample={onRejectSample}
+          />
+
           {/* Card 5: Live Materials & Stock Availability Summary (Read-Only Snapshot) */}
         <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0 flex flex-col justify-between">
           <div className="space-y-3">

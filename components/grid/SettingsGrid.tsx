@@ -200,14 +200,16 @@ const INITIAL_TARIFFS: TariffRecord[] = [
 export function SettingsGrid({ type }: SettingsGridProps) {
   const tCommon = useTranslations("Common");
   const tMod = useTranslations("Modules");
-  const { updateGridStats, theme, openTab, plants, upsertPlant, users, upsertUser, fetchUsers } = useWorkspaceStore();
+  const { updateGridStats, theme, openTab, plants, upsertPlant, openNewPlantTab, fetchPlants, savePlantToDb, users, upsertUser, fetchUsers } = useWorkspaceStore();
   const isDark = theme === "dark";
 
   useEffect(() => {
     if (type === "users") {
       fetchUsers();
+    } else if (type === "plants") {
+      fetchPlants();
     }
-  }, [type, fetchUsers]);
+  }, [type, fetchUsers, fetchPlants]);
 
   const [tariffs, setTariffs] = useState<TariffRecord[]>(INITIAL_TARIFFS);
 
@@ -232,15 +234,15 @@ export function SettingsGrid({ type }: SettingsGridProps) {
 
     if (type === "plants") {
       cols = [
-        { id: "id", title: "Branch ID", width: 95, icon: GridColumnIcon.HeaderReference },
-        { id: "name", title: "Company / Plant / Workshop Name", width: 270, icon: GridColumnIcon.HeaderString },
-        { id: "branchType", title: "Specialization", width: 200, icon: GridColumnIcon.HeaderLookup },
-        { id: "tin", title: "STIR (INN)", width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: "director", title: "Head / Responsible", width: 160, icon: GridColumnIcon.HeaderString },
-        { id: "shiftRegime", title: "Shift Schedule", width: 165, icon: GridColumnIcon.HeaderString },
-        { id: "machinesCount", title: "Units", width: 80, icon: GridColumnIcon.HeaderNumber },
-        { id: "address", title: "Location Address", width: 240, icon: GridColumnIcon.HeaderString },
-        { id: "status", title: "Status", width: 110, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "code", title: "Kodi", width: 95, icon: GridColumnIcon.HeaderReference },
+        { id: "name", title: "Tashkilot / Korxona / Sex nomi", width: 280, icon: GridColumnIcon.HeaderString },
+        { id: "branchType", title: "Tashkiliy maqomi / Yo'nalishi", width: 230, icon: GridColumnIcon.HeaderLookup },
+        { id: "tin", title: "STIR / INN", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "director", title: "Rahbar / Mas'ul", width: 160, icon: GridColumnIcon.HeaderString },
+        { id: "shiftRegime", title: "Ish tartibi", width: 160, icon: GridColumnIcon.HeaderString },
+        { id: "machinesCount", title: "Uskunalar", width: 85, icon: GridColumnIcon.HeaderNumber },
+        { id: "address", title: "Manzil / Joylashuv", width: 240, icon: GridColumnIcon.HeaderString },
+        { id: "status", title: "Holati", width: 100, icon: GridColumnIcon.HeaderSingleValue },
       ];
       dataRows = plants as unknown as SettingsRow[];
     } else if (type === "users") {
@@ -313,6 +315,19 @@ export function SettingsGrid({ type }: SettingsGridProps) {
 
       const column = columns[col];
       const val = rowData[column.id as keyof typeof rowData];
+
+      if (column.id === "code") {
+        const codeVal = (rowData as any).code || rowData.id;
+        return {
+          kind: GridCellKind.Text,
+          data: String(codeVal),
+          displayData: String(codeVal),
+          allowOverlay: false,
+          themeOverride: {
+            baseFontStyle: "600 12px monospace",
+          },
+        };
+      }
 
       if (column.id === "status") {
         const isOk = val === "Active";
@@ -425,56 +440,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       setEditSetupUsd(String(newTariff.setupFeeUsd));
       setIsDrawerOpen(true);
     } else if (type === "plants") {
-      const nextNum = plants.length + 1;
-      const newPlant: PlantRecord = {
-        id: `PLT-${String(nextNum).padStart(3, "0")}`,
-        code: `BRN-${String(nextNum).padStart(2, "0")}`,
-        name: `Yangi Filial / Sex #${nextNum}`,
-        shortName: `Filial #${nextNum}`,
-        legalEntityName: "'PrintGoo Industrial Group' MCHJ",
-        branchType: "Offset & Packaging Plant",
-        tin: "305112890",
-        vatNumber: "320011289012",
-        oked: "18.12.0",
-        address: "Toshkent shahri",
-        legalAddress: "Toshkent shahri",
-        phone: "+998 71 200-55-00",
-        email: "branch@printgoo.uz",
-        director: "Yangi Rahbar",
-        chiefAccountant: "Bosh Buxgalter",
-        shiftRegime: "24/7 (2×12h Shifts)",
-        workingHours: "08:00 – 20:00 / 20:00 – 08:00",
-        daysOfWeek: "Dushanba – Shanba",
-        machinesCount: 0,
-        status: "Active",
-        departments: [],
-        warehouses: [],
-        bankAccounts: [
-          {
-            id: `ACC-${Date.now()}`,
-            bankName: "AT 'Kapitalbank' Bosh Ofisi",
-            mfo: "01087",
-            accountNumber: "20208000700543210001",
-            currency: "UZS",
-            isPrimary: true,
-          },
-        ],
-        integration: {
-          didoxEnabled: true,
-          didoxContractorCode: `DIDOX-BRN-${nextNum}`,
-          apiKeySet: false,
-          autoSyncInvoices: false,
-          oneCSyncEnabled: false,
-        },
-      };
-      upsertPlant(newPlant);
-      openTab({
-        id: `plant-${newPlant.id}`,
-        title: newPlant.name,
-        type: "plant-detail",
-        module: "settings",
-        documentData: newPlant,
-      });
+      openNewPlantTab();
     } else {
       const nextNum = (users?.length || 0) + 1;
       const newUserId = `USR-${String(nextNum).padStart(3, "0")}`;
@@ -507,7 +473,9 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       );
     } else if (type === "plants") {
       const plant = selectedRecord as unknown as PlantRecord;
-      upsertPlant({ ...plant, name: editName || plant.name });
+      const updated = { ...plant, name: editName || plant.name };
+      upsertPlant(updated);
+      savePlantToDb(updated);
     } else if (type === "users") {
       const user = selectedRecord as unknown as SystemUserRecord;
       upsertUser({ ...user, fullName: editName || user.fullName });
@@ -529,18 +497,6 @@ export function SettingsGrid({ type }: SettingsGridProps) {
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>{tCommon("create")}</span>
-              </Button>
-              <Button
-                onClick={() => {
-                  const indices = selection.rows.toArray();
-                  if (indices.length > 0) handleOpenRow(indices[0]);
-                }}
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5 text-xs font-medium gap-1 rounded"
-              >
-                <ExternalLink className="w-3 h-3 text-muted-foreground" />
-                <span>{tCommon("edit")}</span>
               </Button>
               <Separator orientation="vertical" className="h-4 mx-1" />
 

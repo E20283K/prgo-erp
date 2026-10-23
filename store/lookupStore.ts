@@ -81,6 +81,17 @@ interface LookupStoreState {
   syncWithServer: (companyCode?: string) => Promise<void>;
   addCustomer: (name: string) => void;
   addSite: (site: Partial<SiteOption> & { name: string }) => SiteOption;
+  addSiteAsync: (
+    site: {
+      name: string;
+      code?: string;
+      address?: string;
+      phone?: string;
+      facilities?: string;
+      isMain?: boolean;
+    },
+    companyCode?: string
+  ) => Promise<SiteOption>;
   addMachine: (mach: any) => void;
   addSpecification: (spec: any) => void;
   addFormat: (item: string | ComboboxItem) => void;
@@ -255,6 +266,52 @@ export const useLookupStore = create<LookupStoreState>()(
 
         set((state) => ({ sites: [...state.sites, newSite] }));
         return newSite;
+      },
+
+      addSiteAsync: async (siteInput, companyCode = "PRINTGOO") => {
+        const cleanName = siteInput.name.trim();
+        try {
+          const res = await fetch(`/api/v1/production/sites?companyCode=${companyCode}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              companyCode,
+              name: cleanName,
+              code: siteInput.code?.trim() || `BR-${Math.floor(1000 + Math.random() * 9000)}`,
+              address: siteInput.address?.trim() || null,
+              phone: siteInput.phone?.trim() || null,
+              isMain: !!siteInput.isMain,
+            }),
+          });
+
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && json.data) {
+              const inserted = json.data;
+              const newSite: SiteOption = {
+                id: inserted.id,
+                name: inserted.name,
+                label: inserted.name,
+                location: inserted.address || "Main Site",
+                facilities: siteInput.facilities?.trim() || (inserted.isMain ? "Bosh korxona & Asosiy sexlar" : "Ishlab chiqarish sexi"),
+                status: "Active (Online)",
+              };
+
+              set((state) => {
+                const filtered = state.sites.filter(
+                  (s) => s.id !== newSite.id && s.name.toLowerCase() !== cleanName.toLowerCase()
+                );
+                return { sites: [...filtered, newSite] };
+              });
+              return newSite;
+            }
+          }
+        } catch (error) {
+          console.error("Error creating branch in database:", error);
+        }
+
+        // Fallback to local in-memory site if offline or API error
+        return get().addSite(siteInput);
       },
 
       addMachine: (mach) => {

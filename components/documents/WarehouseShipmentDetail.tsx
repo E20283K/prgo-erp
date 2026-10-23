@@ -794,10 +794,10 @@ export function CarrierDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="text-xs">
-                  <SelectItem value="fleet">🚛 Kompaniya avtoparki (Fleet)</SelectItem>
-                  <SelectItem value="courier">📦 Kuryer / Logistika xizmati</SelectItem>
-                  <SelectItem value="self">🛍️ Mijoz o'zi olib ketadi (Samovyvoz)</SelectItem>
-                  <SelectItem value="other">🚚 Yollanma transport</SelectItem>
+                  <SelectItem value="fleet">Kompaniya avtoparki (Fleet)</SelectItem>
+                  <SelectItem value="courier">Kuryer / Logistika xizmati</SelectItem>
+                  <SelectItem value="self">Mijoz o&apos;zi olib ketadi (Samovyvoz)</SelectItem>
+                  <SelectItem value="other">Yollanma transport</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1574,11 +1574,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 <SelectValue placeholder="Chiqim turini tanlang..." />
               </SelectTrigger>
               <SelectContent className="text-xs">
-                <SelectItem value="CustomerDelivery">🛍️ Mijozga topshirish (Buyurtma)</SelectItem>
-                <SelectItem value="BranchTransfer">🚛 Filialga jo'natish (Inter-branch)</SelectItem>
-                <SelectItem value="Outsourcing">🔄 Subpudratga berish (Autsorsing)</SelectItem>
-                <SelectItem value="VendorReturn">↩️ Yetkazib beruvchiga qaytarish</SelectItem>
-                <SelectItem value="MaterialSale">📦 Xomashyo / Otxod sotuvi</SelectItem>
+                <SelectItem value="CustomerDelivery">Mijozga topshirish (Buyurtma)</SelectItem>
+                <SelectItem value="BranchTransfer">Filialga jo&apos;natish (Inter-branch)</SelectItem>
+                <SelectItem value="Outsourcing">Subpudratga berish (Autsorsing)</SelectItem>
+                <SelectItem value="VendorReturn">Yetkazib beruvchiga qaytarish</SelectItem>
+                <SelectItem value="MaterialSale">Xomashyo / Otxod sotuvi</SelectItem>
               </SelectContent>
             </Select>
           )}

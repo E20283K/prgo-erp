@@ -50,3 +50,10 @@ venv/
 
 # Cache
 /public/cache/
+
+# Uploads
+/public/uploads/**
+!/public/uploads/
+!/public/uploads/.gitkeep
+
+

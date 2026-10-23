@@ -397,19 +397,19 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
         let light = "#0284c7";
 
         if (mType === "ProductionIssue") {
-          label = "🏭 Ishlab chiqarish sarfi";
+          label = "Ishlab chiqarish sarfi";
           dark = "#f59e0b";
           light = "#b45309";
         } else if (mType === "CuttingReturn") {
-          label = "✂️ Delovoy Otxod qaytarish";
+          label = "Delovoy Otxod qaytarish";
           dark = "#ec4899";
           light = "#be185d";
         } else if (mType === "Transfer") {
-          label = "🔄 Omborlararo ko'chirish";
+          label = "Omborlararo ko'chirish";
           dark = "#a855f7";
           light = "#7e22ce";
         } else if (mType === "WriteOff") {
-          label = "⚠️ Spisaniye (Texnik brak)";
+          label = "Spisaniye (Texnik brak)";
           dark = "#f87171";
           light = "#dc2626";
         }
@@ -849,7 +849,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                             variant="outline"
                             className="text-xs bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-semibold"
                           >
-                            ✂️ Delovoy Otxod
+                            Delovoy Otxod
                           </Badge>
                         )}
                       </div>
@@ -1202,7 +1202,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                                   {off.sku}
                                 </span>
                                 <Badge variant="outline" className="text-[10px] py-0 px-1 bg-amber-500/10">
-                                  ✂️ Otxod
+                                  Delovoy Otxod
                                 </Badge>
                               </div>
                               <h4 className="text-xs font-semibold text-foreground mt-0.5">{off.name}</h4>

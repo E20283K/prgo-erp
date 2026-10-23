@@ -89,7 +89,6 @@ import { FinancialsTab } from "./tabs/FinancialsTab";
 import { FilesTab } from "../common/FilesTab";
 import { LayoutCalcTab } from "./tabs/LayoutCalcTab";
 import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
-import { SampleTab } from "./tabs/SampleTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { JobTicketDialog } from "./dialogs/JobTicketDialog";
@@ -108,6 +107,7 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
 
   const items: WorkOrderToolingItem[] = [];
   const dept = data.department || "Offset";
+  const isUsd = (data.currency || "UZS").toUpperCase() === "USD";
 
   // 1. CTP metall formalar
   if (dept === "Offset") {
@@ -118,7 +118,7 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
       specDetails: `Format: ${data.pressSheetW || 700}×${data.pressSheetH || 1000} mm (CMYK 4 rang)`,
       quantity: 4,
       unit: "dona",
-      estimatedCost: 300000,
+      estimatedCost: isUsd ? 25 : 300000,
       currency: data.currency || "UZS",
       status: "Draft",
       createdAt: new Date().toISOString(),
@@ -131,7 +131,7 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
       specDetails: `Digital Plate 1.14mm, ${data.flexoColors || 4} rang`,
       quantity: data.flexoColors || 4,
       unit: "dona",
-      estimatedCost: 450000,
+      estimatedCost: isUsd ? 35 : 450000,
       currency: data.currency || "UZS",
       status: "Draft",
       createdAt: new Date().toISOString(),
@@ -154,7 +154,7 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
       specDetails: `Razmer: ${data.width || 700}×${data.height || 1000} mm, 23.8mm pichoq`,
       quantity: 1,
       unit: "dona",
-      estimatedCost: data.toolingProcurementCost || 800000,
+      estimatedCost: data.toolingProcurementCost || (isUsd ? 65 : 800000),
       currency: data.currency || "UZS",
       status: data.selectedToolingId ? "Ready" : "Draft",
       createdAt: new Date().toISOString(),
@@ -170,7 +170,7 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
       specDetails: "Material: Latun (Jez 3mm CNC gravirovka)",
       quantity: 1,
       unit: "dona",
-      estimatedCost: 350000,
+      estimatedCost: isUsd ? 30 : 350000,
       currency: data.currency || "UZS",
       status: "Draft",
       createdAt: new Date().toISOString(),
@@ -186,7 +186,7 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
       specDetails: "Material: Magniy 4mm (Matritsa + Patriysa)",
       quantity: 1,
       unit: "dona",
-      estimatedCost: 300000,
+      estimatedCost: isUsd ? 25 : 300000,
       currency: data.currency || "UZS",
       status: "Draft",
       createdAt: new Date().toISOString(),
@@ -207,6 +207,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     replaceTabId,
     upsertProductionQueueItem,
     upsertWorkOrderAsync,
+    toggleReadinessCheck,
     loadProductionQueue,
     closeTab,
     requestCloseTab,
@@ -252,64 +253,91 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     ? data.attachments
     : (initialQueueItem?.attachments && initialQueueItem.attachments.length > 0 ? initialQueueItem.attachments : []);
 
-  const [viewMode, setViewMode] = useState<"manager" | "operator">("manager");
-  const isOperator = viewMode === "operator";
+  // Role-Based Access Control (RBAC): Determine operator mode automatically from currentUser
+  const isOperator = useMemo(() => {
+    if (!currentUser) return false;
+    // Admins and managers have full access
+    if (currentUser.role === "admin" || currentUser.role === "System Administrator") {
+      return false;
+    }
+    const role = (currentUser.role || "").toLowerCase();
+    // If role indicates an operator / pressman / floor technician
+    if (role.includes("operator") || role.includes("pressman") || role.includes("stanokchi")) {
+      return true;
+    }
+    // If user explicitly lacks production edit permissions
+    if (currentUser.permissions?.production && !currentUser.permissions.production.edit) {
+      return true;
+    }
+    return false;
+  }, [currentUser]);
 
   const [formData, setFormData] = useState<WorkOrderFormData>({
     customer: data.customer || initialQueueItem?.customer || "",
     product: data.product || initialQueueItem?.product || "",
     department: data.department || initialQueueItem?.department || "Offset",
     site: data.site || initialQueueItem?.site || "",
-    recipe: data.recipe || "",
+    recipe: data.recipe || initialQueueItem?.recipe || "",
     quantity: data.quantity || initialQueueItem?.quantity || 0,
     unit: data.unit || initialQueueItem?.unit || "pcs",
     status: data.status || initialQueueItem?.stage || "Draft",
     priority: data.priority || initialQueueItem?.priority || "Normal",
     pressMachine: data.pressMachine || initialQueueItem?.pressMachine || "",
-    startDate: data.startDate || "",
+    startDate: data.startDate || initialQueueItem?.startDate || "",
     deadline: data.deadline || initialQueueItem?.deadline || "",
-    paperStock: data.paperStock || "",
-    coating: data.coating || "",
-    lamination: data.lamination || "",
-    laminationSides: data.laminationSides || "1s",
-    laminationMicron: data.laminationMicron || 0,
-    embellishment: data.embellishment || "",
-    priceTotal: data.priceTotal || 0,
-    currency: data.currency || "UZS",
+    paperStock: data.paperStock || initialQueueItem?.paperStock || "",
+    coating: data.coating || initialQueueItem?.coating || "",
+    lamination: data.lamination || initialQueueItem?.lamination || "",
+    laminationSides: data.laminationSides || initialQueueItem?.laminationSides || "1s",
+    laminationMicron: data.laminationMicron ?? initialQueueItem?.laminationMicron ?? 0,
+    embellishment: data.embellishment || initialQueueItem?.embellishment || "",
+    priceTotal: data.priceTotal || initialQueueItem?.priceTotal || 0,
+    currency: data.currency || initialQueueItem?.currency || "UZS",
     photoUrl: effectivePhotoUrl,
     photoUrls: effectivePhotoUrls,
-    artworkFront: data.artworkFront || "",
-    itemCategory: data.itemCategory || "",
-    width: data.width || 0,
-    height: data.height || 0,
-    dimensionUnit: data.dimensionUnit || "mm",
-    cornerType: data.cornerType || "Square",
-    bleed: data.bleed || 0,
-    shapeType: data.shapeType || "rectangle",
-    foldType: data.foldType || "",
-    boxType: data.boxType || "",
-    boxDepth: data.boxDepth || 0,
-    customShape: data.customShape || "",
-    customSvgPath: data.customSvgPath || "",
-    colorsConfig: data.colorsConfig || initialQueueItem?.colors || "",
-    frontColors: data.frontColors || { c: false, m: false, y: false, k: false },
-    backColors: data.backColors || { c: false, m: false, y: false, k: false },
-    spotColors: data.spotColors || initialQueueItem?.spotColors || [],
-    spotColorItems: data.spotColorItems || [],
-    holeSize: data.holeSize ?? 0,
-    holePosition: data.holePosition || "none",
-    holeOffset: data.holeOffset ?? 0,
-    sizes: data.sizes || [],
-    kashirovkaMode: data.kashirovkaMode || "none",
-    kashirovkaStrategy: data.kashirovkaStrategy || "split_half_sheet",
-    kashirovkaLayers: data.kashirovkaLayers || [],
-    kashirovkaGlueGsm: data.kashirovkaGlueGsm ?? 0,
-    kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets ?? 0,
-    kashirovkaCuringHours: data.kashirovkaCuringHours ?? 0,
-    milestones: data.milestones || [],
+    artworkFront: data.artworkFront || initialQueueItem?.artworkFront || "",
+    artworkBack: data.artworkBack || initialQueueItem?.artworkBack || "",
+    itemCategory: data.itemCategory || initialQueueItem?.itemCategory || "",
+    width: data.width || initialQueueItem?.width || data.dimensions?.width || initialQueueItem?.dimensions?.width || 0,
+    height: data.height || initialQueueItem?.height || data.dimensions?.height || initialQueueItem?.dimensions?.height || 0,
+    dimensionUnit: data.dimensionUnit || initialQueueItem?.dimensionUnit || "mm",
+    cornerType: data.cornerType || initialQueueItem?.cornerType || data.dimensions?.cornerType || initialQueueItem?.dimensions?.cornerType || "Square",
+    bleed: data.bleed ?? initialQueueItem?.bleed ?? data.dimensions?.bleed ?? 0,
+    shapeType: data.shapeType || initialQueueItem?.shapeType || data.dimensions?.shapeType || "rectangle",
+    foldType: data.foldType || initialQueueItem?.foldType || data.dimensions?.foldType || "",
+    boxType: data.boxType || initialQueueItem?.boxType || data.dimensions?.boxType || "",
+    boxDepth: data.boxDepth ?? initialQueueItem?.boxDepth ?? data.dimensions?.boxDepth ?? 0,
+    customShape: data.customShape || initialQueueItem?.customShape || data.dimensions?.customShape || "",
+    customSvgPath: data.customSvgPath || initialQueueItem?.customSvgPath || data.dimensions?.customSvgPath || "",
+    colorsConfig: data.colorsConfig || initialQueueItem?.colorsConfig || initialQueueItem?.colors || "",
+    frontColors: data.frontColors || initialQueueItem?.frontColors || { c: false, m: false, y: false, k: false },
+    backColors: data.backColors || initialQueueItem?.backColors || { c: false, m: false, y: false, k: false },
+    spotColors: (data.spotColors && data.spotColors.length > 0) ? data.spotColors : (initialQueueItem?.spotColors || []),
+    spotColorItems: (data.spotColorItems && data.spotColorItems.length > 0) ? data.spotColorItems : (initialQueueItem?.spotColorItems || []),
+    holeSize: data.holeSize ?? initialQueueItem?.holeSize ?? data.dimensions?.holeSize ?? 0,
+    holePosition: data.holePosition || initialQueueItem?.holePosition || data.dimensions?.holePosition || "none",
+    holeOffset: data.holeOffset ?? initialQueueItem?.holeOffset ?? data.dimensions?.holeOffset ?? 0,
+    sizes: (data.sizes && data.sizes.length > 0) ? data.sizes : (initialQueueItem?.sizes || []),
+    kashirovkaMode: data.kashirovkaMode || initialQueueItem?.kashirovkaMode || "none",
+    kashirovkaStrategy: data.kashirovkaStrategy || initialQueueItem?.kashirovkaStrategy || "split_half_sheet",
+    kashirovkaLayers: (data.kashirovkaLayers && data.kashirovkaLayers.length > 0) ? data.kashirovkaLayers : (initialQueueItem?.kashirovkaLayers || []),
+    kashirovkaGlueGsm: data.kashirovkaGlueGsm ?? initialQueueItem?.kashirovkaGlueGsm ?? 0,
+    kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets ?? initialQueueItem?.kashirovkaMakeReadySheets ?? 0,
+    kashirovkaCuringHours: data.kashirovkaCuringHours ?? initialQueueItem?.kashirovkaCuringHours ?? 0,
+    selectedToolingId: data.selectedToolingId || initialQueueItem?.selectedToolingId || "",
+    selectedToolingName: data.selectedToolingName || initialQueueItem?.selectedToolingName || "",
+    toolingProcurementNeeded: data.toolingProcurementNeeded ?? initialQueueItem?.toolingProcurementNeeded ?? false,
+    toolingProcurementCost: data.toolingProcurementCost ?? initialQueueItem?.toolingProcurementCost ?? 0,
+    milestones: data.milestones || initialQueueItem?.milestones || [],
+    financials: data.financials || initialQueueItem?.financials,
     parentWorkOrderId: data.parentWorkOrderId || data.linkedWoId || undefined,
     isReorder: data.isReorder ?? Boolean(data.parentWorkOrderId),
-    toolingItems: data.toolingItems || getInitialToolingItems(data, docNo || tab.id),
+    toolingItems:
+      data.toolingItems ||
+      (data.dimensions as any)?.toolingItems ||
+      initialQueueItem?.toolingItems ||
+      (initialQueueItem?.dimensions as any)?.toolingItems ||
+      getInitialToolingItems(data, docNo || tab.id),
   });
 
   const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(() => {
@@ -334,6 +362,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     return list;
   });
 
+  const [skuArtworks, setSkuArtworks] = useState<SkuArtwork[]>(
+    data.skuArtworks || initialQueueItem?.skuArtworks || data.dimensions?.skuArtworks || initialQueueItem?.dimensions?.skuArtworks || []
+  );
+
   // Keep state synchronized with queueItem if loaded asynchronously
   useEffect(() => {
     if (queueItem && !tab.isUnsaved) {
@@ -350,10 +382,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       if (queueItem.attachments && queueItem.attachments.length > 0 && orderAttachments.length === 0) {
         setOrderAttachments(queueItem.attachments);
       }
+      if (queueItem.skuArtworks && queueItem.skuArtworks.length > 0 && skuArtworks.length === 0) {
+        setSkuArtworks(queueItem.skuArtworks);
+      }
+      if (queueItem.toolingItems && queueItem.toolingItems.length > 0 && (!formData.toolingItems || formData.toolingItems.length === 0)) {
+        setFormData((prev) => ({ ...prev, toolingItems: queueItem.toolingItems }));
+      }
     }
-  }, [queueItem, tab.isUnsaved, formData.photoUrl, orderAttachments.length]);
-
-  const [skuArtworks, setSkuArtworks] = useState<SkuArtwork[]>(data.skuArtworks || []);
+  }, [queueItem, tab.isUnsaved, formData.photoUrl, orderAttachments.length, skuArtworks.length, formData.toolingItems?.length]);
 
   const handleSkuArtworksChange = (artworks: SkuArtwork[]) => {
     setSkuArtworks(artworks);
@@ -907,8 +943,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       `${effectiveId}: ${formData.product || "Yangi buyruq"}`
     );
 
+    const isSampleNeeded = formData.orderType === "Sample" || Boolean(sampleData?.isRequired);
+
     upsertProductionQueueItem({
+      ...formData,
       id: effectiveId,
+      docNo: effectiveId,
       customer: formData.customer,
       product: formData.product,
       quantity:
@@ -920,18 +960,22 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       department: formData.department,
       priority: (formData.priority as "Normal" | "High" | "Urgent") || "Normal",
       deadline: formData.deadline,
-      sampleRequired: formData.orderType === "Sample",
-      sampleStatus:
-        formData.orderType === "Sample"
-          ? sampleData.approvalStatus === "approved"
-            ? "approved"
-            : sampleData.approvalStatus === "revision_requested"
-            ? "revision_requested"
-            : sampleData.isProduced
-            ? "awaiting_approval"
-            : "in_production"
-          : "none",
+      orderType: formData.orderType,
+      sampleRequired: isSampleNeeded,
+      sampleStatus: isSampleNeeded
+        ? sampleData.approvalStatus === "approved"
+          ? "approved"
+          : sampleData.approvalStatus === "revision_requested"
+          ? "revision_requested"
+          : sampleData.isProduced
+          ? "awaiting_approval"
+          : "in_production"
+        : "none",
       sampleQty: sampleData.sampleQty,
+      sampleData,
+      operations,
+      attachments: orderAttachments,
+      skuArtworks,
     });
 
     setTabUnsaved(effectiveId, false);
@@ -1138,7 +1182,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const isOffset = !isFlexo && !isJacquard;
 
   const rawActiveTab = tab.activeLevel3Tab || "overview";
-  const activeTab = (isOperator && (rawActiveTab === "financials" || rawActiveTab === "sample"))
+  const activeTab = (isOperator && rawActiveTab === "financials")
     ? "overview"
     : (!isOffset && rawActiveTab === "layout")
     ? "specs"
@@ -1360,7 +1404,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     </span>
                     {formData.orderType === "Sample" && (
                       <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
-                        (🧪 Namuna: {sampleData.sampleQty} dona)
+                        (Namuna: {sampleData.sampleQty} dona)
                       </span>
                     )}
                   </div>
@@ -1485,29 +1529,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               ...(!isOperator
                 ? [
                     {
-                      id: "sample",
-                      label: formData.orderType === "Sample" ? "Namuna (Sample)" : "Namuna sinovi",
-                      icon: FlaskConical,
-                      badge:
-                        formData.orderType === "Production"
-                          ? "Kerak emas"
-                          : sampleData.approvalStatus === "approved"
-                          ? "Tasdiqlangan"
-                          : sampleData.approvalStatus === "revision_requested"
-                          ? "Reviziya"
-                          : sampleData.isProduced
-                          ? "Tasdiq kutilmoqda"
-                          : "Tayyorlanmoqda",
-                      badgeClassName:
-                        formData.orderType === "Production"
-                          ? "bg-muted text-muted-foreground"
-                          : sampleData.approvalStatus === "approved"
-                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold"
-                          : sampleData.approvalStatus === "revision_requested"
-                          ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 font-semibold"
-                          : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-semibold",
-                    },
-                    {
                       id: "financials",
                       label: tOrder("tabCosting"),
                       icon: DollarSign,
@@ -1544,12 +1565,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               setOrderAttachments={setOrderAttachments}
               sampleData={sampleData}
               onSampleChange={handleSampleChange}
+              onApproveAndReleaseMassRun={handleApproveSampleAndRelease}
+              onRejectSample={handleRejectSample}
               onOpenLightbox={() => setIsLightboxOpen(true)}
               onOpenTab={openTab}
               onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
               onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
               isOperator={isOperator}
-              onToggleOperatorMode={(mode) => setViewMode(mode)}
               tOrder={tOrder}
             />
 
@@ -1565,6 +1587,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               onSampleChange={handleSampleChange}
               orderAttachments={orderAttachments}
               setOrderAttachments={setOrderAttachments}
+              skuArtworks={skuArtworks}
+              onSkuArtworksChange={handleSkuArtworksChange}
+              docNo={docNo || tab.id}
             />
 
             {/* Tab: Imposition / Layout for Offset & Front-Back Print Planning */}
@@ -1659,6 +1684,43 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     "toolingProcurementNeeded",
                     newItems.some((it) => it.status === "Draft" || it.status === "Ordered")
                   );
+
+                  // ─── Live Auto-Sync to Production Readiness Gates ───
+                  const ctpItems = newItems.filter(
+                    (i) => i.category === "ctp_plates" || i.category === "flexo_polymer"
+                  );
+                  const dieItems = newItems.filter(
+                    (i) =>
+                      i.category === "die_cutting" ||
+                      i.category === "foil_cliche" ||
+                      i.category === "emboss_cliche" ||
+                      i.category === "varnish_plate"
+                  );
+
+                  const platesReady =
+                    ctpItems.length > 0
+                      ? ctpItems.every((i) => i.status === "Ready")
+                      : true;
+                  const toolingReady =
+                    dieItems.length > 0
+                      ? dieItems.every((i) => i.status === "Ready")
+                      : true;
+
+                  const targetId = data.docNo || tab.id;
+                  if (toggleReadinessCheck) {
+                    toggleReadinessCheck(targetId, "platesReady", {
+                      forceStatus: platesReady ? "ready" : "pending",
+                    });
+                    toggleReadinessCheck(targetId, "toolingReady", {
+                      forceStatus: toolingReady ? "ready" : "pending",
+                    });
+                  }
+
+                  handleFieldChange("checks", {
+                    ...((formData as any).checks || {}),
+                    platesReady,
+                    toolingReady,
+                  });
                 }}
                 onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
               />
@@ -1734,21 +1796,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 setTabUnsaved(tab.id, true);
               }}
             />
-
-            {/* Tab: Physical Sample (Hidden for Operators) */}
-            {!isOperator && (
-              <TabsContent value="sample" className="flex-1 overflow-y-auto p-3 m-0 space-y-3 no-scrollbar">
-                <SampleTab
-                  formData={{ ...formData, skuArtworks }}
-                  sampleData={sampleData}
-                  handleSampleChange={handleSampleChange}
-                  handleFieldChange={handleFieldChange}
-                  onApproveAndReleaseMassRun={handleApproveSampleAndRelease}
-                  onRejectSample={handleRejectSample}
-                  tabId={tab.id}
-                />
-              </TabsContent>
-            )}
 
             {/* Tab 6: Financials (Hidden for Operators) */}
             {!isOperator && (

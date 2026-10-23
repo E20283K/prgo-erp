@@ -49,12 +49,22 @@ export function PlantIntegrationTab({ plant, onUpdate }: PlantIntegrationTabProp
             <span>Didox / Soliq.uz Elektron Hujjat Aylanishi (EDO)</span>
           </div>
 
-          <Badge
-            variant="outline"
-            className="text-[10px] text-emerald-600 dark:text-emerald-400 border-emerald-300"
+          <Button
+            type="button"
+            variant={plant.integration.didoxEnabled ? "default" : "outline"}
+            size="sm"
+            onClick={() =>
+              onUpdate({
+                integration: {
+                  ...plant.integration,
+                  didoxEnabled: !plant.integration.didoxEnabled,
+                },
+              })
+            }
+            className="h-7 text-xs px-2.5 font-medium"
           >
-            {plant.integration.didoxEnabled ? "Ulangan (Active)" : "O'chirilgan"}
-          </Badge>
+            {plant.integration.didoxEnabled ? "Didox EDO yoqilgan" : "Didox EDO o'chirilgan"}
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
@@ -123,10 +133,26 @@ export function PlantIntegrationTab({ plant, onUpdate }: PlantIntegrationTabProp
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant={plant.integration.oneCSyncEnabled ? "default" : "outline"}
+              size="sm"
+              onClick={() =>
+                onUpdate({
+                  integration: {
+                    ...plant.integration,
+                    oneCSyncEnabled: !plant.integration.oneCSyncEnabled,
+                  },
+                })
+              }
+              className="h-7 text-xs px-2.5 font-medium"
+            >
+              {plant.integration.oneCSyncEnabled ? "1C sinxron yoqilgan" : "1C sinxron o'chirilgan"}
+            </Button>
             <span className="text-[11px] text-muted-foreground">
-              Oxirgi sinxron:{" "}
+              Oxirgi:{" "}
               <strong className="font-mono text-foreground">
-                {plant.integration.lastSyncAt || "Hech qachon"}
+                {plant.integration.lastSyncAt || "—"}
               </strong>
             </span>
           </div>

@@ -159,6 +159,24 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     category: "registry-grid",
     description: "System parameters, plant configurations, and user RBAC security.",
   },
+  "grid-hr": {
+    componentName: "EmployeeDetail",
+    fileName: "EmployeeDetail.tsx",
+    relativePath: "components/documents/hr/EmployeeDetail.tsx",
+    linesOfCode: 520,
+    featureModule: "hr",
+    category: "registry-grid",
+    description: "Staff & personnel registry, timesheets, and wage records.",
+  },
+  "grid-trading": {
+    componentName: "TradingGrid",
+    fileName: "TradingGrid.tsx",
+    relativePath: "components/grid/TradingGrid.tsx",
+    linesOfCode: 650,
+    featureModule: "sales",
+    category: "registry-grid",
+    description: "Wholesale trade, retail sales, and import registry.",
+  },
 
   // Document Detail Views
   "doc-employee-detail": {
@@ -391,6 +409,8 @@ export function resolveActiveComponent(
       meta = COMPONENT_REGISTRY["grid-finance"];
     } else if (mod === "hr") {
       meta = COMPONENT_REGISTRY["grid-hr"];
+    } else if (mod === "trading") {
+      meta = COMPONENT_REGISTRY["grid-trading"];
     } else if (mod === "settings") {
       meta = COMPONENT_REGISTRY["grid-settings"];
     } else {
@@ -398,31 +418,44 @@ export function resolveActiveComponent(
     }
   }
 
+  if (!meta) {
+    meta = COMPONENT_REGISTRY["grid-production-work-orders"] || {
+      componentName: "AppModule",
+      fileName: "AppLayout.tsx",
+      relativePath: "components/layout/AppLayout.tsx",
+      linesOfCode: 500,
+      featureModule: (tab?.module || activeModule || "production") as any,
+      category: "registry-grid",
+      description: "Active system module view.",
+    };
+  }
+
   // Handle active subTab inside complex documents
   let activeSubTab: SubComponentMeta | undefined;
-  if (isDocument && tab?.activeLevel3Tab && meta.subTabs) {
+  if (isDocument && tab?.activeLevel3Tab && meta?.subTabs) {
     activeSubTab = meta.subTabs[tab.activeLevel3Tab];
   }
 
-  const effectiveLoc = activeSubTab ? activeSubTab.linesOfCode : meta.linesOfCode;
-  const totalLoc = activeSubTab ? meta.linesOfCode + activeSubTab.linesOfCode : meta.linesOfCode;
+  const baseLoc = meta?.linesOfCode || 0;
+  const effectiveLoc = activeSubTab ? activeSubTab.linesOfCode : baseLoc;
+  const totalLoc = activeSubTab ? baseLoc + activeSubTab.linesOfCode : baseLoc;
 
-  const targetPath = activeSubTab ? activeSubTab.relativePath : meta.relativePath;
+  const targetPath = activeSubTab ? activeSubTab.relativePath : (meta?.relativePath || "components/layout/AppLayout.tsx");
   const vscodeUrl = `vscode://file/${WORKSPACE_ROOT}/${targetPath}`;
 
   const docNo = tab?.documentData?.docNo || tab?.documentData?.id || (isDocument ? tab?.title : undefined);
   const status = tab?.documentData?.status || undefined;
 
   return {
-    featureModule: meta.featureModule,
-    featureModuleLabel: meta.featureModule.toUpperCase(),
+    featureModule: meta?.featureModule || "production",
+    featureModuleLabel: (meta?.featureModule || "production").toUpperCase(),
     subModuleName: tab?.id || currentSubModule,
-    componentName: meta.componentName,
-    fileName: meta.fileName,
-    relativePath: meta.relativePath,
+    componentName: meta?.componentName || "Component",
+    fileName: meta?.fileName || "Component.tsx",
+    relativePath: targetPath,
     linesOfCode: effectiveLoc,
-    category: meta.category,
-    description: meta.description,
+    category: meta?.category || "registry-grid",
+    description: meta?.description || "System view",
     activeSubTab,
     totalLines: totalLoc,
     vscodeUrl,

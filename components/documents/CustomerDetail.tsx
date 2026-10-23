@@ -462,7 +462,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
 
                 <InfoRow label="Valyuta:">
                   <Badge variant="secondary" className="text-[10px] h-4 font-mono font-bold">
-                    {form.currency === "USD" ? "🇺🇸 USD ($)" : "🇺🇿 UZS (so'm)"}
+                    {form.currency === "USD" ? "USD ($)" : "UZS (so'm)"}
                   </Badge>
                 </InfoRow>
 

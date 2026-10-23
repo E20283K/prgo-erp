@@ -511,6 +511,7 @@ export interface WorkOrderToolingItem {
   remakeReason?: string;
   faultParty?: "none" | "prepress" | "production" | "client" | "supplier";
   jobTicketPrinted?: boolean;
+  notes?: string;
   createdAt: string;
 }
 

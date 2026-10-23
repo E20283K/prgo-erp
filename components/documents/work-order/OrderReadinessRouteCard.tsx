@@ -467,8 +467,8 @@ export function OrderReadinessRouteCard({
                 )}
               >
                 {currentItem.sampleStatus === "approved"
-                  ? "✓ Namuna tasdiqlangan"
-                  : `🧪 Namuna (${currentItem.sampleQty || 5} dona)`}
+                  ? "Namuna tasdiqlangan"
+                  : `Namuna (${currentItem.sampleQty || 5} dona)`}
               </Badge>
             )}
 

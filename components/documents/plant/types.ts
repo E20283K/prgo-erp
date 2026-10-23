@@ -69,9 +69,99 @@ export interface PlantRecord {
   totalFloorAreaM2?: number;
   machinesCount: number;
   status: "Active" | "Maintenance" | "Inactive";
+  isMain?: boolean;
   departments: PlantDepartment[];
   warehouses: PlantWarehouseInfo[];
   bankAccounts: PlantBankAccount[];
   integration: PlantIntegrationSettings;
   notes?: string;
+}
+
+export function createEmptyPlant(id: string = `PLT-${Date.now().toString().slice(-4)}`, code: string = ""): PlantRecord {
+  return {
+    id,
+    code,
+    name: "",
+    shortName: "",
+    legalEntityName: "",
+    branchType: "",
+    tin: "",
+    vatNumber: "",
+    oked: "",
+    address: "",
+    legalAddress: "",
+    landmark: "",
+    phone: "",
+    email: "",
+    director: "",
+    directorPhone: "",
+    chiefAccountant: "",
+    chiefAccountantPhone: "",
+    productionHead: "",
+    productionHeadPhone: "",
+    shiftRegime: "",
+    workingHours: "",
+    daysOfWeek: "",
+    totalFloorAreaM2: 0,
+    machinesCount: 0,
+    status: "Active",
+    isMain: false,
+    departments: [],
+    warehouses: [],
+    bankAccounts: [],
+    integration: {
+      didoxEnabled: false,
+      didoxContractorCode: "",
+      apiKeySet: false,
+      autoSyncInvoices: false,
+      oneCSyncEnabled: false,
+    },
+    notes: "",
+  };
+}
+
+export function branchToPlantRecord(b: any): PlantRecord {
+  const rawIntegration = b.integration && typeof b.integration === "object" ? b.integration : {};
+  return {
+    id: b.id,
+    code: b.code || "",
+    name: b.name || "",
+    shortName: b.shortName || "",
+    legalEntityName: b.legalEntityName || "",
+    branchType: b.branchType || (b.isMain ? "Bosh Korxona (HQ / Asosiy korpus)" : ""),
+    tin: b.tin || "",
+    vatNumber: b.vatNumber || "",
+    oked: b.oked || "",
+    address: b.address || "",
+    legalAddress: b.legalAddress || "",
+    landmark: b.landmark || "",
+    phone: b.phone || "",
+    email: b.email || "",
+    director: b.director || "",
+    directorPhone: b.directorPhone || "",
+    chiefAccountant: b.chiefAccountant || "",
+    chiefAccountantPhone: b.chiefAccountantPhone || "",
+    productionHead: b.productionHead || "",
+    productionHeadPhone: b.productionHeadPhone || "",
+    shiftRegime: b.shiftRegime || "",
+    workingHours: b.workingHours || "",
+    daysOfWeek: b.daysOfWeek || "",
+    totalFloorAreaM2: Number(b.totalFloorAreaM2) || 0,
+    machinesCount: Number(b.machinesCount) || 0,
+    status: (b.status as PlantRecord["status"]) || (b.isActive === false ? "Inactive" : "Active"),
+    isMain: Boolean(b.isMain),
+    departments: Array.isArray(b.departments) ? b.departments : [],
+    warehouses: Array.isArray(b.warehouses) ? b.warehouses : [],
+    bankAccounts: Array.isArray(b.bankAccounts) ? b.bankAccounts : [],
+    integration: {
+      didoxEnabled: Boolean(rawIntegration.didoxEnabled),
+      didoxContractorCode: rawIntegration.didoxContractorCode || "",
+      apiKeySet: Boolean(rawIntegration.apiKeySet),
+      autoSyncInvoices: Boolean(rawIntegration.autoSyncInvoices),
+      oneCSyncEnabled: Boolean(rawIntegration.oneCSyncEnabled),
+      oneCEndpoint: rawIntegration.oneCEndpoint || "",
+      lastSyncAt: rawIntegration.lastSyncAt || "",
+    },
+    notes: b.notes || "",
+  };
 }

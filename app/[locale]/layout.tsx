@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "../globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/toast";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
 import { notFound } from 'next/navigation';
@@ -23,6 +24,17 @@ export const metadata: Metadata = {
   title: "Polygraph ERP",
   description: "Enterprise CRM + ERP System",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      { url: "/icon.svg?v=2", type: "image/svg+xml" },
+      { url: "/favicon.ico?v=2", sizes: "any" },
+      { url: "/icons/favicon-32x32.png?v=2", sizes: "32x32", type: "image/png" },
+      { url: "/icons/favicon-16x16.png?v=2", sizes: "16x16", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png?v=2", sizes: "180x180", type: "image/png" },
+    ],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -78,7 +90,10 @@ export default async function RootLayout({
         <FontCacheInitializer />
         <NextIntlClientProvider messages={messages}>
           <QueryProvider>
-            <TooltipProvider>{children}</TooltipProvider>
+            <TooltipProvider>
+              {children}
+              <Toaster />
+            </TooltipProvider>
           </QueryProvider>
         </NextIntlClientProvider>
         <div id="portal" suppressHydrationWarning />

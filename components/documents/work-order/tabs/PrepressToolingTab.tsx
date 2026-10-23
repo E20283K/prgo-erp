@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -44,6 +45,18 @@ import {
   ContextMenuSubTrigger,
 } from "@/components/ui/context-menu";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
+import {
   Stamp,
   Layers,
   Printer,
@@ -54,12 +67,16 @@ import {
   ExternalLink,
   Trash2,
   Edit2,
+  Edit3,
   Wrench,
   RotateCcw,
   Sparkles,
   ShoppingBag,
   Copy,
   MousePointerClick,
+  Warehouse,
+  Search,
+  Check,
 } from "lucide-react";
 import {
   WorkOrderToolingItem,
@@ -89,27 +106,27 @@ const CATEGORY_CONFIG: Record<
   { label: string; orderType: string }
 > = {
   ctp_plates: {
-    label: "⚙️ CTP Metall Forma",
+    label: "CTP Metall Forma",
     orderType: "ctp_plates",
   },
   die_cutting: {
-    label: "✂️ Kesish Shtansformasi",
+    label: "Kesish Shtansformasi",
     orderType: "die_tooling",
   },
   foil_cliche: {
-    label: "✨ Folga Klishesi (Jez)",
+    label: "Folga Klishesi (Jez)",
     orderType: "cliche",
   },
   emboss_cliche: {
-    label: "🔲 Kongrev Klishesi (Magniy)",
+    label: "Kongrev Klishesi (Magniy)",
     orderType: "cliche",
   },
   varnish_plate: {
-    label: "💧 Lak Trafareti / Polimer",
+    label: "Lak Trafareti / Polimer",
     orderType: "outsourcing",
   },
   flexo_polymer: {
-    label: "🌀 Flexo Polimer Forma",
+    label: "Flexo Polimer Forma",
     orderType: "ctp_plates",
   },
 };
@@ -118,13 +135,28 @@ const STATUS_CONFIG: Record<
   ToolingStatus,
   { label: string }
 > = {
-  Draft: { label: "Loyiha (Kutilmoqda)" },
-  Ordered: { label: "Pudratga buyurtma berilgan" },
-  In_Production: { label: "Tayyorlanmoqda (Sexda)" },
-  Ready: { label: "Tayyor (Omborda)" },
-  Delivered: { label: "Yetkazib berilgan" },
-  Mounted: { label: "Mashinaga o'rnatilgan" },
+  Draft: { label: "Kutilmoqda" },
+  Ordered: { label: "Buyurtma berilgan" },
+  Ready: { label: "Tayyor" },
+  In_Production: { label: "Buyurtma berilgan" },
+  Delivered: { label: "Tayyor" },
+  Mounted: { label: "Tayyor" },
 };
+
+const FAULT_PARTY_CONFIG: Record<string, string> = {
+  prepress: "Prepress xatosi (Dizayn/Spusk)",
+  production: "Ishlab chiqarish (Sexdagi brak)",
+  client: "Mijoz o'zgartirishi",
+  supplier: "Ta'minotchi / Pudratchi defekti",
+};
+
+const FALLBACK_CATALOG_DIES = [
+  { id: "die-01", code: "DIE-BX-180x240", name: "Standart quti shtampi (FEFCO 0427)", dieType: "flatbed", widthMm: 180, heightMm: 240, location: "SHELF-A1", status: "available" },
+  { id: "die-02", code: "DIE-RECT-50x90", name: "Vizitka / Birka shtampi (To'g'ri to'rtburchak)", dieType: "flatbed", widthMm: 50, heightMm: 90, location: "SHELF-B3", status: "available" },
+  { id: "die-03", code: "DIE-ROTR-75x120", name: "Aylanma yorliq pichog'i (Z=96)", dieType: "rotary_magnetic", widthMm: 75, heightMm: 120, location: "RACK-CYL-04", status: "available" },
+  { id: "die-04", code: "KL-FOIL-LOGO-01", name: "Zarhal (Hot Foil) Logo Jez Klishesi", dieType: "hot_stamp", widthMm: 60, heightMm: 40, location: "BOX-FOIL-02", status: "available" },
+  { id: "die-05", code: "KL-EMB-MEDAL-02", name: "Kongrev Bo'rtma Magniy Klishesi", dieType: "embossing", widthMm: 50, heightMm: 50, location: "BOX-EMB-01", status: "available" },
+];
 
 export function PrepressToolingTab({
   formData,
@@ -133,12 +165,21 @@ export function PrepressToolingTab({
   onUpdateTooling,
   onMarkUnsaved,
 }: PrepressToolingTabProps) {
-  const { suppliers, loadSuppliers, addNotification, openTab, theme } = useWorkspaceStore();
+  const {
+    suppliers,
+    loadSuppliers,
+    diesTooling,
+    loadDiesToolingAsync,
+    addNotification,
+    openTab,
+    theme,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
 
   useEffect(() => {
     loadSuppliers();
-  }, [loadSuppliers]);
+    if (loadDiesToolingAsync) loadDiesToolingAsync();
+  }, [loadSuppliers, loadDiesToolingAsync]);
 
   const items = useMemo(() => formData.toolingItems || [], [formData.toolingItems]);
   const filteredItems = items;
@@ -146,6 +187,74 @@ export function PrepressToolingTab({
   // Modals state
   const [isAddEditOpen, setIsAddEditOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Partial<WorkOrderToolingItem> | null>(null);
+
+  // Catalog Picker state
+  const [isCatalogPickerOpen, setIsCatalogPickerOpen] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogCategoryFilter, setCatalogCategoryFilter] = useState<string>("ALL");
+
+  const catalogDies = useMemo(() => {
+    return diesTooling && diesTooling.length > 0 ? diesTooling : FALLBACK_CATALOG_DIES;
+  }, [diesTooling]);
+
+  const filteredCatalogDies = useMemo(() => {
+    const list = catalogDies;
+    const search = catalogSearch.toLowerCase().trim();
+    return list.filter((tool: any) => {
+      const matchCat =
+        catalogCategoryFilter === "ALL" ||
+        (catalogCategoryFilter === "die_cutting" &&
+          (tool.dieType === "flatbed" ||
+            tool.dieType === "rotary_magnetic" ||
+            tool.dieType === "solid_rotary")) ||
+        (catalogCategoryFilter === "foil_cliche" && tool.dieType === "hot_stamp") ||
+        (catalogCategoryFilter === "emboss_cliche" && tool.dieType === "embossing");
+
+      const matchSearch =
+        !search ||
+        (tool.code && tool.code.toLowerCase().includes(search)) ||
+        (tool.name && tool.name.toLowerCase().includes(search)) ||
+        (tool.location && tool.location.toLowerCase().includes(search)) ||
+        (tool.customerName && tool.customerName.toLowerCase().includes(search));
+
+      return matchCat && matchSearch;
+    });
+  }, [catalogDies, catalogSearch, catalogCategoryFilter]);
+
+  const handleAttachCatalogDie = (tool: any) => {
+    const category: ToolingCategory =
+      tool.dieType === "hot_stamp"
+        ? "foil_cliche"
+        : tool.dieType === "embossing"
+        ? "emboss_cliche"
+        : "die_cutting";
+
+    const newItem: WorkOrderToolingItem = {
+      id: `TL-EXIST-${tool.id || Date.now()}`,
+      category,
+      name: `${tool.code} — ${tool.name}`,
+      specDetails: `Razmer: ${tool.widthMm || 0}×${tool.heightMm || 0} mm, Joyi: ${tool.location || "Ombor stellaji"}`,
+      quantity: 1,
+      unit: "dona",
+      estimatedCost: 0,
+      actualCost: 0,
+      currency: formData.currency || "UZS",
+      status: "Ready",
+      supplierName: tool.customerName ? `Mijoz (${tool.customerName})` : "Mavjud inventar (Ombor)",
+      notes: `Katalogdan biriktirildi. Kodi: ${tool.code}, Shakli: ${tool.shape || "standart"}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    onUpdateTooling([...items, newItem]);
+    onMarkUnsaved();
+    setIsCatalogPickerOpen(false);
+
+    addNotification({
+      title: "Mavjud jihoz biriktirildi",
+      description: `${tool.code}: ${tool.name} buyurtmaga 0 so'm bilan 'Tayyor' holatida biriktirildi.`,
+      severity: "success",
+    });
+  };
 
   const [isPoModalOpen, setIsPoModalOpen] = useState(false);
   const [targetPoItem, setTargetPoItem] = useState<WorkOrderToolingItem | null>(null);
@@ -184,10 +293,9 @@ export function PrepressToolingTab({
 
   // Columns definition
   const [columns, setColumns] = useState<GridColumn[]>([
-    { id: "idx", title: "№", width: 45, icon: GridColumnIcon.HeaderNumber },
-    { id: "category", title: "Toifasi", width: 175, icon: GridColumnIcon.HeaderSingleValue },
-    { id: "name", title: "Jihoz / Qolip Nomi", width: 280, icon: GridColumnIcon.HeaderString },
-    { id: "specDetails", title: "Spetsifikatsiya / Format", width: 300, icon: GridColumnIcon.HeaderString },
+    { id: "category", title: "Toifasi", width: 180, icon: GridColumnIcon.HeaderSingleValue },
+    { id: "name", title: "Jihoz / Qolip Nomi", width: 290, icon: GridColumnIcon.HeaderString },
+    { id: "specDetails", title: "Spetsifikatsiya / Format", width: 310, icon: GridColumnIcon.HeaderString },
     { id: "quantity", title: "Miqdori", width: 95, icon: GridColumnIcon.HeaderNumber },
     { id: "supplierName", title: "Pudratchi / Ta'minotchi", width: 180, icon: GridColumnIcon.HeaderReference },
     { id: "purchaseOrderNo", title: "Xarid PO №", width: 130, icon: GridColumnIcon.HeaderReference },
@@ -213,16 +321,6 @@ export function PrepressToolingTab({
       const column = columns[col];
       if (!item || !column) {
         return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
-      }
-
-      if (column.id === "idx") {
-        return {
-          kind: GridCellKind.Number,
-          data: row + 1,
-          displayData: String(row + 1),
-          allowOverlay: false,
-          contentAlign: "center",
-        };
       }
 
       if (column.id === "category") {
@@ -498,83 +596,237 @@ export function PrepressToolingTab({
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden h-full bg-background select-text">
-      {/* 1. Header Toolbar & Quick KPI Strip */}
-      <div className="px-4 py-2 bg-card border-b border-border flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3">
-          <div>
-            <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-              Jami Jihozlar
-            </div>
-            <div className="text-xs font-bold">
-              {stats.totalCount} ta talab ({stats.readyCount} tayyor)
-            </div>
-          </div>
+      {/* 1. Header Toolbar (Matches BomMaterialsGrid style) */}
+      <div className="h-9 px-3 py-1 bg-card border-b border-border flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Add Tooling Primary Action */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  size="sm"
+                  className="h-6.5 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Jihoz qo&apos;shish</span>
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-56 text-xs">
+              <DropdownMenuItem
+                onClick={() => {
+                  setEditingItem({
+                    category: "ctp_plates",
+                    name: `${docNo} CTP Metall Forma Komplekti`,
+                    specDetails: `Format: ${formData.pressSheetW || 700}×${formData.pressSheetH || 1000} mm, CMYK 4 rang`,
+                    quantity: 4,
+                    unit: "dona",
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 25 : 300000,
+                    currency: formData.currency || "UZS",
+                    status: "Draft",
+                  });
+                  setIsAddEditOpen(true);
+                }}
+                className="gap-2 cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5 text-blue-600" />
+                <span>CTP metall forma</span>
+              </DropdownMenuItem>
 
-          <Separator orientation="vertical" className="h-6" />
+              <DropdownMenuItem
+                onClick={() => {
+                  setEditingItem({
+                    category: "die_cutting",
+                    name: `${formData.product || "Mahsulot"} Kesish Shtampi`,
+                    specDetails: `Format: ${formData.width || 700}×${formData.height || 1000} mm (Flatbed Die)`,
+                    quantity: 1,
+                    unit: "dona",
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 65 : 800000,
+                    currency: formData.currency || "UZS",
+                    status: "Draft",
+                  });
+                  setIsAddEditOpen(true);
+                }}
+                className="gap-2 cursor-pointer"
+              >
+                <Stamp className="w-3.5 h-3.5 text-amber-600" />
+                <span>Kesish shtampi (Die)</span>
+              </DropdownMenuItem>
 
-          <div>
-            <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-              CTP Metall Formalar
-            </div>
-            <div className="font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
-              {stats.ctpCount} ta plastina
-            </div>
-          </div>
+              <DropdownMenuItem
+                onClick={() => {
+                  setEditingItem({
+                    category: "foil_cliche",
+                    name: `${formData.product || "Mahsulot"} Zarhal Klishesi`,
+                    specDetails: "Material: Latun (Jez 3mm), Termo-folga",
+                    quantity: 1,
+                    unit: "dona",
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 30 : 350000,
+                    currency: formData.currency || "UZS",
+                    status: "Draft",
+                  });
+                  setIsAddEditOpen(true);
+                }}
+                className="gap-2 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-yellow-600" />
+                <span>Folga klishesi (Jez)</span>
+              </DropdownMenuItem>
 
-          <Separator orientation="vertical" className="h-6" />
+              <DropdownMenuItem
+                onClick={() => {
+                  setEditingItem({
+                    category: "emboss_cliche",
+                    name: `${formData.product || "Mahsulot"} Kongrev Klishesi`,
+                    specDetails: "Material: Magniy 4mm (Kongrev/Bo'rtma)",
+                    quantity: 1,
+                    unit: "dona",
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 25 : 300000,
+                    currency: formData.currency || "UZS",
+                    status: "Draft",
+                  });
+                  setIsAddEditOpen(true);
+                }}
+                className="gap-2 cursor-pointer"
+              >
+                <Stamp className="w-3.5 h-3.5 text-purple-600" />
+                <span>Kongrev klishesi (Magniy)</span>
+              </DropdownMenuItem>
 
-          <div>
-            <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-              Kesish Shtamplari
-            </div>
-            <div className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">
-              {stats.dieCount} ta qolip
-            </div>
-          </div>
+              <DropdownMenuSeparator />
 
-          <Separator orientation="vertical" className="h-6" />
+              <DropdownMenuSeparator />
 
-          <div>
-            <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-              Zarhal / Kongrev Klishe
-            </div>
-            <div className="font-mono text-xs font-bold text-purple-600 dark:text-purple-400">
-              {stats.clicheCount} ta klishe
-            </div>
-          </div>
+              <DropdownMenuItem
+                onClick={() => setIsCatalogPickerOpen(true)}
+                className="gap-2 cursor-pointer font-medium text-blue-600 dark:text-blue-400"
+              >
+                <Warehouse className="w-3.5 h-3.5" />
+                <span>Mavjud katalogdan tanlash...</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          <Separator orientation="vertical" className="h-6" />
+          {/* Quick Catalog Picker Button */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  onClick={() => setIsCatalogPickerOpen(true)}
+                  variant="outline"
+                  size="sm"
+                  className="h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer shrink-0 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                >
+                  <Warehouse className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span className="hidden sm:inline">Katalogdan biriktirish</span>
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+              Mavjud shtamp &amp; klishelar bazasidan biriktirish (0 so&apos;m)
+            </TooltipContent>
+          </Tooltip>
 
-          <div>
-            <div className="text-[10px] text-muted-foreground uppercase font-semibold">
-              Jami Xarid Qiymati
+          {/* Row Actions when selected */}
+          {selectedItem && (
+            <div className="flex items-center gap-1 shrink-0 animate-in fade-in duration-150">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      onClick={() => {
+                        setEditingItem(selectedItem);
+                        setIsAddEditOpen(true);
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer shrink-0 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span className="hidden sm:inline">Tahrirlash</span>
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                  Jihozni tahrirlash
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      onClick={() => handleDeleteItem(selectedItem.id)}
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6.5 w-6.5 p-0 text-destructive hover:text-destructive hover:bg-destructive/10 rounded cursor-pointer shrink-0"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                  Tanlanganni o&apos;chirish (Del)
+                </TooltipContent>
+              </Tooltip>
             </div>
-            <div className="font-mono text-xs font-bold text-foreground">
-              {stats.totalCost.toLocaleString("uz-UZ")} {formData.currency || "UZS"}
-            </div>
-          </div>
+          )}
+        </div>
+
+        {/* Right Financial & Quantity Summary (Matches BomMaterialsGrid style without category breakdown) */}
+        <div className="flex items-center gap-2 text-[11px] font-mono shrink-0 pl-2 ml-auto whitespace-nowrap">
+          <span className="text-muted-foreground">
+            Jami: <strong className="text-foreground">{stats.totalCount} ta talab</strong>
+          </span>
+          <span className="text-muted-foreground">•</span>
+          <span className="text-muted-foreground">
+            Tayyor: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{stats.readyCount} ta</strong>
+          </span>
+          <span className="text-muted-foreground">•</span>
+          <span className="text-muted-foreground">
+            Qiymati: <strong className="text-primary font-bold">{stats.totalCost.toLocaleString("uz-UZ")} {formData.currency || "UZS"}</strong>
+          </span>
         </div>
       </div>
 
       {/* 2. Glide Data Grid with Context Menu Wrapping */}
       <ContextMenu>
         <ContextMenuTrigger className="flex-1 min-h-0 w-full relative">
-          <DataEditor
-            columns={columns}
-            rows={filteredItems.length}
-            getCellContent={getCellContent}
-            onColumnResize={handleColumnResize}
-            gridSelection={selection}
-            onGridSelectionChange={setSelection}
-            onCellActivated={handleCellActivated}
-            rowMarkers="both"
-            freezeColumns={2}
-            smoothScrollX
-            smoothScrollY
-            theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
-            width="100%"
-            height="100%"
-          />
+          <div
+            className="w-full h-full"
+            onKeyDown={(e) => {
+              if (e.key === "Delete" && selectedItem) {
+                e.preventDefault();
+                handleDeleteItem(selectedItem.id);
+              }
+            }}
+          >
+            <DataEditor
+              columns={columns}
+              rows={filteredItems.length}
+              getCellContent={getCellContent}
+              onColumnResize={handleColumnResize}
+              gridSelection={selection}
+              onGridSelectionChange={setSelection}
+              onCellContextMenu={(cell) => {
+                const [, row] = cell;
+                setSelection({
+                  columns: CompactSelection.empty(),
+                  rows: CompactSelection.fromSingleSelection(row),
+                });
+              }}
+              onCellActivated={handleCellActivated}
+              rowMarkers="both"
+              freezeColumns={1}
+              smoothScrollX
+              smoothScrollY
+              headerHeight={28}
+              rowHeight={30}
+              theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+              width="100%"
+              height="100%"
+            />
+          </div>
         </ContextMenuTrigger>
 
         {/* ─── Radix Context Menu: Add Tooling & Item Actions ─── */}
@@ -582,7 +834,7 @@ export function PrepressToolingTab({
           <ContextMenuSub>
             <ContextMenuSubTrigger className="gap-2 cursor-pointer font-semibold text-primary">
               <Plus className="w-3.5 h-3.5" />
-              <span>+ Yangi Jihoz Qo&apos;shish</span>
+              <span>Jihoz qo&apos;shish</span>
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="text-xs w-56">
               <ContextMenuItem
@@ -593,7 +845,8 @@ export function PrepressToolingTab({
                     specDetails: `Format: ${formData.pressSheetW || 700}×${formData.pressSheetH || 1000} mm, CMYK`,
                     quantity: 4,
                     unit: "dona",
-                    estimatedCost: 300000,
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 25 : 300000,
+                    currency: formData.currency || "UZS",
                     status: "Draft",
                   });
                   setIsAddEditOpen(true);
@@ -601,7 +854,7 @@ export function PrepressToolingTab({
                 className="gap-2 cursor-pointer"
               >
                 <Layers className="w-3.5 h-3.5 text-blue-600" />
-                <span>+ CTP Metall Forma</span>
+                <span>CTP metall forma</span>
               </ContextMenuItem>
 
               <ContextMenuItem
@@ -612,7 +865,8 @@ export function PrepressToolingTab({
                     specDetails: `Format: ${formData.width || 700}×${formData.height || 1000} mm (Flatbed Die)`,
                     quantity: 1,
                     unit: "dona",
-                    estimatedCost: 800000,
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 65 : 800000,
+                    currency: formData.currency || "UZS",
                     status: "Draft",
                   });
                   setIsAddEditOpen(true);
@@ -620,7 +874,7 @@ export function PrepressToolingTab({
                 className="gap-2 cursor-pointer"
               >
                 <Stamp className="w-3.5 h-3.5 text-amber-600" />
-                <span>+ Kesish Shtampi (Die)</span>
+                <span>Kesish shtampi (Die)</span>
               </ContextMenuItem>
 
               <ContextMenuItem
@@ -631,7 +885,8 @@ export function PrepressToolingTab({
                     specDetails: "Material: Latun (Jez 3mm), Termo-folga",
                     quantity: 1,
                     unit: "dona",
-                    estimatedCost: 350000,
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 30 : 350000,
+                    currency: formData.currency || "UZS",
                     status: "Draft",
                   });
                   setIsAddEditOpen(true);
@@ -639,7 +894,7 @@ export function PrepressToolingTab({
                 className="gap-2 cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-yellow-600" />
-                <span>+ Folga Klishesi (Jez)</span>
+                <span>Folga klishesi (Jez)</span>
               </ContextMenuItem>
 
               <ContextMenuItem
@@ -650,7 +905,8 @@ export function PrepressToolingTab({
                     specDetails: "Material: Magniy 4mm (Kongrev/Bo'rtma)",
                     quantity: 1,
                     unit: "dona",
-                    estimatedCost: 300000,
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 25 : 300000,
+                    currency: formData.currency || "UZS",
                     status: "Draft",
                   });
                   setIsAddEditOpen(true);
@@ -658,7 +914,7 @@ export function PrepressToolingTab({
                 className="gap-2 cursor-pointer"
               >
                 <Stamp className="w-3.5 h-3.5 text-purple-600" />
-                <span>+ Kongrev Klishesi (Magniy)</span>
+                <span>Kongrev klishesi (Magniy)</span>
               </ContextMenuItem>
 
               <ContextMenuSeparator />
@@ -671,7 +927,8 @@ export function PrepressToolingTab({
                     specDetails: "Brak yoki matn xatosi sababli qayta chiqarish",
                     quantity: 1,
                     unit: "dona",
-                    estimatedCost: 75000,
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 10 : 75000,
+                    currency: formData.currency || "UZS",
                     status: "Draft",
                     isRemake: true,
                     faultParty: "prepress",
@@ -681,7 +938,16 @@ export function PrepressToolingTab({
                 className="gap-2 cursor-pointer text-rose-600"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>+ Remake / Brak</span>
+                <span>Remake / Qayta chiqarish</span>
+              </ContextMenuItem>
+              <DropdownMenuSeparator />
+
+              <ContextMenuItem
+                onClick={() => setIsCatalogPickerOpen(true)}
+                className="gap-2 cursor-pointer font-medium text-blue-600 dark:text-blue-400"
+              >
+                <Warehouse className="w-3.5 h-3.5" />
+                <span>Mavjud katalogdan biriktirish...</span>
               </ContextMenuItem>
             </ContextMenuSubContent>
           </ContextMenuSub>
@@ -701,23 +967,23 @@ export function PrepressToolingTab({
                 </ContextMenuItem>
               )}
 
-              {selectedItem.status === "Ordered" && (
+              {selectedItem.status !== "Ready" && (
                 <ContextMenuItem
                   onClick={() => handleUpdateItemStatus(selectedItem, "Ready")}
                   className="gap-2 cursor-pointer text-emerald-600 font-medium"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Holat: Tayyor bo&apos;ldi (Omborda)</span>
+                  <span>Holat: Tayyor bo&apos;ldi</span>
                 </ContextMenuItem>
               )}
 
               {selectedItem.status === "Ready" && (
                 <ContextMenuItem
-                  onClick={() => handleUpdateItemStatus(selectedItem, "Mounted")}
-                  className="gap-2 cursor-pointer text-teal-600 font-medium"
+                  onClick={() => handleUpdateItemStatus(selectedItem, "Draft")}
+                  className="gap-2 cursor-pointer text-muted-foreground"
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Mashinaga o&apos;rnatildi (Mounted)</span>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Holat: Kutilmoqda (Qaytarish)</span>
                 </ContextMenuItem>
               )}
 
@@ -758,10 +1024,11 @@ export function PrepressToolingTab({
 
               <ContextMenuItem
                 onClick={() => handleDeleteItem(selectedItem.id)}
-                className="gap-2 cursor-pointer text-rose-600"
+                className="gap-2 text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>O&apos;chirish (Del)</span>
+                <span>Yozuvni o&apos;chirish</span>
+                <span className="ml-auto text-[10px] text-muted-foreground font-mono">Del</span>
               </ContextMenuItem>
             </>
           )}
@@ -770,7 +1037,7 @@ export function PrepressToolingTab({
 
       {/* 3. PO Creation Modal */}
       <Dialog open={isPoModalOpen} onOpenChange={setIsPoModalOpen}>
-        <DialogContent className="max-w-md p-5 text-xs">
+        <DialogContent className="sm:max-w-md w-full p-5 text-xs">
           <DialogHeader>
             <DialogTitle className="text-sm font-semibold flex items-center gap-2">
               <ShoppingBag className="w-4 h-4 text-primary" />
@@ -800,7 +1067,9 @@ export function PrepressToolingTab({
                   onValueChange={(val) => setPoForm((prev) => ({ ...prev, supplierId: val || "" }))}
                 >
                   <SelectTrigger className="h-8 text-xs bg-background">
-                    <SelectValue placeholder="Ta'minotchini tanlang" />
+                    <SelectValue placeholder="Ta'minotchini tanlang">
+                      {(val) => suppliers.find((s) => s.id === val)?.name || val}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {suppliers.map((s) => (
@@ -832,7 +1101,7 @@ export function PrepressToolingTab({
                     onValueChange={(val) => setPoForm((prev) => ({ ...prev, currency: val || "UZS" }))}
                   >
                     <SelectTrigger className="h-8 text-xs bg-background">
-                      <SelectValue />
+                      <SelectValue>{(val) => (val === "USD" ? "USD ($)" : "UZS (So'm)")}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="UZS" className="text-xs">UZS (So&apos;m)</SelectItem>
@@ -893,7 +1162,7 @@ export function PrepressToolingTab({
 
       {/* 4. Add / Edit Tooling Item Modal */}
       <Dialog open={isAddEditOpen} onOpenChange={setIsAddEditOpen}>
-        <DialogContent className="max-w-md p-5 text-xs">
+        <DialogContent className="sm:max-w-[560px] w-full p-5 text-xs">
           <DialogHeader>
             <DialogTitle className="text-sm font-semibold flex items-center gap-2">
               <Wrench className="w-4 h-4 text-primary" />
@@ -910,15 +1179,17 @@ export function PrepressToolingTab({
                   onValueChange={(val: any) => setEditingItem((prev) => ({ ...prev, category: val }))}
                 >
                   <SelectTrigger className="h-8 text-xs bg-background">
-                    <SelectValue />
+                    <SelectValue>
+                      {(val) => CATEGORY_CONFIG[val as ToolingCategory]?.label || val}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ctp_plates" className="text-xs">⚙️ CTP Metall Forma (Offset)</SelectItem>
-                    <SelectItem value="die_cutting" className="text-xs">✂️ Kesish Shtansformasi (Die-cutting)</SelectItem>
-                    <SelectItem value="foil_cliche" className="text-xs">✨ Folga Klishesi (Jez / Latun)</SelectItem>
-                    <SelectItem value="emboss_cliche" className="text-xs">🔲 Kongrev Klishesi (Magniy)</SelectItem>
-                    <SelectItem value="varnish_plate" className="text-xs">💧 Lak Trafareti / Polimer</SelectItem>
-                    <SelectItem value="flexo_polymer" className="text-xs">🌀 Flexo Fotopolimer Forma</SelectItem>
+                    <SelectItem value="ctp_plates" className="text-xs">CTP Metall Forma (Offset)</SelectItem>
+                    <SelectItem value="die_cutting" className="text-xs">Kesish Shtansformasi (Die-cutting)</SelectItem>
+                    <SelectItem value="foil_cliche" className="text-xs">Folga Klishesi (Jez / Latun)</SelectItem>
+                    <SelectItem value="emboss_cliche" className="text-xs">Kongrev Klishesi (Magniy)</SelectItem>
+                    <SelectItem value="varnish_plate" className="text-xs">Lak Trafareti / Polimer</SelectItem>
+                    <SelectItem value="flexo_polymer" className="text-xs">Flexo Fotopolimer Forma</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -945,33 +1216,85 @@ export function PrepressToolingTab({
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground font-medium">Miqdori</Label>
+              <div className="grid grid-cols-12 gap-2.5">
+                <div className="col-span-3 space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground font-medium">Miqdori *</Label>
                   <Input
                     type="number"
-                    value={editingItem.quantity || 1}
-                    onChange={(e) => setEditingItem((prev) => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                    min={1}
+                    value={editingItem.quantity ?? 1}
+                    onChange={(e) => {
+                      const qty = Math.max(1, parseInt(e.target.value) || 1);
+                      const currentUnitPrice = (editingItem.estimatedCost || 0) / Math.max(1, editingItem.quantity || 1);
+                      setEditingItem((prev) => ({
+                        ...prev,
+                        quantity: qty,
+                        estimatedCost: Math.round(currentUnitPrice * qty),
+                      }));
+                    }}
                     className="h-8 text-xs font-mono bg-background"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground font-medium">Birligi</Label>
-                  <Input
+                <div className="col-span-3 space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground font-medium">Birligi *</Label>
+                  <Select
                     value={editingItem.unit || "dona"}
-                    onChange={(e) => setEditingItem((prev) => ({ ...prev, unit: e.target.value }))}
-                    className="h-8 text-xs bg-background"
+                    onValueChange={(val: any) => setEditingItem((prev) => ({ ...prev, unit: val || "dona" }))}
+                  >
+                    <SelectTrigger className="h-8 text-xs bg-background">
+                      <SelectValue>{(val) => val || "dona"}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dona" className="text-xs">dona</SelectItem>
+                      <SelectItem value="komplekt" className="text-xs">komplekt</SelectItem>
+                      <SelectItem value="kv.m" className="text-xs">kv.m</SelectItem>
+                      <SelectItem value="metr" className="text-xs">metr</SelectItem>
+                      <SelectItem value="list" className="text-xs">list (varaq)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="col-span-3 space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground font-medium truncate" title="1 birlik narxi">
+                    Dona narxi
+                  </Label>
+                  <Input
+                    type="number"
+                    value={
+                      editingItem.quantity && editingItem.quantity > 0
+                        ? Math.round(((editingItem.estimatedCost || 0) / editingItem.quantity) * 100) / 100
+                        : 0
+                    }
+                    onChange={(e) => {
+                      const uPrice = parseFloat(e.target.value) || 0;
+                      const qty = editingItem.quantity || 1;
+                      setEditingItem((prev) => ({
+                        ...prev,
+                        estimatedCost: Math.round(uPrice * qty * 100) / 100,
+                      }));
+                    }}
+                    className="h-8 text-xs font-mono bg-background"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground font-medium">Taxminiy Narxi</Label>
+                <div className="col-span-3 space-y-1.5">
+                  <Label
+                    className="text-[11px] text-muted-foreground font-medium truncate"
+                    title={`Jami summa (${editingItem.currency || formData.currency || "UZS"})`}
+                  >
+                    Jami summa ({editingItem.currency || formData.currency || "UZS"})
+                  </Label>
                   <Input
                     type="number"
                     value={editingItem.estimatedCost || 0}
-                    onChange={(e) => setEditingItem((prev) => ({ ...prev, estimatedCost: parseFloat(e.target.value) || 0 }))}
-                    className="h-8 text-xs font-mono bg-background"
+                    onChange={(e) =>
+                      setEditingItem((prev) => ({
+                        ...prev,
+                        estimatedCost: parseFloat(e.target.value) || 0,
+                      }))
+                    }
+                    className="h-8 text-xs font-mono bg-background font-semibold"
                   />
                 </div>
               </div>
@@ -983,15 +1306,14 @@ export function PrepressToolingTab({
                   onValueChange={(val: any) => setEditingItem((prev) => ({ ...prev, status: val }))}
                 >
                   <SelectTrigger className="h-8 text-xs bg-background">
-                    <SelectValue />
+                    <SelectValue>
+                      {(val) => STATUS_CONFIG[val as ToolingStatus]?.label || val}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Draft" className="text-xs">Loyiha (Kutilmoqda)</SelectItem>
-                    <SelectItem value="Ordered" className="text-xs">Pudratga buyurtma berildi</SelectItem>
-                    <SelectItem value="In_Production" className="text-xs">Ishlab chiqarilmoqda</SelectItem>
-                    <SelectItem value="Ready" className="text-xs">Tayyor (Omborda)</SelectItem>
-                    <SelectItem value="Delivered" className="text-xs">Yetkazib berildi</SelectItem>
-                    <SelectItem value="Mounted" className="text-xs">Mashinaga o&apos;rnatildi</SelectItem>
+                    <SelectItem value="Draft" className="text-xs">Kutilmoqda (Loyiha)</SelectItem>
+                    <SelectItem value="Ordered" className="text-xs">Buyurtma berilgan</SelectItem>
+                    <SelectItem value="Ready" className="text-xs">Tayyor</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1006,7 +1328,9 @@ export function PrepressToolingTab({
                     onValueChange={(val: any) => setEditingItem((prev) => ({ ...prev, faultParty: val }))}
                   >
                     <SelectTrigger className="h-8 text-xs bg-background">
-                      <SelectValue />
+                      <SelectValue>
+                        {(val) => FAULT_PARTY_CONFIG[val] || val}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="prepress" className="text-xs">Prepress xatosi (Dizayn/Spusk)</SelectItem>
@@ -1064,6 +1388,127 @@ export function PrepressToolingTab({
         totalProducedYield={formData.quantity || 1000}
         totalOverproduction={0}
       />
+
+      {/* 6. Catalog Tooling Picker Modal */}
+      <Dialog open={isCatalogPickerOpen} onOpenChange={setIsCatalogPickerOpen}>
+        <DialogContent className="sm:max-w-[660px] w-full p-5 text-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Warehouse className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>Mavjud Shtamp, Klishe va Qoliplar Katalogi</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Korxona ombori yoki stellajida tayyor turgan shtamplar va klishelarni buyurtmaga biriktirish (Xarid xarajatisiz, 0 so&apos;m).
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* 1. Search Bar on Top */}
+          <div className="space-y-2.5 py-1">
+            <div className="relative w-full">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={catalogSearch}
+                onChange={(e) => setCatalogSearch(e.target.value)}
+                placeholder="Shtamp kodi, nomi, o'lchami yoki stellaj joyi bo'yicha qidirish..."
+                className="h-8.5 pl-9 text-xs bg-background w-full"
+                autoFocus
+              />
+            </div>
+
+            {/* 2. Filter Buttons Row Below Search */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {[
+                { id: "ALL", label: "Barchasi" },
+                { id: "die_cutting", label: "Kesish shtamplari" },
+                { id: "foil_cliche", label: "Folga klishelari" },
+                { id: "emboss_cliche", label: "Kongrev klishelari" },
+              ].map((tab) => (
+                <Button
+                  key={tab.id}
+                  type="button"
+                  variant={catalogCategoryFilter === tab.id ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setCatalogCategoryFilter(tab.id)}
+                  className={cn(
+                    "h-7 px-3 text-xs font-medium cursor-pointer rounded shadow-none",
+                    catalogCategoryFilter === tab.id
+                      ? "bg-primary text-primary-foreground font-semibold"
+                      : "bg-muted/30 text-muted-foreground hover:text-foreground border-border"
+                  )}
+                >
+                  {tab.label}
+                </Button>
+              ))}
+            </div>
+
+            {/* 3. Clean Items List (No emojis, no useless badges, no redundant status text) */}
+            <div className="border border-border rounded-md overflow-hidden max-h-[380px] overflow-y-auto divide-y divide-border bg-card mt-1">
+              {filteredCatalogDies.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground space-y-1">
+                  <div className="font-medium text-xs">Mavjud katalogda bunday jihoz topilmadi.</div>
+                  <div className="text-[11px]">Qidiruv so&apos;zini o&apos;zgartiring yoki filterni tozalang.</div>
+                </div>
+              ) : (
+                filteredCatalogDies.map((tool: any) => (
+                  <div
+                    key={tool.id}
+                    className="p-3 flex items-center justify-between gap-4 hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="min-w-0 space-y-1 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-xs text-foreground">
+                          {tool.code}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground font-mono">
+                          {tool.widthMm || 0} × {tool.heightMm || 0} mm
+                        </span>
+                        {tool.location && (
+                          <span className="text-[11px] text-muted-foreground font-mono">
+                            [{tool.location}]
+                          </span>
+                        )}
+                        {tool.customerName && (
+                          <span className="text-[11px] text-muted-foreground">
+                            • Mijoz: {tool.customerName}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-xs text-foreground font-medium truncate">
+                        {tool.name}
+                      </div>
+                    </div>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => handleAttachCatalogDie(tool)}
+                      className="h-7 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium shrink-0 cursor-pointer shadow-none rounded"
+                    >
+                      Biriktirish
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2 flex items-center justify-between sm:justify-between">
+            <span className="text-[11px] text-muted-foreground">
+              Jami <strong>{filteredCatalogDies.length}</strong> ta mos jihoz topildi
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsCatalogPickerOpen(false)}
+              className="h-7 text-xs"
+            >
+              Yopish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

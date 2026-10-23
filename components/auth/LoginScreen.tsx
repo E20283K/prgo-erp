@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Sun, Moon, ArrowRight } from "lucide-react";
+import { Sun, Moon, ArrowRight, AlertCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { 
   Card, 
   CardContent, 
@@ -25,10 +26,24 @@ export function LoginScreen() {
   const [email, setEmail] = useState("admin");
   const [password, setPassword] = useState("admin");
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const performLogin = async (identifier: string, pass: string) => {
     if (isLoading) return;
+
+    if (!identifier.trim() || !pass) {
+      const emptyMsg = t("emptyCredentials");
+      setError(emptyMsg);
+      toast.add({
+        title: t("loginErrorTitle"),
+        description: emptyMsg,
+        type: "error",
+      });
+      return;
+    }
+
     setIsLoading(true);
+    setError(null);
 
     try {
       const res = await fetch("/api/v1/auth/login", {
@@ -43,10 +58,21 @@ export function LoginScreen() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
+        let errorMsg = t("invalidCredentials");
+        if (data.error) {
+          if (res.status === 403 || data.error.includes("bloklangan") || data.error.includes("faol emas")) {
+            errorMsg = t("accountInactive");
+          } else if (res.status === 401) {
+            errorMsg = t("invalidCredentials");
+          } else {
+            errorMsg = data.error;
+          }
+        }
+        setError(errorMsg);
         toast.add({
-          title: "Kirishda xatolik",
-          description: data.error || "Login yoki parol noto'g'ri",
-          type: "danger",
+          title: t("loginErrorTitle"),
+          description: errorMsg,
+          type: "error",
         });
         setIsLoading(false);
         return;
@@ -80,10 +106,12 @@ export function LoginScreen() {
         type: "success",
       });
     } catch (err: any) {
+      const serverMsg = err.message || t("serverErrorDesc");
+      setError(serverMsg);
       toast.add({
-        title: "Server xatosi",
-        description: err.message || "Tizimga ulanishda xatolik yuz berdi",
-        type: "danger",
+        title: t("serverErrorTitle"),
+        description: serverMsg,
+        type: "error",
       });
     } finally {
       setIsLoading(false);
@@ -96,6 +124,7 @@ export function LoginScreen() {
   };
 
   const handleQuickDemo = (roleKey: "operator" | "sales" | "admin") => {
+    setError(null);
     if (roleKey === "admin") {
       setEmail("admin");
       setPassword("admin");
@@ -135,6 +164,19 @@ export function LoginScreen() {
       <Card className="w-full max-w-sm sm:max-w-md shadow-lg border-border bg-card pt-2">
         <CardContent className="space-y-4 pt-2">
           <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div
+                role="alert"
+                className="flex items-start gap-2.5 p-2.5 rounded-md bg-destructive/10 border border-destructive/25 text-destructive text-xs animate-in fade-in-50 duration-150"
+              >
+                <AlertCircle className="size-4 shrink-0 mt-0.5 text-destructive" />
+                <div className="flex-1 leading-snug">
+                  <span className="font-semibold block text-xs">{t("loginErrorTitle")}</span>
+                  <span className="text-[11px] text-destructive/90">{error}</span>
+                </div>
+              </div>
+            )}
+
             {/* Username / Email Field */}
             <div className="space-y-1.5 text-left">
               <Label htmlFor="email" className="text-xs font-medium">
@@ -145,9 +187,15 @@ export function LoginScreen() {
                 type="text"
                 placeholder={t("emailPlaceholder")}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (error) setError(null);
+                }}
                 required
-                className="h-9 text-xs"
+                className={cn(
+                  "h-9 text-xs transition-colors",
+                  error && "border-destructive/60 focus-visible:ring-destructive/30"
+                )}
               />
             </div>
 
@@ -177,9 +225,15 @@ export function LoginScreen() {
                 type="password"
                 placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (error) setError(null);
+                }}
                 required
-                className="h-9 text-xs"
+                className={cn(
+                  "h-9 text-xs transition-colors",
+                  error && "border-destructive/60 focus-visible:ring-destructive/30"
+                )}
               />
             </div>
 

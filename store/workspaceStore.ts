@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { MachineRecord } from "@/components/documents/machine/types";
-import { PlantRecord } from "@/components/documents/plant/types";
-import { INITIAL_PLANTS_RECORD } from "@/components/documents/plant/data";
+import { PlantRecord, branchToPlantRecord, createEmptyPlant } from "@/components/documents/plant/types";
+import { useLookupStore } from "@/store/lookupStore";
 import {
   EmployeeRecord,
   AttendanceRecord,
@@ -363,6 +363,7 @@ export type ProductionQueueStage = "Queue" | "Ready to Print" | "In Production" 
 
 export interface ProductionQueueItem {
   id: string; // e.g. "WOOF-26-0351"
+  docNo?: string;
   clientOrderId?: string; // e.g. "CO-00041"
   customer: string;
   product: string;
@@ -381,9 +382,11 @@ export interface ProductionQueueItem {
   shift?: string;
   colors?: string;
   spotColors?: string[];
+  orderType?: string;
   sampleRequired?: boolean;
   sampleStatus?: "none" | "in_production" | "awaiting_approval" | "approved" | "revision_requested";
   sampleQty?: number;
+  sampleData?: any;
   photoUrl?: string;
   photoUrls?: string[];
   attachments?: any[];
@@ -393,7 +396,50 @@ export interface ProductionQueueItem {
   startDate?: string;
   recipe?: string;
   dimensions?: any;
+  toolingItems?: any[];
   colorsConfig?: any;
+  paperStock?: string;
+  coating?: string;
+  lamination?: string;
+  laminationSides?: "1s" | "2s";
+  laminationMicron?: number;
+  embellishment?: string;
+  currency?: string;
+  width?: number;
+  height?: number;
+  dimensionUnit?: string;
+  bleed?: number;
+  shapeType?: any;
+  cornerType?: string;
+  itemCategory?: string;
+  boxDepth?: number;
+  foldType?: string;
+  boxType?: string;
+  customShape?: string;
+  customSvgPath?: string;
+  holeSize?: number;
+  holePosition?: string;
+  holeOffset?: number;
+  sizes?: any[];
+  skuArtworks?: any[];
+  kashirovkaMode?: any;
+  kashirovkaStrategy?: any;
+  kashirovkaLayers?: any[];
+  kashirovkaGlueGsm?: number;
+  kashirovkaMakeReadySheets?: number;
+  kashirovkaCuringHours?: number;
+  selectedToolingId?: string;
+  selectedToolingName?: string;
+  toolingProcurementNeeded?: boolean;
+  toolingProcurementCost?: number;
+  frontColors?: any;
+  backColors?: any;
+  spotColorItems?: any[];
+  packagingData?: any;
+  artworkFront?: string;
+  artworkBack?: string;
+  financials?: any;
+  milestones?: any[];
   operations?: any[];
   events?: any[];
 }
@@ -631,7 +677,12 @@ interface WorkspaceState {
 
   // ── Enterprise Branches & Plants ──────────────────────────────────────────
   plants: PlantRecord[];
+  isPlantsLoading: boolean;
   upsertPlant: (plant: PlantRecord) => void;
+  savePlantToDb: (plant: PlantRecord) => Promise<boolean>;
+  deletePlantFromDb: (id: string) => Promise<boolean>;
+  fetchPlants: () => Promise<void>;
+  openNewPlantTab: () => string;
 
   // ── Users & Roles (Settings Module) ────────────────────────────────────────
   users: SystemUserRecord[];
@@ -1421,7 +1472,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
     return false;
   },
-  plants: INITIAL_PLANTS_RECORD,
+  plants: [],
+  isPlantsLoading: false,
   users: INITIAL_SYSTEM_USERS,
   isUsersLoading: false,
   employees: [],
@@ -1572,6 +1624,143 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           : [plant, ...state.plants],
       };
     }),
+
+  openNewPlantTab: () => {
+    const plantsList = get().plants || [];
+    const nextNum = plantsList.length + 1;
+    const newId = `PLT-${String(nextNum).padStart(3, "0")}`;
+    const newCode = `BRN-${String(nextNum).padStart(2, "0")}`;
+    const newPlant: PlantRecord = createEmptyPlant(newId, newCode);
+
+    // NOTE: We do not call upsertPlant here so unsaved drafts never appear as ghost rows in the grid.
+    const tabId = `plant-${newPlant.id}`;
+    get().openTab({
+      id: tabId,
+      title: "Yangi korxona / tashkilot *",
+      type: "plant-detail",
+      module: "settings",
+      documentData: newPlant,
+      isUnsaved: true,
+    });
+    return tabId;
+  },
+
+  fetchPlants: async () => {
+    set({ isPlantsLoading: true });
+    try {
+      const res = await fetch("/api/v1/production/sites?companyCode=PRINTGOO");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        const dbPlants = json.data.map(branchToPlantRecord);
+        set({ plants: dbPlants, isPlantsLoading: false });
+      } else {
+        set({ isPlantsLoading: false });
+      }
+    } catch (e) {
+      console.error("fetchPlants error:", e);
+      set({ isPlantsLoading: false });
+    }
+  },
+
+  savePlantToDb: async (plant) => {
+    try {
+      const isNewDraft = plant.id.startsWith("PLT-") && plant.id.length < 15;
+      const res = await fetch("/api/v1/production/sites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyCode: "PRINTGOO",
+          id: isNewDraft ? undefined : plant.id,
+          name: plant.name.trim(),
+          code: plant.code?.trim() || `BR-${Math.floor(1000 + Math.random() * 9000)}`,
+          shortName: plant.shortName?.trim() || null,
+          legalEntityName: plant.legalEntityName?.trim() || null,
+          branchType: plant.branchType?.trim() || null,
+          tin: plant.tin?.trim() || null,
+          vatNumber: plant.vatNumber?.trim() || null,
+          oked: plant.oked?.trim() || null,
+          address: plant.address?.trim() || null,
+          legalAddress: plant.legalAddress?.trim() || null,
+          landmark: plant.landmark?.trim() || null,
+          phone: plant.phone?.trim() || null,
+          email: plant.email?.trim() || null,
+          director: plant.director?.trim() || null,
+          directorPhone: plant.directorPhone?.trim() || null,
+          chiefAccountant: plant.chiefAccountant?.trim() || null,
+          chiefAccountantPhone: plant.chiefAccountantPhone?.trim() || null,
+          productionHead: plant.productionHead?.trim() || null,
+          productionHeadPhone: plant.productionHeadPhone?.trim() || null,
+          shiftRegime: plant.shiftRegime?.trim() || null,
+          workingHours: plant.workingHours?.trim() || null,
+          daysOfWeek: plant.daysOfWeek?.trim() || null,
+          totalFloorAreaM2: Number(plant.totalFloorAreaM2) || 0,
+          machinesCount: Number(plant.machinesCount) || 0,
+          status: plant.status || "Active",
+          isMain: !!plant.isMain,
+          isActive: plant.status !== "Inactive",
+          departments: Array.isArray(plant.departments) ? plant.departments : [],
+          warehouses: Array.isArray(plant.warehouses) ? plant.warehouses : [],
+          bankAccounts: Array.isArray(plant.bankAccounts) ? plant.bankAccounts : [],
+          integration: plant.integration || {},
+          notes: plant.notes?.trim() || null,
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const savedBranch = json.data;
+          const fullPlant: PlantRecord = branchToPlantRecord(savedBranch);
+
+          // 1. Replace tab ID if open from draft to real DB ID
+          if (plant.id !== savedBranch.id) {
+            get().replaceTabId(`plant-${plant.id}`, `plant-${savedBranch.id}`, savedBranch.name, fullPlant);
+          } else {
+            get().updateTabData(`plant-${savedBranch.id}`, fullPlant, savedBranch.name);
+          }
+
+          // 2. Remove draft and clean in-memory plants list
+          set((state) => ({
+            plants: state.plants
+              .filter((p) => p.id !== plant.id && p.id !== savedBranch.id)
+              .concat(fullPlant),
+          }));
+
+          // 3. Sync lookup store (used in work order combobox)
+          useLookupStore.getState().syncWithServer();
+
+          // 4. Refresh full list from DB so no ghosts or duplicates exist
+          await get().fetchPlants();
+          return true;
+        }
+      }
+      return false;
+    } catch (err) {
+      console.error("savePlantToDb error:", err);
+      return false;
+    }
+  },
+
+  deletePlantFromDb: async (id) => {
+    try {
+      const res = await fetch(`/api/v1/production/sites?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          set((state) => ({
+            plants: state.plants.filter((p) => p.id !== id),
+          }));
+          useLookupStore.getState().syncWithServer();
+          return true;
+        }
+      }
+      return false;
+    } catch (err) {
+      console.error("deletePlantFromDb error:", err);
+      return false;
+    }
+  },
 
   upsertUser: (user) =>
     set((state) => {

@@ -15,12 +15,9 @@ import {
   Shirt,
   Scissors,
   RotateCw,
-  Stamp,
-  Wrench,
   Boxes,
   Lock,
   Unlock,
-  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -28,13 +25,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { TabsContent } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -49,7 +39,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { SmartCombobox } from "@/components/ui/smart-combobox";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxSelect,
+  type ComboboxOption,
+} from "@/components/ui/combobox";
 import { DieLinePreview } from "../DieLinePreview";
 import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
@@ -66,6 +65,7 @@ import {
   calculateKashirovkaTotals,
   WorkOrderSampleData,
   OrderAttachment,
+  SkuArtwork,
 } from "../types";
 import { SizeMatrixCard } from "./SizeMatrixCard";
 
@@ -80,7 +80,186 @@ interface SpecificationsTabProps {
   onSampleChange?: (field: keyof WorkOrderSampleData, val: any) => void;
   orderAttachments?: OrderAttachment[];
   setOrderAttachments?: React.Dispatch<React.SetStateAction<OrderAttachment[]>>;
+  skuArtworks?: SkuArtwork[];
+  onSkuArtworksChange?: (artworks: SkuArtwork[]) => void;
+  docNo?: string;
 }
+
+const ITEM_CATEGORY_OPTIONS: ComboboxOption[] = [
+  { value: "Hangtag", label: "Hangtag (Yorliq)" },
+  { value: "Label", label: "Label (Stiker/Etiketka)" },
+  { value: "Card", label: "Business Card / Postcard" },
+  { value: "Carton", label: "Carton Box (Quti)" },
+  { value: "Flyer", label: "Flyer / Buklet" },
+  { value: "Other", label: "Custom Product" },
+];
+
+const SHAPE_TYPE_OPTIONS: ComboboxOption[] = [
+  { value: "rectangle", label: "To'g'ri to'rtburchak / Kvadrat (Rectangle)" },
+  { value: "circle", label: "Doira / Aylana (Circle)" },
+  { value: "oval", label: "Oval / Ellips (Oval)" },
+  { value: "folded", label: "Buklama (Folded / Booklet)" },
+  { value: "carton_box", label: "Quti / Karobka (Carton Box)" },
+  { value: "custom_die", label: "Maxsus shtansforma (Custom Die)" },
+];
+
+const CORNER_TYPE_OPTIONS: ComboboxOption[] = [
+  { value: "Square", label: "To'g'ri burchak (Square)" },
+  { value: "Rounded (R3)", label: "Aylana R3 (Rounded)" },
+  { value: "Rounded (R5)", label: "Aylana R5 (Rounded)" },
+  { value: "Die-cut", label: "Shtansforma (Custom Die)" },
+];
+
+const FOLD_TYPE_OPTIONS: ComboboxOption[] = [
+  { value: "half_vertical", label: "Tik 1 buklama (Half fold vertical)" },
+  { value: "half_horizontal", label: "Yotiq 1 buklama (Half fold horizontal)" },
+  { value: "tri_fold", label: "3 buklama / Z-fold" },
+  { value: "gate_fold", label: "Eshiksimon buklama (Gate fold)" },
+];
+
+const BOX_TYPE_OPTIONS: ComboboxOption[] = [
+  { value: "tuck_end", label: "Klassik quti (Straight/Reverse Tuck End)" },
+  { value: "auto_lock_bottom", label: "Avtolok tubli (Auto-lock Crash Bottom)" },
+  { value: "snap_lock_bottom", label: "1-2-3 qulfli tub (Snap Lock Bottom)" },
+  { value: "sleeve_tray", label: "G'ilofli tortma (Sleeve & Tray)" },
+];
+
+const HOLE_SIZE_OPTIONS: ComboboxOption[] = [
+  { value: "0", label: "0 mm (Teshiksiz)" },
+  { value: "3", label: "Ø3 mm (Ip/Shnur)" },
+  { value: "4", label: "Ø4 mm (Standart)" },
+  { value: "5", label: "Ø5 mm (Katta)" },
+  { value: "6", label: "Ø6 mm (Lyuvers grommet)" },
+  { value: "8", label: "Ø8 mm (Evro-slott)" },
+];
+
+const HOLE_POSITION_OPTIONS: ComboboxOption[] = [
+  { value: "none", label: "Yo'q (None)" },
+  { value: "top-center", label: "Tepada markazda (Top Center)" },
+  { value: "top-left", label: "Tepada chapda (Top Left)" },
+  { value: "top-right", label: "Tepada o'ngda (Top Right)" },
+  { value: "left-center", label: "Yon chapda (Left Center)" },
+  { value: "right-center", label: "Yon o'ngda (Right Center)" },
+  { value: "both-sides-fold", label: "Buklama atrofida juft (Both Sides / Fold)" },
+];
+
+const LAMINATION_OPTIONS: ComboboxOption[] = [
+  { value: "none", label: "Yo'q / Laminatsiyasiz (Uncoated)" },
+  { value: "Soft-Touch Matte", label: "Soft-Touch Matte (Baxmal/Velvet 30µm)" },
+  { value: "Matte Lamination", label: "Matte Lamination (Xira plyonka 25µm)" },
+  { value: "Gloss Lamination", label: "Gloss Lamination (Yaltiroq plyonka 25µm)" },
+  { value: "Anti-Scuff Matte", label: "Anti-Scuff Matte (Tirnalishga chidamli 28µm)" },
+  { value: "Thermal Metallized Silver", label: "Metallized Silver (Kumush folga plyonka)" },
+  { value: "Thermal Metallized Gold", label: "Metallized Gold (Oltin folga plyonka)" },
+  { value: "Holographic Film", label: "Golografik plyonka (Holographic)" },
+];
+
+const LAMINATION_SIDES_OPTIONS: ComboboxOption[] = [
+  { value: "1s", label: "1-tomonlama (Front / 1S / 1+0)" },
+  { value: "2s", label: "2-tomonlama (Both sides / 2S / 1+1)" },
+];
+
+const LAMINATION_MICRON_OPTIONS: ComboboxOption[] = [
+  { value: "24", label: "24 µm (Yengil / Standart BOPP)" },
+  { value: "28", label: "28 µm (Mustahkam / O'rtacha)" },
+  { value: "30", label: "30 µm (Soft-Touch Velvet PET)" },
+  { value: "32", label: "32 µm (Qalin / Qattiq himoya)" },
+];
+
+const EMBELLISHMENT_OPTIONS: ComboboxOption[] = [
+  { value: "None", label: "Qo'shimcha pardozsiz (None)" },
+  { value: "Spot UV (3D)", label: "Tanlanma 3D UF lak (Spot UV)" },
+  { value: "Gold Hot Foil", label: "Oltin issiq folga (Gold Foil)" },
+  { value: "Silver Hot Foil", label: "Kumush issiq folga (Silver Foil)" },
+  { value: "Blind Emboss", label: "Relyefli bosish (Blind Emboss)" },
+  { value: "Overall WB Varnish", label: "Umumiy suvli lak (WB Varnish)" },
+];
+
+const LABEL_FOLD_OPTIONS: ComboboxOption[] = [
+  { value: "center_fold", label: "Markazdan buklama (Center / Loop fold)" },
+  { value: "end_fold", label: "Ikki chekkadan buklama (End fold)" },
+  { value: "straight_cut", label: "To'g'ri kesim (Straight cut / Dona)" },
+  { value: "manhattan_fold", label: "Kitobcha buklama (Manhattan fold)" },
+  { value: "mitre_fold", label: "Manjetli buklama (Mitre fold)" },
+  { value: "roll", label: "Rulonda uzluksiz (Roll / Kesilmagan)" },
+];
+
+const LABEL_CUT_OPTIONS: ComboboxOption[] = [
+  { value: "ultrasonic", label: "Ultrasonik kesim (Yumshoq, terini qichitmaydi)" },
+  { value: "hot_knife", label: "Issiq pichoq (Hot knife - erigan qirra)" },
+  { value: "cold_knife", label: "Sovuq pichoq (Cold knife)" },
+  { value: "laser", label: "Lazerli kesim (Laser cut)" },
+];
+
+const SEWING_MARGIN_OPTIONS: ComboboxOption[] = [
+  { value: "0", label: "0 mm (Xoshiyasiz)" },
+  { value: "3", label: "3 mm (Tor chok)" },
+  { value: "5", label: "5 mm (Standart tikuv)" },
+  { value: "7", label: "7 mm (Keng tikuv)" },
+  { value: "10", label: "10 mm (Qalin kiyimlar)" },
+];
+
+const FLEXO_MATERIAL_OPTIONS: ComboboxOption[] = [
+  { value: "nylon_taffeta", label: "Neylon (Nylon Taffeta) — Parvarish va o'lcham yorlig'i" },
+  { value: "polyester_satin_white", label: "Oq Satin (Polyester Satin) — Ipaksimon yumshoq" },
+  { value: "polyester_satin_black", label: "Qora Satin (Black Satin) — Premium to'qilgan qirra" },
+  { value: "cotton_tape", label: "Organik Paxta (Cotton Tape) — Eko mato" },
+  { value: "self_adhesive_pp", label: "O'ziyelimli Polipropilen (PP Film)" },
+  { value: "semi_gloss_paper", label: "Yarim yaltiroq qog'oz (Semi-gloss)" },
+];
+
+const FLEXO_EDGE_OPTIONS: ComboboxOption[] = [
+  { value: "woven_edge", label: "To'qilgan qirra (Woven edge — eng mayin)" },
+  { value: "hot_slit", label: "Issiq kesilgan (Hot slit edge)" },
+  { value: "ultrasonic_slit", label: "Ultrasonik kesilgan (Ultrasonic slit)" },
+];
+
+const WASH_RESISTANCE_OPTIONS: ComboboxOption[] = [
+  { value: "40c", label: "Standart yuvish (40°C)" },
+  { value: "60c", label: "Yuqori harorat (60°C - Kiyimlar)" },
+  { value: "90c_boil", label: "Qaynatishga chidamli (90°C - Tibbiy / Ish kiyimlari)" },
+  { value: "dry_clean", label: "Kimyoviy tozalash (Dry clean)" },
+];
+
+const PRINT_SIDES_OPTIONS: ComboboxOption[] = [
+  { value: "1s", label: "1-tomonlama (1+0)" },
+  { value: "2s", label: "2-tomonlama (1+1)" },
+];
+
+const JACQUARD_MATERIAL_OPTIONS: ComboboxOption[] = [
+  { value: "polyester_satin_black", label: "Qora to'qima (Black Damask Base)" },
+  { value: "polyester_satin_white", label: "Oq to'qima (White Damask Base)" },
+  { value: "cotton_tape", label: "Organik paxta asos (Cotton Jacquard)" },
+  { value: "metallic_yarn", label: "Metalllashgan ip bilan (Lurex Jacquard)" },
+];
+
+const WEAVE_DENSITY_OPTIONS: ComboboxOption[] = [
+  { value: "damask_50d", label: "Damask 50D (High Definition — juda mayda detallar)" },
+  { value: "damask_100d", label: "Damask 100D (Standart yuqori sifat)" },
+  { value: "woven_satin", label: "Satin to'qish (Woven Satin — atlas jiloli)" },
+  { value: "taffeta", label: "Tafta (Taffeta — yengil va tejamkor)" },
+  { value: "hd_microfiber", label: "HD Mikrofibra (Ekstra mayin)" },
+];
+
+const LUREX_OPTIONS: ComboboxOption[] = [
+  { value: "none", label: "Yo'q (Standart poliester ip)" },
+  { value: "gold", label: "Oltin Lurex (Gold Metallic)" },
+  { value: "silver", label: "Kumush Lurex (Silver Metallic)" },
+  { value: "copper", label: "Mis / Bronza (Copper Metallic)" },
+];
+
+const CORE_MM_OPTIONS: ComboboxOption[] = [
+  { value: "25", label: "25 mm / 1 dyuym (Kichik printerlar)" },
+  { value: "40", label: "40 mm (Standart sanoat)" },
+  { value: "76", label: "76 mm / 3 dyuym (Katta dastgohlar)" },
+];
+
+const WINDING_DIR_OPTIONS: ComboboxOption[] = [
+  { value: "out_head", label: "Tashqariga - Bosh qism oldinda (Face Out / Head first)" },
+  { value: "out_foot", label: "Tashqariga - Oyoq qism oldinda (Face Out / Foot first)" },
+  { value: "in_head", label: "Ichkariga - Bosh qism oldinda (Face In / Head first)" },
+  { value: "in_foot", label: "Ichkariga - Oyoq qism oldinda (Face In / Foot first)" },
+];
 
 export function SpecificationsTab({
   formData,
@@ -93,10 +272,30 @@ export function SpecificationsTab({
   onSampleChange,
   orderAttachments,
   setOrderAttachments,
+  skuArtworks,
+  onSkuArtworksChange,
+  docNo,
 }: SpecificationsTabProps) {
   const tDie = useTranslations("DieLine");
   const { paperStocks, addPaperStock, coatings, addCoating } = useLookupStore();
-  const { customerTooling, upsertCustomerTooling, addNotification } = useWorkspaceStore();
+  const { addNotification } = useWorkspaceStore();
+
+  // Paper stock options for Base UI Combobox
+  const [paperInput, setPaperInput] = useState(formData.paperStock || "");
+
+  React.useEffect(() => {
+    setPaperInput(formData.paperStock || "");
+  }, [formData.paperStock]);
+
+  const paperStockOptions = useMemo(() => {
+    const base = paperStocks.map((p) => (typeof p === "string" ? p : p.value || p.label));
+    const set = new Set(base);
+    if (formData.paperStock) set.add(formData.paperStock);
+    if (paperInput.trim() && !set.has(paperInput.trim())) {
+      return [paperInput.trim(), ...Array.from(set)];
+    }
+    return Array.from(set);
+  }, [paperStocks, formData.paperStock, paperInput]);
   const [isPantoneModalOpen, setIsPantoneModalOpen] = useState(false);
   const [pantoneTargetSide, setPantoneTargetSide] = useState<"front" | "back" | "both">("front");
   const [isSvgModalOpen, setIsSvgModalOpen] = useState(false);
@@ -118,60 +317,6 @@ export function SpecificationsTab({
         lockedRatioRef.current = null;
       }
       return next;
-    });
-  };
-  const [isNewToolingModalOpen, setIsNewToolingModalOpen] = useState(false);
-  const [newToolForm, setNewToolForm] = useState({
-    name: "",
-    toolType: "Flatbed Die (Штанцформа)",
-    format: `${formData.width || 700}×${formData.height || 1000} mm`,
-    cavities: "4-up",
-    estimatedCost: 65,
-  });
-
-  // Matched customer tools
-  const availableCustomerTools = useMemo(() => {
-    const cust = (formData.customer || "").trim().toLowerCase();
-    if (!cust) return customerTooling;
-    const cleanCust = cust.replace(" llc", "").replace(" mchj", "").trim();
-    return customerTooling.filter((t) => {
-      if (!t.customerName) return false;
-      const c = t.customerName.toLowerCase();
-      return c === cleanCust || c.includes(cleanCust) || cleanCust.includes(c);
-    });
-  }, [customerTooling, formData.customer]);
-
-  const selectedTool = useMemo(() => {
-    if (!formData.selectedToolingId) return null;
-    return customerTooling.find((t) => t.id === formData.selectedToolingId) || null;
-  }, [customerTooling, formData.selectedToolingId]);
-
-  const handleOrderNewTooling = () => {
-    const newToolId = `DIE-${Math.floor(100 + Math.random() * 899)}`;
-    const createdTool = {
-      id: newToolId,
-      customerName: formData.customer || "Buyurtmachi",
-      name: newToolForm.name || `${formData.product || "Buyurtma"} Shtansformasi`,
-      toolType: newToolForm.toolType,
-      format: newToolForm.format || `${formData.width || 700}×${formData.height || 1000} mm`,
-      cavities: newToolForm.cavities || "1-up",
-      location: "Kutilmoqda (Pudratda)",
-      impressionsUsed: 0,
-      maxLife: 150000,
-      status: "Ready" as const,
-    };
-    upsertCustomerTooling(createdTool);
-    handleFieldChange("selectedToolingId", newToolId);
-    handleFieldChange("selectedToolingName", createdTool.name);
-    handleFieldChange("toolingProcurementNeeded", true);
-    handleFieldChange("toolingProcurementCost", newToolForm.estimatedCost || 65);
-    onMarkUnsaved();
-    setIsNewToolingModalOpen(false);
-
-    addNotification({
-      title: "Shtansforma tayyorlashga buyurtma kiritildi",
-      description: `${newToolId}: ${createdTool.name} xaridlar va texkartaga biriktirildi.`,
-      severity: "success",
     });
   };
 
@@ -456,6 +601,16 @@ export function SpecificationsTab({
         totalQuantity={formData.quantity}
         width={formData.width}
         height={formData.height}
+        workOrderId={docNo || (formData as any).docNo}
+        skuArtworks={skuArtworks || formData.skuArtworks || []}
+        onSkuArtworksChange={(artworks) => {
+          if (onSkuArtworksChange) {
+            onSkuArtworksChange(artworks);
+          } else {
+            handleFieldChange("skuArtworks", artworks);
+          }
+          onMarkUnsaved();
+        }}
         printSides={
           formData.labelPrintSides ||
           (formData.colorsConfig && !formData.colorsConfig.endsWith("+0") ? "2s" : "1s")
@@ -575,75 +730,49 @@ export function SpecificationsTab({
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Buklash turi (Fold Type):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={LABEL_FOLD_OPTIONS}
                       value={formData.labelFoldType || "center_fold"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("labelFoldType", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20 font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="center_fold">Markazdan buklama (Center / Loop fold)</SelectItem>
-                        <SelectItem value="end_fold">Ikki chekkadan buklama (End fold)</SelectItem>
-                        <SelectItem value="straight_cut">To&apos;g&apos;ri kesim (Straight cut / Dona)</SelectItem>
-                        <SelectItem value="manhattan_fold">Kitobcha buklama (Manhattan fold)</SelectItem>
-                        <SelectItem value="mitre_fold">Manjetli buklama (Mitre fold)</SelectItem>
-                        <SelectItem value="roll">Rulonda uzluksiz (Roll / Kesilmagan)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Buklash turini tanlang..."
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Kesish usuli (Cut Method):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={LABEL_CUT_OPTIONS}
                       value={formData.labelCutType || "ultrasonic"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("labelCutType", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ultrasonic">Ultrasonik kesim (Yumshoq, terini qichitmaydi)</SelectItem>
-                        <SelectItem value="hot_knife">Issiq pichoq (Hot knife - erigan qirra)</SelectItem>
-                        <SelectItem value="cold_knife">Sovuq pichoq (Cold knife)</SelectItem>
-                        <SelectItem value="laser">Lazerli kesim (Laser cut)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Kesish usulini tanlang..."
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Tikish xoshiyasi (Sewing Margin):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={SEWING_MARGIN_OPTIONS}
                       value={String(formData.labelSewingMarginMm ?? 5)}
                       disabled={isOperator}
                       onValueChange={(val) => {
                         handleFieldChange("labelSewingMarginMm", Number(val));
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20 font-mono">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="0">0 mm (Xoshiyasiz)</SelectItem>
-                        <SelectItem value="3">3 mm (Tor chok)</SelectItem>
-                        <SelectItem value="5">5 mm (Standart tikuv)</SelectItem>
-                        <SelectItem value="7">7 mm (Keng tikuv)</SelectItem>
-                        <SelectItem value="10">10 mm (Qalin kiyimlar)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Xoshiyani tanlang..."
+                      className="font-mono"
+                    />
                   </div>
                 </div>
               </div>
@@ -667,7 +796,8 @@ export function SpecificationsTab({
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Lenta turi (Ribbon Material):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={FLEXO_MATERIAL_OPTIONS}
                       value={formData.labelMaterialType || (formData.paperStock?.toLowerCase().includes("satin") ? "polyester_satin_white" : "nylon_taffeta")}
                       disabled={isOperator}
                       onValueChange={(val) => {
@@ -684,88 +814,60 @@ export function SpecificationsTab({
                         handleFieldChange("paperStock", labelStockMap[val] || val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20 font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="nylon_taffeta">Neylon (Nylon Taffeta) — Parvarish va o&apos;lcham yorlig&apos;i</SelectItem>
-                        <SelectItem value="polyester_satin_white">Oq Satin (Polyester Satin) — Ipaksimon yumshoq</SelectItem>
-                        <SelectItem value="polyester_satin_black">Qora Satin (Black Satin) — Premium to&apos;qilgan qirra</SelectItem>
-                        <SelectItem value="cotton_tape">Organik Paxta (Cotton Tape) — Eko mato</SelectItem>
-                        <SelectItem value="self_adhesive_pp">O&apos;ziyelimli Polipropilen (PP Film)</SelectItem>
-                        <SelectItem value="semi_gloss_paper">Yarim yaltiroq qog&apos;oz (Semi-gloss)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Lenta turini tanlang..."
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Lenta qirrasi (Ribbon Edge):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={FLEXO_EDGE_OPTIONS}
                       value={formData.labelEdgeType || "woven_edge"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("labelEdgeType", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="woven_edge">To&apos;qilgan qirra (Woven edge — eng mayin)</SelectItem>
-                        <SelectItem value="hot_slit">Issiq kesilgan (Hot slit edge)</SelectItem>
-                        <SelectItem value="ultrasonic_slit">Ultrasonik kesilgan (Ultrasonic slit)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Lenta qirrasini tanlang..."
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Yuvishga bardoshlilik (Wash Resistance):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={WASH_RESISTANCE_OPTIONS}
                       value={formData.labelWashResistance || "60c"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("labelWashResistance", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="40c">Standart yuvish (40°C)</SelectItem>
-                        <SelectItem value="60c">Yuqori harorat (60°C - Kiyimlar)</SelectItem>
-                        <SelectItem value="90c_boil">Qaynatishga chidamli (90°C - Tibbiy / Ish kiyimlari)</SelectItem>
-                        <SelectItem value="dry_clean">Kimyoviy tozalash (Dry clean)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Haroratni tanlang..."
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Bosma tomoni (Print Sides):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={[
+                        { value: "1s", label: "1-tomonlama (1+0 / Faqat yuzi)" },
+                        { value: "2s", label: "2-tomonlama (1+1 / Oldi logotip, orqasi tarkib)" },
+                      ]}
                       value={formData.labelPrintSides || "1s"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("labelPrintSides", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20 font-mono">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1s">1-tomonlama (1+0 / Faqat yuzi)</SelectItem>
-                        <SelectItem value="2s">2-tomonlama (1+1 / Oldi logotip, orqasi tarkib)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Bosma tomonini tanlang..."
+                      className="font-mono"
+                    />
                   </div>
                 </div>
               </div>
@@ -828,49 +930,32 @@ export function SpecificationsTab({
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Buklash turi (Fold Type):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={LABEL_FOLD_OPTIONS}
                       value={formData.labelFoldType || "end_fold"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("labelFoldType", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20 font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="end_fold">Ikki chekkadan buklama (End fold — kiyim ichiga)</SelectItem>
-                        <SelectItem value="center_fold">Markazdan buklama (Center / Loop fold)</SelectItem>
-                        <SelectItem value="straight_cut">To&apos;g&apos;ri kesim (Straight cut / 4 tomonlama tikuv)</SelectItem>
-                        <SelectItem value="manhattan_fold">Kitobcha buklama (Manhattan fold)</SelectItem>
-                        <SelectItem value="mitre_fold">Manjetli buklama (Mitre fold)</SelectItem>
-                        <SelectItem value="roll">Rulonda (Roll / Uzluksiz)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Buklash turini tanlang..."
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Qirralarni kesish (Edge Processing):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={LABEL_CUT_OPTIONS}
                       value={formData.labelCutType || "ultrasonic"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("labelCutType", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ultrasonic">Ultrasonik kesim (Soft ultrasonic edge — terini achitmaydi)</SelectItem>
-                        <SelectItem value="laser">Lazerli kesim (Laser contour)</SelectItem>
-                        <SelectItem value="hot_knife">Issiq pichoq (Hot knife cut)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Kesish turini tanlang..."
+                    />
                   </div>
                 </div>
               </div>
@@ -894,50 +979,33 @@ export function SpecificationsTab({
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       To&apos;qish zichligi (Weave Quality):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={WEAVE_DENSITY_OPTIONS}
                       value={formData.weaveQuality || "damask_50d"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("weaveQuality", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20 font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="damask_50d">Damask 50D (High Definition — juda mayda detallar)</SelectItem>
-                        <SelectItem value="damask_100d">Damask 100D (Standart yuqori sifat)</SelectItem>
-                        <SelectItem value="woven_satin">Satin to&apos;qish (Woven Satin — atlas jiloli)</SelectItem>
-                        <SelectItem value="taffeta">Tafta (Taffeta — yengil va tejamkor)</SelectItem>
-                        <SelectItem value="hd_microfiber">HD Mikrofibra (Ekstra mayin)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="To'qish zichligini tanlang..."
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Lurex metall ip (Metallic Thread):
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={LUREX_OPTIONS}
                       value={formData.lurexColor || "none"}
                       disabled={isOperator}
-                      onValueChange={(val: any) => {
+                      onValueChange={(val) => {
                         handleFieldChange("lurexColor", val);
                         handleFieldChange("hasLurexThread", val !== "none");
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Yo&apos;q (Standart poliester ip)</SelectItem>
-                        <SelectItem value="gold">Oltin Lurex (Gold Metallic)</SelectItem>
-                        <SelectItem value="silver">Kumush Lurex (Silver Metallic)</SelectItem>
-                        <SelectItem value="copper">Mis / Bronza (Copper Metallic)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Lurex ip turini tanlang..."
+                    />
                   </div>
                 </div>
               </div>
@@ -969,7 +1037,8 @@ export function SpecificationsTab({
                 <label className="text-xs font-medium text-muted-foreground block mb-1">
                   Type
                 </label>
-                <Select
+                <ComboboxSelect
+                  items={ITEM_CATEGORY_OPTIONS}
                   value={formData.itemCategory || "Hangtag"}
                   disabled={isOperator}
                   onValueChange={(val) => {
@@ -984,26 +1053,16 @@ export function SpecificationsTab({
                     }
                     onMarkUnsaved();
                   }}
-                >
-                  <SelectTrigger className="h-8 text-xs bg-muted/20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Hangtag">Hangtag (Yorliq)</SelectItem>
-                    <SelectItem value="Label">Label (Stiker/Etiketka)</SelectItem>
-                    <SelectItem value="Card">Business Card / Postcard</SelectItem>
-                    <SelectItem value="Carton">Carton Box (Quti)</SelectItem>
-                    <SelectItem value="Flyer">Flyer / Buklet</SelectItem>
-                    <SelectItem value="Other">Custom Product</SelectItem>
-                  </SelectContent>
-                </Select>
+                  placeholder="Mahsulot turini tanlang..."
+                />
               </div>
 
               <div>
                 <label className="text-xs font-medium text-muted-foreground block mb-1">
                   {tDie("shape")}
                 </label>
-                <Select
+                <ComboboxSelect
+                  items={SHAPE_TYPE_OPTIONS}
                   value={formData.shapeType || "rectangle"}
                   disabled={isOperator}
                   onValueChange={(val) => {
@@ -1014,19 +1073,8 @@ export function SpecificationsTab({
                     }
                     onMarkUnsaved();
                   }}
-                >
-                  <SelectTrigger className="h-8 text-xs bg-muted/20 font-medium">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="rectangle">{tDie("shapeRect")}</SelectItem>
-                    <SelectItem value="circle">{tDie("shapeCircle")}</SelectItem>
-                    <SelectItem value="oval">{tDie("shapeOval")}</SelectItem>
-                    <SelectItem value="folded">{tDie("shapeFolded")}</SelectItem>
-                    <SelectItem value="carton_box">{tDie("shapeCarton")}</SelectItem>
-                    <SelectItem value="custom_die">{tDie("shapeCustom")}</SelectItem>
-                  </SelectContent>
-                </Select>
+                  placeholder="Shaklni tanlang..."
+                />
               </div>
 
               <div className="col-span-2 grid grid-cols-[1fr_auto_1fr] items-end gap-1.5">
@@ -1155,24 +1203,16 @@ export function SpecificationsTab({
                   <label className="text-xs font-medium text-muted-foreground block mb-1">
                     Corners
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={CORNER_TYPE_OPTIONS}
                     value={formData.cornerType || "Square"}
                     disabled={isOperator}
                     onValueChange={(val) => {
                       handleFieldChange("cornerType", val);
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Square">To&apos;g&apos;ri burchak (Square)</SelectItem>
-                      <SelectItem value="Rounded (R3)">Aylana R3 (Rounded)</SelectItem>
-                      <SelectItem value="Rounded (R5)">Aylana R5 (Rounded)</SelectItem>
-                      <SelectItem value="Die-cut">Shtansforma (Custom Die)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Burchakni tanlang..."
+                  />
                 </div>
               )}
 
@@ -1203,7 +1243,8 @@ export function SpecificationsTab({
                   <label className="text-xs font-medium text-muted-foreground block mb-1">
                     {tDie("foldType")}
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={FOLD_TYPE_OPTIONS}
                     value={formData.foldType || "half_vertical"}
                     disabled={isOperator}
                     onValueChange={(val) => {
@@ -1211,18 +1252,8 @@ export function SpecificationsTab({
                       handleFieldChange("foldType", val);
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="half_vertical">{tDie("foldHalfV")}</SelectItem>
-                      <SelectItem value="half_horizontal">{tDie("foldHalfH")}</SelectItem>
-                      <SelectItem value="tri_c">{tDie("foldTriC")}</SelectItem>
-                      <SelectItem value="tri_z">{tDie("foldTriZ")}</SelectItem>
-                      <SelectItem value="gate">{tDie("foldGate")}</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Buklamani tanlang..."
+                  />
                 </div>
               )}
 
@@ -1231,7 +1262,8 @@ export function SpecificationsTab({
                   <label className="text-xs font-medium text-muted-foreground block mb-1">
                     {tDie("boxType")}
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={BOX_TYPE_OPTIONS}
                     value={formData.boxType || "tuck_end"}
                     disabled={isOperator}
                     onValueChange={(val) => {
@@ -1239,17 +1271,8 @@ export function SpecificationsTab({
                       handleFieldChange("boxType", val);
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="tuck_end">{tDie("boxTuckEnd")}</SelectItem>
-                      <SelectItem value="snap_lock">{tDie("boxSnapLock")}</SelectItem>
-                      <SelectItem value="auto_bottom">{tDie("boxAutoBottom")}</SelectItem>
-                      <SelectItem value="sleeve">{tDie("boxSleeve")}</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Quti modelini tanlang..."
+                  />
                 </div>
               )}
 
@@ -1258,7 +1281,14 @@ export function SpecificationsTab({
                   <label className="text-xs font-medium text-muted-foreground block mb-1">
                     {tDie("customShape")}
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={[
+                      { value: "arch", label: "Arka (Arch shape)" },
+                      { value: "hexagon", label: "Oltiburchak (Hexagon)" },
+                      { value: "star", label: "Yulduz (Star shape)" },
+                      { value: "pillow", label: "Yostiqcha (Pillow box)" },
+                      { value: "vector_svg", label: "Vektor SVG yuklash (Custom Vector)" },
+                    ]}
                     value={formData.customShape || "arch"}
                     disabled={isOperator}
                     onValueChange={(val) => {
@@ -1269,18 +1299,8 @@ export function SpecificationsTab({
                       }
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="arch">{tDie("customArch")}</SelectItem>
-                      <SelectItem value="hexagon">{tDie("customHexagon")}</SelectItem>
-                      <SelectItem value="star">{tDie("customStar")}</SelectItem>
-                      <SelectItem value="pillow">{tDie("customPillow")}</SelectItem>
-                      <SelectItem value="vector_svg">{tDie("customSvg")}</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Qolip shaklini tanlang..."
+                  />
                 </div>
               )}
 
@@ -1306,24 +1326,16 @@ export function SpecificationsTab({
                   <label className="text-xs font-medium text-muted-foreground block mb-1">
                     Corners
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={CORNER_TYPE_OPTIONS}
                     value={formData.cornerType || "Square"}
                     disabled={isOperator}
                     onValueChange={(val) => {
                       handleFieldChange("cornerType", val);
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Square">To&apos;g&apos;ri burchak (Square)</SelectItem>
-                      <SelectItem value="Rounded (R3)">Aylana R3 (Rounded)</SelectItem>
-                      <SelectItem value="Rounded (R5)">Aylana R5 (Rounded)</SelectItem>
-                      <SelectItem value="Die-cut">Shtansforma (Custom Die)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Burchakni tanlang..."
+                  />
                 </div>
               ) : formData.shapeType === "custom_die" && formData.customShape === "vector_svg" ? (
                 <div>
@@ -1382,100 +1394,6 @@ export function SpecificationsTab({
               )}
             </div>
 
-            {/* Technological Tooling / Shtansforma (Die-Cutting) Management */}
-            <div className="pt-2.5 space-y-2 border-t border-border">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                  <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  <span>Texkartadagi Jihoz: Kesish Shtansformasi (Die Tooling) & Klishelar</span>
-                </label>
-                <div className="flex items-center gap-2">
-                  {selectedTool && (
-                    <Badge variant="outline" className="text-[10px] font-mono border-amber-500/40 text-amber-700 dark:text-amber-300">
-                      Ombor: {selectedTool.location} ({selectedTool.impressionsUsed.toLocaleString()} / {selectedTool.maxLife.toLocaleString()})
-                    </Badge>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onSwitchTab?.("prepress-tooling")}
-                    className="h-6 px-2 text-[11px] text-primary gap-1 font-medium hover:bg-primary/10"
-                  >
-                    <span>Prepress & Jihozlar bo&apos;limi</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 items-end">
-                <div className="@md:col-span-2">
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">
-                    Mijozning mavjud shtansformalari
-                  </label>
-                  <Select
-                    value={formData.selectedToolingId || "none"}
-                    disabled={isOperator}
-                    onValueChange={(val) => {
-                      if (val === "none") {
-                        handleFieldChange("selectedToolingId", undefined);
-                        handleFieldChange("selectedToolingName", undefined);
-                        handleFieldChange("toolingProcurementNeeded", false);
-                      } else {
-                        const t = customerTooling.find((x) => x.id === val);
-                        handleFieldChange("selectedToolingId", val);
-                        handleFieldChange("selectedToolingName", t?.name);
-                        handleFieldChange("toolingProcurementNeeded", false);
-                      }
-                      onMarkUnsaved();
-                    }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/20">
-                      <SelectValue placeholder="Mavjud shtansformani tanlang..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Shtansforma tanlanmagan (Yangi / Standart)</SelectItem>
-                      {availableCustomerTools.map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.id} — {t.name} ({t.format}, {t.location})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={isOperator}
-                    onClick={() => {
-                      onSwitchTab?.("prepress-tooling");
-                    }}
-                    className="h-8 w-full text-xs gap-1.5 border-dashed border-amber-500/60 hover:bg-amber-500/10 text-amber-700 dark:text-amber-300 font-medium cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-amber-600" />
-                    <span>+ Jihozlar / Prepress bo&apos;limi</span>
-                  </Button>
-                </div>
-              </div>
-
-              {formData.toolingProcurementNeeded && (
-                <div className="p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-xs flex items-center justify-between text-amber-900 dark:text-amber-200">
-                  <div className="flex items-center gap-1.5">
-                    <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                    <span>
-                      Pudratchiga yangi shtansforma buyurtmasi kiritildi (Tannarxga: <strong>${formData.toolingProcurementCost || 65}</strong> qo&apos;shiladi).
-                    </span>
-                  </div>
-                  <Badge variant="secondary" className="text-[10px] bg-amber-500/20 text-amber-800 dark:text-amber-300">
-                    Xarid talab qilinadi
-                  </Badge>
-                </div>
-              )}
-            </div>
-
             {/* Drill Hole Specifications */}
             <div className="pt-2.5 space-y-2 border-t border-border">
               <div className="flex items-center justify-between">
@@ -1497,7 +1415,8 @@ export function SpecificationsTab({
                   <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                     Hole size
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={HOLE_SIZE_OPTIONS}
                     value={String(effectiveHoleSize)}
                     disabled={isOperator}
                     onValueChange={(val) => {
@@ -1507,46 +1426,25 @@ export function SpecificationsTab({
                       else if (effectiveHolePos === "none") handleFieldChange("holePosition", "top-center");
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/20 font-mono">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">0 mm (Teshiksiz)</SelectItem>
-                      <SelectItem value="3">Ø3 mm (Ip/Shnur)</SelectItem>
-                      <SelectItem value="4">Ø4 mm (Standart)</SelectItem>
-                      <SelectItem value="5">Ø5 mm (Katta)</SelectItem>
-                      <SelectItem value="6">Ø6 mm (Lyuvers grommet)</SelectItem>
-                      <SelectItem value="8">Ø8 mm (Evro-slott)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Teshik diametrini tanlang..."
+                    className="font-mono"
+                  />
                 </div>
 
                 <div>
                   <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                     Position
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={HOLE_POSITION_OPTIONS}
                     value={effectiveHolePos}
                     disabled={isOperator || effectiveHoleSize === 0}
                     onValueChange={(val) => {
                       handleFieldChange("holePosition", val);
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Yo&apos;q (None)</SelectItem>
-                      <SelectItem value="top-center">Tepada markazda (Top Center)</SelectItem>
-                      <SelectItem value="top-left">Tepada chapda (Top Left)</SelectItem>
-                      <SelectItem value="top-right">Tepada o&apos;ngda (Top Right)</SelectItem>
-                      <SelectItem value="left-center">Yon chapda (Left Center)</SelectItem>
-                      <SelectItem value="right-center">Yon o&apos;ngda (Right Center)</SelectItem>
-                      <SelectItem value="both-sides-fold">Buklama atrofida juft (Both Sides / Fold)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Joylashuvni tanlang..."
+                  />
                 </div>
 
                 <div>
@@ -1593,17 +1491,18 @@ export function SpecificationsTab({
               <label className="text-xs font-medium text-muted-foreground block mb-1">
                 Paper / material
               </label>
-              <SmartCombobox
-                value={formData.paperStock || ""}
-                disabled={isOperator}
-                onChange={(val) => {
+              <ComboboxSelect
+                items={paperStocks.map((p) => (typeof p === "string" ? p : { value: p.value || p.label, label: p.label || p.value, description: p.description }))}
+                value={formData.paperStock}
+                onValueChange={(val) => {
                   handleFieldChange("paperStock", val);
                   onMarkUnsaved();
                 }}
                 onAddNew={(newStock) => addPaperStock(newStock)}
-                searchPlaceholder="Qog'oz markasi yoki zichligini qidiring..."
+                placeholder="Qog'oz markasi yoki zichligini qidiring..."
+                disabled={isOperator}
                 allowCustom={!isOperator}
-                options={paperStocks}
+                className="font-mono"
               />
             </div>
 
@@ -1637,7 +1536,8 @@ export function SpecificationsTab({
                   <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                     Film type
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={LAMINATION_OPTIONS}
                     value={currentLamination}
                     disabled={isOperator}
                     onValueChange={(val) => {
@@ -1645,43 +1545,25 @@ export function SpecificationsTab({
                       handleFieldChange("coating", val);
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-background">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Yo&apos;q / Laminatsiyasiz (Uncoated)</SelectItem>
-                      <SelectItem value="Soft-Touch Matte">Soft-Touch Matte (Baxmal/Velvet 30µm)</SelectItem>
-                      <SelectItem value="Matte Lamination">Matte Lamination (Xira plyonka 25µm)</SelectItem>
-                      <SelectItem value="Gloss Lamination">Gloss Lamination (Yaltiroq plyonka 25µm)</SelectItem>
-                      <SelectItem value="Anti-Scuff Matte">Anti-Scuff Matte (Tirnalishga chidamli 28µm)</SelectItem>
-                      <SelectItem value="Thermal Metallized Silver">Metallized Silver (Kumush folga plyonka)</SelectItem>
-                      <SelectItem value="Thermal Metallized Gold">Metallized Gold (Oltin folga plyonka)</SelectItem>
-                      <SelectItem value="Holographic Film">Golografik plyonka (Holographic)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Laminatsiya turini tanlang..."
+                  />
                 </div>
 
                 <div>
                   <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                     Sides
                   </label>
-                  <Select
+                  <ComboboxSelect
+                    items={LAMINATION_SIDES_OPTIONS}
                     value={laminationSides}
                     disabled={isOperator || !isLaminationActive}
-                    onValueChange={(val: any) => {
+                    onValueChange={(val) => {
                       handleFieldChange("laminationSides", val);
                       onMarkUnsaved();
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-background font-mono">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1s">1-tomonlama (Front / 1S / 1+0)</SelectItem>
-                      <SelectItem value="2s">2-tomonlama (Both sides / 2S / 1+1)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Tomonlarni tanlang..."
+                    className="font-mono"
+                  />
                 </div>
               </div>
 
@@ -1691,50 +1573,33 @@ export function SpecificationsTab({
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Thickness (µm)
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={LAMINATION_MICRON_OPTIONS}
                       value={String(laminationMicron)}
                       disabled={isOperator}
                       onValueChange={(val) => {
                         handleFieldChange("laminationMicron", Number(val));
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-background font-mono">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="24">24 µm (Yengil / Standart BOPP)</SelectItem>
-                        <SelectItem value="28">28 µm (Mustahkam / O&apos;rtacha)</SelectItem>
-                        <SelectItem value="30">30 µm (Soft-Touch Velvet PET)</SelectItem>
-                        <SelectItem value="32">32 µm (Qalin / Qattiq himoya)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Qalinlikni tanlang..."
+                      className="font-mono"
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Finishing
                     </label>
-                    <Select
+                    <ComboboxSelect
+                      items={EMBELLISHMENT_OPTIONS}
                       value={embellishment}
                       disabled={isOperator}
                       onValueChange={(val) => {
                         handleFieldChange("embellishment", val);
                         onMarkUnsaved();
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="None">Qo&apos;shimcha pardozsiz (None)</SelectItem>
-                        <SelectItem value="Spot UV (3D)">Tanlanma 3D UF lak (Spot UV)</SelectItem>
-                        <SelectItem value="Gold Hot Foil">Oltin issiq folga (Gold Foil)</SelectItem>
-                        <SelectItem value="Silver Hot Foil">Kumush issiq folga (Silver Foil)</SelectItem>
-                        <SelectItem value="Blind Emboss">Relyefli bosish (Blind Emboss)</SelectItem>
-                        <SelectItem value="Overall WB Varnish">Umumiy suvli lak (WB Varnish)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Pardoz turini tanlang..."
+                    />
                   </div>
                 </div>
               )}
@@ -2170,111 +2035,6 @@ export function SpecificationsTab({
           </div>
         </div>
       </div>
-
-      {/* New Tooling Procurement Order Dialog */}
-      <Dialog open={isNewToolingModalOpen} onOpenChange={setIsNewToolingModalOpen}>
-        <DialogContent className="sm:max-w-[425px] text-xs">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
-              <Stamp className="w-4 h-4 text-amber-600" />
-              <span>Yangi Shtansforma Tayyorlashga Buyurtma</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Mijozning ushbu buyurtmasi uchun yangi kesish qolipi (штанцформа) yasash xaridini shakllantiring.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 py-2">
-            <div>
-              <label className="text-xs font-medium block mb-1">Mijoz</label>
-              <Input
-                value={formData.customer || ""}
-                disabled
-                className="h-8 text-xs bg-muted/40 font-medium"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-medium block mb-1">Shtansforma Nomi / Modeli *</label>
-              <Input
-                value={newToolForm.name}
-                onChange={(e) => setNewToolForm((p) => ({ ...p, name: e.target.value }))}
-                placeholder="masalan, Standart Quti 100x60 FEFCO"
-                className="h-8 text-xs font-medium"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className="text-xs font-medium block mb-1">Qolip turi</label>
-                <Select
-                  value={newToolForm.toolType}
-                  onValueChange={(val) => setNewToolForm((p) => ({ ...p, toolType: val || "Flatbed Die (Штанцформа)" }))}
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Flatbed Die (Штанцформа)">Flatbed Die (Yassi)</SelectItem>
-                    <SelectItem value="Rotary Die (Aylanma)">Rotary Die (Rotatsion)</SelectItem>
-                    <SelectItem value="Hot Foil Cliché (Brass)">Hot Foil Klishe (Jez)</SelectItem>
-                    <SelectItem value="Embossing Cliché (Magnesium)">Kongrev Klishe (Magniy)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="text-xs font-medium block mb-1">Format / Razmer</label>
-                <Input
-                  value={newToolForm.format}
-                  onChange={(e) => setNewToolForm((p) => ({ ...p, format: e.target.value }))}
-                  className="h-8 text-xs font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className="text-xs font-medium block mb-1">Kassetalar soni (Cavities)</label>
-                <Input
-                  value={newToolForm.cavities}
-                  onChange={(e) => setNewToolForm((p) => ({ ...p, cavities: e.target.value }))}
-                  placeholder="masalan, 4-up, 6-up"
-                  className="h-8 text-xs font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium block mb-1">Taxminiy narxi (USD)</label>
-                <Input
-                  type="number"
-                  value={newToolForm.estimatedCost}
-                  onChange={(e) => setNewToolForm((p) => ({ ...p, estimatedCost: parseFloat(e.target.value) || 0 }))}
-                  className="h-8 text-xs font-mono font-medium"
-                />
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsNewToolingModalOpen(false)}
-              className="h-8 text-xs"
-            >
-              Bekor qilish
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleOrderNewTooling}
-              className="h-8 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium"
-            >
-              Buyurtma berish & Biriktirish
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </TabsContent>
   );
 }

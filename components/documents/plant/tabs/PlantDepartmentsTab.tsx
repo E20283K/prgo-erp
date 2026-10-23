@@ -28,12 +28,12 @@ export function PlantDepartmentsTab({ plant, onUpdate }: PlantDepartmentsTabProp
     const newDep: PlantDepartment = {
       id: `DEP-${Date.now()}`,
       code: `DEP-0${plant.departments.length + 1}`,
-      name: "Yangi Ishlab Chiqarish Uchastkasi",
-      headPerson: "Mas'ul Usta",
-      phone: "+998 90 000-00-00",
-      staffCount: 5,
-      machinesCount: 1,
-      operations: ["Tekshiruv", "Qadoqlash"],
+      name: "",
+      headPerson: "",
+      phone: "",
+      staffCount: 0,
+      machinesCount: 0,
+      operations: [],
       status: "Active",
     };
     onUpdate({ departments: [...plant.departments, newDep] });
@@ -104,24 +104,41 @@ export function PlantDepartmentsTab({ plant, onUpdate }: PlantDepartmentsTabProp
         </div>
 
         <div className="grid grid-cols-1 gap-2.5">
-          {plant.departments.map((dept) => (
-            <div
-              key={dept.id}
-              className="rounded-md border border-border bg-muted/20 p-3 text-xs space-y-2.5"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="font-mono text-[10px]">
-                    {dept.code}
-                  </Badge>
-                  <span className="font-semibold text-foreground">{dept.name}</span>
-                  <Badge
-                    variant={dept.status === "Active" ? "outline" : "secondary"}
-                    className="text-[10px] text-emerald-600 dark:text-emerald-400 border-emerald-300"
-                  >
-                    {dept.status}
-                  </Badge>
-                </div>
+          {plant.departments.length === 0 ? (
+            <div className="py-6 px-4 text-center rounded border border-dashed border-border bg-muted/10 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Hozircha ishlab chiqarish sexlari yoki bo&apos;limlari kiritilmagan.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAddDepartment}
+                className="h-7 text-xs gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Birinchi sexni kiritish</span>
+              </Button>
+            </div>
+          ) : (
+            plant.departments.map((dept) => (
+              <div
+                key={dept.id}
+                className="rounded-md border border-border bg-muted/20 p-3 text-xs space-y-2.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="font-mono text-[10px]">
+                      {dept.code}
+                    </Badge>
+                    <span className="font-semibold text-foreground">{dept.name || "Nomsiz sex"}</span>
+                    <Badge
+                      variant={dept.status === "Active" ? "outline" : "secondary"}
+                      className="text-[10px] text-emerald-600 dark:text-emerald-400 border-emerald-300"
+                    >
+                      {dept.status}
+                    </Badge>
+                  </div>
 
                 <Button
                   type="button"
@@ -197,9 +214,10 @@ export function PlantDepartmentsTab({ plant, onUpdate }: PlantDepartmentsTabProp
                 </div>
               </div>
             </div>
-          ))}
-        </div>
+          ))
+        )}
       </div>
+    </div>
 
       {/* 2. Assigned Production Machinery (Cross-linked to MachineDetail) */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3 shadow-xs">

@@ -65,6 +65,7 @@ Never hardcode hex values (`#383838`, `#eee`) or random arbitrary classes. Use T
 
 ### Iconography Standards
 - Use **only** `lucide-react`.
+- **CRITICAL: NEVER USE EMOJIS IN UI** (no `⚙️`, `✂️`, `✨`, `🔲`, `💧`, `📍`, `✓`, etc.). Professional enterprise software uses official Lucide icons or clean typography. Emojis look cheap and amateurish in ERP/CRM.
 - Standard sizes:
   - Toolbar & inline actions: `w-3.5 h-3.5` (size-3.5)
   - Sidebar modules: `w-4 h-4` (size-4)

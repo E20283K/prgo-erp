@@ -153,7 +153,7 @@ function ToastIcon({ type }: { type: string | undefined }) {
     )
   }
 
-  if (type === "error") {
+  if (type === "error" || type === "danger") {
     icon = (
       <OctagonXIcon className="text-destructive" aria-hidden="true" />
     )

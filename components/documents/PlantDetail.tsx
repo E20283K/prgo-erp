@@ -2,8 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
-import { PlantRecord } from "./plant/types";
-import { INITIAL_PLANTS_RECORD } from "./plant/data";
+import { PlantRecord, createEmptyPlant } from "./plant/types";
 import {
   DocumentHeader,
   DocumentSidebar,
@@ -44,6 +43,7 @@ export function PlantDetail({ tab }: PlantDetailProps) {
   const {
     plants,
     upsertPlant,
+    savePlantToDb,
     setTabUnsaved,
     updateTabData,
     closeTab,
@@ -57,19 +57,25 @@ export function PlantDetail({ tab }: PlantDetailProps) {
     return tab.id;
   }, [tab]);
 
-  // Find matching record from store, or fallback to INITIAL_PLANTS_RECORD
+  // Find matching record from store, or fallback to empty plant
   const storePlant = useMemo(() => {
-    const list = plants && plants.length > 0 ? plants : INITIAL_PLANTS_RECORD;
+    const list = plants || [];
     const found = list.find(
       (p) =>
         p.id === plantId ||
-        p.code.toLowerCase() === plantId.toLowerCase() ||
-        p.name.toLowerCase() === (tab.title || "").toLowerCase()
+        (p.code && p.code.toLowerCase() === plantId.toLowerCase()) ||
+        (p.name && p.name.toLowerCase() === (tab.title || "").toLowerCase())
     );
+    if (!tab.isUnsaved && found) return found;
+
+    if (tab.documentData && (tab.documentData.id || tab.documentData.name !== undefined)) {
+      return tab.documentData as PlantRecord;
+    }
+
     if (found) return found;
 
-    return INITIAL_PLANTS_RECORD[0];
-  }, [plants, plantId, tab.title]);
+    return createEmptyPlant(plantId);
+  }, [plants, plantId, tab.documentData, tab.title, tab.isUnsaved]);
 
   const [plantData, setPlantData] = useState<PlantRecord>(storePlant);
   const [prevPlantId, setPrevPlantId] = useState(plantId);
@@ -85,36 +91,72 @@ export function PlantDetail({ tab }: PlantDetailProps) {
   );
 
   const handleUpdate = (updated: Partial<PlantRecord>) => {
-    setPlantData((prev) => ({
-      ...prev,
-      ...updated,
-    }));
+    setPlantData((prev) => {
+      const next = { ...prev, ...updated };
+      if (updated.name && updated.name.trim()) {
+        updateTabData(tab.id, next, updated.name.trim());
+      } else {
+        updateTabData(tab.id, next);
+      }
+      return next;
+    });
     setTabUnsaved(tab.id, true);
     setIsSaved(false);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!plantData.name.trim()) {
+      if (addNotification) {
+        addNotification({
+          title: "Nom kiritilmagan",
+          description: "Iltimos, tashkilot / korxona nomini kiriting.",
+          severity: "warning",
+        });
+      }
+      return false;
+    }
+
     if (upsertPlant) {
       upsertPlant(plantData);
     }
-    updateTabData(tab.id, plantData);
-    setTabUnsaved(tab.id, false);
-    setIsSaved(true);
+    updateTabData(tab.id, plantData, plantData.name.trim());
 
-    if (addNotification) {
+    let ok = true;
+    if (savePlantToDb) {
+      ok = await savePlantToDb(plantData);
+    }
+
+    if (ok) {
+      setTabUnsaved(tab.id, false);
+      setIsSaved(true);
+
+      if (addNotification) {
+        addNotification({
+          title: "Korxona Rekvizitlari Saqlandi",
+          description: `${plantData.name} ma'lumotlari muvaffaqiyatli saqlandi.`,
+          severity: "success",
+        });
+      }
+
+      setTimeout(() => setIsSaved(false), 3000);
+    } else if (addNotification) {
       addNotification({
-        title: "Korxona Rekvizitlari Saqlandi",
-        description: `${plantData.name} ma'lumotlari muvaffaqiyatli yangilandi.`,
-        severity: "success",
+        title: "Saqlashda xatolik",
+        description: "Ma'lumotlarni bazaga saqlashda xatolik yuz berdi.",
+        severity: "error",
       });
     }
 
-    setTimeout(() => setIsSaved(false), 3000);
+    return ok;
   };
 
-  const handlePostAndClose = () => {
-    handleSave();
-    closeTab(tab.id);
+  const handlePostAndClose = async () => {
+    const currentTabId = tab.id;
+    const ok = await handleSave();
+    if (ok) {
+      const activeId = useWorkspaceStore.getState().activeTabId;
+      closeTab(activeId?.startsWith("plant-") ? activeId : currentTabId);
+    }
   };
 
   const handlePrint = () => {
@@ -158,8 +200,8 @@ export function PlantDetail({ tab }: PlantDetailProps) {
       {/* 1C Document Shell Header */}
       <DocumentHeader
         icon={Building}
-        title={plantData.name}
-        docNo={plantData.code}
+        title={plantData.name || "Yangi Korxona / Tashkilot"}
+        docNo={plantData.code || plantId}
         status={plantData.status}
         priority={plantData.branchType}
         actions={
@@ -252,17 +294,17 @@ export function PlantDetail({ tab }: PlantDetailProps) {
           summary={
             <SidebarSummaryCard
               icon={Building}
-              title={plantData.shortName || plantData.code}
+              title={plantData.shortName || plantData.name || "Yangi korxona"}
               subtitle={plantData.branchType}
             >
               <InfoRow label="STIR / INN" className="font-mono">
-                {plantData.tin}
+                {plantData.tin || "—"}
               </InfoRow>
-              <InfoRow label="Direktor">
-                {plantData.director}
+              <InfoRow label="Rahbar">
+                {plantData.director || "—"}
               </InfoRow>
               <InfoRow label="Smena">
-                {plantData.shiftRegime}
+                {plantData.shiftRegime || "—"}
               </InfoRow>
               <InfoRow label="Stanoklar">
                 {`${plantData.departments?.reduce((acc, d) => acc + d.machinesCount, 0) || plantData.machinesCount} ta`}
@@ -275,7 +317,7 @@ export function PlantDetail({ tab }: PlantDetailProps) {
               </InfoRow>
             </SidebarSummaryCard>
           }
-          sectionsLabel="Korxona Bo'limlari"
+          sectionsLabel="Korxona Bo'limlari va Sexlari"
           items={navItems}
           activeId={activeTab}
           onSelect={(id) => setActiveTab(id)}

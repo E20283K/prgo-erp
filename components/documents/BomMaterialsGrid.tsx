@@ -78,6 +78,16 @@ import {
   BookmarkPlus,
   MoreHorizontal,
   Edit3,
+  ShoppingCart,
+  Package,
+  AlertTriangle,
+  Info,
+  Truck,
+  CheckCircle2,
+  Calendar,
+  Clock,
+  Tag,
+  Scale,
 } from "lucide-react";
 
 import { useWorkspaceStore, WarehouseStockRecord } from "@/store/workspaceStore";
@@ -90,11 +100,25 @@ import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/
 
 export type MaterialIssueType = "standard" | "remake" | "client_change" | "press_waste";
 export type FaultParty = "none" | "prepress" | "production" | "client" | "supplier";
+export type AcquisitionSource = "warehouse" | "procurement";
 
 export interface BomItem {
   id: string;
   name: string;
   spec: string;
+  category?: string;
+  sheetFormat?: string;
+  grammage?: number;
+  grainDirection?: "Long Grain" | "Short Grain";
+  rollWidthMm?: number;
+  rollLengthM?: number;
+  colorOrPantone?: string;
+  filmMicron?: number;
+  batchNo?: string;
+  leadTimeDays?: number;
+  warehouseLocation?: string;
+  warehouseStockLevel?: number;
+  warehouseAvailable?: number;
   planQty: number; // Rejali norma
   actualQty: number; // Faktik haqiqiy sarf
   wasteQty?: number; // Farq / Brak (actualQty - planQty)
@@ -108,6 +132,41 @@ export interface BomItem {
   faultParty?: FaultParty;
   notes?: string;
   imageUrl?: string;
+  sourceType?: AcquisitionSource;
+}
+
+export interface BomFormState extends BomItem {
+  acquisitionSource: AcquisitionSource;
+}
+
+export function buildMaterialSpec(form: Partial<BomItem>): string {
+  const parts: string[] = [];
+  const cat = form.category || "";
+
+  if (cat === "Paper & Board") {
+    if (form.grammage) parts.push(`${form.grammage} g/m²`);
+    if (form.sheetFormat) parts.push(`${form.sheetFormat} mm`);
+    if (form.grainDirection) parts.push(form.grainDirection === "Long Grain" ? "Bo'yiga tola" : "Eniga tola");
+  } else if (cat === "Roll & Label") {
+    if (form.rollWidthMm) parts.push(`Eni: ${form.rollWidthMm}mm`);
+    if (form.rollLengthM) parts.push(`Uzunligi: ${form.rollLengthM}m`);
+    if (form.spec && !form.spec.startsWith("Eni:")) parts.push(form.spec);
+  } else if (cat === "Inks & Plates") {
+    if (form.colorOrPantone) parts.push(form.colorOrPantone);
+    if (form.sheetFormat) parts.push(`Format: ${form.sheetFormat} mm`);
+    if (form.batchNo) parts.push(`Partiya: ${form.batchNo}`);
+  } else if (cat === "Foil & Film") {
+    if (form.filmMicron) parts.push(`${form.filmMicron} mikron`);
+    if (form.rollWidthMm) parts.push(`Eni: ${form.rollWidthMm}mm`);
+    if (form.rollLengthM) parts.push(`Uzunligi: ${form.rollLengthM}m`);
+  } else if (cat === "Offcuts & Scraps") {
+    if (form.sheetFormat) parts.push(`Otxod: ${form.sheetFormat} mm`);
+  }
+
+  if (parts.length > 0) {
+    return parts.join(", ");
+  }
+  return form.spec?.trim() || "Standart parametr";
 }
 
 export function normalizeBomItem(item: any): BomItem {
@@ -120,6 +179,19 @@ export function normalizeBomItem(item: any): BomItem {
     id: item.id || `MAT-${Math.floor(100 + Math.random() * 900)}`,
     name: item.name || "",
     spec: item.spec || "",
+    category: item.category || "",
+    sheetFormat: item.sheetFormat || "",
+    grammage: item.grammage !== undefined ? Number(item.grammage) : undefined,
+    grainDirection: item.grainDirection || undefined,
+    rollWidthMm: item.rollWidthMm !== undefined ? Number(item.rollWidthMm) : undefined,
+    rollLengthM: item.rollLengthM !== undefined ? Number(item.rollLengthM) : undefined,
+    colorOrPantone: item.colorOrPantone || "",
+    filmMicron: item.filmMicron !== undefined ? Number(item.filmMicron) : undefined,
+    batchNo: item.batchNo || "",
+    leadTimeDays: item.leadTimeDays !== undefined ? Number(item.leadTimeDays) : undefined,
+    warehouseLocation: item.warehouseLocation || "",
+    warehouseStockLevel: item.warehouseStockLevel,
+    warehouseAvailable: item.warehouseAvailable,
     planQty,
     actualQty,
     wasteQty,
@@ -133,6 +205,7 @@ export function normalizeBomItem(item: any): BomItem {
     faultParty: item.faultParty || "none",
     notes: item.notes || "",
     imageUrl: item.imageUrl || getMaterialImage(item),
+    sourceType: item.sourceType || (item.availability === "On Order" ? "procurement" : "warehouse"),
   };
 }
 
@@ -213,10 +286,37 @@ export function BomMaterialsGrid({
   onItemsChange,
 }: BomMaterialsGridProps) {
   const t = useTranslations("BOM");
-  const { theme, setTabUnsaved, updateGridStats, warehouseStock, masterSpecifications } = useWorkspaceStore();
+  const {
+    theme,
+    setTabUnsaved,
+    updateGridStats,
+    warehouseStock,
+    loadWarehouseStock,
+    suppliers,
+    loadSuppliers,
+    masterSpecifications,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [isSpecComboboxOpen, setIsSpecComboboxOpen] = useState(false);
   const [isWarehousePickerOpen, setIsWarehousePickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (warehouseStock.length === 0 && loadWarehouseStock) loadWarehouseStock();
+    if (suppliers.length === 0 && loadSuppliers) loadSuppliers();
+  }, [warehouseStock.length, loadWarehouseStock, suppliers.length, loadSuppliers]);
+
+  const supplierOptions = useMemo(() => {
+    const set = new Set<string>();
+    suppliers.forEach((s) => {
+      if (s.name) set.add(s.name);
+      if ((s as any).legalName) set.add((s as any).legalName);
+    });
+    warehouseStock.forEach((ws) => {
+      if (ws.supplier) set.add(ws.supplier);
+    });
+    ["Antalis Central Asia", "Sappi Paper Mill", "Hubergroup", "Agfa Graphics", "Dunmore", "Avery Dennison", "Flint Group", "MacDermid", "Kurz Foil"].forEach((s) => set.add(s));
+    return Array.from(set);
+  }, [suppliers, warehouseStock]);
 
   const defaultItems = (initialItems || (
     (recipe && RECIPE_BOM_MAP[recipe]) ? RECIPE_BOM_MAP[recipe] :
@@ -235,18 +335,25 @@ export function BomMaterialsGrid({
   const [previewMaterial, setPreviewMaterial] = useState<MaterialImagePreviewData | null>(null);
 
   // Add / Edit form state
-  const [formState, setFormState] = useState<BomItem>({
+  const [formState, setFormState] = useState<BomFormState>({
     id: `MAT-${Math.floor(100 + Math.random() * 900)}`,
     name: "",
     spec: "",
+    category: "Paper & Board",
+    acquisitionSource: "warehouse",
+    sheetFormat: "700×1000",
+    grammage: 150,
+    grainDirection: "Long Grain",
+    rollWidthMm: 100,
+    rollLengthM: 1000,
     planQty: 100,
     actualQty: 100,
     wasteQty: 0,
     qty: 100,
-    unit: "pcs",
+    unit: "sheets",
     unitPrice: 1.0,
     totalPrice: 100,
-    supplier: "Approved Supplier",
+    supplier: "Asosiy Ombor",
     availability: "In Stock",
     issueType: "standard",
     faultParty: "none",
@@ -276,21 +383,32 @@ export function BomMaterialsGrid({
       const unitPrice = stock.unitPriceUsd !== undefined ? stock.unitPriceUsd : (prev.unitPrice || 1.0);
       const actualQty = prev.actualQty || 1;
       const spec = stock.sheetFormat
-        ? `${stock.sheetFormat} mm · ${stock.category}`
+        ? `${stock.sheetFormat} mm${stock.grammage ? `, ${stock.grammage} g/m²` : ""} · ${stock.category}`
         : stock.category;
       return {
         ...prev,
+        acquisitionSource: "warehouse",
         id: stock.sku,
         name: stock.name,
+        category: stock.category,
         spec,
+        sheetFormat: stock.sheetFormat || stock.cutDimensions || "",
+        grammage: stock.grammage,
+        grainDirection: stock.grainDirection,
+        rollWidthMm: stock.rollWidthMm,
+        rollLengthM: stock.rollLengthM,
+        batchNo: stock.batchNo,
+        warehouseLocation: stock.location,
+        warehouseStockLevel: stock.stockLevel,
+        warehouseAvailable: stock.available,
         unit: stock.unit,
         unitPrice,
         totalPrice: Number((actualQty * unitPrice).toFixed(2)),
         supplier: stock.supplier || `Asosiy Ombor (${stock.location})`,
         availability:
-          stock.status === "In Stock"
+          stock.available > 0
             ? "In Stock"
-            : stock.status === "Low Stock"
+            : stock.stockLevel > 0
             ? "Low Stock"
             : "On Order",
         imageUrl: stock.imageUrl || getMaterialImage(stock),
@@ -428,7 +546,7 @@ export function BomMaterialsGrid({
           const type = item.issueType || "standard";
           const label =
             type === "remake"
-              ? "⚠️ Qayta (Remake)"
+              ? "Qayta (Remake)"
               : type === "client_change"
               ? "Mijoz tuzatishi"
               : type === "press_waste"
@@ -726,14 +844,21 @@ export function BomMaterialsGrid({
       id: `MAT-${Math.floor(100 + Math.random() * 900)}`,
       name: "",
       spec: "",
+      category: "Paper & Board",
+      acquisitionSource: "warehouse",
+      sheetFormat: "700×1000",
+      grammage: 150,
+      grainDirection: "Long Grain",
+      rollWidthMm: 100,
+      rollLengthM: 1000,
       planQty: 100,
       actualQty: 100,
       wasteQty: 0,
       qty: 100,
-      unit: "pcs",
+      unit: "sheets",
       unitPrice: 1.0,
       totalPrice: 100,
-      supplier: "Approved Supplier",
+      supplier: "Asosiy Ombor",
       availability: "In Stock",
       issueType: "standard",
       faultParty: "none",
@@ -748,33 +873,90 @@ export function BomMaterialsGrid({
     const item = items[index];
     if (!item) return;
     setEditingIndex(index);
-    setFormState(normalizeBomItem(item));
+    const normalized = normalizeBomItem(item);
+    const isProcurement = normalized.availability === "On Order" || normalized.sourceType === "procurement";
+
+    // Auto-detect category if missing
+    let detectedCategory = normalized.category || "Paper & Board";
+    if (!normalized.category) {
+      const lower = (normalized.name + " " + normalized.spec).toLowerCase();
+      if (normalized.unit === "sheets" || lower.includes("paper") || lower.includes("qog'oz") || lower.includes("karton") || lower.includes("silk")) {
+        detectedCategory = "Paper & Board";
+      } else if (normalized.unit === "rolls" || lower.includes("roll") || lower.includes("rulon") || lower.includes("tape") || lower.includes("label")) {
+        detectedCategory = "Roll & Label";
+      } else if (normalized.unit === "kg" || lower.includes("ink") || lower.includes("bo'yoq") || lower.includes("plate") || lower.includes("ctp")) {
+        detectedCategory = "Inks & Plates";
+      } else if (lower.includes("film") || lower.includes("lam") || lower.includes("foil") || lower.includes("zar")) {
+        detectedCategory = "Foil & Film";
+      } else if (lower.includes("glue") || lower.includes("yelim") || lower.includes("wire") || lower.includes("ip")) {
+        detectedCategory = "Adhesives & Binding";
+      }
+    }
+
+    setFormState({
+      ...normalized,
+      acquisitionSource: isProcurement ? "procurement" : "warehouse",
+      category: detectedCategory,
+      sheetFormat: normalized.sheetFormat || (normalized.spec?.match(/\d+x\d+|\d+×\d+/) ? normalized.spec.match(/\d+x\d+|\d+×\d+/)?.[0] : ""),
+      grammage: normalized.grammage || (normalized.spec?.match(/(\d+)\s*g\/m²/) ? Number(normalized.spec.match(/(\d+)\s*g\/m²/)?.[1]) : undefined),
+      grainDirection: normalized.grainDirection || "Long Grain",
+      rollWidthMm: normalized.rollWidthMm || (normalized.spec?.match(/(\d+)\s*mm/) ? Number(normalized.spec.match(/(\d+)\s*mm/)?.[1]) : undefined),
+      rollLengthM: normalized.rollLengthM || (normalized.spec?.match(/(\d+)\s*m\b/) ? Number(normalized.spec.match(/(\d+)\s*m\b/)?.[1]) : undefined),
+      colorOrPantone: normalized.colorOrPantone || (normalized.spec?.includes("CMYK") ? "Process CMYK" : ""),
+      batchNo: normalized.batchNo || "",
+      leadTimeDays: normalized.leadTimeDays || 3,
+    });
     setIsDialogOpen(true);
   };
 
   // Save Add/Edit Material handler
   const handleSaveMaterial = () => {
-    if (!formState.name.trim()) return;
+    if (!formState.name.trim()) {
+      toast.add({
+        title: "Xatolik",
+        description: "Iltimos, material nomini kiriting yoki ombordan tanlang.",
+        type: "danger",
+      });
+      return;
+    }
 
     const planQty = Number(formState.planQty) || 0;
     const actualQty = Number(formState.actualQty) || 0;
     const wasteQty = formState.wasteQty !== undefined ? Number(formState.wasteQty) : Math.max(0, actualQty - planQty);
     const unitPrice = Number(formState.unitPrice) || 0;
+
+    const finalSpec = buildMaterialSpec(formState);
+    const finalAvailability = formState.acquisitionSource === "procurement"
+      ? "On Order"
+      : (formState.availability || "In Stock");
+
     const itemToSave: BomItem = {
       ...formState,
       name: formState.name.trim(),
-      spec: formState.spec.trim() || "Standard Industry Spec",
+      spec: finalSpec,
+      category: formState.category,
+      sheetFormat: formState.sheetFormat,
+      grammage: formState.grammage,
+      grainDirection: formState.grainDirection,
+      rollWidthMm: formState.rollWidthMm,
+      rollLengthM: formState.rollLengthM,
+      colorOrPantone: formState.colorOrPantone,
+      batchNo: formState.batchNo,
+      leadTimeDays: formState.leadTimeDays,
       planQty,
       actualQty,
       wasteQty,
       qty: actualQty,
+      unit: formState.unit?.trim() || "pcs",
       unitPrice,
       totalPrice: Number((actualQty * unitPrice).toFixed(2)),
-      supplier: formState.supplier.trim() || "Approved Supplier",
+      supplier: formState.supplier?.trim() || (formState.acquisitionSource === "warehouse" ? "Asosiy Ombor" : "Approved Supplier"),
+      availability: finalAvailability,
       issueType: formState.issueType || "standard",
       faultParty: formState.faultParty || "none",
       notes: formState.notes?.trim() || "",
       imageUrl: formState.imageUrl || getMaterialImage(formState),
+      sourceType: formState.acquisitionSource,
     };
 
     if (editingIndex !== null) {
@@ -784,15 +966,19 @@ export function BomMaterialsGrid({
         return next;
       });
       toast.add({
-        title: "Material Updated",
-        description: `Updated ${itemToSave.id} (${itemToSave.name})`,
+        title: "Material yangilandi",
+        description: `${itemToSave.id} (${itemToSave.name}) muvaffaqiyatli saqlandi.`,
         type: "success",
       });
     } else {
       setItems((prev) => [...prev, itemToSave]);
       toast.add({
-        title: itemToSave.issueType === "remake" ? "CTP / Brak qo'shildi" : t("addMaterial"),
-        description: t("toastAdded", { code: itemToSave.id }),
+        title: formState.acquisitionSource === "procurement"
+          ? "Xaridga buyurtma qo'shildi"
+          : itemToSave.issueType === "remake"
+          ? "CTP / Brak qayd etildi"
+          : t("addMaterial"),
+        description: `${itemToSave.name} (${itemToSave.actualQty} ${itemToSave.unit}) BOM ga kiritildi.`,
         type: "success",
       });
     }
@@ -1251,462 +1437,494 @@ export function BomMaterialsGrid({
         </ContextMenuContent>
       </ContextMenu>
 
-      {/* Add / Edit Material Dialog Modal */}
+      {/* Compact & Elongated (Uzunroq) BOM Material Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-lg text-xs">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
-              <Boxes className="w-4 h-4 text-blue-600" />
-              <span>{editingIndex !== null ? "Edit Material" : t("dialogAddTitle")}</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              {editingIndex !== null ? "Update item specification and consumption values." : t("dialogAddDesc")}
-            </DialogDescription>
+        <DialogContent className="sm:max-w-[490px] min-h-[460px] p-0 overflow-hidden text-xs flex flex-col gap-0 max-h-[90vh]">
+          {/* Header with Title and Mode Switcher in single row, with pr-10 to prevent colliding with close X button */}
+          <DialogHeader className="px-4 py-2.5 pr-10 border-b border-border bg-card shrink-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-xs font-semibold flex items-center gap-1.5">
+                <Boxes className="size-4 text-primary" />
+                <span>{editingIndex !== null ? "Materialni tahrirlash" : "Material kiritish (BOM)"}</span>
+              </DialogTitle>
+
+              {/* Segmented Source Switch */}
+              <div className="inline-flex items-center p-0.5 rounded-md bg-muted border border-border text-[11px] mr-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormState((prev) => ({
+                      ...prev,
+                      acquisitionSource: "warehouse",
+                      availability: (selectedStockItem && selectedStockItem.available > 0) ? "In Stock" : "Low Stock",
+                    }));
+                  }}
+                  className={cn(
+                    "px-2.5 py-0.5 rounded font-medium transition-colors cursor-pointer flex items-center gap-1",
+                    formState.acquisitionSource === "warehouse"
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Warehouse className="size-3 text-blue-600" />
+                  <span>Ombordan</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormState((prev) => ({
+                      ...prev,
+                      acquisitionSource: "procurement",
+                      availability: "On Order",
+                      supplier: prev.supplier && !prev.supplier.includes("Ombor") ? prev.supplier : "Approved Supplier",
+                    }));
+                  }}
+                  className={cn(
+                    "px-2.5 py-0.5 rounded font-medium transition-colors cursor-pointer flex items-center gap-1",
+                    formState.acquisitionSource === "procurement"
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <ShoppingCart className="size-3 text-amber-600" />
+                  <span>Xaridga</span>
+                </button>
+              </div>
+            </div>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-3 py-2 text-xs">
-            {/* Sarf turi (Issue Type) */}
-            <div className="col-span-1">
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("issueType")} *
-              </label>
-              <Select
-                value={formState.issueType || "standard"}
-                onValueChange={(val: any) =>
-                  setFormState((p) => ({
-                    ...p,
-                    issueType: val,
-                    faultParty: val === "standard" ? "none" : (p.faultParty === "none" ? "prepress" : p.faultParty),
-                  }))
-                }
-              >
-                <SelectTrigger className="h-8 text-xs bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="standard">Standart reja (Standard BOM)</SelectItem>
-                  <SelectItem value="remake">⚠️ Qayta chiqarish (Remake / Defect)</SelectItem>
-                  <SelectItem value="client_change">Mijoz o&apos;zgartirishi (Client Revision)</SelectItem>
-                  <SelectItem value="press_waste">Bosma chiqindisi (Press Spoilage)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Aybdor tomon / Manba (Fault Party) */}
-            <div className="col-span-1">
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("faultParty")}
-              </label>
-              <Select
-                value={formState.faultParty || "none"}
-                onValueChange={(val: any) => setFormState((p) => ({ ...p, faultParty: val }))}
-              >
-                <SelectTrigger className="h-8 text-xs bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Norma (Aybdor yo&apos;q)</SelectItem>
-                  <SelectItem value="prepress">Prepress / Dizayn xatosi</SelectItem>
-                  <SelectItem value="production">Sex / Stanok xatosi</SelectItem>
-                  <SelectItem value="client">Mijoz (Qo&apos;shimcha to&apos;lov)</SelectItem>
-                  <SelectItem value="supplier">Ta&apos;minotchi nuqsoni</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* 1C-style Warehouse Nomenklatura Picker */}
-            <div className="col-span-2 p-2.5 rounded-lg border bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
-                  <Warehouse className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  Ombor nomenklaturasidan tanlash
-                </span>
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  {warehouseStock.length} ta material mavjud
-                </span>
-              </div>
-
-              <Popover open={isWarehousePickerOpen} onOpenChange={setIsWarehousePickerOpen}>
-                <PopoverTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={isWarehousePickerOpen}
-                      className="w-full justify-between h-9 text-xs bg-background font-normal"
-                    />
-                  }
-                >
-                  <span className="truncate flex items-center gap-2">
-                    <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    {formState.name ? (
-                      <span className="font-medium text-foreground">
-                        {formState.id} — {formState.name}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        Ombordan materialni qidirish (qog&apos;oz, CTP plastina, bo&apos;yoq, lenta...)...
-                      </span>
-                    )}
+          {/* Form Body - Compact & Clean */}
+          <div className="p-4 space-y-3 text-xs bg-background overflow-y-auto flex-1">
+            {/* ── 1. MATERIAL SOURCE SELECTION ── */}
+            {formState.acquisitionSource === "warehouse" ? (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-muted-foreground">
+                    Ombor xomashyosi *
+                  </label>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {warehouseStock.length} ta mavjud
                   </span>
-                  <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-                </PopoverTrigger>
-                <PopoverContent className="w-[450px] p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Material nomi yoki SKU bo'yicha qidirish..." className="h-9 text-xs" />
-                    <CommandList className="max-h-[280px]">
-                      <CommandEmpty className="text-xs p-3 text-center text-muted-foreground space-y-2">
-                        <div>Omborda bunday material topilmadi.</div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs gap-1.5 border-dashed"
-                          onClick={() => {
-                            setFormState((p) => ({
-                              ...p,
-                              availability: "On Order",
-                            }));
-                            setIsWarehousePickerOpen(false);
-                          }}
-                        >
-                          <Plus className="w-3.5 h-3.5 text-blue-600" />
-                          <span>Yangi rejaviy xomashyo sifatida kiritish</span>
-                        </Button>
-                      </CommandEmpty>
-                      {stockCategories.map((cat) => {
-                        const itemsInCat = warehouseStock.filter((s) => s.category === cat);
-                        if (itemsInCat.length === 0) return null;
-                        return (
-                          <CommandGroup key={cat} heading={cat} className="text-xs">
-                            {itemsInCat.map((stock) => {
-                              const isSelected = formState.id === stock.sku;
-                              return (
+                </div>
+
+                <Popover open={isWarehousePickerOpen} onOpenChange={setIsWarehousePickerOpen}>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={isWarehousePickerOpen}
+                        className="w-full justify-between h-8 text-xs bg-background font-normal"
+                      />
+                    }
+                  >
+                    <span className="truncate flex items-center gap-2">
+                      <Search className="size-3.5 text-muted-foreground shrink-0" />
+                      {formState.name ? (
+                        <span className="font-medium text-foreground">
+                          {formState.id} — {formState.name}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          Materialni qidirish va tanlash...
+                        </span>
+                      )}
+                    </span>
+                    <ChevronsUpDown className="size-3 shrink-0 opacity-50" />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[450px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Material nomi yoki SKU bo'yicha..." className="h-8 text-xs" />
+                      <CommandList className="max-h-[240px]">
+                        <CommandEmpty className="text-xs p-3 text-center text-muted-foreground">
+                          Omborda material topilmadi.
+                        </CommandEmpty>
+                        {stockCategories.map((cat) => {
+                          const itemsInCat = warehouseStock.filter((s) => s.category === cat);
+                          if (itemsInCat.length === 0) return null;
+                          return (
+                            <CommandGroup key={cat} heading={cat} className="text-xs">
+                              {itemsInCat.map((stock) => (
                                 <CommandItem
                                   key={stock.sku}
                                   value={`${stock.sku} ${stock.name} ${stock.category}`}
                                   onSelect={() => handleSelectWarehouseStock(stock)}
                                   className="text-xs flex items-center justify-between py-1.5 cursor-pointer"
                                 >
-                                  <div className="flex items-center gap-2 max-w-[310px]">
-                                    <div className="size-8 rounded border border-border bg-muted/40 overflow-hidden shrink-0 flex items-center justify-center p-0.5">
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
-                                        src={stock.imageUrl || getMaterialImage(stock)}
-                                        alt={stock.name}
-                                        className="size-full object-contain select-none"
-                                      />
-                                    </div>
-                                    <div className="flex flex-col gap-0.5 truncate">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="font-mono font-semibold text-blue-600 dark:text-blue-400 text-[11px]">
-                                          {stock.sku}
-                                        </span>
-                                        <span className="font-medium truncate">{stock.name}</span>
-                                      </div>
-                                      <div className="text-[10px] text-muted-foreground flex items-center gap-2">
-                                        <span>{stock.sheetFormat ? `${stock.sheetFormat} mm` : stock.unit}</span>
-                                        <span>•</span>
-                                        <span>Joy: {stock.location}</span>
-                                        <span>•</span>
-                                        <span>${stock.unitPriceUsd} / {stock.unit}</span>
-                                      </div>
-                                    </div>
+                                  <div className="flex items-center gap-2 truncate">
+                                    <span className="font-mono font-semibold text-blue-600 dark:text-blue-400 text-[11px]">
+                                      {stock.sku}
+                                    </span>
+                                    <span className="truncate">{stock.name}</span>
+                                    {stock.sheetFormat && (
+                                      <span className="text-[10px] text-muted-foreground">({stock.sheetFormat}mm)</span>
+                                    )}
                                   </div>
-
-                                  <div className="flex flex-col items-end gap-1 shrink-0">
-                                    <Badge
-                                      variant={stock.status === "In Stock" ? "secondary" : "outline"}
-                                      className={cn(
-                                        "text-[10px] font-mono px-1.5 py-0",
-                                        stock.available > 0
-                                          ? "text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300"
-                                          : "text-rose-700 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-300"
-                                      )}
-                                    >
-                                      {stock.available.toLocaleString()} {stock.unit}
-                                    </Badge>
-                                    {isSelected && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                                  </div>
+                                  <Badge
+                                    variant={stock.available > 0 ? "secondary" : "outline"}
+                                    className={cn(
+                                      "text-[10px] font-mono px-1 py-0 shrink-0",
+                                      stock.available > 0
+                                        ? "text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                        : "text-rose-700 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-300"
+                                    )}
+                                  >
+                                    {stock.available.toLocaleString()} {stock.unit}
+                                  </Badge>
                                 </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        );
-                      })}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+                              ))}
+                            </CommandGroup>
+                          );
+                        })}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
 
-              {/* Selected Stock Real-time Info & Deficit Warning */}
-              {selectedStockItem ? (
-                <div className="mt-1 pt-1.5 border-t border-blue-200/60 dark:border-blue-900/40 flex items-center justify-between text-[11px]">
-                  <div className="flex items-center gap-1.5 text-blue-900 dark:text-blue-200">
-                    <span className="font-medium">Ombor qoldig&apos;i:</span>
-                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                      {selectedStockItem.available.toLocaleString()} {selectedStockItem.unit}
-                    </span>
-                    <span className="text-muted-foreground">({selectedStockItem.location})</span>
-                  </div>
-
-                  {formState.actualQty > selectedStockItem.available ? (
-                    <div className="flex items-center gap-1 text-rose-600 dark:text-rose-400 font-medium text-[10px]">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      <span>
-                        Yetishmovchilik: {(formState.actualQty - selectedStockItem.available).toLocaleString()} {selectedStockItem.unit} (Xarid talab)
-                      </span>
+                {/* Single-line Stock Status Strip */}
+                {selectedStockItem && (
+                  <div className="flex items-center justify-between px-2.5 py-1.5 rounded bg-muted/40 border border-border text-[11px]">
+                    <div className="flex items-center gap-2 text-muted-foreground truncate">
+                      <span>Joy: <b className="text-foreground">{selectedStockItem.location || "Asosiy"}</b></span>
+                      <span>•</span>
+                      <span>Mavjud: <b className={cn("font-mono", selectedStockItem.available > 0 ? "text-emerald-600" : "text-rose-600")}>{selectedStockItem.available.toLocaleString()} {selectedStockItem.unit}</b></span>
+                      <span>•</span>
+                      <span>Narx: <b className="text-foreground font-mono">${selectedStockItem.unitPriceUsd}</b></span>
                     </div>
-                  ) : (
-                    <span className="text-[10px] text-muted-foreground">
-                      Yetarli zaxira mavjud
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-1 pt-1.5 border-t border-blue-200/60 dark:border-blue-900/40 flex items-center justify-between text-[11px] text-amber-700 dark:text-amber-300">
-                  <span>Yangi rejaviy xomashyo (Omborda yo&apos;q — Xarid kutilmoqda)</span>
-                  <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">
-                    On Order / Defitsit
-                  </Badge>
-                </div>
-              )}
-            </div>
-
-            {/* Material Image Preview & URL */}
-            <div className="col-span-2 p-2.5 rounded-lg border border-border bg-muted/30 flex items-center gap-3">
-              <div
-                className="size-14 rounded-lg border border-border overflow-hidden bg-background shrink-0 flex items-center justify-center p-1 shadow-sm cursor-pointer hover:ring-2 hover:ring-blue-500/50 transition-all"
-                onClick={() => {
-                  const img = formState.imageUrl || getMaterialImage(formState);
-                  setPreviewMaterial({
-                    imageUrl: img,
-                    title: formState.name || formState.id,
-                    sku: formState.id,
-                    spec: formState.spec,
-                    unit: formState.unit,
-                    supplier: formState.supplier,
-                    status: formState.availability,
-                  });
-                }}
-                title={t("imagePreview")}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={formState.imageUrl || getMaterialImage(formState)}
-                  alt={formState.name || "Material"}
-                  className="size-full object-contain select-none"
-                />
-              </div>
-
-              <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-                <span className="text-[11px] font-semibold text-foreground">
-                  {t("image")} (Ombor nomenklaturasidan)
-                </span>
-                <span className="text-[10px] text-muted-foreground truncate">
-                  {formState.imageUrl?.startsWith("data:")
-                    ? "Ombor kartochkasida biriktirilgan maxsus grafik rasm"
-                    : formState.imageUrl?.startsWith("http")
-                    ? "Omborga havola orqali biriktirilgan rasm"
-                    : "Standart avtomatik tizim shabloni"}
-                </span>
-                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-normal">
-                  Kattalashtirish uchun rasm ustiga bosing
-                </span>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("itemCode")}
-              </label>
-              <Input
-                value={formState.id}
-                onChange={(e) => setFormState((p) => ({ ...p, id: e.target.value }))}
-                className="h-8 text-xs font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("unit")}
-              </label>
-              <Input
-                value={formState.unit}
-                onChange={(e) => setFormState((p) => ({ ...p, unit: e.target.value }))}
-                className="h-8 text-xs"
-                placeholder="Sheets, kg, pcs, m..."
-              />
-            </div>
-
-            <div className="col-span-2">
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("materialName")} *
-              </label>
-              <Input
-                value={formState.name}
-                onChange={(e) => setFormState((p) => ({ ...p, name: e.target.value }))}
-                className="h-8 text-xs font-medium"
-                placeholder="masalan: Agfa CTP, Magniy klishe, Shtamp pichoq, Qog'oz, Bo'yoq..."
-                autoFocus
-              />
-            </div>
-
-            <div className="col-span-2">
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("specification")}
-              </label>
-              <Input
-                value={formState.spec}
-                onChange={(e) => setFormState((p) => ({ ...p, spec: e.target.value }))}
-                className="h-8 text-xs"
-                placeholder="e.g. 1030x790mm, 2-sided coated"
-              />
-            </div>
-
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("planQty")} (Reja normasi)
-              </label>
-              <Input
-                type="number"
-                min={0}
-                value={formState.planQty}
-                onChange={(e) => {
-                  const pVal = parseFloat(e.target.value) || 0;
-                  setFormState((p) => ({
-                    ...p,
-                    planQty: pVal,
-                    wasteQty: Math.max(0, (p.actualQty || 0) - pVal),
-                  }));
-                }}
-                className="h-8 text-xs font-mono"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[11px] font-medium text-muted-foreground">
-                  {t("actualQty")} (Faktik sarf) *
-                </label>
-                {formState.actualQty > formState.planQty && (
-                  <span className="text-[10px] font-mono font-bold text-rose-600 dark:text-rose-400">
-                    +{formState.actualQty - formState.planQty} {formState.unit} brak
-                  </span>
+                    {formState.actualQty > selectedStockItem.available && (
+                      <span className="text-[10px] font-mono font-semibold text-rose-600 shrink-0">
+                        Yetishmovchilik: {formState.actualQty - selectedStockItem.available}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
-              <Input
-                type="number"
-                min={0}
-                value={formState.actualQty}
-                onChange={(e) => {
-                  const aVal = parseFloat(e.target.value) || 0;
-                  setFormState((p) => ({
-                    ...p,
-                    actualQty: aVal,
-                    qty: aVal,
-                    wasteQty: Math.max(0, aVal - (p.planQty || 0)),
-                    totalPrice: Number((aVal * (p.unitPrice || 0)).toFixed(2)),
-                  }));
-                }}
-                className="h-8 text-xs font-mono font-bold"
-              />
+            ) : (
+              /* Procurement Form: Compact 2 rows */
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-1">
+                    <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                      Toifasi *
+                    </label>
+                    <Select
+                      value={formState.category || "Paper & Board"}
+                      onValueChange={(val) => {
+                        let defaultUnit = "sheets";
+                        if (val === "Roll & Label") defaultUnit = "rolls";
+                        else if (val === "Inks & Plates") defaultUnit = "kg";
+                        else if (val === "Foil & Film") defaultUnit = "m";
+                        else if (val === "Adhesives & Binding") defaultUnit = "kg";
+                        setFormState((p) => ({
+                          ...p,
+                          category: val || "Paper & Board",
+                          unit: defaultUnit,
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Paper & Board">Paper & Board</SelectItem>
+                        <SelectItem value="Roll & Label">Roll & Label</SelectItem>
+                        <SelectItem value="Inks & Plates">Inks & Plates</SelectItem>
+                        <SelectItem value="Foil & Film">Foil & Film</SelectItem>
+                        <SelectItem value="Adhesives & Binding">Adhesives</SelectItem>
+                        <SelectItem value="Offcuts & Scraps">Delovoy Otxod</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                      Material nomi *
+                    </label>
+                    <Input
+                      value={formState.name}
+                      onChange={(e) => setFormState((p) => ({ ...p, name: e.target.value }))}
+                      className="h-8 text-xs font-medium"
+                      placeholder="masalan: Galerie Art Silk, Kurz Gold..."
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                {/* Category parameters in 1 line */}
+                {formState.category === "Paper & Board" && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Format (mm)</label>
+                      <Input
+                        value={formState.sheetFormat || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, sheetFormat: e.target.value }))}
+                        placeholder="700×1000"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Zichlik (g/m²)</label>
+                      <Input
+                        type="number"
+                        value={formState.grammage || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, grammage: Number(e.target.value) || undefined }))}
+                        placeholder="150"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Tola yo&apos;nalishi</label>
+                      <Select
+                        value={formState.grainDirection || "Long Grain"}
+                        onValueChange={(val: any) => setFormState((p) => ({ ...p, grainDirection: val }))}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Long Grain">Long Grain</SelectItem>
+                          <SelectItem value="Short Grain">Short Grain</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+
+                {formState.category === "Roll & Label" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Rulon eni (mm)</label>
+                      <Input
+                        type="number"
+                        value={formState.rollWidthMm || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, rollWidthMm: Number(e.target.value) || undefined }))}
+                        placeholder="100"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Uzunligi (m)</label>
+                      <Input
+                        type="number"
+                        value={formState.rollLengthM || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, rollLengthM: Number(e.target.value) || undefined }))}
+                        placeholder="1000"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {formState.category === "Inks & Plates" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Rang / Pantone / Format</label>
+                      <Input
+                        value={formState.colorOrPantone || formState.sheetFormat || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, colorOrPantone: e.target.value, sheetFormat: e.target.value }))}
+                        placeholder="CMYK Cyan / 1030×790"
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Yetkazib beruvchi</label>
+                      <Input
+                        list="supplier-options-list"
+                        value={formState.supplier}
+                        onChange={(e) => setFormState((p) => ({ ...p, supplier: e.target.value }))}
+                        className="h-7 text-xs"
+                        placeholder="Supplier..."
+                      />
+                      <datalist id="supplier-options-list">
+                        {supplierOptions.map((s) => (
+                          <option key={s} value={s} />
+                        ))}
+                      </datalist>
+                    </div>
+                  </div>
+                )}
+
+                {formState.category !== "Paper & Board" && formState.category !== "Roll & Label" && formState.category !== "Inks & Plates" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Xususiyati / O&apos;lcham</label>
+                      <Input
+                        value={formState.spec || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, spec: e.target.value }))}
+                        placeholder="Standart o'lcham..."
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Yetkazib beruvchi</label>
+                      <Input
+                        value={formState.supplier}
+                        onChange={(e) => setFormState((p) => ({ ...p, supplier: e.target.value }))}
+                        className="h-7 text-xs"
+                        placeholder="Supplier..."
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 2. QUANTITIES & COSTING (4 compact inputs in 1 row) ── */}
+            <div className="space-y-1.5 pt-1 border-t border-border/80">
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">Reja norma</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={formState.planQty}
+                    onChange={(e) => {
+                      const pVal = parseFloat(e.target.value) || 0;
+                      setFormState((p) => ({
+                        ...p,
+                        planQty: pVal,
+                        wasteQty: Math.max(0, (p.actualQty || 0) - pVal),
+                      }));
+                    }}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">Faktik sarf *</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={formState.actualQty}
+                    onChange={(e) => {
+                      const aVal = parseFloat(e.target.value) || 0;
+                      setFormState((p) => ({
+                        ...p,
+                        actualQty: aVal,
+                        qty: aVal,
+                        wasteQty: Math.max(0, aVal - (p.planQty || 0)),
+                        totalPrice: Number((aVal * (p.unitPrice || 0)).toFixed(2)),
+                      }));
+                    }}
+                    className="h-8 text-xs font-mono font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">Birlik</label>
+                  <Input
+                    value={formState.unit}
+                    onChange={(e) => setFormState((p) => ({ ...p, unit: e.target.value }))}
+                    className="h-8 text-xs"
+                    placeholder="sheets..."
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">Narx ($)</label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={formState.unitPrice}
+                    onChange={(e) => {
+                      const uVal = parseFloat(e.target.value) || 0;
+                      setFormState((p) => ({
+                        ...p,
+                        unitPrice: uVal,
+                        totalPrice: Number(((p.actualQty || 0) * uVal).toFixed(2)),
+                      }));
+                    }}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Summary line */}
+              <div className="flex items-center justify-between text-[11px] pt-1 text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  <span>Jami summa:</span>
+                  <span className="font-mono font-bold text-foreground">
+                    ${Number((formState.actualQty * formState.unitPrice).toFixed(2)).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {formState.actualQty > formState.planQty && (
+                    <span className="text-[10px] font-mono text-rose-600 font-semibold">
+                      +{formState.actualQty - formState.planQty} brak
+                    </span>
+                  )}
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[9px] px-1 py-0",
+                      formState.availability === "On Order"
+                        ? "border-amber-400 text-amber-600"
+                        : "text-emerald-700 dark:text-emerald-400 border-emerald-300"
+                    )}
+                  >
+                    {formState.availability}
+                  </Badge>
+                </div>
+              </div>
             </div>
 
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("unitPrice")} ($)
-              </label>
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                value={formState.unitPrice}
-                onChange={(e) => {
-                  const uVal = parseFloat(e.target.value) || 0;
-                  setFormState((p) => ({
-                    ...p,
-                    unitPrice: uVal,
-                    totalPrice: Number(((p.actualQty || 0) * uVal).toFixed(2)),
-                  }));
-                }}
-                className="h-8 text-xs font-mono"
-              />
-            </div>
+            {/* ── 3. ISSUE TYPE & NOTES (Compact 2 columns) ── */}
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/80">
+              <div>
+                <label className="text-[10px] text-muted-foreground block mb-1">Sarf turi</label>
+                <Select
+                  value={formState.issueType || "standard"}
+                  onValueChange={(val: any) =>
+                    setFormState((p) => ({
+                      ...p,
+                      issueType: val,
+                      faultParty: val === "standard" ? "none" : (p.faultParty === "none" ? "prepress" : p.faultParty),
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Standart reja (BOM)</SelectItem>
+                    <SelectItem value="remake">Qayta chiqarish (Remake)</SelectItem>
+                    <SelectItem value="client_change">Mijoz tuzatishi</SelectItem>
+                    <SelectItem value="press_waste">Bosma chiqindisi</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("totalPrice")} ($)
-              </label>
-              <Input
-                disabled
-                value={`$${Number((formState.actualQty * formState.unitPrice).toFixed(2)).toLocaleString("en-US", { minimumFractionDigits: 2 })}`}
-                className="h-8 text-xs font-mono font-bold bg-muted/40 text-primary"
-              />
-            </div>
-
-            <div className="col-span-2">
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("notes")} (Sabab / Izoh)
-              </label>
-              <Input
-                value={formState.notes || ""}
-                onChange={(e) => setFormState((p) => ({ ...p, notes: e.target.value }))}
-                className="h-8 text-xs"
-                placeholder="masalan: Qolip/klishe yorildi, matn xatosi, kashirovka yoki qog'oz braki..."
-              />
-            </div>
-
-            <div className="col-span-1">
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("supplier")}
-              </label>
-              <Input
-                value={formState.supplier}
-                onChange={(e) => setFormState((p) => ({ ...p, supplier: e.target.value }))}
-                className="h-8 text-xs"
-                placeholder="Vendor or supplier"
-              />
-            </div>
-
-            <div className="col-span-1">
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                {t("availability")}
-              </label>
-              <Select
-                value={formState.availability}
-                onValueChange={(val: any) => val && setFormState((p) => ({ ...p, availability: val }))}
-              >
-                <SelectTrigger className="h-8 text-xs bg-background">
-                  <SelectValue placeholder="Availability" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="In Stock">In Stock</SelectItem>
-                  <SelectItem value="Reserved">Reserved</SelectItem>
-                  <SelectItem value="Low Stock">Low Stock</SelectItem>
-                  <SelectItem value="On Order">On Order</SelectItem>
-                </SelectContent>
-              </Select>
+              <div>
+                <label className="text-[10px] text-muted-foreground block mb-1">Izoh / Sabab</label>
+                <Input
+                  value={formState.notes || ""}
+                  onChange={(e) => setFormState((p) => ({ ...p, notes: e.target.value }))}
+                  className="h-8 text-xs"
+                  placeholder="Qisqa izoh..."
+                />
+              </div>
             </div>
           </div>
 
-          <DialogFooter className="flex justify-end gap-2 pt-2 border-t border-border">
+          {/* Compact Footer without negative margins */}
+          <DialogFooter className="m-0 mx-0 mb-0 px-4 py-3 border-t border-border bg-card flex flex-row items-center justify-end gap-2 shrink-0">
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => setIsDialogOpen(false)}
-              className="text-xs h-8"
+              className="text-xs h-8 px-3"
             >
               {t("cancel")}
             </Button>
             <Button
+              type="button"
               size="sm"
               onClick={handleSaveMaterial}
               disabled={!formState.name.trim()}
-              className="text-xs h-8 bg-blue-600 hover:bg-blue-700 text-white"
+              className="text-xs h-8 px-3.5 bg-blue-600 hover:bg-blue-700 text-white gap-1"
             >
-              {editingIndex !== null ? "Save Changes" : t("save")}
+              <Check className="size-3.5" />
+              <span>{editingIndex !== null ? "Saqlash" : "Qo'shish"}</span>
             </Button>
           </DialogFooter>
         </DialogContent>

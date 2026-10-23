@@ -34,12 +34,12 @@ export function PlantWarehousesTab({ plant, onUpdate }: PlantWarehousesTabProps)
     const newWh: PlantWarehouseInfo = {
       id: `WAR-${Date.now()}`,
       code: `W-NEW-${plant.warehouses.length + 1}`,
-      name: "Yangi Ombor Maydoni",
+      name: "",
       type: "RawMaterials",
-      manager: "Ombor Mudiri",
-      phone: "+998 90 000-00-00",
-      capacityM2: 1000,
-      locationDetails: "Asosiy bino",
+      manager: "",
+      phone: "",
+      capacityM2: 0,
+      locationDetails: "",
       status: "Active",
     };
     onUpdate({ warehouses: [...plant.warehouses, newWh] });
@@ -105,30 +105,47 @@ export function PlantWarehousesTab({ plant, onUpdate }: PlantWarehousesTabProps)
         </div>
 
         <div className="grid grid-cols-1 gap-2.5">
-          {plant.warehouses.map((wh) => (
-            <div
-              key={wh.id}
-              className="rounded-md border border-border bg-muted/20 p-3 text-xs space-y-2.5"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="font-mono text-[10px]">
-                    {wh.code}
-                  </Badge>
-                  <span className="font-semibold text-foreground">{wh.name}</span>
-                  <Badge
-                    variant="secondary"
-                    className="text-[10px] bg-primary/10 text-primary font-medium"
-                  >
-                    {wh.type}
-                  </Badge>
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] text-emerald-600 border-emerald-300"
-                  >
-                    {wh.status}
-                  </Badge>
-                </div>
+          {plant.warehouses.length === 0 ? (
+            <div className="py-6 px-4 text-center rounded border border-dashed border-border bg-muted/10 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Hozircha biriktirilgan omborlar kiritilmagan.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAddWarehouse}
+                className="h-7 text-xs gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Birinchi omborni kiritish</span>
+              </Button>
+            </div>
+          ) : (
+            plant.warehouses.map((wh) => (
+              <div
+                key={wh.id}
+                className="rounded-md border border-border bg-muted/20 p-3 text-xs space-y-2.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="font-mono text-[10px]">
+                      {wh.code}
+                    </Badge>
+                    <span className="font-semibold text-foreground">{wh.name || "Nomsiz ombor"}</span>
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] bg-primary/10 text-primary font-medium"
+                    >
+                      {wh.type}
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] text-emerald-600 border-emerald-300"
+                    >
+                      {wh.status}
+                    </Badge>
+                  </div>
 
                 <Button
                   type="button"
@@ -246,7 +263,8 @@ export function PlantWarehousesTab({ plant, onUpdate }: PlantWarehousesTabProps)
                 </div>
               </div>
             </div>
-          ))}
+          ))
+        )}
         </div>
       </div>
     </div>

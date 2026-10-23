@@ -9,7 +9,7 @@ import { useWorkspaceStore } from "@/store/workspaceStore";
 import { toggleAppFullscreen } from "@/lib/fullscreen";
 import { CommandPalette } from "@/components/command/CommandPalette";
 import { AiChatSheet } from "./AiChatSheet";
-import { Toaster } from "@/components/ui/toast";
+
 import { MODULE_NAV } from "@/lib/modules";
 import { ElementInspectorOverlay } from "@/components/dev/ElementInspectorOverlay";
 
@@ -235,7 +235,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <AiChatSheet />
 
       {/* Global Toast Notification System */}
-      <Toaster />
+
 
       {/* AI UI Element & Container Inspector Overlay (Ctrl+Shift+C) */}
       <ElementInspectorOverlay />

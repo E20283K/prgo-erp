@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import { users } from "@/db/schema/users";
-import { eq, or } from "drizzle-orm";
+import { eq, or, ilike } from "drizzle-orm";
 import {
   verifyPassword,
   createSession,
@@ -32,8 +32,8 @@ export async function POST(req: NextRequest) {
       .from(users)
       .where(
         or(
-          eq(users.username, trimmedIdentifier),
-          eq(users.email, trimmedIdentifier)
+          ilike(users.username, trimmedIdentifier),
+          ilike(users.email, trimmedIdentifier)
         )
       )
       .limit(1);

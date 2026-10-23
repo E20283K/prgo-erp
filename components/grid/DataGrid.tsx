@@ -19,14 +19,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
 
 import {
   ContextMenu,
@@ -54,9 +46,6 @@ import {
   Image as ImageIcon,
   CalendarDays,
   Table as TableIcon,
-  ChevronLeft,
-  ChevronRight,
-  Camera,
 } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -116,6 +105,8 @@ export interface OrderRow {
   preview: string[];
   allPhotos?: string[];
   rawOrder?: any;
+  sampleStage: "mass_production" | "sample_pending" | "sample_review" | "sample_revision" | "sample_approved_mass";
+  sampleStatusLabel: string;
   department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
   site: "Building 1" | "Building 2";
   customer: string;
@@ -134,6 +125,7 @@ export interface OrderRow {
 const INITIAL_COLUMNS: GridColumn[] = [
   { id: "id", title: "Doc No.", width: 120, icon: GridColumnIcon.HeaderReference, hasMenu: true },
   { id: "preview", title: "Proof Sample", width: 95, icon: GridColumnIcon.HeaderImage, hasMenu: true },
+  { id: "sampleStatus", title: "Namuna holati", width: 175, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "site", title: "Production Site", width: 140, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "department", title: "Technology", width: 130, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "customer", title: "Customer Organization", width: 220, icon: GridColumnIcon.HeaderString, hasMenu: true },
@@ -164,6 +156,7 @@ export function DataGrid() {
   const localizedColumns = React.useMemo(() => {
     const colMap: Record<string, string> = {
       preview: tGrid("colId"),
+      sampleStatus: tGrid("colSampleStatus"),
       type: tGrid("colMachine"),
       customer: tGrid("colCustomer"),
       product: tGrid("colProduct"),
@@ -197,10 +190,39 @@ export function DataGrid() {
         photos.push(wo.photoUrl.trim());
       }
 
+      const isSampleReq =
+        wo.orderType === "Sample" ||
+        wo.sampleRequired === true ||
+        Boolean(wo.sampleData?.isRequired);
+
+      const approvalStatus = wo.sampleData?.approvalStatus || wo.sampleStatus;
+      const isProduced = Boolean(wo.sampleData?.isProduced || wo.sampleProduced);
+
+      let sampleStage: OrderRow["sampleStage"] = "mass_production";
+      let sampleStatusLabel = "Ishlab chiqarish";
+
+      if (isSampleReq) {
+        if (approvalStatus === "approved") {
+          sampleStage = "sample_approved_mass";
+          sampleStatusLabel = "Tasdiqlangan (Tirajda)";
+        } else if (approvalStatus === "revision_requested") {
+          sampleStage = "sample_revision";
+          sampleStatusLabel = "Qayta ko'rikda";
+        } else if (isProduced || approvalStatus === "awaiting_approval") {
+          sampleStage = "sample_review";
+          sampleStatusLabel = "Namuna ko'rikda";
+        } else {
+          sampleStage = "sample_pending";
+          sampleStatusLabel = "Namuna kutilmoqda";
+        }
+      }
+
       return {
         id: wo.id,
         preview: photos,
         allPhotos: photos,
+        sampleStage,
+        sampleStatusLabel,
         department: (wo.department as any) || "Offset",
         site: wo.site || "Building 1",
         customer: wo.customer,
@@ -223,43 +245,79 @@ export function DataGrid() {
   const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [sortConfig, setSortConfig] = useState<{ colId: string; asc: boolean } | null>(null);
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   });
 
   const filteredRows = React.useMemo(() => {
-    return rows.filter((r) => {
+    let result = rows.filter((r) => {
       const matchesSearch = 
         !searchFilter ||
         r.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.customer.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        r.product.toLowerCase().includes(searchFilter.toLowerCase());
+        r.product.toLowerCase().includes(searchFilter.toLowerCase()) ||
+        r.sampleStatusLabel.toLowerCase().includes(searchFilter.toLowerCase());
 
       const matchesStatus = statusFilter === "ALL" || r.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [rows, searchFilter, statusFilter]);
+
+    if (sortConfig) {
+      const { colId, asc } = sortConfig;
+      result = [...result].sort((a, b) => {
+        let valA: any = "";
+        let valB: any = "";
+        if (colId === "sampleStatus") {
+          valA = a.sampleStatusLabel;
+          valB = b.sampleStatusLabel;
+        } else {
+          valA = (a as any)[colId] ?? "";
+          valB = (b as any)[colId] ?? "";
+        }
+        if (typeof valA === "number" && typeof valB === "number") {
+          return asc ? valA - valB : valB - valA;
+        }
+        const cmp = String(valA).localeCompare(String(valB));
+        return asc ? cmp : -cmp;
+      });
+    }
+
+    return result;
+  }, [rows, searchFilter, statusFilter, sortConfig]);
+
+  const handleHeaderClicked = useCallback((colIndex: number) => {
+    const column = columns[colIndex];
+    const colId = column?.id;
+    if (!colId) return;
+    setSortConfig((prev) => {
+      if (prev && prev.colId === colId) {
+        return prev.asc ? { colId, asc: false } : null;
+      }
+      return { colId, asc: true };
+    });
+  }, [columns]);
 
   // Lightweight Hover & Dialog order overview state
   const mouseCoordsRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const getCursorCardPosition = useCallback((clientX: number, clientY: number) => {
-    const cardWidth = 230;
-    const cardHeight = 220;
+    const cardWidth = 430;
+    const cardHeight = 430;
     let x = clientX + 16;
     let y = clientY + 12;
 
     if (typeof window !== "undefined") {
-      if (x + cardWidth > window.innerWidth - 12) {
+      if (x + cardWidth > window.innerWidth - 16) {
         x = clientX - cardWidth - 16;
       }
-      if (x < 12) x = 12;
+      if (x < 16) x = 16;
 
-      if (y + cardHeight > window.innerHeight - 12) {
+      if (y + cardHeight > window.innerHeight - 16) {
         y = clientY - cardHeight - 12;
       }
-      if (y < 12) y = 12;
+      if (y < 16) y = 16;
     }
 
     return { x, y };
@@ -267,16 +325,9 @@ export function DataGrid() {
 
   const [hoveredPreview, setHoveredPreview] = useState<{
     url: string;
-    totalPhotos: number;
-    docNo: string;
-    product: string;
-    customer: string;
-    qty: string;
     x: number;
     y: number;
   } | null>(null);
-  const [selectedPreviewRow, setSelectedPreviewRow] = useState<OrderRow | null>(null);
-  const [previewPhotoIndex, setPreviewPhotoIndex] = useState(0);
 
   const onItemHovered = useCallback((args: GridMouseEventArgs) => {
     if (args.kind === "cell") {
@@ -301,11 +352,6 @@ export function DataGrid() {
 
           setHoveredPreview({
             url: rowData.preview[0],
-            totalPhotos: rowData.allPhotos?.length || rowData.preview.length,
-            docNo: rowData.id,
-            product: rowData.product,
-            customer: rowData.customer,
-            qty: `${rowData.qty.toLocaleString()} ${rowData.unit}`,
             x,
             y,
           });
@@ -315,21 +361,6 @@ export function DataGrid() {
     }
     setHoveredPreview(null);
   }, [columns, filteredRows, getCursorCardPosition]);
-
-  const onCellClicked = useCallback((cell: Item) => {
-    const [col, row] = cell;
-    const column = columns[col];
-    if (column?.id === "preview") {
-      const rowData = filteredRows[row];
-      // Only open image preview dialog if there is at least one real photo
-      if (rowData && rowData.preview.length > 0) {
-        setPreviewPhotoIndex(0);
-        setSelectedPreviewRow(rowData);
-      }
-    }
-  }, [columns, filteredRows]);
-
-
 
   // Keep Workspace Status Bar in sync with real-time rows, selections, and active cell coordinates
   useEffect(() => {
@@ -372,6 +403,36 @@ export function DataGrid() {
           rounding: 4,
           contentAlign: "center",
         };
+
+      case "sampleStatus": {
+        let colorDark = "#94a3b8";
+        let colorLight = "#64748b";
+
+        if (rowData.sampleStage === "sample_approved_mass") {
+          colorDark = "#4ade80";
+          colorLight = "#16a34a";
+        } else if (rowData.sampleStage === "sample_revision") {
+          colorDark = "#f87171";
+          colorLight = "#dc2626";
+        } else if (rowData.sampleStage === "sample_review") {
+          colorDark = "#c084fc";
+          colorLight = "#7c3aed";
+        } else if (rowData.sampleStage === "sample_pending") {
+          colorDark = "#fbbf24";
+          colorLight = "#d97706";
+        }
+
+        return {
+          kind: GridCellKind.Text,
+          data: rowData.sampleStatusLabel,
+          displayData: rowData.sampleStatusLabel,
+          allowOverlay: false,
+          themeOverride: {
+            textDark: isDark ? colorDark : colorLight,
+            baseFontStyle: "600 12px sans-serif",
+          },
+        };
+      }
 
       case "department":
         return {
@@ -748,7 +809,7 @@ export function DataGrid() {
               gridSelection={selection}
               onGridSelectionChange={setSelection}
               onCellActivated={handleCellActivated}
-              onCellClicked={onCellClicked}
+              onHeaderClicked={handleHeaderClicked}
               onItemHovered={onItemHovered}
               onCellEdited={onCellEdited}
               onColumnResize={onColumnResize}
@@ -757,186 +818,23 @@ export function DataGrid() {
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
             />
 
-            {/* Hover Image Preview Tooltip Card (Minimal Order Overview) */}
+            {/* Hover Image Preview (Full format image only) */}
             {hoveredPreview && (
               <div
                 style={{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }}
-                className="fixed z-50 pointer-events-none w-56 rounded-lg bg-popover text-popover-foreground border border-border shadow-xl p-2.5 flex flex-col gap-2 animate-in fade-in-0 zoom-in-95 duration-75"
+                className="fixed z-50 pointer-events-none rounded-lg bg-popover/95 backdrop-blur-xs border border-border shadow-2xl p-1 animate-in fade-in-0 zoom-in-95 duration-75 max-w-[430px] max-h-[430px] flex items-center justify-center overflow-hidden"
               >
-                <div className="relative w-full h-32 rounded-md overflow-hidden bg-muted border border-border/60">
-                  <img
-                    src={hoveredPreview.url}
-                    alt={hoveredPreview.product}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 text-white font-mono text-[9px] font-bold backdrop-blur-xs">
-                    {hoveredPreview.docNo}
-                  </div>
-                  {hoveredPreview.totalPhotos > 1 && (
-                    <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 text-white font-mono text-[9px] font-semibold backdrop-blur-xs flex items-center gap-1">
-                      <Camera className="w-2.5 h-2.5" />
-                      <span>{hoveredPreview.totalPhotos} ta rasm</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold text-foreground leading-tight truncate">
-                    {hoveredPreview.product}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground truncate">
-                    {hoveredPreview.customer}
-                  </p>
-                  <div className="flex items-center justify-between pt-1 border-t border-border/50 text-[10px]">
-                    <span className="text-muted-foreground font-mono">{hoveredPreview.qty}</span>
-                    <span className="font-medium text-primary">Click to inspect</span>
-                  </div>
-                </div>
+                <img
+                  src={hoveredPreview.url}
+                  alt="Order proof preview"
+                  className="max-w-[415px] max-h-[415px] w-auto h-auto object-contain rounded select-none"
+                />
               </div>
             )}
           </div>
         )}
         </div>
       </ContextMenuTrigger>
-
-      {/* Order Overview Dialog Card */}
-      <Dialog 
-        open={!!selectedPreviewRow} 
-        onOpenChange={(open) => !open && setSelectedPreviewRow(null)}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <div className="flex items-center gap-2">
-              <DialogTitle className="text-base font-semibold">
-                {selectedPreviewRow?.id}
-              </DialogTitle>
-              <Badge 
-                variant="outline" 
-                className="text-[10px] font-semibold uppercase tracking-wider h-5 px-2"
-              >
-                {selectedPreviewRow?.status}
-              </Badge>
-            </div>
-            <DialogDescription className="text-xs text-muted-foreground">
-              {selectedPreviewRow?.customer}
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedPreviewRow && (
-            <div className="space-y-3 py-1">
-              {/* Photo Gallery Viewer */}
-              {(() => {
-                const photos = selectedPreviewRow.allPhotos && selectedPreviewRow.allPhotos.length > 0 
-                  ? selectedPreviewRow.allPhotos 
-                  : selectedPreviewRow.preview;
-                const activePhoto = photos[previewPhotoIndex] || photos[0];
-                const total = photos.length;
-
-                return (
-                  <div className="space-y-2">
-                    <div className="relative w-full h-52 rounded-lg overflow-hidden bg-muted border border-border flex items-center justify-center group">
-                      <img
-                        src={activePhoto}
-                        alt={`${selectedPreviewRow.product} ${previewPhotoIndex + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                      {total > 1 && (
-                        <>
-                          <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/70 text-white font-mono text-[10px] font-medium backdrop-blur-xs flex items-center gap-1">
-                            <Camera className="w-3 h-3" />
-                            <span>{previewPhotoIndex + 1} / {total}</span>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => setPreviewPhotoIndex((prev) => (prev > 0 ? prev - 1 : total - 1))}
-                            className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white transition-opacity opacity-80 group-hover:opacity-100"
-                            title="Oldingi rasm"
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setPreviewPhotoIndex((prev) => (prev < total - 1 ? prev + 1 : 0))}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white transition-opacity opacity-80 group-hover:opacity-100"
-                            title="Keyingi rasm"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Thumbnail Strip if multiple photos */}
-                    {total > 1 && (
-                      <div className="flex items-center gap-2 overflow-x-auto py-1">
-                        {photos.map((p, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => setPreviewPhotoIndex(idx)}
-                            className={`relative w-12 h-12 rounded-md overflow-hidden border-2 transition-all shrink-0 ${
-                              idx === previewPhotoIndex
-                                ? "border-primary ring-2 ring-primary/30"
-                                : "border-border/60 opacity-60 hover:opacity-100"
-                            }`}
-                          >
-                            <img src={p} alt={`thumb-${idx}`} className="w-full h-full object-cover" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              <div className="grid grid-cols-2 gap-2 text-xs bg-muted/40 p-2.5 rounded-lg border border-border/50">
-                <div>
-                  <span className="text-[10px] text-muted-foreground block">Product</span>
-                  <span className="font-medium text-foreground truncate block">{selectedPreviewRow.product}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted-foreground block">Quantity</span>
-                  <span className="font-medium text-foreground">{selectedPreviewRow.qty.toLocaleString()} {selectedPreviewRow.unit}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted-foreground block">Machine</span>
-                  <span className="font-medium text-foreground truncate block">{selectedPreviewRow.machine}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted-foreground block">Deadline</span>
-                  <span className="font-medium text-foreground">{selectedPreviewRow.deadline}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="flex flex-row justify-end gap-2 pt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSelectedPreviewRow(null)}
-              className="text-xs h-8"
-            >
-              {tCommon("close")}
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                if (selectedPreviewRow) {
-                  handleCellActivated([0, rows.findIndex(r => r.id === selectedPreviewRow.id)]);
-                  setSelectedPreviewRow(null);
-                }
-              }}
-              className="text-xs gap-1.5 h-8 bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>{tGrid("contextOpen")}</span>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Radix Context Menu on Right Click */}
       <ContextMenuContent className="w-56 text-xs">

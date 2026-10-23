@@ -34,6 +34,7 @@ import {
   PanelRightOpen,
   PanelLeftClose,
   PanelLeftOpen,
+  UserCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -185,6 +186,7 @@ export function TelegramInbox() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [linkingDialogOpen, setLinkingDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string>("");
 
   const [groupChatSettings, setGroupChatSettings] = useState<TelegramChatSettings>({
@@ -1152,6 +1154,30 @@ export function TelegramInbox() {
                     <TooltipTrigger
                       render={
                         <Button
+                          variant={settingsDialogOpen ? "secondary" : "ghost"}
+                          size="icon"
+                          onClick={() => setSettingsDialogOpen(true)}
+                          className={cn(
+                            "h-7 w-7 cursor-pointer transition-colors",
+                            settingsDialogOpen
+                              ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                          title={t("groupSettings")}
+                        >
+                          <Sliders className="w-3.5 h-3.5" />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="bottom" className="text-xs">
+                      {t("groupSettings")}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
                           variant={showRightPanel ? "secondary" : "ghost"}
                           size="icon"
                           onClick={() => setShowRightPanel((prev) => !prev)}
@@ -1545,7 +1571,7 @@ export function TelegramInbox() {
             style={{ width: `${rightWidth}px` }}
             className="flex flex-col border-l border-border bg-card shrink-0 p-3 space-y-3.5 overflow-y-auto animate-in fade-in-50 duration-150"
           >
-          {/* Telegram Header Card (Avatar + Title + Type Badge) */}
+          {/* Telegram Header Card (Avatar + Title + Type Badge + Settings Button) */}
           <div className="flex flex-col items-center text-center p-3.5 rounded-lg bg-muted/40 border border-border">
             <Avatar className="size-16 border-2 border-border/80 shadow-xs mb-2">
               {activeChat.photoUrl && (
@@ -1581,6 +1607,17 @@ export function TelegramInbox() {
                 </Badge>
               )}
             </div>
+
+            {/* Guruh sozlamalari tugmasi */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSettingsDialogOpen(true)}
+              className="mt-3 h-7 text-xs px-2.5 gap-1.5 w-full justify-center cursor-pointer border-border hover:bg-accent"
+            >
+              <Sliders className="size-3.5 text-blue-500" />
+              <span>{t("groupSettings")}</span>
+            </Button>
           </div>
 
           {/* 1. Guruh ma'lumotlari */}
@@ -1664,8 +1701,24 @@ export function TelegramInbox() {
 
             {activeChat.clientName ? (
               <div className="p-2.5 rounded-md bg-muted/40 border border-border space-y-1.5 text-xs">
-                <div className="font-semibold text-[11px] text-foreground">
-                  {activeChat.clientName}
+                <div className="flex items-center justify-between">
+                  <span
+                    onClick={() => {
+                      if (activeChat.clientId) {
+                        openTab({
+                          id: activeChat.clientId,
+                          title: activeChat.clientName || "Mijoz",
+                          type: "customer",
+                          module: "crm",
+                        });
+                      }
+                    }}
+                    className="font-semibold text-[11px] text-foreground hover:text-primary hover:underline cursor-pointer flex items-center gap-1 truncate max-w-[200px]"
+                    title="Mijoz kartasini ochish"
+                  >
+                    {activeChat.clientName}
+                    <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-60" />
+                  </span>
                 </div>
                 {activeChat.clientCode && (
                   <div className="flex justify-between text-[10px]">
@@ -1699,14 +1752,12 @@ export function TelegramInbox() {
             )}
           </div>
 
-          <Separator />
-
-          {/* 3. Guruh Sozlamalari & Xabarnomalar */}
+          {/* 3. Mas'ul menejer */}
           <div>
             <div className="flex items-center justify-between text-xs font-semibold text-foreground mb-1.5">
               <div className="flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5 text-blue-500" />
-                <span>Guruh sozlamalari</span>
+                <UserCheck className="w-3.5 h-3.5 text-blue-500" />
+                <span>{t("assignedManager")}</span>
               </div>
               {savingGroupSettings && (
                 <span className="text-[10px] text-muted-foreground flex items-center gap-1 font-normal">
@@ -1716,99 +1767,38 @@ export function TelegramInbox() {
               )}
             </div>
 
-            <div className="p-2.5 rounded-md bg-muted/40 border border-border space-y-2.5 text-xs">
-              {/* Mas'ul menejer */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-medium text-muted-foreground">
-                  {t("assignedManager")}:
-                </label>
-                <div className="flex items-center gap-1">
-                  <Input
-                    value={selectedManager}
-                    onChange={(e) => setSelectedManager(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleUpdateManager(selectedManager)}
-                    placeholder="Menejer ismi..."
-                    className="h-7 text-xs bg-background"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleUpdateManager(selectedManager)}
-                    disabled={savingGroupSettings}
-                    className="h-7 px-2 text-[10px] cursor-pointer shrink-0"
-                    title="Menejerni saqlash"
-                  >
-                    <Save className="w-3 h-3" />
-                  </Button>
-                </div>
+            <div className="p-2.5 rounded-md bg-muted/40 border border-border space-y-2 text-xs">
+              <div className="flex items-center gap-1">
+                <Input
+                  value={selectedManager}
+                  onChange={(e) => setSelectedManager(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleUpdateManager(selectedManager)}
+                  placeholder="Menejer ismi..."
+                  className="h-7 text-xs bg-background"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleUpdateManager(selectedManager)}
+                  disabled={savingGroupSettings}
+                  className="h-7 px-2.5 text-[10px] cursor-pointer shrink-0"
+                  title="Menejerni saqlash"
+                >
+                  <Save className="w-3 h-3" />
+                </Button>
               </div>
-
-              <Separator className="my-1" />
-
-              {/* Xabarnomalar ro'yxati */}
-              <div className="space-y-2">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
-                  Avtomatik xabarnomalar
-                </span>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <span className="text-[11px] font-medium block text-foreground">Yangi buyurtma</span>
-                      <span className="text-[9px] text-muted-foreground block leading-tight">
-                        Work order ochilganda
-                      </span>
-                    </div>
-                    <Switch
-                      checked={groupChatSettings.notifyOrderCreated ?? true}
-                      onCheckedChange={(checked) => handleToggleSetting("notifyOrderCreated", checked)}
-                      disabled={savingGroupSettings}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <span className="text-[11px] font-medium block text-foreground">Maket / Proof tasdiqlash</span>
-                      <span className="text-[9px] text-muted-foreground block leading-tight">
-                        Tasdiqlash so&apos;rovi yuborish
-                      </span>
-                    </div>
-                    <Switch
-                      checked={groupChatSettings.notifyProofReady ?? true}
-                      onCheckedChange={(checked) => handleToggleSetting("notifyProofReady", checked)}
-                      disabled={savingGroupSettings}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <span className="text-[11px] font-medium block text-foreground">Buyurtma tayyor</span>
-                      <span className="text-[9px] text-muted-foreground block leading-tight">
-                        Ishlab chiqarish yakunida
-                      </span>
-                    </div>
-                    <Switch
-                      checked={groupChatSettings.notifyProductionDone ?? true}
-                      onCheckedChange={(checked) => handleToggleSetting("notifyProductionDone", checked)}
-                      disabled={savingGroupSettings}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <span className="text-[11px] font-medium block text-foreground">To&apos;lov eslatmasi</span>
-                      <span className="text-[9px] text-muted-foreground block leading-tight">
-                        To&apos;lov muddati kelganda
-                      </span>
-                    </div>
-                    <Switch
-                      checked={groupChatSettings.notifyPaymentReminder ?? false}
-                      onCheckedChange={(checked) => handleToggleSetting("notifyPaymentReminder", checked)}
-                      disabled={savingGroupSettings}
-                    />
-                  </div>
+              {activeChat.assignedUserId ? (
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5 border-t border-border/40">
+                  <span>Biriktirilgan:</span>
+                  <span className="font-medium text-foreground truncate max-w-[170px]">
+                    {activeChat.assignedUserId}
+                  </span>
                 </div>
-              </div>
+              ) : (
+                <p className="text-[10px] text-muted-foreground italic">
+                  Mas'ul menejer belgilanmagan
+                </p>
+              )}
             </div>
           </div>
 
@@ -1880,6 +1870,122 @@ export function TelegramInbox() {
         </div>
         </>
       )}
+
+      {/* ─── Guruh Sozlamalari Dialog (Modal) ─────────────────────────── */}
+      <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
+        <DialogContent className="max-w-md p-4">
+          <DialogHeader>
+            <DialogTitle className="text-xs font-semibold flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Sliders className="w-4 h-4 text-blue-500" />
+                <span>{t("groupSettings")}</span>
+              </div>
+              {savingGroupSettings && (
+                <span className="text-[10px] text-muted-foreground flex items-center gap-1 font-normal">
+                  <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                  Saqlanmoqda...
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 text-xs">
+            {activeChat && (
+              <div className="p-2 rounded-md bg-muted/40 border border-border text-[11px] space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Guruh:</span>
+                  <span className="font-semibold text-foreground truncate max-w-[250px]">{activeChat.title}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Chat ID:</span>
+                  <span className="font-mono text-foreground">{activeChat.chatId}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                Avtomatik xabarnomalar
+              </span>
+
+              <div className="space-y-2.5 p-3 rounded-md border border-border bg-card">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <span className="text-[11px] font-medium block text-foreground">Yangi buyurtma</span>
+                    <span className="text-[9px] text-muted-foreground block leading-tight">
+                      Work order ochilganda avtomatik xabar
+                    </span>
+                  </div>
+                  <Switch
+                    checked={groupChatSettings.notifyOrderCreated ?? true}
+                    onCheckedChange={(checked) => handleToggleSetting("notifyOrderCreated", checked)}
+                    disabled={savingGroupSettings}
+                  />
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <span className="text-[11px] font-medium block text-foreground">Maket / Proof tasdiqlash</span>
+                    <span className="text-[9px] text-muted-foreground block leading-tight">
+                      Tasdiqlash so&apos;rovi yuborish
+                    </span>
+                  </div>
+                  <Switch
+                    checked={groupChatSettings.notifyProofReady ?? true}
+                    onCheckedChange={(checked) => handleToggleSetting("notifyProofReady", checked)}
+                    disabled={savingGroupSettings}
+                  />
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <span className="text-[11px] font-medium block text-foreground">Buyurtma tayyor</span>
+                    <span className="text-[9px] text-muted-foreground block leading-tight">
+                      Ishlab chiqarish yakunida xabar berish
+                    </span>
+                  </div>
+                  <Switch
+                    checked={groupChatSettings.notifyProductionDone ?? true}
+                    onCheckedChange={(checked) => handleToggleSetting("notifyProductionDone", checked)}
+                    disabled={savingGroupSettings}
+                  />
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <span className="text-[11px] font-medium block text-foreground">To&apos;lov eslatmasi</span>
+                    <span className="text-[9px] text-muted-foreground block leading-tight">
+                      To&apos;lov muddati kelganda eslatma
+                    </span>
+                  </div>
+                  <Switch
+                    checked={groupChatSettings.notifyPaymentReminder ?? false}
+                    onCheckedChange={(checked) => handleToggleSetting("notifyPaymentReminder", checked)}
+                    disabled={savingGroupSettings}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-1 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSettingsDialogOpen(false)}
+              className="h-7 text-xs cursor-pointer"
+            >
+              Yopish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Mijozga biriktirish Dialog (Modal) ─────────────────────────── */}
       <Dialog open={linkingDialogOpen} onOpenChange={setLinkingDialogOpen}>
