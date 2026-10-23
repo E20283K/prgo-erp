@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useMemo } from "react";
 import {
@@ -20,6 +20,7 @@ import {
   Boxes,
   Lock,
   Unlock,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -1382,100 +1383,98 @@ export function SpecificationsTab({
             </div>
 
             {/* Technological Tooling / Shtansforma (Die-Cutting) Management */}
-            {(formData.shapeType === "carton_box" ||
-              formData.shapeType === "custom_die" ||
-              formData.shapeType === "folded" ||
-              formData.shapeType === "circle" ||
-              formData.shapeType === "oval" ||
-              formData.cornerType === "Die-cut") && (
-              <div className="pt-2.5 space-y-2 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                    <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                    <span>Texkartadagi Jihoz: Kesish Shtansformasi (Die Tooling)</span>
-                  </label>
+            <div className="pt-2.5 space-y-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>Texkartadagi Jihoz: Kesish Shtansformasi (Die Tooling) & Klishelar</span>
+                </label>
+                <div className="flex items-center gap-2">
                   {selectedTool && (
                     <Badge variant="outline" className="text-[10px] font-mono border-amber-500/40 text-amber-700 dark:text-amber-300">
                       Ombor: {selectedTool.location} ({selectedTool.impressionsUsed.toLocaleString()} / {selectedTool.maxLife.toLocaleString()})
                     </Badge>
                   )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onSwitchTab?.("prepress-tooling")}
+                    className="h-6 px-2 text-[11px] text-primary gap-1 font-medium hover:bg-primary/10"
+                  >
+                    <span>Prepress & Jihozlar bo&apos;limi</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </Button>
                 </div>
-
-                <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 items-end">
-                  <div className="@md:col-span-2">
-                    <label className="text-xs font-medium text-muted-foreground block mb-1">
-                      Mijozning mavjud shtansformalari
-                    </label>
-                    <Select
-                      value={formData.selectedToolingId || "none"}
-                      disabled={isOperator}
-                      onValueChange={(val) => {
-                        if (val === "none") {
-                          handleFieldChange("selectedToolingId", undefined);
-                          handleFieldChange("selectedToolingName", undefined);
-                          handleFieldChange("toolingProcurementNeeded", false);
-                        } else {
-                          const t = customerTooling.find((x) => x.id === val);
-                          handleFieldChange("selectedToolingId", val);
-                          handleFieldChange("selectedToolingName", t?.name);
-                          handleFieldChange("toolingProcurementNeeded", false);
-                        }
-                        onMarkUnsaved();
-                      }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-muted/20">
-                        <SelectValue placeholder="Mavjud shtansformani tanlang..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Shtansforma tanlanmagan (Yangi / Standart)</SelectItem>
-                        {availableCustomerTools.map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.id} — {t.name} ({t.format}, {t.location})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={isOperator}
-                      onClick={() => {
-                        setNewToolForm({
-                          name: `${formData.product || "Mahsulot"} Shtansformasi`,
-                          toolType: "Flatbed Die (Штанцформа)",
-                          format: `${formData.width || 700}×${formData.height || 1000} mm`,
-                          cavities: "4-up",
-                          estimatedCost: 65,
-                        });
-                        setIsNewToolingModalOpen(true);
-                      }}
-                      className="h-8 w-full text-xs gap-1.5 border-dashed border-amber-500/60 hover:bg-amber-500/10 text-amber-700 dark:text-amber-300 font-medium cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-amber-600" />
-                      <span>+ Yangi buyurtma berish</span>
-                    </Button>
-                  </div>
-                </div>
-
-                {formData.toolingProcurementNeeded && (
-                  <div className="p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-xs flex items-center justify-between text-amber-900 dark:text-amber-200">
-                    <div className="flex items-center gap-1.5">
-                      <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span>
-                        Pudratchiga yangi shtansforma buyurtmasi kiritildi (Tannarxga: <strong>${formData.toolingProcurementCost || 65}</strong> qo&apos;shiladi).
-                      </span>
-                    </div>
-                    <Badge variant="secondary" className="text-[10px] bg-amber-500/20 text-amber-800 dark:text-amber-300">
-                      Xarid talab qilinadi
-                    </Badge>
-                  </div>
-                )}
               </div>
-            )}
+
+              <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 items-end">
+                <div className="@md:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    Mijozning mavjud shtansformalari
+                  </label>
+                  <Select
+                    value={formData.selectedToolingId || "none"}
+                    disabled={isOperator}
+                    onValueChange={(val) => {
+                      if (val === "none") {
+                        handleFieldChange("selectedToolingId", undefined);
+                        handleFieldChange("selectedToolingName", undefined);
+                        handleFieldChange("toolingProcurementNeeded", false);
+                      } else {
+                        const t = customerTooling.find((x) => x.id === val);
+                        handleFieldChange("selectedToolingId", val);
+                        handleFieldChange("selectedToolingName", t?.name);
+                        handleFieldChange("toolingProcurementNeeded", false);
+                      }
+                      onMarkUnsaved();
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs bg-muted/20">
+                      <SelectValue placeholder="Mavjud shtansformani tanlang..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Shtansforma tanlanmagan (Yangi / Standart)</SelectItem>
+                      {availableCustomerTools.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.id} — {t.name} ({t.format}, {t.location})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isOperator}
+                    onClick={() => {
+                      onSwitchTab?.("prepress-tooling");
+                    }}
+                    className="h-8 w-full text-xs gap-1.5 border-dashed border-amber-500/60 hover:bg-amber-500/10 text-amber-700 dark:text-amber-300 font-medium cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-amber-600" />
+                    <span>+ Jihozlar / Prepress bo&apos;limi</span>
+                  </Button>
+                </div>
+              </div>
+
+              {formData.toolingProcurementNeeded && (
+                <div className="p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-xs flex items-center justify-between text-amber-900 dark:text-amber-200">
+                  <div className="flex items-center gap-1.5">
+                    <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>
+                      Pudratchiga yangi shtansforma buyurtmasi kiritildi (Tannarxga: <strong>${formData.toolingProcurementCost || 65}</strong> qo&apos;shiladi).
+                    </span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] bg-amber-500/20 text-amber-800 dark:text-amber-300">
+                    Xarid talab qilinadi
+                  </Badge>
+                </div>
+              )}
+            </div>
 
             {/* Drill Hole Specifications */}
             <div className="pt-2.5 space-y-2 border-t border-border">

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useMemo, useEffect } from "react";
 import {
@@ -12,6 +12,7 @@ import {
   Sparkles,
   LayoutTemplate,
   Layers,
+  Stamp,
   ChevronDown,
   ChevronUp,
   RotateCcw,
@@ -1445,16 +1446,28 @@ export function SizeMatrixCard({
             </div>
 
             {onSwitchTab && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => onSwitchTab(impositionTabKey)}
-                className="h-7 px-2.5 text-xs gap-1.5 font-medium text-primary cursor-pointer"
-              >
-                <LayoutTemplate className="w-3.5 h-3.5" />
-                <span>{impositionLabel || "Spusk / Qoliplarga bo'lish (Imposition)"}</span>
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSwitchTab("prepress-tooling")}
+                  className="h-7 px-2.5 text-xs gap-1.5 font-medium text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer"
+                >
+                  <Stamp className="w-3.5 h-3.5" />
+                  <span>Prepress & Jihozlar</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onSwitchTab(impositionTabKey)}
+                  className="h-7 px-2.5 text-xs gap-1.5 font-medium text-primary cursor-pointer"
+                >
+                  <LayoutTemplate className="w-3.5 h-3.5" />
+                  <span>{impositionLabel || "Spusk / Qoliplarga bo'lish (Imposition)"}</span>
+                </Button>
+              </div>
             )}
           </div>
         </div>

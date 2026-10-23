@@ -84,11 +84,18 @@ export function FinancialsTab({
   const paperTotalCost = bomTotalCost > 0 ? bomTotalCost : calculatedPaperCost;
   const paperWeightKg = hasQty ? (printPlan?.totalPaperWeightKg || Number(((requiredSheets * 0.7 * 150) / 1000).toFixed(1))) : 0;
 
-  // B. CTP Qoliplari (Plates & Prepress)
+  // B. CTP Qoliplari va Texnologik Jihozlar (Plates, Dies & Clichés)
   const ctpPlatesCount = hasQty ? (printPlan?.totalCtpPlates || 0) : 0;
   const plateStockItem = warehouseStock.find((s) => s.category === "Inks & Plates" && s.unit === "pcs");
   const plateUnitPrice = plateStockItem?.unitPriceUsd || (ctpPlatesCount > 0 ? 7.20 : 0);
-  const platesTotalCost = hasQty ? Number((ctpPlatesCount * plateUnitPrice).toFixed(2)) : 0;
+  const calculatedPlatesCost = hasQty ? Number((ctpPlatesCount * plateUnitPrice).toFixed(2)) : 0;
+
+  const toolingItems = formData?.toolingItems || [];
+  const toolingCostFromItems = toolingItems.reduce(
+    (sum, t) => sum + (t.actualCost !== undefined ? t.actualCost : t.estimatedCost || 0),
+    0
+  );
+  const platesTotalCost = toolingCostFromItems > 0 ? toolingCostFromItems : calculatedPlatesCost;
 
   // C. Kraska va Kimyoviy materiallar (Inks & Chemistry)
   const totalInksCount = hasQty ? (printPlan?.totalUniqueInks || 0) : 0;
@@ -455,18 +462,20 @@ To'lov shartlari: 50% avans to'lovi, 50% mahsulot tayyor bo'lgach.`;
                 </div>
               </div>
 
-              {/* 2. CTP Formalar */}
+              {/* 2. CTP Formalar & Jihozlar */}
               <div className="p-3 flex flex-wrap items-center justify-between gap-2 hover:bg-muted/20 transition-colors">
                 <div className="space-y-0.5">
                   <div className="font-medium text-foreground flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                    <span>CTP Qoliplari (Thermal Plates)</span>
+                    <span>CTP Formalar & Texnologik Jihozlar</span>
                     <span className="text-muted-foreground font-normal">
-                      ({printPlan?.colorNotation || "4+0"} rang)
+                      ({toolingItems.length > 0 ? `${toolingItems.length} ta jihoz` : `${printPlan?.colorNotation || "4+0"} rang`})
                     </span>
                   </div>
                   <div className="text-[11px] text-muted-foreground font-mono">
-                    {ctpPlatesCount} dona qolip • {formatMoney(plateUnitPrice, currency)}/dona
+                    {toolingItems.length > 0
+                      ? toolingItems.map((t) => `${t.name} (${t.quantity} ${t.unit})`).join(" • ")
+                      : `${ctpPlatesCount} dona qolip • ${formatMoney(plateUnitPrice, currency)}/dona`}
                   </div>
                 </div>
                 <div className="text-right">

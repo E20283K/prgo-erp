@@ -24,6 +24,7 @@ import {
   Disc,
   Package,
   FlaskConical,
+  Stamp,
   X,
   RotateCw,
   MoreVertical,
@@ -96,8 +97,104 @@ import { PackagingDialog } from "./dialogs/PackagingDialog";
 import { BoxLabelPrintModal } from "./dialogs/BoxLabelPrintModal";
 import { SaveSpecDialog } from "./dialogs/SaveSpecDialog";
 import { BomItem, RECIPE_BOM_MAP } from "../BomMaterialsGrid";
-import { WorkOrderPackagingSummary } from "./types";
+import { WorkOrderPackagingSummary, WorkOrderToolingItem } from "./types";
+import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
 import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEngine";
+
+function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string): WorkOrderToolingItem[] {
+  if (data.toolingItems && data.toolingItems.length > 0) {
+    return data.toolingItems;
+  }
+
+  const items: WorkOrderToolingItem[] = [];
+  const dept = data.department || "Offset";
+
+  // 1. CTP metall formalar
+  if (dept === "Offset") {
+    items.push({
+      id: `TL-CTP-${Date.now()}`,
+      category: "ctp_plates",
+      name: `${docNo || "WO"} CTP Metall Formalar Komplekti`,
+      specDetails: `Format: ${data.pressSheetW || 700}×${data.pressSheetH || 1000} mm (CMYK 4 rang)`,
+      quantity: 4,
+      unit: "dona",
+      estimatedCost: 300000,
+      currency: data.currency || "UZS",
+      status: "Draft",
+      createdAt: new Date().toISOString(),
+    });
+  } else if (dept === "Flexo") {
+    items.push({
+      id: `TL-FLX-${Date.now()}`,
+      category: "flexo_polymer",
+      name: `${docNo || "WO"} Flexo Polimer Formalar`,
+      specDetails: `Digital Plate 1.14mm, ${data.flexoColors || 4} rang`,
+      quantity: data.flexoColors || 4,
+      unit: "dona",
+      estimatedCost: 450000,
+      currency: data.currency || "UZS",
+      status: "Draft",
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  // 2. Kesish shtampi (agar shaklli kesim yoki die-cut bo'lsa)
+  if (
+    data.shapeType === "custom_die" ||
+    data.shapeType === "carton_box" ||
+    data.shapeType === "circle" ||
+    data.shapeType === "oval" ||
+    data.cornerType === "Die-cut" ||
+    data.selectedToolingId
+  ) {
+    items.push({
+      id: `TL-DIE-${Date.now() + 1}`,
+      category: "die_cutting",
+      name: data.selectedToolingName || `${data.product || "Mahsulot"} Kesish Shtampi (Flatbed Die)`,
+      specDetails: `Razmer: ${data.width || 700}×${data.height || 1000} mm, 23.8mm pichoq`,
+      quantity: 1,
+      unit: "dona",
+      estimatedCost: data.toolingProcurementCost || 800000,
+      currency: data.currency || "UZS",
+      status: data.selectedToolingId ? "Ready" : "Draft",
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  // 3. Folga klishesi
+  if (data.embellishment?.toLowerCase().includes("foil") || data.coating?.toLowerCase().includes("foil")) {
+    items.push({
+      id: `TL-FOIL-${Date.now() + 2}`,
+      category: "foil_cliche",
+      name: `${data.product || "Mahsulot"} Zarhal (Hot Foil) Klishesi`,
+      specDetails: "Material: Latun (Jez 3mm CNC gravirovka)",
+      quantity: 1,
+      unit: "dona",
+      estimatedCost: 350000,
+      currency: data.currency || "UZS",
+      status: "Draft",
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  // 4. Kongrev klishesi
+  if (data.embellishment?.toLowerCase().includes("emboss") || data.coating?.toLowerCase().includes("emboss")) {
+    items.push({
+      id: `TL-EMB-${Date.now() + 3}`,
+      category: "emboss_cliche",
+      name: `${data.product || "Mahsulot"} Kongrev (Embossing) Klishesi`,
+      specDetails: "Material: Magniy 4mm (Matritsa + Patriysa)",
+      quantity: 1,
+      unit: "dona",
+      estimatedCost: 300000,
+      currency: data.currency || "UZS",
+      status: "Draft",
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return items;
+}
 
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
@@ -212,6 +309,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     milestones: data.milestones || [],
     parentWorkOrderId: data.parentWorkOrderId || data.linkedWoId || undefined,
     isReorder: data.isReorder ?? Boolean(data.parentWorkOrderId),
+    toolingItems: data.toolingItems || getInitialToolingItems(data, docNo || tab.id),
   });
 
   const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(() => {
@@ -1360,6 +1458,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               ...(isOffset ? [{ id: "layout", label: tOrder("tabPlanning"), icon: LayoutTemplate }] : []),
               ...(isFlexo ? [{ id: "flexo", label: "Flexo Imposition", icon: Disc }] : []),
               {
+                id: "prepress-tooling",
+                label: tOrder("tabPrepressTooling") || "Prepress & Jihozlar",
+                icon: Stamp,
+                badge: (formData.toolingItems || []).length > 0 ? `${(formData.toolingItems || []).length} ta` : null,
+                badgeClassName: (formData.toolingItems || []).some((t) => t.status === "Draft" || t.status === "Ordered")
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold"
+                  : undefined,
+              },
+              {
                 id: "materials",
                 label: tOrder("tabMaterials"),
                 icon: Boxes,
@@ -1534,6 +1641,28 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 />
               </TabsContent>
             )}
+
+            {/* Tab: Prepress & Tooling (CTP, Klishe, Shtamp) */}
+            <TabsContent value="prepress-tooling" className="flex-1 overflow-hidden p-0 m-0 h-full flex flex-col data-[state=inactive]:hidden">
+              <PrepressToolingTab
+                formData={formData}
+                docNo={data.docNo || tab.id}
+                isOperator={isOperator}
+                onUpdateTooling={(newItems) => {
+                  handleFieldChange("toolingItems", newItems);
+                  const totalCost = newItems.reduce(
+                    (sum, it) => sum + (it.actualCost !== undefined ? it.actualCost : it.estimatedCost || 0),
+                    0
+                  );
+                  handleFieldChange("toolingProcurementCost", totalCost);
+                  handleFieldChange(
+                    "toolingProcurementNeeded",
+                    newItems.some((it) => it.status === "Draft" || it.status === "Ordered")
+                  );
+                }}
+                onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+              />
+            </TabsContent>
 
             {/* Tab 3: Materials BOM */}
             <MaterialsTab

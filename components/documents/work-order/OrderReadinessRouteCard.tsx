@@ -77,6 +77,7 @@ export function OrderReadinessRouteCard({
     toggleReadinessCheck,
     setProductionStage,
     openTab,
+    setLevel3Tab,
     setModule,
     upsertProductionQueueItem,
   } = useWorkspaceStore();
@@ -720,6 +721,19 @@ export function OrderReadinessRouteCard({
                       <div className="pt-1.5 border-t border-border/60 text-[10px] text-muted-foreground flex items-center justify-between">
                         <span>{t("auditVerified", { name: audit.verifiedBy, time: audit.verifiedAt || "" })}</span>
                       </div>
+                    )}
+
+                    {(item.key === "platesReady" || item.key === "toolingReady") && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setLevel3Tab(workOrderId, "prepress-tooling")}
+                        className="w-full h-6 text-[10px] gap-1 cursor-pointer font-medium mt-1 text-primary border-primary/30 hover:bg-primary/10"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Prepress & Jihozlarni ochish</span>
+                      </Button>
                     )}
                   </PopoverContent>
                 </Popover>

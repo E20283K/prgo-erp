@@ -149,6 +149,7 @@
     "docNo": "Belge No",
     "created": "Oluşturulma",
     "tabOverview": "Genel",
+    "tabPrepressTooling": "Baskı Öncesi & Kalıplar",
     "tabMaterials": "Malzeme (BOM)",
     "tabOperations": "Rota",
     "tabTimeline": "Vardiya",

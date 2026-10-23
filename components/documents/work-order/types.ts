@@ -1,4 +1,4 @@
-﻿export {
+export {
   type WorkOrderDepartment,
   WO_DEPT_PREFIXES,
   WO_PREFIX_TO_DEPT,
@@ -476,6 +476,44 @@ export type ProductFoldType = "half_vertical" | "half_horizontal" | "tri_c" | "t
 export type ProductBoxType = "tuck_end" | "snap_lock" | "auto_bottom" | "sleeve";
 export type ProductCustomShape = "arch" | "star" | "hexagon" | "pillow" | "vector_svg";
 
+export type ToolingCategory =
+  | "ctp_plates"
+  | "die_cutting"
+  | "foil_cliche"
+  | "emboss_cliche"
+  | "varnish_plate"
+  | "flexo_polymer";
+
+export type ToolingStatus =
+  | "Draft"
+  | "Ordered"
+  | "In_Production"
+  | "Ready"
+  | "Delivered"
+  | "Mounted";
+
+export interface WorkOrderToolingItem {
+  id: string;
+  category: ToolingCategory;
+  name: string;
+  specDetails: string;
+  quantity: number;
+  unit: string;
+  supplierId?: string;
+  supplierName?: string;
+  purchaseOrderId?: string;
+  purchaseOrderNo?: string;
+  estimatedCost: number;
+  actualCost?: number;
+  currency: string;
+  status: ToolingStatus;
+  isRemake?: boolean;
+  remakeReason?: string;
+  faultParty?: "none" | "prepress" | "production" | "client" | "supplier";
+  jobTicketPrinted?: boolean;
+  createdAt: string;
+}
+
 export interface WorkOrderFormData {
   customer: string;
   product: string;
@@ -589,6 +627,7 @@ export interface WorkOrderFormData {
   /** Per-SKU artwork files (front + back PDF/SVG). Key: SizeDistribution.id */
   skuArtworks?: SkuArtwork[];
   packagingData?: WorkOrderPackagingSummary;
+  toolingItems?: WorkOrderToolingItem[];
 }
 
 export const FLOOR_OPERATORS = [
