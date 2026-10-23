@@ -245,8 +245,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       dataRows = plants as unknown as SettingsRow[];
     } else if (type === "users") {
       cols = [
-        { id: "id", title: "User ID", width: 90, icon: GridColumnIcon.HeaderReference },
-        { id: "fullName", title: "Employee Name", width: 190, icon: GridColumnIcon.HeaderString },
+        { id: "fullName", title: "Employee Name", width: 220, icon: GridColumnIcon.HeaderString },
         { id: "email", title: "Login / Email", width: 200, icon: GridColumnIcon.HeaderString },
         { id: "role", title: "Position / Role", width: 200, icon: GridColumnIcon.HeaderLookup },
         { id: "department", title: "Department", width: 165, icon: GridColumnIcon.HeaderString },
