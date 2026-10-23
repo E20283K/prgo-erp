@@ -201,9 +201,9 @@ export function PalletReportDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[680px] p-0 text-xs gap-0 overflow-hidden border border-border">
+      <DialogContent className="sm:max-w-[680px] w-full max-h-[90vh] flex flex-col p-0 text-xs gap-0 overflow-hidden border border-border shadow-2xl">
         {/* Header */}
-        <DialogHeader className="p-3.5 bg-muted/40 border-b border-border">
+        <DialogHeader className="shrink-0 p-3.5 bg-muted/40 border-b border-border">
           <div className="flex items-center justify-between pr-8">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-md bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
@@ -235,7 +235,7 @@ export function PalletReportDialog({
         </DialogHeader>
 
         {/* Body Content */}
-        <div className="p-4 space-y-4 max-h-[82vh] overflow-y-auto">
+        <div className="p-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
           {/* Cascade Context Banner (Previous Step Good Output Link) */}
           {previousOp && (
             <div className="p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/20 flex items-center justify-between">
@@ -568,7 +568,7 @@ export function PalletReportDialog({
         </div>
 
         {/* Footer Actions */}
-        <DialogFooter className="p-3 bg-muted/30 border-t border-border flex flex-wrap items-center justify-between gap-2">
+        <DialogFooter className="m-0 p-3 sm:p-3 bg-muted/40 border-t border-border flex sm:flex-row items-center justify-between gap-2 shrink-0">
           <Button
             type="button"
             variant="outline"
@@ -579,7 +579,7 @@ export function PalletReportDialog({
             Bekor qilish
           </Button>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 shrink-0">
             <Button
               type="button"
               variant="outline"

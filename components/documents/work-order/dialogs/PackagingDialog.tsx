@@ -456,7 +456,7 @@ export function PackagingDialog({
         </div>
 
         {/* Footer */}
-        <DialogFooter className="p-3 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between">
+        <DialogFooter className="m-0 p-3 sm:p-3 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between">
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
