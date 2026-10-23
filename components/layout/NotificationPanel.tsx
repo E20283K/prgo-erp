@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useEffect, useMemo } from "react";
 import {
   Bell,
   CheckCheck,
@@ -10,8 +10,12 @@ import {
   CheckCircle2,
   Info,
   XCircle,
+  SlidersHorizontal,
+  CircleDot,
+  Check,
+  ChevronLeft,
+  Layers,
   ArrowRight,
-  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -31,7 +35,6 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
-  AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -51,300 +54,366 @@ function relativeTime(ts: number, t: any): string {
   return t("daysAgo", { days });
 }
 
-function fullDate(ts: number): string {
-  return new Date(ts).toLocaleString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-const SEVERITY_META: Record<
+const SEVERITY_CONFIG: Record<
   NotifSeverity,
   {
     icon: React.ElementType;
     iconCls: string;
-    ringCls: string;
-    dotCls: string;
-    label: string;
-    mediaBg: string;
+    borderAccent?: string;
   }
 > = {
   error: {
     icon: XCircle,
-    iconCls: "text-red-500 dark:text-red-400",
-    ringCls: "border-l-red-500 dark:border-l-red-400",
-    dotCls: "bg-red-500",
-    label: "Error",
-    mediaBg: "bg-red-100 dark:bg-red-950",
+    iconCls: "text-rose-500 dark:text-rose-400",
+    borderAccent: "border-l-rose-500",
   },
   warning: {
     icon: AlertTriangle,
     iconCls: "text-amber-500 dark:text-amber-400",
-    ringCls: "border-l-amber-500 dark:border-l-amber-400",
-    dotCls: "bg-amber-500",
-    label: "Warning",
-    mediaBg: "bg-amber-100 dark:bg-amber-950",
+    borderAccent: "border-l-amber-500",
   },
   success: {
     icon: CheckCircle2,
     iconCls: "text-emerald-500 dark:text-emerald-400",
-    ringCls: "border-l-emerald-500 dark:border-l-emerald-400",
-    dotCls: "bg-emerald-500",
-    label: "Success",
-    mediaBg: "bg-emerald-100 dark:bg-emerald-950",
   },
   info: {
     icon: Info,
     iconCls: "text-blue-500 dark:text-blue-400",
-    ringCls: "border-l-blue-500 dark:border-l-blue-400",
-    dotCls: "bg-blue-500",
-    label: "Info",
-    mediaBg: "bg-blue-100 dark:bg-blue-950",
   },
 };
-
-// ─── Notification Detail AlertDialog ─────────────────────────────────────────
-
-interface NotifDetailDialogProps {
-  notif: AppNotification | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onDismiss: (id: string) => void;
-  onNavigate: (module: string, subModule: string) => void;
-}
-
-function NotifDetailDialog({
-  notif,
-  open,
-  onOpenChange,
-  onDismiss,
-  onNavigate,
-}: NotifDetailDialogProps) {
-  if (!notif) return null;
-
-  const meta = SEVERITY_META[notif.severity];
-  const Icon = meta.icon;
-
-  const handleNavigate = () => {
-    if (notif.link) {
-      onNavigate(notif.link.module, notif.link.subModule);
-    }
-    onOpenChange(false);
-  };
-
-  const handleDismiss = () => {
-    onDismiss(notif.id);
-    onOpenChange(false);
-  };
-
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="max-w-sm">
-        <AlertDialogHeader>
-          {/* Severity icon badge */}
-          <AlertDialogMedia className={cn(meta.mediaBg)}>
-            <Icon className={cn("w-5 h-5", meta.iconCls)} />
-          </AlertDialogMedia>
-
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <AlertDialogTitle className="text-sm leading-snug">
-                {notif.title}
-              </AlertDialogTitle>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[9px] font-semibold uppercase tracking-wider h-4 px-1.5 shrink-0",
-                  notif.severity === "error" &&
-                    "border-red-300 text-red-600 dark:border-red-800 dark:text-red-400",
-                  notif.severity === "warning" &&
-                    "border-amber-300 text-amber-600 dark:border-amber-800 dark:text-amber-400",
-                  notif.severity === "success" &&
-                    "border-emerald-300 text-emerald-600 dark:border-emerald-800 dark:text-emerald-400",
-                  notif.severity === "info" &&
-                    "border-blue-300 text-blue-600 dark:border-blue-800 dark:text-blue-400",
-                )}
-              >
-                {meta.label}
-              </Badge>
-            </div>
-            <AlertDialogDescription className="text-xs leading-relaxed">
-              {notif.description ?? "No additional details available for this notification."}
-            </AlertDialogDescription>
-          </div>
-        </AlertDialogHeader>
-
-        {/* Metadata row */}
-        <div className="px-4 -mt-1 mb-1">
-          <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono bg-muted/40 rounded px-2 py-1.5 border border-border/50">
-            <span>Received</span>
-            <span>{fullDate(notif.timestamp)}</span>
-          </div>
-          {notif.link && (
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono bg-muted/40 rounded px-2 py-1.5 border border-border/50 mt-1">
-              <span>Module</span>
-              <span className="text-primary capitalize">
-                {notif.link.module} / {notif.link.subModule}
-              </span>
-            </div>
-          )}
-        </div>
-
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={handleDismiss} variant="outline" size="sm">
-            Dismiss
-          </AlertDialogCancel>
-          {notif.link ? (
-            <AlertDialogAction
-              size="sm"
-              onClick={handleNavigate}
-              className="gap-1.5"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Open in {notif.link.module}
-            </AlertDialogAction>
-          ) : (
-            <AlertDialogAction size="sm" onClick={() => onOpenChange(false)}>
-              Got it
-            </AlertDialogAction>
-          )}
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
 
 // ─── Notification List Item ───────────────────────────────────────────────────
 
 interface NotifItemProps {
   notif: AppNotification;
-  onDismiss: (id: string) => void;
-  onExpand: (notif: AppNotification) => void;
+  onOpen: (notif: AppNotification) => void;
+  onToggleRead: (id: string, e: React.MouseEvent) => void;
+  onDismiss: (id: string, e: React.MouseEvent) => void;
 }
 
-function NotifItem({ notif, onDismiss, onExpand }: NotifItemProps) {
+function NotifItem({ notif, onOpen, onToggleRead, onDismiss }: NotifItemProps) {
   const t = useTranslations("NotificationPanel");
-  const meta = SEVERITY_META[notif.severity];
-  const Icon = meta.icon;
+  const cfg = SEVERITY_CONFIG[notif.severity] || SEVERITY_CONFIG.info;
+  const Icon = cfg.icon;
+
+  const categoryLabel = useMemo(() => {
+    switch (notif.category) {
+      case "production":
+        return t("catProduction");
+      case "warehouse":
+        return t("catWarehouse");
+      case "finance":
+        return t("catFinance");
+      case "crm":
+        return t("catCrm");
+      default:
+        return t("catSystem");
+    }
+  }, [notif.category, t]);
 
   return (
-    <button
-      onClick={() => onExpand(notif)}
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(notif)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(notif);
+        }
+      }}
       className={cn(
-        "group relative w-full text-left flex gap-2.5 px-3 py-2.5 border-l-2 transition-colors",
-        "hover:bg-muted/50 focus-visible:outline-none focus-visible:bg-muted/50",
-        notif.read ? "border-l-border/40 opacity-60" : meta.ringCls,
+        "group relative w-full text-left flex items-start gap-2.5 px-3 py-2.5 transition-colors cursor-pointer select-none border-b border-border/40 last:border-b-0",
+        "hover:bg-muted/40 focus-visible:outline-none focus-visible:bg-muted/50",
+        notif.read ? "bg-background opacity-65" : "bg-muted/15 font-normal"
       )}
     >
-      {/* Severity icon */}
+      {/* Severity Icon */}
       <div className="mt-0.5 shrink-0">
-        <Icon className={cn("w-3.5 h-3.5", meta.iconCls)} />
+        <Icon className={cn("size-3.5", cfg.iconCls)} />
       </div>
 
-      {/* Body */}
-      <div className="flex-1 min-w-0 space-y-0.5">
-        <div className="flex items-start justify-between gap-2">
-          <p
+      {/* Main Content */}
+      <div className="flex-1 min-w-0 pr-12 space-y-1">
+        {/* Top row: Entity code badge + Title */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {notif.entityCode && (
+            <span className="font-mono text-[9px] font-semibold px-1 py-0.2 rounded bg-muted border border-border/70 text-foreground shrink-0 leading-tight">
+              {notif.entityCode}
+            </span>
+          )}
+          <span
             className={cn(
-              "text-[11px] font-medium leading-snug",
-              notif.read ? "text-muted-foreground" : "text-foreground",
+              "text-xs leading-snug truncate",
+              notif.read ? "text-muted-foreground font-normal" : "text-foreground font-medium"
             )}
           >
             {notif.title}
-          </p>
-          {/* Dismiss — stops propagation so it doesn't open detail */}
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDismiss(notif.id);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation();
-                onDismiss(notif.id);
-              }
-            }}
-            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-muted text-muted-foreground hover:text-foreground"
-            aria-label="Dismiss notification"
-          >
-            <X className="w-3 h-3" />
           </span>
         </div>
 
+        {/* Description snippet */}
         {notif.description && (
-          <p className="text-[10px] text-muted-foreground leading-snug line-clamp-1 pr-2">
+          <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
             {notif.description}
           </p>
         )}
 
-        <div className="flex items-center justify-between pt-0.5">
-          <span className="font-mono text-[10px] text-muted-foreground/70">
-            {relativeTime(notif.timestamp, t)}
-          </span>
-          <span className="text-[10px] text-primary flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            Details <ArrowRight className="w-2.5 h-2.5" />
-          </span>
+        {/* Meta row: Category · Timestamp */}
+        <div className="flex items-center gap-1.5 pt-0.5 text-[10px] text-muted-foreground/75">
+          <span className="font-medium text-foreground/80">{categoryLabel}</span>
+          <span>·</span>
+          <span className="font-mono">{relativeTime(notif.timestamp, t)}</span>
+          {notif.targetTab && (
+            <span className="text-[10px] text-primary hidden group-hover:inline-flex items-center gap-0.5 ml-auto">
+              {t("openDocument")} <ArrowRight className="size-2.5" />
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Unread dot */}
-      {!notif.read && (
-        <span
-          className={cn(
-            "absolute top-2 right-2 w-1.5 h-1.5 rounded-full shrink-0 pointer-events-none",
-            meta.dotCls,
-          )}
-        />
-      )}
-    </button>
+      {/* Action Slot (Top-Right): Quiet dot in idle, Quick action buttons on hover */}
+      <div
+        className="absolute top-2.5 right-2.5 flex items-center justify-end"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Idle unread indicator dot */}
+        {!notif.read && (
+          <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 transition-opacity group-hover:hidden pointer-events-none" />
+        )}
+
+        {/* Hover action buttons (clean 18px icons, zero overlap) */}
+        <div className="hidden group-hover:flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => onToggleRead(notif.id, e)}
+                  className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+                  aria-label={notif.read ? t("markUnread") : t("markRead")}
+                >
+                  {notif.read ? <CircleDot className="size-3" /> : <Check className="size-3 text-primary" />}
+                </Button>
+              }
+            />
+            <TooltipContent side="top" className="text-[10px]">
+              {notif.read ? t("markUnread") : t("markRead")}
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => onDismiss(notif.id, e)}
+                  className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
+                  aria-label={t("dismiss")}
+                >
+                  <X className="size-3" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top" className="text-[10px]">
+              {t("dismiss")}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Inline Notification Rules Settings View ─────────────────────────────────
+
+interface RulesSettingsViewProps {
+  onBack: () => void;
+}
+
+function RulesSettingsView({ onBack }: RulesSettingsViewProps) {
+  const t = useTranslations("NotificationPanel");
+  const { notificationRules, updateNotificationRules } = useWorkspaceStore();
+
+  const handleToggle = (key: keyof typeof notificationRules) => {
+    updateNotificationRules({ [key]: !notificationRules[key] });
+  };
+
+  return (
+    <div className="p-3 space-y-3">
+      <div className="flex items-center justify-between border-b border-border pb-2">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground font-medium transition-colors"
+        >
+          <ChevronLeft className="size-3.5" />
+          <span>{t("rulesTitle")}</span>
+        </button>
+      </div>
+
+      <p className="text-[11px] text-muted-foreground leading-relaxed">
+        {t("rulesDesc")}
+      </p>
+
+      <div className="space-y-2 pt-1">
+        <label className="flex items-start gap-2.5 p-2 rounded border border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={notificationRules.woDeadlineEnabled}
+            onChange={() => handleToggle("woDeadlineEnabled")}
+            className="mt-0.5 rounded border-border text-primary focus:ring-primary size-3.5"
+          />
+          <div className="space-y-0.5">
+            <span className="font-medium text-foreground block">{t("ruleWoDeadline")}</span>
+            <span className="text-[10px] text-muted-foreground block font-mono">
+              7 kun qolganda yoki muddati o'tganda (WOOF)
+            </span>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-2.5 p-2 rounded border border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={notificationRules.stockLowEnabled}
+            onChange={() => handleToggle("stockLowEnabled")}
+            className="mt-0.5 rounded border-border text-primary focus:ring-primary size-3.5"
+          />
+          <div className="space-y-0.5">
+            <span className="font-medium text-foreground block">{t("ruleStockLow")}</span>
+            <span className="text-[10px] text-muted-foreground block font-mono">
+              Qoldiq minimal nuqtadan (reorder point) tushganda
+            </span>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-2.5 p-2 rounded border border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={notificationRules.financeDocsEnabled}
+            onChange={() => handleToggle("financeDocsEnabled")}
+            className="mt-0.5 rounded border-border text-primary focus:ring-primary size-3.5"
+          />
+          <div className="space-y-0.5">
+            <span className="font-medium text-foreground block">{t("ruleFinanceDocs")}</span>
+            <span className="text-[10px] text-muted-foreground block font-mono">
+              Schet-fakturalar (SF) va rasmiylashtirilgan to'lovlar
+            </span>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-2.5 p-2 rounded border border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={notificationRules.woStatusEnabled}
+            onChange={() => handleToggle("woStatusEnabled")}
+            className="mt-0.5 rounded border-border text-primary focus:ring-primary size-3.5"
+          />
+          <div className="space-y-0.5">
+            <span className="font-medium text-foreground block">{t("ruleWoStatus")}</span>
+            <span className="text-[10px] text-muted-foreground block font-mono">
+              Yangi buyurtmalar va ishlab chiqarish bosqichlari
+            </span>
+          </div>
+        </label>
+      </div>
+    </div>
   );
 }
 
 // ─── Main Notification Panel ──────────────────────────────────────────────────
 
 export function NotificationPanel() {
-  const tNotif = useTranslations("NotificationPanel");
+  const t = useTranslations("NotificationPanel");
   const {
     notifications,
     isNotifPanelOpen,
     setNotifPanelOpen,
-    dismissNotification,
+    loadNotifications,
+    markNotificationRead,
+    toggleNotificationRead,
     markAllRead,
+    dismissNotification,
     clearAllNotifications,
+    openTab,
     setActiveModule,
     setModule,
   } = useWorkspaceStore();
 
-  const [detailNotif, setDetailNotif] = useState<AppNotification | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<"all" | "unread" | "critical">("all");
+  const [showSettings, setShowSettings] = useState(false);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
-  const unread = notifications.filter((n) => !n.read);
-  const read = notifications.filter((n) => n.read);
+  // Background polling: har 60 soniyada yangilab turish
+  useEffect(() => {
+    loadNotifications();
+    const timer = setInterval(() => {
+      loadNotifications();
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [loadNotifications]);
 
-  const handleExpand = useCallback((notif: AppNotification) => {
-    setDetailNotif(notif);
-    setDetailOpen(true);
-  }, []);
-
-  const handleNavigate = useCallback(
-    (module: string, subModule: string) => {
-      setActiveModule(module);
-      setModule(module, subModule);
-      setNotifPanelOpen(false);
-      setDetailOpen(false);
-    },
-    [setActiveModule, setModule, setNotifPanelOpen],
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !n.read).length,
+    [notifications]
   );
+
+  const filteredNotifications = useMemo(() => {
+    if (activeFilter === "unread") {
+      return notifications.filter((n) => !n.read);
+    }
+    if (activeFilter === "critical") {
+      return notifications.filter((n) => n.severity === "error" || n.severity === "warning");
+    }
+    return notifications;
+  }, [notifications, activeFilter]);
+
+  // 1-Klikda Hujjatni Ochish (Deep-Linking)
+  const handleOpenNotification = useCallback(
+    (notif: AppNotification) => {
+      // 1. O'qilgan deb belgilash
+      markNotificationRead(notif.id, true);
+      setNotifPanelOpen(false);
+
+      // 2. To'g'ridan-to'g'ri Workspace Document Tab ochish
+      if (notif.targetTab) {
+        openTab(notif.targetTab);
+        return;
+      }
+
+      // 3. Fallback: modul va submodulga o'tish
+      if (notif.link) {
+        setActiveModule(notif.link.module);
+        setModule(notif.link.module, notif.link.subModule);
+      }
+    },
+    [markNotificationRead, setNotifPanelOpen, openTab, setActiveModule, setModule]
+  );
+
+  const handleToggleRead = useCallback(
+    (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      toggleNotificationRead(id);
+    },
+    [toggleNotificationRead]
+  );
+
+  const handleDismiss = useCallback(
+    (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      dismissNotification(id);
+    },
+    [dismissNotification]
+  );
+
+  const handleConfirmClear = () => {
+    clearAllNotifications();
+    setConfirmClearOpen(false);
+  };
 
   return (
     <>
-      {/* ── Popover tray (panel list) ── */}
       <Popover open={isNotifPanelOpen} onOpenChange={setNotifPanelOpen}>
         <Tooltip>
           <TooltipTrigger
@@ -355,9 +424,9 @@ export function NotificationPanel() {
                     variant="ghost"
                     size="sm"
                     className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground relative"
-                    aria-label={`${tNotif("title")}${unreadCount > 0 ? ` (${unreadCount})` : ""}`}
+                    aria-label={`${t("title")}${unreadCount > 0 ? ` (${unreadCount})` : ""}`}
                   >
-                    <Bell className="w-3.5 h-3.5" />
+                    <Bell className="size-3.5" />
                     {unreadCount > 0 && (
                       <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 flex items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground px-0.5 leading-none select-none pointer-events-none">
                         {unreadCount > 9 ? "9+" : unreadCount}
@@ -369,16 +438,21 @@ export function NotificationPanel() {
             }
           />
           <TooltipContent side="bottom" className="text-[11px]">
-            {tNotif("title")}{unreadCount > 0 ? ` (${unreadCount})` : ""}
+            {t("title")}{unreadCount > 0 ? ` (${unreadCount})` : ""}
           </TooltipContent>
         </Tooltip>
 
-        <PopoverContent side="bottom" align="end" sideOffset={6} className="w-[340px] p-0 gap-0">
+        <PopoverContent
+          side="bottom"
+          align="end"
+          sideOffset={6}
+          className="w-[380px] p-0 gap-0 shadow-lg border-border bg-card overflow-hidden"
+        >
           {/* Header */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/20">
             <div className="flex items-center gap-2">
-              <Bell className="w-3.5 h-3.5 text-foreground" />
-              <span className="text-xs font-semibold text-foreground">{tNotif("title")}</span>
+              <Bell className="size-3.5 text-foreground" />
+              <span className="text-xs font-semibold text-foreground">{t("title")}</span>
               {unreadCount > 0 && (
                 <Badge
                   variant="secondary"
@@ -388,7 +462,27 @@ export function NotificationPanel() {
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-0.5">
+
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant={showSettings ? "secondary" : "ghost"}
+                      size="sm"
+                      onClick={() => setShowSettings((prev) => !prev)}
+                      className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                      aria-label={t("rulesTitle")}
+                    >
+                      <SlidersHorizontal className="size-3" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom" className="text-[10px]">
+                  {t("rulesTitle")}
+                </TooltipContent>
+              </Tooltip>
+
               {unreadCount > 0 && (
                 <Tooltip>
                   <TooltipTrigger
@@ -396,17 +490,20 @@ export function NotificationPanel() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={markAllRead}
+                        onClick={() => markAllRead()}
                         className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                        aria-label={tNotif("markAllRead")}
+                        aria-label={t("markAllRead")}
                       >
-                        <CheckCheck className="w-3.5 h-3.5" />
+                        <CheckCheck className="size-3.5" />
                       </Button>
                     }
                   />
-                  <TooltipContent side="bottom" className="text-[11px]">{tNotif("markAllRead")}</TooltipContent>
+                  <TooltipContent side="bottom" className="text-[10px]">
+                    {t("markAllRead")}
+                  </TooltipContent>
                 </Tooltip>
               )}
+
               {notifications.length > 0 && (
                 <Tooltip>
                   <TooltipTrigger
@@ -414,82 +511,143 @@ export function NotificationPanel() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={clearAllNotifications}
+                        onClick={() => setConfirmClearOpen(true)}
                         className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                        aria-label={tNotif("clearAll")}
+                        aria-label={t("clearAll")}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="size-3" />
                       </Button>
                     }
                   />
-                  <TooltipContent side="bottom" className="text-[11px]">{tNotif("clearAll")}</TooltipContent>
+                  <TooltipContent side="bottom" className="text-[10px]">
+                    {t("clearAll")}
+                  </TooltipContent>
                 </Tooltip>
               )}
             </div>
           </div>
 
-          {/* Body */}
-          {notifications.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
-              <Bell className="w-8 h-8 opacity-20" />
-              <p className="text-[11px]">{tNotif("noNotifications")}</p>
-            </div>
+          {/* Conditional: Settings View or Main Notification List */}
+          {showSettings ? (
+            <RulesSettingsView onBack={() => setShowSettings(false)} />
           ) : (
-            <ScrollArea className="max-h-[420px]">
-              <div className="divide-y divide-border/50">
-                {unread.length > 0 && (
-                  <div>
-                    <div className="px-3 py-1.5 bg-muted/30 border-b border-border/40">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {tNotif("unreadCount", { count: unread.length })}
-                      </span>
-                    </div>
-                    {unread.map((n) => (
-                      <NotifItem key={n.id} notif={n} onDismiss={dismissNotification} onExpand={handleExpand} />
-                    ))}
-                  </div>
-                )}
-                {read.length > 0 && (
-                  <div>
-                    {read.map((n) => (
-                      <NotifItem key={n.id} notif={n} onDismiss={dismissNotification} onExpand={handleExpand} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-          )}
-
-          {/* Footer */}
-          {notifications.length > 0 && (
             <>
-              <Separator />
-              <div className="px-3 py-2 flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  {notifications.length} · {tNotif("unreadCount", { count: unreadCount })}
-                </span>
-                <Button
-                  variant="link"
-                  size="xs"
-                  onClick={markAllRead}
-                  className="text-[10px] text-primary hover:underline font-medium h-auto p-0"
+              {/* 3 Filter Tabs */}
+              <div className="flex items-center px-3 py-1.5 gap-1.5 border-b border-border/60 bg-muted/10">
+                <button
+                  onClick={() => setActiveFilter("all")}
+                  className={cn(
+                    "text-[11px] font-medium px-2 py-0.5 rounded transition-colors",
+                    activeFilter === "all"
+                      ? "bg-primary text-primary-foreground font-semibold"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  )}
                 >
-                  {tNotif("markAllRead")}
-                </Button>
+                  {t("tabAll")}
+                </button>
+                <button
+                  onClick={() => setActiveFilter("unread")}
+                  className={cn(
+                    "text-[11px] font-medium px-2 py-0.5 rounded transition-colors flex items-center gap-1",
+                    activeFilter === "unread"
+                      ? "bg-primary text-primary-foreground font-semibold"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  )}
+                >
+                  <span>{t("tabUnread")}</span>
+                  {unreadCount > 0 && (
+                    <span className="font-mono text-[9px] px-1 rounded-full bg-background/20">
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveFilter("critical")}
+                  className={cn(
+                    "text-[11px] font-medium px-2 py-0.5 rounded transition-colors",
+                    activeFilter === "critical"
+                      ? "bg-primary text-primary-foreground font-semibold"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  )}
+                >
+                  {t("tabCritical")}
+                </button>
               </div>
+
+              {/* Body */}
+              {filteredNotifications.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-1.5 py-10 px-4 text-center text-muted-foreground">
+                  <Bell className="size-7 opacity-20" />
+                  <p className="text-xs font-medium text-foreground/80">{t("noNotifications")}</p>
+                  <p className="text-[11px] text-muted-foreground/70 leading-normal max-w-[260px]">
+                    {t("noNotificationsSub")}
+                  </p>
+                </div>
+              ) : (
+                <ScrollArea className="max-h-[380px]">
+                  <div>
+                    {filteredNotifications.map((notif) => (
+                      <NotifItem
+                        key={notif.id}
+                        notif={notif}
+                        onOpen={handleOpenNotification}
+                        onToggleRead={handleToggleRead}
+                        onDismiss={handleDismiss}
+                      />
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+
+              {/* Footer */}
+              {notifications.length > 0 && (
+                <>
+                  <Separator />
+                  <div className="px-3 py-1.5 flex items-center justify-between text-[10px] text-muted-foreground font-mono bg-muted/15">
+                    <span>
+                      {notifications.length} · {t("unreadCount", { count: unreadCount })}
+                    </span>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={() => markAllRead()}
+                        className="text-primary hover:underline font-sans font-medium"
+                      >
+                        {t("markAllRead")}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </>
           )}
         </PopoverContent>
       </Popover>
 
-      {/* ── AlertDialog for single notification detail ── */}
-      <NotifDetailDialog
-        notif={detailNotif}
-        open={detailOpen}
-        onOpenChange={setDetailOpen}
-        onDismiss={dismissNotification}
-        onNavigate={handleNavigate}
-      />
+      {/* Confirmation Dialog for Clear All */}
+      <AlertDialog open={confirmClearOpen} onOpenChange={setConfirmClearOpen}>
+        <AlertDialogContent className="max-w-xs">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm">
+              {t("confirmClearTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              {t("confirmClearDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm">
+              {t("cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              size="sm"
+              onClick={handleConfirmClear}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t("confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

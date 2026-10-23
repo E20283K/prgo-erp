@@ -11,6 +11,7 @@ import {
 import { eq, desc, and } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { getNextDeliveryActNumber } from "./numberingService";
+import { emitNotification } from "./notificationService";
 import type { DeliveryActRecord, ClientSettlementRecord } from "@/store/workspaceStore";
 
 // ─── 1. Delivery Acts ──────────────────────────────────────────────────────────
@@ -237,6 +238,29 @@ export async function upsertDeliveryAct(
 
   // 2. Client Settlements (Mijoz balansi)ni avtomatik yangilash
   await syncClientSettlement(companyId, targetClientId, data.customer || "", data.customerTin, data.contractNo);
+
+  // 3. Bildirishnoma triggeri (Schet-faktura rasmiylashtirildi)
+  try {
+    await emitNotification(
+      {
+        dedupKey: `delivery-act:${docNo}`,
+        severity: "success",
+        category: "finance",
+        eventType: "invoice_posted",
+        entityCode: docNo,
+        title: `Schet-faktura ${docNo} rasmiylashtirildi`,
+        description: `${data.customer || "Mijoz"} — $${totalUsd.toLocaleString()} (${data.status || "Signed & Stamped"}).`,
+        link: { module: "finance", subModule: "delivery-acts" },
+        targetTab: {
+          id: `doc-delivery-act-${docNo}`,
+          title: `${docNo} (Schet-faktura)`,
+          type: "delivery-act",
+          module: "finance",
+        },
+      },
+      companyCode
+    );
+  } catch (_) {}
 
   return { success: true, docNo, id: actId };
 }

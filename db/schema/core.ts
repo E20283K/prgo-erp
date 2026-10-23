@@ -41,12 +41,21 @@ export interface TelegramCompanySettings {
   autoCreateLeadsFromUnknownGroups?: boolean;
 }
 
+export interface NotificationRulesConfig {
+  woDeadlineEnabled?: boolean;
+  woDeadlineDays?: number;
+  woStatusEnabled?: boolean;
+  stockLowEnabled?: boolean;
+  financeDocsEnabled?: boolean;
+}
+
 export interface CompanySettings {
   timezone?: string;
   defaultTaxPercent?: number;
   allowNegativeStock?: boolean;
   workOrderPrefix?: string;
   telegram?: TelegramCompanySettings;
+  notifications?: NotificationRulesConfig;
 }
 
 export const companies = pgTable(

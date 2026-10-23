@@ -12,6 +12,7 @@ import { AiChatSheet } from "./AiChatSheet";
 
 import { MODULE_NAV } from "@/lib/modules";
 import { ElementInspectorOverlay } from "@/components/dev/ElementInspectorOverlay";
+import { Toaster } from "@/components/ui/toast";
 
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -235,6 +236,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <AiChatSheet />
 
       {/* Global Toast Notification System */}
+      <Toaster />
 
 
       {/* AI UI Element & Container Inspector Overlay (Ctrl+Shift+C) */}

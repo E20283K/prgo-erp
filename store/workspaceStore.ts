@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "@/components/ui/toast";
 import { MachineRecord } from "@/components/documents/machine/types";
 import { PlantRecord, branchToPlantRecord, createEmptyPlant } from "@/components/documents/plant/types";
 import { useLookupStore } from "@/store/lookupStore";
@@ -397,6 +398,7 @@ export interface ProductionQueueItem {
   recipe?: string;
   dimensions?: any;
   toolingItems?: any[];
+  materials?: any[];
   colorsConfig?: any;
   paperStock?: string;
   coating?: string;
@@ -446,16 +448,23 @@ export interface ProductionQueueItem {
 
 // ─── Notifications ────────────────────────────────────────────────────────────
 export type NotifSeverity = "info" | "success" | "warning" | "error";
+export type NotifCategory = "production" | "warehouse" | "finance" | "crm" | "system";
 
 export interface AppNotification {
   id: string;
   title: string;
   description?: string;
   severity: NotifSeverity;
+  category?: NotifCategory;
+  eventType?: string;
+  entityCode?: string;
   timestamp: number; // Date.now()
   read: boolean;
-  /** Optional deep-link: module + subModule to navigate to */
   link?: { module: string; subModule: string };
+  targetTab?: DocumentTab;
+  channel?: "inbox" | "toast" | "both";
+  i18nKey?: string;
+  i18nParams?: Record<string, string | number>;
 }
 
 export type AppTheme = "dark" | "light";
@@ -729,11 +738,29 @@ interface WorkspaceState {
   // ── Notifications ──────────────────────────────────────────────────────────
   notifications: AppNotification[];
   isNotifPanelOpen: boolean;
+  isNotifLoading: boolean;
+  notificationRules: {
+    woDeadlineEnabled: boolean;
+    woDeadlineDays: number;
+    woStatusEnabled: boolean;
+    stockLowEnabled: boolean;
+    financeDocsEnabled: boolean;
+  };
   setNotifPanelOpen: (open: boolean) => void;
+  loadNotifications: (companyCode?: string) => Promise<void>;
   addNotification: (notif: Omit<AppNotification, "id" | "timestamp" | "read">) => void;
-  dismissNotification: (id: string) => void;
-  markAllRead: () => void;
-  clearAllNotifications: () => void;
+  markNotificationRead: (id: string, read?: boolean, companyCode?: string) => Promise<void>;
+  toggleNotificationRead: (id: string, companyCode?: string) => Promise<void>;
+  markAllRead: (companyCode?: string) => Promise<void>;
+  dismissNotification: (id: string, companyCode?: string) => Promise<void>;
+  clearAllNotifications: (companyCode?: string) => Promise<void>;
+  updateNotificationRules: (rules: Partial<{
+    woDeadlineEnabled: boolean;
+    woDeadlineDays: number;
+    woStatusEnabled: boolean;
+    stockLowEnabled: boolean;
+    financeDocsEnabled: boolean;
+  }>, companyCode?: string) => Promise<void>;
 
   // ── AI Copilot Chat ────────────────────────────────────────────────────────
   isAiChatOpen: boolean;
@@ -2778,70 +2805,240 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   // ── Notifications seed data ─────────────────────────────────────────────────
   isNotifPanelOpen: false,
+  isNotifLoading: false,
+  notificationRules: {
+    woDeadlineEnabled: true,
+    woDeadlineDays: 7,
+    woStatusEnabled: true,
+    stockLowEnabled: true,
+    financeDocsEnabled: true,
+  },
   notifications: [
     {
       id: "notif-1",
-      title: "WOOF-26-0351 deadline approaching",
-      description: "Hardcover Catalog is due in 6 days. Prepress: Approved.",
+      entityCode: "WOOF-26-0351",
+      category: "production",
+      eventType: "wo_deadline",
+      title: "WOOF-26-0351 dedlayn yaqinlashmoqda",
+      description: "Hardcover Catalog buyurtmasi uchun 6 kun qoldi. Prepress: Tasdiqlangan.",
       severity: "warning",
       timestamp: Date.now() - 1000 * 60 * 8,
       read: false,
       link: { module: "production", subModule: "work-orders" },
+      targetTab: {
+        id: "wo-WOOF-26-0351",
+        title: "WOOF-26-0351 (Buyurtma)",
+        type: "work-order",
+        module: "production",
+      },
     },
     {
       id: "notif-2",
-      title: "Stock alert: Galerie Art Silk 150g",
-      description: "Warehouse stock below reorder point (42 sheets remaining).",
+      entityCode: "PAP-GAS-150",
+      category: "warehouse",
+      eventType: "stock_low",
+      title: "Ombor ogohlantirishi: Galerie Art Silk 150g",
+      description: "Ombor qoldig'i reorder darajasidan past (42 varaq qoldi).",
       severity: "error",
       timestamp: Date.now() - 1000 * 60 * 35,
       read: false,
-      link: { module: "warehouse", subModule: "stock" },
+      link: { module: "warehouse", subModule: "stock-balance" },
+      targetTab: {
+        id: "stock-PAP-GAS-150",
+        title: "PAP-GAS-150 (Qoldiq)",
+        type: "warehouse-stock",
+        module: "warehouse",
+      },
     },
     {
       id: "notif-3",
+      entityCode: "SF-8001",
+      category: "finance",
+      eventType: "invoice_posted",
       title: "Schet-faktura SF-8001 rasmiylashtirildi",
       description: "Alpha Media Group LLC — $14,850.00 (Ombor yuk xati: SHP-6000).",
       severity: "success",
       timestamp: Date.now() - 1000 * 60 * 60 * 2,
       read: false,
       link: { module: "finance", subModule: "delivery-acts" },
-    },
-    {
-      id: "notif-4",
-      title: "Sync completed",
-      description: "All registries refreshed at 00:58.",
-      severity: "info",
-      timestamp: Date.now() - 1000 * 60 * 60 * 6,
-      read: true,
+      targetTab: {
+        id: "doc-delivery-act-SF-8001",
+        title: "SF-8001 (Schet-faktura)",
+        type: "delivery-act",
+        module: "finance",
+      },
     },
   ],
 
   setNotifPanelOpen: (open) => set({ isNotifPanelOpen: open }),
 
-  addNotification: (notif) =>
-    set((state) => ({
-      notifications: [
-        {
-          ...notif,
-          id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          timestamp: Date.now(),
-          read: false,
-        },
-        ...state.notifications,
-      ],
-    })),
+  loadNotifications: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isNotifLoading: true });
+      const res = await fetch(`/api/v1/notifications?companyCode=${companyCode}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.notifications)) {
+        const mapped: AppNotification[] = data.notifications.map((n: any) => ({
+          id: n.id,
+          title: n.title,
+          description: n.description || undefined,
+          severity: n.severity || "info",
+          category: n.category || "system",
+          eventType: n.eventType,
+          entityCode: n.entityCode || undefined,
+          timestamp: new Date(n.createdAt).getTime(),
+          read: Boolean(n.isRead),
+          link: n.link || undefined,
+          targetTab: n.targetTab || undefined,
+          i18nKey: n.i18nKey || undefined,
+          i18nParams: n.i18nParams || undefined,
+        }));
+        set({
+          notifications: mapped,
+          notificationRules: data.rules || get().notificationRules,
+        });
+      }
+    } catch (e) {
+      console.error("[loadNotifications] Failed:", e);
+    } finally {
+      set({ isNotifLoading: false });
+    }
+  },
 
-  dismissNotification: (id) =>
-    set((state) => ({
-      notifications: state.notifications.filter((n) => n.id !== id),
-    })),
+  addNotification: (notif) => {
+    // 1. Toast vs. Bell Inbox filtrlash
+    const isToastOnly =
+      notif.channel === "toast" ||
+      (!notif.targetTab &&
+        !notif.entityCode &&
+        !notif.link &&
+        (notif.severity === "info" || notif.severity === "success"));
 
-  markAllRead: () =>
+    if (isToastOnly || notif.channel === "both") {
+      try {
+        toast.add({
+          title: notif.title,
+          description: notif.description,
+          type:
+            notif.severity === "error"
+              ? "error"
+              : notif.severity === "warning"
+              ? "warning"
+              : notif.severity === "success"
+              ? "success"
+              : "info",
+        });
+      } catch (e) {}
+    }
+
+    if (notif.channel === "toast") {
+      return;
+    }
+
+    const newId = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const fullItem: AppNotification = {
+      ...notif,
+      id: newId,
+      timestamp: Date.now(),
+      read: false,
+    };
+
+    set((state) => ({
+      notifications: [fullItem, ...state.notifications],
+    }));
+
+    try {
+      fetch("/api/v1/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: notif.title,
+          description: notif.description,
+          severity: notif.severity,
+          category: notif.category || "system",
+          eventType: notif.eventType || "user_action",
+          entityCode: notif.entityCode,
+          link: notif.link,
+          targetTab: notif.targetTab,
+          i18nKey: notif.i18nKey,
+          i18nParams: notif.i18nParams,
+        }),
+      }).catch(() => {});
+    } catch (_) {}
+  },
+
+  markNotificationRead: async (id, read = true, companyCode = "PRINTGOO") => {
+    set((state) => ({
+      notifications: state.notifications.map((n) => (n.id === id ? { ...n, read } : n)),
+    }));
+    try {
+      await fetch(`/api/v1/notifications?companyCode=${companyCode}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, read }),
+      });
+    } catch (_) {}
+  },
+
+  toggleNotificationRead: async (id, companyCode = "PRINTGOO") => {
+    const target = get().notifications.find((n) => n.id === id);
+    if (!target) return;
+    const nextRead = !target.read;
+    await get().markNotificationRead(id, nextRead, companyCode);
+  },
+
+  markAllRead: async (companyCode = "PRINTGOO") => {
     set((state) => ({
       notifications: state.notifications.map((n) => ({ ...n, read: true })),
-    })),
+    }));
+    try {
+      await fetch(`/api/v1/notifications?companyCode=${companyCode}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markAll: true }),
+      });
+    } catch (_) {}
+  },
 
-  clearAllNotifications: () => set({ notifications: [] }),
+  dismissNotification: async (id, companyCode = "PRINTGOO") => {
+    set((state) => ({
+      notifications: state.notifications.filter((n) => n.id !== id),
+    }));
+    try {
+      await fetch(`/api/v1/notifications?id=${id}&companyCode=${companyCode}`, {
+        method: "DELETE",
+      });
+    } catch (_) {}
+  },
+
+  clearAllNotifications: async (companyCode = "PRINTGOO") => {
+    set({ notifications: [] });
+    try {
+      await fetch(`/api/v1/notifications?all=true&companyCode=${companyCode}`, {
+        method: "DELETE",
+      });
+    } catch (_) {}
+  },
+
+  updateNotificationRules: async (rules, companyCode = "PRINTGOO") => {
+    set((state) => ({
+      notificationRules: { ...state.notificationRules, ...rules },
+    }));
+    try {
+      const res = await fetch("/api/v1/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateRules", rules, companyCode }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rules) {
+          set({ notificationRules: data.rules });
+        }
+      }
+    } catch (_) {}
+  },
 
   // ── AI Copilot Chat state & actions ─────────────────────────────────────────
   isAiChatOpen: false,

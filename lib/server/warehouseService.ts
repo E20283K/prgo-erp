@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { getNextReceiptNumber, getNextShipmentNumber } from "./numberingService";
+import { emitNotification } from "./notificationService";
 
 /**
  * Korxona kodi bo'yicha korxona ID sini olish
@@ -276,6 +277,31 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
       }
     }
   }
+
+  // Biznes bildirishnoma triggeri (Ombor kirimi)
+  try {
+    if (status === "Posted") {
+      await emitNotification(
+        {
+          dedupKey: `receipt-posted:${receiptNumber}`,
+          severity: "info",
+          category: "warehouse",
+          eventType: "stock_receipt:posted",
+          entityCode: receiptNumber,
+          title: `Ombor kirimi o'tkazildi: ${receiptNumber}`,
+          description: `${payload.supplierName || "Yetkazib beruvchi"} dan xomashyo kirim qilindi (${locationName}).`,
+          link: { module: "warehouse", subModule: "receipts" },
+          targetTab: {
+            id: `doc-receipt-${receiptNumber}`,
+            title: `${receiptNumber} (Kirim)`,
+            type: "warehouse-receipt",
+            module: "warehouse",
+          },
+        },
+        companyCode
+      );
+    }
+  } catch (_) {}
 
   const allReceipts = await getWarehouseReceipts(companyCode);
   return {

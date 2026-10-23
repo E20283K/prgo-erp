@@ -36,6 +36,7 @@ import type { ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode } from "./crmService";
 import { getNextSpecNumber } from "./numberingService";
+import { emitNotification } from "./notificationService";
 import {
   normalizeDepartment,
   WO_DEPT_PREFIXES,
@@ -153,6 +154,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
 
       // Shtansforma / Asbob-uskuna
       toolingItems: dims.toolingItems || [],
+      materials: dims.materials || [],
       selectedToolingId: dims.selectedToolingId || "",
       selectedToolingName: dims.selectedToolingName || "",
       toolingProcurementNeeded: !!dims.toolingProcurementNeeded,
@@ -355,6 +357,7 @@ export async function upsertWorkOrder(
       kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets,
       kashirovkaCuringHours: data.kashirovkaCuringHours,
       toolingItems: (data as any).toolingItems || (data as any).dimensions?.toolingItems || [],
+      materials: (data as any).materials || (data as any).dimensions?.materials || [],
       selectedToolingId: data.selectedToolingId,
       selectedToolingName: data.selectedToolingName,
       toolingProcurementNeeded: data.toolingProcurementNeeded,
@@ -483,6 +486,30 @@ export async function upsertWorkOrder(
       }
     }
   }
+
+  // 5. Biznes bildirishnoma triggeri (Work Order Created / Updated)
+  try {
+    const isNew = !existingOrder;
+    await emitNotification(
+      {
+        dedupKey: isNew ? `wo-create:${docNo}` : `wo-update:${docNo}:${payload.stage || "Queue"}`,
+        severity: isNew ? "info" : "success",
+        category: "production",
+        eventType: isNew ? "wo_status:created" : "wo_status:updated",
+        entityCode: docNo,
+        title: isNew ? `Yangi buyurtma: ${docNo}` : `Buyurtma yangilandi: ${docNo}`,
+        description: `${customerName} — ${(data as any).productName || data.product || "Poligrafiya mahsuloti"} (${data.quantity || 0} ${data.unit || "pcs"}). Bosqich: ${payload.stage || "Queue"}.`,
+        link: { module: "production", subModule: "work-orders" },
+        targetTab: {
+          id: `wo-${docNo}`,
+          title: `${docNo} (Buyurtma)`,
+          type: "work-order",
+          module: "production",
+        },
+      },
+      companyCode
+    );
+  } catch (_) {}
 
   return {
     success: true,

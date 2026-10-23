@@ -16,3 +16,4 @@ export * from "./telegram";
 export * from "./finance";
 export * from "./trading";
 export * from "./users";
+export * from "./notifications";
