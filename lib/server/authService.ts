@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { users, userSessions, type DbUser } from "@/db/schema/users";
 import { eq, and, gt } from "drizzle-orm";
 import crypto from "crypto";
+import { getUserInitials } from "@/lib/utils";
 import { ROLE_TEMPLATES, FULL_PERMISSIONS } from "@/components/documents/user/data";
 import type { SystemUserRecord } from "@/components/documents/user/types";
 
@@ -39,7 +40,7 @@ export function sanitizeUser(dbUser: DbUser): SanitizedUser {
     plant: dbUser.plant || "",
     status: dbUser.status,
     avatar: dbUser.avatar || undefined,
-    initials: dbUser.initials || dbUser.fullName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase(),
+    initials: getUserInitials(dbUser.fullName || dbUser.username, "U"),
     language: dbUser.language,
     defaultModule: dbUser.defaultModule,
     linkedEmployeeId: dbUser.linkedEmployeeId || undefined,

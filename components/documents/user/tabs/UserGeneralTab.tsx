@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ImageCropperDialog } from "@/components/ui/image-cropper-dialog";
 import { toast } from "@/components/ui/toast";
+import { getUserInitials } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -52,19 +53,7 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
   const [selectedRawImage, setSelectedRawImage] = useState<string | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
-  const userInitials =
-    data.initials ||
-    (data.fullName
-      ? data.fullName
-          .split(" ")
-          .filter(Boolean)
-          .map((w) => w[0])
-          .join("")
-          .slice(0, 2)
-          .toUpperCase()
-      : data.username
-      ? data.username.slice(0, 2).toUpperCase()
-      : "U");
+  const userInitials = getUserInitials(data.fullName || data.username, "U");
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

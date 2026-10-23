@@ -18,6 +18,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "@/i18n/routing";
 import { toggleAppFullscreen } from "@/lib/fullscreen";
+import { getUserInitials } from "@/lib/utils";
 import { MODULE_NAV } from "@/lib/modules";
 import { ImageCropperDialog } from "@/components/ui/image-cropper-dialog";
 import { toast } from "@/components/ui/toast";
@@ -76,6 +77,13 @@ export function UserNav() {
   const [cropperOpen, setCropperOpen] = React.useState(false);
   const [selectedRawImage, setSelectedRawImage] = React.useState<string | null>(null);
   const [isUploading, setIsUploading] = React.useState(false);
+
+  const displayInitials = React.useMemo(() => {
+    return getUserInitials(
+      currentUser.name || currentUser.fullName || currentUser.username,
+      "AD"
+    );
+  }, [currentUser.name, currentUser.fullName, currentUser.username]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -252,7 +260,7 @@ export function UserNav() {
                   <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
                 )}
                 <AvatarFallback className="text-[10px] font-semibold bg-primary/10 text-primary">
-                  {currentUser.initials}
+                  {displayInitials}
                 </AvatarFallback>
                 <AvatarBadge className="bg-emerald-500" />
               </Avatar>
@@ -271,12 +279,18 @@ export function UserNav() {
           <DropdownMenuLabel className="p-0 font-normal">
             <div className="flex items-center gap-2.5 px-2 py-2 text-left text-sm">
               <div className="relative group shrink-0">
-                <Avatar className="size-9 cursor-pointer">
+                <Avatar
+                  className="size-9 cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
+                >
                   {currentUser.avatar && (
                     <AvatarImage src={currentUser.avatar} alt={currentUser.name} className="object-cover" />
                   )}
                   <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
-                    {currentUser.initials}
+                    {displayInitials}
                   </AvatarFallback>
                   <AvatarBadge className="bg-emerald-500" />
                 </Avatar>
@@ -287,14 +301,11 @@ export function UserNav() {
                     fileInputRef.current?.click();
                   }}
                   disabled={isUploading}
-                  className="absolute inset-0 rounded-full bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                  title="Rasmni o'zgartirish (1:1 kvadrat)"
+                  className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-background border border-border shadow-xs flex items-center justify-center text-muted-foreground hover:text-blue-600 transition-colors cursor-pointer z-10"
+                  title="Rasm yuklash (1:1 kvadrat)"
+                  aria-label="Rasm yuklash"
                 >
-                  {isUploading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Camera className="w-3.5 h-3.5" />
-                  )}
+                  <Camera className="size-2.5" />
                 </button>
               </div>
               <div className="grid flex-1 text-left leading-tight min-w-0">
@@ -309,10 +320,15 @@ export function UserNav() {
                       fileInputRef.current?.click();
                     }}
                     disabled={isUploading}
-                    className="text-[10px] text-blue-600 hover:text-blue-700 dark:text-blue-400 font-medium cursor-pointer"
-                    title="Fotosurat yuklash"
+                    className="size-6 -mr-1 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-blue-600 transition-colors cursor-pointer shrink-0"
+                    title="Fotosurat yuklash (1:1 kvadrat)"
+                    aria-label="Fotosurat yuklash"
                   >
-                    {currentUser.avatar ? "Almashtirish" : "Rasm qo'shish"}
+                    {isUploading ? (
+                      <Loader2 className="size-3.5 animate-spin text-blue-600" />
+                    ) : (
+                      <Camera className="size-3.5" />
+                    )}
                   </button>
                 </div>
                 <span className="truncate text-xs text-muted-foreground">

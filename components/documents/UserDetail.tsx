@@ -17,6 +17,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
+import { getUserInitials } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -311,16 +312,7 @@ export function UserDetail({ tab }: UserDetailProps) {
                     />
                   )}
                   <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
-                    {userData.initials ||
-                      (userData.fullName
-                        ? userData.fullName
-                            .split(" ")
-                            .filter(Boolean)
-                            .map((w) => w[0])
-                            .join("")
-                            .slice(0, 2)
-                            .toUpperCase()
-                        : "U")}
+                    {getUserInitials(userData.fullName || userData.username, "U")}
                   </AvatarFallback>
                 </Avatar>
               }

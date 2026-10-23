@@ -12,6 +12,7 @@ import {
   ShiftRecord,
 } from "@/components/documents/hr/types";
 import { getMaterialImage } from "@/lib/materialImages";
+import { getUserInitials } from "@/lib/utils";
 import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
 import type { SystemUserRecord } from "@/components/documents/user/types";
 import { INITIAL_SYSTEM_USERS } from "@/components/documents/user/data";
@@ -1593,7 +1594,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           name: user.fullName || user.username || state.currentUser.name,
           fullName: user.fullName || state.currentUser.fullName,
           avatar: user.avatar,
-          initials: user.initials || state.currentUser.initials,
+          initials: getUserInitials(user.fullName || user.username || state.currentUser.name, "AD"),
           role: user.role || state.currentUser.role,
           department: user.department || state.currentUser.department,
           plant: user.plant || state.currentUser.plant,
@@ -1705,7 +1706,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             role: u.role,
             department: u.department,
             plant: u.plant,
-            initials: u.initials,
+            initials: getUserInitials(u.fullName || u.username, "AD"),
             defaultModule: u.defaultModule,
             avatar: u.avatar,
             permissions: u.permissions,
@@ -2989,7 +2990,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   login: (user) => {
     set((state) => {
-      const updatedUser = user ? { ...state.currentUser, ...user } : state.currentUser;
+      const baseUser = user ? { ...state.currentUser, ...user } : state.currentUser;
+      const updatedUser = {
+        ...baseUser,
+        initials: getUserInitials(baseUser.fullName || baseUser.name || baseUser.username, "AD"),
+      };
       const targetMod = updatedUser.defaultModule || state.activeModule || "production";
       const defaultSubMap: Record<string, string> = {
         production: "work-orders",

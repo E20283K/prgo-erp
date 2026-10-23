@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { users, type DbUser } from "@/db/schema/users";
 import { eq, desc } from "drizzle-orm";
 import { hashPassword, sanitizeUser, type SanitizedUser, seedDefaultUsersIfEmpty } from "./authService";
+import { getUserInitials } from "@/lib/utils";
 import type { SystemUserRecord } from "@/components/documents/user/types";
 
 export async function getAllUsers(): Promise<SanitizedUser[]> {
@@ -36,7 +37,7 @@ export async function createUser(data: Partial<SystemUserRecord>): Promise<Sanit
       plant: data.plant || "",
       status: data.status || "Active",
       avatar: data.avatar || null,
-      initials: data.initials || "UF",
+      initials: getUserInitials(data.fullName || data.username, "U"),
       language: data.language || "uz",
       defaultModule: data.defaultModule || "production",
       linkedEmployeeId: data.linkedEmployeeId || null,
@@ -60,7 +61,10 @@ export async function updateUser(
     updatedAt: new Date(),
   };
 
-  if (data.fullName !== undefined) updatePayload.fullName = data.fullName;
+  if (data.fullName !== undefined) {
+    updatePayload.fullName = data.fullName;
+    updatePayload.initials = getUserInitials(data.fullName, "U");
+  }
   if (data.username !== undefined) updatePayload.username = data.username;
   if (data.email !== undefined) updatePayload.email = data.email;
   if (data.phone !== undefined) updatePayload.phone = data.phone;
