@@ -91,17 +91,14 @@ import { LayoutCalcTab } from "./tabs/LayoutCalcTab";
 import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
+import { PalletReportDialog } from "./dialogs/PalletReportDialog";
 import { JobTicketDialog } from "./dialogs/JobTicketDialog";
 import { PackagingDialog } from "./dialogs/PackagingDialog";
 import { BoxLabelPrintModal } from "./dialogs/BoxLabelPrintModal";
 import { SaveSpecDialog } from "./dialogs/SaveSpecDialog";
 import {
   BomItem,
-  RECIPE_BOM_MAP,
   normalizeBomItem,
-  OFFSET_BOM_ITEMS,
-  FLEXO_BOM_ITEMS,
-  JACQUARD_BOM_ITEMS,
 } from "../BomMaterialsGrid";
 import { WorkOrderPackagingSummary, WorkOrderToolingItem } from "./types";
 import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
@@ -269,6 +266,13 @@ export function syncBomWithSpecs(
         warehouseAvailable: ws?.available ?? existing.warehouseAvailable,
       };
     } else {
+      const wsImg =
+        ws?.imageUrl &&
+        typeof ws.imageUrl === "string" &&
+        !ws.imageUrl.startsWith("data:image/svg+xml")
+          ? ws.imageUrl.trim()
+          : undefined;
+
       const newPaper: BomItem = {
         id: ws?.sku || `MAT-PAP-${Date.now().toString().slice(-4)}`,
         name: paperName,
@@ -283,7 +287,7 @@ export function syncBomWithSpecs(
         unit: ws?.unit || "Sheets",
         unitPrice,
         totalPrice: Number((requiredPaperSheets * unitPrice).toFixed(2)),
-        supplier: "Ombor",
+        supplier: ws?.supplier || "Ombor",
         availability: ws?.status === "Critical" ? "Low Stock" : (ws?.status || "In Stock"),
         issueType: "standard",
         faultParty: "none",
@@ -291,6 +295,7 @@ export function syncBomWithSpecs(
         warehouseStockLevel: ws?.stockLevel,
         warehouseAvailable: ws?.available,
         sourceType: "warehouse",
+        imageUrl: wsImg,
       };
       items = [newPaper, ...items];
     }
@@ -542,18 +547,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (raw && Array.isArray(raw) && raw.length > 0) {
       return raw.map(normalizeBomItem);
     }
-    const dept = data.department || initialQueueItem?.department || "Offset";
-    const recipeCode = data.recipe || initialQueueItem?.recipe;
-    const baseItems =
-      recipeCode && RECIPE_BOM_MAP[recipeCode]
-        ? RECIPE_BOM_MAP[recipeCode]
-        : dept === "Flexo"
-        ? FLEXO_BOM_ITEMS
-        : dept === "Jacquard"
-        ? JACQUARD_BOM_ITEMS
-        : OFFSET_BOM_ITEMS;
+    const baseItems: BomItem[] = [];
     return syncBomWithSpecs(
-      baseItems.map(normalizeBomItem),
+      baseItems,
       {
         paperStock: data.paperStock || initialQueueItem?.paperStock,
         lamination: data.lamination || initialQueueItem?.lamination,
@@ -750,6 +746,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   );
 
   const [isLogEventDialogOpen, setIsLogEventDialogOpen] = useState(false);
+  const [isPalletReportDialogOpen, setIsPalletReportDialogOpen] = useState(false);
   const [logEventForm, setLogEventForm] = useState<{
     type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC" | "Waste";
     note: string;
@@ -869,9 +866,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (spec.department && spec.department !== formData.department) {
       handleDepartmentChange(spec.department);
     }
-    // Load associated BOM materials
-    if (RECIPE_BOM_MAP[spec.code]) {
-      const newItems = RECIPE_BOM_MAP[spec.code];
+    // Load associated BOM materials if defined on the master specification
+    const specMaterials = (spec as any).materials;
+    if (specMaterials && Array.isArray(specMaterials) && specMaterials.length > 0) {
+      const newItems = specMaterials.map(normalizeBomItem);
       setCurrentBomItems(newItems);
       handleFieldChange("materials", newItems);
     }
@@ -1098,29 +1096,36 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   }, []);
 
   // Actions
-  const handleFieldChange = (field: string, val: any) => {
-    const updated = { ...formData, [field]: val };
-    setFormData(updated);
-    updateTabData(tab.id, { [field]: val });
-    setTabUnsaved(tab.id, true);
+  const handleFieldChange = (field: string | Record<string, any>, val?: any) => {
+    const updates: Record<string, any> = typeof field === "string" ? { [field]: val } : field;
 
-    if (
-      [
-        "paperStock",
-        "lamination",
-        "laminationSides",
-        "laminationMicron",
-        "quantity",
-        "plannedSheets",
-        "parentSheetW",
-        "parentSheetH",
-      ].includes(field)
-    ) {
-      const synced = syncBomWithSpecs(currentBomItems, updated, warehouseStock);
-      setCurrentBomItems(synced);
-      updateTabData(tab.id, { materials: synced });
-      syncPaperReadiness(synced);
-    }
+    setFormData((prev) => {
+      const updated = { ...prev, ...updates };
+
+      const shouldSyncBom = Object.keys(updates).some((f) =>
+        [
+          "paperStock",
+          "lamination",
+          "laminationSides",
+          "laminationMicron",
+          "quantity",
+          "plannedSheets",
+          "parentSheetW",
+          "parentSheetH",
+        ].includes(f)
+      );
+
+      if (shouldSyncBom) {
+        const synced = syncBomWithSpecs(currentBomItems, updated, warehouseStock);
+        setCurrentBomItems(synced);
+        updateTabData(tab.id, { materials: synced });
+        syncPaperReadiness(synced);
+      }
+      return updated;
+    });
+
+    updateTabData(tab.id, updates);
+    setTabUnsaved(tab.id, true);
   };
 
   const handleSizesChange = (newSizes: SizeDistribution[]) => {
@@ -1365,6 +1370,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       name: "",
       machine: formData.pressMachine || "Heidelberg Speedmaster XL 106",
       operator: "K. Anderson",
+      operators: ["K. Anderson"],
       duration: 1,
       qtyCompleted: `0 / ${(formData.quantity || 5000).toLocaleString()}`,
       status: "Queued",
@@ -1381,9 +1387,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       name: item.name,
       machine: item.machine,
       operator: item.operator,
+      operators:
+        item.operators && item.operators.length > 0
+          ? item.operators
+          : item.operator
+          ? item.operator.split(",").map((s) => s.trim()).filter(Boolean)
+          : [],
       duration: item.duration,
       qtyCompleted: item.qtyCompleted,
       status: item.status,
+      toolingId: item.toolingId,
+      toolingName: item.toolingName,
     });
     setIsOpDialogOpen(true);
   };
@@ -1423,17 +1437,77 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   // Log Event Dialog Handlers
   const handleOpenLogEvent = () => {
-    const now = new Date();
-    const hours = String(now.getHours()).padStart(2, "0");
-    const minutes = String(now.getMinutes()).padStart(2, "0");
-    setLogEventForm({
+    setIsPalletReportDialogOpen(true);
+  };
+
+  const handleSavePalletEvent = (eventData: {
+    batchLabel: string;
+    shift: "1-smena" | "2-smena";
+    operator: string;
+    inputQty: number;
+    makeReadyQty: number;
+    defectQty: number;
+    goodQty: number;
+    outputPiecesQty?: number;
+    wasteReason?: string;
+    time: string;
+    note: string;
+    markStepFinished?: boolean;
+  }) => {
+    const totalWaste = eventData.makeReadyQty + eventData.defectQty;
+    const newEvent: ShiftEvent = {
+      id: "e_" + Date.now(),
+      opId: selectedOp.id,
+      time: eventData.time || "15:30",
+      shift: eventData.shift,
+      batchLabel: eventData.batchLabel,
       type: "Run",
-      note: "",
-      time: `${hours}:${minutes}`,
-      wasteQty: undefined,
-      wasteReason: undefined,
+      note: eventData.note,
+      operator: eventData.operator,
+      inputQty: eventData.inputQty,
+      makeReadyQty: eventData.makeReadyQty,
+      defectQty: eventData.defectQty,
+      goodQty: eventData.goodQty,
+      outputPiecesQty: eventData.outputPiecesQty,
+      wasteQty: totalWaste > 0 ? totalWaste : undefined,
+      wasteReason: eventData.wasteReason,
+    };
+
+    const updatedEvents = [newEvent, ...shiftEvents];
+    setShiftEvents(updatedEvents);
+
+    // Calculate total completed for this op including this event
+    const thisOpEvents = updatedEvents.filter((ev) => ev.opId === selectedOp.id);
+    const totalGood = thisOpEvents.reduce((sum, ev) => sum + (ev.goodQty || 0), 0);
+
+    // Update operations state
+    setOperations((prev) =>
+      prev.map((op) => {
+        if (op.id !== selectedOp.id) return op;
+        const targetMatch = (op.qtyCompleted || "").match(/\/s*([d,]+.*)$/);
+        const targetStr = targetMatch ? ` / ${targetMatch[1]}` : "";
+        const nextStatus = eventData.markStepFinished ? "Finished" : op.status === "Queued" ? "In Progress" : op.status;
+        return {
+          ...op,
+          qtyCompleted: `${totalGood.toLocaleString()}${targetStr}`,
+          status: nextStatus,
+          operator: eventData.operator,
+        };
+      })
+    );
+
+    setTabUnsaved(tab.id, true);
+
+    addNotification({
+      title: eventData.markStepFinished ? "Bosqich yakunlandi" : "Palet hisoboti saqlandi",
+      description: `${selectedOp.name}: ${eventData.batchLabel} (${eventData.goodQty.toLocaleString()} list) qayd etildi.`,
+      severity: "success",
     });
-    setIsLogEventDialogOpen(true);
+  };
+
+  const handleDeleteShiftEvent = (eventId: string) => {
+    setShiftEvents((prev) => prev.filter((ev) => ev.id !== eventId));
+    setTabUnsaved(tab.id, true);
   };
 
   const handleSaveLogEvent = () => {
@@ -2072,6 +2146,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               setSelectedTimelineOpId={setSelectedTimelineOpId}
               selectedOp={selectedOp}
               selectedOpEvents={selectedOpEvents}
+              allEvents={shiftEvents}
               onOpenQuickPalletLog={handleOpenLogEvent}
               onChangeStepStatus={(opId, status) => {
                 setOperations((prev) =>
@@ -2079,6 +2154,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 );
                 setTabUnsaved(tab.id, true);
               }}
+              onDeleteEvent={handleDeleteShiftEvent}
+              piecesPerSheet={activePrintPlan.piecesPerSheet}
             />
 
             {/* Tab 6: Financials (Hidden for Operators) */}
@@ -2149,6 +2226,32 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         form={logEventForm}
         setForm={setLogEventForm}
         onSave={handleSaveLogEvent}
+      />
+
+      {/* Dialog: Floor Pallet & Step Execution Report */}
+      <PalletReportDialog
+        isOpen={isPalletReportDialogOpen}
+        onOpenChange={setIsPalletReportDialogOpen}
+        selectedOp={selectedOp}
+        allOperations={operations}
+        previousOp={(() => {
+          const idx = operations.findIndex((o) => o.id === selectedOp.id);
+          return idx > 0 ? operations[idx - 1] : undefined;
+        })()}
+        previousOpGoodOutput={(() => {
+          const idx = operations.findIndex((o) => o.id === selectedOp.id);
+          if (idx <= 0) return 0;
+          const prev = operations[idx - 1];
+          const prevEvents = shiftEvents.filter((ev) => ev.opId === prev.id);
+          if (prevEvents.length > 0) {
+            return prevEvents.reduce((sum, ev) => sum + (ev.goodQty || 0), 0);
+          }
+          const parsed = (prev.qtyCompleted || "").split("/");
+          return parseInt(parsed[0]?.replace(/[^\d]/g, "") || "0", 10);
+        })()}
+        existingOpEvents={selectedOpEvents}
+        piecesPerSheet={activePrintPlan.piecesPerSheet}
+        onSaveEvent={handleSavePalletEvent}
       />
 
       {/* Unified Order Passport / Job Ticket Dialog */}

@@ -85,7 +85,7 @@ export function OperationsTab({
     { id: "name", title: "Texnologik Operatsiya (Description)", width: 300, icon: GridColumnIcon.HeaderString },
     { id: "machine", title: "Stanok / Uskuna (Work Center)", width: 240, icon: GridColumnIcon.HeaderLookup },
     { id: "tooling", title: "Texnologik Jihoz (Shtansforma / Qolip)", width: 240, icon: GridColumnIcon.HeaderString },
-    { id: "operator", title: "Mas'ul Operator / Smena", width: 180, icon: GridColumnIcon.HeaderString },
+    { id: "operator", title: "Mas'ul Operator / Smena", width: 220, icon: GridColumnIcon.HeaderString },
     { id: "duration", title: "Me'yoriy vaqt (hrs)", width: 130, icon: GridColumnIcon.HeaderNumber },
   ], []);
 

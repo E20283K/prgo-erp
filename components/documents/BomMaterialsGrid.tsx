@@ -96,7 +96,6 @@ import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { toast } from "@/components/ui/toast";
 import { MASTER_SPECIFICATIONS, MasterSpecification } from "./work-order/types";
-import { getMaterialImage } from "@/lib/materialImages";
 import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/documents/MaterialImageModal";
 
 export type MaterialIssueType = "standard" | "remake" | "client_change" | "press_waste";
@@ -206,60 +205,21 @@ export function normalizeBomItem(item: any): BomItem {
     issueType: item.issueType || "standard",
     faultParty: item.faultParty || "none",
     notes: item.notes || "",
-    imageUrl: item.imageUrl || getMaterialImage(item),
+    imageUrl:
+      item.imageUrl &&
+      typeof item.imageUrl === "string" &&
+      !item.imageUrl.startsWith("data:image/svg+xml")
+        ? item.imageUrl.trim()
+        : undefined,
     acquisitionSource: item.acquisitionSource || (item.supplier?.toLowerCase().includes("mijoz") ? "client" : item.availability === "On Order" || item.sourceType === "procurement" ? "procurement" : "warehouse"),
     sourceType: item.sourceType || (item.supplier?.toLowerCase().includes("mijoz") ? "client" : item.availability === "On Order" ? "procurement" : "warehouse"),
   };
 }
 
-export const OFFSET_BOM_ITEMS: BomItem[] = [
-  { id: "MAT-PAP-014", name: "Galerie Art Silk Paper", spec: "150 g/m², 700x1000mm", planQty: 12500, actualQty: 12850, wasteQty: 350, qty: 12850, unit: "Sheets", unitPrice: 0.42, totalPrice: 5397.00, supplier: "Sappi Paper Mill", availability: "In Stock", issueType: "standard", faultParty: "none", notes: "Makeready over-run (+350)" },
-  { id: "MAT-INK-CMYK", name: "Hubergroup Eco-Offset Ink", spec: "Process CMYK", planQty: 36, actualQty: 36, wasteQty: 0, qty: 36, unit: "kg", unitPrice: 24.00, totalPrice: 864.00, supplier: "Hubergroup", availability: "In Stock", issueType: "standard", faultParty: "none" },
-  { id: "MAT-PLT-CTP", name: "Agfa CTP Thermal Plates", spec: "1030x790mm", planQty: 8, actualQty: 8, wasteQty: 0, qty: 8, unit: "pcs", unitPrice: 18.50, totalPrice: 148.00, supplier: "Agfa", availability: "In Stock", issueType: "standard", faultParty: "none", notes: "4+4 Asosiy forma komplekti" },
-  { id: "MAT-PLT-RMK1", name: "Agfa CTP Plates (Magenta Remake)", spec: "1030x790mm Thermal", planQty: 0, actualQty: 1, wasteQty: 1, qty: 1, unit: "pcs", unitPrice: 18.50, totalPrice: 18.50, supplier: "Agfa", availability: "In Stock", issueType: "remake", faultParty: "prepress", notes: "Matn xatosi sababli Magenta qayta chiqarildi" },
-  { id: "MAT-LAM-M01", name: "Soft-Touch Matte Film", spec: "BOPP 32 micron", planQty: 2400, actualQty: 2400, wasteQty: 0, qty: 2400, unit: "m", unitPrice: 0.32, totalPrice: 768.00, supplier: "Dunmore", availability: "In Stock", issueType: "standard", faultParty: "none" },
-];
-
-export const FLEXO_BOM_ITEMS: BomItem[] = [
-  { id: "MAT-FLX-NYL", name: "Nylon Taffeta Tape Roll", spec: "30mm width, 200m", planQty: 45, actualQty: 48, wasteQty: 3, qty: 48, unit: "Rolls", unitPrice: 12.50, totalPrice: 600.00, supplier: "Avery Dennison", availability: "In Stock", issueType: "standard", faultParty: "none", notes: "Chiqindi: +3 rulon" },
-  { id: "MAT-FLX-INK", name: "Wash-Resistant Flexo Ink", spec: "Black, 5kg", planQty: 2, actualQty: 2, wasteQty: 0, qty: 2, unit: "kg", unitPrice: 45.00, totalPrice: 90.00, supplier: "Flint Group", availability: "Low Stock", issueType: "standard", faultParty: "none" },
-  { id: "MAT-FLX-PLT", name: "Photopolymer Flexo Plate", spec: "Digital Plate 1.14mm", planQty: 2, actualQty: 2, wasteQty: 0, qty: 2, unit: "pcs", unitPrice: 120.00, totalPrice: 240.00, supplier: "MacDermid", availability: "In Stock", issueType: "standard", faultParty: "none", notes: "2 rangli polimer" },
-  { id: "MAT-FLX-RMK", name: "Photopolymer Flexo Plate (Remake)", spec: "Digital Plate 1.14mm", planQty: 0, actualQty: 1, wasteQty: 1, qty: 1, unit: "pcs", unitPrice: 120.00, totalPrice: 120.00, supplier: "MacDermid", availability: "In Stock", issueType: "remake", faultParty: "prepress", notes: "Rastr nuqsoni tufayli qayta tayyorlandi" },
-];
-
-export const JACQUARD_BOM_ITEMS: BomItem[] = [
-  { id: "MAT-YRN-WARP", name: "Polyester Warp Yarn", spec: "Black, 50D", planQty: 120, actualQty: 124, wasteQty: 4, qty: 124, unit: "kg", unitPrice: 5.20, totalPrice: 644.80, supplier: "Shenghong Corp", availability: "In Stock", issueType: "standard", faultParty: "none" },
-  { id: "MAT-YRN-WEFT", name: "Polyester Weft Yarn", spec: "White, 75D", planQty: 85, actualQty: 85, wasteQty: 0, qty: 85, unit: "kg", unitPrice: 4.80, totalPrice: 408.00, supplier: "Shenghong Corp", availability: "In Stock", issueType: "standard", faultParty: "none" },
-  { id: "MAT-YRN-GLD", name: "Metallic Lurex Yarn", spec: "Gold, 30D", planQty: 15, actualQty: 15, wasteQty: 0, qty: 15, unit: "kg", unitPrice: 18.50, totalPrice: 277.50, supplier: "Lurex Co", availability: "Reserved", issueType: "standard", faultParty: "none" },
-];
-
-export const RECIPE_BOM_MAP: Record<string, BomItem[]> = {
-  OFFSET_STD_V1: OFFSET_BOM_ITEMS,
-  OFFSET_KASHIROVKA_V1: [
-    { id: "MAT-CRD-300F", name: "Layer 1: Coated Cardboard 300g/m²", spec: "Face Sheet 4+0, 700x1000mm", planQty: 1100, actualQty: 1150, wasteQty: 50, qty: 1150, unit: "Sheets", unitPrice: 0.68, totalPrice: 782.00, supplier: "Stora Enso", availability: "In Stock", issueType: "standard", faultParty: "none" },
-    { id: "MAT-CRD-300B", name: "Layer 2: Coated Cardboard 300g/m²", spec: "Back Sheet 4+0, 700x1000mm", planQty: 1100, actualQty: 1150, wasteQty: 50, qty: 1150, unit: "Sheets", unitPrice: 0.68, totalPrice: 782.00, supplier: "Stora Enso", availability: "In Stock", issueType: "standard", faultParty: "none" },
-    { id: "MAT-GLU-PVA", name: "PVA Dispersion Mounting Glue", spec: "25 g/m² Kashirovka Adhesive", planQty: 19.25, actualQty: 20, wasteQty: 0.75, qty: 20, unit: "kg", unitPrice: 4.20, totalPrice: 84.00, supplier: "Henkel Adhesive", availability: "In Stock", issueType: "standard", faultParty: "none" },
-    { id: "MAT-LAM-SFT", name: "Soft-Touch Matte Lamination Film", spec: "BOPP 32 micron", planQty: 1540, actualQty: 1540, wasteQty: 0, qty: 1540, unit: "m²", unitPrice: 0.32, totalPrice: 492.80, supplier: "Dunmore", availability: "In Stock", issueType: "standard", faultParty: "none" },
-    { id: "MAT-PLT-CTP4", name: "Agfa CTP Plates (Split-Mount Set)", spec: "1030x790mm Thermal", planQty: 4, actualQty: 4, wasteQty: 0, qty: 4, unit: "pcs", unitPrice: 18.50, totalPrice: 74.00, supplier: "Agfa", availability: "In Stock", issueType: "standard", faultParty: "none" },
-  ],
-  OFFSET_PREM_V2: [
-    { id: "MAT-PAP-250", name: "LumiForte Premium Board", spec: "250 g/m², 700x1000mm", planQty: 5000, actualQty: 5150, wasteQty: 150, qty: 5150, unit: "Sheets", unitPrice: 0.58, totalPrice: 2987.00, supplier: "Stora Enso", availability: "Low Stock", issueType: "standard", faultParty: "none" },
-    { id: "MAT-VRN-SUV", name: "Spot UV High-Build Varnish", spec: "UV Curable Gloss", planQty: 15, actualQty: 15, wasteQty: 0, qty: 15, unit: "kg", unitPrice: 32.00, totalPrice: 480.00, supplier: "Actega", availability: "In Stock", issueType: "standard", faultParty: "none" },
-  ],
-  FLEXO_NYLON_V1: FLEXO_BOM_ITEMS,
-  FLEXO_SATIN_V2: [
-    { id: "MAT-FLX-SAT", name: "Premium Satin Ribbon Roll", spec: "40mm width, 200m, Woven Edge", planQty: 30, actualQty: 31, wasteQty: 1, qty: 31, unit: "Rolls", unitPrice: 18.00, totalPrice: 558.00, supplier: "Avery Dennison", availability: "In Stock", issueType: "standard", faultParty: "none" },
-    { id: "MAT-FLX-GLD", name: "Metallic Gold Flexo Ink", spec: "Wash-Fast Metallic", planQty: 1.5, actualQty: 1.5, wasteQty: 0, qty: 1.5, unit: "kg", unitPrice: 68.00, totalPrice: 102.00, supplier: "Flint Group", availability: "In Stock", issueType: "standard", faultParty: "none" },
-  ],
-  JACQ_WOVEN_V1: JACQUARD_BOM_ITEMS,
-  JACQ_TAFFETA_V2: [
-    { id: "MAT-YRN-HDT", name: "High-Density Taffeta Yarn", spec: "50D Micro-Polyester", planQty: 200, actualQty: 205, wasteQty: 5, qty: 205, unit: "kg", unitPrice: 6.40, totalPrice: 1312.00, supplier: "Shenghong Corp", availability: "Low Stock", issueType: "standard", faultParty: "none" },
-  ],
-  POST_GENERIC_V1: [
-    { id: "MAT-PKG-STR", name: "PP Packaging Straps", spec: "12mm Heavy Duty", planQty: 10, actualQty: 10, wasteQty: 0, qty: 10, unit: "Rolls", unitPrice: 14.00, totalPrice: 140.00, supplier: "Local Pack", availability: "In Stock", issueType: "standard", faultParty: "none" },
-    { id: "MAT-PKG-BOX", name: "Corrugated Carton Boxes", spec: "Double-Wall 5-Ply", planQty: 100, actualQty: 100, wasteQty: 0, qty: 100, unit: "pcs", unitPrice: 1.45, totalPrice: 145.00, supplier: "Local Pack", availability: "In Stock", issueType: "standard", faultParty: "none" },
-  ],
-};
+export const OFFSET_BOM_ITEMS: BomItem[] = [];
+export const FLEXO_BOM_ITEMS: BomItem[] = [];
+export const JACQUARD_BOM_ITEMS: BomItem[] = [];
+export const RECIPE_BOM_MAP: Record<string, BomItem[]> = {};
 
 interface BomMaterialsGridProps {
   tabId: string;
@@ -317,16 +277,10 @@ export function BomMaterialsGrid({
     warehouseStock.forEach((ws) => {
       if (ws.supplier) set.add(ws.supplier);
     });
-    ["Antalis Central Asia", "Sappi Paper Mill", "Hubergroup", "Agfa Graphics", "Dunmore", "Avery Dennison", "Flint Group", "MacDermid", "Kurz Foil"].forEach((s) => set.add(s));
     return Array.from(set);
   }, [suppliers, warehouseStock]);
 
-  const defaultItems = (initialItems || (
-    (recipe && RECIPE_BOM_MAP[recipe]) ? RECIPE_BOM_MAP[recipe] :
-    department === "Flexo" ? FLEXO_BOM_ITEMS :
-    department === "Jacquard" ? JACQUARD_BOM_ITEMS :
-    OFFSET_BOM_ITEMS
-  )).map(normalizeBomItem);
+  const defaultItems = (initialItems || []).map(normalizeBomItem);
 
   const [items, setItems] = useState<BomItem[]>(defaultItems);
   const [selection, setSelection] = useState<GridSelection>({
@@ -414,7 +368,12 @@ export function BomMaterialsGrid({
             : stock.stockLevel > 0
             ? "Low Stock"
             : "On Order",
-        imageUrl: stock.imageUrl || getMaterialImage(stock),
+        imageUrl:
+          stock.imageUrl &&
+          typeof stock.imageUrl === "string" &&
+          !stock.imageUrl.startsWith("data:image/svg+xml")
+            ? stock.imageUrl.trim()
+            : undefined,
       };
     });
     setIsWarehousePickerOpen(false);
@@ -639,12 +598,30 @@ export function BomMaterialsGrid({
 
       switch (column.id) {
         case "image": {
-          const img = item.imageUrl || getMaterialImage(item);
+          const img =
+            item.imageUrl &&
+            typeof item.imageUrl === "string" &&
+            !item.imageUrl.startsWith("data:image/svg+xml")
+              ? item.imageUrl.trim()
+              : "";
+          if (img) {
+            return {
+              kind: GridCellKind.Image,
+              data: [img],
+              displayData: [img],
+              allowOverlay: true,
+            };
+          }
           return {
-            kind: GridCellKind.Image,
-            data: [img],
-            displayData: [img],
-            allowOverlay: true,
+            kind: GridCellKind.Text,
+            data: "",
+            displayData: "—",
+            allowOverlay: false,
+            contentAlign: "center",
+            themeOverride: {
+              textDark: isDark ? "#64748b" : "#94a3b8",
+              baseFontStyle: "11px monospace",
+            },
           };
         }
         case "id":
@@ -1107,7 +1084,12 @@ export function BomMaterialsGrid({
       issueType: formState.issueType || "standard",
       faultParty: formState.faultParty || "none",
       notes: formState.notes?.trim() || "",
-      imageUrl: formState.imageUrl || getMaterialImage(formState),
+      imageUrl:
+        formState.imageUrl &&
+        typeof formState.imageUrl === "string" &&
+        !formState.imageUrl.startsWith("data:image/svg+xml")
+          ? formState.imageUrl.trim()
+          : undefined,
       sourceType: formState.acquisitionSource,
       acquisitionSource: formState.acquisitionSource,
     };
@@ -1597,17 +1579,25 @@ export function BomMaterialsGrid({
                 const column = columns[col];
                 const item = filteredItems[row];
                 if (column?.id === "image" && item) {
-                  setPreviewMaterial({
-                    imageUrl: item.imageUrl || getMaterialImage(item),
-                    title: item.name,
-                    sku: item.id,
-                    spec: item.spec,
-                    stock: item.actualQty,
-                    unit: item.unit,
-                    supplier: item.supplier,
-                    notes: item.notes,
-                    status: item.availability,
-                  });
+                  const img =
+                    item.imageUrl &&
+                    typeof item.imageUrl === "string" &&
+                    !item.imageUrl.startsWith("data:image/svg+xml")
+                      ? item.imageUrl.trim()
+                      : "";
+                  if (img) {
+                    setPreviewMaterial({
+                      imageUrl: img,
+                      title: item.name,
+                      sku: item.id,
+                      spec: item.spec,
+                      stock: item.actualQty,
+                      unit: item.unit,
+                      supplier: item.supplier,
+                      notes: item.notes,
+                      status: item.availability,
+                    });
+                  }
                   return;
                 }
                 handleOpenEdit(row);
@@ -1618,6 +1608,13 @@ export function BomMaterialsGrid({
               rowHeight={30}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
             />
+            {filteredItems.length === 0 && (
+              <div className="absolute inset-0 top-7 flex flex-col items-center justify-center pointer-events-none text-muted-foreground z-10 select-none">
+                <Package className="size-8 text-muted-foreground/30 mb-2" />
+                <span className="text-xs font-medium">BOM ro&apos;yxatida materiallar mavjud emas</span>
+                <span className="text-[11px] text-muted-foreground/70">Material kiritish yoki ombordan tanlash uchun yuqoridagi tugmalardan foydalaning</span>
+              </div>
+            )}
           </div>
         </ContextMenuTrigger>
 

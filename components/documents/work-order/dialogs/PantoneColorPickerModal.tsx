@@ -20,6 +20,7 @@ import {
   BASE_PANTONE_INKS,
   SPECIALTY_STATIONS,
   PantoneColor,
+  searchPantoneColors,
 } from "@/lib/pantone-catalog";
 import { cn } from "@/lib/utils";
 
@@ -59,21 +60,18 @@ export function PantoneColorPickerModal({
 
   // Filter colors based on search and category
   const filteredColors = useMemo(() => {
-    let source: PantoneColor[] = ALL_PANTONE_COLORS;
-    if (activeCategory === "base") source = BASE_PANTONE_INKS;
-    if (activeCategory === "specialty") source = SPECIALTY_STATIONS;
+    const q = searchQuery.trim();
+    if (q) {
+      // If user typed a search query, search comprehensively across catalog
+      if (activeCategory === "specialty") {
+        return searchPantoneColors(q, 100).filter((c) => c.category === "Specialty & Foils");
+      }
+      return searchPantoneColors(q, 100);
+    }
 
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return source.slice(0, 80);
-
-    return source
-      .filter(
-        (c) =>
-          c.code.toLowerCase().includes(q) ||
-          c.name.toLowerCase().includes(q) ||
-          c.hex.toLowerCase().includes(q)
-      )
-      .slice(0, 100);
+    if (activeCategory === "base") return BASE_PANTONE_INKS;
+    if (activeCategory === "specialty") return SPECIALTY_STATIONS;
+    return ALL_PANTONE_COLORS.slice(0, 80);
   }, [searchQuery, activeCategory]);
 
   const handleSelect = (color: PantoneColor) => {
@@ -87,16 +85,35 @@ export function PantoneColorPickerModal({
     setSearchQuery("");
   };
 
-  const handleAddCustom = () => {
-    if (!customName.trim()) return;
+  const handleAddCustomNamed = (name: string, hex = "#2563eb") => {
+    const clean = name.trim();
+    if (!clean) return;
+    const cleanName = clean.toUpperCase().startsWith("PANTONE") ? clean : `PANTONE ${clean}`;
     onSelectColor({
-      code: customName.trim(),
-      name: customName.trim(),
-      hex: customHex,
+      code: clean,
+      name: cleanName,
+      hex,
       side: targetSide,
     });
     onOpenChange(false);
+    setSearchQuery("");
+  };
+
+  const handleAddCustom = () => {
+    if (!customName.trim()) return;
+    handleAddCustomNamed(customName, customHex);
     setCustomName("");
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (filteredColors.length > 0) {
+        handleSelect(filteredColors[0]);
+      } else if (searchQuery.trim()) {
+        handleAddCustomNamed(searchQuery.trim());
+      }
+    }
   };
 
   return (
@@ -114,13 +131,13 @@ export function PantoneColorPickerModal({
             </div>
           </div>
           <DialogDescription className="sr-only">
-            Pantone katalogi va maxsus bo'yoqlarni tanlash
+            Pantone katalogi va maxsus bo&apos;yoqlarni tanlash
           </DialogDescription>
         </DialogHeader>
 
         {/* Target Side Selector Banner */}
         <div className="px-3.5 py-2 bg-muted/40 border-b border-border flex items-center justify-between text-xs">
-          <span className="text-muted-foreground font-medium text-[11px]">Apply Station to:</span>
+          <span className="text-muted-foreground font-medium text-[11px]">Tayinlash tomoni (Target side):</span>
           <div className="inline-flex items-center p-0.5 rounded bg-muted border border-border">
             <button
               type="button"
@@ -132,7 +149,7 @@ export function PantoneColorPickerModal({
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              Face / Лицо
+              Old tomon (Front)
             </button>
             <button
               type="button"
@@ -144,7 +161,7 @@ export function PantoneColorPickerModal({
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              Reverse / Оборот
+              Orqa tomon (Back)
             </button>
             <button
               type="button"
@@ -156,7 +173,7 @@ export function PantoneColorPickerModal({
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              Both Sides
+              Ikkala tomon (Both)
             </button>
           </div>
         </div>
@@ -167,7 +184,7 @@ export function PantoneColorPickerModal({
             <div className="inline-flex items-center p-0.5 rounded bg-muted/60 border border-border">
               <button
                 type="button"
-                onClick={() => setActiveCategory("base")}
+                onClick={() => { setActiveCategory("base"); }}
                 className={cn(
                   "px-2.5 py-1 text-xs rounded transition-colors cursor-pointer",
                   activeCategory === "base"
@@ -179,7 +196,7 @@ export function PantoneColorPickerModal({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveCategory("specialty")}
+                onClick={() => { setActiveCategory("specialty"); }}
                 className={cn(
                   "px-2.5 py-1 text-xs rounded transition-colors cursor-pointer",
                   activeCategory === "specialty"
@@ -191,7 +208,7 @@ export function PantoneColorPickerModal({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveCategory("all")}
+                onClick={() => { setActiveCategory("all"); }}
                 className={cn(
                   "px-2.5 py-1 text-xs rounded transition-colors cursor-pointer",
                   activeCategory === "all"
@@ -203,7 +220,7 @@ export function PantoneColorPickerModal({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveCategory("custom")}
+                onClick={() => { setActiveCategory("custom"); }}
                 className={cn(
                   "px-2.5 py-1 text-xs rounded transition-colors cursor-pointer",
                   activeCategory === "custom"
@@ -221,12 +238,30 @@ export function PantoneColorPickerModal({
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search code (e.g. 021, Warm Red, 871)..."
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Katalogdan qidirish (021, Warm Red, 485, 871)..."
                   className="h-7.5 pl-8 text-xs bg-background border-input"
                 />
               </div>
             )}
           </div>
+
+          {/* Quick Custom Add Banner when searching */}
+          {searchQuery.trim() && activeCategory !== "custom" && (
+            <div className="flex items-center justify-between px-2.5 py-1.5 rounded bg-muted/40 border border-border text-xs">
+              <span className="text-muted-foreground text-[11px] truncate mr-2">
+                Qidiruv: <span className="font-semibold text-foreground">&quot;{searchQuery.trim()}&quot;</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => handleAddCustomNamed(searchQuery.trim())}
+                className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline cursor-pointer"
+              >
+                <Plus className="size-3" />
+                <span>Maxsus rang sifatida qo&apos;shish</span>
+              </button>
+            </div>
+          )}
 
           {/* Content Area */}
           {activeCategory === "custom" ? (
@@ -315,8 +350,18 @@ export function PantoneColorPickerModal({
                   </div>
                 ))
               ) : (
-                <div className="py-8 text-center text-xs text-muted-foreground">
-                  No Pantone colors matching "{searchQuery}".
+                <div className="py-8 text-center text-xs text-muted-foreground space-y-2">
+                  <p>Katalogda &quot;{searchQuery}&quot; topilmadi.</p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleAddCustomNamed(searchQuery.trim())}
+                    className="h-7 text-xs gap-1.5"
+                  >
+                    <Plus className="size-3.5" />
+                    <span>&quot;{searchQuery}&quot; ni maxsus rang sifatida qo&apos;shish</span>
+                  </Button>
                 </div>
               )}
             </div>

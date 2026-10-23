@@ -34,17 +34,27 @@ export function InfoTooltip({
     <Tooltip>
       <TooltipTrigger
         render={
-          <button
-            type="button"
+          <span
+            role="button"
+            tabIndex={0}
             className={cn(
-              "inline-flex items-center justify-center p-0.5 rounded-full text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-help focus:outline-hidden focus:ring-1 focus:ring-ring shrink-0",
+              "inline-flex items-center justify-center p-0.5 rounded-full text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-help focus:outline-hidden focus:ring-1 focus:ring-ring shrink-0 select-none",
               className
             )}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation();
+                e.preventDefault();
+              }
+            }}
             aria-label={title || "Ma'lumot"}
           >
             <Info className={cn("w-3.5 h-3.5", iconClassName)} />
-          </button>
+          </span>
         }
       />
       <TooltipContent

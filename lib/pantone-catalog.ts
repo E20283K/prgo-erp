@@ -85,10 +85,38 @@ export function searchPantoneColors(query: string, maxResults = 50): PantoneColo
   const q = query.trim().toLowerCase();
   if (!q) return ALL_PANTONE_COLORS.slice(0, maxResults);
 
-  return ALL_PANTONE_COLORS.filter(
-    (p) =>
-      p.code.toLowerCase().includes(q) ||
-      p.name.toLowerCase().includes(q) ||
-      p.hex.toLowerCase().includes(q)
-  ).slice(0, maxResults);
+  const cleanNum = q.replace(/^(pantone|pms)\s*/i, "").trim().toLowerCase();
+
+  const exactMatches: PantoneColor[] = [];
+  const primaryMatches: PantoneColor[] = [];
+  const secondaryMatches: PantoneColor[] = [];
+
+  for (const p of ALL_PANTONE_COLORS) {
+    const codeL = p.code.toLowerCase();
+    const nameL = p.name.toLowerCase();
+
+    // 1. Exact match by code or name
+    if (codeL === q || codeL === cleanNum || nameL === q) {
+      exactMatches.push(p);
+      continue;
+    }
+
+    // 2. Starts with / prefix match
+    if (
+      codeL.startsWith(cleanNum) ||
+      codeL.startsWith(q) ||
+      nameL.startsWith(q) ||
+      nameL.startsWith(`pantone ${cleanNum}`)
+    ) {
+      primaryMatches.push(p);
+      continue;
+    }
+
+    // 3. Substring match
+    if (nameL.includes(q) || codeL.includes(cleanNum) || nameL.includes(cleanNum)) {
+      secondaryMatches.push(p);
+    }
+  }
+
+  return [...exactMatches, ...primaryMatches, ...secondaryMatches].slice(0, maxResults);
 }

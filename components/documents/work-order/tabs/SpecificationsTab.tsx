@@ -52,6 +52,7 @@ import {
 import { DieLinePreview } from "../DieLinePreview";
 import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
+import { searchPantoneColors } from "@/lib/pantone-catalog";
 import { extractSvgDimensions } from "../utils/svgContour";
 import { useLookupStore } from "@/store/lookupStore";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -71,7 +72,7 @@ import { SizeMatrixCard } from "./SizeMatrixCard";
 
 interface SpecificationsTabProps {
   formData: WorkOrderFormData;
-  handleFieldChange: (field: string, val: any) => void;
+  handleFieldChange: (field: string | Record<string, any>, val?: any) => void;
   handleSizesChange?: (newSizes: SizeDistribution[]) => void;
   onMarkUnsaved: () => void;
   isOperator?: boolean;
@@ -367,6 +368,8 @@ export function SpecificationsTab({
   }, [formData.paperStock, warehouseStock]);
   const [isPantoneModalOpen, setIsPantoneModalOpen] = useState(false);
   const [pantoneTargetSide, setPantoneTargetSide] = useState<"front" | "back" | "both">("front");
+  const [frontQuickInput, setFrontQuickInput] = useState("");
+  const [backQuickInput, setBackQuickInput] = useState("");
   const [isSvgModalOpen, setIsSvgModalOpen] = useState(false);
   const [svgInputDraft, setSvgInputDraft] = useState(formData.customSvgPath || "");
   const detectedSvgDims = useMemo(() => extractSvgDimensions(svgInputDraft), [svgInputDraft]);
@@ -450,17 +453,17 @@ export function SpecificationsTab({
   // Color config helpers
   const frontColors = formData.frontColors || { c: false, m: false, y: false, k: false };
   const backColors = formData.backColors || { c: false, m: false, y: false, k: false };
-  const spotColorItems: SpotColorItem[] = formData.spotColorItems || (
-    formData.spotColors && formData.spotColors.length > 0
-      ? formData.spotColors.map((name, i) => ({
-          id: `spot-${i}`,
-          name,
-          code: name.split(" ")[1] || "PMS",
-          hex: name.includes("021") ? "#fe5000" : name.includes("871") ? "#84754e" : "#2563eb",
-          side: "front" as const,
-        }))
-      : []
-  );
+  const spotColorItems: SpotColorItem[] = (formData.spotColorItems && formData.spotColorItems.length > 0)
+    ? formData.spotColorItems
+    : (formData.spotColors && formData.spotColors.length > 0
+        ? formData.spotColors.map((name, i) => ({
+            id: `spot-${i}`,
+            name,
+            code: name.replace(/^PANTONE\s+/i, ""),
+            hex: name.includes("021") ? "#fe5000" : name.includes("871") ? "#84754e" : "#2563eb",
+            side: "front" as const,
+          }))
+        : []);
 
   const frontSpots = spotColorItems.filter((s) => s.side === "front" || s.side === "both");
   const backSpots = spotColorItems.filter((s) => s.side === "back" || s.side === "both");
@@ -472,36 +475,91 @@ export function SpecificationsTab({
   const handleToggleFrontColor = (color: "c" | "m" | "y" | "k") => {
     if (isOperator) return;
     const updated = { ...frontColors, [color]: !frontColors[color] };
-    handleFieldChange("frontColors", updated);
+    const newProcessCount = (updated.c ? 1 : 0) + (updated.m ? 1 : 0) + (updated.y ? 1 : 0) + (updated.k ? 1 : 0);
+    const newColorsConfig = `${newProcessCount + frontSpots.length}+${backTotalCount}`;
+    handleFieldChange({
+      frontColors: updated,
+      colorsConfig: newColorsConfig,
+    });
     onMarkUnsaved();
   };
 
   const handleToggleBackColor = (color: "c" | "m" | "y" | "k") => {
     if (isOperator) return;
     const updated = { ...backColors, [color]: !backColors[color] };
-    handleFieldChange("backColors", updated);
+    const newProcessCount = (updated.c ? 1 : 0) + (updated.m ? 1 : 0) + (updated.y ? 1 : 0) + (updated.k ? 1 : 0);
+    const newColorsConfig = `${frontTotalCount}+${newProcessCount + backSpots.length}`;
+    handleFieldChange({
+      backColors: updated,
+      colorsConfig: newColorsConfig,
+    });
     onMarkUnsaved();
   };
 
   const handleAddSpotColor = (selection: SpotStationSelection) => {
     const newItem: SpotColorItem = {
-      id: `spot-${Date.now()}`,
+      id: `spot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: selection.name,
       code: selection.code,
       hex: selection.hex,
       side: selection.side,
     };
     const updated = [...spotColorItems, newItem];
-    handleFieldChange("spotColorItems", updated);
-    handleFieldChange("spotColors", updated.map((s) => s.name));
+    const newFrontSpots = updated.filter((s) => s.side === "front" || s.side === "both");
+    const newBackSpots = updated.filter((s) => s.side === "back" || s.side === "both");
+    const newColorsConfig = `${frontProcessCount + newFrontSpots.length}+${backProcessCount + newBackSpots.length}`;
+
+    handleFieldChange({
+      spotColorItems: updated,
+      spotColors: updated.map((s) => s.name),
+      colorsConfig: newColorsConfig,
+    });
     onMarkUnsaved();
   };
 
   const handleRemoveSpotColor = (id: string) => {
     if (isOperator) return;
     const updated = spotColorItems.filter((s) => s.id !== id);
-    handleFieldChange("spotColorItems", updated);
-    handleFieldChange("spotColors", updated.map((s) => s.name));
+    const newFrontSpots = updated.filter((s) => s.side === "front" || s.side === "both");
+    const newBackSpots = updated.filter((s) => s.side === "back" || s.side === "both");
+    const newColorsConfig = `${frontProcessCount + newFrontSpots.length}+${backProcessCount + newBackSpots.length}`;
+
+    handleFieldChange({
+      spotColorItems: updated,
+      spotColors: updated.map((s) => s.name),
+      colorsConfig: newColorsConfig,
+    });
+    onMarkUnsaved();
+  };
+
+  const handleQuickAddPantone = (side: "front" | "back") => {
+    if (isOperator) return;
+    const raw = (side === "front" ? frontQuickInput : backQuickInput).trim();
+    if (!raw) return;
+
+    const matches = searchPantoneColors(raw, 5);
+    const matched = matches[0];
+
+    const newItem: SpotColorItem = {
+      id: `spot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: matched ? matched.name : (raw.toUpperCase().startsWith("PANTONE") ? raw : `PANTONE ${raw}`),
+      code: matched ? matched.code : raw,
+      hex: matched ? matched.hex : "#2563eb",
+      side,
+    };
+
+    const updated = [...spotColorItems, newItem];
+    const newFrontSpots = updated.filter((s) => s.side === "front" || s.side === "both");
+    const newBackSpots = updated.filter((s) => s.side === "back" || s.side === "both");
+    const newColorsConfig = `${frontProcessCount + newFrontSpots.length}+${backProcessCount + newBackSpots.length}`;
+
+    handleFieldChange({
+      spotColorItems: updated,
+      spotColors: updated.map((s) => s.name),
+      colorsConfig: newColorsConfig,
+    });
+    if (side === "front") setFrontQuickInput("");
+    else setBackQuickInput("");
     onMarkUnsaved();
   };
 
@@ -1979,7 +2037,7 @@ export function SpecificationsTab({
                 </div>
 
                 {/* Front Pantone Spot Colors */}
-                <div className="pt-2 border-t border-border/60 space-y-1.5">
+                <div className="pt-2 border-t border-border/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] uppercase font-semibold text-muted-foreground">
                       Pantone / Spot ({frontSpots.length})
@@ -1992,13 +2050,14 @@ export function SpecificationsTab({
                         onClick={() => handleOpenPantoneModal("front")}
                         className="h-5 px-1.5 text-[11px] gap-1 text-primary hover:bg-primary/10 cursor-pointer"
                       >
-                        <Plus className="w-3 h-3" />
-                        <span>Pantone qo&apos;shish</span>
+                        <Palette className="w-3 h-3" />
+                        <span>Katalog (PMS)</span>
                       </Button>
                     )}
                   </div>
 
-                  {frontSpots.length > 0 ? (
+                  {/* Active Front Spot Chips */}
+                  {frontSpots.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {frontSpots.map((spot) => (
                         <div
@@ -2016,6 +2075,7 @@ export function SpecificationsTab({
                             <button
                               type="button"
                               onClick={() => handleRemoveSpotColor(spot.id)}
+                              title="O'chirish"
                               className="text-muted-foreground hover:text-destructive opacity-40 group-hover:opacity-100 transition-opacity ml-0.5 cursor-pointer"
                             >
                               <Trash2 className="w-3 h-3" />
@@ -2024,17 +2084,34 @@ export function SpecificationsTab({
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    !isOperator && (
-                      <button
+                  )}
+
+                  {/* Direct Input & Quick Add Row */}
+                  {!isOperator && (
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      <Input
+                        value={frontQuickInput}
+                        onChange={(e) => setFrontQuickInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleQuickAddPantone("front");
+                          }
+                        }}
+                        placeholder="Old tomonga Pantone (021, Warm Red, 485)..."
+                        className="h-7 text-xs flex-1 bg-background"
+                      />
+                      <Button
                         type="button"
-                        onClick={() => handleOpenPantoneModal("front")}
-                        className="w-full py-1 text-[11px] text-muted-foreground/70 hover:text-primary hover:bg-background/80 border border-dashed border-border/70 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                        size="sm"
+                        onClick={() => handleQuickAddPantone("front")}
+                        disabled={!frontQuickInput.trim()}
+                        className="h-7 px-2 text-xs gap-1 cursor-pointer"
                       >
                         <Plus className="w-3 h-3" />
-                        <span>Old tomonga Pantone qo&apos;shish</span>
-                      </button>
-                    )
+                        <span>Qo&apos;shish</span>
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -2083,7 +2160,7 @@ export function SpecificationsTab({
                 </div>
 
                 {/* Back Pantone Spot Colors */}
-                <div className="pt-2 border-t border-border/60 space-y-1.5">
+                <div className="pt-2 border-t border-border/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] uppercase font-semibold text-muted-foreground">
                       Pantone / Spot ({backSpots.length})
@@ -2096,13 +2173,14 @@ export function SpecificationsTab({
                         onClick={() => handleOpenPantoneModal("back")}
                         className="h-5 px-1.5 text-[11px] gap-1 text-primary hover:bg-primary/10 cursor-pointer"
                       >
-                        <Plus className="w-3 h-3" />
-                        <span>Pantone qo&apos;shish</span>
+                        <Palette className="w-3 h-3" />
+                        <span>Katalog (PMS)</span>
                       </Button>
                     )}
                   </div>
 
-                  {backSpots.length > 0 ? (
+                  {/* Active Back Spot Chips */}
+                  {backSpots.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {backSpots.map((spot) => (
                         <div
@@ -2120,6 +2198,7 @@ export function SpecificationsTab({
                             <button
                               type="button"
                               onClick={() => handleRemoveSpotColor(spot.id)}
+                              title="O'chirish"
                               className="text-muted-foreground hover:text-destructive opacity-40 group-hover:opacity-100 transition-opacity ml-0.5 cursor-pointer"
                             >
                               <Trash2 className="w-3 h-3" />
@@ -2128,17 +2207,34 @@ export function SpecificationsTab({
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    !isOperator && (
-                      <button
+                  )}
+
+                  {/* Direct Input & Quick Add Row */}
+                  {!isOperator && (
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      <Input
+                        value={backQuickInput}
+                        onChange={(e) => setBackQuickInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleQuickAddPantone("back");
+                          }
+                        }}
+                        placeholder="Orqa tomonga Pantone (021, Warm Red, 485)..."
+                        className="h-7 text-xs flex-1 bg-background"
+                      />
+                      <Button
                         type="button"
-                        onClick={() => handleOpenPantoneModal("back")}
-                        className="w-full py-1 text-[11px] text-muted-foreground/70 hover:text-primary hover:bg-background/80 border border-dashed border-border/70 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                        size="sm"
+                        onClick={() => handleQuickAddPantone("back")}
+                        disabled={!backQuickInput.trim()}
+                        className="h-7 px-2 text-xs gap-1 cursor-pointer"
                       >
                         <Plus className="w-3 h-3" />
-                        <span>Orqa tomonga Pantone qo&apos;shish</span>
-                      </button>
-                    )
+                        <span>Qo&apos;shish</span>
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>

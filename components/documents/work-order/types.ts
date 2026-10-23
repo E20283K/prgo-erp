@@ -380,6 +380,9 @@ export interface RouteStep {
   name: string;
   machine: string;
   operator: string;
+  operators?: string[];
+  countingMode?: "theoretical" | "counter" | "multipiece";
+  multiplier?: number;
   duration: number;
   qtyCompleted: string;
   status: "Queued" | "In Progress" | "Finished";
@@ -391,9 +394,16 @@ export interface ShiftEvent {
   id: string;
   opId: string;
   time: string;
+  shift?: "1-smena" | "2-smena";
+  batchLabel?: string;
   type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC" | "Waste";
   note: string;
   operator: string;
+  inputQty?: number;
+  makeReadyQty?: number;
+  defectQty?: number;
+  goodQty?: number;
+  outputPiecesQty?: number;
   wasteQty?: number;
   wasteReason?: string;
 }

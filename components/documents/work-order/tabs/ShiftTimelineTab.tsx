@@ -12,6 +12,9 @@ import {
   ChevronRight,
   TrendingDown,
   User,
+  ArrowRight,
+  Trash2,
+  Package,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar";
 import { RouteStep, ShiftEvent } from "../types";
 
 export function parseQtyString(qtyStr: string, fallbackTarget = 0) {
@@ -41,14 +45,27 @@ export function parseQtyString(qtyStr: string, fallbackTarget = 0) {
   return { completed, target, unitSuffix, percent };
 }
 
+export function getOperatorInitials(name: string) {
+  if (!name) return "OP";
+  const clean = name.replace(/\(.*?\)/g, "").trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return clean.slice(0, 2).toUpperCase();
+}
+
 interface ShiftTimelineTabProps {
   operations: RouteStep[];
   selectedTimelineOpId: string;
   setSelectedTimelineOpId: (id: string) => void;
   selectedOp: RouteStep;
   selectedOpEvents: ShiftEvent[];
+  allEvents?: ShiftEvent[];
   onOpenQuickPalletLog?: () => void;
   onChangeStepStatus?: (opId: string, status: RouteStep["status"]) => void;
+  onDeleteEvent?: (eventId: string) => void;
+  piecesPerSheet?: number;
 }
 
 export function ShiftTimelineTab({
@@ -57,8 +74,11 @@ export function ShiftTimelineTab({
   setSelectedTimelineOpId,
   selectedOp,
   selectedOpEvents,
+  allEvents = [],
   onOpenQuickPalletLog,
   onChangeStepStatus,
+  onDeleteEvent,
+  piecesPerSheet = 1,
 }: ShiftTimelineTabProps) {
   const { completed, target, unitSuffix, percent } = useMemo(
     () => parseQtyString(selectedOp.qtyCompleted),
@@ -73,57 +93,98 @@ export function ShiftTimelineTab({
     return { overallPercent: pct, finishedStepsCount: finished };
   }, [operations]);
 
-  // Aggregate stats STRICTLY from actual pallet floor logs for this step
+  // Find index of current op
+  const currentOpIndex = operations.findIndex((o) => o.id === selectedOp.id);
+  const previousOp = currentOpIndex > 0 ? operations[currentOpIndex - 1] : undefined;
+
+  // Previous op good output calculation
+  const previousOpGoodOutput = useMemo(() => {
+    if (!previousOp) return 0;
+    const prevEvents = allEvents.filter((ev) => ev.opId === previousOp.id);
+    if (prevEvents.length > 0) {
+      return prevEvents.reduce((sum, ev) => sum + (ev.goodQty || 0), 0);
+    }
+    const parsed = parseQtyString(previousOp.qtyCompleted);
+    return parsed.completed;
+  }, [previousOp, allEvents]);
+
+  // Aggregate stats strictly from structured ShiftEvent records
   const stepStats = useMemo(() => {
-    // If no events have been recorded for this step, it is completely fresh (0)
     if (!selectedOpEvents || selectedOpEvents.length === 0) {
       return {
         hasLogs: false,
         grossInput: 0,
+        makeReady: 0,
+        defect: 0,
         totalWaste: 0,
         goodOutput: 0,
+        outputPieces: 0,
         wastePct: "0.0",
         percentCompleted: 0,
       };
     }
 
     let inputTotal = 0;
-    let totalWaste = 0;
-    let goodOutput = 0;
+    let makeReadyTotal = 0;
+    let defectTotal = 0;
+    let goodTotal = 0;
+    let piecesTotal = 0;
 
     selectedOpEvents.forEach((ev) => {
-      // Parse logged text like: "[Palet #1] Kirish: 5000 l. | Priladka: 20 | Brak: 0 | Chiqish: 4980 l."
-      const inputMatch = ev.note.match(/Kirish:s*([d,]+)/i);
-      const outMatch = ev.note.match(/Chiqish:s*([d,]+)/i);
-
-      if (inputMatch) {
-        inputTotal += parseInt(inputMatch[1].replace(/,/g, ""), 10) || 0;
-      }
-      if (outMatch) {
-        goodOutput += parseInt(outMatch[1].replace(/,/g, ""), 10) || 0;
-      } else if (ev.type === "Run" && !ev.wasteQty) {
-        goodOutput += completed;
+      // Direct structured fields
+      if (ev.inputQty !== undefined) {
+        inputTotal += ev.inputQty;
+      } else {
+        const inputMatch = ev.note.match(/Kirish:\s*([\d,]+)/i);
+        if (inputMatch) inputTotal += parseInt(inputMatch[1].replace(/,/g, ""), 10) || 0;
       }
 
-      if (ev.wasteQty) {
-        totalWaste += ev.wasteQty;
+      if (ev.makeReadyQty !== undefined) {
+        makeReadyTotal += ev.makeReadyQty;
+      }
+      if (ev.defectQty !== undefined) {
+        defectTotal += ev.defectQty;
+      }
+
+      if (ev.goodQty !== undefined) {
+        goodTotal += ev.goodQty;
+      } else {
+        const outMatch = ev.note.match(/Chiqish:\s*([\d,]+)/i);
+        if (outMatch) {
+          goodTotal += parseInt(outMatch[1].replace(/,/g, ""), 10) || 0;
+        } else if (ev.type === "Run" && !ev.wasteQty) {
+          goodTotal += completed;
+        }
+      }
+
+      if (ev.outputPiecesQty !== undefined) {
+        piecesTotal += ev.outputPiecesQty;
       }
     });
 
-    // If input was not matched, fallback to goodOutput + waste
-    const grossInput = inputTotal > 0 ? inputTotal : (goodOutput + totalWaste);
+    const totalWaste = makeReadyTotal + defectTotal > 0
+      ? makeReadyTotal + defectTotal
+      : selectedOpEvents.reduce((sum, ev) => sum + (ev.wasteQty || 0), 0);
+
+    const grossInput = inputTotal > 0 ? inputTotal : (goodTotal + totalWaste);
     const wastePct = grossInput > 0 ? ((totalWaste / grossInput) * 100).toFixed(1) : "0.0";
-    const percentCompleted = target > 0 ? Math.min(100, Math.round((goodOutput / target) * 100)) : 0;
+    const percentCompleted = target > 0 ? Math.min(100, Math.round((goodTotal / target) * 100)) : 0;
 
     return {
       hasLogs: true,
       grossInput,
+      makeReady: makeReadyTotal,
+      defect: defectTotal,
       totalWaste,
-      goodOutput,
+      goodOutput: goodTotal,
+      outputPieces: piecesTotal,
       wastePct,
       percentCompleted,
     };
   }, [selectedOpEvents, target, completed]);
+
+  // Is multipiece step
+  const isMultipiece = selectedOp.countingMode === "multipiece" || /shtamp|die-cut|tigel|qadoq|pack/i.test(selectedOp.name);
 
   return (
     <TabsContent value="timeline" className="flex-1 overflow-y-auto p-4 m-0 space-y-4 no-scrollbar">
@@ -135,7 +196,7 @@ export function ShiftTimelineTab({
           </div>
           <div>
             <div className="text-xs font-bold text-foreground flex items-center gap-2">
-              <span>Smena & Qog&apos;oz Harakati Nazorati</span>
+              <span>Smena & Qog&apos;oz Harakati Nazorati (Cascade Floor Ledger)</span>
               <Badge variant="outline" className="font-mono text-[10px]">
                 Bosqich {selectedOp.stepNumber}: {selectedOp.name}
               </Badge>
@@ -202,13 +263,13 @@ export function ShiftTimelineTab({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* Left Column: Technological Route Steps */}
+        {/* Left Column: Technological Route Steps (Cascade Waterfall) */}
         <div className="lg:col-span-4 space-y-3">
           <div className="p-3 bg-card border border-border rounded-lg space-y-2.5 shadow-2xs">
             <div className="flex items-center justify-between pb-2 border-b border-border">
               <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
                 <Factory className="w-3.5 h-3.5 text-primary" />
-                Texnologik Bosqichlar
+                <span>Texnologik Bosqichlar Zanjiri</span>
               </span>
               <span className="text-[11px] font-mono text-muted-foreground">
                 {operations.length} ta operatsiya
@@ -216,15 +277,17 @@ export function ShiftTimelineTab({
             </div>
 
             <div className="flex flex-col gap-2">
-              {operations.map((op) => {
+              {operations.map((op, idx) => {
                 const isSelected = selectedTimelineOpId === op.id;
                 const opParsed = parseQtyString(op.qtyCompleted);
+                const isCutter = /kesish|gilotin|cutter/i.test(op.name);
+
                 return (
                   <div
                     key={op.id}
                     onClick={() => setSelectedTimelineOpId(op.id)}
                     className={cn(
-                      "p-3 rounded-md border transition-all cursor-pointer flex flex-col gap-1.5 text-left select-none",
+                      "p-2.5 rounded-md border transition-all cursor-pointer flex flex-col gap-1.5 text-left select-none relative",
                       isSelected
                         ? "bg-primary/5 border-primary shadow-xs"
                         : "bg-muted/30 border-border hover:bg-muted/60"
@@ -241,7 +304,7 @@ export function ShiftTimelineTab({
                           </Badge>
                         ) : op.status === "In Progress" ? (
                           <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30 text-[9px] px-1.5 py-0 h-4">
-                            {opParsed.percent}% Bosildi
+                            {opParsed.percent}% Bajarildi
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="text-muted-foreground text-[9px] px-1.5 py-0 h-4">
@@ -258,10 +321,59 @@ export function ShiftTimelineTab({
                       {op.name}
                     </div>
 
+                    {isCutter && (
+                      <div className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">
+                        Datchiksiz (Nazariy hisob)
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border/40 font-mono">
-                      <span>{op.machine || "Dastgoh"}</span>
+                      <span className="truncate max-w-[130px]">{op.machine || "Dastgoh"}</span>
                       <strong className="text-foreground">{op.qtyCompleted}</strong>
                     </div>
+
+                    {/* Biriktirilgan Operatorlar (Avatar Group) */}
+                    {(() => {
+                      const opList = (op.operators && op.operators.length > 0)
+                        ? op.operators
+                        : (op.operator ? [op.operator] : []);
+
+                      if (opList.length === 0) return null;
+
+                      return (
+                        <div className="flex items-center justify-between gap-1.5 pt-1 mt-0.5 border-t border-border/30">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <AvatarGroup className="-space-x-1.5">
+                              {opList.slice(0, 3).map((operatorName) => {
+                                const initials = getOperatorInitials(operatorName);
+                                return (
+                                  <Avatar
+                                    key={operatorName}
+                                    size="sm"
+                                    className="size-6 text-[10px] font-bold border-2 border-card bg-card shadow-sm"
+                                    title={operatorName}
+                                  >
+                                    <AvatarFallback className="size-full bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-mono font-bold">
+                                      {initials}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                );
+                              })}
+                            </AvatarGroup>
+
+                            <span className="text-[10px] text-muted-foreground truncate font-sans" title={opList.join(", ")}>
+                              {opList.length === 1 ? opList[0] : `${opList[0]} (+${opList.length - 1})`}
+                            </span>
+                          </div>
+
+                          {opList.length > 3 && (
+                            <span className="text-[9px] font-mono text-muted-foreground bg-muted px-1 rounded">
+                              +{opList.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -281,9 +393,32 @@ export function ShiftTimelineTab({
                     {selectedOp.machine}
                   </Badge>
                 </div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">
-                  Mas&apos;ul: <strong className="text-foreground">{selectedOp.operator}</strong> · Reja:{" "}
-                  <strong className="text-foreground font-mono">{target.toLocaleString()}{unitSuffix}</strong>
+                <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <AvatarGroup className="-space-x-1.5">
+                      {((selectedOp.operators && selectedOp.operators.length > 0)
+                        ? selectedOp.operators
+                        : (selectedOp.operator ? [selectedOp.operator] : [])
+                      ).slice(0, 4).map((opName) => (
+                        <Avatar
+                          key={opName}
+                          size="sm"
+                          className="size-6 text-[10px] font-bold border-2 border-card bg-card shadow-sm"
+                          title={opName}
+                        >
+                          <AvatarFallback className="size-full bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-mono font-bold">
+                            {getOperatorInitials(opName)}
+                          </AvatarFallback>
+                        </Avatar>
+                      ))}
+                    </AvatarGroup>
+                    <span>Mas&apos;ul: <strong className="text-foreground">{selectedOp.operator}</strong></span>
+                    {selectedOp.operators && selectedOp.operators.length > 1 && (
+                      <span className="text-muted-foreground"> (+{selectedOp.operators.length - 1} yordamchi)</span>
+                    )}
+                  </div>
+                  <span>·</span>
+                  <div>Reja: <strong className="text-foreground font-mono">{target.toLocaleString()}{unitSuffix}</strong></div>
                 </div>
               </div>
 
@@ -319,7 +454,7 @@ export function ShiftTimelineTab({
               <div className="p-3 rounded-lg border border-rose-500/20 bg-rose-500/5 flex flex-col justify-between">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-semibold uppercase text-rose-600 dark:text-rose-400 tracking-wider">
-                    2. Jami Brak
+                    2. Jami Isrof (Brak)
                   </span>
                   <TrendingDown className="w-3.5 h-3.5 text-rose-500" />
                 </div>
@@ -327,8 +462,8 @@ export function ShiftTimelineTab({
                   <div className="text-xl font-black font-mono text-rose-600 dark:text-rose-400 leading-none">
                     {stepStats.totalWaste.toLocaleString()}
                   </div>
-                  <span className="text-[10px] text-rose-600/80 dark:text-rose-400/80 mt-1 block">
-                    {stepStats.wastePct}% chiqindi
+                  <span className="text-[10px] text-rose-600/80 dark:text-rose-400/80 mt-1 block font-mono">
+                    {stepStats.wastePct}% ({stepStats.makeReady} pril. + {stepStats.defect} brak)
                   </span>
                 </div>
               </div>
@@ -343,10 +478,12 @@ export function ShiftTimelineTab({
                 </div>
                 <div className="mt-1">
                   <div className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 leading-none">
-                    {completed.toLocaleString()}
+                    {stepStats.goodOutput > 0 ? stepStats.goodOutput.toLocaleString() : completed.toLocaleString()}
                   </div>
                   <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 mt-1 block">
-                    yaroqli list
+                    {isMultipiece && stepStats.outputPieces > 0
+                      ? `${stepStats.outputPieces.toLocaleString()} dona tayyor`
+                      : "yaroqli list"}
                   </span>
                 </div>
               </div>
@@ -376,7 +513,7 @@ export function ShiftTimelineTab({
             <div className="p-3 bg-muted/40 font-bold border-b border-border text-xs flex justify-between items-center">
               <span className="flex items-center gap-1.5">
                 <Layers className="w-4 h-4 text-primary" />
-                <span>Ushbu Bosqichda Qabul Qilingan va Topshirilgan Paletlar</span>
+                <span>Ushbu Bosqichda Qabul Qilingan va Topshirilgan Paletlar (Log)</span>
                 <Badge variant="outline" className="text-[10px] font-mono font-normal">
                   {selectedOpEvents.length} ta yozuv
                 </Badge>
@@ -408,6 +545,11 @@ export function ShiftTimelineTab({
                       <span className="font-mono text-muted-foreground text-xs font-semibold w-12">
                         {ev.time}
                       </span>
+                      {ev.shift && (
+                        <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 h-4">
+                          {ev.shift}
+                        </Badge>
+                      )}
                       <Badge
                         variant="outline"
                         className={cn(
@@ -417,16 +559,31 @@ export function ShiftTimelineTab({
                             : "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
                         )}
                       >
-                        {ev.wasteQty && ev.wasteQty > 0 ? `Brak: ${ev.wasteQty} l.` : "Toza partiya"}
+                        {ev.wasteQty && ev.wasteQty > 0
+                          ? `Brak: ${ev.wasteQty} l.`
+                          : "Toza partiya"}
                       </Badge>
                       <span className="font-medium text-foreground text-xs">
                         {ev.note}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-muted-foreground text-[11px] font-mono shrink-0">
-                      <User className="w-3 h-3 text-primary" />
-                      <span>{ev.operator}</span>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="flex items-center gap-1.5 text-muted-foreground text-[11px] font-mono">
+                        <User className="w-3 h-3 text-primary" />
+                        <span>{ev.operator}</span>
+                      </div>
+
+                      {onDeleteEvent && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteEvent(ev.id)}
+                          className="text-muted-foreground hover:text-destructive p-1 rounded transition-colors cursor-pointer"
+                          title="Yozuvni o'chirish"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
