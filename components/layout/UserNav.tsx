@@ -309,28 +309,9 @@ export function UserNav() {
                 </button>
               </div>
               <div className="grid flex-1 text-left leading-tight min-w-0">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="truncate font-semibold text-foreground text-sm">
-                    {currentUser.name}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      fileInputRef.current?.click();
-                    }}
-                    disabled={isUploading}
-                    className="size-6 -mr-1 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-blue-600 transition-colors cursor-pointer shrink-0"
-                    title="Fotosurat yuklash (1:1 kvadrat)"
-                    aria-label="Fotosurat yuklash"
-                  >
-                    {isUploading ? (
-                      <Loader2 className="size-3.5 animate-spin text-blue-600" />
-                    ) : (
-                      <Camera className="size-3.5" />
-                    )}
-                  </button>
-                </div>
+                <span className="truncate font-semibold text-foreground text-sm">
+                  {currentUser.name}
+                </span>
                 <span className="truncate text-xs text-muted-foreground">
                   {getRoleLabel(currentUser.role)}
                 </span>
