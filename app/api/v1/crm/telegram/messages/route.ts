@@ -15,12 +15,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { chat, messages } = await getTelegramChatMessages(chatId);
+    const { chat, messages, bot } = await getTelegramChatMessages(chatId);
 
     return NextResponse.json({
       success: true,
       chat,
       data: messages,
+      bot,
       total: messages.length,
     });
   } catch (error) {

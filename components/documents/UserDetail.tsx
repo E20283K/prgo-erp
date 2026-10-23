@@ -13,6 +13,7 @@ import {
 } from "./common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/toast";
@@ -300,7 +301,29 @@ export function UserDetail({ tab }: UserDetailProps) {
         <DocumentSidebar
           summary={
             <SidebarSummaryCard
-              icon={User}
+              avatar={
+                <Avatar size="sm" className="size-8">
+                  {userData.avatar && (
+                    <AvatarImage
+                      src={userData.avatar}
+                      alt={userData.fullName || userData.username}
+                      className="object-cover"
+                    />
+                  )}
+                  <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
+                    {userData.initials ||
+                      (userData.fullName
+                        ? userData.fullName
+                            .split(" ")
+                            .filter(Boolean)
+                            .map((w) => w[0])
+                            .join("")
+                            .slice(0, 2)
+                            .toUpperCase()
+                        : "U")}
+                  </AvatarFallback>
+                </Avatar>
+              }
               title={userData.fullName || userData.username || "Yangi Hisob"}
               subtitle={userData.role || "Operator"}
             >

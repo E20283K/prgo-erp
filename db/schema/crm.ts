@@ -13,6 +13,7 @@ import {
 import { relations } from "drizzle-orm";
 import { companies } from "./core";
 import { employees } from "./hr";
+import { workOrders } from "./production";
 
 // ─── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,24 @@ export const supplierStatusEnum = pgEnum("supplier_status", [
   "Active",
   "Blocked",
   "Archived",
+]);
+
+export const supplierOrderStatusEnum = pgEnum("supplier_order_status", [
+  "Draft",
+  "Ordered",
+  "In_Production",
+  "Ready",
+  "Delivered",
+  "Cancelled",
+]);
+
+export const supplierOrderTypeEnum = pgEnum("supplier_order_type", [
+  "die_tooling",   // Shtamp / Kesish qolipi
+  "ctp_plates",    // CTP metall formalar
+  "cliche",        // Folga / Kongrev klishe
+  "raw_materials", // Qog'oz, bo'yoq, xomashyo
+  "outsourcing",   // Autsorsing xizmati
+  "service",       // Ta'mirlash / Servis
 ]);
 
 export const clientTypeEnum = pgEnum("client_type", [
@@ -286,10 +305,66 @@ export const suppliers = pgTable(
   ]
 );
 
-export const suppliersRelations = relations(suppliers, ({ one }) => ({
+export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
   company: one(companies, {
     fields: [suppliers.companyId],
     references: [companies.id],
+  }),
+  orders: many(supplierOrders),
+}));
+
+// ─── 6. Supplier Orders (Purchase Orders / CTP, Shtamp, Xomashyo Buyurtmalari) ──
+
+export const supplierOrders = pgTable(
+  "supplier_orders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    orderNo: varchar("order_no", { length: 64 }).notNull(), // PO-2026-001
+    orderDate: varchar("order_date", { length: 32 }).notNull(),
+    deliveryDeadline: varchar("delivery_deadline", { length: 32 }),
+    orderType: supplierOrderTypeEnum("order_type").default("raw_materials").notNull(),
+    title: varchar("title", { length: 255 }).notNull(), // Masalan: "4 ta CTP Forma (Choy qutisi uchun)"
+    workOrderId: uuid("work_order_id").references(() => workOrders.id, {
+      onDelete: "set null",
+    }),
+    workOrderNo: varchar("work_order_no", { length: 64 }),
+    quantity: numeric("quantity", { precision: 12, scale: 2 }).default("1.00").notNull(),
+    unit: varchar("unit", { length: 32 }).default("dona").notNull(),
+    amount: numeric("amount", { precision: 18, scale: 2 }).default("0.00").notNull(),
+    currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
+    status: supplierOrderStatusEnum("status").default("Ordered").notNull(),
+    specDetails: text("spec_details"), // "Format: 745x605mm, 4 rang (CMYK), 0.3mm metall"
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("supplier_orders_company_no_uq").on(table.companyId, table.orderNo),
+    index("supplier_orders_supplier_idx").on(table.supplierId),
+    index("supplier_orders_work_order_idx").on(table.workOrderId),
+    index("supplier_orders_status_idx").on(table.status),
+    index("supplier_orders_date_idx").on(table.orderDate),
+  ]
+);
+
+export const supplierOrdersRelations = relations(supplierOrders, ({ one }) => ({
+  company: one(companies, {
+    fields: [supplierOrders.companyId],
+    references: [companies.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [supplierOrders.supplierId],
+    references: [suppliers.id],
+  }),
+  workOrder: one(workOrders, {
+    fields: [supplierOrders.workOrderId],
+    references: [workOrders.id],
   }),
 }));
 

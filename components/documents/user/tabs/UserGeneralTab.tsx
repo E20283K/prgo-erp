@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { SystemUserRecord } from "../types";
 import { ROLE_TEMPLATES } from "../data";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { ImageCropperDialog } from "@/components/ui/image-cropper-dialog";
+import { toast } from "@/components/ui/toast";
 import {
   Select,
   SelectContent,
@@ -28,6 +31,10 @@ import {
   CheckCircle2,
   Globe,
   LayoutDashboard,
+  Camera,
+  Trash2,
+  Upload,
+  Loader2,
 } from "lucide-react";
 
 interface UserGeneralTabProps {
@@ -36,8 +43,131 @@ interface UserGeneralTabProps {
 }
 
 export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
-  const { employees, plants, departmentsList } = useWorkspaceStore();
+  const { employees, plants, departmentsList, upsertUser } = useWorkspaceStore();
   const [showPassword, setShowPassword] = useState(false);
+
+  // Avatar upload and crop state
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [cropperOpen, setCropperOpen] = useState(false);
+  const [selectedRawImage, setSelectedRawImage] = useState<string | null>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+  const userInitials =
+    data.initials ||
+    (data.fullName
+      ? data.fullName
+          .split(" ")
+          .filter(Boolean)
+          .map((w) => w[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase()
+      : data.username
+      ? data.username.slice(0, 2).toUpperCase()
+      : "U");
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.add({
+        title: "Xatolik",
+        description: "Faqat rasm fayllari (JPG, PNG, WebP) qabul qilinadi",
+        type: "danger",
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.add({
+        title: "Xatolik",
+        description: "Rasm hajmi 5MB dan oshmasligi kerak",
+        type: "danger",
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelectedRawImage(reader.result as string);
+      setCropperOpen(true);
+      // Reset input value so same file can be selected again
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCropComplete = async (croppedBlob: Blob) => {
+    setIsUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", croppedBlob, "avatar.jpg");
+      formData.append("userId", data.id || data.code || "");
+
+      const res = await fetch("/api/v1/users/avatar", {
+        method: "POST",
+        body: formData,
+      });
+
+      const json = await res.json();
+      if (json.success && json.url) {
+        onChange({ avatar: json.url });
+        upsertUser({ ...data, avatar: json.url });
+        toast.add({
+          title: "Muvaffaqiyatli",
+          description: "Foydalanuvchi fotosurati yangilandi",
+          type: "success",
+        });
+      } else {
+        toast.add({
+          title: "Xatolik",
+          description: json.error || "Rasmni yuklashda xatolik yuz berdi",
+          type: "danger",
+        });
+      }
+    } catch (err: any) {
+      toast.add({
+        title: "Xatolik",
+        description: err.message || "Server bilan aloqa uzildi",
+        type: "danger",
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const handleDeleteAvatar = async () => {
+    if (!data.id) {
+      onChange({ avatar: undefined });
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    try {
+      const res = await fetch(`/api/v1/users/avatar?userId=${encodeURIComponent(data.id)}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        onChange({ avatar: undefined });
+        upsertUser({ ...data, avatar: undefined });
+        toast.add({
+          title: "O'chirildi",
+          description: "Profil fotosurati olib tashlandi",
+          type: "success",
+        });
+      }
+    } catch {
+      toast.add({
+        title: "Xatolik",
+        description: "Rasmni o'chirishda xatolik",
+        type: "danger",
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
 
   // Generate strong random password
   const generatePassword = () => {
@@ -112,6 +242,94 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
           </Badge>
         </div>
 
+        {/* ── Avatar Upload Banner ─────────────────────────────────── */}
+        <div className="p-4 border-b border-border bg-muted/10 flex flex-col sm:flex-row items-center sm:items-start gap-4">
+          <div className="relative group shrink-0">
+            <Avatar className="size-20 border-2 border-border shadow-xs">
+              {data.avatar && (
+                <AvatarImage
+                  src={data.avatar}
+                  alt={data.fullName || data.username}
+                  className="object-cover"
+                />
+              )}
+              <AvatarFallback className="text-xl font-bold bg-primary/10 text-primary">
+                {userInitials}
+              </AvatarFallback>
+            </Avatar>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingAvatar}
+              className="absolute inset-0 rounded-full bg-black/40 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              title="Rasmni o'zgartirish"
+            >
+              <Camera className="w-5 h-5" />
+              <span className="text-[9px] font-medium mt-0.5">O&apos;zgartirish</span>
+            </button>
+          </div>
+
+          <div className="flex-1 text-center sm:text-left space-y-2">
+            <div>
+              <div className="text-xs font-semibold text-foreground flex items-center justify-center sm:justify-start gap-2">
+                <span>Profil Fotosurati</span>
+                {data.avatar && (
+                  <Badge variant="outline" className="text-[10px] text-emerald-600 dark:text-emerald-400 font-normal">
+                    Yuklangan
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                PNG, JPG yoki WebP formatida. Kvadrat (1:1) formatga moslash oynasi avtomatik ochiladi.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center sm:justify-start gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isUploadingAvatar}
+                onClick={() => fileInputRef.current?.click()}
+                className="h-7 px-2.5 text-xs gap-1.5 cursor-pointer"
+              >
+                {isUploadingAvatar ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                    <span>Yuklanmoqda...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Rasm yuklash</span>
+                  </>
+                )}
+              </Button>
+
+              {data.avatar && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={isUploadingAvatar}
+                  onClick={handleDeleteAvatar}
+                  className="h-7 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50 gap-1 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>O&apos;chirish</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {/* Username / Login */}
           <div className="space-y-1">
@@ -122,7 +340,7 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
             <Input
               value={data.username || ""}
               onChange={(e) => onChange({ username: e.target.value.toLowerCase().replace(/\s+/g, "") })}
-              placeholder="masalan: d.morozov"
+              placeholder="masalan: admin"
               className="h-8 text-xs font-mono"
             />
           </div>
@@ -441,6 +659,14 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
           </div>
         </div>
       </div>
+
+      {/* ── Image 1:1 Square Cropper Dialog ─────────────────────────── */}
+      <ImageCropperDialog
+        open={cropperOpen}
+        onOpenChange={setCropperOpen}
+        imageSrc={selectedRawImage}
+        onCropComplete={handleCropComplete}
+      />
     </div>
   );
 }

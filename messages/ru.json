@@ -1093,6 +1093,8 @@
     "togglePanel": "Скрыть/показать панель",
     "hidePanel": "Закрыть панель",
     "showPanel": "Открыть панель",
+    "collapseLeftPanel": "Свернуть панель чатов",
+    "expandLeftPanel": "Развернуть панель чатов",
     "copyText": "Копировать"
   },
   "LeadModal": {

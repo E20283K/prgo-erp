@@ -1070,6 +1070,9 @@
     "quickReplies": "Hızlı Şablonlar",
     "attachToOrder": "ERP'ye Bağla",
     "createDraftOrder": "Sipariş Oluştur",
+    "reply": "Cevapla",
+    "openFile": "Dosyayı aç",
+    "copiedSuccess": "Mesaj metni kopyalandı",
     "linkClient": "Müşteriye Bağla",
     "selectClient": "Müşteri Seçin",
     "assignedManager": "Sorumlu Yönetici",
@@ -1088,6 +1091,8 @@
     "togglePanel": "Paneli aç/kapat",
     "hidePanel": "Paneli kapat",
     "showPanel": "Paneli aç",
+    "collapseLeftPanel": "Sohbetler panelini daralt",
+    "expandLeftPanel": "Sohbetler panelini genişlet",
     "copyText": "Kopyala"
   },
   "LeadModal": {

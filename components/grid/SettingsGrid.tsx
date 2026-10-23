@@ -47,17 +47,6 @@ interface SettingsGridProps {
   type: "plants" | "users" | "tariffs";
 }
 
-interface UserRecord {
-  id: string;
-  fullName: string;
-  email: string;
-  role: string;
-  department: string;
-  plant: string;
-  accessLevel: string;
-  status: "Active" | "Suspended";
-}
-
 interface TariffRecord {
   id: string;
   category: string;
@@ -94,69 +83,6 @@ interface SettingsRow {
   status?: string;
   [key: string]: unknown;
 }
-
-const INITIAL_USERS: UserRecord[] = [
-  {
-    id: "USR-001",
-    fullName: "Dmitry Morozov",
-    email: "admin@printgoo.com",
-    role: "System Administrator",
-    department: "Management / IT",
-    plant: "PrintGoo Main Factory — Tashkent (HQ)",
-    accessLevel: "Full ERP Admin",
-    status: "Active",
-  },
-  {
-    id: "USR-002",
-    fullName: "Elena Voronina",
-    email: "e.voronina@printgoo.com",
-    role: "Sales & Client Director",
-    department: "Commercial / Sales",
-    plant: "PrintGoo Main Factory — Tashkent (HQ)",
-    accessLevel: "Sales, Costing & Contracts",
-    status: "Active",
-  },
-  {
-    id: "USR-003",
-    fullName: "Alexey Kovalev",
-    email: "a.kovalev@printgoo.com",
-    role: "Production Shift Lead",
-    department: "Offset & Post-Press",
-    plant: "PrintGoo Main Factory — Tashkent (HQ)",
-    accessLevel: "Production, BOM & Tooling",
-    status: "Active",
-  },
-  {
-    id: "USR-004",
-    fullName: "Davron Karimov",
-    email: "d.karimov@printgoo.com",
-    role: "Chief Warehouse Manager",
-    department: "Warehouse & Logistics",
-    plant: "Central Paper & Substrate Warehouse",
-    accessLevel: "Stock, Receipts & Shipments",
-    status: "Active",
-  },
-  {
-    id: "USR-005",
-    fullName: "Malika Ivanova",
-    email: "m.ivanova@printgoo.com",
-    role: "Senior Prepress & CTP Engineer",
-    department: "Prepress / Layout",
-    plant: "PrintGoo Main Factory — Tashkent (HQ)",
-    accessLevel: "Imposition, CTP & Proofs",
-    status: "Active",
-  },
-  {
-    id: "USR-006",
-    fullName: "Sardor Abdullayev",
-    email: "s.abdullayev@printgoo.com",
-    role: "Chief Accountant (1C / Finance)",
-    department: "Finance & Accounting",
-    plant: "PrintGoo Main Factory — Tashkent (HQ)",
-    accessLevel: "Schet-faktura, Settlements & Ledger",
-    status: "Active",
-  },
-];
 
 const INITIAL_TARIFFS: TariffRecord[] = [
   {

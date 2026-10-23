@@ -241,11 +241,13 @@ export function DocumentSidebar({
 
 export function SidebarSummaryCard({
   icon: Icon,
+  avatar,
   title,
   subtitle,
   children,
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
+  avatar?: React.ReactNode;
   title: string;
   subtitle: React.ReactNode;
   children: React.ReactNode;
@@ -253,9 +255,13 @@ export function SidebarSummaryCard({
   return (
     <div className="rounded-lg border border-border bg-muted/40 p-2.5 space-y-2">
       <div className="flex items-start gap-2">
-        <div className="w-7 h-7 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
-          <Icon className="w-4 h-4" />
-        </div>
+        {avatar ? (
+          <div className="shrink-0">{avatar}</div>
+        ) : Icon ? (
+          <div className="w-7 h-7 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <Icon className="w-4 h-4" />
+          </div>
+        ) : null}
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-xs text-foreground truncate" title={title}>
             {title}

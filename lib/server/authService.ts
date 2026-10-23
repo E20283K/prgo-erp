@@ -59,23 +59,23 @@ export async function seedDefaultUsersIfEmpty(): Promise<void> {
     return;
   }
 
-  // 1. Admin
+  // 1. Asosiy Administrator
   const adminHash = hashPassword("admin");
   const adminRole = ROLE_TEMPLATES.admin;
   await db.insert(users).values({
     code: "USR-001",
     username: "admin",
-    email: "admin@printgoo.com",
+    email: "admin@printgoo.uz",
     passwordHash: adminHash.hash,
     passwordSalt: adminHash.salt,
-    fullName: "Dmitry Morozov",
-    phone: "+998 90 123-45-67",
+    fullName: "Administrator",
+    phone: "+998 71 200-00-00",
     role: "admin",
     department: adminRole.department,
     plant: "Bosh Bino (HQ & Plant 1)",
     status: "Active",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-    initials: "DM",
+    avatar: null,
+    initials: "AD",
     language: "uz",
     defaultModule: "settings",
     permissions: adminRole.permissions,
@@ -83,85 +83,6 @@ export async function seedDefaultUsersIfEmpty(): Promise<void> {
     security: {
       twoFactorEnabled: false,
       sessionTimeoutMinutes: 480,
-      allowedIpOnly: false,
-      allowedIps: "",
-      workHoursOnly: false,
-      requirePasswordChange: false,
-      auditLog: [],
-    },
-  });
-
-  // 2. Manager (Commercial & Sales)
-  const managerHash = hashPassword("manager");
-  const managerRole = ROLE_TEMPLATES.sales_mgr;
-  await db.insert(users).values({
-    code: "USR-002",
-    username: "manager",
-    email: "e.voronina@printgoo.com",
-    passwordHash: managerHash.hash,
-    passwordSalt: managerHash.salt,
-    fullName: "Elena Voronina",
-    phone: "+998 90 234-56-78",
-    role: "manager",
-    department: "Commercial / Sales",
-    plant: "Bosh Bino (HQ & Plant 1)",
-    status: "Active",
-    avatar: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
-    initials: "EV",
-    language: "uz",
-    defaultModule: "trading",
-    permissions: {
-      crm: { view: true, create: true, edit: true, delete: false, approve: false, export: true },
-      trading: { view: true, create: true, edit: true, delete: false, approve: false, export: true },
-      production: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
-      warehouse: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
-      finance: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
-      hr: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-      settings: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-    },
-    scope: {
-      allPlants: true,
-      plantIds: [],
-      viewCostPrice: false,
-      viewMargin: false,
-      maxDiscountPercent: 15,
-      ownDocumentsOnly: false,
-    },
-    security: {
-      twoFactorEnabled: false,
-      sessionTimeoutMinutes: 240,
-      allowedIpOnly: false,
-      allowedIps: "",
-      workHoursOnly: false,
-      requirePasswordChange: false,
-      auditLog: [],
-    },
-  });
-
-  // 3. Operator (Production Shift Lead)
-  const operatorHash = hashPassword("operator");
-  const operatorRole = ROLE_TEMPLATES.shift_lead;
-  await db.insert(users).values({
-    code: "USR-003",
-    username: "operator",
-    email: "a.kovalev@printgoo.com",
-    passwordHash: operatorHash.hash,
-    passwordSalt: operatorHash.salt,
-    fullName: "Alexey Kovalev",
-    phone: "+998 90 345-67-89",
-    role: "operator",
-    department: operatorRole.department,
-    plant: "1-sonli Bosmaxona (Plant 1)",
-    status: "Active",
-    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-    initials: "AK",
-    language: "uz",
-    defaultModule: "production",
-    permissions: operatorRole.permissions,
-    scope: operatorRole.scope,
-    security: {
-      twoFactorEnabled: false,
-      sessionTimeoutMinutes: 120,
       allowedIpOnly: false,
       allowedIps: "",
       workHoursOnly: false,

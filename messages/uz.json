@@ -1093,6 +1093,8 @@
     "togglePanel": "Panelni ochish/yopish",
     "hidePanel": "Panelni yopish",
     "showPanel": "Panelni ochish",
+    "collapseLeftPanel": "Chatlar panelini yig'ish",
+    "expandLeftPanel": "Chatlar panelini yoyish",
     "copyText": "Nusxa olish"
   },
   "LeadModal": {

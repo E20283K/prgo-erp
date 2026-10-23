@@ -16,7 +16,7 @@ export const INITIAL_PLANTS_RECORD: PlantRecord[] = [
     landmark: "Yunusobod metro bekati yaqinida, 4-bino",
     phone: "+998 71 200-55-11",
     email: "hq@printgoo.uz",
-    director: "Dmitry Morozov",
+    director: "Ezoz Egamberganov",
     directorPhone: "+998 90 911-22-33",
     chiefAccountant: "Sardor Abdullayev",
     chiefAccountantPhone: "+998 90 922-33-44",

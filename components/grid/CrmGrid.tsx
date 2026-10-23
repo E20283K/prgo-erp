@@ -320,8 +320,14 @@ export function CrmGrid({ type }: CrmGridProps) {
       setSelectedLead({ ...rowData });
       setLeadModalOpen(true);
     } else if (type === "suppliers") {
-      setSelectedSupplier({ ...rowData });
-      setSupplierModalOpen(true);
+      openTab({
+        id: rowData.id,
+        title: `${rowData.code || rowData.id}: ${rowData.name}`,
+        type: "supplier",
+        module: "crm",
+        activeLevel3Tab: "overview",
+        documentData: rowData,
+      });
     } else {
       const custRecord: CrmCustomerRecord = {
         id: rowData.id,
@@ -366,9 +372,10 @@ export function CrmGrid({ type }: CrmGridProps) {
       });
       setLeadModalOpen(true);
     } else if (type === "suppliers") {
+      const draftId = `draft-supp-${Date.now()}`;
       const nextCode = `SUP-${101 + suppliers.length}`;
-      setSelectedSupplier({
-        id: "",
+      const newSupp: SupplierRecord = {
+        id: draftId,
         code: nextCode,
         name: "",
         category: "raw_materials",
@@ -379,8 +386,16 @@ export function CrmGrid({ type }: CrmGridProps) {
         currency: "UZS",
         paymentTerms: "100% Shartnoma bo'yicha",
         status: "Active",
+      };
+      openTab({
+        id: draftId,
+        title: `Yangi ta'minotchi: ${nextCode}`,
+        type: "supplier",
+        module: "crm",
+        isUnsaved: true,
+        activeLevel3Tab: "overview",
+        documentData: newSupp,
       });
-      setSupplierModalOpen(true);
     } else {
       const draftId = `draft-cust-${Date.now()}`;
       const newCust: CrmCustomerRecord = {

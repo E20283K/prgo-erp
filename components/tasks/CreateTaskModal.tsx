@@ -47,9 +47,9 @@ import { cn } from "@/lib/utils";
 // ─── Combobox Master Data with Lucide Icons (NO EMOJIS) ─────────────────────
 
 export const ASSIGNEE_COMBOBOX_OPTIONS: ComboboxItem[] = [
-  { value: "Alexey Kovalev", label: "Alexey Kovalev", description: "Production Shift Lead • Lead Supervisor", badge: "Management", icon: User },
-  { value: "Dmitry Morozov", label: "Dmitry Morozov", description: "System Administrator • Operations & IT", badge: "Admin", icon: ShieldCheck },
-  { value: "Elena Voronina", label: "Elena Voronina", description: "Commercial & Sales Director • VIP Clients", badge: "Commercial", icon: Briefcase },
+  { value: "Supervisor", label: "Supervisor", description: "Production Shift Lead", badge: "Management", icon: User },
+  { value: "Administrator", label: "Administrator", description: "System Administrator • Operations & IT", badge: "Admin", icon: ShieldCheck },
+  { value: "Sales Manager", label: "Sales Manager", description: "Commercial & Sales", badge: "Commercial", icon: Briefcase },
   { value: "K. Anderson (Prepress)", label: "K. Anderson", description: "Prepress Lead • CTP & Color Management", badge: "Prepress", icon: Wrench },
   { value: "M. Ivanova (Press)", label: "M. Ivanova", description: "Lead Pressman • Heidelberg Speedmaster XL 106", badge: "Press", icon: Printer },
   { value: "A. Becker (Lamination)", label: "A. Becker", description: "Finishing Specialist • Thermal & Soft-touch", badge: "Finishing", icon: Layers },
@@ -193,7 +193,7 @@ export function CreateTaskModal() {
         setDescription("Audit physical stock in warehouse bay A3-12 due to discrepancy in scheduled run sheet. Verify pallet batch numbers.");
         setRoleCategory("manager");
         setPriority("urgent");
-        setAssignedTo("Dmitry Morozov");
+        setAssignedTo("Administrator");
         setShift("Morning");
         setRelatedType("work-order");
         setSelectedEntityId("WOOF-26-0351");

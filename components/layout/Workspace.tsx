@@ -42,6 +42,7 @@ import { WorkOrderDetail } from "@/components/documents/WorkOrderDetail";
 import { ProductSpecDetail } from "@/components/documents/ProductSpecDetail";
 import { DeliveryActDetail } from "@/components/documents/DeliveryActDetail";
 import { CustomerDetail } from "@/components/documents/CustomerDetail";
+import { SupplierDetail } from "@/components/documents/SupplierDetail";
 import { WarehouseReceiptDetail } from "@/components/documents/WarehouseReceiptDetail";
 import { WarehouseShipmentDetail } from "@/components/documents/WarehouseShipmentDetail";
 import { PlanningSlotDetail } from "@/components/documents/PlanningSlotDetail";
@@ -175,6 +176,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     if (tab.type === "product-spec") return <ProductSpecDetail tab={tab} />;
     if (tab.type === "delivery-act") return <DeliveryActDetail tab={tab} />;
     if (tab.type === "customer") return <CustomerDetail tab={tab} />;
+    if (tab.type === "supplier") return <SupplierDetail tab={tab} />;
     if (tab.type === "warehouse-receipt") return <WarehouseReceiptDetail tab={tab} />;
     if (tab.type === "warehouse-shipment") return <WarehouseShipmentDetail tab={tab} />;
     if (tab.type === "warehouse-stock") return <WarehouseStockDetail tab={tab} />;

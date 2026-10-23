@@ -1071,6 +1071,9 @@
     "quickReplies": "Quick Templates",
     "attachToOrder": "Attach to ERP",
     "createDraftOrder": "Create Order",
+    "reply": "Reply",
+    "openFile": "Open file",
+    "copiedSuccess": "Message text copied",
     "linkClient": "Link to Client",
     "selectClient": "Select Client",
     "assignedManager": "Assigned Manager",
@@ -1089,6 +1092,8 @@
     "togglePanel": "Toggle panel",
     "hidePanel": "Close panel",
     "showPanel": "Open panel",
+    "collapseLeftPanel": "Collapse chats panel",
+    "expandLeftPanel": "Expand chats panel",
     "copyText": "Copy"
   },
   "LeadModal": {

@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { companies } from "./core";
-import { clients } from "./crm";
+import { clients, suppliers, supplierOrders } from "./crm";
 import { workOrders } from "./production";
 import { warehouseShipments } from "./warehouse";
 
@@ -300,5 +300,61 @@ export const clientPaymentsRelations = relations(clientPayments, ({ one }) => ({
   deliveryAct: one(deliveryActs, {
     fields: [clientPayments.deliveryActId],
     references: [deliveryActs.id],
+  }),
+}));
+
+// ─── 6. Supplier Payments (Ta'minotchilarga chiqim to'lovlari) ──────────────────
+
+export const supplierPayments = pgTable(
+  "supplier_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    docNo: varchar("doc_no", { length: 64 }).notNull(), // SPAY-2026-0001
+    date: varchar("date", { length: 32 }).notNull(), // YYYY-MM-DD
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    supplierName: varchar("supplier_name", { length: 255 }).notNull(),
+    amount: numeric("amount", { precision: 18, scale: 2 }).default("0.00").notNull(),
+    currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
+    method: paymentMethodEnum("method").default("bank_transfer").notNull(),
+    bankAccountId: uuid("bank_account_id").references(() => bankAccounts.id, {
+      onDelete: "set null",
+    }),
+    supplierOrderId: uuid("supplier_order_id").references(() => supplierOrders.id, {
+      onDelete: "set null",
+    }),
+    note: text("note"),
+    status: paymentStatusEnum("status").default("confirmed").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("supplier_payments_company_doc_uq").on(table.companyId, table.docNo),
+    index("supplier_payments_company_idx").on(table.companyId),
+    index("supplier_payments_supplier_idx").on(table.supplierId),
+    index("supplier_payments_date_idx").on(table.date),
+  ]
+);
+
+export const supplierPaymentsRelations = relations(supplierPayments, ({ one }) => ({
+  company: one(companies, {
+    fields: [supplierPayments.companyId],
+    references: [companies.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [supplierPayments.supplierId],
+    references: [suppliers.id],
+  }),
+  bankAccount: one(bankAccounts, {
+    fields: [supplierPayments.bankAccountId],
+    references: [bankAccounts.id],
+  }),
+  supplierOrder: one(supplierOrders, {
+    fields: [supplierPayments.supplierOrderId],
+    references: [supplierOrders.id],
   }),
 }));

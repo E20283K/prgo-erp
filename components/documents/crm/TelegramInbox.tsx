@@ -32,6 +32,8 @@ import {
   ExternalLink,
   PanelRightClose,
   PanelRightOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,6 +116,7 @@ interface TelegramChatListItem {
   chatId: string;
   title: string;
   type: string;
+  username?: string | null;
   photoUrl?: string | null;
   clientId?: string | null;
   clientName?: string | null;
@@ -169,6 +172,11 @@ export function TelegramInbox() {
   const [activeChat, setActiveChat] = useState<TelegramChatListItem | null>(null);
   const [messages, setMessages] = useState<TelegramMessageItem[]>([]);
   const [templates, setTemplates] = useState<QuickReplyTemplate[]>([]);
+  const [botInfo, setBotInfo] = useState<{ avatarUrl?: string; firstName?: string; username?: string }>({
+    avatarUrl: "/cache/telegram/avatars/bot.jpg",
+    firstName: "PrintGoo Support",
+    username: "printgoo_supportbot",
+  });
   const [clientActiveOrders, setClientActiveOrders] = useState<ClientActiveOrder[]>([]);
   const [filter, setFilter] = useState<"all" | "unlinked" | "sla_breach" | "active">("all");
   const [search, setSearch] = useState("");
@@ -190,6 +198,7 @@ export function TelegramInbox() {
   const [copiedChatId, setCopiedChatId] = useState(false);
   const [realtimeActive, setRealtimeActive] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState<boolean>(false);
 
   // Panel o'lchamlarini boshqarish (Telegram UI uslubidagi Resizable Rail)
   const containerRef = useRef<HTMLDivElement>(null);
@@ -200,6 +209,10 @@ export function TelegramInbox() {
 
   useEffect(() => {
     try {
+      const savedLeftCollapsed = localStorage.getItem("printgoo_tg_left_collapsed");
+      if (savedLeftCollapsed === "true") {
+        setIsLeftCollapsed(true);
+      }
       const savedLeft = localStorage.getItem("printgoo_tg_left_width");
       if (savedLeft) {
         const val = parseInt(savedLeft, 10);
@@ -217,6 +230,16 @@ export function TelegramInbox() {
     } catch {}
   }, []);
 
+  const toggleLeftCollapse = () => {
+    setIsLeftCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("printgoo_tg_left_collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const handleLeftResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -227,7 +250,22 @@ export function TelegramInbox() {
     const onMouseMove = (moveEvent: MouseEvent) => {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const newWidth = Math.min(Math.max(moveEvent.clientX - rect.left, 240), 560);
+      const rawWidth = moveEvent.clientX - rect.left;
+
+      if (rawWidth < 140) {
+        setIsLeftCollapsed(true);
+        try {
+          localStorage.setItem("printgoo_tg_left_collapsed", "true");
+        } catch {}
+        return;
+      }
+
+      setIsLeftCollapsed(false);
+      try {
+        localStorage.setItem("printgoo_tg_left_collapsed", "false");
+      } catch {}
+
+      const newWidth = Math.min(Math.max(rawWidth, 240), 560);
       setLeftWidth(newWidth);
     };
 
@@ -240,10 +278,13 @@ export function TelegramInbox() {
 
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        const finalWidth = Math.min(Math.max(upEvent.clientX - rect.left, 240), 560);
-        try {
-          localStorage.setItem("printgoo_tg_left_width", finalWidth.toString());
-        } catch {}
+        const rawWidth = upEvent.clientX - rect.left;
+        if (rawWidth >= 140) {
+          const finalWidth = Math.min(Math.max(rawWidth, 240), 560);
+          try {
+            localStorage.setItem("printgoo_tg_left_width", finalWidth.toString());
+          } catch {}
+        }
       }
     };
 
@@ -252,10 +293,17 @@ export function TelegramInbox() {
   };
 
   const handleLeftReset = () => {
-    setLeftWidth(320);
-    try {
-      localStorage.setItem("printgoo_tg_left_width", "320");
-    } catch {}
+    if (isLeftCollapsed) {
+      setIsLeftCollapsed(false);
+      try {
+        localStorage.setItem("printgoo_tg_left_collapsed", "false");
+      } catch {}
+    } else {
+      setLeftWidth(320);
+      try {
+        localStorage.setItem("printgoo_tg_left_width", "320");
+      } catch {}
+    }
   };
 
   const handleRightResizeStart = (e: React.MouseEvent) => {
@@ -408,6 +456,9 @@ export function TelegramInbox() {
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         setMessages(json.data);
+        if (json.bot) {
+          setBotInfo((prev) => ({ ...prev, ...json.bot }));
+        }
         if (json.chat) {
           setActiveChat(json.chat);
           setSelectedClientId(json.chat.clientId || "");
@@ -443,6 +494,9 @@ export function TelegramInbox() {
       const res = await fetch(`/api/v1/crm/telegram/messages?chatId=${chatId}`);
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
+        if (json.bot) {
+          setBotInfo((prev) => ({ ...prev, ...json.bot }));
+        }
         setMessages((prev) => {
           if (
             prev.length !== json.data.length ||
@@ -686,192 +740,304 @@ export function TelegramInbox() {
   return (
     <div ref={containerRef} className="flex-1 flex h-full min-h-0 bg-background text-foreground overflow-hidden font-sans select-none">
       {/* ─── 1-USTUN: Guruhlar va Chatlar Ro'yxati (Chap Panel) ─────────── */}
-      <div 
-        style={{ width: `${leftWidth}px` }}
-        className="flex flex-col border-r border-border bg-card shrink-0 relative"
-      >
-        {/* Yuqori boshqaruv va qidiruv */}
-        <div className="p-2.5 border-b border-border space-y-2 bg-muted/20">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
-              <MessageSquare className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>{t("title")}</span>
-              <Badge variant="secondary" className="h-4 text-[10px] px-1 font-mono">
-                {chats.length}
-              </Badge>
-            </div>
-            <div className="flex items-center gap-1">
-              <TooltipProvider delay={200}>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 cursor-pointer text-muted-foreground hover:text-foreground"
-                        onClick={fetchChats}
-                      >
-                        <RefreshCw className={cn("w-3 h-3", loadingChats && "animate-spin")} />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent side="bottom" className="text-xs">
-                    Yangilash
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
+      {isLeftCollapsed ? (
+        <div 
+          style={{ width: "64px" }}
+          className="flex flex-col border-r border-border bg-card shrink-0 relative items-center py-2 transition-[width] duration-150 animate-in fade-in-50"
+        >
+          {/* Yuqori ochish tugmasi */}
+          <div className="h-10 w-full flex items-center justify-center border-b border-border/60 pb-2 mb-2">
+            <TooltipProvider delay={100}>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={toggleLeftCollapse}
+                      className="size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer"
+                    >
+                      <PanelLeftOpen className="size-4 text-blue-500" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="right" className="text-xs">
+                  {t("expandLeftPanel")}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
 
-          {/* Qidiruv maydoni (shadcn InputGroup) */}
-          <InputGroup className="h-8 bg-background border-input">
-            <InputGroupAddon align="inline-start" className="pl-2.5 text-muted-foreground">
-              <Search className="w-3.5 h-3.5" />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && fetchChats()}
-              placeholder={t("searchPlaceholder")}
-              className="text-xs h-full"
-            />
-            {search && (
-              <InputGroupAddon align="inline-end" className="pr-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearch("");
-                    fetchChats();
-                  }}
-                  className="text-muted-foreground hover:text-foreground cursor-pointer"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </InputGroupAddon>
-            )}
-          </InputGroup>
-
-          {/* Filter tabs (shadcn Tabs) */}
-          <Tabs value={filter} onValueChange={(val) => setFilter(val as any)} className="w-full">
-            <TabsList className="w-full grid grid-cols-4 h-7 p-0.5 bg-muted">
-              <TabsTrigger value="all" className="text-[10px] h-6 px-1">
-                {t("filterAll")}
-              </TabsTrigger>
-              <TabsTrigger
-                value="sla_breach"
-                className="text-[10px] h-6 px-1 gap-1 text-red-500 data-[state=active]:text-red-500"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                SLA
-              </TabsTrigger>
-              <TabsTrigger value="unlinked" className="text-[10px] h-6 px-1">
-                {t("filterUnlinked")}
-              </TabsTrigger>
-              <TabsTrigger value="active" className="text-[10px] h-6 px-1">
-                {t("filterActive")}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-
-        {/* Guruhlar ro'yxati (shadcn Item & ItemGroup) */}
-        <ScrollArea className="flex-1">
-          {chats.length === 0 ? (
-            <div className="p-8 text-center text-xs text-muted-foreground flex flex-col items-center justify-center h-48 space-y-2">
-              <MessageSquare className="w-8 h-8 opacity-20" />
-              <p>{t("noChats")}</p>
-              <p className="text-[11px] text-muted-foreground/70 max-w-[200px]">
-                Telegram bot guruhga qo'shilgach xabarlar bu yerda avtomatik ko'rinadi
-              </p>
-            </div>
-          ) : (
-            <ItemGroup className="p-2 gap-1.5">
+          {/* Chatlar faqat ikonkalari ro'yxati */}
+          <ScrollArea className="flex-1 w-full">
+            <div className="flex flex-col items-center gap-2.5 p-1.5">
               {chats.map((c) => {
                 const isSelected = activeChat?.id === c.id;
                 return (
-                  <Item
-                    key={c.id}
-                    onClick={() => selectChat(c)}
-                    className={cn(
-                      "cursor-pointer select-none transition-all p-2.5 rounded-lg border",
-                      isSelected
-                        ? "bg-accent/80 border-border text-foreground shadow-2xs font-medium"
-                        : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground",
-                      c.isSlaBreached && !isSelected && "bg-destructive/5 hover:bg-destructive/10"
-                    )}
-                  >
-                    <ItemMedia
-                      variant="image"
-                      className="relative size-9 p-0 bg-transparent shrink-0"
-                    >
-                      <Avatar className="size-9 border border-border/60">
-                        {c.photoUrl && (
-                          <AvatarImage
-                            src={c.photoUrl}
-                            alt={c.title}
-                            className="object-cover"
-                          />
+                  <TooltipProvider key={c.id} delay={100}>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            onClick={() => selectChat(c)}
+                            className={cn(
+                              "relative size-10 rounded-full flex items-center justify-center transition-all cursor-pointer",
+                              isSelected
+                                ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105"
+                                : "hover:scale-105 opacity-85 hover:opacity-100",
+                              c.isSlaBreached && !isSelected && "ring-1 ring-red-500/60"
+                            )}
+                          >
+                            <Avatar className="size-10 border border-border/70">
+                              {c.photoUrl && (
+                                <AvatarImage
+                                  src={c.photoUrl}
+                                  alt={c.title}
+                                  className="object-cover"
+                                />
+                              )}
+                              <AvatarFallback className="bg-primary/10 text-primary font-bold text-xs">
+                                {c.title ? c.title.slice(0, 2).toUpperCase() : "TG"}
+                              </AvatarFallback>
+                            </Avatar>
+
+                            {c.isSlaBreached ? (
+                              <span
+                                className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-red-500 ring-2 ring-background animate-pulse"
+                              />
+                            ) : c.unreadCount > 0 ? (
+                              <span
+                                className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-background"
+                              >
+                                {c.unreadCount > 9 ? "9+" : c.unreadCount}
+                              </span>
+                            ) : null}
+                          </button>
+                        }
+                      />
+                      <TooltipContent side="right" className="max-w-[220px] p-2.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-xs truncate text-foreground">{c.title}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">{formatTime(c.lastMessageAt)}</span>
+                        </div>
+                        {c.clientName && (
+                          <div className="text-[11px] text-blue-500 font-medium flex items-center gap-1">
+                            <Building2 className="size-3 shrink-0" />
+                            <span className="truncate">{c.clientName}</span>
+                          </div>
                         )}
-                        <AvatarFallback className="bg-primary/10 text-primary font-bold text-xs">
-                          {c.title ? c.title.slice(0, 2).toUpperCase() : "TG"}
-                        </AvatarFallback>
-                      </Avatar>
-                      {c.isSlaBreached && (
-                        <span
-                          title={t("slaBreached")}
-                          className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-red-500 ring-2 ring-background animate-pulse"
-                        />
-                      )}
-                    </ItemMedia>
-
-                    <ItemContent className="min-w-0 flex-1 gap-1">
-                      <ItemHeader className="flex items-center justify-between gap-1 w-full">
-                        <ItemTitle className="text-xs font-semibold text-foreground truncate max-w-[145px]">
-                          {c.title}
-                        </ItemTitle>
-                        <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                          {formatTime(c.lastMessageAt)}
-                        </span>
-                      </ItemHeader>
-
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="truncate flex items-center gap-1">
-                          {c.clientName ? (
-                            <span className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 font-medium truncate">
-                              <Building2 className="w-3 h-3 shrink-0" />
-                              <span className="truncate">{c.clientName}</span>
-                            </span>
-                          ) : (
-                            <Badge
-                              variant="outline"
-                              className="h-4 text-[9px] px-1 py-0 font-normal border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10"
-                            >
-                              {t("unlinkedBadge")}
+                        {c.lastMessageSnippet && (
+                          <p className="text-[11px] text-muted-foreground line-clamp-2">
+                            {c.lastMessageSnippet}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-1 pt-0.5">
+                          <Badge variant="secondary" className="text-[9px] uppercase font-mono px-1 py-0 h-3.5">
+                            {c.type}
+                          </Badge>
+                          {c.isSlaBreached && (
+                            <Badge variant="destructive" className="text-[9px] px-1 py-0 h-3.5">
+                              SLA 15+ min
                             </Badge>
                           )}
-                        </span>
-
-                        {c.unreadCount > 0 && (
-                          <Badge
-                            variant="default"
-                            className="h-4 min-w-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0"
-                          >
-                            {c.unreadCount}
-                          </Badge>
-                        )}
-                      </div>
-
-                      <ItemDescription className="text-[11px] text-muted-foreground truncate line-clamp-1 block w-full mt-0.5">
-                        {c.lastMessageSnippet || "..."}
-                      </ItemDescription>
-                    </ItemContent>
-                  </Item>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 );
               })}
-            </ItemGroup>
-          )}
-        </ScrollArea>
-      </div>
+            </div>
+          </ScrollArea>
+        </div>
+      ) : (
+        <div 
+          style={{ width: `${leftWidth}px` }}
+          className="flex flex-col border-r border-border bg-card shrink-0 relative transition-[width] duration-150 animate-in fade-in-50"
+        >
+          {/* Yuqori boshqaruv va qidiruv */}
+          <div className="p-2.5 border-b border-border space-y-2 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                <MessageSquare className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>{t("title")}</span>
+                <Badge variant="secondary" className="h-4 text-[10px] px-1 font-mono">
+                  {chats.length}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded-md cursor-pointer text-muted-foreground hover:text-foreground"
+                  onClick={fetchChats}
+                  title="Yangilash"
+                >
+                  <RefreshCw className={cn("w-3.5 h-3.5", loadingChats && "animate-spin")} />
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded-md cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted"
+                  onClick={toggleLeftCollapse}
+                  title={t("collapseLeftPanel")}
+                >
+                  <PanelLeftClose className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Qidiruv maydoni (shadcn InputGroup) */}
+            <InputGroup className="h-8 bg-background border-input">
+              <InputGroupAddon align="inline-start" className="pl-2.5 text-muted-foreground">
+                <Search className="w-3.5 h-3.5" />
+              </InputGroupAddon>
+              <InputGroupInput
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && fetchChats()}
+                placeholder={t("searchPlaceholder")}
+                className="text-xs h-full"
+              />
+              {search && (
+                <InputGroupAddon align="inline-end" className="pr-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch("");
+                      fetchChats();
+                    }}
+                    className="text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </InputGroupAddon>
+              )}
+            </InputGroup>
+
+            {/* Filter tabs (shadcn Tabs) */}
+            <Tabs value={filter} onValueChange={(val) => setFilter(val as any)} className="w-full">
+              <TabsList className="w-full flex h-7 p-0.5 bg-muted gap-0.5">
+                <TabsTrigger value="all" className="flex-1 text-[10px] h-6 px-1 truncate">
+                  {t("filterAll")}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="sla_breach"
+                  className="flex-1 text-[10px] h-6 px-1 gap-1 text-red-500 data-[state=active]:text-red-500 truncate"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                  SLA
+                </TabsTrigger>
+                <TabsTrigger value="unlinked" className="flex-1 text-[10px] h-6 px-1 truncate">
+                  {t("filterUnlinked")}
+                </TabsTrigger>
+                <TabsTrigger value="active" className="flex-1 text-[10px] h-6 px-1 truncate">
+                  {t("filterActive")}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+
+          {/* Guruhlar ro'yxati (shadcn Item & ItemGroup) */}
+          <ScrollArea className="flex-1">
+            {chats.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground flex flex-col items-center justify-center h-48 space-y-2">
+                <MessageSquare className="w-8 h-8 opacity-20" />
+                <p>{t("noChats")}</p>
+                <p className="text-[11px] text-muted-foreground/70 max-w-[200px]">
+                  Telegram bot guruhga qo'shilgach xabarlar bu yerda avtomatik ko'rinadi
+                </p>
+              </div>
+            ) : (
+              <ItemGroup className="p-2 gap-1.5">
+                {chats.map((c) => {
+                  const isSelected = activeChat?.id === c.id;
+                  return (
+                    <Item
+                      key={c.id}
+                      onClick={() => selectChat(c)}
+                      className={cn(
+                        "cursor-pointer select-none transition-all p-2.5 rounded-lg border",
+                        isSelected
+                          ? "bg-accent/80 border-border text-foreground shadow-2xs font-medium"
+                          : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground",
+                        c.isSlaBreached && !isSelected && "bg-destructive/5 hover:bg-destructive/10"
+                      )}
+                    >
+                      <ItemMedia
+                        variant="image"
+                        className="relative size-9 p-0 bg-transparent shrink-0"
+                      >
+                        <Avatar className="size-9 border border-border/60">
+                          {c.photoUrl && (
+                            <AvatarImage
+                              src={c.photoUrl}
+                              alt={c.title}
+                              className="object-cover"
+                            />
+                          )}
+                          <AvatarFallback className="bg-primary/10 text-primary font-bold text-xs">
+                            {c.title ? c.title.slice(0, 2).toUpperCase() : "TG"}
+                          </AvatarFallback>
+                        </Avatar>
+                        {c.isSlaBreached && (
+                          <span
+                            title={t("slaBreached")}
+                            className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-red-500 ring-2 ring-background animate-pulse"
+                          />
+                        )}
+                      </ItemMedia>
+
+                      <ItemContent className="min-w-0 flex-1 gap-1">
+                        <ItemHeader className="flex items-center justify-between gap-1 w-full">
+                          <ItemTitle className="text-xs font-semibold text-foreground truncate max-w-[145px]">
+                            {c.title}
+                          </ItemTitle>
+                          <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                            {formatTime(c.lastMessageAt)}
+                          </span>
+                        </ItemHeader>
+
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="truncate flex items-center gap-1">
+                            {c.clientName ? (
+                              <span className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 font-medium truncate">
+                                <Building2 className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{c.clientName}</span>
+                              </span>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="h-4 text-[9px] px-1 py-0 font-normal border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                              >
+                                {t("unlinkedBadge")}
+                              </Badge>
+                            )}
+                          </span>
+
+                          {c.unreadCount > 0 && (
+                            <Badge
+                              variant="default"
+                              className="h-4 min-w-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0"
+                            >
+                              {c.unreadCount}
+                            </Badge>
+                          )}
+                        </div>
+
+                        <ItemDescription className="text-[11px] text-muted-foreground truncate line-clamp-1 block w-full mt-0.5">
+                          {c.lastMessageSnippet || "..."}
+                        </ItemDescription>
+                      </ItemContent>
+                    </Item>
+                  );
+                })}
+              </ItemGroup>
+            )}
+          </ScrollArea>
+        </div>
+      )}
 
       {/* Resize Handle for Left Panel (Telegram UI rail) */}
       <div
@@ -1036,16 +1202,31 @@ export function TelegramInbox() {
                                 <div className="cursor-context-menu select-text">
                                   <Message align={m.isOutgoing ? "end" : "start"} className="gap-2.5">
                                     <Avatar className="size-7 shrink-0 self-end border border-border/50">
-                                      {!m.isOutgoing && m.senderAvatarUrl && (
-                                        <AvatarImage
-                                          src={m.senderAvatarUrl}
-                                          alt={m.senderName || "Sender"}
-                                          className="object-cover"
-                                        />
+                                      {m.isOutgoing ? (
+                                        <>
+                                          <AvatarImage
+                                            src={botInfo?.avatarUrl || m.senderAvatarUrl || "/cache/telegram/avatars/bot.jpg"}
+                                            alt={botInfo?.firstName || "PrintGoo Support"}
+                                            className="object-cover"
+                                          />
+                                          <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
+                                            BOT
+                                          </AvatarFallback>
+                                        </>
+                                      ) : (
+                                        <>
+                                          {m.senderAvatarUrl && (
+                                            <AvatarImage
+                                              src={m.senderAvatarUrl}
+                                              alt={m.senderName || "Foydalanuvchi"}
+                                              className="object-cover"
+                                            />
+                                          )}
+                                          <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-bold">
+                                            {m.senderName ? m.senderName.slice(0, 2).toUpperCase() : "TG"}
+                                          </AvatarFallback>
+                                        </>
                                       )}
-                                      <AvatarFallback className="bg-muted text-muted-foreground text-[10px] font-bold">
-                                        {m.isOutgoing ? "OP" : (m.senderName ? m.senderName.slice(0, 2).toUpperCase() : "TG")}
-                                      </AvatarFallback>
                                     </Avatar>
                                     <MessageContent>
                                       <MessageHeader className={cn("px-1 gap-1.5 items-center", m.isOutgoing && "justify-end")}>
@@ -1364,32 +1545,49 @@ export function TelegramInbox() {
             style={{ width: `${rightWidth}px` }}
             className="flex flex-col border-l border-border bg-card shrink-0 p-3 space-y-3.5 overflow-y-auto animate-in fade-in-50 duration-150"
           >
+          {/* Telegram Header Card (Avatar + Title + Type Badge) */}
+          <div className="flex flex-col items-center text-center p-3.5 rounded-lg bg-muted/40 border border-border">
+            <Avatar className="size-16 border-2 border-border/80 shadow-xs mb-2">
+              {activeChat.photoUrl && (
+                <AvatarImage
+                  src={activeChat.photoUrl}
+                  alt={activeChat.title}
+                  className="object-cover"
+                />
+              )}
+              <AvatarFallback className="bg-primary/10 text-primary font-bold text-xl">
+                {activeChat.title ? activeChat.title.slice(0, 2).toUpperCase() : "TG"}
+              </AvatarFallback>
+            </Avatar>
+            <h3 className="font-semibold text-sm text-foreground truncate max-w-[240px]">
+              {activeChat.title}
+            </h3>
+            {activeChat.username ? (
+              <p className="text-xs text-muted-foreground font-mono mt-0.5">@{activeChat.username}</p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{activeChat.chatId}</p>
+            )}
+            <div className="flex items-center gap-1.5 mt-2">
+              <Badge variant="secondary" className="text-[9px] uppercase font-mono px-1.5 py-0 h-4">
+                {activeChat.type}
+              </Badge>
+              {activeChat.status === "active" ? (
+                <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20 text-[9px] h-4 px-1.5">
+                  Faol
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20 text-[9px] h-4 px-1.5">
+                  Bog'lanmagan
+                </Badge>
+              )}
+            </div>
+          </div>
+
           {/* 1. Guruh ma'lumotlari */}
           <div>
-            <div className="flex items-center justify-between text-xs font-semibold text-foreground mb-1.5">
-              <div className="flex items-center gap-1.5">
-                <Info className="w-3.5 h-3.5 text-blue-500" />
-                <span>{t("groupDetails")}</span>
-              </div>
-              <TooltipProvider delay={200}>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setShowRightPanel(false)}
-                        className="h-6 w-6 text-muted-foreground hover:text-foreground cursor-pointer rounded-md hover:bg-muted"
-                      >
-                        <PanelRightClose className="w-3.5 h-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent side="left" className="text-xs">
-                    {t("hidePanel")}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground mb-1.5">
+              <Info className="w-3.5 h-3.5 text-blue-500" />
+              <span>{t("groupDetails")}</span>
             </div>
             <div className="p-2.5 rounded-md bg-muted/40 border border-border space-y-1.5 text-xs">
               <div className="flex justify-between">

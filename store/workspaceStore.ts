@@ -435,66 +435,15 @@ export interface UserProfile {
 }
 
 export const DEMO_USERS: Record<string, UserProfile> = {
-  operator: {
-    id: "operator",
-    name: "Alexey Kovalev",
-    email: "a.kovalev@printgoo.com",
-    role: "Production Shift Lead",
-    initials: "AK",
-    defaultModule: "production",
-    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-    permissions: {
-      crm: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-      trading: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-      production: { view: true, create: true, edit: true, delete: false, approve: false, export: false },
-      warehouse: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
-      finance: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-      hr: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-      settings: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-    },
-    scope: {
-      allPlants: false,
-      plantIds: [],
-      viewCostPrice: false,
-      viewMargin: false,
-      maxDiscountPercent: 0,
-      ownDocumentsOnly: true,
-    },
-  },
-  sales: {
-    id: "manager",
-    name: "Elena Voronina",
-    email: "e.voronina@printgoo.com",
-    role: "Commercial & Order Manager",
-    initials: "EV",
-    defaultModule: "trading",
-    avatar: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
-    permissions: {
-      crm: { view: true, create: true, edit: true, delete: false, approve: false, export: true },
-      trading: { view: true, create: true, edit: true, delete: false, approve: false, export: true },
-      production: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
-      warehouse: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
-      finance: { view: true, create: false, edit: false, delete: false, approve: false, export: false },
-      hr: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-      settings: { view: false, create: false, edit: false, delete: false, approve: false, export: false },
-    },
-    scope: {
-      allPlants: true,
-      plantIds: [],
-      viewCostPrice: false,
-      viewMargin: false,
-      maxDiscountPercent: 15,
-      ownDocumentsOnly: false,
-    },
-  },
   admin: {
     id: "admin",
-    name: "Dmitry Morozov",
-    email: "admin@printgoo.com",
+    name: "Administrator",
+    fullName: "Administrator",
+    email: "admin@printgoo.uz",
     role: "System Administrator",
-    initials: "DM",
+    initials: "AD",
     defaultModule: "settings",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+    avatar: undefined,
     permissions: {
       crm: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
       trading: { view: true, create: true, edit: true, delete: true, approve: true, export: true },
@@ -1626,10 +1575,37 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   upsertUser: (user) =>
     set((state) => {
       const exists = state.users.some((u) => u.id === user.id);
+      const newUsers = exists
+        ? state.users.map((u) => (u.id === user.id ? user : u))
+        : [user, ...state.users];
+
+      let updatedCurrentUser = state.currentUser;
+      const isCurrent =
+        state.currentUser &&
+        (state.currentUser.id === user.id ||
+          state.currentUser.id === user.code ||
+          state.currentUser.username === user.username ||
+          state.currentUser.email === user.email);
+
+      if (isCurrent) {
+        updatedCurrentUser = {
+          ...state.currentUser,
+          name: user.fullName || user.username || state.currentUser.name,
+          fullName: user.fullName || state.currentUser.fullName,
+          avatar: user.avatar,
+          initials: user.initials || state.currentUser.initials,
+          role: user.role || state.currentUser.role,
+          department: user.department || state.currentUser.department,
+          plant: user.plant || state.currentUser.plant,
+        };
+        try {
+          localStorage.setItem("printgoo_user", JSON.stringify(updatedCurrentUser));
+        } catch {}
+      }
+
       return {
-        users: exists
-          ? state.users.map((u) => (u.id === user.id ? user : u))
-          : [user, ...state.users],
+        users: newUsers,
+        currentUser: updatedCurrentUser,
       };
     }),
 
@@ -2992,7 +2968,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setLastInspectedElement: (info) => set({ lastInspectedElement: info }),
 
   isAuthenticated: false,
-  currentUser: DEMO_USERS.sales,
+  currentUser: DEMO_USERS.admin,
 
   switchTab: (direction = "next") =>
     set((state) => {

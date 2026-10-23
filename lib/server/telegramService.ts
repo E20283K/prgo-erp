@@ -1,4 +1,6 @@
 import { db } from "@/db";
+import fs from "fs";
+import path from "path";
 import {
   telegramChats,
   telegramMessages,
@@ -12,7 +14,7 @@ import {
   type TelegramCompanySettings,
   type TelegramChatSettings,
 } from "@/db/schema";
-import { eq, desc, asc, and, sql, or, ilike } from "drizzle-orm";
+import { eq, desc, asc, and, sql, or, ilike, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -43,48 +45,236 @@ export async function getEffectiveTelegramBotToken(companyCode: string = "PRINTG
   return getTelegramBotToken();
 }
 
+const AVATARS_CACHE_DIR = path.join(process.cwd(), "public", "cache", "telegram", "avatars");
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function chatMatchWhere(idOrChatId: string) {
+  return UUID_REGEX.test(idOrChatId)
+    ? or(eq(telegramChats.id, idOrChatId), eq(telegramChats.chatId, idOrChatId))
+    : eq(telegramChats.chatId, idOrChatId);
+}
+
+function ensureCacheDir() {
+  if (!fs.existsSync(AVATARS_CACHE_DIR)) {
+    fs.mkdirSync(AVATARS_CACHE_DIR, { recursive: true });
+  }
+}
+
 /**
- * Telegram foydalanuvchisining eng so'nggi profil rasmini (avatarini) olish
+ * Telegram faylini (avatar/rasm) yuklab olib, lokal keshga (diskka) saqlash
+ */
+export async function downloadAndCacheTelegramPhoto(
+  botToken: string,
+  filePath: string,
+  fileName: string
+): Promise<string | null> {
+  try {
+    ensureCacheDir();
+    const localPath = path.join(AVATARS_CACHE_DIR, fileName);
+
+    // Agar keshdagi rasm mavjud va hajmi to'g'ri bo'lsa
+    if (fs.existsSync(localPath) && fs.statSync(localPath).size > 0) {
+      return `/cache/telegram/avatars/${fileName}`;
+    }
+
+    const downloadUrl = `${TELEGRAM_API_BASE}/file/bot${botToken}/${filePath}`;
+    const res = await fetch(downloadUrl);
+    if (!res.ok) {
+      console.warn(`[downloadAndCacheTelegramPhoto] download failed status ${res.status}`);
+      return null;
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    fs.writeFileSync(localPath, Buffer.from(arrayBuffer));
+    return `/cache/telegram/avatars/${fileName}`;
+  } catch (err) {
+    console.error("[downloadAndCacheTelegramPhoto] error:", err);
+    return null;
+  }
+}
+
+/**
+ * Foydalanuvchi yoki guruh uchun zamonaviy Telegram uslubidagi SVG avatarni keshga yaratish
+ */
+export function generateSvgAvatar(type: "user" | "chat" | "bot", id: string, name: string): string {
+  ensureCacheDir();
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const fileName = `${type}_${safeId}.svg`;
+  const localPath = path.join(AVATARS_CACHE_DIR, fileName);
+
+  if (fs.existsSync(localPath) && fs.statSync(localPath).size > 0) {
+    return `/cache/telegram/avatars/${fileName}`;
+  }
+
+  const initials = (name || (type === "chat" ? "TG" : type === "bot" ? "BOT" : "U"))
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("") || (type === "chat" ? "TG" : "U");
+
+  const colors = [
+    ["#3B82F6", "#1D4ED8"], // Blue
+    ["#10B981", "#047857"], // Emerald
+    ["#F59E0B", "#B45309"], // Amber
+    ["#EF4444", "#B91C1C"], // Red
+    ["#8B5CF6", "#6D28D9"], // Purple
+    ["#EC4899", "#BE185D"], // Pink
+    ["#06B6D4", "#0E7490"], // Cyan
+    ["#14B8A6", "#0F766E"], // Teal
+  ];
+
+  const hash = Math.abs(
+    (id + name).split("").reduce((acc, c) => acc + c.charCodeAt(0), 0)
+  );
+  const [col1, col2] = colors[hash % colors.length];
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="g_${safeId}" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${col1}" />
+      <stop offset="100%" stop-color="${col2}" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="64" fill="url(#g_${safeId})" />
+  <text x="50%" y="54%" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="50" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${initials}</text>
+</svg>`;
+
+  fs.writeFileSync(localPath, svg, "utf-8");
+  return `/cache/telegram/avatars/${fileName}`;
+}
+
+/**
+ * Telegram Botining o'z rasmini (avatarini) olish va diskda keshlab saqlash
+ */
+export async function getTelegramBotAvatarUrl(botToken?: string): Promise<string | null> {
+  const token = botToken || (await getEffectiveTelegramBotToken());
+  if (!token) return null;
+
+  const fileName = "bot.jpg";
+  const localPath = path.join(AVATARS_CACHE_DIR, fileName);
+  if (fs.existsSync(localPath) && fs.statSync(localPath).size > 0) {
+    return `/cache/telegram/avatars/${fileName}`;
+  }
+
+  try {
+    const meRes = await fetch(`${TELEGRAM_API_BASE}/bot${token}/getMe`);
+    const meData = await meRes.json();
+    if (!meData.ok || !meData.result?.id) return null;
+    const botId = meData.result.id;
+
+    let photoFileId: string | null = null;
+
+    // 1. getChat orqali bot rasmini tekshirish
+    const chatRes = await fetch(`${TELEGRAM_API_BASE}/bot${token}/getChat?chat_id=${botId}`);
+    const chatData = await chatRes.json();
+    if (chatData.ok && chatData.result?.photo?.small_file_id) {
+      photoFileId = chatData.result.photo.small_file_id;
+    }
+
+    // 2. getUserProfilePhotos orqali bot rasmini tekshirish
+    if (!photoFileId) {
+      const photosRes = await fetch(
+        `${TELEGRAM_API_BASE}/bot${token}/getUserProfilePhotos?user_id=${botId}&limit=1`
+      );
+      const photosData = await photosRes.json();
+      if (photosData.ok && photosData.result?.photos?.[0]?.[0]?.file_id) {
+        photoFileId = photosData.result.photos[0][0].file_id;
+      }
+    }
+
+    if (photoFileId) {
+      const fileRes = await fetch(`${TELEGRAM_API_BASE}/bot${token}/getFile?file_id=${photoFileId}`);
+      const fileData = await fileRes.json();
+      if (fileData.ok && fileData.result?.file_path) {
+        return await downloadAndCacheTelegramPhoto(token, fileData.result.file_path, fileName);
+      }
+    }
+  } catch (err) {
+    console.warn("[getTelegramBotAvatarUrl] error:", err);
+  }
+
+  // Fallback: Bot nomiga mos SVG
+  return generateSvgAvatar("bot", "bot", "Bot");
+}
+
+/**
+ * Telegram foydalanuvchisining profil rasmini (avatarini) olish va diskda keshlab saqlash
  */
 export async function getTelegramUserAvatarUrl(
   botToken: string,
-  userId: string | number
+  userId: string | number,
+  senderName?: string
 ): Promise<string | null> {
   if (!botToken || !userId) return null;
+
+  const idStr = String(userId);
+  const jpgName = `user_${idStr}.jpg`;
+  const localJpg = path.join(AVATARS_CACHE_DIR, jpgName);
+
+  if (fs.existsSync(localJpg) && fs.statSync(localJpg).size > 0) {
+    return `/cache/telegram/avatars/${jpgName}`;
+  }
+
   try {
+    let photoFileId: string | null = null;
+
+    // 1. getUserProfilePhotos
     const res = await fetch(
       `${TELEGRAM_API_BASE}/bot${botToken}/getUserProfilePhotos?user_id=${userId}&limit=1`,
       { cache: "no-store" }
     );
     const data = await res.json();
-    if (!data.ok || !data.result || data.result.total_count === 0) {
-      return null;
+    if (data.ok && data.result?.photos?.[0]?.[0]?.file_id) {
+      photoFileId = data.result.photos[0][0].file_id;
     }
-    const photos = data.result.photos?.[0];
-    if (!photos || photos.length === 0) return null;
-    // Kichik yoki o'rta o'lchamdagi rasm
-    const photo = photos[0];
-    const fileRes = await fetch(
-      `${TELEGRAM_API_BASE}/bot${botToken}/getFile?file_id=${photo.file_id}`
-    );
-    const fileData = await fileRes.json();
-    if (fileData.ok && fileData.result?.file_path) {
-      return `${TELEGRAM_API_BASE}/file/bot${botToken}/${fileData.result.file_path}`;
+
+    // 2. Agar getUserProfilePhotos topilmasa, getChat orqali
+    if (!photoFileId) {
+      const chatRes = await fetch(`${TELEGRAM_API_BASE}/bot${botToken}/getChat?chat_id=${userId}`);
+      const chatData = await chatRes.json();
+      if (chatData.ok && chatData.result?.photo?.small_file_id) {
+        photoFileId = chatData.result.photo.small_file_id;
+      }
+    }
+
+    if (photoFileId) {
+      const fileRes = await fetch(`${TELEGRAM_API_BASE}/bot${botToken}/getFile?file_id=${photoFileId}`);
+      const fileData = await fileRes.json();
+      if (fileData.ok && fileData.result?.file_path) {
+        const cached = await downloadAndCacheTelegramPhoto(botToken, fileData.result.file_path, jpgName);
+        if (cached) return cached;
+      }
     }
   } catch (err) {
     console.warn("[getTelegramUserAvatarUrl] error:", err);
   }
-  return null;
+
+  // Telegram maxfiylik tufayli rasm berilmasa yoki foydalanuvchida rasm bo'lmasa,
+  // foydalanuvchi ismi bilan zamonaviy SVG avatarni keshga yozamiz
+  return generateSvgAvatar("user", idStr, senderName || "Foydalanuvchi");
 }
 
 /**
- * Telegram guruhi yoki chatining rasmini olish
+ * Telegram guruhi yoki chatining rasmini olish va diskda keshlab saqlash
  */
 export async function getTelegramChatPhotoUrl(
   botToken: string,
-  chatId: string | number
+  chatId: string | number,
+  title?: string
 ): Promise<string | null> {
   if (!botToken || !chatId) return null;
+
+  const idStr = String(chatId);
+  const safeId = idStr.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const jpgName = `chat_${safeId}.jpg`;
+  const localJpg = path.join(AVATARS_CACHE_DIR, jpgName);
+
+  if (fs.existsSync(localJpg) && fs.statSync(localJpg).size > 0) {
+    return `/cache/telegram/avatars/${jpgName}`;
+  }
+
   try {
     const res = await fetch(`${TELEGRAM_API_BASE}/bot${botToken}/getChat?chat_id=${chatId}`);
     const data = await res.json();
@@ -94,14 +284,98 @@ export async function getTelegramChatPhotoUrl(
       );
       const fileData = await fileRes.json();
       if (fileData.ok && fileData.result?.file_path) {
-        return `${TELEGRAM_API_BASE}/file/bot${botToken}/${fileData.result.file_path}`;
+        const cached = await downloadAndCacheTelegramPhoto(botToken, fileData.result.file_path, jpgName);
+        if (cached) return cached;
       }
     }
   } catch (err) {
     console.warn("[getTelegramChatPhotoUrl] error:", err);
   }
-  return null;
+
+  // Guruhda rasm bo'lmasa, guruh nomi bosh harflari bilan SVG kesh yaratamiz
+  return generateSvgAvatar("chat", safeId, title || "Guruh");
 }
+
+/**
+ * Barcha chatlar va xabarlar avatarlarini bir martalik keshga yuklash va bazani sinxronlash
+ */
+export async function backfillTelegramAvatars(companyCode: string = "PRINTGOO"): Promise<{
+  botAvatarUrl: string | null;
+  updatedChats: number;
+  updatedMessages: number;
+}> {
+  const token = await getEffectiveTelegramBotToken(companyCode);
+  const botAvatarUrl = await getTelegramBotAvatarUrl(token);
+
+  let updatedChats = 0;
+  let updatedMessages = 0;
+
+  try {
+    // 1. Guruhlarning rasmlarini keshga yuklash
+    const allChats = await db.select().from(telegramChats);
+    for (const c of allChats) {
+      const cachedPhoto = await getTelegramChatPhotoUrl(token, c.chatId, c.title);
+      if (cachedPhoto && (c.photoUrl !== cachedPhoto || !c.photoUrl)) {
+        await db
+          .update(telegramChats)
+          .set({ photoUrl: cachedPhoto })
+          .where(eq(telegramChats.id, c.id));
+        updatedChats++;
+      }
+    }
+
+    // 2. Chiquvchi xabarlarga Bot avatarini biriktirish
+    if (botAvatarUrl) {
+      const res = await db
+        .update(telegramMessages)
+        .set({ senderAvatarUrl: botAvatarUrl })
+        .where(
+          and(
+            eq(telegramMessages.isOutgoing, true),
+            or(isNull(telegramMessages.senderAvatarUrl), ilike(telegramMessages.senderAvatarUrl, "%api.telegram.org%"))
+          )
+        );
+      updatedMessages += Number(res);
+    }
+
+    // 3. Kiruvchi xabarlar uchun foydalanuvchilar avatarlarini keshga olish
+    const distinctSenders = await db
+      .select({
+        senderId: telegramMessages.senderId,
+        senderName: telegramMessages.senderName,
+      })
+      .from(telegramMessages)
+      .where(
+        and(
+          eq(telegramMessages.isOutgoing, false),
+          sql`${telegramMessages.senderId} IS NOT NULL`
+        )
+      )
+      .groupBy(telegramMessages.senderId, telegramMessages.senderName);
+
+    for (const sender of distinctSenders) {
+      if (!sender.senderId) continue;
+      const userAvatar = await getTelegramUserAvatarUrl(token, sender.senderId, sender.senderName || undefined);
+      if (userAvatar) {
+        await db
+          .update(telegramMessages)
+          .set({ senderAvatarUrl: userAvatar })
+          .where(
+            and(
+              eq(telegramMessages.senderId, sender.senderId),
+              or(isNull(telegramMessages.senderAvatarUrl), ilike(telegramMessages.senderAvatarUrl, "%api.telegram.org%"))
+            )
+          );
+        updatedMessages++;
+      }
+    }
+  } catch (err) {
+    console.error("[backfillTelegramAvatars] error:", err);
+  }
+
+  return { botAvatarUrl, updatedChats, updatedMessages };
+}
+
 
 /**
  * Korxonaning Telegram integratsiya sozlamalarini olish
@@ -237,7 +511,7 @@ export async function updateTelegramChatSettings(
   extra?: { assignedUserId?: string; clientId?: string }
 ): Promise<TelegramChat> {
   const chat = await db.query.telegramChats.findFirst({
-    where: or(eq(telegramChats.id, chatRecordId), eq(telegramChats.chatId, chatRecordId)),
+    where: chatMatchWhere(chatRecordId),
   });
 
   if (!chat) {
@@ -315,8 +589,16 @@ export async function getTelegramChats(
         isSlaBreached = true;
       }
     }
+    let photoUrl = chat.photoUrl;
+    if (!photoUrl || photoUrl.includes("api.telegram.org")) {
+      const safeId = chat.chatId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      photoUrl = fs.existsSync(path.join(AVATARS_CACHE_DIR, `chat_${safeId}.jpg`))
+        ? `/cache/telegram/avatars/chat_${safeId}.jpg`
+        : `/cache/telegram/avatars/chat_${safeId}.svg`;
+    }
     return {
       ...chat,
+      photoUrl,
       clientName,
       clientCode,
       clientPhone,
@@ -351,17 +633,23 @@ export async function getTelegramChats(
  */
 export async function getTelegramChatMessages(
   chatId: string
-): Promise<{ chat: TelegramChatWithClient | null; messages: TelegramMessage[] }> {
+): Promise<{
+  chat: TelegramChatWithClient | null;
+  messages: TelegramMessage[];
+  bot: { avatarUrl: string };
+}> {
   // Chatni topish (UUID yoki telegram chatId bo'yicha)
   const chatRecord = await db.query.telegramChats.findFirst({
-    where: or(eq(telegramChats.id, chatId), eq(telegramChats.chatId, chatId)),
+    where: chatMatchWhere(chatId),
     with: {
       client: true,
     },
   });
 
+  const botAvatar = (await getTelegramBotAvatarUrl()) || "/cache/telegram/avatars/bot.jpg";
+
   if (!chatRecord) {
-    return { chat: null, messages: [] };
+    return { chat: null, messages: [], bot: { avatarUrl: botAvatar } };
   }
 
   // unreadCount ni 0 qilish
@@ -372,26 +660,56 @@ export async function getTelegramChatMessages(
       .where(eq(telegramChats.id, chatRecord.id));
   }
 
-  const messages = await db
+  const rawMessages = await db
     .select()
     .from(telegramMessages)
     .where(eq(telegramMessages.chatId, chatRecord.id))
     .orderBy(asc(telegramMessages.sentAt));
+
+  const messages: TelegramMessage[] = rawMessages.map((m) => {
+    let avatarUrl = m.senderAvatarUrl;
+    if (m.isOutgoing) {
+      avatarUrl = avatarUrl && !avatarUrl.includes("api.telegram.org") ? avatarUrl : botAvatar;
+    } else if (!avatarUrl || avatarUrl.includes("api.telegram.org")) {
+      if (m.senderId) {
+        const jpg = path.join(AVATARS_CACHE_DIR, `user_${m.senderId}.jpg`);
+        avatarUrl = fs.existsSync(jpg)
+          ? `/cache/telegram/avatars/user_${m.senderId}.jpg`
+          : `/cache/telegram/avatars/user_${m.senderId}.svg`;
+      }
+    }
+    return {
+      ...m,
+      senderAvatarUrl: avatarUrl,
+    };
+  });
 
   const now = new Date();
   const isSlaBreached =
     chatRecord.unansweredSince &&
     now.getTime() - new Date(chatRecord.unansweredSince).getTime() >= 15 * 60 * 1000;
 
+  let chatPhoto = chatRecord.photoUrl;
+  if (!chatPhoto || chatPhoto.includes("api.telegram.org")) {
+    const safeId = chatRecord.chatId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    chatPhoto = fs.existsSync(path.join(AVATARS_CACHE_DIR, `chat_${safeId}.jpg`))
+      ? `/cache/telegram/avatars/chat_${safeId}.jpg`
+      : `/cache/telegram/avatars/chat_${safeId}.svg`;
+  }
+
   return {
     chat: {
       ...chatRecord,
+      photoUrl: chatPhoto,
       clientName: chatRecord.client?.name ?? null,
       clientCode: chatRecord.client?.code ?? null,
       clientPhone: chatRecord.client?.phone ?? null,
       isSlaBreached: Boolean(isSlaBreached),
     },
     messages,
+    bot: {
+      avatarUrl: botAvatar,
+    },
   };
 }
 
@@ -405,7 +723,7 @@ export async function sendTelegramMessage(params: {
   replyToTelegramMessageId?: number;
 }): Promise<{ success: boolean; message?: TelegramMessage; error?: string }> {
   const chatRecord = await db.query.telegramChats.findFirst({
-    where: or(eq(telegramChats.id, params.chatId), eq(telegramChats.chatId, params.chatId)),
+    where: chatMatchWhere(params.chatId),
   });
 
   if (!chatRecord) {
@@ -437,12 +755,15 @@ export async function sendTelegramMessage(params: {
   }
 
   // Bazada chiquvchi xabarni saqlash
+  const botAvatarUrl = await getTelegramBotAvatarUrl(token);
+
   const [newMsg] = await db
     .insert(telegramMessages)
     .values({
       chatId: chatRecord.id,
       telegramMessageId: tgMsgId,
       senderName: params.senderName || "PrintGoo Menejer",
+      senderAvatarUrl: botAvatarUrl || "/cache/telegram/avatars/bot.jpg",
       isOutgoing: true,
       text: params.text,
       replyToTelegramMessageId: params.replyToTelegramMessageId,
@@ -480,7 +801,7 @@ export async function linkTelegramChatToClient(params: {
       status: "active",
       updatedAt: new Date(),
     })
-    .where(or(eq(telegramChats.id, params.chatId), eq(telegramChats.chatId, params.chatId)))
+    .where(chatMatchWhere(params.chatId))
     .returning();
 
   if (!updated) {
@@ -612,13 +933,15 @@ export async function processTelegramWebhookUpdate(
     // Foydalanuvchi va guruh avatarlarini olish
     const botToken = await getEffectiveTelegramBotToken(companyCode);
     let senderAvatarUrl: string | null = null;
-    if (senderId && !message.from?.is_bot && botToken) {
-      senderAvatarUrl = await getTelegramUserAvatarUrl(botToken, senderId);
+    if (message.from?.is_bot) {
+      senderAvatarUrl = await getTelegramBotAvatarUrl(botToken);
+    } else if (senderId && botToken) {
+      senderAvatarUrl = await getTelegramUserAvatarUrl(botToken, senderId, senderName);
     }
 
-    if (!chatRecord.photoUrl && botToken) {
-      const chatPhoto = await getTelegramChatPhotoUrl(botToken, tgChatId);
-      if (chatPhoto) {
+    if (botToken) {
+      const chatPhoto = await getTelegramChatPhotoUrl(botToken, tgChatId, title);
+      if (chatPhoto && (!chatRecord.photoUrl || chatRecord.photoUrl !== chatPhoto || chatRecord.photoUrl.includes("api.telegram.org"))) {
         await db
           .update(telegramChats)
           .set({ photoUrl: chatPhoto })
