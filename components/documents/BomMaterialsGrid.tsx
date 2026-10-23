@@ -88,6 +88,7 @@ import {
   Clock,
   Tag,
   Scale,
+  UserCheck,
 } from "lucide-react";
 
 import { useWorkspaceStore, WarehouseStockRecord } from "@/store/workspaceStore";
@@ -100,7 +101,7 @@ import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/
 
 export type MaterialIssueType = "standard" | "remake" | "client_change" | "press_waste";
 export type FaultParty = "none" | "prepress" | "production" | "client" | "supplier";
-export type AcquisitionSource = "warehouse" | "procurement";
+export type AcquisitionSource = "warehouse" | "procurement" | "client";
 
 export interface BomItem {
   id: string;
@@ -133,6 +134,7 @@ export interface BomItem {
   notes?: string;
   imageUrl?: string;
   sourceType?: AcquisitionSource;
+  acquisitionSource?: AcquisitionSource;
 }
 
 export interface BomFormState extends BomItem {
@@ -205,11 +207,12 @@ export function normalizeBomItem(item: any): BomItem {
     faultParty: item.faultParty || "none",
     notes: item.notes || "",
     imageUrl: item.imageUrl || getMaterialImage(item),
-    sourceType: item.sourceType || (item.availability === "On Order" ? "procurement" : "warehouse"),
+    acquisitionSource: item.acquisitionSource || (item.supplier?.toLowerCase().includes("mijoz") ? "client" : item.availability === "On Order" || item.sourceType === "procurement" ? "procurement" : "warehouse"),
+    sourceType: item.sourceType || (item.supplier?.toLowerCase().includes("mijoz") ? "client" : item.availability === "On Order" ? "procurement" : "warehouse"),
   };
 }
 
-const OFFSET_BOM_ITEMS: BomItem[] = [
+export const OFFSET_BOM_ITEMS: BomItem[] = [
   { id: "MAT-PAP-014", name: "Galerie Art Silk Paper", spec: "150 g/m², 700x1000mm", planQty: 12500, actualQty: 12850, wasteQty: 350, qty: 12850, unit: "Sheets", unitPrice: 0.42, totalPrice: 5397.00, supplier: "Sappi Paper Mill", availability: "In Stock", issueType: "standard", faultParty: "none", notes: "Makeready over-run (+350)" },
   { id: "MAT-INK-CMYK", name: "Hubergroup Eco-Offset Ink", spec: "Process CMYK", planQty: 36, actualQty: 36, wasteQty: 0, qty: 36, unit: "kg", unitPrice: 24.00, totalPrice: 864.00, supplier: "Hubergroup", availability: "In Stock", issueType: "standard", faultParty: "none" },
   { id: "MAT-PLT-CTP", name: "Agfa CTP Thermal Plates", spec: "1030x790mm", planQty: 8, actualQty: 8, wasteQty: 0, qty: 8, unit: "pcs", unitPrice: 18.50, totalPrice: 148.00, supplier: "Agfa", availability: "In Stock", issueType: "standard", faultParty: "none", notes: "4+4 Asosiy forma komplekti" },
@@ -217,14 +220,14 @@ const OFFSET_BOM_ITEMS: BomItem[] = [
   { id: "MAT-LAM-M01", name: "Soft-Touch Matte Film", spec: "BOPP 32 micron", planQty: 2400, actualQty: 2400, wasteQty: 0, qty: 2400, unit: "m", unitPrice: 0.32, totalPrice: 768.00, supplier: "Dunmore", availability: "In Stock", issueType: "standard", faultParty: "none" },
 ];
 
-const FLEXO_BOM_ITEMS: BomItem[] = [
+export const FLEXO_BOM_ITEMS: BomItem[] = [
   { id: "MAT-FLX-NYL", name: "Nylon Taffeta Tape Roll", spec: "30mm width, 200m", planQty: 45, actualQty: 48, wasteQty: 3, qty: 48, unit: "Rolls", unitPrice: 12.50, totalPrice: 600.00, supplier: "Avery Dennison", availability: "In Stock", issueType: "standard", faultParty: "none", notes: "Chiqindi: +3 rulon" },
   { id: "MAT-FLX-INK", name: "Wash-Resistant Flexo Ink", spec: "Black, 5kg", planQty: 2, actualQty: 2, wasteQty: 0, qty: 2, unit: "kg", unitPrice: 45.00, totalPrice: 90.00, supplier: "Flint Group", availability: "Low Stock", issueType: "standard", faultParty: "none" },
   { id: "MAT-FLX-PLT", name: "Photopolymer Flexo Plate", spec: "Digital Plate 1.14mm", planQty: 2, actualQty: 2, wasteQty: 0, qty: 2, unit: "pcs", unitPrice: 120.00, totalPrice: 240.00, supplier: "MacDermid", availability: "In Stock", issueType: "standard", faultParty: "none", notes: "2 rangli polimer" },
   { id: "MAT-FLX-RMK", name: "Photopolymer Flexo Plate (Remake)", spec: "Digital Plate 1.14mm", planQty: 0, actualQty: 1, wasteQty: 1, qty: 1, unit: "pcs", unitPrice: 120.00, totalPrice: 120.00, supplier: "MacDermid", availability: "In Stock", issueType: "remake", faultParty: "prepress", notes: "Rastr nuqsoni tufayli qayta tayyorlandi" },
 ];
 
-const JACQUARD_BOM_ITEMS: BomItem[] = [
+export const JACQUARD_BOM_ITEMS: BomItem[] = [
   { id: "MAT-YRN-WARP", name: "Polyester Warp Yarn", spec: "Black, 50D", planQty: 120, actualQty: 124, wasteQty: 4, qty: 124, unit: "kg", unitPrice: 5.20, totalPrice: 644.80, supplier: "Shenghong Corp", availability: "In Stock", issueType: "standard", faultParty: "none" },
   { id: "MAT-YRN-WEFT", name: "Polyester Weft Yarn", spec: "White, 75D", planQty: 85, actualQty: 85, wasteQty: 0, qty: 85, unit: "kg", unitPrice: 4.80, totalPrice: 408.00, supplier: "Shenghong Corp", availability: "In Stock", issueType: "standard", faultParty: "none" },
   { id: "MAT-YRN-GLD", name: "Metallic Lurex Yarn", spec: "Gold, 30D", planQty: 15, actualQty: 15, wasteQty: 0, qty: 15, unit: "kg", unitPrice: 18.50, totalPrice: 277.50, supplier: "Lurex Co", availability: "Reserved", issueType: "standard", faultParty: "none" },
@@ -459,6 +462,132 @@ export function BomMaterialsGrid({
 
   const selectedRowIndex = selection.rows.toArray()[0];
   const hasSelectedRow = selectedRowIndex !== undefined && items[selectedRowIndex] !== undefined;
+
+  // Synchronize items when initialItems prop is updated from parent (e.g. SpecificationsTab sync)
+  const isInitialMount = React.useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (initialItems && initialItems.length > 0) {
+      setItems(initialItems);
+    }
+  }, [initialItems]);
+
+  // Compute Shortage Items (items out of stock or requiring procurement)
+  const shortageItems = useMemo(() => {
+    return items.filter((item) => {
+      // Client supplied materials never have a shortage
+      if (item.acquisitionSource === "client" || item.supplier?.toLowerCase().includes("mijoz")) {
+        return false;
+      }
+      if (item.availability === "On Order") {
+        return true;
+      }
+      const matched = warehouseStock.find(
+        (ws) =>
+          ws.sku.toLowerCase() === item.id.toLowerCase() ||
+          ws.name.toLowerCase() === item.name.toLowerCase()
+      );
+      if (matched) {
+        const required = item.actualQty !== undefined ? item.actualQty : (item.qty || 0);
+        return required > matched.available;
+      }
+      return false;
+    });
+  }, [items, warehouseStock]);
+
+  // Bulk 1-Click Action: Mark all shortage items as client supplied ($0, no warehouse deduction)
+  const handleMarkAllShortageAsClient = useCallback(() => {
+    if (shortageItems.length === 0) return;
+    const shortageIds = new Set(shortageItems.map((s) => s.id));
+    const next = items.map((it) => {
+      if (shortageIds.has(it.id)) {
+        return {
+          ...it,
+          acquisitionSource: "client" as const,
+          supplier: "Mijoz xomashyosi (Davalcheskiy)",
+          unitPrice: 0,
+          totalPrice: 0,
+          availability: "In Stock" as const,
+        };
+      }
+      return it;
+    });
+    setItems(next);
+    if (onItemsChange) onItemsChange(next);
+    if (tabId) setTabUnsaved(tabId, true);
+    toast.add({
+      title: "Mijoz xomashyosi qilib belgilandi",
+      description: `${shortageItems.length} ta yetishmayotgan material davalcheskiy ($0) deb belgilandi.`,
+      type: "success",
+    });
+  }, [shortageItems, items, onItemsChange, tabId, setTabUnsaved]);
+
+  // Bulk 1-Click Action: Request Purchase Order (PO) for all shortage items
+  const handleCreateProcurementPO = useCallback(() => {
+    if (shortageItems.length === 0) return;
+    const shortageIds = new Set(shortageItems.map((s) => s.id));
+    const next = items.map((it) => {
+      if (shortageIds.has(it.id)) {
+        return {
+          ...it,
+          acquisitionSource: "procurement" as const,
+          availability: "On Order" as const,
+          supplier: it.supplier && !it.supplier.includes("Ombor") ? it.supplier : "Approved Supplier",
+        };
+      }
+      return it;
+    });
+    setItems(next);
+    if (onItemsChange) onItemsChange(next);
+    if (tabId) setTabUnsaved(tabId, true);
+    toast.add({
+      title: "Ta'minotga xarid so'rovi (PO) yuborildi",
+      description: `${shortageItems.length} ta material xaridga buyurtma qilindi (On Order).`,
+      type: "info",
+    });
+  }, [shortageItems, items, onItemsChange, tabId, setTabUnsaved]);
+
+  // Toggle selected row between client material and warehouse material
+  const handleMarkSelectedAsClient = useCallback(() => {
+    if (!hasSelectedRow || selectedRowIndex === undefined) return;
+    const target = items[selectedRowIndex];
+    if (!target) return;
+    const isCurrentlyClient = target.acquisitionSource === "client" || target.supplier?.toLowerCase().includes("mijoz");
+    const next = [...items];
+    if (isCurrentlyClient) {
+      next[selectedRowIndex] = {
+        ...target,
+        acquisitionSource: "warehouse",
+        supplier: "Asosiy Ombor",
+        availability: "In Stock",
+      };
+      toast.add({
+        title: "Ombor materialiga qaytarildi",
+        description: `${target.name} korxona ombori hisobiga o'tkazildi.`,
+        type: "info",
+      });
+    } else {
+      next[selectedRowIndex] = {
+        ...target,
+        acquisitionSource: "client",
+        supplier: "Mijoz xomashyosi (Davalcheskiy)",
+        unitPrice: 0,
+        totalPrice: 0,
+        availability: "In Stock",
+      };
+      toast.add({
+        title: "Mijoz xomashyosi qilib belgilandi",
+        description: `${target.name} davalcheskiy ($0) deb belgilandi.`,
+        type: "success",
+      });
+    }
+    setItems(next);
+    if (onItemsChange) onItemsChange(next);
+    if (tabId) setTabUnsaved(tabId, true);
+  }, [hasSelectedRow, selectedRowIndex, items, onItemsChange, tabId, setTabUnsaved]);
 
   // Compute total BOM costs (Plan vs Fact vs Waste)
   const { planTotalCost, actualTotalCost, wasteTotalCost, remakeCount } = useMemo(() => {
@@ -698,21 +827,29 @@ export function BomMaterialsGrid({
               textDark: isDark ? "#a1a1aa" : "#475569",
             },
           };
-        case "supplier":
+        case "supplier": {
+          const isClient = item.acquisitionSource === "client" || item.supplier?.toLowerCase().includes("mijoz");
           return {
             kind: GridCellKind.Text,
             data: item.supplier,
             displayData: item.supplier,
             allowOverlay: true,
             themeOverride: {
-              textDark: isDark ? "#e4e4e7" : "#18181b",
+              textDark: isClient
+                ? (isDark ? "#34d399" : "#059669")
+                : (isDark ? "#e4e4e7" : "#18181b"),
+              baseFontStyle: isClient ? "600 11px sans-serif" : undefined,
             },
           };
+        }
         case "availability": {
+          const isClient = item.acquisitionSource === "client" || item.supplier?.toLowerCase().includes("mijoz");
           const isStock = item.availability === "In Stock";
           const isReserved = item.availability === "Reserved";
           const isLow = item.availability === "Low Stock";
-          const statusColor = isStock
+          const statusColor = isClient
+            ? (isDark ? "#34d399" : "#059669")
+            : isStock
             ? (isDark ? "#4ade80" : "#16a34a")
             : isReserved
             ? (isDark ? "#60a5fa" : "#2563eb")
@@ -720,10 +857,12 @@ export function BomMaterialsGrid({
             ? (isDark ? "#fbbf24" : "#d97706")
             : (isDark ? "#f87171" : "#dc2626");
 
+          const displayLabel = isClient ? "Mijozniki" : item.availability;
+
           return {
             kind: GridCellKind.Text,
-            data: item.availability,
-            displayData: item.availability,
+            data: displayLabel,
+            displayData: displayLabel,
             allowOverlay: true,
             themeOverride: {
               textDark: statusColor,
@@ -751,8 +890,8 @@ export function BomMaterialsGrid({
       const targetItem = filteredItems[row];
       if (!targetItem || !column) return;
 
-      setItems((prev) =>
-        prev.map((item) => {
+      setItems((prev) => {
+        const next = prev.map((item) => {
           if (item.id === targetItem.id) {
             const updated = { ...item };
             if (column.id === "actualQty") {
@@ -806,8 +945,10 @@ export function BomMaterialsGrid({
             return updated;
           }
           return item;
-        })
-      );
+        });
+        if (onItemsChange) onItemsChange(next);
+        return next;
+      });
 
       if (tabId) {
         setTabUnsaved(tabId, true);
@@ -874,7 +1015,8 @@ export function BomMaterialsGrid({
     if (!item) return;
     setEditingIndex(index);
     const normalized = normalizeBomItem(item);
-    const isProcurement = normalized.availability === "On Order" || normalized.sourceType === "procurement";
+    const isClient = normalized.acquisitionSource === "client" || normalized.supplier?.toLowerCase().includes("mijoz");
+    const isProcurement = !isClient && (normalized.availability === "On Order" || normalized.sourceType === "procurement");
 
     // Auto-detect category if missing
     let detectedCategory = normalized.category || "Paper & Board";
@@ -895,7 +1037,7 @@ export function BomMaterialsGrid({
 
     setFormState({
       ...normalized,
-      acquisitionSource: isProcurement ? "procurement" : "warehouse",
+      acquisitionSource: isClient ? "client" : isProcurement ? "procurement" : "warehouse",
       category: detectedCategory,
       sheetFormat: normalized.sheetFormat || (normalized.spec?.match(/\d+x\d+|\d+×\d+/) ? normalized.spec.match(/\d+x\d+|\d+×\d+/)?.[0] : ""),
       grammage: normalized.grammage || (normalized.spec?.match(/(\d+)\s*g\/m²/) ? Number(normalized.spec.match(/(\d+)\s*g\/m²/)?.[1]) : undefined),
@@ -923,12 +1065,22 @@ export function BomMaterialsGrid({
     const planQty = Number(formState.planQty) || 0;
     const actualQty = Number(formState.actualQty) || 0;
     const wasteQty = formState.wasteQty !== undefined ? Number(formState.wasteQty) : Math.max(0, actualQty - planQty);
-    const unitPrice = Number(formState.unitPrice) || 0;
 
     const finalSpec = buildMaterialSpec(formState);
-    const finalAvailability = formState.acquisitionSource === "procurement"
+    const finalAvailability = formState.acquisitionSource === "client"
+      ? "In Stock"
+      : formState.acquisitionSource === "procurement"
       ? "On Order"
       : (formState.availability || "In Stock");
+
+    const unitPrice = formState.acquisitionSource === "client" ? 0 : (Number(formState.unitPrice) || 0);
+    const supplier = formState.supplier?.trim() || (
+      formState.acquisitionSource === "client"
+        ? "Mijoz xomashyosi (Davalcheskiy)"
+        : formState.acquisitionSource === "warehouse"
+        ? "Asosiy Ombor"
+        : "Approved Supplier"
+    );
 
     const itemToSave: BomItem = {
       ...formState,
@@ -950,19 +1102,21 @@ export function BomMaterialsGrid({
       unit: formState.unit?.trim() || "pcs",
       unitPrice,
       totalPrice: Number((actualQty * unitPrice).toFixed(2)),
-      supplier: formState.supplier?.trim() || (formState.acquisitionSource === "warehouse" ? "Asosiy Ombor" : "Approved Supplier"),
+      supplier,
       availability: finalAvailability,
       issueType: formState.issueType || "standard",
       faultParty: formState.faultParty || "none",
       notes: formState.notes?.trim() || "",
       imageUrl: formState.imageUrl || getMaterialImage(formState),
       sourceType: formState.acquisitionSource,
+      acquisitionSource: formState.acquisitionSource,
     };
 
     if (editingIndex !== null) {
       setItems((prev) => {
         const next = [...prev];
         next[editingIndex] = itemToSave;
+        if (onItemsChange) onItemsChange(next);
         return next;
       });
       toast.add({
@@ -971,9 +1125,15 @@ export function BomMaterialsGrid({
         type: "success",
       });
     } else {
-      setItems((prev) => [...prev, itemToSave]);
+      setItems((prev) => {
+        const next = [...prev, itemToSave];
+        if (onItemsChange) onItemsChange(next);
+        return next;
+      });
       toast.add({
-        title: formState.acquisitionSource === "procurement"
+        title: formState.acquisitionSource === "client"
+          ? "Mijoz xomashyosi qo'shildi"
+          : formState.acquisitionSource === "procurement"
           ? "Xaridga buyurtma qo'shildi"
           : itemToSave.issueType === "remake"
           ? "CTP / Brak qayd etildi"
@@ -996,7 +1156,11 @@ export function BomMaterialsGrid({
       selectedRowIndices.map((idx) => filteredItems[idx]?.id).filter(Boolean)
     );
 
-    setItems((prev) => prev.filter((m) => !idsToDelete.has(m.id)));
+    setItems((prev) => {
+      const next = prev.filter((m) => !idsToDelete.has(m.id));
+      if (onItemsChange) onItemsChange(next);
+      return next;
+    });
     setSelection({
       columns: CompactSelection.empty(),
       rows: CompactSelection.empty(),
@@ -1008,7 +1172,7 @@ export function BomMaterialsGrid({
       description: t("toastDeleted", { count: idsToDelete.size }),
       type: "info",
     });
-  }, [selection, filteredItems, tabId, setTabUnsaved, t]);
+  }, [selection, filteredItems, tabId, setTabUnsaved, t, onItemsChange]);
 
   // Duplicate Selected Row
   const handleDuplicateRow = useCallback(() => {
@@ -1023,7 +1187,11 @@ export function BomMaterialsGrid({
       name: `${target.name} (Copy)`,
     };
 
-    setItems((prev) => [...prev, duplicated]);
+    setItems((prev) => {
+      const next = [...prev, duplicated];
+      if (onItemsChange) onItemsChange(next);
+      return next;
+    });
     if (tabId) setTabUnsaved(tabId, true);
 
     toast.add({
@@ -1031,7 +1199,7 @@ export function BomMaterialsGrid({
       description: t("toastAdded", { code: duplicated.id }),
       type: "success",
     });
-  }, [selection, filteredItems, tabId, setTabUnsaved, t]);
+  }, [selection, filteredItems, tabId, setTabUnsaved, t, onItemsChange]);
 
   // Copy Cell / Row
   const handleCopySelection = useCallback(() => {
@@ -1244,6 +1412,32 @@ export function BomMaterialsGrid({
                 <TooltipTrigger
                   render={
                     <Button
+                      onClick={handleMarkSelectedAsClient}
+                      variant="outline"
+                      size="sm"
+                      className={cn(
+                        "h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer shrink-0",
+                        items[selectedRowIndex]?.acquisitionSource === "client" || items[selectedRowIndex]?.supplier?.toLowerCase().includes("mijoz")
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/40"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <UserCheck className="w-3 h-3 text-emerald-600" />
+                      <span className="hidden sm:inline">
+                        {items[selectedRowIndex]?.acquisitionSource === "client" || items[selectedRowIndex]?.supplier?.toLowerCase().includes("mijoz") ? "Mijozniki" : "Mijozniki qilish"}
+                      </span>
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                  Mijoz xomashyosi (Davalcheskiy $0) deb belgilash yoki omborga qaytarish
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
                       onClick={handleDuplicateRow}
                       variant="outline"
                       size="icon-sm"
@@ -1314,6 +1508,51 @@ export function BomMaterialsGrid({
           )}
         </div>
       </div>
+
+      {/* Shortage & Procurement Alert Strip */}
+      {shortageItems.length > 0 && (
+        <div className="flex items-center justify-between px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/25 text-xs shrink-0 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span className="font-medium text-amber-950 dark:text-amber-200 truncate">
+              {shortageItems.length} ta material omborda yetarli emas yoki xarid talab qiladi:
+            </span>
+            <div className="hidden lg:flex items-center gap-1 overflow-hidden">
+              {shortageItems.slice(0, 2).map((si) => (
+                <span key={si.id} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-300 font-medium">
+                  {si.id}: {si.name}
+                </span>
+              ))}
+              {shortageItems.length > 2 && (
+                <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">
+                  +{shortageItems.length - 2} ta
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleMarkAllShortageAsClient}
+              className="h-6 px-2 text-[11px] font-medium border-amber-500/35 text-amber-950 dark:text-amber-200 hover:bg-amber-500/20 gap-1 rounded cursor-pointer"
+            >
+              <UserCheck className="size-3 text-emerald-600 dark:text-emerald-400" />
+              <span>Mijoz xomashyosi deb belgilash</span>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleCreateProcurementPO}
+              className="h-6 px-2 text-[11px] font-medium bg-amber-600 hover:bg-amber-700 text-white gap-1 rounded cursor-pointer shadow-none"
+            >
+              <ShoppingCart className="size-3" />
+              <span>Ta&apos;minotga xarid so&apos;rovi (PO)</span>
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* 2. Full-bleed Glide Data Grid with ContextMenu */}
       <ContextMenu>
@@ -1489,6 +1728,28 @@ export function BomMaterialsGrid({
                   <ShoppingCart className="size-3 text-amber-600" />
                   <span>Xaridga</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormState((prev) => ({
+                      ...prev,
+                      acquisitionSource: "client",
+                      availability: "In Stock",
+                      supplier: "Mijoz xomashyosi (Davalcheskiy)",
+                      unitPrice: 0,
+                      totalPrice: 0,
+                    }));
+                  }}
+                  className={cn(
+                    "px-2.5 py-0.5 rounded font-medium transition-colors cursor-pointer flex items-center gap-1",
+                    formState.acquisitionSource === "client"
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <UserCheck className="size-3 text-emerald-600" />
+                  <span>Mijozniki</span>
+                </button>
               </div>
             </div>
           </DialogHeader>
@@ -1597,6 +1858,127 @@ export function BomMaterialsGrid({
                         Yetishmovchilik: {formState.actualQty - selectedStockItem.available}
                       </span>
                     )}
+                  </div>
+                )}
+              </div>
+            ) : formState.acquisitionSource === "client" ? (
+              /* Client-Supplied Material Form: Compact & Clean */
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-800 dark:text-emerald-300 text-[11px]">
+                  <UserCheck className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>Mijoz tomonidan keltiriladigan davalcheskiy xomashyo. Tan narxi $0 hisoblanadi va korxona omboridan hisobdan chiqarilmaydi.</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-1">
+                    <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                      Toifasi *
+                    </label>
+                    <Select
+                      value={formState.category || "Paper & Board"}
+                      onValueChange={(val) => {
+                        let defaultUnit = "sheets";
+                        if (val === "Roll & Label") defaultUnit = "rolls";
+                        else if (val === "Inks & Plates") defaultUnit = "kg";
+                        else if (val === "Foil & Film") defaultUnit = "m";
+                        else if (val === "Adhesives & Binding") defaultUnit = "kg";
+                        setFormState((p) => ({
+                          ...p,
+                          category: val || "Paper & Board",
+                          unit: defaultUnit,
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Paper & Board">Paper & Board</SelectItem>
+                        <SelectItem value="Roll & Label">Roll & Label</SelectItem>
+                        <SelectItem value="Inks & Plates">Inks & Plates</SelectItem>
+                        <SelectItem value="Foil & Film">Foil & Film</SelectItem>
+                        <SelectItem value="Adhesives & Binding">Adhesives</SelectItem>
+                        <SelectItem value="Offcuts & Scraps">Delovoy Otxod</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                      Mijoz xomashyosi nomi *
+                    </label>
+                    <Input
+                      value={formState.name}
+                      onChange={(e) => setFormState((p) => ({ ...p, name: e.target.value }))}
+                      className="h-8 text-xs font-medium"
+                      placeholder="masalan: Mijoz qog'ozi: Arctic Silk 170g..."
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                {/* Category parameters in 1 line */}
+                {formState.category === "Paper & Board" && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Format (mm)</label>
+                      <Input
+                        value={formState.sheetFormat || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, sheetFormat: e.target.value }))}
+                        placeholder="700×1000"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Zichlik (g/m²)</label>
+                      <Input
+                        type="number"
+                        value={formState.grammage || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, grammage: Number(e.target.value) || undefined }))}
+                        placeholder="150"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Tola yo&apos;nalishi</label>
+                      <Select
+                        value={formState.grainDirection || "Long Grain"}
+                        onValueChange={(val: any) => setFormState((p) => ({ ...p, grainDirection: val }))}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Long Grain">Long Grain</SelectItem>
+                          <SelectItem value="Short Grain">Short Grain</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+
+                {formState.category === "Roll & Label" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Rulon eni (mm)</label>
+                      <Input
+                        type="number"
+                        value={formState.rollWidthMm || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, rollWidthMm: Number(e.target.value) || undefined }))}
+                        placeholder="100"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground block mb-1">Uzunligi (m)</label>
+                      <Input
+                        type="number"
+                        value={formState.rollLengthM || ""}
+                        onChange={(e) => setFormState((p) => ({ ...p, rollLengthM: Number(e.target.value) || undefined }))}
+                        placeholder="1000"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
                   </div>
                 )}
               </div>
@@ -1847,22 +2229,30 @@ export function BomMaterialsGrid({
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  {formState.actualQty > formState.planQty && (
-                    <span className="text-[10px] font-mono text-rose-600 font-semibold">
-                      +{formState.actualQty - formState.planQty} brak
-                    </span>
+                  {formState.acquisitionSource === "client" ? (
+                    <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                      Mijoz hisobidan ($0)
+                    </Badge>
+                  ) : (
+                    <>
+                      {formState.actualQty > formState.planQty && (
+                        <span className="text-[10px] font-mono text-rose-600 font-semibold">
+                          +{formState.actualQty - formState.planQty} brak
+                        </span>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[9px] px-1 py-0",
+                          formState.availability === "On Order"
+                            ? "border-amber-400 text-amber-600"
+                            : "text-emerald-700 dark:text-emerald-400 border-emerald-300"
+                        )}
+                      >
+                        {formState.availability}
+                      </Badge>
+                    </>
                   )}
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "text-[9px] px-1 py-0",
-                      formState.availability === "On Order"
-                        ? "border-amber-400 text-amber-600"
-                        : "text-emerald-700 dark:text-emerald-400 border-emerald-300"
-                    )}
-                  >
-                    {formState.availability}
-                  </Badge>
                 </div>
               </div>
             </div>

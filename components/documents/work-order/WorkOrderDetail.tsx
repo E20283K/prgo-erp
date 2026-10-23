@@ -95,10 +95,18 @@ import { JobTicketDialog } from "./dialogs/JobTicketDialog";
 import { PackagingDialog } from "./dialogs/PackagingDialog";
 import { BoxLabelPrintModal } from "./dialogs/BoxLabelPrintModal";
 import { SaveSpecDialog } from "./dialogs/SaveSpecDialog";
-import { BomItem, RECIPE_BOM_MAP } from "../BomMaterialsGrid";
+import {
+  BomItem,
+  RECIPE_BOM_MAP,
+  normalizeBomItem,
+  OFFSET_BOM_ITEMS,
+  FLEXO_BOM_ITEMS,
+  JACQUARD_BOM_ITEMS,
+} from "../BomMaterialsGrid";
 import { WorkOrderPackagingSummary, WorkOrderToolingItem } from "./types";
 import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
 import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEngine";
+import { WarehouseStockRecord } from "@/store/workspaceStore";
 
 function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string): WorkOrderToolingItem[] {
   if (data.toolingItems && data.toolingItems.length > 0) {
@@ -196,6 +204,161 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
   return items;
 }
 
+export function syncBomWithSpecs(
+  bomItems: BomItem[],
+  form: Partial<WorkOrderFormData>,
+  stockList: WarehouseStockRecord[] = []
+): BomItem[] {
+  let items = [...bomItems];
+  const paperName = form.paperStock?.trim();
+  const targetQty = Number(form.quantity) || 1000;
+  const targetSheets = Number((form as any).plannedSheets) || 0;
+  const requiredPaperSheets = targetSheets > 0 ? targetSheets : Math.ceil(targetQty * 1.05);
+
+  if (paperName) {
+    const ws = stockList.find(
+      (s) =>
+        s.name.toLowerCase() === paperName.toLowerCase() ||
+        s.sku.toLowerCase() === paperName.toLowerCase()
+    );
+
+    const paperIdx = items.findIndex(
+      (i) =>
+        i.category === "Paper & Board" ||
+        i.category === "Roll & Label" ||
+        i.category === "Offcuts & Scraps"
+    );
+
+    const sheetFormat =
+      ws?.sheetFormat ||
+      (form.parentSheetW && form.parentSheetH
+        ? `${form.parentSheetW}×${form.parentSheetH}`
+        : "700×1000");
+    const grammage = ws?.grammage || (form as any).paperDensity || 150;
+    const unitPrice = ws?.unitPriceUsd
+      ? Number(ws.unitPriceUsd)
+      : paperIdx >= 0 && items[paperIdx].unitPrice > 0
+      ? items[paperIdx].unitPrice
+      : 0.35;
+
+    if (paperIdx >= 0) {
+      const existing = items[paperIdx];
+      const planQty = requiredPaperSheets;
+      const actualQty =
+        existing.actualQty > 0 && existing.actualQty !== existing.planQty
+          ? existing.actualQty
+          : planQty;
+      const totalPrice = Number((actualQty * unitPrice).toFixed(2));
+
+      items[paperIdx] = {
+        ...existing,
+        name: paperName,
+        spec: `${grammage} g/m², ${sheetFormat}`,
+        sheetFormat,
+        grammage,
+        planQty,
+        actualQty,
+        qty: actualQty,
+        unit: ws?.unit || existing.unit || "Sheets",
+        unitPrice,
+        totalPrice,
+        supplier: existing.supplier || "Ombor",
+        availability: ws?.status === "Critical" ? "Low Stock" : (ws?.status || existing.availability || "In Stock"),
+        warehouseLocation: ws?.location || existing.warehouseLocation || "SHELF-A1",
+        warehouseStockLevel: ws?.stockLevel ?? existing.warehouseStockLevel,
+        warehouseAvailable: ws?.available ?? existing.warehouseAvailable,
+      };
+    } else {
+      const newPaper: BomItem = {
+        id: ws?.sku || `MAT-PAP-${Date.now().toString().slice(-4)}`,
+        name: paperName,
+        spec: `${grammage} g/m², ${sheetFormat}`,
+        category: "Paper & Board",
+        sheetFormat,
+        grammage,
+        planQty: requiredPaperSheets,
+        actualQty: requiredPaperSheets,
+        wasteQty: 0,
+        qty: requiredPaperSheets,
+        unit: ws?.unit || "Sheets",
+        unitPrice,
+        totalPrice: Number((requiredPaperSheets * unitPrice).toFixed(2)),
+        supplier: "Ombor",
+        availability: ws?.status === "Critical" ? "Low Stock" : (ws?.status || "In Stock"),
+        issueType: "standard",
+        faultParty: "none",
+        warehouseLocation: ws?.location || "SHELF-A1",
+        warehouseStockLevel: ws?.stockLevel,
+        warehouseAvailable: ws?.available,
+        sourceType: "warehouse",
+      };
+      items = [newPaper, ...items];
+    }
+  }
+
+  // Lamination sync
+  const lam = form.lamination;
+  const isLamActive = Boolean(
+    lam && lam !== "none" && lam !== "None / Uncoated" && lam !== "None"
+  );
+  const lamIdx = items.findIndex(
+    (i) =>
+      i.category === "Foil & Film" ||
+      i.name.toLowerCase().includes("film") ||
+      i.name.toLowerCase().includes("lamination")
+  );
+
+  if (isLamActive) {
+    const lamMeter = Math.ceil(
+      requiredPaperSheets * (Number(form.laminationSides === "2s" ? 2 : 1) * 0.72)
+    );
+    const lamName = `${lam} Film`;
+    const lamSpec = `BOPP ${form.laminationMicron || 30}µm, ${form.laminationSides || "1s"}`;
+    const lamPrice = 0.28;
+
+    if (lamIdx >= 0) {
+      const ex = items[lamIdx];
+      const planQty = lamMeter;
+      const actualQty =
+        ex.actualQty > 0 && ex.actualQty !== ex.planQty ? ex.actualQty : planQty;
+      items[lamIdx] = {
+        ...ex,
+        name: lamName,
+        spec: lamSpec,
+        category: "Foil & Film",
+        planQty,
+        actualQty,
+        qty: actualQty,
+        unit: "m",
+        unitPrice: ex.unitPrice || lamPrice,
+        totalPrice: Number((actualQty * (ex.unitPrice || lamPrice)).toFixed(2)),
+      };
+    } else {
+      const newLam: BomItem = {
+        id: `MAT-LAM-${Date.now().toString().slice(-4)}`,
+        name: lamName,
+        spec: lamSpec,
+        category: "Foil & Film",
+        planQty: lamMeter,
+        actualQty: lamMeter,
+        wasteQty: 0,
+        qty: lamMeter,
+        unit: "m",
+        unitPrice: lamPrice,
+        totalPrice: Number((lamMeter * lamPrice).toFixed(2)),
+        supplier: "Ombor / Ta'minot",
+        availability: "In Stock",
+        issueType: "standard",
+        faultParty: "none",
+        sourceType: "warehouse",
+      };
+      items.push(newLam);
+    }
+  }
+
+  return items;
+}
+
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
   const tAct = useTranslations("DeliveryAct");
@@ -221,12 +384,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     loadCrmCustomers,
     machines: storeMachines,
     loadMachines,
+    warehouseStock,
+    loadWarehouseStock,
   } = useWorkspaceStore();
 
   useEffect(() => {
     loadCrmCustomers();
     loadMachines();
-  }, [loadCrmCustomers, loadMachines]);
+    if (warehouseStock.length === 0 && loadWarehouseStock) {
+      loadWarehouseStock();
+    }
+  }, [loadCrmCustomers, loadMachines, warehouseStock.length, loadWarehouseStock]);
   const isDark = theme === "dark";
   const data = tab.documentData || {};
 
@@ -366,6 +534,39 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     data.skuArtworks || initialQueueItem?.skuArtworks || data.dimensions?.skuArtworks || initialQueueItem?.dimensions?.skuArtworks || []
   );
 
+  const [currentBomItems, setCurrentBomItems] = useState<BomItem[]>(() => {
+    const raw =
+      data.materials ||
+      initialQueueItem?.materials ||
+      (initialQueueItem?.dimensions as any)?.materials;
+    if (raw && Array.isArray(raw) && raw.length > 0) {
+      return raw.map(normalizeBomItem);
+    }
+    const dept = data.department || initialQueueItem?.department || "Offset";
+    const recipeCode = data.recipe || initialQueueItem?.recipe;
+    const baseItems =
+      recipeCode && RECIPE_BOM_MAP[recipeCode]
+        ? RECIPE_BOM_MAP[recipeCode]
+        : dept === "Flexo"
+        ? FLEXO_BOM_ITEMS
+        : dept === "Jacquard"
+        ? JACQUARD_BOM_ITEMS
+        : OFFSET_BOM_ITEMS;
+    return syncBomWithSpecs(
+      baseItems.map(normalizeBomItem),
+      {
+        paperStock: data.paperStock || initialQueueItem?.paperStock,
+        lamination: data.lamination || initialQueueItem?.lamination,
+        laminationSides: data.laminationSides || initialQueueItem?.laminationSides,
+        laminationMicron: data.laminationMicron || initialQueueItem?.laminationMicron,
+        quantity: data.quantity || initialQueueItem?.quantity,
+        parentSheetW: (data as any).parentSheetW || (initialQueueItem as any)?.parentSheetW,
+        parentSheetH: (data as any).parentSheetH || (initialQueueItem as any)?.parentSheetH,
+      },
+      useWorkspaceStore.getState().warehouseStock
+    );
+  });
+
   // Keep state synchronized with queueItem if loaded asynchronously
   useEffect(() => {
     if (queueItem && !tab.isUnsaved) {
@@ -388,8 +589,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       if (queueItem.toolingItems && queueItem.toolingItems.length > 0 && (!formData.toolingItems || formData.toolingItems.length === 0)) {
         setFormData((prev) => ({ ...prev, toolingItems: queueItem.toolingItems }));
       }
+      if (queueItem.materials && queueItem.materials.length > 0 && (!currentBomItems || currentBomItems.length === 0)) {
+        setCurrentBomItems(queueItem.materials.map(normalizeBomItem));
+      }
     }
-  }, [queueItem, tab.isUnsaved, formData.photoUrl, orderAttachments.length, skuArtworks.length, formData.toolingItems?.length]);
+  }, [queueItem, tab.isUnsaved, formData.photoUrl, orderAttachments.length, skuArtworks.length, formData.toolingItems?.length, currentBomItems.length]);
 
   const handleSkuArtworksChange = (artworks: SkuArtwork[]) => {
     setSkuArtworks(artworks);
@@ -538,7 +742,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   // Save As Specification State
   const [isSaveSpecDialogOpen, setIsSaveSpecDialogOpen] = useState(false);
-  const [currentBomItems, setCurrentBomItems] = useState<BomItem[]>(data.materials || []);
 
   // Shift Timeline & Log Events State
   const [selectedTimelineOpId, setSelectedTimelineOpId] = useState<string>("1");
@@ -847,11 +1050,77 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     return shiftEvents.filter((ev) => ev.opId === selectedOp.id);
   }, [shiftEvents, selectedOp.id]);
 
+  // Synchronize paperReady gate status based on BOM items stock availability
+  const syncPaperReadiness = useCallback(
+    (bomList: BomItem[]) => {
+      const wsStock = useWorkspaceStore.getState().warehouseStock;
+      const hasShortage = bomList.some((item) => {
+        if (item.acquisitionSource === "client" || item.supplier?.toLowerCase().includes("mijoz")) {
+          return false;
+        }
+        if (item.availability === "On Order") {
+          return true;
+        }
+        const matched = wsStock.find(
+          (ws) =>
+            ws.sku.toLowerCase() === item.id.toLowerCase() ||
+            ws.name.toLowerCase() === item.name.toLowerCase()
+        );
+        if (matched) {
+          const required = item.actualQty !== undefined ? item.actualQty : (item.qty || 0);
+          return required > matched.available;
+        }
+        return false;
+      });
+
+      const paperReady = !hasShortage;
+      const targetId = data.docNo || tab.id;
+      if (toggleReadinessCheck) {
+        toggleReadinessCheck(targetId, "paperReady", {
+          forceStatus: paperReady ? "ready" : "pending",
+        });
+      }
+      const currentChecks = (formData as any).checks || {};
+      if (currentChecks.paperReady !== paperReady) {
+        const updatedChecks = { ...currentChecks, paperReady };
+        setFormData((prev) => ({ ...prev, checks: updatedChecks }));
+        updateTabData(tab.id, { checks: updatedChecks });
+      }
+    },
+    [data.docNo, tab.id, toggleReadinessCheck, formData, updateTabData]
+  );
+
+  // Initial paperReady check on mount
+  useEffect(() => {
+    if (currentBomItems && currentBomItems.length > 0) {
+      syncPaperReadiness(currentBomItems);
+    }
+  }, []);
+
   // Actions
   const handleFieldChange = (field: string, val: any) => {
-    setFormData((prev) => ({ ...prev, [field]: val }));
+    const updated = { ...formData, [field]: val };
+    setFormData(updated);
     updateTabData(tab.id, { [field]: val });
     setTabUnsaved(tab.id, true);
+
+    if (
+      [
+        "paperStock",
+        "lamination",
+        "laminationSides",
+        "laminationMicron",
+        "quantity",
+        "plannedSheets",
+        "parentSheetW",
+        "parentSheetH",
+      ].includes(field)
+    ) {
+      const synced = syncBomWithSpecs(currentBomItems, updated, warehouseStock);
+      setCurrentBomItems(synced);
+      updateTabData(tab.id, { materials: synced });
+      syncPaperReadiness(synced);
+    }
   };
 
   const handleSizesChange = (newSizes: SizeDistribution[]) => {
@@ -860,12 +1129,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       sizes: newSizes,
       ...(newSizes.length > 0 ? { quantity: total } : {}),
     };
-    setFormData((prev) => ({
-      ...prev,
-      ...updates,
-    }));
+    const updatedForm = { ...formData, ...updates };
+    setFormData(updatedForm);
     updateTabData(tab.id, updates);
     setTabUnsaved(tab.id, true);
+
+    if (newSizes.length > 0) {
+      const synced = syncBomWithSpecs(currentBomItems, updatedForm, warehouseStock);
+      setCurrentBomItems(synced);
+      updateTabData(tab.id, { materials: synced });
+      syncPaperReadiness(synced);
+    }
   };
 
   const handleDepartmentChange = (newDept: string) => {
@@ -898,6 +1172,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         sampleData,
         attachments: orderAttachments,
         skuArtworks,
+        materials: currentBomItems,
       });
 
       if (savedResult && typeof savedResult === "object" && savedResult.docNo) {
@@ -1744,6 +2019,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               onItemsChange={(newItems) => {
                 setCurrentBomItems(newItems);
                 handleFieldChange("materials", newItems);
+                const primarySubstrate = newItems.find(
+                  (i) => i.category === "Paper & Board" || i.category === "Roll & Label"
+                );
+                if (primarySubstrate?.name && primarySubstrate.name !== formData.paperStock) {
+                  setFormData((prev) => ({ ...prev, paperStock: primarySubstrate.name }));
+                  updateTabData(tab.id, { paperStock: primarySubstrate.name });
+                  setTabUnsaved(tab.id, true);
+                }
+                syncPaperReadiness(newItems);
               }}
               onSaveAsSpec={(items) => {
                 setCurrentBomItems(items);

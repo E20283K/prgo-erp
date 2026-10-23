@@ -124,20 +124,16 @@ export interface OrderRow {
 
 const INITIAL_COLUMNS: GridColumn[] = [
   { id: "id", title: "Doc No.", width: 120, icon: GridColumnIcon.HeaderReference, hasMenu: true },
-  { id: "preview", title: "Proof Sample", width: 95, icon: GridColumnIcon.HeaderImage, hasMenu: true },
-  { id: "sampleStatus", title: "Namuna holati", width: 175, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
-  { id: "site", title: "Production Site", width: 140, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
-  { id: "department", title: "Technology", width: 130, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
+  { id: "preview", title: "Eskiz", width: 80, icon: GridColumnIcon.HeaderImage, hasMenu: true },
+  { id: "sampleStatus", title: "Namuna holati", width: 160, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
+  { id: "site", title: "Hudud", width: 120, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
+  { id: "department", title: "Sex", width: 110, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "customer", title: "Customer Organization", width: 220, icon: GridColumnIcon.HeaderString, hasMenu: true },
   { id: "product", title: "Product / Specification", width: 260, icon: GridColumnIcon.HeaderTextTemplate, hasMenu: true },
-  { id: "machine", title: "Assigned Workstation", width: 190, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
-  { id: "qty", title: "Quantity", width: 100, icon: GridColumnIcon.HeaderNumber, hasMenu: true },
-  { id: "priceTotal", title: "Total (USD)", width: 120, icon: GridColumnIcon.HeaderMath, hasMenu: true },
+  { id: "qty", title: "Quantity", width: 110, icon: GridColumnIcon.HeaderNumber, hasMenu: true },
   { id: "status", title: "1C Status", width: 110, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
   { id: "priority", title: "Priority", width: 95, icon: GridColumnIcon.HeaderIfThenElse, hasMenu: true },
-  { id: "startDate", title: "Start Date", width: 110, icon: GridColumnIcon.HeaderDate, hasMenu: true },
-  { id: "deadline", title: "Deadline", width: 110, icon: GridColumnIcon.HeaderDate, hasMenu: true },
-  { id: "responsible", title: "Manager / Lead", width: 150, icon: GridColumnIcon.HeaderString, hasMenu: true },
+  { id: "deadline", title: "Deadline", width: 115, icon: GridColumnIcon.HeaderDate, hasMenu: true },
 ];
 
 export function DataGrid() {
@@ -155,19 +151,14 @@ export function DataGrid() {
 
   const localizedColumns = React.useMemo(() => {
     const colMap: Record<string, string> = {
-      preview: tGrid("colId"),
+      id: tGrid("colId"),
       sampleStatus: tGrid("colSampleStatus"),
-      type: tGrid("colMachine"),
       customer: tGrid("colCustomer"),
       product: tGrid("colProduct"),
-      machine: tGrid("colMachine"),
       qty: tGrid("colQty"),
-      priceTotal: tGrid("colPrice"),
       status: tGrid("colStatus"),
       priority: tGrid("colPriority"),
-      startDate: tGrid("colStart"),
       deadline: tGrid("colDeadline"),
-      responsible: tGrid("colResponsible"),
     };
     return columns.map((col) => ({
       ...col,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Ruler,
   Layers,
@@ -278,24 +278,93 @@ export function SpecificationsTab({
 }: SpecificationsTabProps) {
   const tDie = useTranslations("DieLine");
   const { paperStocks, addPaperStock, coatings, addCoating } = useLookupStore();
-  const { addNotification } = useWorkspaceStore();
+  const { warehouseStock, loadWarehouseStock, addNotification } = useWorkspaceStore();
 
-  // Paper stock options for Base UI Combobox
+  useEffect(() => {
+    if (warehouseStock.length === 0 && loadWarehouseStock) {
+      loadWarehouseStock();
+    }
+  }, [warehouseStock.length, loadWarehouseStock]);
+
+  // Paper stock options for Base UI Combobox (connected to Real Warehouse Stock)
   const [paperInput, setPaperInput] = useState(formData.paperStock || "");
 
   React.useEffect(() => {
     setPaperInput(formData.paperStock || "");
   }, [formData.paperStock]);
 
-  const paperStockOptions = useMemo(() => {
-    const base = paperStocks.map((p) => (typeof p === "string" ? p : p.value || p.label));
-    const set = new Set(base);
-    if (formData.paperStock) set.add(formData.paperStock);
-    if (paperInput.trim() && !set.has(paperInput.trim())) {
-      return [paperInput.trim(), ...Array.from(set)];
+  const paperStockOptions = useMemo<ComboboxOption[]>(() => {
+    const options: ComboboxOption[] = [];
+    const seen = new Set<string>();
+
+    // 1. Primary: Real Warehouse Stock items (Paper, Board, Roll)
+    if (warehouseStock && warehouseStock.length > 0) {
+      warehouseStock
+        .filter(
+          (w) =>
+            w.category === "Paper & Board" ||
+            w.category === "Roll & Label" ||
+            w.category === "Offcuts & Scraps"
+        )
+        .forEach((ws) => {
+          const val = ws.name;
+          const key = val.toLowerCase().trim();
+          if (!seen.has(key)) {
+            seen.add(key);
+            const formatStr = ws.sheetFormat
+              ? `Format: ${ws.sheetFormat}`
+              : ws.rollWidthMm
+              ? `Eni: ${ws.rollWidthMm}mm`
+              : "";
+            const gsmStr = ws.grammage ? `${ws.grammage} g/m²` : "";
+            const avail = ws.available ?? ws.stockLevel ?? 0;
+            const stockStr = `Omborda: ${avail.toLocaleString()} ${ws.unit || "birlik"} (${ws.status || "In Stock"})`;
+            const desc = [formatStr, gsmStr, stockStr].filter(Boolean).join(" • ");
+            options.push({
+              value: val,
+              label: val,
+              description: desc,
+            });
+          }
+        });
     }
-    return Array.from(set);
-  }, [paperStocks, formData.paperStock, paperInput]);
+
+    // 2. Secondary: Fallback shared lookup catalogue
+    paperStocks.forEach((p) => {
+      const val = typeof p === "string" ? p : p.value || p.label;
+      const key = val?.toLowerCase().trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        const desc = typeof p === "string" ? undefined : p.description;
+        options.push({
+          value: val,
+          label: val,
+          description: desc,
+        });
+      }
+    });
+
+    // 3. Current custom value if not present in lists
+    if (formData.paperStock && !seen.has(formData.paperStock.toLowerCase().trim())) {
+      options.unshift({
+        value: formData.paperStock,
+        label: formData.paperStock,
+        description: "Maxsus / Joriy kiritilgan xomashyo",
+      });
+    }
+
+    return options;
+  }, [warehouseStock, paperStocks, formData.paperStock]);
+
+  const matchedStockItem = useMemo(() => {
+    if (!formData.paperStock) return null;
+    const clean = formData.paperStock.toLowerCase().trim();
+    return (
+      warehouseStock.find(
+        (w) => w.name.toLowerCase().trim() === clean || w.sku.toLowerCase().trim() === clean
+      ) || null
+    );
+  }, [formData.paperStock, warehouseStock]);
   const [isPantoneModalOpen, setIsPantoneModalOpen] = useState(false);
   const [pantoneTargetSide, setPantoneTargetSide] = useState<"front" | "back" | "both">("front");
   const [isSvgModalOpen, setIsSvgModalOpen] = useState(false);
@@ -1492,18 +1561,60 @@ export function SpecificationsTab({
                 Paper / material
               </label>
               <ComboboxSelect
-                items={paperStocks.map((p) => (typeof p === "string" ? p : { value: p.value || p.label, label: p.label || p.value, description: p.description }))}
+                items={paperStockOptions}
                 value={formData.paperStock}
                 onValueChange={(val) => {
                   handleFieldChange("paperStock", val);
+                  const matched = warehouseStock.find(
+                    (w) =>
+                      w.name.toLowerCase() === val.toLowerCase() ||
+                      w.sku.toLowerCase() === val.toLowerCase()
+                  );
+                  if (matched) {
+                    if (matched.sheetFormat) {
+                      const dims = matched.sheetFormat
+                        .split(/[×xX*]/)
+                        .map((s) => parseFloat(s.trim()))
+                        .filter(Boolean);
+                      if (dims.length >= 2 && !isNaN(dims[0]) && !isNaN(dims[1])) {
+                        handleFieldChange("parentSheetW", dims[0]);
+                        handleFieldChange("parentSheetH", dims[1]);
+                      }
+                    }
+                    if (matched.grammage) {
+                      handleFieldChange("paperDensity", matched.grammage);
+                    }
+                  }
                   onMarkUnsaved();
                 }}
                 onAddNew={(newStock) => addPaperStock(newStock)}
-                placeholder="Qog'oz markasi yoki zichligini qidiring..."
+                placeholder="Ombordagi qog'oz yoki xomashyoni qidiring..."
                 disabled={isOperator}
                 allowCustom={!isOperator}
                 className="font-mono"
               />
+              {formData.paperStock && (
+                <div className="mt-1 flex items-center justify-between text-[11px] font-mono">
+                  {matchedStockItem ? (
+                    <span className="text-muted-foreground flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      <span>
+                        Omborda:{" "}
+                        <strong className="text-foreground">
+                          {(matchedStockItem.available ?? matchedStockItem.stockLevel ?? 0).toLocaleString()}{" "}
+                          {matchedStockItem.unit || "varaq"}
+                        </strong>
+                        {matchedStockItem.sheetFormat ? ` (${matchedStockItem.sheetFormat} mm)` : ""}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                      <span>Omborda mavjud emas / Maxsus material (BOM bo&apos;limida boshqariladi)</span>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* DEDICATED LAMINATION & FINISHING SECTION */}

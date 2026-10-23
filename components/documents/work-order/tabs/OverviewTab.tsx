@@ -86,9 +86,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FieldCombobox } from "@/components/ui/field-combobox";
+import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { SmartCombobox } from "@/components/ui/smart-combobox";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   Table,
@@ -221,6 +220,21 @@ const WASH_RESISTANCE_LABELS: Record<string, string> = {
   "90c_boil": "90°C Qaynatish / Toshli",
   dry_clean: "Kimyoviy tozalash (Dry clean)",
 };
+
+const UNIT_OPTIONS: ComboboxOption[] = [
+  { value: "pcs", label: "pcs (Pieces)" },
+  { value: "sets", label: "sets (Sets)" },
+  { value: "rolls", label: "rolls (Rolls)" },
+  { value: "m", label: "m (Meters)" },
+  { value: "kg", label: "kg (Kilograms)" },
+];
+
+const CURRENCY_OPTIONS: ComboboxOption[] = [
+  { value: "USD", label: "USD ($)" },
+  { value: "UZS", label: "UZS (so'm)" },
+  { value: "EUR", label: "EUR (€)" },
+  { value: "RUB", label: "RUB (₽)" },
+];
 
 export function OverviewTab({
   onSelectProductTemplate,
@@ -430,9 +444,66 @@ export function OverviewTab({
     });
   };
 
-  const [isSiteComboboxOpen, setIsSiteComboboxOpen] = useState(false);
-  const [isTechComboboxOpen, setIsTechComboboxOpen] = useState(false);
-  const [isMachineComboboxOpen, setIsMachineComboboxOpen] = useState(false);
+  const handleOpenNewMachine = async () => {
+    try {
+      const res = await fetch("/api/v1/production/machines?nextCode=true");
+      const json = await res.json();
+      const nextCode = json?.nextCode || "MAC-0001";
+      openTab({
+        id: `machine-new-${Date.now()}`,
+        title: `Yangi Uskuna (${nextCode})`,
+        type: "machine-detail",
+        module: "production",
+        isUnsaved: true,
+        activeLevel3Tab: "overview",
+        documentData: {
+          isNew: true,
+          name: "",
+          code: nextCode,
+          department: formData.department || "Offset",
+          category: formData.department === "Flexo" ? "flexo" : formData.department === "Jacquard" ? "jacquard" : "offset",
+          status: "Idle",
+        },
+      });
+    } catch (e) {
+      console.error("Open new machine error", e);
+    }
+  };
+
+  const siteOptions = useMemo<ComboboxOption[]>(() => {
+    return sites.map((site) => ({
+      value: site.id,
+      label: site.name,
+      description: site.label,
+      location: site.location,
+      facilities: site.facilities,
+    }));
+  }, [sites]);
+
+  const techOptions = useMemo<ComboboxOption[]>(() => {
+    return TECHNOLOGY_OPTIONS.map((tech) => ({
+      value: tech.id,
+      label: tech.name,
+      description: tech.description,
+      equipmentCount: tech.equipmentCount,
+    }));
+  }, []);
+
+  const machineOptions = useMemo<ComboboxOption[]>(() => {
+    return currentDeptMachines.map((mach: any) => ({
+      value: mach.code || mach.name,
+      label: mach.code ? `[${mach.code}] ${mach.name}` : mach.name,
+      code: mach.code,
+      name: mach.name,
+      department: mach.department,
+      features: mach.features,
+      format: mach.format,
+      speed: mach.speed,
+      status: mach.status || "Idle",
+      hourlyRate: mach.hourlyRate,
+    }));
+  }, [currentDeptMachines]);
+
   const [previewFile, setPreviewFile] = useState<ViewableFile | null>(null);
   const [carouselApi, setCarouselApi] = useState<CarouselApi>();
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
@@ -946,22 +1017,38 @@ export function OverviewTab({
           <div className="space-y-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("customerLabel")}</label>
-              <FieldCombobox
-                value={formData.customer}
-                onChange={(val) => {
-                  handleFieldChange("customer", val);
-                  onMarkUnsaved();
-                }}
-                disabled={isOperator}
-                onAddNew={handleAddNewCustomer}
-                options={customerOptions}
-                placeholder={tOrder("selectCustomer") || "Select customer..."}
-                searchPlaceholder={tOrder("searchCustomer") || "Search or type new customer..."}
-                actionLabel={tOrder("addCustomer") || "Yangi mijoz qo'shish"}
-                onAction={(search) => handleOpenNewCustomer(search)}
-                className="h-8 text-xs bg-muted/30 w-full"
-                popoverClassName="w-auto min-w-[280px]"
-              />
+              <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <ComboboxSelect
+                    items={customerOptions}
+                    value={formData.customer}
+                    onValueChange={(val) => {
+                      handleFieldChange("customer", val);
+                      onMarkUnsaved();
+                    }}
+                    disabled={isOperator}
+                    allowCustom
+                    onAddNew={handleAddNewCustomer}
+                    actionLabel={!isOperator ? (tOrder("addCustomer") || "Yangi mijoz qo'shish...") : undefined}
+                    onAction={!isOperator ? (search) => handleOpenNewCustomer(search) : undefined}
+                    placeholder={tOrder("selectCustomer") || "Select customer..."}
+                    className="h-8 text-xs bg-muted/30 w-full"
+                    contentClassName="w-[320px]"
+                  />
+                </div>
+                {formData.customer && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleOpenCurrentCustomer}
+                    title="Mijoz kartasini ochish"
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+              </div>
             </div>
 
             <div>
@@ -1177,22 +1264,17 @@ export function OverviewTab({
 
               <div>
                 <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("unitLabel")}</label>
-                <Select 
-                  value={formData.unit} 
-                  onValueChange={(val: any) => val && handleFieldChange("unit", val)}
+                <ComboboxSelect 
+                  items={UNIT_OPTIONS}
+                  value={formData.unit || "pcs"} 
+                  onValueChange={(val) => {
+                    handleFieldChange("unit", val);
+                    onMarkUnsaved();
+                  }}
                   disabled={isOperator}
-                >
-                  <SelectTrigger className="h-8 text-xs bg-muted/30 font-mono disabled:opacity-85">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pcs">pcs (Pieces)</SelectItem>
-                    <SelectItem value="sets">sets (Sets)</SelectItem>
-                    <SelectItem value="rolls">rolls (Rolls)</SelectItem>
-                    <SelectItem value="m">m (Meters)</SelectItem>
-                    <SelectItem value="kg">kg (Kilograms)</SelectItem>
-                  </SelectContent>
-                </Select>
+                  className="h-8 text-xs bg-muted/30 font-mono disabled:opacity-85"
+                  placeholder="pcs"
+                />
               </div>
             </div>
 
@@ -1257,20 +1339,16 @@ export function OverviewTab({
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground block mb-1">Valyuta</label>
-                  <Select
+                  <ComboboxSelect
+                    items={CURRENCY_OPTIONS}
                     value={formData.currency || "USD"}
-                    onValueChange={(val: any) => val && handleFieldChange("currency", val)}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-muted/30 font-mono font-semibold">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="USD">USD ($)</SelectItem>
-                      <SelectItem value="UZS">UZS (so&apos;m)</SelectItem>
-                      <SelectItem value="EUR">EUR (€)</SelectItem>
-                      <SelectItem value="RUB">RUB (₽)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(val) => {
+                      handleFieldChange("currency", val);
+                      onMarkUnsaved();
+                    }}
+                    className="h-8 text-xs bg-muted/30 font-mono font-semibold"
+                    placeholder="USD"
+                  />
                 </div>
               </div>
             )}
@@ -1713,94 +1791,30 @@ export function OverviewTab({
                   <label className="text-muted-foreground font-medium text-xs block mb-1">
                     Production Site
                   </label>
-                  <Popover open={!isOperator && isSiteComboboxOpen} onOpenChange={isOperator ? undefined : setIsSiteComboboxOpen}>
-                    <PopoverTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          role="combobox"
-                          disabled={isOperator}
-                          aria-expanded={isSiteComboboxOpen}
-                          className={cn(
-                            "w-full h-8 justify-between px-2.5 text-xs bg-muted/30 font-normal shadow-none border-border transition-colors",
-                            isOperator ? "opacity-85 cursor-not-allowed" : "hover:border-primary/50"
-                          )}
-                        />
-                      }
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1 text-left">
-                        <Building2 className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span className="truncate font-medium text-foreground">
-                          {activeSite.name}
-                        </span>
+                  <ComboboxSelect
+                    items={siteOptions}
+                    value={formData.site || activeSite.id || activeSite.name}
+                    onValueChange={(val) => {
+                      handleFieldChange("site", val);
+                      onMarkUnsaved();
+                    }}
+                    disabled={isOperator}
+                    placeholder="Filialni tanlang..."
+                    className="h-8 text-xs bg-muted/30"
+                    contentClassName="w-[320px]"
+                    actionLabel={!isOperator ? "Yangi filial / sex qo'shish..." : undefined}
+                    onAction={!isOperator ? () => openNewPlantTab() : undefined}
+                    renderItem={(site) => (
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-foreground">{site.label}</span>
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">● Online</span>
+                        </div>
+                        {site.description && <p className="text-[11px] text-muted-foreground">{site.description}</p>}
+                        {site.location && <p className="text-[10px] text-muted-foreground">{site.location}</p>}
                       </div>
-                      <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[320px] p-0 shadow-xl border border-border bg-popover" align="start">
-                      <Command className="w-full">
-                        <CommandInput placeholder="Search production site..." className="h-8 text-xs" />
-                        <CommandList className="max-h-60">
-                          <CommandEmpty className="py-3 text-center text-xs text-muted-foreground flex flex-col items-center gap-1">
-                            <span>Mos filial topilmadi.</span>
-                            {!isOperator && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsSiteComboboxOpen(false);
-                                  openNewPlantTab();
-                                }}
-                                className="text-primary hover:underline flex items-center gap-1 text-[11px] font-medium mt-1 cursor-pointer"
-                              >
-                                <Plus className="w-3 h-3" />
-                                <span>Yangi filial qo'shish</span>
-                              </button>
-                            )}
-                          </CommandEmpty>
-                          <CommandGroup heading="Ishlab chiqarish filiallari (Sexlar)">
-                            {sites.map((site) => {
-                              const isSelected = formData.site === site.id || formData.site === site.name;
-                              return (
-                                <CommandItem
-                                  key={site.id}
-                                  value={`${site.name} ${site.label} ${site.facilities}`}
-                                  onSelect={() => {
-                                     handleFieldChange("site", site.id);
-                                     setIsSiteComboboxOpen(false);
-                                  }}
-                                  className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2"
-                                >
-                                  <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
-                                  <div className="flex-1 min-w-0 space-y-0.5">
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-medium text-foreground">{site.name}</span>
-                                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">● Online</span>
-                                    </div>
-                                    <p className="text-[11px] text-muted-foreground">{site.label}</p>
-                                    <p className="text-[10px] text-muted-foreground">{site.location}</p>
-                                  </div>
-                                </CommandItem>
-                              );
-                            })}
-
-                            {!isOperator && (
-                              <CommandItem
-                                value="__add_new_facility_site_action__"
-                                onSelect={() => {
-                                  setIsSiteComboboxOpen(false);
-                                  openNewPlantTab();
-                                }}
-                                className="py-1.5 px-2.5 cursor-pointer text-xs flex items-center gap-1.5 text-primary font-medium border-t border-border mt-1"
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                <span>Yangi filial / sex qo'shish...</span>
-                              </CommandItem>
-                            )}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                    )}
+                  />
                 </div>
 
                 {/* Technology Combobox */}
@@ -1808,65 +1822,31 @@ export function OverviewTab({
                   <label className="text-muted-foreground font-medium text-xs block mb-1">
                     Technology
                   </label>
-                  <Popover open={!isOperator && isTechComboboxOpen} onOpenChange={isOperator ? undefined : setIsTechComboboxOpen}>
-                    <PopoverTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          role="combobox"
-                          disabled={isOperator}
-                          aria-expanded={isTechComboboxOpen}
-                          className={cn(
-                            "w-full h-8 justify-between px-2.5 text-xs bg-muted/30 font-normal shadow-none border-border transition-colors",
-                            isOperator ? "opacity-85 cursor-not-allowed" : "hover:border-primary/50"
-                          )}
-                        />
-                      }
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1 text-left">
-                        <span className="truncate font-medium text-foreground">
-                          {activeTech.name}
-                        </span>
+                  <ComboboxSelect
+                    items={techOptions}
+                    value={formData.department || activeTech.id}
+                    onValueChange={(val) => {
+                      handleDepartmentChange(val);
+                      onMarkUnsaved();
+                    }}
+                    disabled={isOperator}
+                    placeholder="Texnologiyani tanlang..."
+                    className="h-8 text-xs bg-muted/30"
+                    contentClassName="w-[360px]"
+                    renderItem={(tech) => (
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-foreground">{tech.label}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {tech.equipmentCount} lines
+                          </span>
+                        </div>
+                        {tech.description && (
+                          <p className="text-[11px] text-muted-foreground line-clamp-1">{tech.description}</p>
+                        )}
                       </div>
-                      <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[360px] p-0 shadow-xl border border-border bg-popover" align="start">
-                      <Command className="w-full">
-                        <CommandInput placeholder="Search printing technology..." className="h-8 text-xs" />
-                        <CommandList className="max-h-64">
-                          <CommandEmpty className="py-3 text-center text-xs text-muted-foreground">No technology found.</CommandEmpty>
-                          <CommandGroup heading="Production Technologies">
-                            {TECHNOLOGY_OPTIONS.map((tech) => {
-                              const isSelected = formData.department === tech.id;
-                              return (
-                                <CommandItem
-                                  key={tech.id}
-                                  value={`${tech.id} ${tech.name} ${tech.description}`}
-                                  onSelect={() => {
-                                    handleDepartmentChange(tech.id);
-                                    setIsTechComboboxOpen(false);
-                                  }}
-                                  className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2"
-                                >
-                                  <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
-                                  <div className="flex-1 min-w-0 space-y-0.5">
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-semibold text-foreground">{tech.name}</span>
-                                      <span className="text-[10px] text-muted-foreground font-mono">
-                                        {tech.equipmentCount} lines
-                                      </span>
-                                    </div>
-                                    <p className="text-[11px] text-muted-foreground line-clamp-1">{tech.description}</p>
-                                  </div>
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                    )}
+                  />
                 </div>
               </div>
 
@@ -1876,201 +1856,77 @@ export function OverviewTab({
                   <label className="text-muted-foreground font-medium text-xs">
                     {tOrder("machineLabel")}
                   </label>
-                </div>
-                <Popover open={!isOperator && isMachineComboboxOpen} onOpenChange={isOperator ? undefined : setIsMachineComboboxOpen}>
-                  <PopoverTrigger
-                    render={
-                      <Button
-                        type="button"
-                        variant="outline"
-                        role="combobox"
-                        disabled={isOperator}
-                        aria-expanded={isMachineComboboxOpen}
-                        className={cn(
-                          "w-full h-8 justify-between px-2.5 text-xs bg-muted/30 font-normal shadow-none border-border transition-colors",
-                          isOperator ? "opacity-85 cursor-not-allowed" : "hover:border-primary/50"
-                        )}
-                      />
-                    }
-                  >
-                    <div className="flex items-center gap-2 min-w-0 flex-1 text-left">
-                      <Cpu className="w-3.5 h-3.5 text-primary shrink-0" />
-                      <span className="truncate font-semibold text-foreground">
-                        {activeMachine
-                          ? `[${activeMachine.code}] ${activeMachine.name}`
-                          : formData.pressMachine
-                          ? formData.pressMachine
-                          : "Uskunani tanlang..."}
-                      </span>
-                      {activeMachine && activeMachine.format && (
-                        <span className="text-[11px] text-muted-foreground shrink-0 hidden @lg:inline font-mono">
-                          • {activeMachine.format} {activeMachine.speed ? `(${activeMachine.speed})` : ""}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                  {activeMachine && (
+                    <span className={cn(
+                      "inline-flex items-center gap-1 text-[11px] font-medium font-mono",
+                      (activeMachine.status === "Running" || activeMachine.status === "Ready" || activeMachine.status === "Available") && "text-emerald-600 dark:text-emerald-400",
+                      activeMachine.status === "Idle" && "text-amber-600 dark:text-amber-400",
+                      activeMachine.status === "Maintenance" && "text-rose-600 dark:text-rose-400",
+                      activeMachine.status && !["Running", "Ready", "Available", "Idle", "Maintenance"].includes(activeMachine.status) && "text-blue-600 dark:text-blue-400"
+                    )}>
                       <span className={cn(
-                        "inline-flex items-center gap-1 text-[11px] font-medium",
-                        (activeMachine?.status === "Running" || activeMachine?.status === "Ready" || activeMachine?.status === "Available") && "text-emerald-600 dark:text-emerald-400",
-                        activeMachine?.status === "Idle" && "text-amber-600 dark:text-amber-400",
-                        activeMachine?.status === "Maintenance" && "text-rose-600 dark:text-rose-400",
-                        activeMachine?.status && !["Running", "Ready", "Available", "Idle", "Maintenance"].includes(activeMachine.status) && "text-blue-600 dark:text-blue-400"
-                      )}>
-                        <span className={cn(
-                          "size-1.5 rounded-full shrink-0",
-                          (activeMachine?.status === "Running" || activeMachine?.status === "Ready" || activeMachine?.status === "Available") && "bg-emerald-500",
-                          activeMachine?.status === "Idle" && "bg-amber-500",
-                          activeMachine?.status === "Maintenance" && "bg-rose-500",
-                          activeMachine?.status && !["Running", "Ready", "Available", "Idle", "Maintenance"].includes(activeMachine.status) && "bg-blue-500"
-                        )} />
-                        {activeMachine?.status || "Tanlanmagan"}
-                      </span>
-                      <ChevronsUpDown className="h-3 w-3 opacity-50" />
-                    </div>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[460px] p-0 shadow-xl border border-border bg-popover" align="start">
-                    <Command className="w-full">
-                      <CommandInput placeholder="Search machine name, model, speed, format..." className="h-8 text-xs" />
-                      <CommandList className="max-h-72">
-                        <CommandEmpty className="py-6 px-4 text-center space-y-2">
-                          <p className="text-xs text-muted-foreground">
-                            {formData.department} bo&apos;limida uskuna topilmadi.
-                          </p>
-                          {!isOperator && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={async () => {
-                                try {
-                                  const res = await fetch("/api/v1/production/machines?nextCode=true");
-                                  const json = await res.json();
-                                  const nextCode = json?.nextCode || "MAC-0001";
-                                  openTab({
-                                    id: `machine-new-${Date.now()}`,
-                                    title: `Yangi Uskuna (${nextCode})`,
-                                    type: "machine-detail",
-                                    module: "production",
-                                    isUnsaved: true,
-                                    activeLevel3Tab: "overview",
-                                    documentData: {
-                                      isNew: true,
-                                      name: "",
-                                      code: nextCode,
-                                      department: formData.department || "Offset",
-                                      category: formData.department === "Flexo" ? "flexo" : formData.department === "Jacquard" ? "jacquard" : "offset",
-                                      status: "Idle",
-                                    },
-                                  });
-                                  setIsMachineComboboxOpen(false);
-                                } catch (e) {
-                                  console.error("Open new machine error", e);
-                                }
-                              }}
-                              className="h-7 text-xs gap-1.5 font-medium"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>Yangi uskuna pasportini yaratish</span>
-                            </Button>
+                        "size-1.5 rounded-full shrink-0",
+                        (activeMachine.status === "Running" || activeMachine.status === "Ready" || activeMachine.status === "Available") && "bg-emerald-500",
+                        activeMachine.status === "Idle" && "bg-amber-500",
+                        activeMachine.status === "Maintenance" && "bg-rose-500",
+                        activeMachine.status && !["Running", "Ready", "Available", "Idle", "Maintenance"].includes(activeMachine.status) && "bg-blue-500"
+                      )} />
+                      {activeMachine.status}
+                    </span>
+                  )}
+                </div>
+                <ComboboxSelect
+                  items={machineOptions}
+                  value={formData.pressMachine}
+                  onValueChange={(val) => {
+                    handleFieldChange("pressMachine", val);
+                    onMarkUnsaved();
+                  }}
+                  disabled={isOperator}
+                  placeholder="Uskunani tanlang..."
+                  className="h-8 text-xs bg-muted/30"
+                  contentClassName="w-[460px]"
+                  actionLabel={!isOperator ? "Yangi uskuna pasportini yaratish (To'liq texnik karta)..." : undefined}
+                  onAction={!isOperator ? handleOpenNewMachine : undefined}
+                  emptyText={`${formData.department} bo'limida uskuna topilmadi.`}
+                  renderItem={(mach) => (
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          {mach.code && (
+                            <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1 py-0.5 rounded">
+                              {mach.code}
+                            </span>
                           )}
-                        </CommandEmpty>
-                        
-                        <CommandGroup heading={`${formData.department} Presses & Equipment (Database)`}>
-                          {currentDeptMachines.map((mach: any) => {
-                            const isSelected = formData.pressMachine === mach.name || formData.pressMachine === mach.code;
-                            return (
-                              <CommandItem
-                                key={mach.code || mach.id}
-                                value={`${mach.code || ""} ${mach.name} ${mach.department || ""} ${mach.features || ""} ${mach.format || ""}`}
-                                onSelect={() => {
-                                  handleFieldChange("pressMachine", mach.code || mach.name);
-                                  setIsMachineComboboxOpen(false);
-                                  onMarkUnsaved();
-                                }}
-                                className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5"
-                              >
-                                <Check className={cn("mt-0.5 h-4 w-4 text-primary shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
-                                <div className="flex-1 min-w-0 space-y-0.5">
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5">
-                                      {mach.code && (
-                                        <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1 py-0.5 rounded">
-                                          {mach.code}
-                                        </span>
-                                      )}
-                                      <span className="font-semibold text-foreground">{mach.name}</span>
-                                    </div>
-                                    <span className={cn(
-                                      "font-medium text-[10px]",
-                                      (mach.status === "Running" || mach.status === "Ready" || mach.status === "Available") && "text-emerald-600 dark:text-emerald-400",
-                                      mach.status === "Maintenance" && "text-rose-600 dark:text-rose-400",
-                                      mach.status === "Idle" && "text-amber-600 dark:text-amber-400"
-                                    )}>● {mach.status || "Idle"}</span>
-                                  </div>
-                                  {mach.features && <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>}
-                                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5">
-                                    {mach.format && <span className="font-medium text-foreground">{mach.format}</span>}
-                                    {mach.speed && (
-                                      <>
-                                        <span>•</span>
-                                        <span>{mach.speed}</span>
-                                      </>
-                                    )}
-                                    {mach.hourlyRate ? (
-                                      <>
-                                        <span>•</span>
-                                        <span className="font-mono text-primary">${mach.hourlyRate}/soat</span>
-                                      </>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              </CommandItem>
-                            );
-                          })}
-                        </CommandGroup>
-
-                        {!isOperator && (
-                          <CommandItem
-                            value="__add_new_machine_action__"
-                            onSelect={async () => {
-                              try {
-                                const res = await fetch("/api/v1/production/machines?nextCode=true");
-                                const json = await res.json();
-                                const nextCode = json?.nextCode || "MAC-0001";
-                                openTab({
-                                  id: `machine-new-${Date.now()}`,
-                                  title: `Yangi Uskuna (${nextCode})`,
-                                  type: "machine-detail",
-                                  module: "production",
-                                  isUnsaved: true,
-                                  activeLevel3Tab: "overview",
-                                  documentData: {
-                                    isNew: true,
-                                    name: "",
-                                    code: nextCode,
-                                    department: formData.department || "Offset",
-                                    category: formData.department === "Flexo" ? "flexo" : formData.department === "Jacquard" ? "jacquard" : "offset",
-                                    status: "Idle",
-                                  },
-                                });
-                                setIsMachineComboboxOpen(false);
-                              } catch (e) {
-                                console.error("Machine open error", e);
-                              }
-                            }}
-                            className="py-2 px-2.5 cursor-pointer text-xs flex items-center gap-2 text-primary font-medium border-t border-border mt-1"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            <span>Yangi uskuna pasportini yaratish (To&apos;liq texnik karta)...</span>
-                          </CommandItem>
+                          <span className="font-semibold text-foreground">{mach.name}</span>
+                        </div>
+                        <span className={cn(
+                          "font-medium text-[10px]",
+                          (mach.status === "Running" || mach.status === "Ready" || mach.status === "Available") && "text-emerald-600 dark:text-emerald-400",
+                          mach.status === "Maintenance" && "text-rose-600 dark:text-rose-400",
+                          mach.status === "Idle" && "text-amber-600 dark:text-amber-400"
+                        )}>● {mach.status || "Idle"}</span>
+                      </div>
+                      {mach.features && <p className="text-[11px] text-muted-foreground line-clamp-1">{mach.features}</p>}
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5 font-mono">
+                        {mach.format && <span className="font-medium text-foreground">{mach.format}</span>}
+                        {mach.speed && (
+                          <>
+                            <span>•</span>
+                            <span>{mach.speed}</span>
+                          </>
                         )}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
+                        {mach.hourlyRate ? (
+                          <>
+                            <span>•</span>
+                            <span className="text-primary">${mach.hourlyRate}/soat</span>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+                />
+              </div><div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("shiftStartLabel")}</label>
                   <DatePicker 

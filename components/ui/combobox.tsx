@@ -11,7 +11,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import { ChevronDownIcon, XIcon, CheckIcon } from "lucide-react"
+import { ChevronDownIcon, XIcon, CheckIcon, PlusIcon } from "lucide-react"
 
 const Combobox = ComboboxPrimitive.Root
 
@@ -290,6 +290,7 @@ export interface ComboboxOption {
   value: string
   label: string
   description?: string
+  [key: string]: any
 }
 
 export interface ComboboxSelectProps {
@@ -299,8 +300,14 @@ export interface ComboboxSelectProps {
   placeholder?: string
   disabled?: boolean
   className?: string
+  contentClassName?: string
   allowCustom?: boolean
   onAddNew?: (val: string) => void
+  actionLabel?: string
+  onAction?: (query?: string) => void
+  renderItem?: (item: ComboboxOption) => React.ReactNode
+  emptyText?: string
+  filter?: ((item: ComboboxOption, query: string) => boolean) | null
 }
 
 function ComboboxSelect({
@@ -310,8 +317,14 @@ function ComboboxSelect({
   placeholder = "Tanlang...",
   disabled = false,
   className,
+  contentClassName,
   allowCustom = false,
   onAddNew,
+  actionLabel,
+  onAction,
+  renderItem,
+  emptyText = "Hech narsa topilmadi",
+  filter,
 }: ComboboxSelectProps) {
   const normalizedItems = React.useMemo<ComboboxOption[]>(() => {
     return items.map((it) => {
@@ -352,10 +365,24 @@ function ComboboxSelect({
     return normalizedItems
   }, [normalizedItems, inputVal, allowCustom])
 
+  const itemFilter = React.useMemo(() => {
+    if (filter !== undefined) return filter
+    return (item: ComboboxOption, query: string) => {
+      const q = query.trim().toLowerCase()
+      if (!q) return true
+      if (item.label?.toLowerCase().includes(q)) return true
+      if (item.value?.toLowerCase().includes(q)) return true
+      if (item.description?.toLowerCase().includes(q)) return true
+      if (item.code?.toLowerCase().includes(q)) return true
+      return false
+    }
+  }, [filter])
+
   return (
     <Combobox
       items={effectiveItems}
       value={selectedItem}
+      filter={itemFilter}
       itemToStringLabel={(item: ComboboxOption | null) => item?.label || ""}
       itemToStringValue={(item: ComboboxOption | null) => item?.value || ""}
       isItemEqualToValue={(a: ComboboxOption | null, b: ComboboxOption | null) => a?.value === b?.value}
@@ -384,20 +411,36 @@ function ComboboxSelect({
           }
         }}
       />
-      <ComboboxContent>
-        <ComboboxEmpty>Hech narsa topilmadi</ComboboxEmpty>
+      <ComboboxContent className={contentClassName}>
+        <ComboboxEmpty>{emptyText}</ComboboxEmpty>
         <ComboboxList>
           {(item: ComboboxOption) => (
             <ComboboxItem key={item.value} value={item}>
-              <div className="flex flex-col min-w-0 flex-1 pr-1 py-0.5">
-                <span className="text-xs font-medium leading-normal whitespace-normal break-words">{item.label}</span>
-                {item.description && (
-                  <span className="text-[10px] text-muted-foreground leading-normal whitespace-normal break-words mt-0.5">{item.description}</span>
-                )}
-              </div>
+              {renderItem ? (
+                renderItem(item)
+              ) : (
+                <div className="flex flex-col min-w-0 flex-1 pr-1 py-0.5">
+                  <span className="text-xs font-medium leading-normal whitespace-normal break-words">{item.label}</span>
+                  {item.description && (
+                    <span className="text-[10px] text-muted-foreground leading-normal whitespace-normal break-words mt-0.5">{item.description}</span>
+                  )}
+                </div>
+              )}
             </ComboboxItem>
           )}
         </ComboboxList>
+        {actionLabel && onAction && (
+          <div className="p-1 border-t border-border">
+            <button
+              type="button"
+              onClick={() => onAction(inputVal)}
+              className="w-full py-1.5 px-2 rounded-md hover:bg-muted text-xs text-primary font-medium flex items-center gap-1.5 cursor-pointer text-left transition-colors"
+            >
+              <PlusIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{actionLabel}</span>
+            </button>
+          </div>
+        )}
       </ComboboxContent>
     </Combobox>
   )
