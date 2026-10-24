@@ -353,6 +353,15 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     category: "document-editor",
     description: "Enterprise factory, workshops, bank requisites, and warehouse configurations.",
   },
+  "doc-tariff-detail": {
+    componentName: "TariffDetail",
+    fileName: "TariffDetail.tsx",
+    relativePath: "components/documents/TariffDetail.tsx",
+    linesOfCode: 480,
+    featureModule: "settings",
+    category: "document-editor",
+    description: "Normative operational tariffs, volume pricing tiers, piecework labor rates, and live cost simulation.",
+  },
   "doc-user-detail": {
     componentName: "UserDetail",
     fileName: "UserDetail.tsx",

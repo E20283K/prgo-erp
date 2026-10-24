@@ -409,7 +409,7 @@ export function TradingYttLimitDetail({ tab }: { tab: DocumentTab }) {
       title: `${newSaleId} (${code})`,
       type: "trading-sale",
       module: "trading",
-      isUnsaved: true,
+      isUnsaved: false,
       documentData: {
         id: newSaleId,
         docNo: newSaleId,

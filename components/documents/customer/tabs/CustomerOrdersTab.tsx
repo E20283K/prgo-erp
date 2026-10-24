@@ -337,7 +337,7 @@ export function CustomerOrdersTab({
       title: `Yangi Chiqim: ${customer.name} (Qoralama)`,
       type: "warehouse-shipment",
       module: "warehouse",
-      isUnsaved: true,
+      isUnsaved: false,
       documentData: {
         id: draftId,
         shipmentNumber: "",

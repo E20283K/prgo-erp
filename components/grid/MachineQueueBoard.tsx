@@ -214,7 +214,8 @@ export function MachineQueueBoard({
 
   // Filter orders for a given machine based on search and status
   const getOrdersForMachine = (machineName: string, machineCode?: string) => {
-    return productionQueue
+    return (productionQueue || [])
+      .filter((item) => !item.id?.startsWith("draft-") && !item.id?.startsWith("temp-"))
       .filter((item) => {
         if (!item.pressMachine) return false;
         return (

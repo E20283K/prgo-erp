@@ -16,6 +16,7 @@ import {
   ArrowRight,
   CornerDownLeft,
   Info,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,7 @@ const SUGGESTIONS = [
 
 export function AiChatSheet() {
   const tAi = useTranslations("AiChatSheet");
+  const tCommon = useTranslations("Common");
   const {
     isAiChatOpen,
     setAiChatOpen,
@@ -288,6 +290,7 @@ export function AiChatSheet() {
     <Sheet open={isAiChatOpen} onOpenChange={setAiChatOpen}>
       <SheetContent
         side="right"
+        showCloseButton={false}
         className="w-full sm:max-w-[440px] p-0 flex flex-col gap-0 border-l border-border bg-card shadow-2xl"
       >
         {/* Header */}
@@ -328,6 +331,23 @@ export function AiChatSheet() {
                 }
               />
               <TooltipContent side="bottom" className="text-[11px]">{tAi("clearChat")}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => setAiChatOpen(false)}
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label={tCommon("close")}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" className="text-[11px]">{tCommon("close")}</TooltipContent>
             </Tooltip>
           </div>
         </SheetHeader>

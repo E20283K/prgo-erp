@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { toast } from "@/components/ui/toast";
 import { MachineRecord } from "@/components/documents/machine/types";
 import { PlantRecord, branchToPlantRecord, createEmptyPlant } from "@/components/documents/plant/types";
+import { TariffRecord, createEmptyTariff } from "@/components/documents/tariff/types";
 import { useLookupStore } from "@/store/lookupStore";
 import {
   EmployeeRecord,
@@ -23,7 +24,7 @@ export type { SupplierRecord };
 export interface DocumentTab {
   id: string;
   title: string;
-  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "supplier" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "employee-detail" | "department-detail" | "position-detail" | "shift-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog" | "trading-ytt-limit" | "user-detail";
+  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "supplier" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "tariff-detail" | "employee-detail" | "department-detail" | "position-detail" | "shift-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog" | "trading-ytt-limit" | "user-detail";
   module: string;
   isUnsaved?: boolean;
   documentData?: any;
@@ -693,6 +694,15 @@ interface WorkspaceState {
   fetchPlants: () => Promise<void>;
   openNewPlantTab: () => string;
 
+  // ── Tariffs & Pricing Rules (Settings & Production) ───────────────────────
+  tariffs: TariffRecord[];
+  isTariffsLoading: boolean;
+  fetchTariffs: (companyCode?: string) => Promise<void>;
+  saveTariffToDb: (tariff: Partial<TariffRecord>, companyCode?: string) => Promise<TariffRecord | null>;
+  deleteTariffFromDb: (id: string, companyCode?: string) => Promise<boolean>;
+  upsertTariff: (tariff: TariffRecord) => void;
+  openNewTariffTab: () => string;
+
   // ── Users & Roles (Settings Module) ────────────────────────────────────────
   users: SystemUserRecord[];
   isUsersLoading: boolean;
@@ -1339,7 +1349,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          set({ productionQueue: json.data });
+          set({
+            productionQueue: json.data.filter(
+              (item: any) => !item.id?.startsWith("draft-") && !item.id?.startsWith("temp-")
+            ),
+          });
         }
       }
     } catch (e) {
@@ -1501,6 +1515,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   plants: [],
   isPlantsLoading: false,
+  tariffs: [],
+  isTariffsLoading: false,
   users: INITIAL_SYSTEM_USERS,
   isUsersLoading: false,
   employees: [],
@@ -1667,7 +1683,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       type: "plant-detail",
       module: "settings",
       documentData: newPlant,
-      isUnsaved: true,
+      isUnsaved: false,
     });
     return tabId;
   },
@@ -1787,6 +1803,97 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       console.error("deletePlantFromDb error:", err);
       return false;
     }
+  },
+
+  // ── Tariffs & Pricing Rules (Settings & Production) ───────────────────────
+  fetchTariffs: async (companyCode = "PRINTGOO") => {
+    set({ isTariffsLoading: true });
+    try {
+      const res = await fetch(`/api/v1/settings/tariffs?companyCode=${encodeURIComponent(companyCode)}`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        set({ tariffs: json.data, isTariffsLoading: false });
+      } else {
+        set({ isTariffsLoading: false });
+      }
+    } catch (e) {
+      console.error("fetchTariffs error:", e);
+      set({ isTariffsLoading: false });
+    }
+  },
+
+  saveTariffToDb: async (tariff, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/settings/tariffs?companyCode=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(tariff),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.tariff) {
+          get().upsertTariff(json.tariff);
+          await get().fetchTariffs(companyCode);
+          return json.tariff;
+        }
+      }
+      return null;
+    } catch (err) {
+      console.error("saveTariffToDb error:", err);
+      return null;
+    }
+  },
+
+  deleteTariffFromDb: async (id, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/settings/tariffs?id=${encodeURIComponent(id)}&companyCode=${encodeURIComponent(companyCode)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          set((state) => ({
+            tariffs: state.tariffs.filter((t) => t.id !== id && t.code !== id),
+          }));
+          return true;
+        }
+      }
+      return false;
+    } catch (err) {
+      console.error("deleteTariffFromDb error:", err);
+      return false;
+    }
+  },
+
+  upsertTariff: (tariff) =>
+    set((state) => {
+      const exists = state.tariffs.some((t) => t.id === tariff.id || t.code === tariff.code);
+      return {
+        tariffs: exists
+          ? state.tariffs.map((t) => (t.id === tariff.id || t.code === tariff.code ? tariff : t))
+          : [tariff, ...state.tariffs],
+      };
+    }),
+
+  openNewTariffTab: () => {
+    const list = get().tariffs || [];
+    const maxNum = list.reduce((max, t) => {
+      const match = t.code.match(/TRF-(\d+)/i);
+      return match ? Math.max(max, parseInt(match[1], 10)) : max;
+    }, 0);
+    const newCode = `TRF-${String(maxNum + 1).padStart(3, "0")}`;
+    const newTariff = createEmptyTariff(`tariff-${Date.now()}`, newCode);
+
+    const tabId = `tariff-${newTariff.id}`;
+    get().openTab({
+      id: tabId,
+      title: `${newTariff.code}: Yangi me'yoriy tarif *`,
+      type: "tariff-detail",
+      module: "settings",
+      documentData: newTariff,
+      isUnsaved: false,
+    });
+    return tabId;
   },
 
   upsertUser: (user) =>
@@ -2771,6 +2878,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   upsertProductionQueueItem: (item) =>
     set((state) => {
+      // Disallow draft- or temp- placeholder IDs from entering productionQueue
+      if (!item.id || item.id.startsWith("draft-") || item.id.startsWith("temp-")) {
+        return state;
+      }
       const exists = state.productionQueue.some((i) => i.id === item.id);
       if (exists) {
         return {
@@ -3067,7 +3178,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       title: "Yangi buyruq (Qoralama)",
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: "",
@@ -3099,7 +3210,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             ? "finance"
             : "production"
           : tab.module;
-      const normalizedTab = { ...tab, module: normalizedModule };
+      const normalizedTab = {
+        ...tab,
+        module: normalizedModule,
+        isUnsaved: false,
+      };
 
       // 1. Single Registry Tab Slot: Replace the existing registry tab in-place at index 0
       if (normalizedTab.type === "registry") {
@@ -3113,21 +3228,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       // 2. If document tab already exists, activate it (and refresh documentData if not unsaved)
       const exists = state.tabs.find((t) => t.id === normalizedTab.id);
       if (exists) {
-        if (!exists.isUnsaved && normalizedTab.documentData) {
-          return {
-            tabs: state.tabs.map((t) =>
-              t.id === normalizedTab.id
-                ? {
-                    ...t,
-                    title: normalizedTab.title || t.title,
-                    documentData: { ...t.documentData, ...normalizedTab.documentData },
-                  }
-                : t
-            ),
-            activeTabId: normalizedTab.id,
-          };
-        }
-        return { activeTabId: normalizedTab.id };
+        const nextActiveLevel3Tab = normalizedTab.activeLevel3Tab || exists.activeLevel3Tab;
+        return {
+          tabs: state.tabs.map((t) =>
+            t.id === normalizedTab.id
+              ? {
+                  ...t,
+                  title: normalizedTab.title || t.title,
+                  activeLevel3Tab: nextActiveLevel3Tab,
+                  documentData:
+                    !exists.isUnsaved && normalizedTab.documentData
+                      ? { ...t.documentData, ...normalizedTab.documentData }
+                      : t.documentData,
+                }
+              : t
+          ),
+          activeTabId: normalizedTab.id,
+        };
       }
 
       // 3. Smart Tab Limit: Auto-evict the oldest saved document tab when full
@@ -3178,6 +3295,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return {
         tabs: newTabs,
         activeTabId: newActiveId,
+        productionQueue: id.startsWith("draft-") || id.startsWith("temp-")
+          ? state.productionQueue.filter((q) => q.id !== id)
+          : state.productionQueue,
         tabToConfirmClose: state.tabToConfirmClose?.id === id ? null : state.tabToConfirmClose,
       };
     }),

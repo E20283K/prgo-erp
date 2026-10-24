@@ -54,6 +54,141 @@ export const attachmentCategoryEnum = pgEnum("attachment_category", [
   "docs",
 ]);
 
+// ─── 0. Tariffs & Pricing Rules (Operatsiyalar va Narx Belgilash Qoidalari) ─────
+
+export const tariffs = pgTable(
+  "tariffs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 64 }).notNull(), // TRF-001, TRF-002...
+    category: varchar("category", { length: 128 }).notNull(), // Prepress / CTP, Offset Printing, Surface Coating...
+    operationName: varchar("operation_name", { length: 255 }).notNull(),
+    department: varchar("department", { length: 64 }).default("Offset").notNull(),
+    machineOrDept: varchar("machine_or_dept", { length: 255 }),
+    unit: varchar("unit", { length: 64 }).default("1,000 impressions").notNull(),
+    unitDivisor: integer("unit_divisor").default(1000).notNull(),
+    currency: varchar("currency", { length: 8 }).default("USD").notNull(),
+    rateUsd: numeric("rate_usd", { precision: 14, scale: 4 }).default("0.0000").notNull(),
+    setupFeeUsd: numeric("setup_fee_usd", { precision: 14, scale: 2 }).default("0.00").notNull(),
+    minChargeUsd: numeric("min_charge_usd", { precision: 14, scale: 2 }).default("0.00").notNull(),
+    vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).default("12.00").notNull(),
+    pieceworkRateUsd: numeric("piecework_rate_usd", { precision: 14, scale: 4 }).default("0.0000").notNull(),
+    helperPieceworkRateUsd: numeric("helper_piecework_rate_usd", { precision: 14, scale: 4 }).default("0.0000").notNull(),
+    normOutputPerShift: integer("norm_output_per_shift").default(0).notNull(),
+    volumeTiers: jsonb("volume_tiers").$type<Array<{
+      id: string;
+      minQty: number;
+      maxQty: number | null;
+      rateUsd: number;
+      setupFeeUsd?: number;
+      discountPct?: number;
+      note?: string;
+    }>>().default([]).notNull(),
+    pricingRules: jsonb("pricing_rules").$type<{
+      vipDiscountPct: number;
+      wholesaleDiscountPct: number;
+      urgentSurchargePct: number;
+    }>().default({
+      vipDiscountPct: 10,
+      wholesaleDiscountPct: 15,
+      urgentSurchargePct: 25,
+    }).notNull(),
+    techNorms: jsonb("tech_norms").$type<{
+      makeReadyMinutes: number;
+      makeReadyWasteSheets: number;
+      runningWastePercent: number;
+      ratedSpeedPerHour: number;
+      effectiveSpeedPerHour: number;
+    }>().default({
+      makeReadyMinutes: 20,
+      makeReadyWasteSheets: 50,
+      runningWastePercent: 1.5,
+      ratedSpeedPerHour: 10000,
+      effectiveSpeedPerHour: 7500,
+    }).notNull(),
+    costBreakdown: jsonb("cost_breakdown").$type<{
+      depreciationHourlyUsd: number;
+      powerKwPerHour: number;
+      powerCostPerKwh: number;
+      auxiliaryMaterialsPerUnit: number;
+      overheadPercent: number;
+      targetMarginPercent: number;
+    }>().default({
+      depreciationHourlyUsd: 5.0,
+      powerKwPerHour: 15.0,
+      powerCostPerKwh: 0.08,
+      auxiliaryMaterialsPerUnit: 1.0,
+      overheadPercent: 15.0,
+      targetMarginPercent: 25.0,
+    }).notNull(),
+    pricingMatrix: jsonb("pricing_matrix").$type<Array<{
+      id: string;
+      format: string;
+      colors: string;
+      weightBand: "light" | "standard" | "heavy" | "microflute";
+      rateUsd: number;
+      setupFeeUsd: number;
+      speedFactor: number;
+      note?: string;
+    }>>().default([]).notNull(),
+    operatorGrid: jsonb("operator_grid").$type<{
+      baseGrade: number;
+      gradeMultipliers: Record<string, number>;
+      nightShiftSurchargePct: number;
+      overtimeMultiplier: number;
+      helperSharePct: number;
+    }>().default({
+      baseGrade: 3,
+      gradeMultipliers: { "3": 1.0, "4": 1.15, "5": 1.3, "6": 1.5 },
+      nightShiftSurchargePct: 15,
+      overtimeMultiplier: 1.5,
+      helperSharePct: 35,
+    }).notNull(),
+    lifecycle: jsonb("lifecycle").$type<{
+      version: string;
+      effectiveFrom: string;
+      effectiveTo: string | null;
+      approvedBy: string | null;
+      approvedAt: string | null;
+      approvalStatus: "Draft" | "Pending" | "Approved" | "Archived";
+      auditLog: Array<{
+        date: string;
+        user: string;
+        action: string;
+        details: string;
+      }>;
+    }>().default({
+      version: "v1.0",
+      effectiveFrom: "2026-01-01",
+      effectiveTo: null,
+      approvedBy: "Bosh Texnolog",
+      approvedAt: "2026-01-01T08:00:00Z",
+      approvalStatus: "Approved",
+      auditLog: [
+        {
+          date: "2026-01-01T08:00:00Z",
+          user: "Bosh Texnolog",
+          action: "INITIAL_APPROVAL",
+          details: "Dastlabki korxona tarifi tasdiqlandi.",
+        },
+      ],
+    }).notNull(),
+    status: varchar("status", { length: 32 }).default("Active").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("tariffs_company_code_uq").on(table.companyId, table.code),
+    index("tariffs_company_idx").on(table.companyId),
+    index("tariffs_category_idx").on(table.category),
+    index("tariffs_dept_idx").on(table.department),
+  ]
+);
+
 // ─── 1. Production Machines (Barcha texnologiyalar uchun uskunalar/stanoklar) ───
 
 export const productionMachines = pgTable(
@@ -276,9 +411,23 @@ export const workOrderOperations = pgTable(
     workOrderId: uuid("work_order_id")
       .notNull()
       .references(() => workOrders.id, { onDelete: "cascade" }),
+    tariffId: uuid("tariff_id")
+      .references(() => tariffs.id, { onDelete: "set null" }),
+    tariffCode: varchar("tariff_code", { length: 64 }),
     name: varchar("name", { length: 128 }).notNull(), // Pechat, Lak, Kesim, Qadoqlash
     department: varchar("department", { length: 64 }),
     machineStr: varchar("machine_str", { length: 128 }),
+    operator: varchar("operator", { length: 255 }),
+    durationHours: numeric("duration_hours", { precision: 10, scale: 2 }).default("1.00"),
+    toolingId: varchar("tooling_id", { length: 64 }),
+    toolingName: varchar("tooling_name", { length: 255 }),
+    calcUnit: varchar("calc_unit", { length: 64 }),
+    unitDivisor: integer("unit_divisor").default(1000),
+    rateUsd: numeric("rate_usd", { precision: 14, scale: 4 }).default("0.0000"),
+    setupFeeUsd: numeric("setup_fee_usd", { precision: 14, scale: 2 }).default("0.00"),
+    pieceworkRateUsd: numeric("piecework_rate_usd", { precision: 14, scale: 4 }).default("0.0000"),
+    plannedCostUsd: numeric("planned_cost_usd", { precision: 14, scale: 2 }).default("0.00"),
+    pieceworkTotalUsd: numeric("piecework_total_usd", { precision: 14, scale: 2 }).default("0.00"),
     sequence: integer("sequence").default(1).notNull(),
     status: varchar("status", { length: 32 }).default("pending").notNull(),
     plannedQty: numeric("planned_qty", { precision: 14, scale: 2 }).default("0").notNull(),
@@ -288,6 +437,7 @@ export const workOrderOperations = pgTable(
   },
   (table) => [
     index("work_order_operations_wo_idx").on(table.workOrderId),
+    index("work_order_operations_tariff_idx").on(table.tariffId),
   ]
 );
 
@@ -342,6 +492,14 @@ export const workOrderAttachments = pgTable(
 
 // ─── Relations ────────────────────────────────────────────────────────────────
 
+export const tariffsRelations = relations(tariffs, ({ one, many }) => ({
+  company: one(companies, {
+    fields: [tariffs.companyId],
+    references: [companies.id],
+  }),
+  operations: many(workOrderOperations),
+}));
+
 export const productionMachinesRelations = relations(productionMachines, ({ one }) => ({
   company: one(companies, {
     fields: [productionMachines.companyId],
@@ -378,6 +536,10 @@ export const workOrderOperationsRelations = relations(workOrderOperations, ({ on
   workOrder: one(workOrders, {
     fields: [workOrderOperations.workOrderId],
     references: [workOrders.id],
+  }),
+  tariff: one(tariffs, {
+    fields: [workOrderOperations.tariffId],
+    references: [tariffs.id],
   }),
 }));
 

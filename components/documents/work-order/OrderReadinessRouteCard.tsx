@@ -92,8 +92,11 @@ export function OrderReadinessRouteCard({
     });
   }, [productionQueue, normalizedKey]);
 
-  // Ensure an item exists if opening an ad-hoc work order
+  // Ensure an item exists if opening an ad-hoc work order (never create ghost items for unsaved drafts)
   React.useEffect(() => {
+    const isDraft = !workOrderId || workOrderId.startsWith("draft-") || workOrderId.startsWith("temp-");
+    if (isDraft) return;
+
     if (!currentItem && workOrderId) {
       upsertProductionQueueItem({
         id: workOrderId,
@@ -147,16 +150,19 @@ export function OrderReadinessRouteCard({
 
   const handleToggle = (key: ReadinessCheckKey) => {
     const targetId = currentItem?.id || workOrderId;
+    if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     toggleReadinessCheck(targetId, key);
   };
 
   const handleSetReady = (key: ReadinessCheckKey) => {
     const targetId = currentItem?.id || workOrderId;
+    if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     toggleReadinessCheck(targetId, key, { forceStatus: "ready" });
   };
 
   const handleResetPending = (key: ReadinessCheckKey) => {
     const targetId = currentItem?.id || workOrderId;
+    if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     toggleReadinessCheck(targetId, key, { forceStatus: "pending" });
   };
 
@@ -168,6 +174,7 @@ export function OrderReadinessRouteCard({
   const handleConfirmBlocker = () => {
     if (!blockerModalKey) return;
     const targetId = currentItem?.id || workOrderId;
+    if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     toggleReadinessCheck(targetId, blockerModalKey, {
       forceStatus: "blocked",
       note: blockerReason.trim() || undefined,
@@ -178,6 +185,7 @@ export function OrderReadinessRouteCard({
 
   const handleStageChange = (stage: ProductionQueueStage) => {
     const targetId = currentItem?.id || workOrderId;
+    if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     setProductionStage(targetId, stage);
   };
 

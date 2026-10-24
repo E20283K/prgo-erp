@@ -320,7 +320,7 @@ export function TradingGrid({ type }: TradingGridProps) {
         title: `${newId} (Yangi Buyurtma)`,
         type: "trading-order",
         module: "trading",
-        isUnsaved: true,
+        isUnsaved: false,
         documentData: {
           id: newId,
           orderNo: newId,
@@ -349,7 +349,7 @@ export function TradingGrid({ type }: TradingGridProps) {
       title: `${newId} (Yangi Sotuv)`,
       type: "trading-sale",
       module: "trading",
-      isUnsaved: true,
+      isUnsaved: false,
       documentData: {
         id: newId,
         docNo: newId,

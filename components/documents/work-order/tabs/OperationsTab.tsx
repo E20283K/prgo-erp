@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useCallback } from "react";
-import { Plus, ExternalLink, Trash2, Clock, Sparkles, ArrowUpRight, Package } from "lucide-react";
+import { Plus, ExternalLink, Trash2, Clock, Sparkles, ArrowUpRight, Package, Calculator, DollarSign } from "lucide-react";
 import { TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -80,13 +80,25 @@ export function OperationsTab({
     return operations.reduce((sum, op) => sum + (Number(op.duration) || 0), 0);
   }, [operations]);
 
+  const totalPlannedCost = useMemo(() => {
+    return operations.reduce((sum, op) => sum + (Number(op.plannedCostUsd) || 0), 0);
+  }, [operations]);
+
+  const totalPiecework = useMemo(() => {
+    return operations.reduce((sum, op) => sum + (Number(op.pieceworkTotalUsd) || 0), 0);
+  }, [operations]);
+
   const opColumns = useMemo<GridColumn[]>(() => [
-    { id: "step", title: "Step #", width: 80, icon: GridColumnIcon.HeaderNumber },
-    { id: "name", title: "Texnologik Operatsiya (Description)", width: 300, icon: GridColumnIcon.HeaderString },
-    { id: "machine", title: "Stanok / Uskuna (Work Center)", width: 240, icon: GridColumnIcon.HeaderLookup },
-    { id: "tooling", title: "Texnologik Jihoz (Shtansforma / Qolip)", width: 240, icon: GridColumnIcon.HeaderString },
-    { id: "operator", title: "Mas'ul Operator / Smena", width: 220, icon: GridColumnIcon.HeaderString },
-    { id: "duration", title: "Me'yoriy vaqt (hrs)", width: 130, icon: GridColumnIcon.HeaderNumber },
+    { id: "step", title: "Step #", width: 70, icon: GridColumnIcon.HeaderNumber },
+    { id: "tariffCode", title: "Tarif", width: 105, icon: GridColumnIcon.HeaderString },
+    { id: "name", title: "Texnologik Operatsiya (Description)", width: 260, icon: GridColumnIcon.HeaderString },
+    { id: "machine", title: "Stanok / Uskuna (Work Center)", width: 210, icon: GridColumnIcon.HeaderLookup },
+    { id: "tooling", title: "Texnologik Jihoz (Shtansforma / Qolip)", width: 210, icon: GridColumnIcon.HeaderString },
+    { id: "operator", title: "Mas'ul Operator / Smena", width: 180, icon: GridColumnIcon.HeaderString },
+    { id: "rate", title: "Stavka / Birlik", width: 130, icon: GridColumnIcon.HeaderNumber },
+    { id: "plannedCost", title: "Rejaviy Tannarx ($)", width: 130, icon: GridColumnIcon.HeaderNumber },
+    { id: "piecework", title: "Sdelka FOT ($)", width: 110, icon: GridColumnIcon.HeaderNumber },
+    { id: "duration", title: "Me'yoriy vaqt (hrs)", width: 120, icon: GridColumnIcon.HeaderNumber },
   ], []);
 
   const getOpCellContent = useCallback((cell: Item): GridCell => {
@@ -95,11 +107,24 @@ export function OperationsTab({
     if (!op) return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
 
     if (col === 0) return { kind: GridCellKind.Number, data: op.stepNumber, displayData: `#${op.stepNumber}`, allowOverlay: false };
-    if (col === 1) return { kind: GridCellKind.Text, data: op.name, displayData: op.name, allowOverlay: true };
-    if (col === 2) return { kind: GridCellKind.Text, data: op.machine, displayData: op.machine, allowOverlay: true };
-    if (col === 3) return { kind: GridCellKind.Text, data: op.toolingName || op.toolingId || "—", displayData: op.toolingName || op.toolingId || "—", allowOverlay: true };
-    if (col === 4) return { kind: GridCellKind.Text, data: op.operator || "Unassigned", displayData: op.operator || "Unassigned", allowOverlay: true };
-    if (col === 5) return { kind: GridCellKind.Number, data: op.duration || 1, displayData: `${op.duration || 1} soat`, allowOverlay: true };
+    if (col === 1) return { kind: GridCellKind.Text, data: op.tariffCode || "—", displayData: op.tariffCode || "—", allowOverlay: false };
+    if (col === 2) return { kind: GridCellKind.Text, data: op.name, displayData: op.name, allowOverlay: true };
+    if (col === 3) return { kind: GridCellKind.Text, data: op.machine, displayData: op.machine, allowOverlay: true };
+    if (col === 4) return { kind: GridCellKind.Text, data: op.toolingName || op.toolingId || "—", displayData: op.toolingName || op.toolingId || "—", allowOverlay: true };
+    if (col === 5) return { kind: GridCellKind.Text, data: op.operator || "Unassigned", displayData: op.operator || "Unassigned", allowOverlay: true };
+    if (col === 6) {
+      const rateText = op.rateUsd !== undefined ? `$${op.rateUsd} / ${op.calcUnit || "unit"}` : "—";
+      return { kind: GridCellKind.Text, data: rateText, displayData: rateText, allowOverlay: false };
+    }
+    if (col === 7) {
+      const val = op.plannedCostUsd || 0;
+      return { kind: GridCellKind.Number, data: val, displayData: val > 0 ? `$${val.toFixed(2)}` : "—", allowOverlay: true };
+    }
+    if (col === 8) {
+      const val = op.pieceworkTotalUsd || 0;
+      return { kind: GridCellKind.Number, data: val, displayData: val > 0 ? `$${val.toFixed(2)}` : "—", allowOverlay: true };
+    }
+    if (col === 9) return { kind: GridCellKind.Number, data: op.duration || 1, displayData: `${op.duration || 1} soat`, allowOverlay: true };
 
     return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
   }, [operations]);
@@ -107,15 +132,19 @@ export function OperationsTab({
   const onOpCellEdited = useCallback((cell: Item, newValue: EditableGridCell) => {
     const [col, row] = cell;
     const updated = [...operations];
-    if (col === 1 && newValue.kind === GridCellKind.Text) {
+    if (col === 2 && newValue.kind === GridCellKind.Text) {
       updated[row].name = newValue.data.toString();
-    } else if (col === 2 && newValue.kind === GridCellKind.Text) {
-      updated[row].machine = newValue.data.toString();
     } else if (col === 3 && newValue.kind === GridCellKind.Text) {
-      updated[row].toolingName = newValue.data.toString();
+      updated[row].machine = newValue.data.toString();
     } else if (col === 4 && newValue.kind === GridCellKind.Text) {
+      updated[row].toolingName = newValue.data.toString();
+    } else if (col === 5 && newValue.kind === GridCellKind.Text) {
       updated[row].operator = newValue.data.toString();
-    } else if (col === 5 && newValue.kind === GridCellKind.Number) {
+    } else if (col === 7 && newValue.kind === GridCellKind.Number) {
+      updated[row].plannedCostUsd = Number(newValue.data);
+    } else if (col === 8 && newValue.kind === GridCellKind.Number) {
+      updated[row].pieceworkTotalUsd = Number(newValue.data);
+    } else if (col === 9 && newValue.kind === GridCellKind.Number) {
       updated[row].duration = Number(newValue.data);
     }
     setOperations(updated);
@@ -226,8 +255,24 @@ export function OperationsTab({
           <span>Bosqichlar: <strong className="text-foreground">{operations.length} ta</strong></span>
           <Separator orientation="vertical" className="h-3" />
           <span className="flex items-center gap-1">
-            <Clock className="w-3 h-3" /> Me&apos;yor: <strong className="text-foreground">{totalDuration} soat</strong>
+            <Clock className="w-3 h-3 text-muted-foreground" /> Me&apos;yor: <strong className="text-foreground">{totalDuration}h</strong>
           </span>
+          {totalPlannedCost > 0 && (
+            <>
+              <Separator orientation="vertical" className="h-3" />
+              <span className="flex items-center gap-1 font-mono">
+                Tarif Tannarxi: <strong className="text-blue-600 dark:text-blue-400 font-semibold">${totalPlannedCost.toFixed(2)}</strong>
+              </span>
+            </>
+          )}
+          {totalPiecework > 0 && (
+            <>
+              <Separator orientation="vertical" className="h-3" />
+              <span className="flex items-center gap-1 font-mono">
+                Sdelka FOT: <strong className="text-emerald-600 dark:text-emerald-400 font-semibold">${totalPiecework.toFixed(2)}</strong>
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -281,14 +326,14 @@ export function OperationsTab({
         <ContextMenuContent className="w-56 text-xs">
           <ContextMenuItem onClick={onOpenAddOperation} className="gap-2 cursor-pointer">
             <Plus className="w-3.5 h-3.5 text-blue-500" />
-            <span>Add Routing Step</span>
+            <span>Bosqich qo&apos;shish</span>
             <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ins</span>
           </ContextMenuItem>
 
           {hasSelectedOp && (
             <ContextMenuItem onClick={() => onOpenEditOperation(selectedOpRow)} className="gap-2 cursor-pointer">
               <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-              <span>Edit Step Plan</span>
+              <span>Bosqichni tahrirlash</span>
               <span className="ml-auto text-[10px] text-muted-foreground font-mono">Enter</span>
             </ContextMenuItem>
           )}
@@ -299,7 +344,7 @@ export function OperationsTab({
               className="gap-2 cursor-pointer text-blue-600 dark:text-blue-400"
             >
               <ArrowUpRight className="w-3.5 h-3.5" />
-              <span>Track Execution in Timeline</span>
+              <span>Timeline bo&apos;limida ochish</span>
             </ContextMenuItem>
           )}
 
@@ -308,7 +353,7 @@ export function OperationsTab({
               <ContextMenuSeparator />
               <ContextMenuItem onClick={onDeleteSelectedOperation} className="gap-2 cursor-pointer text-destructive focus:text-destructive">
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete Step</span>
+                <span>Bosqichni o&apos;chirish</span>
                 <span className="ml-auto text-[10px] text-muted-foreground font-mono">Del</span>
               </ContextMenuItem>
             </>

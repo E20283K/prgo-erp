@@ -251,7 +251,7 @@ export function CreateWorkOrderPickerModal({
       title: `${newWoId}: ${orderToDispatch.product}`,
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: "",
@@ -310,7 +310,7 @@ export function CreateWorkOrderPickerModal({
       title: `${newWoId}: ${internalForm.category.split("/")[0].trim()}`,
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: "",

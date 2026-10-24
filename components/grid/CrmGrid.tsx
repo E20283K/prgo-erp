@@ -392,7 +392,7 @@ export function CrmGrid({ type }: CrmGridProps) {
         title: `Yangi ta'minotchi: ${nextCode}`,
         type: "supplier",
         module: "crm",
-        isUnsaved: true,
+        isUnsaved: false,
         activeLevel3Tab: "overview",
         documentData: newSupp,
       });
@@ -418,7 +418,7 @@ export function CrmGrid({ type }: CrmGridProps) {
         title: "Yangi Mijoz (Qoralama)",
         type: "customer",
         module: "crm",
-        isUnsaved: true,
+        isUnsaved: false,
         activeLevel3Tab: "overview",
         documentData: newCust,
       });
@@ -533,7 +533,7 @@ export function CrmGrid({ type }: CrmGridProps) {
       title: `${newOrderNo}: ${newCust.name}`,
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: newOrderNo,

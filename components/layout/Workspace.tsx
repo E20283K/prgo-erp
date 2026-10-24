@@ -49,6 +49,7 @@ import { PlanningSlotDetail } from "@/components/documents/PlanningSlotDetail";
 import { MachineDetail } from "@/components/documents/MachineDetail";
 import { WarehouseStockDetail } from "@/components/documents/WarehouseStockDetail";
 import { PlantDetail } from "@/components/documents/PlantDetail";
+import { TariffDetail } from "@/components/documents/TariffDetail";
 import { UserDetail } from "@/components/documents/UserDetail";
 import { EmployeeDetail } from "@/components/documents/hr/employees/EmployeeDetail";
 import { DepartmentDetail } from "@/components/documents/hr/departments/DepartmentDetail";
@@ -183,6 +184,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     if (tab.type === "planning-slot") return <PlanningSlotDetail tab={tab} />;
     if (tab.type === "machine-detail") return <MachineDetail tab={tab} />;
     if (tab.type === "plant-detail") return <PlantDetail tab={tab} />;
+    if (tab.type === "tariff-detail") return <TariffDetail tab={tab} />;
     if (tab.type === "user-detail") return <UserDetail tab={tab} />;
     if (tab.type === "employee-detail") return <EmployeeDetail tab={tab} />;
     if (tab.type === "department-detail") return <DepartmentDetail tab={tab} />;

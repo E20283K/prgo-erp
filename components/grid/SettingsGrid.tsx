@@ -16,6 +16,7 @@ import { useTranslations } from "next-intl";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { PlantRecord } from "@/components/documents/plant/types";
 import { SystemUserRecord } from "@/components/documents/user/types";
+import { TariffRecord } from "@/components/documents/tariff/types";
 import { createEmptyUser } from "@/components/documents/user/data";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { Button } from "@/components/ui/button";
@@ -47,20 +48,9 @@ interface SettingsGridProps {
   type: "plants" | "users" | "tariffs";
 }
 
-interface TariffRecord {
-  id: string;
-  category: string;
-  operationName: string;
-  machineOrDept: string;
-  unit: string;
-  rateUsd: number;
-  setupFeeUsd: number;
-  vatRate: number;
-  status: "Active" | "Review";
-}
-
 interface SettingsRow {
   id: string;
+  code?: string;
   name?: string;
   fullName?: string;
   operationName?: string;
@@ -79,128 +69,33 @@ interface SettingsRow {
   unit?: string;
   rateUsd?: number;
   setupFeeUsd?: number;
+  pieceworkRateUsd?: number;
   vatRate?: number;
   status?: string;
   [key: string]: unknown;
 }
 
-const INITIAL_TARIFFS: TariffRecord[] = [
-  {
-    id: "TRF-001",
-    category: "Prepress / CTP",
-    operationName: "CTP Thermal Plate Output (B1 / 790×1030)",
-    machineOrDept: "Kodak Trendsetter Q800",
-    unit: "1 plate",
-    rateUsd: 12.5,
-    setupFeeUsd: 0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-002",
-    category: "Prepress / CTP",
-    operationName: "CTP Thermal Plate Output (B2 / 500×707)",
-    machineOrDept: "Kodak Trendsetter Q800",
-    unit: "1 plate",
-    rateUsd: 8.5,
-    setupFeeUsd: 0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-003",
-    category: "Offset Printing",
-    operationName: "Sheetfed Offset Run (4+0 CMYK)",
-    machineOrDept: "Heidelberg Speedmaster XL 106",
-    unit: "1,000 impressions",
-    rateUsd: 24.0,
-    setupFeeUsd: 45.0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-004",
-    category: "Kashirovka (Mounting)",
-    operationName: "Duplex / Triplex Sheet-to-Sheet Mounting + Press Cure",
-    machineOrDept: "Stock Laminator + Hydraulic Press",
-    unit: "1,000 glue passes",
-    rateUsd: 28.0,
-    setupFeeUsd: 25.0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-005",
-    category: "Kashirovka (Adhesive)",
-    operationName: "PVA Dispersion Adhesive Consumption (25 g/m²)",
-    machineOrDept: "Kashirovka Line",
-    unit: "1 kg",
-    rateUsd: 3.4,
-    setupFeeUsd: 0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-006",
-    category: "Surface Coating",
-    operationName: "Soft-Touch Matte Lamination (BOPP 28 mic)",
-    machineOrDept: "Autobond Mini 76 UV",
-    unit: "1,000 sheets (B2)",
-    rateUsd: 42.0,
-    setupFeeUsd: 15.0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-007",
-    category: "Surface Coating",
-    operationName: "Spot UV Varnish (Selective Screen / Digital)",
-    machineOrDept: "Sakurai Maestro / Scodix",
-    unit: "1,000 sheets",
-    rateUsd: 55.0,
-    setupFeeUsd: 30.0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-008",
-    category: "Die-Cutting & Finishing",
-    operationName: "Flatbed Die-Cutting & Creasing (Высечка / Биговка)",
-    machineOrDept: "Bobst Novacut 106 E",
-    unit: "1,000 strokes",
-    rateUsd: 18.0,
-    setupFeeUsd: 35.0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-009",
-    category: "Flexo Roll Label",
-    operationName: "Narrow-Web Rotary Flexo Run + Die-Cut",
-    machineOrDept: "Mark Andy P7 / Nilpeter FA-4",
-    unit: "1,000 linear meters",
-    rateUsd: 32.0,
-    setupFeeUsd: 40.0,
-    vatRate: 12,
-    status: "Active",
-  },
-  {
-    id: "TRF-010",
-    category: "Bindery & Guillotine",
-    operationName: "Polar High-Speed Guillotine Trimming & Packing",
-    machineOrDept: "Polar N 115 Plus",
-    unit: "1,000 finished pcs",
-    rateUsd: 4.5,
-    setupFeeUsd: 10.0,
-    vatRate: 12,
-    status: "Active",
-  },
-];
-
 export function SettingsGrid({ type }: SettingsGridProps) {
   const tCommon = useTranslations("Common");
   const tMod = useTranslations("Modules");
-  const { updateGridStats, theme, openTab, plants, upsertPlant, openNewPlantTab, fetchPlants, savePlantToDb, users, upsertUser, fetchUsers } = useWorkspaceStore();
+  const {
+    updateGridStats,
+    theme,
+    openTab,
+    plants,
+    upsertPlant,
+    openNewPlantTab,
+    fetchPlants,
+    savePlantToDb,
+    users,
+    upsertUser,
+    fetchUsers,
+    tariffs,
+    fetchTariffs,
+    openNewTariffTab,
+    saveTariffToDb,
+    upsertTariff,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
 
   useEffect(() => {
@@ -208,10 +103,10 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       fetchUsers();
     } else if (type === "plants") {
       fetchPlants();
+    } else if (type === "tariffs") {
+      fetchTariffs();
     }
-  }, [type, fetchUsers, fetchPlants]);
-
-  const [tariffs, setTariffs] = useState<TariffRecord[]>(INITIAL_TARIFFS);
+  }, [type, fetchUsers, fetchPlants, fetchTariffs]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -261,13 +156,14 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       })) as unknown as SettingsRow[];
     } else {
       cols = [
-        { id: "id", title: "Tariff Code", width: 100, icon: GridColumnIcon.HeaderReference },
+        { id: "code", title: "Tariff Code", width: 105, icon: GridColumnIcon.HeaderReference },
         { id: "category", title: "Process Group", width: 165, icon: GridColumnIcon.HeaderLookup },
-        { id: "operationName", title: "Operation / Normative Tariff", width: 310, icon: GridColumnIcon.HeaderString },
-        { id: "machineOrDept", title: "Equipment / Line", width: 210, icon: GridColumnIcon.HeaderString },
+        { id: "operationName", title: "Operation / Normative Tariff", width: 280, icon: GridColumnIcon.HeaderString },
+        { id: "machineOrDept", title: "Equipment / Line", width: 200, icon: GridColumnIcon.HeaderString },
         { id: "unit", title: "Calc Unit", width: 145, icon: GridColumnIcon.HeaderString },
-        { id: "rateUsd", title: "Rate ($ USD)", width: 115, icon: GridColumnIcon.HeaderNumber },
-        { id: "setupFeeUsd", title: "Make-Ready ($)", width: 125, icon: GridColumnIcon.HeaderNumber },
+        { id: "rateUsd", title: "Rate ($ USD)", width: 110, icon: GridColumnIcon.HeaderNumber },
+        { id: "setupFeeUsd", title: "Make-Ready ($)", width: 115, icon: GridColumnIcon.HeaderNumber },
+        { id: "pieceworkRateUsd", title: "Sdelka ($)", width: 105, icon: GridColumnIcon.HeaderNumber },
         { id: "vatRate", title: "VAT (%)", width: 85, icon: GridColumnIcon.HeaderNumber },
         { id: "status", title: "Status", width: 105, icon: GridColumnIcon.HeaderSingleValue },
       ];
@@ -409,36 +305,26 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       return;
     }
 
-    setSelectedRowId(row.id);
     if (type === "tariffs") {
-      setEditName(row.operationName || "");
-      setEditRateUsd(String(row.rateUsd ?? ""));
-      setEditSetupUsd(String(row.setupFeeUsd ?? ""));
-    } else {
-      setEditName(row.fullName || "");
+      openTab({
+        id: `tariff-${row.id}`,
+        title: `${row.code || row.id}: ${row.operationName || "Tarif"}`,
+        type: "tariff-detail",
+        module: "settings",
+        documentData: row,
+      });
+      return;
     }
+
+    setSelectedRowId(row.id);
+    setEditName(row.fullName || "");
     setIsDrawerOpen(true);
   };
 
   const handleCreateNew = () => {
     if (type === "tariffs") {
-      const newTariff: TariffRecord = {
-        id: `TRF-${String(tariffs.length + 1).padStart(3, "0")}`,
-        category: "Post-Press",
-        operationName: "New Custom Print/Finishing Operation",
-        machineOrDept: "Finishing Shop",
-        unit: "1,000 pcs",
-        rateUsd: 15.0,
-        setupFeeUsd: 20.0,
-        vatRate: 12,
-        status: "Active",
-      };
-      setTariffs((prev) => [newTariff, ...prev]);
-      setSelectedRowId(newTariff.id);
-      setEditName(newTariff.operationName);
-      setEditRateUsd(String(newTariff.rateUsd));
-      setEditSetupUsd(String(newTariff.setupFeeUsd));
-      setIsDrawerOpen(true);
+      openNewTariffTab();
+      return;
     } else if (type === "plants") {
       openNewPlantTab();
     } else {
@@ -451,7 +337,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
         type: "user-detail",
         module: "settings",
         documentData: emptyUser,
-        isUnsaved: true,
+        isUnsaved: false,
       });
     }
   };
@@ -459,18 +345,17 @@ export function SettingsGrid({ type }: SettingsGridProps) {
   const handleSaveRecord = () => {
     if (!selectedRecord) return;
     if (type === "tariffs") {
-      setTariffs((prev) =>
-        prev.map((item) =>
-          item.id === selectedRecord.id
-            ? {
-                ...item,
-                operationName: editName || item.operationName,
-                rateUsd: Number(editRateUsd) || item.rateUsd,
-                setupFeeUsd: Number(editSetupUsd) || 0,
-              }
-            : item
-        )
-      );
+      const tariff = tariffs.find((t) => t.id === selectedRecord.id);
+      if (tariff) {
+        const updated = {
+          ...tariff,
+          operationName: editName || tariff.operationName,
+          rateUsd: Number(editRateUsd) || tariff.rateUsd,
+          setupFeeUsd: Number(editSetupUsd) || 0,
+        };
+        upsertTariff(updated);
+        saveTariffToDb(updated);
+      }
     } else if (type === "plants") {
       const plant = selectedRecord as unknown as PlantRecord;
       const updated = { ...plant, name: editName || plant.name };

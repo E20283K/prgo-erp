@@ -90,7 +90,7 @@ export function CommandPalette() {
       title: "Yangi buyruq (Qoralama)",
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: "",

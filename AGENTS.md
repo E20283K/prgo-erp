@@ -14,5 +14,5 @@ Strictly adhere to the `.agent/skills/anti-slop-ui/SKILL.md` standard on all fro
 1. **ZERO EMOJIS IN UI**: Never use emojis in buttons, dialog titles, badges, selects, table cells, or placeholders. Use refined Lucide SVG icons (`size-3.5` or `size-4`) or pure text.
 2. **NO GRATUITOUS GRADIENTS OR GLOW SHADOWS**: Use flat, clean, neutral borders (`border-border`), `bg-card`, and `bg-muted` tokens. Follow Linear/Stripe/1C Enterprise industrial standards.
 3. **HIGH DENSITY & COMPACT SPACING**: Form inputs `h-7` or `h-8` (`text-xs`), table rows `26-28px`, tight padding. No bloated cards or low-density mobile layouts.
-4. **NO PROSE CHATTER**: Clean, direct labels and tooltips. No conversational assistant fluff.
+4. **RADICAL MINIMALISM & ZERO PROSE CHATTER**: Never add descriptive `<p>` subtitles under section/card headers. Keep section titles, KPI headers, buttons, and status badges to 1–2 words max (e.g. `"Texnologik zanjir"`, `"Smena jurnali"`, `"Boshlash"`, `"To'xtalish"`). Never append parenthetical English translations like `(Start)`, `(Paused)`, `(MES Pipeline)` to UI labels.
 

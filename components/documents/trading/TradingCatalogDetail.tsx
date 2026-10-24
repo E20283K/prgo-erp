@@ -280,7 +280,7 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
       title: `${newDocId} (${sku})`,
       type: "trading-sale",
       module: "trading",
-      isUnsaved: true,
+      isUnsaved: false,
       documentData: {
         id: newDocId,
         docNo: newDocId,

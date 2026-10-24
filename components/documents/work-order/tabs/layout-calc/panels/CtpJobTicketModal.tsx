@@ -70,10 +70,12 @@ export function CtpJobTicketModal({
   };
 
   const ctpRelationLabel =
-    ctpSideRelation === "shared_front_variable_back"
+    ctpSideRelation === "single_sided" || backColorsCount <= 0
+      ? `Bir tomonlama (${frontColorsCount}+0)`
+      : ctpSideRelation === "shared_front_variable_back"
       ? "Oldi umumiy (1 to'plam) + Orqasi har xil qoliplar"
       : ctpSideRelation === "work_and_turn"
-      ? "Svoy oborot (Work & Turn - 1 qolipda oldi-orqa)"
+      ? "Qaytarma (Work & Turn - 1 qolipda oldi-orqa)"
       : "Mustaqil (Har bir forma alohida oldi va orqa)";
 
   return (

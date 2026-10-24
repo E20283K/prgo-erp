@@ -155,7 +155,7 @@ export function SalesGrid({ type }: SalesGridProps) {
       title: "Yangi Dalolatnoma / Faktura (Qoralama)",
       type: "delivery-act",
       module: "finance",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: newAct,
     });

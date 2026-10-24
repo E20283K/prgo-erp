@@ -696,7 +696,7 @@ export function TelegramInbox() {
       title: `Yangi: ${guessedProduct} (Qoralama)`,
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: "",

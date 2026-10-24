@@ -358,7 +358,7 @@ export function OverviewTab({
       title: `${newRecord.id}: ${clean}`,
       type: "customer",
       module: "crm",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: newRecord,
     });
@@ -401,7 +401,7 @@ export function OverviewTab({
       title: clean ? `${newRecord.id}: ${clean}` : `${newRecord.id}: ${tOrder("newCustomer") || "Yangi mijoz"}`,
       type: "customer",
       module: "crm",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: newRecord,
     });
@@ -454,7 +454,7 @@ export function OverviewTab({
         title: `Yangi Uskuna (${nextCode})`,
         type: "machine-detail",
         module: "production",
-        isUnsaved: true,
+        isUnsaved: false,
         activeLevel3Tab: "overview",
         documentData: {
           isNew: true,

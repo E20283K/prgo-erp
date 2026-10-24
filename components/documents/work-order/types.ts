@@ -385,9 +385,26 @@ export interface RouteStep {
   multiplier?: number;
   duration: number;
   qtyCompleted: string;
-  status: "Queued" | "In Progress" | "Finished";
+  status: "Queued" | "In Progress" | "Paused" | "Finished";
   toolingId?: string;
   toolingName?: string;
+  department?: string;
+  tariffId?: string;
+  tariffCode?: string;
+  calcUnit?: string;
+  unitDivisor?: number;
+  rateUsd?: number;
+  setupFeeUsd?: number;
+  pieceworkRateUsd?: number;
+  plannedCostUsd?: number;
+  pieceworkTotalUsd?: number;
+  startedAt?: string;
+  pausedAt?: string;
+  completedAt?: string;
+  actualDurationMinutes?: number;
+  downtimeMinutes?: number;
+  curingRequiredHours?: number;
+  curingStartedAt?: string;
 }
 
 export interface ShiftEvent {
@@ -406,7 +423,32 @@ export interface ShiftEvent {
   outputPiecesQty?: number;
   wasteQty?: number;
   wasteReason?: string;
+  downtimeReason?: string;
+  downtimeDurationMinutes?: number;
+  palletCode?: string;
+  palletNumber?: number;
+  status?: "Draft" | "Confirmed" | "Inspected";
 }
+
+export interface DowntimeReasonOption {
+  code: string;
+  label: string;
+  category: "mechanical" | "process" | "material" | "personnel";
+  defaultDurationMinutes: number;
+}
+
+export const DOWNTIME_REASONS: DowntimeReasonOption[] = [
+  { code: "MACHINE_BREAKDOWN", label: "Stanok nosozligi (Avariya)", category: "mechanical", defaultDurationMinutes: 45 },
+  { code: "COLOR_WASH", label: "Kraska yuvish va almashtirish", category: "process", defaultDurationMinutes: 20 },
+  { code: "PLATE_CHANGE", label: "Qolip almashtirish / Sozlash", category: "process", defaultDurationMinutes: 15 },
+  { code: "DIE_ADJUSTMENT", label: "Shtamp / Pichoq moslash", category: "process", defaultDurationMinutes: 25 },
+  { code: "PAPER_WAIT", label: "Qog'oz / Xomashyo kutish", category: "material", defaultDurationMinutes: 30 },
+  { code: "DRYING_WAIT", label: "Oldingi bosqich qurishini kutish", category: "process", defaultDurationMinutes: 60 },
+  { code: "PREVENTIVE_MAINTENANCE", label: "Profilaktika va moylash", category: "mechanical", defaultDurationMinutes: 20 },
+  { code: "POWER_OUTAGE", label: "Elektr / Kompressor uzilishi", category: "mechanical", defaultDurationMinutes: 30 },
+  { code: "SHIFT_CHANGEOVER", label: "Smena topshirish (Пересменка)", category: "personnel", defaultDurationMinutes: 15 },
+  { code: "PLANNED_BREAK", label: "Rejali texnik tanaffus", category: "personnel", defaultDurationMinutes: 15 },
+];
 
 export interface OrderAttachment {
   id: string;
@@ -639,6 +681,35 @@ export interface WorkOrderFormData {
   skuArtworks?: SkuArtwork[];
   packagingData?: WorkOrderPackagingSummary;
   toolingItems?: WorkOrderToolingItem[];
+  plannedSheets?: number;
+  impositionState?: PersistedImpositionState;
+}
+
+export interface PersistedImpositionState {
+  sheetW: number;
+  sheetH: number;
+  parentSheetW: number;
+  parentSheetH: number;
+  cutDivisor: number;
+  orientation: "A" | "B";
+  gap: number;
+  gripper: number;
+  gripperEdge: "Auto" | "Bottom" | "Top" | "Left" | "Right";
+  marginTop: number;
+  marginBottom: number;
+  marginLeft: number;
+  marginRight: number;
+  overproductionMode: "percent" | "exact";
+  overproductionValue: number;
+  ctpSideRelation: "single_sided" | "shared_front_variable_back" | "independent_per_plate" | "work_and_turn";
+  optimizerGoal: "min_waste" | "min_plates";
+  plates: {
+    id: string;
+    name: string;
+    manualSlots: Record<string, number>;
+    assignedSizeIds?: string[];
+    customSheetRun?: number;
+  }[];
 }
 
 export const FLOOR_OPERATORS = [

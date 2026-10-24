@@ -45,19 +45,34 @@ export function LayoutCell({
   const pW = itemW - bleed * 2;
   const pH = itemH - bleed * 2;
 
+  const isEmpty = cellData.sizeId === "empty";
   const primaryText = cellData.sizeCode || cellData.label || "";
   const modelText = cellData.model || "";
-  const maxLabelW = pW * 0.85;
+  const maxLabelW = pW * 0.88;
   const charCount = Math.max(1, primaryText.length);
-  const autoFontSize = maxLabelW / (charCount * 0.58);
-  const labelFontSize = Math.max(2.6, Math.min(autoFontSize, pH * 0.14, 7.5));
-  const slotNumFontSize = Math.max(2, Math.min(labelFontSize * 0.68, 3.5));
+  const autoFontSize = maxLabelW / (charCount * 0.55);
+  const labelFontSize = Math.max(4.5, Math.min(autoFontSize, Math.min(pW, pH) * 0.34, 18));
+  const metaFontSize = Math.max(3, Math.min(labelFontSize * 0.55, 7));
 
-  const strokeColor = cellData.sideBadge === "BACK" ? "#7c3aed" : "#3b82f6";
-  const dieStrokeColor = cellData.sideBadge === "BACK" ? "#7c3aed" : "#10b981";
+  const strokeColor = isEmpty ? "#d4d4d8" : "#2563eb";
+  const dieStrokeColor = "#059669";
 
-  // Render Cut Boundary according to the real product shape!
   const renderCutBoundary = () => {
+    if (isEmpty) {
+      return (
+        <rect
+          x={pX1}
+          y={pY1}
+          width={pW}
+          height={pH}
+          fill="none"
+          stroke="#d4d4d8"
+          strokeWidth={0.4}
+          strokeDasharray="2 2"
+        />
+      );
+    }
+
     // 1. Custom Vector SVG Die-line
     if (shapeType === "custom_die" && customShape === "vector_svg" && parsedSvg) {
       const { pathD } = parsedSvg;
@@ -74,7 +89,7 @@ export function LayoutCell({
         <path
           d={pathD}
           transform={`translate(${offsetX}, ${offsetY}) scale(${autoScale})`}
-          fill="rgba(16, 185, 129, 0.12)"
+          fill="rgba(16, 185, 129, 0.1)"
           stroke={dieStrokeColor}
           strokeWidth={0.8}
           vectorEffect="non-scaling-stroke"
@@ -90,7 +105,7 @@ export function LayoutCell({
       return (
         <path
           d={archPath}
-          fill="rgba(16, 185, 129, 0.12)"
+          fill="rgba(16, 185, 129, 0.1)"
           stroke={dieStrokeColor}
           strokeWidth={0.7}
           strokeDasharray="2.5 1.5"
@@ -105,7 +120,7 @@ export function LayoutCell({
       return (
         <path
           d={ticketPath}
-          fill="rgba(16, 185, 129, 0.12)"
+          fill="rgba(16, 185, 129, 0.1)"
           stroke={dieStrokeColor}
           strokeWidth={0.7}
           strokeDasharray="2.5 1.5"
@@ -130,7 +145,7 @@ export function LayoutCell({
       return (
         <polygon
           points={starPts}
-          fill="rgba(16, 185, 129, 0.12)"
+          fill="rgba(16, 185, 129, 0.1)"
           stroke={dieStrokeColor}
           strokeWidth={0.7}
           strokeDasharray="2.5 1.5"
@@ -145,7 +160,7 @@ export function LayoutCell({
           cx={pX1 + pW / 2}
           cy={pY1 + pH / 2}
           r={Math.min(pW, pH) / 2}
-          fill="rgba(16, 185, 129, 0.12)"
+          fill="rgba(16, 185, 129, 0.1)"
           stroke={dieStrokeColor}
           strokeWidth={0.7}
           strokeDasharray="2.5 1.5"
@@ -161,7 +176,7 @@ export function LayoutCell({
           cy={pY1 + pH / 2}
           rx={pW / 2}
           ry={pH / 2}
-          fill="rgba(16, 185, 129, 0.12)"
+          fill="rgba(16, 185, 129, 0.1)"
           stroke={dieStrokeColor}
           strokeWidth={0.7}
           strokeDasharray="2.5 1.5"
@@ -197,7 +212,7 @@ export function LayoutCell({
         height={pH}
         fill="none"
         stroke={strokeColor}
-        strokeWidth={0.5}
+        strokeWidth={0.55}
         strokeDasharray="2 2"
       />
     );
@@ -206,6 +221,8 @@ export function LayoutCell({
   const imageSrc =
     cellData.artworkUrl ||
     (cellData.sideBadge === "BACK" ? artworkBack || artworkFront : artworkFront || artworkBack);
+
+  const hasVisibleArtwork = !isEmpty && viewMode === "artwork" && Boolean(imageSrc);
 
   return (
     <g>
@@ -216,94 +233,78 @@ export function LayoutCell({
         width={itemW}
         height={itemH}
         fill={cellData.color}
-        stroke="#9ca3af"
+        stroke={isEmpty ? "#e4e4e7" : "#93c5fd"}
         strokeWidth={0.5}
       />
 
       {/* Product Real Cut Boundary & Artwork */}
-      {viewMode === "artwork" && imageSrc && (
+      {hasVisibleArtwork && (
         <image
           href={imageSrc}
           x={pX1}
           y={pY1}
           width={pW}
           height={pH}
-          preserveAspectRatio="none"
-          opacity={0.96}
+          preserveAspectRatio="xMidYMid slice"
+          opacity={0.94}
         />
       )}
       {renderCutBoundary()}
 
-      {/* Centered Label and Meta */}
-      {cellData.label && (
+      {/* Top-Left Slot Index Badge */}
+      {!isEmpty && pW >= 18 && pH >= 18 && (
+        <text
+          x={pX1 + 2}
+          y={pY1 + metaFontSize + 1.5}
+          fontSize={metaFontSize}
+          fill="#475569"
+          fontWeight="600"
+        >
+          {`#${index + 1}`}
+        </text>
+      )}
+
+      {/* Centered High-Contrast Label Pill */}
+      {primaryText && (
         <g>
-          {pH > 35 ? (
-            <>
-              <text
-                x={x + itemW / 2}
-                y={y + itemH / 2 - labelFontSize * (modelText ? 1.15 : 0.75)}
-                fontSize={slotNumFontSize}
-                fill={cellData.sideBadge === "BACK" ? "#6d28d9" : "#1e40af"}
-                textAnchor="middle"
-                alignmentBaseline="middle"
-                fontWeight="700"
-              >
-                {cellData.sideBadge === "BACK"
-                  ? `#${index + 1} · ORQA (BACK)`
-                  : cellData.sideBadge === "FRONT"
-                  ? `#${index + 1} · OLDI (FRONT)`
-                  : `#${index + 1}`}
-              </text>
-              {modelText && (
-                <text
-                  x={x + itemW / 2}
-                  y={y + itemH / 2 - labelFontSize * 0.35}
-                  fontSize={Math.max(2.2, slotNumFontSize * 1.05)}
-                  fill={cellData.sideBadge === "BACK" ? "#4c1d95" : "#1e40af"}
-                  textAnchor="middle"
-                  alignmentBaseline="middle"
-                  fontWeight="700"
-                >
-                  {modelText}
-                </text>
-              )}
-              <text
-                x={x + itemW / 2}
-                y={y + itemH / 2 + labelFontSize * (modelText ? 0.55 : 0.25)}
-                fontSize={labelFontSize}
-                fill="#111827"
-                textAnchor="middle"
-                alignmentBaseline="middle"
-                fontWeight="bold"
-              >
-                {primaryText}
-              </text>
-              <text
-                x={x + itemW / 2}
-                y={y + itemH / 2 + labelFontSize * (modelText ? 1.45 : 1.25)}
-                fontSize={slotNumFontSize * 0.9}
-                fill="#6b7280"
-                textAnchor="middle"
-                alignmentBaseline="middle"
-              >
-                {`${prodW}×${prodH}mm`}
-              </text>
-            </>
-          ) : (
+          {hasVisibleArtwork && (
+            <rect
+              x={x + itemW / 2 - Math.min(pW * 0.44, (charCount * labelFontSize * 0.36) + 4)}
+              y={y + itemH / 2 - labelFontSize * 0.72}
+              width={Math.min(pW * 0.88, (charCount * labelFontSize * 0.72) + 8)}
+              height={labelFontSize * 1.44}
+              rx={2}
+              fill="rgba(255, 255, 255, 0.88)"
+              stroke="#cbd5e1"
+              strokeWidth={0.35}
+            />
+          )}
+
+          {modelText && pH > 32 && !hasVisibleArtwork && (
             <text
               x={x + itemW / 2}
-              y={y + itemH / 2 + labelFontSize * 0.35}
-              fontSize={labelFontSize}
-              fill="#111827"
+              y={y + itemH / 2 - labelFontSize * 0.65}
+              fontSize={metaFontSize}
+              fill="#1e40af"
               textAnchor="middle"
               alignmentBaseline="middle"
-              fontWeight="bold"
+              fontWeight="700"
             >
-              {cellData.sideBadge
-                ? `#${index + 1} [${cellData.sideBadge}] ${cellData.label}`
-                : `#${index + 1} ${cellData.label}`}
+              {modelText}
             </text>
           )}
+
+          <text
+            x={x + itemW / 2}
+            y={y + itemH / 2 + (modelText && pH > 32 && !hasVisibleArtwork ? labelFontSize * 0.25 : 0)}
+            fontSize={labelFontSize}
+            fill={isEmpty ? "#a1a1aa" : "#0f172a"}
+            textAnchor="middle"
+            alignmentBaseline="middle"
+            fontWeight="800"
+          >
+            {primaryText}
+          </text>
         </g>
       )}
     </g>

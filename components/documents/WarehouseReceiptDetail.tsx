@@ -485,7 +485,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
       title: `Yangi Xomashyo Pasporti: ${newSku}`,
       type: "warehouse-stock",
       module: "warehouse",
-      isUnsaved: true,
+      isUnsaved: false,
       documentData: {
         sku: newSku,
         name: "",

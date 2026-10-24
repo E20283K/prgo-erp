@@ -123,7 +123,7 @@ export interface OrderRow {
 }
 
 const INITIAL_COLUMNS: GridColumn[] = [
-  { id: "id", title: "Doc No.", width: 125, icon: GridColumnIcon.HeaderReference, hasMenu: true },
+  { id: "id", title: "Doc No.", width: 120, icon: GridColumnIcon.HeaderReference, hasMenu: true },
   { id: "preview", title: "Eskiz", width: 80, icon: GridColumnIcon.HeaderImage, hasMenu: true },
   { id: "sampleStatus", title: "Namuna holati", width: 160, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "site", title: "Hudud", width: 120, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
@@ -132,6 +132,7 @@ const INITIAL_COLUMNS: GridColumn[] = [
   { id: "product", title: "Product / Specification", width: 260, icon: GridColumnIcon.HeaderTextTemplate, hasMenu: true },
   { id: "qty", title: "Quantity", width: 110, icon: GridColumnIcon.HeaderNumber, hasMenu: true },
   { id: "status", title: "1C Status", width: 110, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
+  { id: "priority", title: "Priority", width: 95, icon: GridColumnIcon.HeaderIfThenElse, hasMenu: true },
   { id: "deadline", title: "Deadline", width: 115, icon: GridColumnIcon.HeaderDate, hasMenu: true },
 ];
 
@@ -156,6 +157,7 @@ export function DataGrid() {
       product: tGrid("colProduct"),
       qty: tGrid("colQty"),
       status: tGrid("colStatus"),
+      priority: tGrid("colPriority"),
       deadline: tGrid("colDeadline"),
     };
     return columns.map((col) => ({
@@ -166,7 +168,9 @@ export function DataGrid() {
 
   // Convert real productionQueue from workspaceStore/DB into OrderRow format
   const rows = React.useMemo<OrderRow[]>(() => {
-    return (productionQueue || []).map((wo: any) => {
+    return (productionQueue || [])
+      .filter((wo: any) => !wo.id?.startsWith("draft-") && !wo.id?.startsWith("temp-"))
+      .map((wo: any) => {
       // Collect ONLY real photographic proof photos from DB (no mock fallback!)
       const photos: string[] = [];
       if (Array.isArray(wo.photoUrls) && wo.photoUrls.length > 0) {
@@ -375,32 +379,14 @@ export function DataGrid() {
     const colId = column?.id;
 
     switch (colId) {
-      case "id": {
-        const isUrgent = rowData.priority === "Urgent";
-        const isHigh = rowData.priority === "High";
-        const textColor = isDark
-          ? isUrgent
-            ? "#f87171"
-            : isHigh
-            ? "#fb923c"
-            : "#60a5fa"
-          : isUrgent
-            ? "#dc2626"
-            : isHigh
-            ? "#ea580c"
-            : "#2563eb";
-
+      case "id":
         return {
           kind: GridCellKind.Text,
           data: rowData.id,
           displayData: rowData.id,
           allowOverlay: true,
-          themeOverride: {
-            textDark: textColor,
-            baseFontStyle: isUrgent ? "700 12px monospace" : "600 12px monospace",
-          },
+          themeOverride: { textDark: isDark ? "#60a5fa" : "#2563eb", baseFontStyle: "600 12px monospace" },
         };
-      }
       case "preview":
         return {
           kind: GridCellKind.Image,
@@ -644,7 +630,7 @@ export function DataGrid() {
       title: "Yangi buyruq (Qoralama)",
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: "",

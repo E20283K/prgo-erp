@@ -13,7 +13,187 @@ import {
   CtpSideRelation,
   OptimizerGoal,
   SmartOptimizerParams,
+  MachineFormatConstraints,
+  SheetCutOption,
+  ImpositionPlanSummary,
 } from "./types";
+
+function parseDimPair(str?: string): [number, number] | null {
+  if (!str) return null;
+  const matches = str.match(/(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d+(?:\.\d+)?)/);
+  if (!matches) return null;
+  const a = parseFloat(matches[1]);
+  const b = parseFloat(matches[2]);
+  if (isNaN(a) || isNaN(b) || a <= 0 || b <= 0) return null;
+  return [Math.max(a, b), Math.min(a, b)];
+}
+
+/**
+ * Resolves offset press max/min sheet size, plate dimensions, and default gripper
+ * from either a MachineRecord (DB/store) or machine name string (e.g. SM 52, GTO 52, SX 74, XL 106).
+ */
+export function resolveMachineConstraints(
+  pressMachineName?: string,
+  activeMachine?: any
+): MachineFormatConstraints {
+  const name = (activeMachine?.name || pressMachineName || "Heidelberg Speedmaster XL 106").trim();
+  const lower = name.toLowerCase();
+
+  const specs = activeMachine?.offsetSpecs;
+  const parsedMax = parseDimPair(specs?.maxSheetMm);
+  const parsedMin = parseDimPair(specs?.minSheetMm);
+  const parsedPlate = parseDimPair(specs?.plateSizeMm);
+
+  // Small B3 format: Heidelberg SM 52 / GTO 52 / PM 52
+  if (lower.includes("52") || lower.includes("gto") || lower.includes("sm 52") || lower.includes("sm52")) {
+    return {
+      machineName: name,
+      maxW: parsedMax ? parsedMax[0] : 520,
+      maxH: parsedMax ? parsedMax[1] : 370,
+      minW: parsedMin ? parsedMin[0] : 180,
+      minH: parsedMin ? parsedMin[1] : 105,
+      plateW: parsedPlate ? parsedPlate[0] : 510,
+      plateH: parsedPlate ? parsedPlate[1] : 400,
+      defaultGripper: 10,
+      printingUnits: specs?.printingUnits || (lower.includes("-2") ? 2 : 4),
+    };
+  }
+
+  // Medium B2 format: Heidelberg SX 74 / SM 74 / XL 75
+  if (lower.includes("74") || lower.includes("75") || lower.includes("b2")) {
+    return {
+      machineName: name,
+      maxW: parsedMax ? parsedMax[0] : 740,
+      maxH: parsedMax ? parsedMax[1] : 530,
+      minW: parsedMin ? parsedMin[0] : 340,
+      minH: parsedMin ? parsedMin[1] : 210,
+      plateW: parsedPlate ? parsedPlate[0] : 745,
+      plateH: parsedPlate ? parsedPlate[1] : 605,
+      defaultGripper: 12,
+      printingUnits: specs?.printingUnits || 4,
+    };
+  }
+
+  // Komori Lithrone G40 / L40 (1030 x 720)
+  if (lower.includes("komori") || lower.includes("g40") || lower.includes("102") || lower.includes("103")) {
+    return {
+      machineName: name,
+      maxW: parsedMax ? parsedMax[0] : 1030,
+      maxH: parsedMax ? parsedMax[1] : 720,
+      minW: parsedMin ? parsedMin[0] : 520,
+      minH: parsedMin ? parsedMin[1] : 360,
+      plateW: parsedPlate ? parsedPlate[0] : 1030,
+      plateH: parsedPlate ? parsedPlate[1] : 800,
+      defaultGripper: 12,
+      printingUnits: specs?.printingUnits || 4,
+    };
+  }
+
+  // Default B1 flagship: Heidelberg Speedmaster XL 106 / CD 102
+  return {
+    machineName: name,
+    maxW: parsedMax ? parsedMax[0] : 1060,
+    maxH: parsedMax ? parsedMax[1] : 750,
+    minW: parsedMin ? parsedMin[0] : 480,
+    minH: parsedMin ? parsedMin[1] : 340,
+    plateW: parsedPlate ? parsedPlate[0] : 1055,
+    plateH: parsedPlate ? parsedPlate[1] : 811,
+    defaultGripper: 15,
+    printingUnits: specs?.printingUnits || 8,
+  };
+}
+
+/**
+ * Checks whether a press sheet (w x h) fits inside the machine's [min, max] format constraints.
+ */
+export function doesSheetFitMachine(
+  sheetW: number,
+  sheetH: number,
+  machine: MachineFormatConstraints
+): boolean {
+  const longSide = Math.max(sheetW, sheetH);
+  const shortSide = Math.min(sheetW, sheetH);
+  const maxLong = Math.max(machine.maxW, machine.maxH);
+  const maxShort = Math.min(machine.maxW, machine.maxH);
+  const minLong = Math.max(machine.minW, machine.minH);
+  const minShort = Math.min(machine.minW, machine.minH);
+
+  return (
+    longSide <= maxLong &&
+    shortSide <= maxShort &&
+    longSide >= minLong &&
+    shortSide >= minShort
+  );
+}
+
+/**
+ * Evaluates standard guillotine divisions (1/1, 1/2, 1/3, 1/4, 1/6, 1/8, 1/9) of a parent sheet
+ * and determines how many items fit per press sheet & per parent sheet.
+ */
+export function calculateSheetCutOptions(
+  parentW: number,
+  parentH: number,
+  prodW: number,
+  prodH: number,
+  bleed: number,
+  gap: number,
+  margins: { top: number; bottom: number; left: number; right: number; gripper: number; gripperEdge: GripperEdge },
+  machine: MachineFormatConstraints
+): SheetCutOption[] {
+  const pLong = Math.max(parentW, parentH);
+  const pShort = Math.min(parentW, parentH);
+
+  const rawSplits: { divisor: number; label: string; w: number; h: number }[] = [
+    { divisor: 1, label: "1/1 (Butun list)", w: pLong, h: pShort },
+    { divisor: 2, label: "1/2 kesim", w: pShort, h: Math.floor(pLong / 2) },
+    { divisor: 3, label: "1/3 kesim", w: pShort, h: Math.floor(pLong / 3) },
+    { divisor: 4, label: "1/4 kesim", w: Math.floor(pLong / 2), h: Math.floor(pShort / 2) },
+    { divisor: 6, label: "1/6 kesim", w: Math.floor(pLong / 3), h: Math.floor(pShort / 2) },
+    { divisor: 8, label: "1/8 kesim", w: Math.floor(pShort / 2), h: Math.floor(pLong / 4) },
+    { divisor: 9, label: "1/9 kesim", w: Math.floor(pLong / 3), h: Math.floor(pShort / 3) },
+  ];
+
+  return rawSplits.map((sp) => {
+    const pressW = Math.max(sp.w, sp.h);
+    const pressH = Math.min(sp.w, sp.h);
+    const fitsMachine = doesSheetFitMachine(pressW, pressH, machine);
+
+    const prepMargins = calculatePrepressMargins(
+      pressW,
+      pressH,
+      margins.top,
+      margins.bottom,
+      margins.left,
+      margins.right,
+      margins.gripper,
+      margins.gripperEdge
+    );
+
+    const layA = calculateImposition(pressW, pressH, prodW, prodH, bleed, gap, "A", prepMargins);
+    const layB = calculateImposition(pressW, pressH, prodW, prodH, bleed, gap, "B", prepMargins);
+    const bestLay = layB.pieces > layA.pieces ? layB : layA;
+
+    return {
+      divisor: sp.divisor,
+      label: `${sp.label} (${pressW}×${pressH})`,
+      pressW,
+      pressH,
+      fitsMachine,
+      wastePercent: Number(Math.max(0, 100 - bestLay.utilization).toFixed(1)),
+      piecesPerPressSheet: bestLay.pieces,
+      piecesPerParentSheet: bestLay.pieces * sp.divisor,
+    };
+  });
+}
+
+export function pickOptimalCutOption(options: SheetCutOption[]): SheetCutOption {
+  const fitting = options.filter((o) => o.fitsMachine && o.piecesPerPressSheet > 0);
+  if (fitting.length === 0) {
+    return options.find((o) => o.fitsMachine) || options[0];
+  }
+  // Prefer the largest sheet (smallest divisor) that fits the press unless a smaller cut yields strictly more pieces per parent sheet with reasonable capacity
+  return fitting[0];
+}
 
 export function calculatePrepressMargins(
   sheetW: number,
@@ -39,13 +219,13 @@ export function calculatePrepressMargins(
 
   if (gripper > 0) {
     if (activeGripperEdge === "Top") {
-      gt = gripper;
+      gt = Math.max(0, gripper - mt);
     } else if (activeGripperEdge === "Bottom") {
-      gb = gripper;
+      gb = Math.max(0, gripper - mb);
     } else if (activeGripperEdge === "Left") {
-      gl = gripper;
+      gl = Math.max(0, gripper - ml);
     } else if (activeGripperEdge === "Right") {
-      gr = gripper;
+      gr = Math.max(0, gripper - mr);
     }
   }
 
@@ -180,6 +360,18 @@ export function allocateOptimalSlotsForPlate(
 }
 
 /**
+ * Deterministic Pseudo-Random generator so optimizer produces stable, repeatable plans.
+ */
+function createSeededRandom(seed: number) {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+/**
  * Smart Gang Run Optimizer using Simulated Annealing:
  * Automatically groups items into plates and distributes slots (1x, 2x, 4x, etc.)
  * to minimize sheet overproduction and total press runs.
@@ -195,19 +387,17 @@ export function smartGangRunOptimizer(
 ): PlateConfig[] {
   const cap = Math.max(1, capacity);
   if (adjustedSizes.length === 0) {
-    return [{ id: `plate-1-${Date.now()}`, name: "Forma 1", manualSlots: {} }];
+    return [{ id: "plate-1", name: "Forma 1", manualSlots: {} }];
   }
 
   const { goal = "min_waste", targetPlateCount } = params;
 
-  // Determine possible plate counts to search
   const minPlates = Math.max(1, Math.ceil(adjustedSizes.length / cap));
   let candidateKList: number[] = [];
 
   if (targetPlateCount && targetPlateCount >= 1) {
     candidateKList = [Math.max(1, targetPlateCount)];
   } else {
-    // Search from minPlates up to min(adjustedSizes.length, minPlates + 4)
     const maxK = Math.min(adjustedSizes.length, minPlates + 4);
     for (let k = minPlates; k <= maxK; k++) {
       candidateKList.push(k);
@@ -224,6 +414,7 @@ export function smartGangRunOptimizer(
   }
 
   let bestGlobalSolution: Solution | null = null;
+  const rand = createSeededRandom(adjustedSizes.length * 101 + cap * 37 + (goal === "min_plates" ? 7 : 13));
 
   for (const k of candidateKList) {
     const sorted = [...adjustedSizes].sort((a, b) => b.quantity - a.quantity);
@@ -234,8 +425,7 @@ export function smartGangRunOptimizer(
     let bestKTotalSheets = Infinity;
     let bestKTotalWaste = Infinity;
 
-    // Run 10 simulated annealing restarts
-    const restarts = 10;
+    const restarts = 6;
     for (let restart = 0; restart < restarts; restart++) {
       const groups: (SizeDistribution & { originalQuantity?: number })[][] = Array.from(
         { length: k },
@@ -243,21 +433,18 @@ export function smartGangRunOptimizer(
       );
 
       if (restart === 0) {
-        // Chunk sorted items
         const chunkSize = Math.ceil(sorted.length / k);
         for (let i = 0; i < sorted.length; i++) {
           const gIdx = Math.min(k - 1, Math.floor(i / chunkSize));
           groups[gIdx].push(sorted[i]);
         }
       } else if (restart === 1) {
-        // Block chunks bounded by capacity
         for (let i = 0; i < sorted.length; i++) {
           const gIdx = Math.min(k - 1, Math.floor(i / cap));
           groups[gIdx].push(sorted[i]);
         }
       } else {
-        // Balanced random permutation
-        const shuffled = [...sorted].sort(() => Math.random() - 0.5);
+        const shuffled = [...sorted].sort(() => rand() - 0.5);
         shuffled.forEach((it, i) => {
           const gIdx = i % k;
           groups[gIdx].push(it);
@@ -280,31 +467,30 @@ export function smartGangRunOptimizer(
           }
         }
 
-        const wasteWeight = goal === "min_waste" ? 1.0 : 0.4;
-        const plateWeight = goal === "min_plates" ? 500 : 50;
+        const wasteWeight = goal === "min_waste" ? 1.2 : 0.25;
+        const plateWeight = goal === "min_plates" ? 2500 : 120;
         const cost = totWaste * wasteWeight + totSheets * 0.4 + k * plateWeight + overflowPenalty;
 
         return { slotsMaps, totSheets, totWaste, cost };
       };
 
       let curEval = evalGroups(groups);
-      let T = 350.0;
-      const coolingRate = 0.99;
+      let T = 300.0;
+      const coolingRate = 0.985;
 
-      // 1000 annealing steps
-      for (let step = 0; step < 1000; step++) {
+      for (let step = 0; step < 500; step++) {
         T *= coolingRate;
-        const g1 = Math.floor(Math.random() * k);
-        let g2 = Math.floor(Math.random() * k);
-        while (g2 === g1 && k > 1) g2 = Math.floor(Math.random() * k);
+        const g1 = Math.floor(rand() * k);
+        let g2 = Math.floor(rand() * k);
+        while (g2 === g1 && k > 1) g2 = Math.floor(rand() * k);
 
         if (groups[g1].length === 0) continue;
 
-        const isSwap = Math.random() > 0.45 && groups[g2].length > 0;
+        const isSwap = rand() > 0.45 && groups[g2].length > 0;
 
         if (isSwap) {
-          const idx1 = Math.floor(Math.random() * groups[g1].length);
-          const idx2 = Math.floor(Math.random() * groups[g2].length);
+          const idx1 = Math.floor(rand() * groups[g1].length);
+          const idx2 = Math.floor(rand() * groups[g2].length);
 
           const it1 = groups[g1][idx1];
           const it2 = groups[g2][idx2];
@@ -315,26 +501,23 @@ export function smartGangRunOptimizer(
           const nextEval = evalGroups(groups);
           const delta = nextEval.cost - curEval.cost;
 
-          if (delta < 0 || Math.random() < Math.exp(-delta / Math.max(1, T))) {
+          if (delta < 0 || rand() < Math.exp(-delta / Math.max(1, T))) {
             curEval = nextEval;
           } else {
-            // Revert
             groups[g1][idx1] = it1;
             groups[g2][idx2] = it2;
           }
         } else if (groups[g1].length > 1 && groups[g2].length < cap) {
-          // Move from g1 to g2
-          const idx1 = Math.floor(Math.random() * groups[g1].length);
+          const idx1 = Math.floor(rand() * groups[g1].length);
           const [moved] = groups[g1].splice(idx1, 1);
           groups[g2].push(moved);
 
           const nextEval = evalGroups(groups);
           const delta = nextEval.cost - curEval.cost;
 
-          if (delta < 0 || Math.random() < Math.exp(-delta / Math.max(1, T))) {
+          if (delta < 0 || rand() < Math.exp(-delta / Math.max(1, T))) {
             curEval = nextEval;
           } else {
-            // Revert
             groups[g2].pop();
             groups[g1].splice(idx1, 0, moved);
           }
@@ -365,24 +548,19 @@ export function smartGangRunOptimizer(
   }
 
   if (!bestGlobalSolution) {
-    return [{ id: `plate-1-${Date.now()}`, name: "Forma 1", manualSlots: {} }];
+    return [{ id: "plate-1", name: "Forma 1", manualSlots: {} }];
   }
 
-  // Filter out any empty groups
   const validGroups = bestGlobalSolution.groups
     .map((grp, idx) => ({ items: grp, slotsMap: bestGlobalSolution!.slotsMaps[idx] }))
     .filter((g) => g.items.length > 0);
 
-  const result: PlateConfig[] = validGroups.map((g, idx) => {
-    return {
-      id: `plate-${idx + 1}-${Date.now()}`,
-      name: `Forma ${idx + 1}`,
-      manualSlots: g.slotsMap,
-      assignedSizeIds: g.items.map((it) => it.id),
-    };
-  });
-
-  return result;
+  return validGroups.map((g, idx) => ({
+    id: `plate-${idx + 1}`,
+    name: `Forma ${idx + 1}`,
+    manualSlots: g.slotsMap,
+    assignedSizeIds: g.items.map((it) => it.id),
+  }));
 }
 
 export function buildPartitionedPlates(
@@ -393,7 +571,7 @@ export function buildPartitionedPlates(
 ): PlateConfig[] {
   const cap = Math.max(1, effectivePieces);
   if (adjustedSizes.length === 0) {
-    return [{ id: `plate-1-${Date.now()}`, name: "Forma 1", manualSlots: {} }];
+    return [{ id: "plate-1", name: "Forma 1", manualSlots: {} }];
   }
 
   if (strategy === "smart_gang_optimizer") {
@@ -401,11 +579,10 @@ export function buildPartitionedPlates(
   }
 
   if (strategy === "by_model") {
-    // Group SKUs by model name
     const groups = new Map<string, (SizeDistribution & { originalQuantity?: number })[]>();
     adjustedSizes.forEach((s) => {
       const { model } = parseModelAndSize(s);
-      const key = model || "Asosiy model";
+      const key = model || "Asosiy";
       const list = groups.get(key) || [];
       list.push(s);
       groups.set(key, list);
@@ -415,22 +592,23 @@ export function buildPartitionedPlates(
     let pCounter = 1;
     groups.forEach((groupItems, modelName) => {
       if (groupItems.length <= cap) {
+        const alloc = allocateOptimalSlotsForPlate(groupItems, cap);
         result.push({
-          id: `plate-${pCounter}-${Date.now()}`,
+          id: `plate-${pCounter}`,
           name: groups.size > 1 ? `Forma ${pCounter} (${modelName})` : `Forma ${pCounter}`,
-          manualSlots: {},
+          manualSlots: alloc.slotsMap,
           assignedSizeIds: groupItems.map((i) => i.id),
         });
         pCounter++;
       } else {
-        // Model itself has more sizes than 1 sheet capacity -> split model into sub-plates
         const subCount = Math.ceil(groupItems.length / cap);
         for (let sub = 0; sub < subCount; sub++) {
           const slice = groupItems.slice(sub * cap, (sub + 1) * cap);
+          const alloc = allocateOptimalSlotsForPlate(slice, cap);
           result.push({
-            id: `plate-${pCounter}-${Date.now()}-${sub}`,
+            id: `plate-${pCounter}-${sub}`,
             name: `Forma ${pCounter} (${modelName} · ${sub + 1}/${subCount})`,
-            manualSlots: {},
+            manualSlots: alloc.slotsMap,
             assignedSizeIds: slice.map((i) => i.id),
           });
           pCounter++;
@@ -441,7 +619,6 @@ export function buildPartitionedPlates(
   }
 
   if (strategy === "by_volume") {
-    // Sort SKUs by quantity descending so high-volume items and low-volume items are separated
     const sorted = [...adjustedSizes].sort((a, b) => b.quantity - a.quantity);
     const maxQ = sorted[0]?.quantity || 0;
     const minQ = sorted[sorted.length - 1]?.quantity || 0;
@@ -456,12 +633,13 @@ export function buildPartitionedPlates(
     for (let i = 0; i < targetPlates; i++) {
       const slice = sorted.slice(i * chunkSize, (i + 1) * chunkSize);
       if (slice.length > 0) {
+        const alloc = allocateOptimalSlotsForPlate(slice, cap);
         const labelSuffix =
-          targetPlates === 2 ? (i === 0 ? "High-Run" : "Low-Run") : `Batch ${i + 1}`;
+          targetPlates === 2 ? (i === 0 ? "Katta tiraj" : "Kichik tiraj") : `Guruh ${i + 1}`;
         result.push({
-          id: `plate-${i + 1}-${Date.now()}`,
+          id: `plate-${i + 1}`,
           name: `Forma ${i + 1} (${labelSuffix})`,
-          manualSlots: {},
+          manualSlots: alloc.slotsMap,
           assignedSizeIds: slice.map((s) => s.id),
         });
       }
@@ -469,17 +647,18 @@ export function buildPartitionedPlates(
     return result;
   }
 
-  // Default: "gang_capacity" (Pack as many SKUs per plate as effectivePieces allows)
+  // Default: "gang_capacity"
   const neededPlates = Math.max(1, Math.ceil(adjustedSizes.length / cap));
   const chunkSize = Math.ceil(adjustedSizes.length / neededPlates);
   const result: PlateConfig[] = [];
   for (let i = 0; i < neededPlates; i++) {
     const slice = adjustedSizes.slice(i * chunkSize, (i + 1) * chunkSize);
     if (slice.length > 0) {
+      const alloc = allocateOptimalSlotsForPlate(slice, cap);
       result.push({
-        id: `plate-${i + 1}-${Date.now()}`,
+        id: `plate-${i + 1}`,
         name: `Forma ${i + 1}`,
-        manualSlots: {},
+        manualSlots: alloc.slotsMap,
         assignedSizeIds: slice.map((s) => s.id),
       });
     }
@@ -493,6 +672,26 @@ export interface PlateDistributionOptions {
   backColorsCount?: number;
 }
 
+export function computeTotalCtpPlatesForConfig(
+  numPlates: number,
+  ctpSideRelation: CtpSideRelation,
+  frontColorsCount: number,
+  backColorsCount: number
+): number {
+  if (numPlates <= 0) return 0;
+  // When backColorsCount === 0 (4+0 single-sided), every distinct plate form needs its own front plates
+  if (backColorsCount <= 0 || ctpSideRelation === "single_sided") {
+    return numPlates * frontColorsCount;
+  }
+  if (ctpSideRelation === "work_and_turn") {
+    return numPlates * Math.max(frontColorsCount, backColorsCount);
+  }
+  if (ctpSideRelation === "shared_front_variable_back") {
+    return frontColorsCount + numPlates * backColorsCount;
+  }
+  return numPlates * (frontColorsCount + backColorsCount);
+}
+
 export function calculatePlateDistribution(
   pieces: number,
   plates: PlateConfig[],
@@ -503,8 +702,11 @@ export function calculatePlateDistribution(
   const {
     ctpSideRelation = "shared_front_variable_back",
     frontColorsCount = 4,
-    backColorsCount = 4,
+    backColorsCount = 0,
   } = options;
+
+  const effectiveRelation: CtpSideRelation =
+    backColorsCount <= 0 ? "single_sided" : ctpSideRelation;
 
   if (pieces === 0) {
     return plates.map((p) => ({
@@ -527,23 +729,35 @@ export function calculatePlateDistribution(
 
   return plates.map((plate, pIdx) => {
     if (adjustedSizes.length === 0) {
-      // Generic mode without variations
       const targetQ = Math.ceil(adjustedGeneralQuantity / totalPlates);
       const reqSheets = Math.ceil(targetQ / pieces);
       const yieldQ = reqSheets * pieces;
       const overQ = yieldQ - targetQ;
 
-      // CTP plates per this plate
-      const fPlates = ctpSideRelation === "shared_front_variable_back" ? (pIdx === 0 ? frontColorsCount : 0) : frontColorsCount;
-      const bPlates = ctpSideRelation === "work_and_turn" ? 0 : backColorsCount;
-      const totCtp = ctpSideRelation === "work_and_turn" ? Math.max(frontColorsCount, backColorsCount) : fPlates + bPlates;
+      let fPlates = frontColorsCount;
+      let bPlates = backColorsCount;
+      let totCtp = frontColorsCount + backColorsCount;
+
+      if (effectiveRelation === "single_sided") {
+        fPlates = frontColorsCount;
+        bPlates = 0;
+        totCtp = frontColorsCount;
+      } else if (effectiveRelation === "work_and_turn") {
+        totCtp = Math.max(frontColorsCount, backColorsCount);
+        fPlates = totCtp;
+        bPlates = 0;
+      } else if (effectiveRelation === "shared_front_variable_back") {
+        fPlates = pIdx === 0 ? frontColorsCount : 0;
+        bPlates = backColorsCount;
+        totCtp = fPlates + bPlates;
+      }
 
       return {
         ...plate,
         assignments: [
           {
             sizeId: "generic",
-            sizeLabel: "Main Product",
+            sizeLabel: "Asosiy mahsulot",
             targetQuantity: targetQ,
             slots: pieces,
             yieldQuantity: yieldQ,
@@ -565,7 +779,6 @@ export function calculatePlateDistribution(
       };
     }
 
-    // Determine which sizes belong to this plate
     let plateSizes = adjustedSizes;
     if (plate.assignedSizeIds && plate.assignedSizeIds.length > 0) {
       const idSet = new Set(plate.assignedSizeIds);
@@ -582,99 +795,28 @@ export function calculatePlateDistribution(
       }
     }
 
-    const totalTargetInPlate = plateSizes.reduce((sum, s) => sum + s.quantity, 0);
-
-    // Check manual overrides for this plate
-    let remainingSlots = pieces;
+    // Start with optimal auto-allocated slots for this plate's items, then apply any explicit manual overrides
+    const autoAlloc = allocateOptimalSlotsForPlate(plateSizes, pieces);
     const assignments: SlotAssignment[] = [];
-    let hasManual = false;
-    let overflowSkusCount = 0;
+    let assignedTotal = 0;
 
     for (const s of plateSizes) {
-      if (plate.manualSlots[s.id] !== undefined) {
-        hasManual = true;
-        break;
-      }
+      const hasManualOverride = plate.manualSlots[s.id] !== undefined;
+      const slots = hasManualOverride ? plate.manualSlots[s.id] : (autoAlloc.slotsMap[s.id] ?? 1);
+      const { model, sizeCode } = parseModelAndSize(s);
+      assignments.push({
+        sizeId: s.id,
+        sizeLabel: s.size,
+        model: model || undefined,
+        sizeCode: sizeCode || s.size,
+        targetQuantity: s.quantity,
+        slots,
+      });
+      assignedTotal += slots;
     }
 
-    if (hasManual) {
-      for (const s of plateSizes) {
-        const slots = plate.manualSlots[s.id] ?? 0;
-        const { model, sizeCode } = parseModelAndSize(s);
-        assignments.push({
-          sizeId: s.id,
-          sizeLabel: s.size,
-          model: model || undefined,
-          sizeCode: sizeCode || s.size,
-          targetQuantity: s.quantity,
-          slots,
-        });
-        remainingSlots -= slots;
-      }
-    } else if (plateSizes.length > pieces) {
-      // More SKUs assigned to this single plate than physical slots on the sheet!
-      overflowSkusCount = plateSizes.length - pieces;
-      plateSizes.forEach((s, idx) => {
-        const slots = idx < pieces ? 1 : 0;
-        const { model, sizeCode } = parseModelAndSize(s);
-        assignments.push({
-          sizeId: s.id,
-          sizeLabel: s.size,
-          model: model || undefined,
-          sizeCode: sizeCode || s.size,
-          targetQuantity: s.quantity,
-          slots,
-        });
-      });
-      remainingSlots = 0;
-    } else {
-      // Proportional Auto-Distribution when plateSizes.length <= pieces
-      const exactSlots = plateSizes.map((s) => ({
-        ...s,
-        exact: totalTargetInPlate > 0 ? (s.quantity / totalTargetInPlate) * pieces : 0,
-      }));
-
-      let assigned = 0;
-      exactSlots.forEach((s) => {
-        const slots = Math.max(1, Math.floor(s.exact)); // at least 1 slot
-        const { model, sizeCode } = parseModelAndSize(s);
-        assignments.push({
-          sizeId: s.id,
-          sizeLabel: s.size,
-          model: model || undefined,
-          sizeCode: sizeCode || s.size,
-          targetQuantity: s.quantity,
-          slots,
-        });
-        assigned += slots;
-      });
-
-      remainingSlots = pieces - assigned;
-
-      if (remainingSlots > 0) {
-        const remainders = exactSlots
-          .map((s, i) => ({
-            index: i,
-            rem: s.exact - Math.floor(s.exact),
-          }))
-          .sort((a, b) => b.rem - a.rem);
-
-        for (let i = 0; i < remainingSlots; i++) {
-          const idx = remainders[i % remainders.length].index;
-          assignments[idx].slots += 1;
-        }
-        remainingSlots = 0;
-      } else if (remainingSlots < 0) {
-        let over = Math.abs(remainingSlots);
-        for (let i = assignments.length - 1; i >= 0 && over > 0; i--) {
-          while (assignments[i].slots > 1 && over > 0) {
-            assignments[i].slots -= 1;
-            over -= 1;
-          }
-        }
-        remainingSlots = 0;
-      }
-    }
+    const remainingSlots = pieces - assignedTotal;
+    const overflowSkusCount = assignments.filter((a) => a.slots === 0).length;
 
     // Calculate required sheets for this plate
     let requiredSheets = 0;
@@ -688,7 +830,10 @@ export function calculatePlateDistribution(
       }
     });
 
-    // Populate yields and overproduction for each assignment
+    if (plate.customSheetRun && plate.customSheetRun > 0) {
+      requiredSheets = plate.customSheetRun;
+    }
+
     let totalTarget = 0;
     let totalYield = 0;
     let totalOver = 0;
@@ -706,23 +851,23 @@ export function calculatePlateDistribution(
 
     const totalOverPct = totalTarget > 0 ? (totalOver / totalTarget) * 100 : 0;
 
-    // CTP Plates calculation for this specific plate
     let ctpFrontPlates = 0;
     let ctpBackPlates = 0;
     let totalCtpPlates = 0;
 
-    if (ctpSideRelation === "work_and_turn") {
-      // 1 plate set per plate
+    if (effectiveRelation === "single_sided") {
+      ctpFrontPlates = frontColorsCount;
+      ctpBackPlates = 0;
+      totalCtpPlates = frontColorsCount;
+    } else if (effectiveRelation === "work_and_turn") {
       totalCtpPlates = Math.max(frontColorsCount, backColorsCount);
       ctpFrontPlates = totalCtpPlates;
       ctpBackPlates = 0;
-    } else if (ctpSideRelation === "shared_front_variable_back") {
-      // Front is shared once overall, but for this plate we attribute front to plate 1
+    } else if (effectiveRelation === "shared_front_variable_back") {
       ctpFrontPlates = pIdx === 0 ? frontColorsCount : 0;
       ctpBackPlates = backColorsCount;
       totalCtpPlates = ctpFrontPlates + ctpBackPlates;
     } else {
-      // Independent
       ctpFrontPlates = frontColorsCount;
       ctpBackPlates = backColorsCount;
       totalCtpPlates = ctpFrontPlates + ctpBackPlates;
@@ -743,6 +888,78 @@ export function calculatePlateDistribution(
       totalCtpPlates,
     };
   });
+}
+
+/**
+ * Pre-calculates real comparison metrics for all imposition plan options
+ * so the user sees exact form count, sheet count, and CTP count inside the selector.
+ */
+export function compareImpositionPlans(
+  effectivePieces: number,
+  adjustedSizes: (SizeDistribution & { originalQuantity?: number })[],
+  adjustedGeneralQuantity: number,
+  cutDivisor: number,
+  ctpSideRelation: CtpSideRelation,
+  frontColorsCount: number,
+  backColorsCount: number,
+  hasMultipleModels: boolean
+): ImpositionPlanSummary[] {
+  const cap = Math.max(1, effectivePieces);
+  const div = Math.max(1, cutDivisor);
+
+  const evalStrategy = (
+    id: "min_waste" | "min_plates" | "by_model",
+    label: string,
+    platesCfg: PlateConfig[]
+  ): ImpositionPlanSummary => {
+    const calc = calculatePlateDistribution(cap, platesCfg, adjustedSizes, adjustedGeneralQuantity, {
+      ctpSideRelation,
+      frontColorsCount,
+      backColorsCount,
+    });
+    const totalPressSheets = calc.reduce((s, p) => s + p.requiredSheets, 0);
+    const totalParentSheets = Math.ceil(totalPressSheets / div);
+    const totalTarget = calc.reduce((s, p) => s + (p.totalTarget || 0), 0);
+    const totalOver = calc.reduce((s, p) => s + (p.totalOverproduction || 0), 0);
+    const overPct = totalTarget > 0 ? (totalOver / totalTarget) * 100 : 0;
+    const totalCtpPlates = computeTotalCtpPlatesForConfig(
+      calc.length,
+      ctpSideRelation,
+      frontColorsCount,
+      backColorsCount
+    );
+
+    return {
+      id,
+      label,
+      platesCount: calc.length,
+      totalPressSheets,
+      totalParentSheets,
+      totalCtpPlates,
+      overproductionPct: Number(overPct.toFixed(1)),
+    };
+  };
+
+  const minWastePlates = buildPartitionedPlates("smart_gang_optimizer", cap, adjustedSizes, {
+    capacity: cap,
+    goal: "min_waste",
+  });
+  const minPlatesCfg = buildPartitionedPlates("smart_gang_optimizer", cap, adjustedSizes, {
+    capacity: cap,
+    goal: "min_plates",
+  });
+
+  const list: ImpositionPlanSummary[] = [
+    evalStrategy("min_waste", "Min. chiqindi", minWastePlates),
+    evalStrategy("min_plates", "Kamroq qolip", minPlatesCfg),
+  ];
+
+  if (hasMultipleModels) {
+    const byModelCfg = buildPartitionedPlates("by_model", cap, adjustedSizes);
+    list.push(evalStrategy("by_model", "Modellar bo'yicha", byModelCfg));
+  }
+
+  return list;
 }
 
 export function calculateOuterTrimMarks(
@@ -801,12 +1018,10 @@ export function calculateParentSheetCuts(
     return { cuts: 0, orientation: "direct", wastePercent: 100, parentSheetsNeeded: 0 };
   }
 
-  // Direct alignment (same grain / orientation)
   const directCols = Math.floor(parentW / childW);
   const directRows = Math.floor(parentH / childH);
   const directCuts = directCols * directRows;
 
-  // Rotated alignment (90 deg)
   const rotCols = Math.floor(parentW / childH);
   const rotRows = Math.floor(parentH / childW);
   const rotCuts = rotCols * rotRows;

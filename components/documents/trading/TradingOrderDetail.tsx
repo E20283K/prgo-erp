@@ -305,7 +305,7 @@ export function TradingOrderDetail({ tab }: { tab: DocumentTab }) {
       title: `${saleId} (${customer})`,
       type: "trading-sale",
       module: "trading",
-      isUnsaved: true,
+      isUnsaved: false,
       documentData: {
         id: saleId,
         docNo: saleId,

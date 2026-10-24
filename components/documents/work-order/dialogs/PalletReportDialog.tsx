@@ -45,7 +45,9 @@ interface PalletReportDialogProps {
   previousOpGoodOutput?: number; // Previous step's good output sheets
   existingOpEvents: ShiftEvent[];
   piecesPerSheet?: number;
+  editingEvent?: ShiftEvent | null;
   onSaveEvent: (eventData: {
+    eventId?: string;
     batchLabel: string;
     shift: "1-smena" | "2-smena";
     operator: string;
@@ -59,6 +61,7 @@ interface PalletReportDialogProps {
     note: string;
     markStepFinished?: boolean;
   }) => void;
+  onOpenPrintTag?: (event: ShiftEvent) => void;
 }
 
 const DEFECT_REASON_OPTIONS: ComboboxItem[] = [
@@ -80,7 +83,9 @@ export function PalletReportDialog({
   previousOpGoodOutput = 0,
   existingOpEvents,
   piecesPerSheet = 1,
+  editingEvent = null,
   onSaveEvent,
+  onOpenPrintTag,
 }: PalletReportDialogProps) {
   // Current time default
   const now = new Date();
@@ -126,15 +131,27 @@ export function PalletReportDialog({
   // Synchronize when opening
   useEffect(() => {
     if (isOpen) {
-      setBatchLabel(`Palet #${existingOpEvents.length + 1}`);
-      setInputQty(suggestedInputQty);
-      setMakeReadyQty(0);
-      setDefectQty(0);
-      setWasteReason("");
-      setCustomGoodQty(null);
-      setSelectedOperator(selectedOp.operator || FLOOR_OPERATORS[0]);
+      if (editingEvent) {
+        setBatchLabel(editingEvent.batchLabel || `Palet #${existingOpEvents.length}`);
+        setShift(editingEvent.shift || "1-smena");
+        setInputQty(editingEvent.inputQty || 0);
+        setMakeReadyQty(editingEvent.makeReadyQty || 0);
+        setDefectQty(editingEvent.defectQty || 0);
+        setWasteReason(editingEvent.wasteReason || "");
+        setTime(editingEvent.time || defaultTime);
+        setCustomGoodQty(editingEvent.goodQty ?? null);
+        setSelectedOperator(editingEvent.operator || selectedOp.operator || FLOOR_OPERATORS[0]);
+      } else {
+        setBatchLabel(`Palet #${existingOpEvents.length + 1}`);
+        setInputQty(suggestedInputQty);
+        setMakeReadyQty(0);
+        setDefectQty(0);
+        setWasteReason("");
+        setCustomGoodQty(null);
+        setSelectedOperator(selectedOp.operator || FLOOR_OPERATORS[0]);
+      }
     }
-  }, [isOpen, existingOpEvents.length, suggestedInputQty, selectedOp.operator]);
+  }, [isOpen, editingEvent, existingOpEvents.length, suggestedInputQty, selectedOp.operator, defaultTime]);
 
   // Net good output calculation
   const calculatedGoodQty = useMemo(() => {
@@ -183,6 +200,7 @@ export function PalletReportDialog({
       : `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} l. | Priladka: ${makeReadyQty} | Brak: ${defectQty} | Chiqish: ${calculatedGoodQty.toLocaleString()} l.`;
 
     onSaveEvent({
+      eventId: editingEvent?.id,
       batchLabel,
       shift,
       operator: selectedOperator,
@@ -211,20 +229,22 @@ export function PalletReportDialog({
               </div>
               <div>
                 <DialogTitle className="text-xs font-bold text-foreground flex items-center gap-2">
-                  <span>Bosqich / Palet Hisobotini Kiritish</span>
+                  <span>{editingEvent ? "Palet tahrirlash" : "Palet kiritish"}</span>
                   <Badge variant="outline" className="font-mono text-[10px] py-0 h-4">
-                    Step {selectedOp.stepNumber}
+                    #{selectedOp.stepNumber}
                   </Badge>
                 </DialogTitle>
                 <DialogDescription className="text-[11px] text-muted-foreground mt-0.5">
-                  {selectedOp.name} • <span className="font-semibold text-foreground">{selectedOp.machine}</span>
+                  {selectedOp.name}
                 </DialogDescription>
               </div>
             </div>
 
-            <Select value={shift} onValueChange={(val: any) => setShift(val)}>
-              <SelectTrigger className="h-7 text-xs w-[110px] bg-background font-medium">
-                <SelectValue />
+            <Select value={shift} onValueChange={(val: any) => { if (val) setShift(val); }}>
+              <SelectTrigger className="h-7 text-xs w-[115px] bg-background font-medium">
+                <SelectValue>
+                  {shift === "1-smena" ? "1-smena (Kun)" : "2-smena (Tun)"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="1-smena" className="text-xs">1-smena (Kun)</SelectItem>
@@ -236,6 +256,20 @@ export function PalletReportDialog({
 
         {/* Body Content */}
         <div className="p-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
+          {/* Discrepancy Warning Banner */}
+          {previousOpGoodOutput > 0 && inputQty > previousOpGoodOutput && (
+            <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between text-rose-700 dark:text-rose-400">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 shrink-0 text-rose-600" />
+                <span className="text-[11px] font-semibold">
+                  Hajm tafovuti (Discrepancy Warning): Kirayotgan miqdor oldingi bosqich toza qoldig&apos;idan ({previousOpGoodOutput.toLocaleString()} list) ko&apos;p!
+                </span>
+              </div>
+              <span className="font-mono text-xs font-bold shrink-0">
+                +{(inputQty - previousOpGoodOutput).toLocaleString()} list ortiqcha
+              </span>
+            </div>
+          )}
           {/* Cascade Context Banner (Previous Step Good Output Link) */}
           {previousOp && (
             <div className="p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/20 flex items-center justify-between">
@@ -285,12 +319,12 @@ export function PalletReportDialog({
 
             <div className="col-span-4 space-y-1">
               <label className="text-[11px] font-medium text-muted-foreground">Mas&apos;ul Operator</label>
-              <Select value={selectedOperator} onValueChange={(val) => setSelectedOperator(val ?? "")}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
+              <Select value={selectedOperator} onValueChange={(val) => { if (val) setSelectedOperator(val); }}>
+                <SelectTrigger className="h-8 text-xs w-full">
+                  <SelectValue>{selectedOperator || "Operator tanlang"}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {FLOOR_OPERATORS.map((op) => (
+                  {quickOperators.map((op) => (
                     <SelectItem key={op} value={op} className="text-xs">
                       {op}
                     </SelectItem>

@@ -75,9 +75,30 @@ This skill establishes zero tolerance for AI slop across the entire codebase.
 
 ---
 
-### 1.5. NO REDUNDANT PROSE OR CHATTER
-- **AI Slop Symptom**: Long explanatory paragraphs repeating what the label already explains (e.g. *"Ushbu maydonga materialning nomini kiriting va ombordan to'g'ri tanlanganligiga ishonch hosil qiling"*).
-- **The Remedy**: Crisp 1-3 word labels, concise placeholders, or a clean `Tooltip` for complex business logic.
+### 1.5. RADICAL MINIMALISM: ZERO SUBTITLES, ZERO DESCRIPTIVE PROSE, ZERO PARENTHETICAL TRANSLATIONS
+- **AI Slop Symptom 1 (Descriptive Subtitles)**: Adding explanatory `<p>` subtitles under card headers, section titles, or empty states (e.g., *"Texnologik zanjir va smena dispetcherligi — Bosqichlararo qog'oz oqimi, dastgoh holati va smena hisoboti"*). Professional ERP users use the screen 100 times a day; descriptive subtitles are pure visual noise.
+- **AI Slop Symptom 2 (Pompous Titles & Parenthetical English)**: Inflating headers and buttons with bilingual parentheticals or buzzwords (e.g., *"Texnologik Zanjir va Smena Dispetcherligi (MES Pipeline)"*, *"Paletlar va Harakatlar Jurnali (Cascade Floor Ledger)"*, *"Ishni Boshlash (Start)"*, *"To'xtatilgan (Paused)"*, *"1. Kirgan Qog'oz (Brutto)"*).
+- **The Remedy**:
+  - **Zero section subtitles**: Never render descriptive `<p>` text under card/section headers.
+  - **1–2 word labels**: Section headers, KPI titles, buttons, and status options must be 1–2 words max (`"Texnologik zanjir"`, `"Smena jurnali"`, `"Kirgan qog'oz"`, `"Jami brak"`, `"Sof chiqish"`, `"Boshlash"`, `"To'xtalish"`, `"Palet kiritish"`).
+  - **Zero bilingual parentheticals**: Never append `(Start)`, `(Resume)`, `(Queued)`, `(Paused)`, `(MES Pipeline)`, `(Cascade Floor Ledger)` to UI strings.
+
+```tsx
+// ❌ REJECTED (AI Slop — Verbose & Noisy):
+<div>
+  <div className="text-xs font-bold">
+    Texnologik Zanjir va Smena Dispetcherligi (MES Pipeline)
+  </div>
+  <p className="text-[11px] text-muted-foreground">
+    Bosqichlararo qog'oz oqimi (WIP kaskadi), dastgoh holati va smena hisoboti
+  </p>
+</div>
+<Button>Ishni Boshlash (Start)</Button>
+
+// ✅ REQUIRED (Minimalist Enterprise Standard):
+<span className="text-xs font-semibold text-foreground">Texnologik zanjir</span>
+<Button>Boshlash</Button>
+```
 
 ---
 

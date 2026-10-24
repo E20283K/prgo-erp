@@ -293,7 +293,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       title: `${newId}: ${doc.name || "Kirim"}`,
       type: "warehouse-receipt",
       module: "warehouse",
-      isUnsaved: true,
+      isUnsaved: false,
       documentData: {
         id: newId,
         date: new Date().toISOString().split("T")[0],

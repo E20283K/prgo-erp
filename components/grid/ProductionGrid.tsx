@@ -337,7 +337,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         title: "Yangi Shablon (Qoralama)",
         type: "product-spec",
         module: "production",
-        isUnsaved: true,
+        isUnsaved: false,
         activeLevel3Tab: "overview",
         documentData: {
           code: "",
@@ -362,7 +362,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         title: "Yangi buyruq (Qoralama)",
         type: "work-order",
         module: "production",
-        isUnsaved: true,
+        isUnsaved: false,
         activeLevel3Tab: "overview",
         documentData: {
           id: draftId,
@@ -433,7 +433,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         title: `Yangi Uskuna (${nextCode})`,
         type: "machine-detail",
         module: "production",
-        isUnsaved: true,
+        isUnsaved: false,
         activeLevel3Tab: "overview",
         documentData: {
           isNew: true,
@@ -483,7 +483,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         { id: "priority", title: "Prioritet", width: 100, icon: GridColumnIcon.HeaderSingleValue },
         { id: "status", title: "Status", width: 135, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      mockRows = productionQueue.map((item) => {
+      mockRows = (productionQueue || [])
+        .filter((item) => !item.id?.startsWith("draft-") && !item.id?.startsWith("temp-"))
+        .map((item) => {
         const readyCount =
           (item.checks.designReady ? 1 : 0) +
           (item.checks.paperReady ? 1 : 0) +
@@ -688,7 +690,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           title: `${docId} (${cust.split(" ")[0]})`,
           type: "work-order",
           module: "production",
-          activeLevel3Tab: "overview",
+          activeLevel3Tab: "timeline",
           documentData: {
             ...item,
             id: docId,
@@ -1364,7 +1366,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     title: `${woId} (${item.customer.split(" ")[0]})`,
                     type: "work-order",
                     module: "production",
-                    activeLevel3Tab: "overview",
+                    activeLevel3Tab: "timeline",
                     documentData: {
                       ...item,
                       id: woId,

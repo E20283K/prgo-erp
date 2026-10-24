@@ -236,7 +236,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         title: "Yangi Kirim Hujjati (Qoralama)",
         type: "warehouse-receipt",
         module: "warehouse",
-        isUnsaved: true,
+        isUnsaved: false,
         documentData: {
           id: draftId,
           receiptNumber: "",
@@ -255,7 +255,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         title: "Yangi Ombor Chiqimi (Qoralama)",
         type: "warehouse-shipment",
         module: "warehouse",
-        isUnsaved: true,
+        isUnsaved: false,
         documentData: {
           id: draftId,
           shipmentNumber: "",
@@ -272,7 +272,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         title: "Zaxiradan Chiqim (Qoralama)",
         type: "warehouse-shipment",
         module: "warehouse",
-        isUnsaved: true,
+        isUnsaved: false,
         documentData: {
           id: draftId,
           shipmentNumber: "",
@@ -290,7 +290,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         title: `${newSku}: Yangi Xomashyo`,
         type: "warehouse-stock",
         module: "warehouse",
-        isUnsaved: true,
+        isUnsaved: false,
         documentData: {
           sku: newSku,
           name: "",
@@ -441,7 +441,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       title: `${newId}: Defitsit Kirim Hujjati`,
       type: "warehouse-receipt",
       module: "warehouse",
-      isUnsaved: true,
+      isUnsaved: false,
       documentData: {
         id: newId,
         date: new Date().toISOString().split("T")[0],
@@ -1103,7 +1103,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                       title: `${newId}: Zaxiradan Chiqim`,
                       type: "warehouse-shipment",
                       module: "warehouse",
-                      isUnsaved: true,
+                      isUnsaved: false,
                       documentData: {
                         id: newId,
                         date: new Date().toISOString().split("T")[0],

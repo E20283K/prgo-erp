@@ -167,6 +167,8 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     openTab,
     machines,
     warehouseStock,
+    tariffs,
+    fetchTariffs,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
@@ -190,6 +192,19 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if ((!tariffs || tariffs.length === 0) && fetchTariffs) {
+      fetchTariffs();
+    }
+  }, [tariffs, fetchTariffs]);
+
+  const tariffOptions = useMemo(() => {
+    return (tariffs || []).map((t) => ({
+      value: t.id,
+      label: `${t.code} — ${t.operationName} [${t.machineOrDept || t.category}] ($${t.rateUsd}/${t.unit})`,
+    }));
+  }, [tariffs]);
 
   // Ombor qoldig'i (Stock Balance) va Baza xomashyolarini birlashtirish
   const combinedStock = useMemo(() => {
@@ -326,6 +341,13 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
         machineStr: op.machineStr || op.machine || "",
         durationHours: Number(op.durationHours || op.duration || 1.0),
         operator: op.operator || "",
+        tariffId: op.tariffId,
+        tariffCode: op.tariffCode,
+        rateUsd: op.rateUsd,
+        setupFeeUsd: op.setupFeeUsd,
+        pieceworkRateUsd: op.pieceworkRateUsd,
+        calcUnit: op.calcUnit,
+        unitDivisor: op.unitDivisor,
       }));
     }
     return [];
@@ -390,6 +412,13 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     machineStr: "",
     durationHours: 1.0,
     operator: "",
+    tariffId: undefined as string | undefined,
+    tariffCode: undefined as string | undefined,
+    rateUsd: 0,
+    setupFeeUsd: 0,
+    pieceworkRateUsd: 0,
+    calcUnit: "1,000 sheets",
+    unitDivisor: 1000,
   });
 
   const activeTab = tab.activeLevel3Tab || "overview";
@@ -546,7 +575,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
       title: `${newWoId} (${formData.name.slice(0, 16)}...)`,
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         id: newWoId,
@@ -577,6 +606,15 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
           duration: op.durationHours,
           qtyCompleted: "0",
           status: "Queued",
+          tariffId: op.tariffId,
+          tariffCode: op.tariffCode,
+          calcUnit: op.calcUnit,
+          unitDivisor: op.unitDivisor,
+          rateUsd: op.rateUsd,
+          setupFeeUsd: op.setupFeeUsd,
+          pieceworkRateUsd: op.pieceworkRateUsd,
+          plannedCostUsd: op.rateUsd ? Number(((op.setupFeeUsd || 0) + (1000 / (op.unitDivisor || 1000)) * op.rateUsd).toFixed(2)) : 0,
+          pieceworkTotalUsd: op.pieceworkRateUsd ? Number(((1000 / (op.unitDivisor || 1000)) * op.pieceworkRateUsd).toFixed(2)) : 0,
         })),
       },
     });
@@ -679,6 +717,26 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   };
 
   // --- Route Dialog Handlers ---
+  const handleSelectTariffInBOM = (tariffId: string) => {
+    const selected = tariffs.find((t) => t.id === tariffId);
+    if (!selected) {
+      setOpDialogForm((p) => ({ ...p, tariffId: undefined, tariffCode: undefined }));
+      return;
+    }
+    setOpDialogForm((p) => ({
+      ...p,
+      tariffId: selected.id,
+      tariffCode: selected.code,
+      name: selected.operationName,
+      machineStr: selected.machineOrDept || p.machineStr,
+      rateUsd: selected.rateUsd,
+      setupFeeUsd: selected.setupFeeUsd,
+      pieceworkRateUsd: selected.pieceworkRateUsd,
+      calcUnit: selected.unit,
+      unitDivisor: selected.unitDivisor,
+    }));
+  };
+
   const handleOpenAddOperation = () => {
     setEditingOpIndex(null);
     setOpDialogForm({
@@ -686,6 +744,13 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
       machineStr: realMachineNames[0] || "",
       durationHours: 1.0,
       operator: "",
+      tariffId: undefined,
+      tariffCode: undefined,
+      rateUsd: 0,
+      setupFeeUsd: 0,
+      pieceworkRateUsd: 0,
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
     });
     setIsOpDialogOpen(true);
   };
@@ -699,6 +764,13 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
       machineStr: item.machineStr,
       durationHours: item.durationHours || 1.0,
       operator: item.operator || "",
+      tariffId: item.tariffId,
+      tariffCode: item.tariffCode,
+      rateUsd: item.rateUsd || 0,
+      setupFeeUsd: item.setupFeeUsd || 0,
+      pieceworkRateUsd: item.pieceworkRateUsd || 0,
+      calcUnit: item.calcUnit || "1,000 sheets",
+      unitDivisor: item.unitDivisor || 1000,
     });
     setIsOpDialogOpen(true);
   };
@@ -796,10 +868,12 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
 
   const opColumns = useMemo<GridColumn[]>(() => [
     { id: "step", title: "Bosqich", width: 75, icon: GridColumnIcon.HeaderNumber },
-    { id: "name", title: "Operatsiya Tavsifi", width: 340, icon: GridColumnIcon.HeaderString },
-    { id: "machineStr", title: "Biriktirilgan Uskuna / Stanok", width: 280, icon: GridColumnIcon.HeaderLookup },
-    { id: "durationHours", title: "Vaqt Normasi (soat)", width: 140, icon: GridColumnIcon.HeaderNumber },
-    { id: "operator", title: "Mas'ul / Malaka", width: 180, icon: GridColumnIcon.HeaderString },
+    { id: "tariffCode", title: "Tarif", width: 105, icon: GridColumnIcon.HeaderString },
+    { id: "name", title: "Operatsiya Tavsifi", width: 300, icon: GridColumnIcon.HeaderString },
+    { id: "machineStr", title: "Biriktirilgan Uskuna / Stanok", width: 240, icon: GridColumnIcon.HeaderLookup },
+    { id: "rate", title: "Stavka", width: 125, icon: GridColumnIcon.HeaderNumber },
+    { id: "durationHours", title: "Vaqt Normasi (soat)", width: 130, icon: GridColumnIcon.HeaderNumber },
+    { id: "operator", title: "Mas'ul / Malaka", width: 160, icon: GridColumnIcon.HeaderString },
   ], []);
 
   const getOpCellContent = useCallback((cell: Item): GridCell => {
@@ -808,10 +882,15 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     if (!op) return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
 
     if (col === 0) return { kind: GridCellKind.Number, data: op.step || (row + 1) * 10, displayData: String(op.step || (row + 1) * 10), allowOverlay: false };
-    if (col === 1) return { kind: GridCellKind.Text, data: op.name, displayData: op.name, allowOverlay: true };
-    if (col === 2) return { kind: GridCellKind.Text, data: op.machineStr, displayData: op.machineStr, allowOverlay: true };
-    if (col === 3) return { kind: GridCellKind.Number, data: op.durationHours || 1, displayData: `${op.durationHours || 1} soat`, allowOverlay: true };
-    if (col === 4) return { kind: GridCellKind.Text, data: op.operator || "—", displayData: op.operator || "—", allowOverlay: true };
+    if (col === 1) return { kind: GridCellKind.Text, data: op.tariffCode || "—", displayData: op.tariffCode || "—", allowOverlay: false };
+    if (col === 2) return { kind: GridCellKind.Text, data: op.name, displayData: op.name, allowOverlay: true };
+    if (col === 3) return { kind: GridCellKind.Text, data: op.machineStr, displayData: op.machineStr, allowOverlay: true };
+    if (col === 4) {
+      const rateText = op.rateUsd ? `$${op.rateUsd}/${op.calcUnit || "unit"}` : "—";
+      return { kind: GridCellKind.Text, data: rateText, displayData: rateText, allowOverlay: false };
+    }
+    if (col === 5) return { kind: GridCellKind.Number, data: op.durationHours || 1, displayData: `${op.durationHours || 1} soat`, allowOverlay: true };
+    if (col === 6) return { kind: GridCellKind.Text, data: op.operator || "—", displayData: op.operator || "—", allowOverlay: true };
     
     return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
   }, [operations]);
@@ -819,13 +898,13 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   const onOpCellEdited = useCallback((cell: Item, newValue: EditableGridCell) => {
     const [col, row] = cell;
     const newOps = [...operations];
-    if (col === 1 && newValue.kind === GridCellKind.Text) {
+    if (col === 2 && newValue.kind === GridCellKind.Text) {
       newOps[row].name = newValue.data.toString();
-    } else if (col === 2 && newValue.kind === GridCellKind.Text) {
+    } else if (col === 3 && newValue.kind === GridCellKind.Text) {
       newOps[row].machineStr = newValue.data.toString();
-    } else if (col === 3 && newValue.kind === GridCellKind.Number) {
+    } else if (col === 5 && newValue.kind === GridCellKind.Number) {
       newOps[row].durationHours = Number(newValue.data);
-    } else if (col === 4 && newValue.kind === GridCellKind.Text) {
+    } else if (col === 6 && newValue.kind === GridCellKind.Text) {
       newOps[row].operator = newValue.data.toString();
     }
     setOperations(newOps);
@@ -1941,7 +2020,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                           title: `Yangi Xomashyo Pasporti: ${newSku}`,
                           type: "warehouse-stock",
                           module: "warehouse",
-                          isUnsaved: true,
+                          isUnsaved: false,
                           documentData: {
                             sku: newSku,
                             name: matDialogForm.name || "",
@@ -2058,6 +2137,44 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
           </DialogHeader>
 
           <div className="space-y-3.5 py-2">
+            {/* Quick Tariff Picker */}
+            <div className="p-2.5 rounded-lg border border-blue-100 dark:border-blue-950/80 bg-blue-50/40 dark:bg-blue-950/20 space-y-1.5">
+              <label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                <span>Standart Korxona Tarifi (Auto-fill)</span>
+                {opDialogForm.tariffCode && (
+                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
+                    {opDialogForm.tariffCode}
+                  </span>
+                )}
+              </label>
+              <FieldCombobox
+                value={opDialogForm.tariffId || ""}
+                onChange={handleSelectTariffInBOM}
+                options={tariffOptions}
+                placeholder="Tarifni tanlang (masalan, TRF-OFF-01)..."
+                searchPlaceholder="Tarif kodi yoki nomini qidiring..."
+                className="h-8 text-xs bg-card"
+                popoverClassName="w-[420px]"
+              />
+              {opDialogForm.rateUsd > 0 && (
+                <div className="text-[11px] text-muted-foreground flex items-center gap-2 pt-0.5">
+                  <span>Stavka: <strong>${opDialogForm.rateUsd}/{opDialogForm.calcUnit || "unit"}</strong></span>
+                  {opDialogForm.setupFeeUsd > 0 && (
+                    <>
+                      <span>•</span>
+                      <span>Pripravka: <strong>${opDialogForm.setupFeeUsd}</strong></span>
+                    </>
+                  )}
+                  {opDialogForm.pieceworkRateUsd > 0 && (
+                    <>
+                      <span>•</span>
+                      <span>Sdelka: <strong>${opDialogForm.pieceworkRateUsd}</strong></span>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-xs font-medium">Operatsiya Nomi <span className="text-destructive">*</span></label>
               <FieldCombobox

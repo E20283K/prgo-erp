@@ -92,6 +92,8 @@ import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
+import { DowntimeLogDialog } from "./dialogs/DowntimeLogDialog";
+import { PalletTagPrintDialog } from "./dialogs/PalletTagPrintDialog";
 import { JobTicketDialog } from "./dialogs/JobTicketDialog";
 import { PackagingDialog } from "./dialogs/PackagingDialog";
 import { BoxLabelPrintModal } from "./dialogs/BoxLabelPrintModal";
@@ -511,6 +513,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       initialQueueItem?.toolingItems ||
       (initialQueueItem?.dimensions as any)?.toolingItems ||
       getInitialToolingItems(data, docNo || tab.id),
+    parentSheetW: data.parentSheetW || (initialQueueItem as any)?.parentSheetW || (data.dimensions as any)?.parentSheetW,
+    parentSheetH: data.parentSheetH || (initialQueueItem as any)?.parentSheetH || (data.dimensions as any)?.parentSheetH,
+    pressSheetW: data.pressSheetW || (initialQueueItem as any)?.pressSheetW || (data.dimensions as any)?.pressSheetW,
+    pressSheetH: data.pressSheetH || (initialQueueItem as any)?.pressSheetH || (data.dimensions as any)?.pressSheetH,
+    plannedSheets: (data as any).plannedSheets || (initialQueueItem as any)?.plannedSheets || (data.dimensions as any)?.plannedSheets,
+    impositionState: (data as any).impositionState || (initialQueueItem as any)?.impositionState || (data.dimensions as any)?.impositionState,
   });
 
   const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(() => {
@@ -650,13 +658,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     );
 
     const docNo = data.docNo || tab.id;
-    upsertProductionQueueItem({
-      id: docNo,
-      stage: "Ready to Print",
-      sampleStatus: "approved",
-      sampleRequired: true,
-      quantity: massQty,
-    });
+    if (!docNo.startsWith("draft-") && !docNo.startsWith("temp-")) {
+      upsertProductionQueueItem({
+        id: docNo,
+        stage: "Ready to Print",
+        sampleStatus: "approved",
+        sampleRequired: true,
+        quantity: massQty,
+      });
+    }
 
     setTabUnsaved(tab.id, true);
 
@@ -691,11 +701,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     }));
 
     const docNo = data.docNo || tab.id;
-    upsertProductionQueueItem({
-      id: docNo,
-      stage: "Queue",
-      sampleStatus: "revision_requested",
-    });
+    if (!docNo.startsWith("draft-") && !docNo.startsWith("temp-")) {
+      upsertProductionQueueItem({
+        id: docNo,
+        stage: "Queue",
+        sampleStatus: "revision_requested",
+      });
+    }
 
     setTabUnsaved(tab.id, true);
 
@@ -747,6 +759,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const [isLogEventDialogOpen, setIsLogEventDialogOpen] = useState(false);
   const [isPalletReportDialogOpen, setIsPalletReportDialogOpen] = useState(false);
+  const [isDowntimeDialogOpen, setIsDowntimeDialogOpen] = useState(false);
+  const [isPalletTagPrintOpen, setIsPalletTagPrintOpen] = useState(false);
+  const [selectedTagPrintEvent, setSelectedTagPrintEvent] = useState<ShiftEvent | null>(null);
+  const [editingPalletEvent, setEditingPalletEvent] = useState<ShiftEvent | null>(null);
+  const [editingDowntimeEvent, setEditingDowntimeEvent] = useState<ShiftEvent | null>(null);
   const [logEventForm, setLogEventForm] = useState<{
     type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC" | "Waste";
     note: string;
@@ -775,11 +792,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       );
 
       const targetWoId = data.docNo || tab.id;
-      upsertProductionQueueItem({
-        id: targetWoId,
-        stage: "Completed",
-        completedSheets: summary.totalPackedQty,
-      });
+      if (!targetWoId.startsWith("draft-") && !targetWoId.startsWith("temp-")) {
+        upsertProductionQueueItem({
+          id: targetWoId,
+          stage: "Completed",
+          completedSheets: summary.totalPackedQty,
+        });
+      }
 
       addNotification({
         title: "Qadoqlash yakunlandi",
@@ -843,7 +862,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       title: `Yangi: ${formData.product} (Takroriy)`,
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         ...reorderPayload,
@@ -1073,7 +1092,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
       const paperReady = !hasShortage;
       const targetId = data.docNo || tab.id;
-      if (toggleReadinessCheck) {
+      if (toggleReadinessCheck && !targetId.startsWith("draft-") && !targetId.startsWith("temp-")) {
         toggleReadinessCheck(targetId, "paperReady", {
           forceStatus: paperReady ? "ready" : "pending",
         });
@@ -1374,6 +1393,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       duration: 1,
       qtyCompleted: `0 / ${(formData.quantity || 5000).toLocaleString()}`,
       status: "Queued",
+      tariffId: undefined,
+      tariffCode: undefined,
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: 0,
+      setupFeeUsd: 0,
+      pieceworkRateUsd: 0,
+      plannedCostUsd: 0,
+      pieceworkTotalUsd: 0,
     });
     setIsOpDialogOpen(true);
   };
@@ -1398,6 +1426,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       status: item.status,
       toolingId: item.toolingId,
       toolingName: item.toolingName,
+      tariffId: item.tariffId,
+      tariffCode: item.tariffCode,
+      calcUnit: item.calcUnit,
+      unitDivisor: item.unitDivisor,
+      rateUsd: item.rateUsd,
+      setupFeeUsd: item.setupFeeUsd,
+      pieceworkRateUsd: item.pieceworkRateUsd,
+      plannedCostUsd: item.plannedCostUsd,
+      pieceworkTotalUsd: item.pieceworkTotalUsd,
     });
     setIsOpDialogOpen(true);
   };
@@ -1437,10 +1474,155 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   // Log Event Dialog Handlers
   const handleOpenLogEvent = () => {
+    setEditingPalletEvent(null);
     setIsPalletReportDialogOpen(true);
   };
 
+  const handleOpenEditPalletEvent = (event: ShiftEvent) => {
+    setEditingPalletEvent(event);
+    setIsPalletReportDialogOpen(true);
+  };
+
+  const handleOpenPalletTagPrint = (event: ShiftEvent) => {
+    setSelectedTagPrintEvent(event);
+    setIsPalletTagPrintOpen(true);
+  };
+
+  const handleStartStep = (opId: string) => {
+    setOperations((prev) =>
+      prev.map((op) =>
+        op.id === opId
+          ? {
+              ...op,
+              status: "In Progress",
+              startedAt: op.startedAt || new Date().toISOString(),
+            }
+          : op
+      )
+    );
+    setTabUnsaved(tab.id, true);
+    addNotification({
+      title: "Bosqich boshlandi",
+      description: `Step #${selectedOp.stepNumber} (${selectedOp.name}) ishga tushirildi.`,
+      severity: "info",
+    });
+  };
+
+  const handlePauseStep = (opId: string) => {
+    setEditingDowntimeEvent(null);
+    setIsDowntimeDialogOpen(true);
+  };
+
+  const handleOpenEditDowntimeEvent = (event: ShiftEvent) => {
+    setEditingDowntimeEvent(event);
+    setIsDowntimeDialogOpen(true);
+  };
+
+  const handleResumeStep = (opId: string) => {
+    setOperations((prev) =>
+      prev.map((op) =>
+        op.id === opId
+          ? {
+              ...op,
+              status: "In Progress",
+            }
+          : op
+      )
+    );
+    setTabUnsaved(tab.id, true);
+    addNotification({
+      title: "Ish davom ettirilmoqda",
+      description: `Step #${selectedOp.stepNumber} yana faol holatga keltirildi.`,
+      severity: "info",
+    });
+  };
+
+  const handleFinishStep = (opId: string) => {
+    setOperations((prev) =>
+      prev.map((op) =>
+        op.id === opId
+          ? {
+              ...op,
+              status: "Finished",
+              completedAt: new Date().toISOString(),
+            }
+          : op
+      )
+    );
+    setTabUnsaved(tab.id, true);
+    addNotification({
+      title: "Bosqich yakunlandi",
+      description: `Step #${selectedOp.stepNumber} muvaffaqiyatli topshirildi.`,
+      severity: "success",
+    });
+  };
+
+  const handleSaveDowntime = (data: {
+    eventId?: string;
+    opId: string;
+    shift: "1-smena" | "2-smena";
+    downtimeReason: string;
+    durationMinutes: number;
+    operator: string;
+    note: string;
+    time: string;
+    pauseStep: boolean;
+  }) => {
+    if (data.eventId) {
+      setShiftEvents((prev) =>
+        prev.map((ev) =>
+          ev.id === data.eventId
+            ? {
+                ...ev,
+                time: data.time || ev.time,
+                shift: data.shift,
+                downtimeReason: data.downtimeReason,
+                downtimeDurationMinutes: data.durationMinutes,
+                note: data.note,
+                operator: data.operator,
+              }
+            : ev
+        )
+      );
+    } else {
+      const newEvent: ShiftEvent = {
+        id: "e_dt_" + Date.now(),
+        opId: data.opId,
+        time: data.time || "15:30",
+        shift: data.shift,
+        type: "Delay",
+        downtimeReason: data.downtimeReason,
+        downtimeDurationMinutes: data.durationMinutes,
+        note: data.note,
+        operator: data.operator,
+      };
+      setShiftEvents((prev) => [newEvent, ...prev]);
+    }
+
+    if (data.pauseStep) {
+      setOperations((prev) =>
+        prev.map((op) =>
+          op.id === data.opId
+            ? {
+                ...op,
+                status: "Paused",
+                pausedAt: new Date().toISOString(),
+                downtimeMinutes: (op.downtimeMinutes || 0) + data.durationMinutes,
+              }
+            : op
+        )
+      );
+    }
+    setTabUnsaved(tab.id, true);
+    addNotification({
+      title: data.eventId ? "To'xtalish yangilandi" : "To'xtalish qayd etildi",
+      description: `${data.downtimeReason} (${data.durationMinutes} daqiqa)`,
+      severity: "warning",
+    });
+  };
+
   const handleSavePalletEvent = (eventData: {
+    eventId?: string;
     batchLabel: string;
     shift: "1-smena" | "2-smena";
     operator: string;
@@ -1455,25 +1637,52 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     markStepFinished?: boolean;
   }) => {
     const totalWaste = eventData.makeReadyQty + eventData.defectQty;
-    const newEvent: ShiftEvent = {
-      id: "e_" + Date.now(),
-      opId: selectedOp.id,
-      time: eventData.time || "15:30",
-      shift: eventData.shift,
-      batchLabel: eventData.batchLabel,
-      type: "Run",
-      note: eventData.note,
-      operator: eventData.operator,
-      inputQty: eventData.inputQty,
-      makeReadyQty: eventData.makeReadyQty,
-      defectQty: eventData.defectQty,
-      goodQty: eventData.goodQty,
-      outputPiecesQty: eventData.outputPiecesQty,
-      wasteQty: totalWaste > 0 ? totalWaste : undefined,
-      wasteReason: eventData.wasteReason,
-    };
 
-    const updatedEvents = [newEvent, ...shiftEvents];
+    let updatedEvents: ShiftEvent[];
+
+    if (eventData.eventId) {
+      // Editing existing event
+      updatedEvents = shiftEvents.map((ev) => {
+        if (ev.id !== eventData.eventId) return ev;
+        return {
+          ...ev,
+          time: eventData.time || ev.time,
+          shift: eventData.shift,
+          batchLabel: eventData.batchLabel,
+          note: eventData.note,
+          operator: eventData.operator,
+          inputQty: eventData.inputQty,
+          makeReadyQty: eventData.makeReadyQty,
+          defectQty: eventData.defectQty,
+          goodQty: eventData.goodQty,
+          outputPiecesQty: eventData.outputPiecesQty,
+          wasteQty: totalWaste > 0 ? totalWaste : undefined,
+          wasteReason: eventData.wasteReason,
+        };
+      });
+    } else {
+      // Creating new event
+      const newEvent: ShiftEvent = {
+        id: "e_" + Date.now(),
+        opId: selectedOp.id,
+        time: eventData.time || "15:30",
+        shift: eventData.shift,
+        batchLabel: eventData.batchLabel,
+        type: "Run",
+        note: eventData.note,
+        operator: eventData.operator,
+        inputQty: eventData.inputQty,
+        makeReadyQty: eventData.makeReadyQty,
+        defectQty: eventData.defectQty,
+        goodQty: eventData.goodQty,
+        outputPiecesQty: eventData.outputPiecesQty,
+        wasteQty: totalWaste > 0 ? totalWaste : undefined,
+        wasteReason: eventData.wasteReason,
+        palletNumber: shiftEvents.filter((ev) => ev.opId === selectedOp.id).length + 1,
+      };
+      updatedEvents = [newEvent, ...shiftEvents];
+    }
+
     setShiftEvents(updatedEvents);
 
     // Calculate total completed for this op including this event
@@ -1664,7 +1873,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                           title: `${newAct.id}: ${newAct.customer}`,
                           type: "delivery-act",
                           module: "finance",
-                          isUnsaved: true,
+                          isUnsaved: false,
                           activeLevel3Tab: "overview",
                           documentData: newAct,
                         });
@@ -1777,16 +1986,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 <InfoRow label="Ranglilik">
                   <span className="font-mono font-medium text-foreground">
                     {formData.colorsConfig || "—"}
-                  </span>
-                </InfoRow>
-
-                {/* 4. Tayinlangan Uskuna */}
-                <InfoRow label={tShell("machine")} title={formData.pressMachine}>
-                  <span
-                    className="truncate max-w-[125px] font-medium text-blue-600 dark:text-blue-400"
-                    title={formData.pressMachine}
-                  >
-                    {formData.pressMachine.replace("Speedmaster ", "")}
                   </span>
                 </InfoRow>
 
@@ -1952,6 +2151,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   defaultProdW={formData.width}
                   defaultProdH={formData.height}
                   defaultBleed={formData.bleed}
+                  shapeType={formData.shapeType}
+                  customShape={formData.customShape}
+                  customSvgPath={formData.customSvgPath}
+                  cornerType={formData.cornerType}
+                  artworkFront={formData.artworkFront}
+                  artworkBack={formData.artworkBack}
+                  skuArtworks={skuArtworks}
                   frontColors={formData.frontColors}
                   backColors={formData.backColors}
                   spotColors={formData.spotColorItems}
@@ -1959,7 +2165,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   onPrintMethodChange={(method) => handleFieldChange("printMethod", method)}
                   onApplyRouteToOperations={handleApplyRouteFromPlan}
                   pressMachine={formData.pressMachine}
+                  activeMachine={activeMachine}
                   paperStock={formData.paperStock}
+                  warehouseStock={warehouseStock}
+                  parentSheetW={formData.parentSheetW}
+                  parentSheetH={formData.parentSheetH}
+                  pressSheetW={formData.pressSheetW}
+                  pressSheetH={formData.pressSheetH}
+                  plannedSheets={formData.plannedSheets}
                   lamination={formData.lamination}
                   embellishment={formData.embellishment}
                   isOperator={isOperator}
@@ -1982,6 +2195,57 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   }}
                   sampleQty={sampleData.sampleQty}
                   onSampleQtyChange={(q) => handleSampleChange("sampleQty", q)}
+                  impositionState={formData.impositionState}
+                  onImpositionStateChange={(impState) => {
+                    setFormData((prev) => ({ ...prev, impositionState: impState }));
+                    updateTabData(tab.id, { impositionState: impState });
+                  }}
+                  onApplyToOrder={(payload) => {
+                    const currentTools = formData.toolingItems || [];
+                    const ctpIdx = currentTools.findIndex((t) => t.category === "ctp_plates");
+                    let nextTooling = [...currentTools];
+                    if (ctpIdx >= 0) {
+                      nextTooling[ctpIdx] = {
+                        ...nextTooling[ctpIdx],
+                        quantity: payload.totalCtpPlates,
+                        specDetails: payload.ctpSpecDetails,
+                      };
+                    } else if (payload.totalCtpPlates > 0) {
+                      const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
+                      nextTooling = [
+                        {
+                          id: `TL-CTP-${Date.now()}`,
+                          category: "ctp_plates",
+                          name: `${data.docNo || tab.id} CTP Metall Formalar Komplekti`,
+                          specDetails: payload.ctpSpecDetails,
+                          quantity: payload.totalCtpPlates,
+                          unit: "dona",
+                          estimatedCost: (isUsd ? 6 : 75000) * payload.totalCtpPlates,
+                          currency: formData.currency || "UZS",
+                          status: "Draft",
+                          createdAt: new Date().toISOString(),
+                        },
+                        ...nextTooling,
+                      ];
+                    }
+
+                    handleFieldChange({
+                      ...(payload.paperStock ? { paperStock: payload.paperStock } : {}),
+                      parentSheetW: payload.parentSheetW,
+                      parentSheetH: payload.parentSheetH,
+                      pressSheetW: payload.pressSheetW,
+                      pressSheetH: payload.pressSheetH,
+                      plannedSheets: payload.plannedParentSheets,
+                      ...(payload.printMethod ? { printMethod: payload.printMethod } : {}),
+                      toolingItems: nextTooling,
+                    });
+                    setTabUnsaved(tab.id, true);
+                    addNotification({
+                      title: "Montaj buyurtmaga qo'llandi",
+                      description: `Xom qog'oz: ${payload.plannedParentSheets.toLocaleString()} list (${payload.plannedPressSheets.toLocaleString()} bosma list) · CTP: ${payload.totalCtpPlates} dona.`,
+                      severity: "success",
+                    });
+                  }}
                 />
               </TabsContent>
             )}
@@ -2141,6 +2405,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
             {/* Tab 5: Shift Timeline & Notes */}
             <ShiftTimelineTab
+              workOrderNo={data.docNo || tab.id}
+              productName={formData.product}
+              customerName={formData.customer}
               operations={operations}
               selectedTimelineOpId={selectedTimelineOpId}
               setSelectedTimelineOpId={setSelectedTimelineOpId}
@@ -2148,6 +2415,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               selectedOpEvents={selectedOpEvents}
               allEvents={shiftEvents}
               onOpenQuickPalletLog={handleOpenLogEvent}
+              onOpenEditPalletLog={handleOpenEditPalletEvent}
+              onOpenDowntimeLog={() => {
+                setEditingDowntimeEvent(null);
+                setIsDowntimeDialogOpen(true);
+              }}
+              onOpenEditDowntimeLog={handleOpenEditDowntimeEvent}
+              onOpenPalletTagPrint={handleOpenPalletTagPrint}
+              onStartStep={handleStartStep}
+              onPauseStep={handlePauseStep}
+              onResumeStep={handleResumeStep}
+              onFinishStep={handleFinishStep}
               onChangeStepStatus={(opId, status) => {
                 setOperations((prev) =>
                   prev.map((op) => (op.id === opId ? { ...op, status } : op))
@@ -2216,6 +2494,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         setForm={setOpDialogForm}
         onSave={handleSaveOperationDialog}
         customerName={formData.customer}
+        orderQuantity={formData.quantity}
       />
 
       {/* Dialog: Shift Downtime Event */}
@@ -2231,7 +2510,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       {/* Dialog: Floor Pallet & Step Execution Report */}
       <PalletReportDialog
         isOpen={isPalletReportDialogOpen}
-        onOpenChange={setIsPalletReportDialogOpen}
+        onOpenChange={(open) => {
+          setIsPalletReportDialogOpen(open);
+          if (!open) setEditingPalletEvent(null);
+        }}
         selectedOp={selectedOp}
         allOperations={operations}
         previousOp={(() => {
@@ -2251,8 +2533,35 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         })()}
         existingOpEvents={selectedOpEvents}
         piecesPerSheet={activePrintPlan.piecesPerSheet}
+        editingEvent={editingPalletEvent}
         onSaveEvent={handleSavePalletEvent}
+        onOpenPrintTag={handleOpenPalletTagPrint}
       />
+
+      {/* Dialog: Machine Downtime / Prostoy Log */}
+      <DowntimeLogDialog
+        isOpen={isDowntimeDialogOpen}
+        onOpenChange={(open) => {
+          setIsDowntimeDialogOpen(open);
+          if (!open) setEditingDowntimeEvent(null);
+        }}
+        selectedOp={selectedOp}
+        editingDowntime={editingDowntimeEvent}
+        onSaveDowntime={handleSaveDowntime}
+      />
+
+      {/* Dialog: Pallet Tag QR Print Slip */}
+      {selectedTagPrintEvent && (
+        <PalletTagPrintDialog
+          isOpen={isPalletTagPrintOpen}
+          onOpenChange={setIsPalletTagPrintOpen}
+          workOrderNo={data.docNo || tab.id}
+          productName={formData.product}
+          customerName={formData.customer}
+          step={selectedOp}
+          event={selectedTagPrintEvent}
+        />
+      )}
 
       {/* Unified Order Passport / Job Ticket Dialog */}
       <JobTicketDialog

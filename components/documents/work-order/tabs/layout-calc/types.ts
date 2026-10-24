@@ -8,8 +8,57 @@ import {
   RouteStep,
   ProductShapeType,
   ProductCustomShape,
+  SkuArtwork,
+  PersistedImpositionState,
 } from "../../types";
 import { PrintMethod, PrintPlanningResult } from "../../planningEngine";
+import { WarehouseStockRecord } from "@/store/workspaceStore";
+
+export interface MachineFormatConstraints {
+  machineName: string;
+  maxW: number;
+  maxH: number;
+  minW: number;
+  minH: number;
+  plateW: number;
+  plateH: number;
+  defaultGripper: number;
+  printingUnits: number;
+}
+
+export interface SheetCutOption {
+  divisor: number; // 1, 2, 3, 4, 6, 8, 9
+  label: string;
+  pressW: number;
+  pressH: number;
+  fitsMachine: boolean;
+  wastePercent: number;
+  piecesPerPressSheet: number;
+  piecesPerParentSheet: number;
+}
+
+export interface ImpositionPlanSummary {
+  id: "min_waste" | "min_plates" | "by_model";
+  label: string;
+  platesCount: number;
+  totalPressSheets: number;
+  totalParentSheets: number;
+  totalCtpPlates: number;
+  overproductionPct: number;
+}
+
+export interface ApplyImpositionPayload {
+  paperStock?: string;
+  parentSheetW: number;
+  parentSheetH: number;
+  pressSheetW: number;
+  pressSheetH: number;
+  plannedParentSheets: number;
+  plannedPressSheets: number;
+  totalCtpPlates: number;
+  ctpSpecDetails: string;
+  printMethod?: PrintMethod;
+}
 
 export interface LayoutCalcTabProps {
   sizes?: SizeDistribution[];
@@ -25,6 +74,7 @@ export interface LayoutCalcTabProps {
   cornerType?: string;
   artworkFront?: string;
   artworkBack?: string;
+  skuArtworks?: SkuArtwork[];
   frontColors?: SideColorConfig;
   backColors?: SideColorConfig;
   spotColors?: SpotColorItem[];
@@ -32,7 +82,14 @@ export interface LayoutCalcTabProps {
   onPrintMethodChange?: (method: PrintMethod) => void;
   onApplyRouteToOperations?: (steps: RouteStep[]) => void;
   pressMachine?: string;
+  activeMachine?: any;
   paperStock?: string;
+  warehouseStock?: WarehouseStockRecord[];
+  parentSheetW?: number;
+  parentSheetH?: number;
+  pressSheetW?: number;
+  pressSheetH?: number;
+  plannedSheets?: number;
   lamination?: string;
   embellishment?: string;
   isOperator?: boolean;
@@ -49,6 +106,9 @@ export interface LayoutCalcTabProps {
   }) => void;
   sampleQty?: number;
   onSampleQtyChange?: (qty: number) => void;
+  impositionState?: PersistedImpositionState;
+  onImpositionStateChange?: (state: PersistedImpositionState) => void;
+  onApplyToOrder?: (payload: ApplyImpositionPayload) => void;
 }
 
 export interface KashirovkaSummary {
@@ -76,6 +136,7 @@ export type PlatePartitionStrategy =
   | "smart_gang_optimizer";
 
 export type CtpSideRelation =
+  | "single_sided"
   | "shared_front_variable_back"
   | "independent_per_plate"
   | "work_and_turn";
@@ -164,6 +225,7 @@ export interface GridCell {
   sizeCode?: string;
   color: string;
   sizeId: string;
+  slotsCount?: number;
   sideBadge?: "FRONT" | "BACK";
   artworkUrl?: string;
 }

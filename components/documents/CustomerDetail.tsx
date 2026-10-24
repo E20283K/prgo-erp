@@ -270,7 +270,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
       title: `Yangi: ${form.name}`,
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: "",
@@ -331,7 +331,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
       title: `Yangi: ${order.product}`,
       type: "work-order",
       module: "production",
-      isUnsaved: true,
+      isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
         docNo: "",
