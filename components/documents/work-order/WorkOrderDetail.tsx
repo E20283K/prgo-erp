@@ -540,6 +540,47 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         existingUrls.add(url);
       }
     });
+
+    // Also include any pre-existing SKU Artworks in the attachments list
+    const initialSkus: SkuArtwork[] =
+      data.skuArtworks ||
+      initialQueueItem?.skuArtworks ||
+      data.dimensions?.skuArtworks ||
+      initialQueueItem?.dimensions?.skuArtworks ||
+      [];
+    if (Array.isArray(initialSkus)) {
+      initialSkus.forEach((sku) => {
+        if (sku.frontArtworkUrl && !existingUrls.has(sku.frontArtworkUrl)) {
+          const skuLabel = sku.model ? `${sku.model} ${sku.sizeCode || ""}` : (sku.sizeCode || "SKU");
+          list.push({
+            id: `att-art-${sku.skuId}-front`,
+            name: `[${skuLabel} / Oldi] ${sku.frontArtworkName || "front.pdf"}`,
+            size: "Artwork",
+            type: sku.frontArtworkUrl.endsWith(".svg") ? "image/svg+xml" : "application/pdf",
+            date: new Date().toISOString().slice(0, 16).replace("T", " "),
+            isImage: sku.frontArtworkUrl.endsWith(".svg"),
+            category: "artwork",
+            url: sku.frontArtworkUrl,
+          });
+          existingUrls.add(sku.frontArtworkUrl);
+        }
+        if (sku.backArtworkUrl && !existingUrls.has(sku.backArtworkUrl)) {
+          const skuLabel = sku.model ? `${sku.model} ${sku.sizeCode || ""}` : (sku.sizeCode || "SKU");
+          list.push({
+            id: `att-art-${sku.skuId}-back`,
+            name: `[${skuLabel} / Orqa] ${sku.backArtworkName || "back.pdf"}`,
+            size: "Artwork",
+            type: sku.backArtworkUrl.endsWith(".svg") ? "image/svg+xml" : "application/pdf",
+            date: new Date().toISOString().slice(0, 16).replace("T", " "),
+            isImage: sku.backArtworkUrl.endsWith(".svg"),
+            category: "artwork",
+            url: sku.backArtworkUrl,
+          });
+          existingUrls.add(sku.backArtworkUrl);
+        }
+      });
+    }
+
     return list;
   });
 
@@ -1152,7 +1193,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const total = newSizes.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
     const updates = {
       sizes: newSizes,
-      ...(newSizes.length > 0 ? { quantity: total } : {}),
+      ...(newSizes.length > 0 && total > 0 ? { quantity: total } : {}),
     };
     const updatedForm = { ...formData, ...updates };
     setFormData(updatedForm);
@@ -2150,141 +2191,145 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
             {/* Tab: Imposition / Layout for Offset & Front-Back Print Planning */}
             {isOffset && (
-              <TabsContent value="layout" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
-                <LayoutCalcTab
-                  sizes={formData.sizes || []}
-                  defaultQuantity={formData.quantity}
-                  docNo={data.docNo || tab.id}
-                  orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
-                  defaultProdW={formData.width}
-                  defaultProdH={formData.height}
-                  defaultBleed={formData.bleed}
-                  shapeType={formData.shapeType}
-                  customShape={formData.customShape}
-                  customSvgPath={formData.customSvgPath}
-                  cornerType={formData.cornerType}
-                  artworkFront={formData.artworkFront}
-                  artworkBack={formData.artworkBack}
-                  skuArtworks={skuArtworks}
-                  frontColors={formData.frontColors}
-                  backColors={formData.backColors}
-                  spotColors={formData.spotColorItems}
-                  printMethod={formData.printMethod}
-                  onPrintMethodChange={(method) => handleFieldChange("printMethod", method)}
-                  onApplyRouteToOperations={handleApplyRouteFromPlan}
-                  pressMachine={formData.pressMachine}
-                  activeMachine={activeMachine}
-                  paperStock={formData.paperStock}
-                  warehouseStock={warehouseStock}
-                  parentSheetW={formData.parentSheetW}
-                  parentSheetH={formData.parentSheetH}
-                  pressSheetW={formData.pressSheetW}
-                  pressSheetH={formData.pressSheetH}
-                  plannedSheets={formData.plannedSheets}
-                  lamination={formData.lamination}
-                  embellishment={formData.embellishment}
-                  isOperator={isOperator}
-                  onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
-                  kashirovkaMode={formData.kashirovkaMode}
-                  kashirovkaStrategy={formData.kashirovkaStrategy}
-                  kashirovkaLayers={formData.kashirovkaLayers}
-                  kashirovkaGlueGsm={formData.kashirovkaGlueGsm}
-                  kashirovkaMakeReadySheets={formData.kashirovkaMakeReadySheets}
-                  onKashirovkaChange={(patch) => {
-                    if (patch.kashirovkaMode !== undefined) {
-                      handleFieldChange("kashirovkaMode", patch.kashirovkaMode);
-                    }
-                    if (patch.kashirovkaStrategy !== undefined) {
-                      handleFieldChange("kashirovkaStrategy", patch.kashirovkaStrategy);
-                    }
-                    if (patch.kashirovkaMakeReadySheets !== undefined) {
-                      handleFieldChange("kashirovkaMakeReadySheets", patch.kashirovkaMakeReadySheets);
-                    }
-                  }}
-                  sampleQty={sampleData.sampleQty}
-                  onSampleQtyChange={(q) => handleSampleChange("sampleQty", q)}
-                  impositionState={formData.impositionState}
-                  onImpositionStateChange={(impState) => {
-                    setFormData((prev) => ({ ...prev, impositionState: impState }));
-                    updateTabData(tab.id, { impositionState: impState });
-                  }}
-                  onApplyToOrder={(payload) => {
-                    const currentTools = formData.toolingItems || [];
-                    const ctpIdx = currentTools.findIndex((t) => t.category === "ctp_plates");
-                    let nextTooling = [...currentTools];
-                    if (ctpIdx >= 0) {
-                      nextTooling[ctpIdx] = {
-                        ...nextTooling[ctpIdx],
-                        quantity: payload.totalCtpPlates,
-                        specDetails: payload.ctpSpecDetails,
-                      };
-                    } else if (payload.totalCtpPlates > 0) {
-                      const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
-                      nextTooling = [
-                        {
-                          id: `TL-CTP-${Date.now()}`,
-                          category: "ctp_plates",
-                          name: `${data.docNo || tab.id} CTP Metall Formalar Komplekti`,
-                          specDetails: payload.ctpSpecDetails,
+              <TabsContent value="layout" keepMounted={false} className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
+                {activeTab === "layout" && (
+                  <LayoutCalcTab
+                    sizes={formData.sizes || []}
+                    defaultQuantity={formData.quantity}
+                    docNo={data.docNo || tab.id}
+                    orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
+                    defaultProdW={formData.width}
+                    defaultProdH={formData.height}
+                    defaultBleed={formData.bleed}
+                    shapeType={formData.shapeType}
+                    customShape={formData.customShape}
+                    customSvgPath={formData.customSvgPath}
+                    cornerType={formData.cornerType}
+                    artworkFront={formData.artworkFront}
+                    artworkBack={formData.artworkBack}
+                    skuArtworks={skuArtworks}
+                    frontColors={formData.frontColors}
+                    backColors={formData.backColors}
+                    spotColors={formData.spotColorItems}
+                    printMethod={formData.printMethod}
+                    onPrintMethodChange={(method) => handleFieldChange("printMethod", method)}
+                    onApplyRouteToOperations={handleApplyRouteFromPlan}
+                    pressMachine={formData.pressMachine}
+                    activeMachine={activeMachine}
+                    paperStock={formData.paperStock}
+                    warehouseStock={warehouseStock}
+                    parentSheetW={formData.parentSheetW}
+                    parentSheetH={formData.parentSheetH}
+                    pressSheetW={formData.pressSheetW}
+                    pressSheetH={formData.pressSheetH}
+                    plannedSheets={formData.plannedSheets}
+                    lamination={formData.lamination}
+                    embellishment={formData.embellishment}
+                    isOperator={isOperator}
+                    onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+                    kashirovkaMode={formData.kashirovkaMode}
+                    kashirovkaStrategy={formData.kashirovkaStrategy}
+                    kashirovkaLayers={formData.kashirovkaLayers}
+                    kashirovkaGlueGsm={formData.kashirovkaGlueGsm}
+                    kashirovkaMakeReadySheets={formData.kashirovkaMakeReadySheets}
+                    onKashirovkaChange={(patch) => {
+                      if (patch.kashirovkaMode !== undefined) {
+                        handleFieldChange("kashirovkaMode", patch.kashirovkaMode);
+                      }
+                      if (patch.kashirovkaStrategy !== undefined) {
+                        handleFieldChange("kashirovkaStrategy", patch.kashirovkaStrategy);
+                      }
+                      if (patch.kashirovkaMakeReadySheets !== undefined) {
+                        handleFieldChange("kashirovkaMakeReadySheets", patch.kashirovkaMakeReadySheets);
+                      }
+                    }}
+                    sampleQty={sampleData.sampleQty}
+                    onSampleQtyChange={(q) => handleSampleChange("sampleQty", q)}
+                    impositionState={formData.impositionState}
+                    onImpositionStateChange={(impState) => {
+                      setFormData((prev) => ({ ...prev, impositionState: impState }));
+                      updateTabData(tab.id, { impositionState: impState });
+                    }}
+                    onApplyToOrder={(payload) => {
+                      const currentTools = formData.toolingItems || [];
+                      const ctpIdx = currentTools.findIndex((t) => t.category === "ctp_plates");
+                      let nextTooling = [...currentTools];
+                      if (ctpIdx >= 0) {
+                        nextTooling[ctpIdx] = {
+                          ...nextTooling[ctpIdx],
                           quantity: payload.totalCtpPlates,
-                          unit: "dona",
-                          estimatedCost: (isUsd ? 6 : 75000) * payload.totalCtpPlates,
-                          currency: formData.currency || "UZS",
-                          status: "Draft",
-                          createdAt: new Date().toISOString(),
-                        },
-                        ...nextTooling,
-                      ];
-                    }
+                          specDetails: payload.ctpSpecDetails,
+                        };
+                      } else if (payload.totalCtpPlates > 0) {
+                        const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
+                        nextTooling = [
+                          {
+                            id: `TL-CTP-${Date.now()}`,
+                            category: "ctp_plates",
+                            name: `${data.docNo || tab.id} CTP Metall Formalar Komplekti`,
+                            specDetails: payload.ctpSpecDetails,
+                            quantity: payload.totalCtpPlates,
+                            unit: "dona",
+                            estimatedCost: (isUsd ? 6 : 75000) * payload.totalCtpPlates,
+                            currency: formData.currency || "UZS",
+                            status: "Draft",
+                            createdAt: new Date().toISOString(),
+                          },
+                          ...nextTooling,
+                        ];
+                      }
 
-                    handleFieldChange({
-                      ...(payload.paperStock ? { paperStock: payload.paperStock } : {}),
-                      parentSheetW: payload.parentSheetW,
-                      parentSheetH: payload.parentSheetH,
-                      pressSheetW: payload.pressSheetW,
-                      pressSheetH: payload.pressSheetH,
-                      plannedSheets: payload.plannedParentSheets,
-                      ...(payload.printMethod ? { printMethod: payload.printMethod } : {}),
-                      toolingItems: nextTooling,
-                    });
-                    setTabUnsaved(tab.id, true);
-                    addNotification({
-                      title: "Montaj buyurtmaga qo'llandi",
-                      description: `Xom qog'oz: ${payload.plannedParentSheets.toLocaleString()} list (${payload.plannedPressSheets.toLocaleString()} bosma list) · CTP: ${payload.totalCtpPlates} dona.`,
-                      severity: "success",
-                    });
-                  }}
-                />
+                      handleFieldChange({
+                        ...(payload.paperStock ? { paperStock: payload.paperStock } : {}),
+                        parentSheetW: payload.parentSheetW,
+                        parentSheetH: payload.parentSheetH,
+                        pressSheetW: payload.pressSheetW,
+                        pressSheetH: payload.pressSheetH,
+                        plannedSheets: payload.plannedParentSheets,
+                        ...(payload.printMethod ? { printMethod: payload.printMethod } : {}),
+                        toolingItems: nextTooling,
+                      });
+                      setTabUnsaved(tab.id, true);
+                      addNotification({
+                        title: "Montaj buyurtmaga qo'llandi",
+                        description: `Xom qog'oz: ${payload.plannedParentSheets.toLocaleString()} list (${payload.plannedPressSheets.toLocaleString()} bosma list) · CTP: ${payload.totalCtpPlates} dona.`,
+                        severity: "success",
+                      });
+                    }}
+                  />
+                )}
               </TabsContent>
             )}
 
             {/* Tab: Flexo Imposition & Cylinder Repeat */}
             {isFlexo && (
-              <TabsContent value="flexo" className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
-                <FlexoCalcTab
-                  defaultQuantity={formData.quantity}
-                  docNo={data.docNo || tab.id}
-                  orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
-                  customer={formData.customer}
-                  productName={formData.product}
-                  defaultProdW={formData.width}
-                  defaultProdH={formData.height}
-                  defaultBleed={formData.bleed}
-                  onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
-                  onAuditLog={() => {}}
-                  onFlexoSave={(res) => {
-                    if (
-                      formData.flexoCylinderTeeth !== res.gearTeeth ||
-                      formData.flexoWebWidth !== res.webWidth
-                    ) {
-                      setFormData((prev) => ({
-                        ...prev,
-                        flexoCylinderTeeth: res.gearTeeth,
-                        flexoWebWidth: res.webWidth,
-                      }));
-                    }
-                  }}
-                />
+              <TabsContent value="flexo" keepMounted={false} className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
+                {activeTab === "flexo" && (
+                  <FlexoCalcTab
+                    defaultQuantity={formData.quantity}
+                    docNo={data.docNo || tab.id}
+                    orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
+                    customer={formData.customer}
+                    productName={formData.product}
+                    defaultProdW={formData.width}
+                    defaultProdH={formData.height}
+                    defaultBleed={formData.bleed}
+                    onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+                    onAuditLog={() => {}}
+                    onFlexoSave={(res) => {
+                      if (
+                        formData.flexoCylinderTeeth !== res.gearTeeth ||
+                        formData.flexoWebWidth !== res.webWidth
+                      ) {
+                        setFormData((prev) => ({
+                          ...prev,
+                          flexoCylinderTeeth: res.gearTeeth,
+                          flexoWebWidth: res.webWidth,
+                        }));
+                      }
+                    }}
+                  />
+                )}
               </TabsContent>
             )}
 

@@ -23,6 +23,10 @@ import {
   Eye,
   Download,
   ExternalLink,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  Palette,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -63,12 +67,44 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Attachment,
+  AttachmentMedia,
+  AttachmentContent,
+  AttachmentTitle,
+  AttachmentDescription,
+  AttachmentActions,
+  AttachmentAction,
+} from "@/components/ui/attachment";
+import { Progress } from "@/components/ui/progress";
+import {
   SizeDistribution,
   SIZE_SCALE_PRESETS,
   parseModelAndSize,
   formatModelAndSize,
   SkuArtwork,
+  OrderAttachment,
 } from "../types";
+import {
+  extractPdfPagesToImages,
+  readFileAsDataUrl,
+} from "../utils/artworkExtractor";
+
+interface ArtworkUploadTask {
+  progress: number;
+  state: "uploading" | "processing" | "done" | "error";
+  fileName: string;
+  fileSize: string;
+  errorMessage?: string;
+}
+
+function formatBytes(bytes: number, decimals = 1): string {
+  if (!bytes || bytes === 0) return "0 B";
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
 
 interface SizeMatrixCardProps {
   sizes: SizeDistribution[];
@@ -90,6 +126,7 @@ interface SizeMatrixCardProps {
   onSampleQtyChange?: (qty: number) => void;
   skuArtworks?: SkuArtwork[];
   onSkuArtworksChange?: (artworks: SkuArtwork[]) => void;
+  setOrderAttachments?: React.Dispatch<React.SetStateAction<OrderAttachment[]>>;
   workOrderId?: string;
 }
 
@@ -113,6 +150,7 @@ export function SizeMatrixCard({
   onSampleQtyChange,
   skuArtworks = [],
   onSkuArtworksChange,
+  setOrderAttachments,
   workOrderId,
 }: SizeMatrixCardProps) {
   // Parse existing sizes to detect if multi-model data already exists
@@ -233,11 +271,14 @@ export function SizeMatrixCard({
     setScope("full");
     onSampleTargetSizeChange?.("all");
     if (!sizes || sizes.length === 0 || (sizes.length === 1 && (sizes[0].size === "Standart" || !sizes[0].size))) {
+      const baseQty = Math.max(0, Number(totalQuantity) || 0);
+      const perSize = baseQty > 0 ? Math.floor(baseQty / 4) : 0;
+      const remainder = baseQty > 0 ? baseQty - perSize * 4 : 0;
       onSizesChange([
-        { id: `size-${Date.now()}-1`, size: "S", sizeCode: "S", quantity: 0 },
-        { id: `size-${Date.now()}-2`, size: "M", sizeCode: "M", quantity: 0 },
-        { id: `size-${Date.now()}-3`, size: "L", sizeCode: "L", quantity: 0 },
-        { id: `size-${Date.now()}-4`, size: "XL", sizeCode: "XL", quantity: 0 },
+        { id: `size-${Date.now()}-1`, size: "S", sizeCode: "S", quantity: perSize + remainder },
+        { id: `size-${Date.now()}-2`, size: "M", sizeCode: "M", quantity: perSize },
+        { id: `size-${Date.now()}-3`, size: "L", sizeCode: "L", quantity: perSize },
+        { id: `size-${Date.now()}-4`, size: "XL", sizeCode: "XL", quantity: perSize },
       ]);
     }
   };
@@ -512,9 +553,17 @@ export function SizeMatrixCard({
 
   // ── Artwork State ──
   const [isArtworkOpen, setIsArtworkOpen] = React.useState(true);
-  const [uploadingKey, setUploadingKey] = React.useState<string | null>(null);
+  const [uploadTasks, setUploadTasks] = React.useState<Record<string, ArtworkUploadTask>>({});
+  const activeUploadsRef = React.useRef<Map<string, XMLHttpRequest>>(new Map());
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [previewName, setPreviewName] = React.useState<string>("");
+
+  React.useEffect(() => {
+    return () => {
+      activeUploadsRef.current.forEach((xhr) => xhr.abort());
+      activeUploadsRef.current.clear();
+    };
+  }, []);
 
   const artworkMap = React.useMemo(() => {
     const map: Record<string, SkuArtwork> = {};
@@ -524,58 +573,175 @@ export function SizeMatrixCard({
     return map;
   }, [skuArtworks]);
 
-  const handleArtworkUpload = async (
+  const cancelUpload = React.useCallback((key: string) => {
+    const xhr = activeUploadsRef.current.get(key);
+    if (xhr) {
+      xhr.abort();
+      activeUploadsRef.current.delete(key);
+    }
+    setUploadTasks((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const handleArtworkUpload = (
     skuItem: { id: string; model?: string; sizeCode?: string; size?: string },
     side: "front" | "back",
     file: File
   ) => {
     const skuId = skuItem.id;
     const key = `${skuId}-${side}`;
-    setUploadingKey(key);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("workOrderId", workOrderId || "WO");
-      fd.append("skuId", skuId);
-      fd.append("side", side);
-      const res = await fetch("/api/artwork/upload", { method: "POST", body: fd });
-      if (!res.ok) throw new Error("Upload failed");
-      const result: { url: string; name: string; thumbUrl?: string } = await res.json();
-      const existing = artworkMap[skuId] || {
-        skuId,
-        model: skuItem.model,
-        sizeCode: skuItem.sizeCode || skuItem.size || "",
-      };
-      const updated: SkuArtwork = {
-        ...existing,
-        model: skuItem.model || existing.model,
-        sizeCode: skuItem.sizeCode || skuItem.size || existing.sizeCode,
-        ...(side === "front"
-          ? {
-              frontArtworkUrl: result.url,
-              frontArtworkName: result.name,
-              frontArtworkThumb: result.thumbUrl,
-            }
-          : {
-              backArtworkUrl: result.url,
-              backArtworkName: result.name,
-              backArtworkThumb: result.thumbUrl,
-            }),
-      };
-      const newArtworks = skuArtworks.filter((a) => a.skuId !== skuId).concat(updated);
-      onSkuArtworksChange?.(newArtworks);
-    } catch (e) {
-      console.error("Artwork upload error:", e);
-    } finally {
-      setUploadingKey(null);
+
+    const existingXhr = activeUploadsRef.current.get(key);
+    if (existingXhr) {
+      existingXhr.abort();
+      activeUploadsRef.current.delete(key);
     }
+
+    // Start generating thumbnail in parallel for instant client-side rendering
+    let localThumbPromise: Promise<string | null> = Promise.resolve(null);
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      localThumbPromise = extractPdfPagesToImages(file, { scale: 1.5, maxPages: 1, autoTrim: false })
+        .then((res) => res.front)
+        .catch(() => null);
+    } else {
+      localThumbPromise = readFileAsDataUrl(file).catch(() => null);
+    }
+
+    setUploadTasks((prev) => ({
+      ...prev,
+      [key]: {
+        progress: 8,
+        state: "uploading",
+        fileName: file.name,
+        fileSize: formatBytes(file.size),
+      },
+    }));
+
+    const xhr = new XMLHttpRequest();
+    activeUploadsRef.current.set(key, xhr);
+
+    xhr.upload.addEventListener("progress", (evt) => {
+      if (evt.lengthComputable) {
+        const pct = Math.min(95, Math.max(8, Math.round((evt.loaded / evt.total) * 95)));
+        setUploadTasks((prev) =>
+          prev[key] ? { ...prev, [key]: { ...prev[key], progress: pct, state: "uploading" } } : prev
+        );
+      }
+    });
+
+    xhr.addEventListener("load", async () => {
+      activeUploadsRef.current.delete(key);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const result: { url: string; name: string; thumbUrl?: string } = JSON.parse(xhr.responseText);
+          const localThumb = await localThumbPromise;
+          const finalThumb = result.thumbUrl || localThumb || undefined;
+
+          setUploadTasks((prev) =>
+            prev[key] ? { ...prev, [key]: { ...prev[key], progress: 100, state: "done" } } : prev
+          );
+
+          const existing = artworkMap[skuId] || {
+            skuId,
+            model: skuItem.model,
+            sizeCode: skuItem.sizeCode || skuItem.size || "",
+          };
+          const updated: SkuArtwork = {
+            ...existing,
+            model: skuItem.model || existing.model,
+            sizeCode: skuItem.sizeCode || skuItem.size || existing.sizeCode,
+            ...(side === "front"
+              ? {
+                  frontArtworkUrl: result.url,
+                  frontArtworkName: result.name,
+                  frontArtworkThumb: finalThumb,
+                }
+              : {
+                  backArtworkUrl: result.url,
+                  backArtworkName: result.name,
+                  backArtworkThumb: finalThumb,
+                }),
+          };
+          const newArtworks = skuArtworks.filter((a) => a.skuId !== skuId).concat(updated);
+          onSkuArtworksChange?.(newArtworks);
+
+          // Synchronize with orderAttachments so uploaded files appear in FilesTab
+          setOrderAttachments?.((prev) => {
+            const filtered = prev.filter((a) => a.url !== result.url);
+            const sideLabel = side === "front" ? "Oldi" : "Orqa";
+            const skuLabel = skuItem.model
+              ? `${skuItem.model} ${skuItem.sizeCode || skuItem.size || ""}`
+              : skuItem.sizeCode || skuItem.size || "SKU";
+            const newAtt: OrderAttachment = {
+              id: `att-art-${skuId}-${side}-${Date.now()}`,
+              name: `[${skuLabel} / ${sideLabel}] ${result.name}`,
+              size: formatBytes(file.size),
+              type: file.type || (result.name.endsWith(".svg") ? "image/svg+xml" : "application/pdf"),
+              date: new Date().toISOString().slice(0, 16).replace("T", " "),
+              isImage: file.type.startsWith("image/") || result.name.endsWith(".svg"),
+              category: "artwork",
+              url: result.url,
+            };
+            return [newAtt, ...filtered];
+          });
+
+          setTimeout(() => {
+            setUploadTasks((prev) => {
+              const next = { ...prev };
+              delete next[key];
+              return next;
+            });
+          }, 600);
+        } catch {
+          setUploadTasks((prev) =>
+            prev[key] ? { ...prev, [key]: { ...prev[key], state: "error", errorMessage: "Javobni o'qib bo'lmadi" } } : prev
+          );
+        }
+      } else {
+        let msg = "Yuklashda xatolik";
+        try {
+          const errJson = JSON.parse(xhr.responseText);
+          if (errJson?.error) msg = errJson.error;
+        } catch (_) {}
+        setUploadTasks((prev) =>
+          prev[key] ? { ...prev, [key]: { ...prev[key], state: "error", errorMessage: msg } } : prev
+        );
+      }
+    });
+
+    xhr.addEventListener("error", () => {
+      activeUploadsRef.current.delete(key);
+      setUploadTasks((prev) =>
+        prev[key] ? { ...prev, [key]: { ...prev[key], state: "error", errorMessage: "Tarmoqda xatolik" } } : prev
+      );
+    });
+
+    xhr.addEventListener("abort", () => {
+      activeUploadsRef.current.delete(key);
+    });
+
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("workOrderId", workOrderId || "WO");
+    fd.append("skuId", skuId);
+    fd.append("side", side);
+
+    xhr.open("POST", "/api/artwork/upload");
+    xhr.send(fd);
   };
 
   const handleArtworkRemove = async (skuId: string, side: "front" | "back") => {
+    const key = `${skuId}-${side}`;
+    cancelUpload(key);
+
     const existing = artworkMap[skuId];
     if (!existing) return;
     const urlToDelete = side === "front" ? existing.frontArtworkUrl : existing.backArtworkUrl;
     if (urlToDelete) {
+      setOrderAttachments?.((prev) => prev.filter((a) => a.url !== urlToDelete));
       try {
         await fetch(`/api/artwork/upload?path=${encodeURIComponent(urlToDelete)}`, { method: "DELETE" });
       } catch (_) {}
@@ -1382,11 +1548,17 @@ export function SizeMatrixCard({
         <div className="flex items-center justify-between p-2.5 px-3 bg-muted/30 border-b border-border/80">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
-              <span>🎨 SKU Artwork fayllari (Old &amp; Orqa PDF / SVG)</span>
+              <Palette className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>SKU Artwork fayllari</span>
             </span>
             <Badge variant="outline" className="text-[10px] font-mono h-4 px-1.5">
               {skuArtworks.length} ta yuklangan
             </Badge>
+            {Object.keys(uploadTasks).length > 0 && (
+              <Badge variant="secondary" className="text-[10px] font-mono h-4 px-1.5 animate-pulse text-primary">
+                {Object.keys(uploadTasks).length} ta yuklanmoqda
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-1.5">
             {artworkItems.length > 1 && artworkMap[artworkItems[0]?.id]?.frontArtworkUrl && !isOperator && (
@@ -1399,7 +1571,7 @@ export function SizeMatrixCard({
                 title="1-SKU oldi tarafi artwork faylini barcha razmerlarga qo'llash"
               >
                 <Copy className="w-3 h-3" />
-                <span>1-SKU oldini hammaga nusxalash</span>
+                <span>1-SKU oldini nusxalash</span>
               </Button>
             )}
             <button
@@ -1436,11 +1608,11 @@ export function SizeMatrixCard({
                     <TableHead className="h-7 px-2 text-right text-xs font-semibold text-muted-foreground w-[80px]">
                       Tiraj
                     </TableHead>
-                    <TableHead className="h-7 px-3 text-xs font-semibold text-foreground">
-                      Oldi tarafi (Front Artwork)
+                    <TableHead className="h-7 px-3 text-xs font-semibold text-foreground min-w-[240px]">
+                      Oldi tarafi
                     </TableHead>
-                    <TableHead className="h-7 px-3 text-xs font-semibold text-foreground">
-                      Orqa tarafi (Back Artwork)
+                    <TableHead className="h-7 px-3 text-xs font-semibold text-foreground min-w-[240px]">
+                      Orqa tarafi
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1449,8 +1621,10 @@ export function SizeMatrixCard({
                     const art = artworkMap[item.id];
                     const frontKey = `${item.id}-front`;
                     const backKey = `${item.id}-back`;
-                    const isUploadingFront = uploadingKey === frontKey;
-                    const isUploadingBack = uploadingKey === backKey;
+                    const frontTask = uploadTasks[frontKey];
+                    const backTask = uploadTasks[backKey];
+                    const isUploadingFront = !!frontTask && (frontTask.state === "uploading" || frontTask.state === "processing");
+                    const isUploadingBack = !!backTask && (backTask.state === "uploading" || backTask.state === "processing");
 
                     return (
                       <TableRow key={item.id} className="border-b border-border/60 last:border-0 hover:bg-muted/20">
@@ -1470,32 +1644,104 @@ export function SizeMatrixCard({
                         </TableCell>
 
                         {/* Front Artwork Slot */}
-                        <TableCell className="px-3 py-1.5">
-                          {art?.frontArtworkUrl ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPreviewUrl(art.frontArtworkUrl!);
-                                  setPreviewName(`${item.model || ""} ${item.sizeCode} (Oldi / Front)`);
-                                }}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border bg-muted/40 hover:bg-muted text-[11px] font-mono text-foreground transition-colors cursor-pointer truncate max-w-[200px]"
-                                title="Ko'rish (Preview)"
-                              >
-                                <Eye className="w-3 h-3 text-primary shrink-0" />
-                                <span className="truncate">{art.frontArtworkName || "front.pdf"}</span>
-                              </button>
-                              {!isOperator && (
-                                <button
+                        <TableCell className="px-3 py-1.5 min-w-[240px]">
+                          {frontTask && (frontTask.state === "uploading" || frontTask.state === "processing" || frontTask.state === "error") ? (
+                            <Attachment
+                              size="xs"
+                              state={frontTask.state}
+                              className="w-full max-w-[260px] bg-card border-border shadow-none"
+                            >
+                              <AttachmentMedia variant="icon" className="size-6 shrink-0">
+                                {frontTask.state === "uploading" ? (
+                                  <Loader2 className="size-3.5 animate-spin text-primary" />
+                                ) : frontTask.state === "processing" ? (
+                                  <RefreshCw className="size-3.5 animate-spin text-amber-500" />
+                                ) : (
+                                  <AlertCircle className="size-3.5 text-destructive" />
+                                )}
+                              </AttachmentMedia>
+                              <AttachmentContent className="min-w-0 flex-1 space-y-0.5">
+                                <div className="flex items-center justify-between gap-1 leading-none">
+                                  <AttachmentTitle className="text-[11px] font-mono truncate max-w-[130px]" title={frontTask.fileName}>
+                                    {frontTask.fileName}
+                                  </AttachmentTitle>
+                                  <span className="text-[10px] font-mono font-bold text-muted-foreground shrink-0">
+                                    {frontTask.progress}%
+                                  </span>
+                                </div>
+                                <AttachmentDescription className="text-[10px] text-muted-foreground leading-none">
+                                  {frontTask.state === "uploading" && (frontTask.fileSize ? `${frontTask.fileSize} · Yuklanmoqda` : "Yuklanmoqda...")}
+                                  {frontTask.state === "processing" && "Saqlanmoqda..."}
+                                  {frontTask.state === "error" && (frontTask.errorMessage || "Xatolik")}
+                                </AttachmentDescription>
+                                {frontTask.state !== "error" && (
+                                  <div className="w-full pt-0.5">
+                                    <Progress value={frontTask.progress} className="h-1" />
+                                  </div>
+                                )}
+                              </AttachmentContent>
+                              <AttachmentActions>
+                                <AttachmentAction
                                   type="button"
-                                  onClick={() => handleArtworkRemove(item.id, "front")}
-                                  className="text-muted-foreground hover:text-destructive p-0.5 rounded transition-colors cursor-pointer"
-                                  title="O'chirish"
+                                  size="icon-xs"
+                                  onClick={() => cancelUpload(frontKey)}
+                                  title="Bekor qilish"
+                                  className="text-muted-foreground hover:text-destructive cursor-pointer size-5"
                                 >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              )}
-                            </div>
+                                  <X className="size-3" />
+                                </AttachmentAction>
+                              </AttachmentActions>
+                            </Attachment>
+                          ) : art?.frontArtworkUrl ? (
+                            <Attachment
+                              size="xs"
+                              state="done"
+                              className="w-full max-w-[260px] bg-card border-border shadow-none"
+                            >
+                              <AttachmentMedia variant="icon" className="size-6 shrink-0 bg-primary/10 text-primary">
+                                <FileText className="size-3.5" />
+                              </AttachmentMedia>
+                              <AttachmentContent className="min-w-0 flex-1">
+                                <AttachmentTitle
+                                  className="text-[11px] font-mono truncate cursor-pointer hover:text-primary transition-colors block"
+                                  title={art.frontArtworkName || "front.pdf"}
+                                  onClick={() => {
+                                    setPreviewUrl(art.frontArtworkUrl!);
+                                    setPreviewName(`${item.model || ""} ${item.sizeCode} (Oldi)`);
+                                  }}
+                                >
+                                  {art.frontArtworkName || "front.pdf"}
+                                </AttachmentTitle>
+                                <AttachmentDescription className="text-[10px] text-muted-foreground">
+                                  PDF / SVG
+                                </AttachmentDescription>
+                              </AttachmentContent>
+                              <AttachmentActions className="gap-0.5">
+                                <AttachmentAction
+                                  type="button"
+                                  size="icon-xs"
+                                  onClick={() => {
+                                    setPreviewUrl(art.frontArtworkUrl!);
+                                    setPreviewName(`${item.model || ""} ${item.sizeCode} (Oldi)`);
+                                  }}
+                                  title="Ko'rish"
+                                  className="text-muted-foreground hover:text-foreground cursor-pointer size-5"
+                                >
+                                  <Eye className="size-3" />
+                                </AttachmentAction>
+                                {!isOperator && (
+                                  <AttachmentAction
+                                    type="button"
+                                    size="icon-xs"
+                                    onClick={() => handleArtworkRemove(item.id, "front")}
+                                    title="O'chirish"
+                                    className="text-muted-foreground hover:text-destructive cursor-pointer size-5"
+                                  >
+                                    <X className="size-3" />
+                                  </AttachmentAction>
+                                )}
+                              </AttachmentActions>
+                            </Attachment>
                           ) : (
                             <div>
                               <input
@@ -1513,46 +1759,118 @@ export function SizeMatrixCard({
                               <label
                                 htmlFor={`file-input-${item.id}-front`}
                                 className={cn(
-                                  "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border border-dashed transition-colors",
+                                  "inline-flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium rounded-md border border-dashed transition-colors",
                                   isOperator
                                     ? "text-muted-foreground border-border cursor-not-allowed opacity-50"
                                     : "text-muted-foreground hover:text-foreground border-border hover:border-primary cursor-pointer hover:bg-muted/40"
                                 )}
                               >
-                                <Upload className="w-3 h-3" />
-                                <span>{isUploadingFront ? "Yuklanmoqda..." : "PDF / SVG yuklash"}</span>
+                                <Upload className="size-3 text-muted-foreground" />
+                                <span>PDF / SVG yuklash</span>
                               </label>
                             </div>
                           )}
                         </TableCell>
 
                         {/* Back Artwork Slot */}
-                        <TableCell className="px-3 py-1.5">
-                          {art?.backArtworkUrl ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPreviewUrl(art.backArtworkUrl!);
-                                  setPreviewName(`${item.model || ""} ${item.sizeCode} (Orqa / Back)`);
-                                }}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border bg-muted/40 hover:bg-muted text-[11px] font-mono text-foreground transition-colors cursor-pointer truncate max-w-[200px]"
-                                title="Ko'rish (Preview)"
-                              >
-                                <Eye className="w-3 h-3 text-primary shrink-0" />
-                                <span className="truncate">{art.backArtworkName || "back.pdf"}</span>
-                              </button>
-                              {!isOperator && (
-                                <button
+                        <TableCell className="px-3 py-1.5 min-w-[240px]">
+                          {backTask && (backTask.state === "uploading" || backTask.state === "processing" || backTask.state === "error") ? (
+                            <Attachment
+                              size="xs"
+                              state={backTask.state}
+                              className="w-full max-w-[260px] bg-card border-border shadow-none"
+                            >
+                              <AttachmentMedia variant="icon" className="size-6 shrink-0">
+                                {backTask.state === "uploading" ? (
+                                  <Loader2 className="size-3.5 animate-spin text-primary" />
+                                ) : backTask.state === "processing" ? (
+                                  <RefreshCw className="size-3.5 animate-spin text-amber-500" />
+                                ) : (
+                                  <AlertCircle className="size-3.5 text-destructive" />
+                                )}
+                              </AttachmentMedia>
+                              <AttachmentContent className="min-w-0 flex-1 space-y-0.5">
+                                <div className="flex items-center justify-between gap-1 leading-none">
+                                  <AttachmentTitle className="text-[11px] font-mono truncate max-w-[130px]" title={backTask.fileName}>
+                                    {backTask.fileName}
+                                  </AttachmentTitle>
+                                  <span className="text-[10px] font-mono font-bold text-muted-foreground shrink-0">
+                                    {backTask.progress}%
+                                  </span>
+                                </div>
+                                <AttachmentDescription className="text-[10px] text-muted-foreground leading-none">
+                                  {backTask.state === "uploading" && (backTask.fileSize ? `${backTask.fileSize} · Yuklanmoqda` : "Yuklanmoqda...")}
+                                  {backTask.state === "processing" && "Saqlanmoqda..."}
+                                  {backTask.state === "error" && (backTask.errorMessage || "Xatolik")}
+                                </AttachmentDescription>
+                                {backTask.state !== "error" && (
+                                  <div className="w-full pt-0.5">
+                                    <Progress value={backTask.progress} className="h-1" />
+                                  </div>
+                                )}
+                              </AttachmentContent>
+                              <AttachmentActions>
+                                <AttachmentAction
                                   type="button"
-                                  onClick={() => handleArtworkRemove(item.id, "back")}
-                                  className="text-muted-foreground hover:text-destructive p-0.5 rounded transition-colors cursor-pointer"
-                                  title="O'chirish"
+                                  size="icon-xs"
+                                  onClick={() => cancelUpload(backKey)}
+                                  title="Bekor qilish"
+                                  className="text-muted-foreground hover:text-destructive cursor-pointer size-5"
                                 >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              )}
-                            </div>
+                                  <X className="size-3" />
+                                </AttachmentAction>
+                              </AttachmentActions>
+                            </Attachment>
+                          ) : art?.backArtworkUrl ? (
+                            <Attachment
+                              size="xs"
+                              state="done"
+                              className="w-full max-w-[260px] bg-card border-border shadow-none"
+                            >
+                              <AttachmentMedia variant="icon" className="size-6 shrink-0 bg-primary/10 text-primary">
+                                <FileText className="size-3.5" />
+                              </AttachmentMedia>
+                              <AttachmentContent className="min-w-0 flex-1">
+                                <AttachmentTitle
+                                  className="text-[11px] font-mono truncate cursor-pointer hover:text-primary transition-colors block"
+                                  title={art.backArtworkName || "back.pdf"}
+                                  onClick={() => {
+                                    setPreviewUrl(art.backArtworkUrl!);
+                                    setPreviewName(`${item.model || ""} ${item.sizeCode} (Orqa)`);
+                                  }}
+                                >
+                                  {art.backArtworkName || "back.pdf"}
+                                </AttachmentTitle>
+                                <AttachmentDescription className="text-[10px] text-muted-foreground">
+                                  PDF / SVG
+                                </AttachmentDescription>
+                              </AttachmentContent>
+                              <AttachmentActions className="gap-0.5">
+                                <AttachmentAction
+                                  type="button"
+                                  size="icon-xs"
+                                  onClick={() => {
+                                    setPreviewUrl(art.backArtworkUrl!);
+                                    setPreviewName(`${item.model || ""} ${item.sizeCode} (Orqa)`);
+                                  }}
+                                  title="Ko'rish"
+                                  className="text-muted-foreground hover:text-foreground cursor-pointer size-5"
+                                >
+                                  <Eye className="size-3" />
+                                </AttachmentAction>
+                                {!isOperator && (
+                                  <AttachmentAction
+                                    type="button"
+                                    size="icon-xs"
+                                    onClick={() => handleArtworkRemove(item.id, "back")}
+                                    title="O'chirish"
+                                    className="text-muted-foreground hover:text-destructive cursor-pointer size-5"
+                                  >
+                                    <X className="size-3" />
+                                  </AttachmentAction>
+                                )}
+                              </AttachmentActions>
+                            </Attachment>
                           ) : (
                             <div>
                               <input
@@ -1570,14 +1888,14 @@ export function SizeMatrixCard({
                               <label
                                 htmlFor={`file-input-${item.id}-back`}
                                 className={cn(
-                                  "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border border-dashed transition-colors",
+                                  "inline-flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium rounded-md border border-dashed transition-colors",
                                   isOperator
                                     ? "text-muted-foreground border-border cursor-not-allowed opacity-50"
                                     : "text-muted-foreground hover:text-foreground border-border hover:border-primary cursor-pointer hover:bg-muted/40"
                                 )}
                               >
-                                <Upload className="w-3 h-3" />
-                                <span>{isUploadingBack ? "Yuklanmoqda..." : "PDF / SVG yuklash"}</span>
+                                <Upload className="size-3 text-muted-foreground" />
+                                <span>PDF / SVG yuklash</span>
                               </label>
                             </div>
                           )}

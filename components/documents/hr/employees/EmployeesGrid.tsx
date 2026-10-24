@@ -17,7 +17,6 @@ import { EmployeeRecord } from "../types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   ContextMenu,
@@ -26,14 +25,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
-} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -49,17 +40,10 @@ import {
   ExternalLink,
   Plus,
   RefreshCw,
-  Briefcase,
-  Building2,
-  Phone,
-  Calendar,
-  CreditCard,
-  CheckCircle2,
 } from "lucide-react";
 
 export function EmployeesGrid() {
-  const { theme, openTab, employees, upsertEmployee, updateGridStats, addNotification } =
-    useWorkspaceStore();
+  const { theme, openTab, employees, updateGridStats } = useWorkspaceStore();
 
   const isDark = theme === "dark";
   const [data, setData] = useState<EmployeeRecord[]>([]);
@@ -67,22 +51,11 @@ export function EmployeesGrid() {
   const [searchFilter, setSearchFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
 
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   });
-
-  // New Employee Form State
-  const [newBadge, setNewBadge] = useState("");
-  const [newFullName, setNewFullName] = useState("");
-  const [newDepartment, setNewDepartment] = useState("Flekso bosma sexi");
-  const [newPosition, setNewPosition] = useState("Pechatnik");
-  const [newWageType, setNewWageType] = useState<any>("piecework");
-  const [newBaseSalary, setNewBaseSalary] = useState("4000000");
-  const [newPhone, setNewPhone] = useState("+998 90 ");
-  const [newShift, setNewShift] = useState("day");
 
   // Load from API with fallback to store
   const fetchEmployees = useCallback(async () => {
@@ -105,6 +78,18 @@ export function EmployeesGrid() {
   useEffect(() => {
     fetchEmployees();
   }, [fetchEmployees]);
+
+  // Keep local data in sync when store employees update
+  useEffect(() => {
+    if (employees && employees.length > 0) {
+      setData((prev) => {
+        const map = new Map<string, EmployeeRecord>();
+        prev.forEach((e) => map.set(e.id, e));
+        employees.forEach((e) => map.set(e.id, e));
+        return Array.from(map.values());
+      });
+    }
+  }, [employees]);
 
   // Filtered rows
   const filtered = useMemo(() => {
@@ -140,9 +125,9 @@ export function EmployeesGrid() {
       { id: "fullName", title: "F.I.O. (Xodim)", width: 230, icon: GridColumnIcon.HeaderString },
       { id: "positionTitle", title: "Lavozim", width: 180, icon: GridColumnIcon.HeaderString },
       { id: "departmentName", title: "Sex / Bo'lim", width: 180, icon: GridColumnIcon.HeaderString },
-      { id: "wageType", title: "To'lov turi", width: 110, icon: GridColumnIcon.HeaderString },
-      { id: "baseSalary", title: "Asosiy oklad (UZS)", width: 145, icon: GridColumnIcon.HeaderNumber },
-      { id: "currentShift", title: "Smena grafigi", width: 130, icon: GridColumnIcon.HeaderString },
+      { id: "wageType", title: "To'lov shakli", width: 120, icon: GridColumnIcon.HeaderString },
+      { id: "baseSalary", title: "Oklad (UZS)", width: 145, icon: GridColumnIcon.HeaderNumber },
+      { id: "currentShift", title: "Smena", width: 130, icon: GridColumnIcon.HeaderString },
       { id: "phone", title: "Telefon", width: 140, icon: GridColumnIcon.HeaderString },
       { id: "hireDate", title: "Ishga kirgan", width: 110, icon: GridColumnIcon.HeaderDate },
       { id: "status", title: "Holati", width: 115, icon: GridColumnIcon.HeaderString },
@@ -187,9 +172,9 @@ export function EmployeesGrid() {
 
       if (col.id === "status") {
         const statusMap: Record<string, { label: string; color: string }> = {
-          active: { label: "Faol (Active)", color: "#059669" },
+          active: { label: "Faol", color: "#059669" },
           on_leave: { label: "Ta'tilda", color: "#d97706" },
-          probation: { label: "Sinov muddati", color: "#2563eb" },
+          probation: { label: "Sinov", color: "#2563eb" },
           terminated: { label: "Bo'shatilgan", color: "#dc2626" },
         };
         const st = statusMap[row.status] || { label: row.status, color: "#6b7280" };
@@ -207,8 +192,8 @@ export function EmployeesGrid() {
 
       if (col.id === "wageType") {
         const typeMap: Record<string, string> = {
-          piecework: "Ishbay (Sdelka)",
-          salary: "Oklad (Sobit)",
+          piecework: "Ishbay",
+          salary: "Oklad",
           mixed: "Aralash",
           hourly: "Soatbay",
         };
@@ -264,52 +249,73 @@ export function EmployeesGrid() {
     [filtered, handleOpenDetail]
   );
 
-  const handleCreateEmployee = async () => {
-    if (!newFullName.trim()) return;
+  // Unified Employee Creation: opens the same EmployeeDetail document module
+  const handleCreateNew = useCallback(() => {
+    let maxNum = 0;
+    const allEmp = data.length > 0 ? data : employees;
+    for (const emp of allEmp) {
+      const b = emp.badgeNumber || emp.badgeNo || "";
+      const m = b.match(/EMP-(\d+)/i);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
+    }
+    const nextBadge = `EMP-${String(maxNum + 1).padStart(4, "0")}`;
+    const newDocId = `emp-new-${Date.now().toString().slice(-4)}`;
 
-    const payload: Partial<EmployeeRecord> = {
-      badgeNumber: newBadge.trim() || `EMP-${Date.now().toString().slice(-4)}`,
-      badgeNo: newBadge.trim() || `EMP-${Date.now().toString().slice(-4)}`,
-      fullName: newFullName.trim(),
-      phone: newPhone.trim(),
-      wageType: newWageType,
-      baseSalary: Number(newBaseSalary) || 0,
-      currentShift: newShift,
-      hireDate: new Date().toISOString().split("T")[0],
+    const newEmp: EmployeeRecord = {
+      id: newDocId,
+      badgeNumber: nextBadge,
+      badgeNo: nextBadge,
+      firstName: "",
+      lastName: "",
+      fullName: "",
+      phone: "+998 90 ",
+      email: "",
       status: "active",
-      department: newDepartment,
-      departmentName: newDepartment,
-      position: newPosition,
-      positionTitle: newPosition,
+      wageType: "piecework",
+      baseSalary: 4000000,
+      hourlyRate: 0,
+      pieceworkMultiplier: 1.0,
+      pieceworkRateMultiplier: 1.0,
+      currentShift: "day",
+      hireDate: new Date().toISOString().split("T")[0],
+      departmentName: "Flekso bosma sexi",
+      department: "Flekso bosma sexi",
+      positionTitle: "Pechatnik",
+      position: "Pechatnik",
       plant: "PrintGoo Bosh Zavod",
+      skills: ["Flekso bosma", "OTK nazorat"],
+      notes: "",
     };
 
-    try {
-      const res = await fetch("/api/v1/hr/employees", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (json.success) {
-        payload.id = json.employeeId;
-        upsertEmployee(payload as EmployeeRecord);
-        addNotification({
-          title: "Xodim qo'shildi",
-          description: `${payload.fullName} bazaga kiritildi.`,
-          severity: "success",
-        });
-        setIsAddSheetOpen(false);
-        fetchEmployees();
-        handleOpenDetail(payload as EmployeeRecord);
+    openTab({
+      id: newDocId,
+      title: "Yangi xodim",
+      type: "employee-detail",
+      module: "hr",
+      documentData: newEmp,
+    });
+  }, [data, employees, openTab]);
+
+  // Keyboard navigation: Insert = Create, F12 / Enter = Open Card
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Insert") {
+        e.preventDefault();
+        handleCreateNew();
+      } else if (e.key === "F12") {
+        const selectedRow = selection.rows.toArray()[0];
+        if (selectedRow !== undefined && filtered[selectedRow]) {
+          e.preventDefault();
+          handleOpenDetail(filtered[selectedRow]);
+        }
       }
-    } catch {
-      payload.id = `emp-${Date.now()}`;
-      upsertEmployee(payload as EmployeeRecord);
-      setIsAddSheetOpen(false);
-      handleOpenDetail(payload as EmployeeRecord);
-    }
-  };
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleCreateNew, handleOpenDetail, filtered, selection.rows]);
 
   return (
     <div className="flex flex-col h-full bg-background select-none">
@@ -318,9 +324,9 @@ export function EmployeesGrid() {
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 font-semibold text-sm mr-2 text-foreground">
             <Users className="size-4 text-primary" />
-            Xodimlar va Kadrlar Ro'yxati
+            Xodimlar
             <Badge variant="secondary" className="font-mono text-xs ml-1 h-5">
-              {filtered.length} ta
+              {filtered.length}
             </Badge>
           </div>
 
@@ -354,8 +360,8 @@ export function EmployeesGrid() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">Barcha holatlar</SelectItem>
-              <SelectItem value="active">Faol (Active)</SelectItem>
-              <SelectItem value="probation">Sinov muddatida</SelectItem>
+              <SelectItem value="active">Faol</SelectItem>
+              <SelectItem value="probation">Sinov</SelectItem>
               <SelectItem value="on_leave">Ta'tilda</SelectItem>
               <SelectItem value="terminated">Bo'shatilgan</SelectItem>
             </SelectContent>
@@ -376,7 +382,7 @@ export function EmployeesGrid() {
           <Button
             size="sm"
             className="h-7 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1 font-medium"
-            onClick={() => setIsAddSheetOpen(true)}
+            onClick={handleCreateNew}
           >
             <UserPlus className="size-3.5" />
             Yangi xodim (Ins)
@@ -429,7 +435,7 @@ export function EmployeesGrid() {
             <ExternalLink className="size-3.5 mr-2" />
             Kartochkani ochish (F12)
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => setIsAddSheetOpen(true)}>
+          <ContextMenuItem onClick={handleCreateNew}>
             <Plus className="size-3.5 mr-2" />
             Yangi xodim qo'shish (Ins)
           </ContextMenuItem>
@@ -440,136 +446,6 @@ export function EmployeesGrid() {
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-
-      {/* ── Add Employee Sheet ── */}
-      <Sheet open={isAddSheetOpen} onOpenChange={setIsAddSheetOpen}>
-        <SheetContent side="right" className="w-[420px] sm:w-[480px] p-5 text-xs overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="text-sm font-semibold flex items-center gap-2">
-              <UserPlus className="size-4 text-primary" />
-              Yangi Xodim Qo'shish
-            </SheetTitle>
-            <SheetDescription className="text-xs">
-              Kadrlar bazasiga yangi xodim shaxsiy kartochkasi kiritiladi
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="space-y-3.5 py-4">
-            <div>
-              <Label className="text-xs">Tabel raqami (Badge No)</Label>
-              <Input
-                value={newBadge}
-                onChange={(e) => setNewBadge(e.target.value)}
-                placeholder="Avtomatik (masalan: EMP-0108)"
-                className="h-8 font-mono"
-              />
-            </div>
-
-            <div>
-              <Label className="text-xs">To'liq F.I.O. *</Label>
-              <Input
-                value={newFullName}
-                onChange={(e) => setNewFullName(e.target.value)}
-                placeholder="Familiya Ism Sharif"
-                className="h-8 font-medium"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Sex / Bo'lim *</Label>
-                <Select value={newDepartment} onValueChange={(val) => { if (val) setNewDepartment(val); }}>
-                  <SelectTrigger className="h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Flekso bosma sexi">Flekso bosma</SelectItem>
-                    <SelectItem value="Tikuvchilik va lenta sexi">Tikuvchilik sexi</SelectItem>
-                    <SelectItem value="Kesish va qadoqlash sexi">Kesish va qadoqlash</SelectItem>
-                    <SelectItem value="Prepress va dizayn">Prepress markazi</SelectItem>
-                    <SelectItem value="Sifat nazorati (OTK)">Sifat nazorati</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="text-xs">Lavozim *</Label>
-                <Input
-                  value={newPosition}
-                  onChange={(e) => setNewPosition(e.target.value)}
-                  className="h-8"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Mehnat to'lovi shakli</Label>
-                <Select value={newWageType} onValueChange={(val) => { if (val) setNewWageType(val); }}>
-                  <SelectTrigger className="h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="piecework">Ishbay (Sdelka)</SelectItem>
-                    <SelectItem value="mixed">Aralash (Oklad + Sdelka)</SelectItem>
-                    <SelectItem value="salary">Oklad (Sobit oylik)</SelectItem>
-                    <SelectItem value="hourly">Soatbay stavka</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="text-xs">Asosiy oklad (UZS)</Label>
-                <Input
-                  type="number"
-                  value={newBaseSalary}
-                  onChange={(e) => setNewBaseSalary(e.target.value)}
-                  className="h-8 font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Telefon raqami</Label>
-                <Input
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value)}
-                  className="h-8 font-mono"
-                />
-              </div>
-
-              <div>
-                <Label className="text-xs">Smena grafigi</Label>
-                <Select value={newShift} onValueChange={(val) => { if (val) setNewShift(val); }}>
-                  <SelectTrigger className="h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="day">Smena A (08:00 - 20:00)</SelectItem>
-                    <SelectItem value="night">Smena B (20:00 - 08:00)</SelectItem>
-                    <SelectItem value="daily">Ofis (09:00 - 18:00)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          <SheetFooter className="mt-4 gap-2">
-            <Button variant="outline" size="sm" onClick={() => setIsAddSheetOpen(false)}>
-              Bekor qilish
-            </Button>
-            <Button
-              size="sm"
-              className="bg-primary text-primary-foreground gap-1"
-              onClick={handleCreateEmployee}
-            >
-              <CheckCircle2 className="size-3.5" />
-              Xodimni kiritish
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

@@ -321,7 +321,19 @@ export function DieLinePreview({
         </defs>
 
         {/* ── 1. FRONT TAG (Left) ── */}
-        <g filter="url(#card-shadow)">
+        <g>
+          {/* Base card background with drop-shadow */}
+          <rect
+            x={leftX}
+            y={startY}
+            width={cardW}
+            height={cardH}
+            rx={cornerRadius}
+            fill="#ffffff"
+            stroke="#e4e4e7"
+            strokeWidth="0.5"
+            filter="url(#card-shadow)"
+          />
           {/* Real Artwork Image (fills card naturally) */}
           {frontImg ? (
             <image
@@ -330,11 +342,16 @@ export function DieLinePreview({
               y={startY}
               width={cardW}
               height={cardH}
-              preserveAspectRatio="none"
+              preserveAspectRatio="xMidYMid slice"
               clipPath={cornerRadius > 0 || chamferCut > 0 ? `url(#${frontClipId})` : undefined}
             />
           ) : (
-            <rect x={leftX} y={startY} width={cardW} height={cardH} rx={cornerRadius} fill="#18181b" />
+            <g>
+              <rect x={leftX} y={startY} width={cardW} height={cardH} rx={cornerRadius} fill="#f4f4f5" />
+              <text x={leftX + cardW / 2} y={startY + cardH / 2} textAnchor="middle" fontSize="9" fill="#a1a1aa" fontFamily="monospace">
+                Old tomon (Bo&apos;sh)
+              </text>
+            </g>
           )}
         </g>
 
@@ -368,7 +385,7 @@ export function DieLinePreview({
             <polygon points={`${leftX + cardW + 8.5},${startY + 2.5} ${leftX + cardW + 11.5},${startY + 2.5} ${leftX + cardW + 10},${startY}`} fill="#ef4444" />
             <polygon points={`${leftX + cardW + 8.5},${leftHoleCy - 2.5} ${leftX + cardW + 11.5},${leftHoleCy - 2.5} ${leftX + cardW + 10},${leftHoleCy}`} fill="#ef4444" />
             {/* Dimension Text */}
-            <text x={leftX + cardW + 15} y={startY + (leftHoleCy - startY) / 2 + 3} font-family="sans-serif" font-size="8.5" font-weight="bold" fill="#ef4444">
+            <text x={leftX + cardW + 15} y={startY + (leftHoleCy - startY) / 2 + 3} fontFamily="sans-serif" fontSize="8.5" fontWeight="bold" fill="#ef4444">
               {effectiveHoleOffset || 5.5} {dimensionUnit || "mm"}
             </text>
           </g>
@@ -376,16 +393,28 @@ export function DieLinePreview({
 
         {/* Front Bottom Caption */}
         <g transform={`translate(${leftX + cardW / 2}, ${startY + cardH + 16})`}>
-          <text textAnchor="middle" font-family="'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="bold" fill="currentColor" className="fill-foreground">
+          <text textAnchor="middle" fontFamily="sans-serif" fontSize="11" fontWeight="bold" fill="currentColor" className="fill-foreground">
             front
           </text>
-          <text y="11" textAnchor="middle" font-family="'Helvetica Neue', Arial, sans-serif" font-size="8.5" font-weight="medium" fill="currentColor" className="fill-muted-foreground">
+          <text y="11" textAnchor="middle" fontFamily="sans-serif" fontSize="8.5" fontWeight="500" fill="currentColor" className="fill-muted-foreground">
             передняя часть
           </text>
         </g>
 
         {/* ── 2. BACK TAG (Right) ── */}
-        <g filter="url(#card-shadow)">
+        <g>
+          {/* Base card background with drop-shadow */}
+          <rect
+            x={rightX}
+            y={startY}
+            width={cardW}
+            height={cardH}
+            rx={cornerRadius}
+            fill="#ffffff"
+            stroke="#e4e4e7"
+            strokeWidth="0.5"
+            filter="url(#card-shadow)"
+          />
           {/* Real Artwork Image */}
           {backImg ? (
             <image
@@ -394,11 +423,16 @@ export function DieLinePreview({
               y={startY}
               width={cardW}
               height={cardH}
-              preserveAspectRatio="none"
+              preserveAspectRatio="xMidYMid slice"
               clipPath={cornerRadius > 0 || chamferCut > 0 ? `url(#${backClipId})` : undefined}
             />
           ) : (
-            <rect x={rightX} y={startY} width={cardW} height={cardH} rx={cornerRadius} fill="#18181b" />
+            <g>
+              <rect x={rightX} y={startY} width={cardW} height={cardH} rx={cornerRadius} fill="#f4f4f5" />
+              <text x={rightX + cardW / 2} y={startY + cardH / 2} textAnchor="middle" fontSize="9" fill="#a1a1aa" fontFamily="monospace">
+                Orqa tomon (Bo&apos;sh)
+              </text>
+            </g>
           )}
         </g>
 
@@ -422,10 +456,10 @@ export function DieLinePreview({
 
         {/* Back Bottom Caption */}
         <g transform={`translate(${rightX + cardW / 2}, ${startY + cardH + 16})`}>
-          <text textAnchor="middle" font-family="'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="bold" fill="currentColor" className="fill-foreground">
+          <text textAnchor="middle" fontFamily="sans-serif" fontSize="11" fontWeight="bold" fill="currentColor" className="fill-foreground">
             back
           </text>
-          <text y="11" textAnchor="middle" font-family="'Helvetica Neue', Arial, sans-serif" font-size="8.5" font-weight="medium" fill="currentColor" className="fill-muted-foreground">
+          <text y="11" textAnchor="middle" fontFamily="sans-serif" fontSize="8.5" fontWeight="500" fill="currentColor" className="fill-muted-foreground">
             задняя часть
           </text>
         </g>
@@ -478,7 +512,12 @@ export function DieLinePreview({
             clipPath={`url(#${clipId})`}
           />
         ) : (
-          <rect x={tX} y={tY} width={cardW} height={cardH} rx={cornerRadius} fill="#27272a" />
+          <g>
+            <rect x={tX} y={tY} width={cardW} height={cardH} rx={cornerRadius} fill="#f4f4f5" stroke="#e4e4e7" strokeWidth="0.8" />
+            <text x={tX + cardW / 2} y={tY + cardH / 2} textAnchor="middle" fontSize="10" fill="#a1a1aa" fontFamily="monospace">
+              {side === "front" ? "Old tomon (Fayl yuklanmagan)" : "Orqa tomon (Fayl yuklanmagan)"}
+            </text>
+          </g>
         )}
 
         {/* Die-line overlay if toggled */}

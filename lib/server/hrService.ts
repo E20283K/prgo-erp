@@ -285,6 +285,7 @@ export async function upsertEmployeeRecord(
         hireDate: data.hireDate || new Date().toISOString().split("T")[0],
         departmentId: data.departmentId || null,
         positionId: data.positionId || null,
+        avatarUrl: data.avatarUrl || null,
         details,
       })
       .returning();

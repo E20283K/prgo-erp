@@ -4,7 +4,6 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import {
   Printer,
-  Download,
   X,
   RefreshCw,
   Image as ImageIcon,
@@ -137,6 +136,85 @@ async function rasterizeImageToPngDataUrl(src: string): Promise<string | undefin
   });
 }
 
+/**
+ * Resolves and rasterizes per-SKU / per-size artwork thumbnails into PNG Data URLs.
+ */
+async function resolveOrderSkuThumbnails(
+  raw: any
+): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  if (!raw) return result;
+  const dims = raw.dimensions || {};
+
+  const skuList: any[] = Array.isArray(raw.skuArtworks)
+    ? raw.skuArtworks
+    : Array.isArray(dims.skuArtworks)
+    ? dims.skuArtworks
+    : [];
+
+  const rawSizes: any[] = Array.isArray(raw.sizes)
+    ? raw.sizes
+    : Array.isArray(dims.sizes)
+    ? dims.sizes
+    : [];
+
+  // 1. Process skuArtworks list
+  for (let idx = 0; idx < skuList.length; idx++) {
+    const sku = skuList[idx];
+    if (!sku) continue;
+    const rawUrl =
+      sku.frontArtworkThumb ||
+      sku.frontArtworkUrl ||
+      sku.proofUrl ||
+      sku.backArtworkThumb ||
+      sku.backArtworkUrl;
+
+    if (typeof rawUrl === "string" && rawUrl.trim().length > 0) {
+      const trimmed = rawUrl.trim();
+      if (!trimmed.toLowerCase().endsWith(".pdf")) {
+        const png = await rasterizeImageToPngDataUrl(trimmed);
+        if (png) {
+          if (sku.skuId) result[String(sku.skuId)] = png;
+          if (sku.sizeCode) {
+            result[String(sku.sizeCode)] = png;
+            result[String(sku.sizeCode).toLowerCase()] = png;
+          }
+          if (sku.size) {
+            result[String(sku.size)] = png;
+            result[String(sku.size).toLowerCase()] = png;
+          }
+          result[`idx_${idx}`] = png;
+        }
+      }
+    }
+  }
+
+  // 2. Also check if rawSizes has direct artworkThumb/artworkUrl
+  for (let idx = 0; idx < rawSizes.length; idx++) {
+    const s = rawSizes[idx];
+    if (!s) continue;
+    const directUrl = s.artworkThumb || s.artworkUrl || s.photoUrl;
+    if (
+      typeof directUrl === "string" &&
+      directUrl.trim().length > 0 &&
+      !directUrl.toLowerCase().endsWith(".pdf")
+    ) {
+      const png = await rasterizeImageToPngDataUrl(directUrl.trim());
+      if (png) {
+        if (s.id) result[String(s.id)] = png;
+        const code = String(s.sizeCode || s.size || "");
+        if (code) {
+          result[code] = png;
+          result[code.toLowerCase()] = png;
+        }
+        result[`idx_${idx}`] = png;
+      }
+    }
+  }
+
+  return result;
+}
+
 export function WorkOrdersPrintModal({
   open,
   onOpenChange,
@@ -145,6 +223,7 @@ export function WorkOrdersPrintModal({
   const tGrid = useTranslations("DataGrid");
   const tCommon = useTranslations("Common");
   const warehouseStock = useWorkspaceStore((s) => s.warehouseStock);
+  const openTabs = useWorkspaceStore((s) => s.tabs);
 
   const [orientation, setOrientation] = useState<"landscape" | "portrait">("landscape");
   const [deptFilter, setDeptFilter] = useState<string>("ALL");
@@ -230,6 +309,7 @@ export function WorkOrdersPrintModal({
       colCustomerProduct: tGrid("colCustomerProduct"),
       colMachineOperator: tGrid("colMachineOperator"),
       colQtySizes: tGrid("colQtySizes"),
+      colSizeBreakdown: tGrid("colSizeBreakdown"),
       colTechSpecs: tGrid("colTechSpecs"),
       colGates: tGrid("colGates"),
       colStateSample: tGrid("colStateSample"),
@@ -273,26 +353,43 @@ export function WorkOrdersPrintModal({
     try {
       const enrichedRows: RegistryPrintRow[] = await Promise.all(
         printableRows.map(async (row) => {
+          const matchingTab = openTabs?.find(
+            (t) =>
+              t.type === "work-order" &&
+              (t.id === row.id || t.documentData?.docNo === row.id)
+          );
+          const mergedRaw = matchingTab?.documentData
+            ? { ...(row.rawOrder || {}), ...matchingTab.documentData }
+            : row.rawOrder || row;
+          const mergedRow: OrderRow = {
+            ...row,
+            qty: Number(mergedRaw.quantity ?? row.qty) || row.qty,
+            rawOrder: mergedRaw,
+          };
+
           const evaluatedChecks = evaluateOrderReadiness(
-            row.rawOrder || row,
+            mergedRaw,
             warehouseStock || []
           );
           let resolvedThumbUrl: string | undefined = undefined;
           let thumbSourceType: "proof" | "artwork" | "sku" | null = null;
+          let resolvedSkuThumbs: Record<string, string> | undefined = undefined;
 
           if (showThumbnails) {
-            const candidate = pickSmartThumbnailCandidate(row);
+            const candidate = pickSmartThumbnailCandidate(mergedRow);
             thumbSourceType = candidate.sourceType;
             if (candidate.url) {
               resolvedThumbUrl = await rasterizeImageToPngDataUrl(candidate.url);
             }
+            resolvedSkuThumbs = await resolveOrderSkuThumbnails(mergedRaw);
           }
 
           return {
-            ...row,
+            ...mergedRow,
             evaluatedChecks,
             resolvedThumbUrl,
             thumbSourceType,
+            resolvedSkuThumbs,
           };
         })
       );
@@ -325,6 +422,7 @@ export function WorkOrdersPrintModal({
   }, [
     open,
     printableRows,
+    openTabs,
     warehouseStock,
     showThumbnails,
     orientation,
@@ -342,28 +440,6 @@ export function WorkOrdersPrintModal({
       });
     }
   }, [open, generatePdf]);
-
-  const handleDownload = () => {
-    if (!pdfBlobUrl) return;
-    const datePart = new Date().toISOString().slice(0, 10);
-    const deptPart = deptFilter === "ALL" ? "ALL" : deptFilter.toUpperCase();
-    const link = document.createElement("a");
-    link.href = pdfBlobUrl;
-    link.download = `WorkOrders_Registry_${deptPart}_${datePart}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handlePrint = () => {
-    if (!pdfBlobUrl) return;
-    const printWin = window.open(pdfBlobUrl, "_blank");
-    if (printWin) {
-      printWin.addEventListener("load", () => {
-        printWin.print();
-      });
-    }
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -498,43 +574,8 @@ export function WorkOrdersPrintModal({
             </Button>
           </div>
 
-          {/* Right: Action Buttons */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={generatePdf}
-              disabled={isGenerating}
-              className="h-7 px-2 text-xs"
-              title={tCommon("refresh")}
-            >
-              <RefreshCw className={`size-3.5 ${isGenerating ? "animate-spin" : ""}`} />
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleDownload}
-              disabled={!pdfBlobUrl || isGenerating}
-              className="h-7 px-2.5 text-xs gap-1.5"
-            >
-              <Download className="size-3.5" />
-              <span>{tGrid("downloadPdf")}</span>
-            </Button>
-
-            <Button
-              type="button"
-              size="sm"
-              onClick={handlePrint}
-              disabled={!pdfBlobUrl || isGenerating}
-              className="h-7 px-2.5 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              <Printer className="size-3.5" />
-              <span>{tGrid("printDocument")}</span>
-            </Button>
-
+          {/* Right: Close Button Only (Print & Download live inside Chrome's native PDF toolbar) */}
+          <div className="flex items-center shrink-0">
             <Button
               type="button"
               variant="ghost"
@@ -547,7 +588,7 @@ export function WorkOrdersPrintModal({
           </div>
         </div>
 
-        {/* Main PDF Preview Viewport */}
+        {/* Main PDF Preview Viewport (Chrome built-in PDF module with #toolbar=1) */}
         <div className="flex-1 w-full h-full bg-muted/40 relative flex items-center justify-center overflow-hidden">
           {isGenerating ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
@@ -560,7 +601,7 @@ export function WorkOrdersPrintModal({
             </div>
           ) : pdfBlobUrl ? (
             <iframe
-              src={`${pdfBlobUrl}#toolbar=0&navpanes=0&view=FitH`}
+              src={`${pdfBlobUrl}#toolbar=1&navpanes=0&view=FitH`}
               title={tGrid("registryPrintTitle")}
               className="w-full h-full border-0"
             />

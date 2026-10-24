@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import {
   Document,
   Page,
@@ -592,8 +592,61 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
   const netQuantity = orderData.quantity || 5000;
   const skuArtworks = orderData.skuArtworks || [];
   const skuArtworksMap: Record<string, SkuArtwork> = {};
-  skuArtworks.forEach((a) => { skuArtworksMap[a.skuId] = a; });
-  const hasSkuArtworks = skuArtworks.length > 0;
+  skuArtworks.forEach((a) => {
+    if (a.skuId) skuArtworksMap[a.skuId] = a;
+    if (a.sizeCode) skuArtworksMap[a.sizeCode.trim().toUpperCase()] = a;
+    if (a.model && a.sizeCode) skuArtworksMap[`${a.model.trim()}___${a.sizeCode.trim().toUpperCase()}`] = a;
+  });
+
+  const rawSizes = orderData.sizes || [{ size: "ALL", quantity: netQuantity }];
+  const normalizedSkuCards = rawSizes.map((s, idx) => {
+    const sId = (s as any).id || `sku-${idx}`;
+    const sStr = s.size || "ALL";
+    const sModel = (s as any).model || (sStr.includes(" - ") ? sStr.split(" - ")[0] : "STD");
+    const sCode = (sStr.includes(" - ") ? sStr.split(" - ")[1] : sStr).trim().toUpperCase();
+    const art = skuArtworksMap[sId] || skuArtworksMap[`${sModel}___${sCode}`] || skuArtworksMap[sCode];
+    const sQty = Number(s.quantity) || 0;
+    const share = netQuantity > 0 ? Math.round((sQty / netQuantity) * 100) : 100;
+    return {
+      id: sId,
+      model: sModel,
+      sizeCode: sCode,
+      quantity: sQty,
+      share,
+      frontSrc: art?.frontArtworkThumb || art?.frontArtworkUrl,
+      backSrc: art?.backArtworkThumb || art?.backArtworkUrl,
+      frontName: art?.frontArtworkName,
+      backName: art?.backArtworkName,
+      hasArtwork: Boolean(art && (art.frontArtworkThumb || art.frontArtworkUrl || art.backArtworkThumb || art.backArtworkUrl)),
+    };
+  });
+
+  const seenKeys = new Set(normalizedSkuCards.map((c) => `${c.model}___${c.sizeCode}`));
+  skuArtworks.forEach((a) => {
+    const aModel = a.model || "STD";
+    const aCode = (a.sizeCode || "").trim().toUpperCase();
+    const key = `${aModel}___${aCode}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      normalizedSkuCards.push({
+        id: a.skuId,
+        model: aModel,
+        sizeCode: aCode,
+        quantity: 0,
+        share: 0,
+        frontSrc: a.frontArtworkThumb || a.frontArtworkUrl,
+        backSrc: a.backArtworkThumb || a.backArtworkUrl,
+        frontName: a.frontArtworkName,
+        backName: a.backArtworkName,
+        hasArtwork: Boolean(a.frontArtworkThumb || a.frontArtworkUrl || a.backArtworkThumb || a.backArtworkUrl),
+      });
+    }
+  });
+
+  const itemsWithArtwork = normalizedSkuCards.filter((c) => c.hasArtwork);
+  const primarySkuArt = itemsWithArtwork[0];
+  const effectiveArtworkFront = orderData.artworkFront || primarySkuArt?.frontSrc;
+  const effectiveArtworkBack = orderData.artworkBack || primarySkuArt?.backSrc;
   const grossSheets = Math.ceil((netQuantity / yieldPerSheet) * 1.05) + (orderData.kashirovkaMakeReadySheets || 50);
 
   // Hole specs
@@ -803,7 +856,7 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
 
             <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
               {/* Real Artwork Proof (Front & Back Side-by-Side) */}
-              {orderData.artworkFront ? (
+              {effectiveArtworkFront ? (
                 <View
                   style={{
                     width: 126,
@@ -839,15 +892,15 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
                       }}
                     >
                       <Image
-                        src={orderData.artworkFront}
+                        src={effectiveArtworkFront}
                         style={{ width: "100%", height: "100%", objectFit: "cover" }}
                       />
                     </View>
                     <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
-                      front
+                      {primarySkuArt && !orderData.artworkFront ? `Oldi (${primarySkuArt.sizeCode})` : "Oldi (Front)"}
                     </Text>
                     <Text style={{ fontSize: 3.6, color: "#64748b" }}>
-                      передняя часть
+                      Yuz tomon
                     </Text>
                   </View>
 
@@ -866,16 +919,24 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
                         justifyContent: "center",
                       }}
                     >
-                      <Image
-                        src={orderData.artworkBack || orderData.artworkFront}
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                      />
+                      {effectiveArtworkBack ? (
+                        <Image
+                          src={effectiveArtworkBack}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      ) : (
+                        <View style={{ alignItems: "center", justifyContent: "center", padding: 2 }}>
+                          <Text style={{ fontSize: 4.2, color: "#94a3b8", textAlign: "center" }}>
+                            1-TOMONLAMA
+                          </Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
-                      back
+                      {primarySkuArt && !orderData.artworkBack ? `Orqa (${primarySkuArt.sizeCode})` : "Orqa (Back)"}
                     </Text>
                     <Text style={{ fontSize: 3.6, color: "#64748b" }}>
-                      задняя часть
+                      Orqa tomon
                     </Text>
                   </View>
                 </View>
@@ -1344,6 +1405,186 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           />
         </View>
       </Page>
+
+      {/* ─── PAGE 2: SKU ARTWORK PROOFS (If SKU Artworks exist) ─── */}
+      {itemsWithArtwork.length > 0 && (
+        <Page size="A4" style={styles.page}>
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <View style={styles.brandRow}>
+                <Text style={styles.brandTitle}>PRINTGOO ERP</Text>
+                <Text style={styles.badgeDark}>SKU ARTWORK PASPORTI (1:1 PROOF)</Text>
+              </View>
+              <Text style={styles.brandSubtitle}>
+                Buyurtmachi: {orderData.customer || "—"} • Mahsulot: {orderData.product || "—"} • {width}×{height} {dimUnit} (+{bleed}{dimUnit} bleed)
+              </Text>
+            </View>
+            <View style={styles.headerRight}>
+              <View style={styles.docMetaBox}>
+                <Text style={styles.docNoText}>{docNo}</Text>
+                <Text style={styles.docSubText}>
+                  Jami {itemsWithArtwork.length} ta razmer • {new Date().toISOString().slice(0, 10)}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Grid of SKU Cards */}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+            {itemsWithArtwork.map((card, idx) => (
+              <View
+                key={card.id || idx}
+                style={{
+                  width: "48.5%",
+                  borderWidth: 0.6,
+                  borderColor: "#cbd5e1",
+                  borderRadius: 2,
+                  backgroundColor: "#ffffff",
+                  marginBottom: 6,
+                  overflow: "hidden",
+                }}
+              >
+                {/* Card Header Bar */}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    backgroundColor: "#0f172a",
+                    paddingHorizontal: 6,
+                    paddingVertical: 3,
+                  }}
+                >
+                  <Text style={{ color: "#ffffff", fontSize: 7, fontWeight: "bold" }}>
+                    {`${card.model} • ${card.sizeCode}`.toUpperCase()}
+                  </Text>
+                  <Text style={{ color: "#93c5fd", fontSize: 6.2, fontWeight: "bold" }}>
+                    {card.quantity > 0 ? `${card.quantity.toLocaleString()} pcs (${card.share}%)` : "NAMUNA"}
+                  </Text>
+                </View>
+
+                {/* Proof Body (Side-by-side Front & Back) */}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-around",
+                    alignItems: "center",
+                    paddingVertical: 8,
+                    paddingHorizontal: 4,
+                    backgroundColor: "#f8fafc",
+                  }}
+                >
+                  {/* Front */}
+                  <View style={{ alignItems: "center", width: "46%" }}>
+                    <View
+                      style={{
+                        width: 64,
+                        height: 74,
+                        borderWidth: 0.8,
+                        borderColor: "#10b981",
+                        borderRadius: orderData.cornerType?.toLowerCase().includes("round") ? 3 : 1,
+                        overflow: "hidden",
+                        backgroundColor: "#ffffff",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {card.frontSrc ? (
+                        <Image src={card.frontSrc} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                      ) : (
+                        <Text style={{ fontSize: 4.8, color: "#94a3b8" }}>YUKLANMAGAN</Text>
+                      )}
+                    </View>
+                    <Text style={{ fontSize: 5, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
+                      Oldi (Front)
+                    </Text>
+                    {card.frontName && (
+                      <Text style={{ fontSize: 4.2, color: "#64748b" }}>{card.frontName}</Text>
+                    )}
+                  </View>
+
+                  {/* Back */}
+                  <View style={{ alignItems: "center", width: "46%" }}>
+                    <View
+                      style={{
+                        width: 64,
+                        height: 74,
+                        borderWidth: 0.8,
+                        borderColor: "#10b981",
+                        borderRadius: orderData.cornerType?.toLowerCase().includes("round") ? 3 : 1,
+                        overflow: "hidden",
+                        backgroundColor: "#ffffff",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {card.backSrc ? (
+                        <Image src={card.backSrc} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                      ) : (
+                        <View style={{ alignItems: "center", justifyContent: "center", padding: 4 }}>
+                          <Text style={{ fontSize: 4.5, color: "#94a3b8", textAlign: "center" }}>
+                            1-TOMONLAMA (OQ)
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={{ fontSize: 5, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
+                      Orqa (Back)
+                    </Text>
+                    {card.backName && (
+                      <Text style={{ fontSize: 4.2, color: "#64748b" }}>{card.backName}</Text>
+                    )}
+                  </View>
+                </View>
+
+                {/* Card Footer Bar */}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    backgroundColor: "#f1f5f9",
+                    paddingHorizontal: 6,
+                    paddingVertical: 3,
+                    borderTopWidth: 0.6,
+                    borderTopColor: "#cbd5e1",
+                  }}
+                >
+                  <Text style={{ fontSize: 5.5, color: "#475569" }}>
+                    {width}×{height} {dimUnit} (+{bleed}{dimUnit}) • {orderData.cornerType || "Square"}
+                  </Text>
+                  <View
+                    style={{
+                      backgroundColor: "#16a34a",
+                      paddingHorizontal: 4,
+                      paddingVertical: 1,
+                      borderRadius: 2,
+                    }}
+                  >
+                    <Text style={{ color: "#ffffff", fontSize: 4.8, fontWeight: "bold" }}>
+                      1:1 PREPRESS OK
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* Footer */}
+          <View style={styles.footer} fixed>
+            <Text style={styles.footerText}>
+              {L.footerSystem} • DOC: {docNo} • SKU ARTWORK SPECIFICATION
+            </Text>
+            <Text
+              style={styles.footerText}
+              render={({ pageNumber, totalPages }) =>
+                `${L.printDate}: ${new Date().toISOString().slice(0, 10)} • Page ${pageNumber} / ${totalPages}`
+              }
+            />
+          </View>
+        </Page>
+      )}
     </Document>
   );
 };

@@ -398,13 +398,13 @@ export function SpecificationsTab({
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = (event.target?.result as string || "").trim();
-      handleFieldChange("customSvgPath", text);
-      setSvgInputDraft(text);
-
       const dims = extractSvgDimensions(text);
       if (dims && dims.width > 0 && dims.height > 0) {
-        handleFieldChange("width", dims.width);
-        handleFieldChange("height", dims.height);
+        handleFieldChange({
+          customSvgPath: text,
+          width: dims.width,
+          height: dims.height,
+        });
         lockedRatioRef.current = dims.height / dims.width;
         setIsAspectLocked(true);
         addNotification({
@@ -412,7 +412,10 @@ export function SpecificationsTab({
           description: `Mahsulot o'lchami SVG fayldan olindi: ${dims.width} × ${dims.height} mm`,
           severity: "success",
         });
+      } else {
+        handleFieldChange("customSvgPath", text);
       }
+      setSvgInputDraft(text);
       onMarkUnsaved();
     };
     reader.readAsText(file);
@@ -580,25 +583,26 @@ export function SpecificationsTab({
 
   const handleKashirovkaModeChange = (mode: KashirovkaMode) => {
     if (isOperator) return;
-    handleFieldChange("kashirovkaMode", mode);
+    const updates: Record<string, any> = { kashirovkaMode: mode };
     if (mode === "none") {
-      handleFieldChange("kashirovkaLayers", []);
+      updates.kashirovkaLayers = [];
     } else {
       const nextLayers = getDefaultKashirovkaLayers(mode, formData.paperStock, formData.coating);
-      handleFieldChange("kashirovkaLayers", nextLayers);
+      updates.kashirovkaLayers = nextLayers;
       if (!formData.kashirovkaStrategy) {
-        handleFieldChange("kashirovkaStrategy", "split_half_sheet");
+        updates.kashirovkaStrategy = "split_half_sheet";
       }
       if (formData.kashirovkaGlueGsm === undefined) {
-        handleFieldChange("kashirovkaGlueGsm", 25);
+        updates.kashirovkaGlueGsm = 25;
       }
       if (formData.kashirovkaMakeReadySheets === undefined) {
-        handleFieldChange("kashirovkaMakeReadySheets", 50);
+        updates.kashirovkaMakeReadySheets = 50;
       }
       if (formData.kashirovkaCuringHours === undefined) {
-        handleFieldChange("kashirovkaCuringHours", 12);
+        updates.kashirovkaCuringHours = 12;
       }
     }
+    handleFieldChange(updates);
     onMarkUnsaved();
   };
 
@@ -699,10 +703,12 @@ export function SpecificationsTab({
               className="h-7 text-xs cursor-pointer"
               onClick={() => {
                 const trimmed = svgInputDraft.trim();
-                handleFieldChange("customSvgPath", trimmed);
                 if (detectedSvgDims && detectedSvgDims.width > 0 && detectedSvgDims.height > 0) {
-                  handleFieldChange("width", detectedSvgDims.width);
-                  handleFieldChange("height", detectedSvgDims.height);
+                  handleFieldChange({
+                    customSvgPath: trimmed,
+                    width: detectedSvgDims.width,
+                    height: detectedSvgDims.height,
+                  });
                   lockedRatioRef.current = detectedSvgDims.height / detectedSvgDims.width;
                   setIsAspectLocked(true);
                   addNotification({
@@ -710,6 +716,8 @@ export function SpecificationsTab({
                     description: `Mahsulot o'lchami SVG dan olindi: ${detectedSvgDims.width} × ${detectedSvgDims.height} mm`,
                     severity: "success",
                   });
+                } else {
+                  handleFieldChange("customSvgPath", trimmed);
                 }
                 setIsSvgModalOpen(false);
                 onMarkUnsaved();
@@ -730,6 +738,7 @@ export function SpecificationsTab({
         height={formData.height}
         workOrderId={docNo || (formData as any).docNo}
         skuArtworks={skuArtworks || formData.skuArtworks || []}
+        setOrderAttachments={setOrderAttachments}
         onSkuArtworksChange={(artworks) => {
           if (onSkuArtworksChange) {
             onSkuArtworksChange(artworks);
@@ -1169,14 +1178,24 @@ export function SpecificationsTab({
                   value={formData.itemCategory || "Hangtag"}
                   disabled={isOperator}
                   onValueChange={(val) => {
-                    handleFieldChange("itemCategory", val);
                     if (val === "Hangtag") {
-                      handleFieldChange("holeSize", 4);
-                      handleFieldChange("holePosition", "top-center");
+                      handleFieldChange({
+                        itemCategory: val,
+                        holeSize: 4,
+                        holePosition: "top-center",
+                      });
                     } else if (val === "Carton") {
-                      handleFieldChange("shapeType", "carton_box");
+                      handleFieldChange({
+                        itemCategory: val,
+                        shapeType: "carton_box",
+                      });
                     } else if (val === "Flyer") {
-                      handleFieldChange("shapeType", "folded");
+                      handleFieldChange({
+                        itemCategory: val,
+                        shapeType: "folded",
+                      });
+                    } else {
+                      handleFieldChange("itemCategory", val);
                     }
                     onMarkUnsaved();
                   }}
@@ -1194,9 +1213,13 @@ export function SpecificationsTab({
                   disabled={isOperator}
                   onValueChange={(val) => {
                     if (!val) return;
-                    handleFieldChange("shapeType", val);
                     if (val === "circle") {
-                      handleFieldChange("height", formData.width ?? 50);
+                      handleFieldChange({
+                        shapeType: val,
+                        height: formData.width ?? 50,
+                      });
+                    } else {
+                      handleFieldChange("shapeType", val);
                     }
                     onMarkUnsaved();
                   }}
@@ -1226,16 +1249,17 @@ export function SpecificationsTab({
 
                       const prevW = Number(formData.width) || 0;
                       const prevH = Number(formData.height) || 0;
-                      handleFieldChange("width", num);
 
                       if (formData.shapeType === "circle") {
-                        handleFieldChange("height", num);
+                        handleFieldChange({ width: num, height: num });
                       } else if (isAspectLocked && num > 0) {
                         const ratio = lockedRatioRef.current || (prevW > 0 && prevH > 0 ? prevH / prevW : 1);
                         lockedRatioRef.current = ratio;
                         const rawH = num * ratio;
                         const newH = Math.round(rawH * 10) / 10;
-                        handleFieldChange("height", newH);
+                        handleFieldChange({ width: num, height: newH });
+                      } else {
+                        handleFieldChange("width", num);
                       }
                       onMarkUnsaved();
                     }}
@@ -1302,14 +1326,15 @@ export function SpecificationsTab({
 
                       const prevW = Number(formData.width) || 0;
                       const prevH = Number(formData.height) || 0;
-                      handleFieldChange("height", num);
 
                       if (isAspectLocked && num > 0) {
                         const ratio = lockedRatioRef.current || (prevW > 0 && prevH > 0 ? prevH / prevW : 1);
                         lockedRatioRef.current = ratio;
                         const rawW = ratio > 0 ? num / ratio : num;
                         const newW = Math.round(rawW * 10) / 10;
-                        handleFieldChange("width", newW);
+                        handleFieldChange({ height: num, width: newW });
+                      } else {
+                        handleFieldChange("height", num);
                       }
                       onMarkUnsaved();
                     }}
@@ -1548,9 +1573,13 @@ export function SpecificationsTab({
                     disabled={isOperator}
                     onValueChange={(val) => {
                       const num = Number(val);
-                      handleFieldChange("holeSize", num);
-                      if (num === 0) handleFieldChange("holePosition", "none");
-                      else if (effectiveHolePos === "none") handleFieldChange("holePosition", "top-center");
+                      if (num === 0) {
+                        handleFieldChange({ holeSize: 0, holePosition: "none" });
+                      } else if (effectiveHolePos === "none") {
+                        handleFieldChange({ holeSize: num, holePosition: "top-center" });
+                      } else {
+                        handleFieldChange("holeSize", num);
+                      }
                       onMarkUnsaved();
                     }}
                     placeholder="Teshik diametrini tanlang..."
@@ -1622,7 +1651,7 @@ export function SpecificationsTab({
                 items={paperStockOptions}
                 value={formData.paperStock}
                 onValueChange={(val) => {
-                  handleFieldChange("paperStock", val);
+                  const updates: Record<string, any> = { paperStock: val };
                   const matched = warehouseStock.find(
                     (w) =>
                       w.name.toLowerCase() === val.toLowerCase() ||
@@ -1635,14 +1664,15 @@ export function SpecificationsTab({
                         .map((s) => parseFloat(s.trim()))
                         .filter(Boolean);
                       if (dims.length >= 2 && !isNaN(dims[0]) && !isNaN(dims[1])) {
-                        handleFieldChange("parentSheetW", dims[0]);
-                        handleFieldChange("parentSheetH", dims[1]);
+                        updates.parentSheetW = dims[0];
+                        updates.parentSheetH = dims[1];
                       }
                     }
                     if (matched.grammage) {
-                      handleFieldChange("paperDensity", matched.grammage);
+                      updates.paperDensity = matched.grammage;
                     }
                   }
+                  handleFieldChange(updates);
                   onMarkUnsaved();
                 }}
                 onAddNew={(newStock) => addPaperStock(newStock)}
@@ -1710,8 +1740,7 @@ export function SpecificationsTab({
                     value={currentLamination}
                     disabled={isOperator}
                     onValueChange={(val) => {
-                      handleFieldChange("lamination", val);
-                      handleFieldChange("coating", val);
+                      handleFieldChange({ lamination: val, coating: val });
                       onMarkUnsaved();
                     }}
                     placeholder="Laminatsiya turini tanlang..."
@@ -1910,14 +1939,28 @@ export function SpecificationsTab({
               holeSize={effectiveHoleSize}
               holePosition={effectiveHolePos}
               holeOffset={effectiveHoleOffset}
-              artworkFront={formData.artworkFront || (formData.skuArtworks && formData.skuArtworks[0]?.frontArtworkUrl) || undefined}
-              artworkBack={formData.artworkBack || (formData.skuArtworks && formData.skuArtworks[0]?.backArtworkUrl) || undefined}
+              artworkFront={
+                (formData.skuArtworks && (formData.skuArtworks[0]?.frontArtworkThumb || formData.skuArtworks[0]?.frontArtworkUrl)) ||
+                formData.artworkFront ||
+                undefined
+              }
+              artworkBack={
+                (formData.skuArtworks && (formData.skuArtworks[0]?.backArtworkThumb || formData.skuArtworks[0]?.backArtworkUrl)) ||
+                formData.artworkBack ||
+                undefined
+              }
               artworkBleedIncluded={formData.artworkBleedIncluded}
               artworkDielineOpacity={formData.artworkDielineOpacity}
               onArtworkChange={(front, back, sourcePdf, detectedW, detectedH, rawFile) => {
-                handleFieldChange("artworkFront", front);
-                if (back) handleFieldChange("artworkBack", back);
-                if (sourcePdf) handleFieldChange("artworkSourcePdf", sourcePdf);
+                const updates: Record<string, any> = { artworkFront: front };
+                if (back) updates.artworkBack = back;
+                if (sourcePdf) updates.artworkSourcePdf = sourcePdf;
+                if (detectedW && detectedH && detectedW > 0 && detectedH > 0) {
+                  updates.width = detectedW;
+                  updates.height = detectedH;
+                }
+                handleFieldChange(updates);
+
                 // Keep photoUrl and production artwork cleanly separated
                 if (rawFile && setOrderAttachments) {
                   setOrderAttachments((prev) => [
@@ -1934,8 +1977,6 @@ export function SpecificationsTab({
                   ]);
                 }
                 if (detectedW && detectedH && detectedW > 0 && detectedH > 0) {
-                  handleFieldChange("width", detectedW);
-                  handleFieldChange("height", detectedH);
                   addNotification({
                     severity: "success",
                     title: "PDF o'lchami qo'llandi",
@@ -1947,8 +1988,7 @@ export function SpecificationsTab({
               onFlipOrientation={!isOperator && formData.shapeType !== "circle" ? () => {
                 const currentW = formData.width ?? 50;
                 const currentH = formData.height ?? 90;
-                handleFieldChange("width", currentH);
-                handleFieldChange("height", currentW);
+                handleFieldChange({ width: currentH, height: currentW });
                 if (lockedRatioRef.current && lockedRatioRef.current > 0) {
                   lockedRatioRef.current = 1 / lockedRatioRef.current;
                 }

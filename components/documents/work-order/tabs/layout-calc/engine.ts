@@ -263,12 +263,15 @@ export function calculateImposition(
   const itemTotalH = prodH + bleed * 2;
 
   const calcForOrientation = (w: number, h: number): ImpositionLayout => {
-    if (w <= 0 || h <= 0 || usableW < w || usableH < h) {
+    if (w < 5 || h < 5 || prodW < 5 || prodH < 5 || usableW < w || usableH < h) {
       return { cols: 0, rows: 0, pieces: 0, utilization: 0, itemW: w, itemH: h, offsetX: 0, offsetY: 0 };
     }
-    const cols = Math.floor((usableW + gap) / (w + gap)) || 0;
-    const rows = Math.floor((usableH + gap) / (h + gap)) || 0;
-    const pieces = cols * rows;
+    const rawCols = Math.floor((usableW + gap) / (w + gap)) || 0;
+    const rawRows = Math.floor((usableH + gap) / (h + gap)) || 0;
+    // Cap to safe maximum grid dimensions (prevent browser UI freeze if intermediate small numbers are typed)
+    const cols = Math.min(rawCols, 80);
+    const rows = Math.min(rawRows, 80);
+    const pieces = Math.min(cols * rows, 1200);
 
     const cutProductArea = pieces * (prodW * prodH);
     const sheetArea = sheetW * sheetH;

@@ -73,7 +73,7 @@ export const GLIDE_LIGHT_THEME: Partial<Theme> = {
   borderColor: "#e2e8f0",
   horizontalBorderColor: "#f1f5f9",
   headerBottomBorderColor: "#cbd5e1",
-  fontFamily: "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+  fontFamily: "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
   baseFontStyle: "12px sans-serif",
   headerFontStyle: "bold 11px sans-serif",
 };
@@ -97,7 +97,7 @@ export const GLIDE_DARK_THEME: Partial<Theme> = {
   borderColor: "#27272a",
   horizontalBorderColor: "#27272a",
   headerBottomBorderColor: "#3f3f46",
-  fontFamily: "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+  fontFamily: "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
   baseFontStyle: "12px sans-serif",
   headerFontStyle: "bold 11px sans-serif",
 };

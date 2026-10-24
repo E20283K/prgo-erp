@@ -1303,9 +1303,9 @@ export function OverviewTab({
                     </Badge>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 font-mono text-xs shrink-0">
+                <div className="flex items-center gap-1.5 text-xs shrink-0">
                   {hasSizes ? (
-                    <span className="font-bold text-foreground">
+                    <span className="font-semibold text-[11px] font-mono text-foreground">
                       {totalSizesQty.toLocaleString()} {formData.unit}
                     </span>
                   ) : (

@@ -55,5 +55,7 @@ venv/
 /public/uploads/**
 !/public/uploads/
 !/public/uploads/.gitkeep
+/public/artwork/**
+!/public/artwork/.gitkeep
 
 

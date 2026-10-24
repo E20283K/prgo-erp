@@ -516,8 +516,12 @@ export function useLayoutCalc({
   const [partitionStrategy, setPartitionStrategy] = useState<PlatePartitionStrategy>("smart_gang_optimizer");
 
   // Persist imposition state back to WorkOrderFormData whenever key state changes
+  const lastEmittedStateRef = useRef<string>(
+    impositionState ? JSON.stringify(impositionState) : ""
+  );
+
   useEffect(() => {
-    onImpositionStateChange?.({
+    const nextState = {
       sheetW,
       sheetH,
       parentSheetW,
@@ -536,7 +540,11 @@ export function useLayoutCalc({
       ctpSideRelation,
       optimizerGoal,
       plates,
-    });
+    };
+    const key = JSON.stringify(nextState);
+    if (lastEmittedStateRef.current === key) return;
+    lastEmittedStateRef.current = key;
+    onImpositionStateChange?.(nextState);
   }, [
     sheetW,
     sheetH,
@@ -556,6 +564,7 @@ export function useLayoutCalc({
     ctpSideRelation,
     optimizerGoal,
     plates,
+    onImpositionStateChange,
   ]);
 
   // Plate distributions with full accounting
@@ -621,10 +630,18 @@ export function useLayoutCalc({
   const skuArtworkMap = useMemo(() => {
     const map = new Map<string, { front?: string; back?: string }>();
     skuArtworks.forEach((art) => {
-      map.set(art.skuId, {
+      const entry = {
         front: art.frontArtworkThumb || art.frontArtworkUrl,
         back: art.backArtworkThumb || art.backArtworkUrl,
-      });
+      };
+      if (art.skuId) map.set(art.skuId, entry);
+      if (art.sizeCode) {
+        map.set(art.sizeCode.toUpperCase(), entry);
+        map.set(art.sizeCode.toLowerCase(), entry);
+      }
+      if (art.model && art.sizeCode) {
+        map.set(`${art.model.toUpperCase()}___${art.sizeCode.toUpperCase()}`, entry);
+      }
     });
     return map;
   }, [skuArtworks]);
@@ -814,8 +831,14 @@ export function useLayoutCalc({
       return COLOR_PALETTE[index % COLOR_PALETTE.length];
     };
 
-    const getSkuArt = (sizeId: string, side: "front" | "back") => {
-      const skuEntry = skuArtworkMap.get(sizeId);
+    const getSkuArt = (sizeId: string, side: "front" | "back", sizeCode?: string, model?: string) => {
+      let skuEntry = skuArtworkMap.get(sizeId);
+      if (!skuEntry && model && sizeCode) {
+        skuEntry = skuArtworkMap.get(`${model.toUpperCase()}___${sizeCode.toUpperCase()}`);
+      }
+      if (!skuEntry && sizeCode) {
+        skuEntry = skuArtworkMap.get(sizeCode.toUpperCase()) || skuArtworkMap.get(sizeCode.toLowerCase());
+      }
       if (side === "front") {
         return skuEntry?.front || artworkFront;
       }
@@ -858,7 +881,7 @@ export function useLayoutCalc({
             fullGrid.push({
               ...base,
               sideBadge: "FRONT",
-              artworkUrl: base.sizeId !== "empty" ? getSkuArt(base.sizeId, "front") : undefined,
+              artworkUrl: base.sizeId !== "empty" ? getSkuArt(base.sizeId, "front", base.sizeCode, base.model) : undefined,
             });
           } else if (c >= layout.cols - halfCols) {
             const mirrorCol = layout.cols - 1 - c;
@@ -866,7 +889,7 @@ export function useLayoutCalc({
             fullGrid.push({
               ...base,
               sideBadge: "BACK",
-              artworkUrl: base.sizeId !== "empty" ? getSkuArt(base.sizeId, "back") : undefined,
+              artworkUrl: base.sizeId !== "empty" ? getSkuArt(base.sizeId, "back", base.sizeCode, base.model) : undefined,
             });
           } else {
             // Odd center column when cols is odd
@@ -894,7 +917,7 @@ export function useLayoutCalc({
           sizeId: assignment.sizeId,
           slotsCount: assignment.slots,
           sideBadge: activeSide === "front" ? "FRONT" : "BACK",
-          artworkUrl: getSkuArt(assignment.sizeId, activeSide),
+          artworkUrl: getSkuArt(assignment.sizeId, activeSide, assignment.sizeCode, assignment.model),
         });
       }
     });
