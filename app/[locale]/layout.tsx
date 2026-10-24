@@ -70,16 +70,16 @@ export default async function RootLayout({
       <head>
         <link
           rel="preload"
-          href="/fonts/Roboto-Regular.ttf"
+          href="/fonts/inter-latin.woff2"
           as="font"
-          type="font/ttf"
+          type="font/woff2"
           crossOrigin="anonymous"
         />
         <link
           rel="preload"
-          href="/fonts/Roboto-Bold.ttf"
+          href="/fonts/inter-cyrillic.woff2"
           as="font"
-          type="font/ttf"
+          type="font/woff2"
           crossOrigin="anonymous"
         />
       </head>

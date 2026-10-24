@@ -21,9 +21,153 @@ class LoadedArtwork:
         self.width = max(1.0, float(width))
         self.height = max(1.0, float(height))
 
+def load_pdf_page_as_image(pdf_bytes: bytes, page_index: int = 0, scale: float = 3.0) -> Optional[LoadedArtwork]:
+    try:
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(pdf_bytes)
+        if len(pdf) > page_index:
+            page = pdf[page_index]
+            pil_img = page.render(scale=scale).to_pil()
+            w, h = pil_img.size
+            if pil_img.mode in ("RGBA", "P"):
+                bg = PILImage.new("RGB", pil_img.size, (255, 255, 255))
+                if pil_img.mode == "RGBA":
+                    bg.paste(pil_img, mask=pil_img.split()[3])
+                else:
+                    bg.paste(pil_img)
+                pil_img = bg
+            buf = io.BytesIO()
+            pil_img.save(buf, format="JPEG", quality=95)
+            buf.seek(0)
+            return LoadedArtwork("image", ImageReader(buf), w, h)
+    except Exception as e:
+        print(f"pypdfium2 render error: {e}", flush=True)
+    return None
+
+def probe_artwork_url(doc_no: str, s_code: str, side: str = "front") -> Optional[str]:
+    clean_code = str(s_code).strip().upper()
+    candidates = [
+        f"/artwork/{doc_no}/sku-0-0-{clean_code}-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-1-{clean_code}-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-2-{clean_code}-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-3-{clean_code}-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-4-{clean_code}-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-5-{clean_code}-{side}.pdf",
+        f"/artwork/{doc_no}/{clean_code}-{side}.pdf",
+        f"/artwork/{doc_no}/{clean_code}-{side}.svg",
+        f"/artwork/{doc_no}/{clean_code}-{side}.png",
+        f"/artwork/{doc_no}/{side}.pdf",
+        f"/artwork/{doc_no}/{side}.svg",
+        f"/artwork/{doc_no}/{side}.png",
+    ]
+    import urllib.request
+    for cand in candidates:
+        for base in ["http://host.docker.internal:3000", "http://localhost:3000", "http://127.0.0.1:3000"]:
+            try:
+                full_url = f"{base}{cand}"
+                req = urllib.request.Request(full_url, headers={"User-Agent": "PrintGoo-DocService"}, method="HEAD")
+                with urllib.request.urlopen(req, timeout=0.8) as resp:
+                    if resp.status == 200:
+                        return cand
+            except Exception:
+                continue
+    return None
+
 def load_artwork_source(img_src: Optional[str]) -> Optional[LoadedArtwork]:
     if not img_src or not isinstance(img_src, str):
         return None
+    try:
+        if img_src.startswith("data:application/pdf") or ";base64," in img_src and "pdf" in img_src[:30].lower():
+            _, body = img_src.split(",", 1)
+            pdf_bytes = base64.b64decode(body)
+            return load_pdf_page_as_image(pdf_bytes)
+        elif img_src.startswith("data:image"):
+            header, body = img_src.split(",", 1)
+            if "svg" in header:
+                try:
+                    import urllib.parse
+                    from svglib.svglib import svg2rlg
+                    svg_str = base64.b64decode(body).decode("utf-8") if ";base64" in header else urllib.parse.unquote(body)
+                    d = svg2rlg(io.StringIO(svg_str))
+                    if d and getattr(d, "width", 0) and getattr(d, "height", 0):
+                        return LoadedArtwork("drawing", d, d.width, d.height)
+                except Exception as svg_err:
+                    print(f"svglib parse error: {svg_err}", flush=True)
+                return None
+            else:
+                img_bytes = base64.b64decode(body)
+                if img_bytes.startswith(b"%PDF"):
+                    return load_pdf_page_as_image(img_bytes)
+                pil_img = PILImage.open(io.BytesIO(img_bytes))
+                w, h = pil_img.size
+                if pil_img.mode in ("RGBA", "P"):
+                    bg = PILImage.new("RGB", pil_img.size, (255, 255, 255))
+                    if pil_img.mode == "RGBA":
+                        bg.paste(pil_img, mask=pil_img.split()[3])
+                    else:
+                        bg.paste(pil_img)
+                    pil_img = bg
+                buf = io.BytesIO()
+                pil_img.save(buf, format="JPEG", quality=92)
+                buf.seek(0)
+                return LoadedArtwork("image", ImageReader(buf), w, h)
+        elif img_src.startswith("/"):
+            app_hosts = ["http://host.docker.internal:3000", "http://localhost:3000", "http://127.0.0.1:3000"]
+            import urllib.request
+            data = None
+            for base in app_hosts:
+                try:
+                    full_url = f"{base}{img_src}"
+                    req = urllib.request.Request(full_url, headers={"User-Agent": "PrintGoo-DocService"})
+                    with urllib.request.urlopen(req, timeout=3) as resp:
+                        if resp.status == 200:
+                            data = resp.read()
+                            break
+                except Exception:
+                    continue
+            if data:
+                if data.startswith(b"%PDF") or img_src.lower().endswith(".pdf"):
+                    return load_pdf_page_as_image(data)
+                elif img_src.lower().endswith(".svg") or b"<svg" in data[:100]:
+                    try:
+                        from svglib.svglib import svg2rlg
+                        d = svg2rlg(io.BytesIO(data))
+                        if d and getattr(d, "width", 0) and getattr(d, "height", 0):
+                            return LoadedArtwork("drawing", d, d.width, d.height)
+                    except Exception as svg_err:
+                        print(f"svglib relative url error: {svg_err}", flush=True)
+                else:
+                    pil_img = PILImage.open(io.BytesIO(data))
+                    w, h = pil_img.size
+                    buf = io.BytesIO()
+                    pil_img.convert("RGB").save(buf, format="JPEG", quality=92)
+                    buf.seek(0)
+                    return LoadedArtwork("image", ImageReader(buf), w, h)
+        elif img_src.startswith("http://") or img_src.startswith("https://"):
+            import urllib.request
+            req = urllib.request.Request(img_src, headers={"User-Agent": "PrintGoo-DocService"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = resp.read()
+                if data.startswith(b"%PDF") or img_src.lower().endswith(".pdf"):
+                    return load_pdf_page_as_image(data)
+                elif img_src.lower().endswith(".svg") or b"<svg" in data[:100]:
+                    try:
+                        from svglib.svglib import svg2rlg
+                        d = svg2rlg(io.BytesIO(data))
+                        if d and getattr(d, "width", 0) and getattr(d, "height", 0):
+                            return LoadedArtwork("drawing", d, d.width, d.height)
+                    except Exception:
+                        pass
+                pil_img = PILImage.open(io.BytesIO(data))
+                w, h = pil_img.size
+                buf = io.BytesIO()
+                pil_img.convert("RGB").save(buf, format="JPEG", quality=90)
+                buf.seek(0)
+                return LoadedArtwork("image", ImageReader(buf), w, h)
+    except Exception as e:
+        print(f"Failed to load artwork source in ReportLab ({img_src}): {e}", flush=True)
+        return None
+    return None
     try:
         if img_src.startswith("data:image"):
             header, body = img_src.split(",", 1)
@@ -322,17 +466,27 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         seen_keys.add(key)
         seen_keys.add(s_id)
 
+        front_src = (art.get("frontArtworkThumb") or art.get("frontArtworkUrl")) if art else None
+        back_src = (art.get("backArtworkThumb") or art.get("backArtworkUrl")) if art else None
+
+        # Auto-discover uploaded files if not in payload map
+        if not front_src:
+            front_src = probe_artwork_url(doc_no, s_code, "front")
+        if not back_src:
+            back_src = probe_artwork_url(doc_no, s_code, "back")
+
+        has_art = bool(front_src or back_src)
         sku_cards_data.append({
             "id": s_id,
             "model": s_model,
             "sizeCode": s_code,
             "quantity": s_qty,
             "share": pct,
-            "frontSrc": art.get("frontArtworkThumb") or art.get("frontArtworkUrl") if art else None,
-            "backSrc": art.get("backArtworkThumb") or art.get("backArtworkUrl") if art else None,
-            "frontName": art.get("frontArtworkName") if art else None,
-            "backName": art.get("backArtworkName") if art else None,
-            "hasArtwork": bool(art and (art.get("frontArtworkThumb") or art.get("frontArtworkUrl") or art.get("backArtworkThumb") or art.get("backArtworkUrl"))),
+            "frontSrc": front_src,
+            "backSrc": back_src,
+            "frontName": art.get("frontArtworkName") if art else (front_src.split("/")[-1] if front_src else None),
+            "backName": art.get("backArtworkName") if art else (back_src.split("/")[-1] if back_src else None),
+            "hasArtwork": has_art,
         })
 
     for a in sku_artworks_raw:
@@ -880,7 +1034,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
             for c_i, card_item in enumerate(chunk):
                 col_i = c_i % 2
                 row_i = c_i // 2
-                cx = margin_x + col_i * (col_w + gap_x)
+                cx = 9.0 + col_i * (col_w + gap_x)
                 cy = start_y + row_i * (card_h + gap_y)
 
                 draw_box(cx, cy, col_w, card_h, fill_hex="#ffffff", stroke_hex="#cbd5e1", lw=0.6)

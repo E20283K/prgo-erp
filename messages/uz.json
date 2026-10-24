@@ -364,6 +364,7 @@
     "users": "Foydalanuvchilar va rollar",
     "plants": "Tashkilotlar, korxonalar va sexlar",
     "tariffs": "Operatsiya va valyuta tariflari",
+    "notifications-sound": "Bildirishnomalar va ovoz",
     "integrations": "Integratsiyalar & API",
     "telegram-settings": "Telegram Bot & API",
     "api": "API va vebhuklar",
@@ -1269,5 +1270,32 @@
       "ipWhitelist": "Faqat Ruxsat Etilgan IP Manzillardan Kirish",
       "auditTitle": "Faollik va Kirishlar Audit Jurnali"
     }
+  },
+  "NotificationSoundSettings": {
+    "title": "Bildirishnomalar va Ovoz",
+    "description": "Tizimdagi Toast va operatsion bildirishnomalarning ovozli signallarini sozlash",
+    "masterTitle": "Ovozli bildirishnomalar",
+    "masterDesc": "Tizimda buyurtmalar saqlanganda, jarayonlar yakunlanganda yoki ogohlantirish chiqqanda ovoz yangrashi",
+    "enabled": "Yoqilgan",
+    "disabled": "O'chirilgan",
+    "themeTitle": "Audio to'plam",
+    "themeDesc": "O'zingizga ma'qul bo'lgan bildirishnoma ohangini tanlang",
+    "volumeTitle": "Ovoz balandligi",
+    "volumeDesc": "Signallar balandligini moslang (0% - 100%)",
+    "testTitle": "Sinov va namoyish",
+    "testDesc": "Har bir status turi bo'yicha Toast bildirishnomasi va ovozini tekshirib ko'ring",
+    "testSuccess": "Muvaffaqiyatli",
+    "testError": "Xatolik",
+    "testWarning": "Ogohlantirish",
+    "testInfo": "Ma'lumot",
+    "preview": "Tinglash",
+    "testSuccessTitle": "Buyurtma saqlandi",
+    "testSuccessDesc": "WOOF-26-0357 — Neggrr, Mahsulot, 50x80 mm muvaffaqiyatli saqlandi.",
+    "testErrorTitle": "Amal bajarilmadi",
+    "testErrorDesc": "Omborda yetarli xomashyo qoldig'i topilmadi.",
+    "testWarningTitle": "Dedlayn yaqinlashmoqda",
+    "testWarningDesc": "WOOF-26-0351 buyurtmasi topshirilishiga 2 kun qoldi.",
+    "testInfoTitle": "Sinxronizatsiya yakunlandi",
+    "testInfoDesc": "Telegram bot xabarlari yangilandi."
   }
 }

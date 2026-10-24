@@ -28,6 +28,8 @@ import type {
 } from "@/components/documents/hr/types";
 import { getCompanyIdByCode } from "./crmService";
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ─── 1. Employees Service ─────────────────────────────────────────────────────
 
 export async function getEmployeesList(
@@ -67,12 +69,12 @@ export async function getEmployeesList(
       hireDate: e.hireDate,
       terminationDate: e.terminationDate,
       departmentId: e.departmentId,
-      departmentName: e.department?.name || "",
-      department: e.department?.name || "",
+      departmentName: e.department?.name || details.departmentName || details.department || "",
+      department: e.department?.name || details.departmentName || details.department || "",
       departmentCode: e.department?.code || "",
       positionId: e.positionId,
-      positionTitle: e.position?.title || "",
-      position: e.position?.title || "",
+      positionTitle: e.position?.title || details.positionTitle || details.position || "",
+      position: e.position?.title || details.positionTitle || details.position || "",
       plant: "PrintGoo Bosh Zavod",
       avatarUrl: e.avatarUrl,
       passportSeries: details.passportSeries || "",
@@ -180,6 +182,31 @@ export async function upsertEmployeeRecord(
     const lName = data.lastName || data.fullName?.split(" ")[1] || "Kadr";
     const fullName = data.fullName || `${fName} ${lName}`;
 
+    // Resolve department and position UUIDs if name given
+    let resolvedDeptId: string | null =
+      data.departmentId && UUID_REGEX.test(data.departmentId) ? data.departmentId : null;
+    const deptName = data.departmentName || data.department;
+    if (!resolvedDeptId && deptName) {
+      const foundDept = await db.query.departments.findFirst({
+        where: and(eq(departments.companyId, companyId), eq(departments.name, deptName)),
+      });
+      if (foundDept) {
+        resolvedDeptId = foundDept.id;
+      }
+    }
+
+    let resolvedPosId: string | null =
+      data.positionId && UUID_REGEX.test(data.positionId) ? data.positionId : null;
+    const posTitle = data.positionTitle || data.position;
+    if (!resolvedPosId && posTitle) {
+      const foundPos = await db.query.positions.findFirst({
+        where: and(eq(positions.companyId, companyId), eq(positions.title, posTitle)),
+      });
+      if (foundPos) {
+        resolvedPosId = foundPos.id;
+      }
+    }
+
     const details = {
       passportSeries: data.passportSeries,
       passportNumber: data.passportNumber,
@@ -193,9 +220,13 @@ export async function upsertEmployeeRecord(
       emergencyPhone: data.emergencyPhone,
       skills: data.skills || [],
       notes: data.notes,
+      departmentName: deptName || undefined,
+      positionTitle: posTitle || undefined,
     };
 
-    if (data.id && data.id.length > 10 && !data.id.startsWith("emp-temp-")) {
+    const isRealUuid = Boolean(data.id && typeof data.id === "string" && UUID_REGEX.test(data.id));
+
+    if (isRealUuid && data.id) {
       // Check existing for history logging
       const existing = await db.query.employees.findFirst({
         where: eq(employees.id, data.id),
@@ -206,13 +237,13 @@ export async function upsertEmployeeRecord(
         if (
           existing.status !== data.status ||
           Number(existing.baseSalary) !== Number(data.baseSalary) ||
-          existing.positionId !== data.positionId ||
-          existing.departmentId !== data.departmentId
+          existing.positionId !== (resolvedPosId || existing.positionId) ||
+          existing.departmentId !== (resolvedDeptId || existing.departmentId)
         ) {
           await db.insert(employeeHistory).values({
             employeeId: existing.id,
             changeType:
-              existing.positionId !== data.positionId
+              existing.positionId !== resolvedPosId
                 ? "position_change"
                 : existing.baseSalary !== String(data.baseSalary)
                 ? "salary_change"
@@ -226,8 +257,8 @@ export async function upsertEmployeeRecord(
             newValue: {
               status: data.status,
               baseSalary: data.baseSalary,
-              positionId: data.positionId,
-              departmentId: data.departmentId,
+              positionId: resolvedPosId || existing.positionId,
+              departmentId: resolvedDeptId || existing.departmentId,
             },
             changedBy,
           });
@@ -249,11 +280,11 @@ export async function upsertEmployeeRecord(
             hourlyRate: String(data.hourlyRate ?? existing.hourlyRate),
             pieceworkMultiplier: String(data.pieceworkMultiplier ?? existing.pieceworkMultiplier),
             currentShift: data.currentShift || existing.currentShift,
-            departmentId: data.departmentId || existing.departmentId,
-            positionId: data.positionId || existing.positionId,
+            departmentId: resolvedDeptId || existing.departmentId,
+            positionId: resolvedPosId || existing.positionId,
             hireDate: data.hireDate || existing.hireDate,
             terminationDate: data.terminationDate || null,
-            avatarUrl: data.avatarUrl || null,
+            avatarUrl: data.avatarUrl !== undefined ? (data.avatarUrl || null) : existing.avatarUrl,
             details: { ...((existing.details as any) || {}), ...details },
             updatedAt: new Date(),
           })
@@ -283,8 +314,8 @@ export async function upsertEmployeeRecord(
         pieceworkMultiplier: String(data.pieceworkMultiplier || 1.0),
         currentShift: data.currentShift || "day",
         hireDate: data.hireDate || new Date().toISOString().split("T")[0],
-        departmentId: data.departmentId || null,
-        positionId: data.positionId || null,
+        departmentId: resolvedDeptId,
+        positionId: resolvedPosId,
         avatarUrl: data.avatarUrl || null,
         details,
       })

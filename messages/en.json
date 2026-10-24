@@ -364,6 +364,7 @@
     "users": "Users & Roles",
     "plants": "Enterprises, Plants & Workshops",
     "tariffs": "Tariffs & Pricing Rules",
+    "notifications-sound": "Notifications & Sound",
     "integrations": "Integrations & API",
     "telegram-settings": "Telegram Bot & API",
     "api": "API & Webhooks",
@@ -1268,5 +1269,32 @@
       "ipWhitelist": "Corporate IP Whitelist Enforced",
       "auditTitle": "Session Activity & Audit Trail"
     }
+  },
+  "NotificationSoundSettings": {
+    "title": "Notifications & Sound",
+    "description": "Configure audio cues and sound themes for Toast notifications",
+    "masterTitle": "Audio Notifications",
+    "masterDesc": "Play audio feedback when orders are saved, tasks complete, or warnings appear",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "themeTitle": "Sound Pack",
+    "themeDesc": "Select your preferred auditory notification profile",
+    "volumeTitle": "Volume Level",
+    "volumeDesc": "Adjust signal loudness (0% - 100%)",
+    "testTitle": "Testing & Preview",
+    "testDesc": "Trigger and audition Toast notifications across all event severities",
+    "testSuccess": "Success",
+    "testError": "Error",
+    "testWarning": "Warning",
+    "testInfo": "Info",
+    "preview": "Audition",
+    "testSuccessTitle": "Order Saved",
+    "testSuccessDesc": "WOOF-26-0357 — Neggrr, Product, 50x80 mm saved successfully.",
+    "testErrorTitle": "Action Failed",
+    "testErrorDesc": "Insufficient raw materials in warehouse for this allocation.",
+    "testWarningTitle": "Deadline Approaching",
+    "testWarningDesc": "Work order WOOF-26-0351 is due in 2 days.",
+    "testInfoTitle": "Sync Completed",
+    "testInfoDesc": "Telegram bot messaging cache refreshed."
   }
 }

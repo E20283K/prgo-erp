@@ -138,27 +138,28 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       lastName: "",
       middleName: "",
       fullName: isInitialNew ? "" : (tab.title || "Yangi xodim"),
-      phone: "+998 90 ",
+      phone: "",
       email: "",
       status: "active",
       wageType: "piecework",
-      baseSalary: 4000000,
+      baseSalary: 0,
       hourlyRate: 0,
       pieceworkMultiplier: 1.0,
       pieceworkRateMultiplier: 1.0,
       currentShift: "day",
       hireDate: new Date().toISOString().split("T")[0],
-      departmentName: "Flekso bosma sexi",
-      department: "Flekso bosma sexi",
-      positionTitle: "Pechatnik",
-      position: "Pechatnik",
+      departmentName: "",
+      department: "",
+      positionTitle: "",
+      position: "",
       plant: "PrintGoo Bosh Zavod",
-      skills: ["Flekso bosma", "OTK nazorat"],
+      skills: [],
       avatarUrl: null,
     };
   }, [tab.documentData, isInitialNew, employees, empId, tab.title]);
 
   const [formData, setFormData] = useState<EmployeeRecord>(initialEmp);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<string>(tab.activeLevel3Tab || "overview");
   const [isSaved, setIsSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -219,6 +220,11 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
   const handleUpdate = (updated: Partial<EmployeeRecord>) => {
     setFormData((prev) => ({ ...prev, ...updated }));
+    setErrors((prev) => {
+      const copy = { ...prev };
+      Object.keys(updated).forEach((k) => delete copy[k]);
+      return copy;
+    });
     setTabUnsaved(tab.id, true);
     setIsSaved(false);
   };
@@ -308,18 +314,36 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     const lName = formData.lastName?.trim() || "";
     const fName = formData.firstName?.trim() || "";
     const mName = formData.middleName?.trim() || "";
+    const dept = formData.departmentName?.trim() || formData.department?.trim() || "";
+    const pos = formData.positionTitle?.trim() || formData.position?.trim() || "";
+    const phone = formData.phone?.trim() || "";
+    const hireDate = formData.hireDate?.trim() || "";
+
     const computedFullName =
       [lName, fName, mName].filter(Boolean).join(" ").trim() || formData.fullName?.trim() || "";
 
-    if (!lName || !fName) {
+    const newErrors: Record<string, string> = {};
+    if (!lName) newErrors.lastName = "Familiyani kiriting";
+    if (!fName) newErrors.firstName = "Ismni kiriting";
+    if (!dept) newErrors.departmentName = "Sex / Bo'limni tanlang";
+    if (!pos) newErrors.positionTitle = "Lavozimni kiriting";
+    if (!phone || phone.replace(/\D/g, "").length < 7) {
+      newErrors.phone = "Telefon raqamini kiriting (kamida 7 ta raqam)";
+    }
+    if (!hireDate) newErrors.hireDate = "Qabul sanasini ko'rsating";
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      if (activeTab !== "overview") setActiveTab("overview");
       addNotification({
-        title: "Xatolik",
-        description: "Xodimning familiyasi va ismini kiriting.",
+        title: "Majburiy maydonlar to'ldirilmadi",
+        description: "Iltimos, yulduzcha (*) bilan belgilangan maydonlarni to'ldiring.",
         severity: "error",
       });
       return false;
     }
 
+    setErrors({});
     setSaving(true);
     let currentId = formData.id;
 
@@ -349,7 +373,11 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         });
         const json = await res.json();
 
-        const createdId = json.success && json.employeeId ? json.employeeId : `emp-${Date.now()}`;
+        if (!res.ok || !json.success || !json.employeeId) {
+          throw new Error(json.error || "Xodimni saqlashda xatolik yuz berdi");
+        }
+
+        const createdId = json.employeeId;
         const finalRecord: EmployeeRecord = {
           ...formData,
           ...payload,
@@ -375,11 +403,15 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         });
       } else {
         if (formData.id && formData.id.length > 20) {
-          await fetch(`/api/v1/hr/employees/${formData.id}`, {
+          const res = await fetch(`/api/v1/hr/employees/${formData.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
+          const json = await res.json();
+          if (!res.ok || !json.success) {
+            throw new Error(json.error || "Xodimni yangilashda xatolik yuz berdi");
+          }
         }
         const updatedRecord = { ...formData, ...payload };
         setFormData(updatedRecord);
@@ -404,24 +436,13 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         closeTab(isNewRecord ? `emp-${currentId}` : tab.id);
       }
       return true;
-    } catch {
-      // Local fallback save
-      const finalRecord = { ...formData, fullName: computedFullName };
-      upsertEmployee(finalRecord);
-      updateTabData(tab.id, finalRecord);
-      setTabUnsaved(tab.id, false);
-      setIsSaved(true);
+    } catch (err: any) {
       addNotification({
-        title: "Lokal saqlandi",
-        description: `${finalRecord.fullName} saqlandi.`,
-        severity: "warning",
+        title: "Xatolik",
+        description: err?.message || "Xodimni saqlashda server xatoligi yuz berdi.",
+        severity: "error",
       });
-      setTimeout(() => setIsSaved(false), 2500);
-
-      if (shouldClose) {
-        closeTab(tab.id);
-      }
-      return true;
+      return false;
     } finally {
       setSaving(false);
     }
@@ -681,7 +702,14 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                       </div>
 
                       <div>
-                        <Label className="text-xs">Familiya *</Label>
+                        <div className="flex justify-between items-center mb-1">
+                          <Label className="text-xs">Familiya *</Label>
+                          {errors.lastName && (
+                            <span className="text-[10px] text-destructive font-medium">
+                              {errors.lastName}
+                            </span>
+                          )}
+                        </div>
                         <Input
                           value={formData.lastName || ""}
                           onChange={(e) => {
@@ -695,12 +723,19 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             });
                           }}
                           placeholder="Masalan: Karimov"
-                          className="h-8 font-medium"
+                          className={`h-8 font-medium ${errors.lastName ? "border-destructive focus-visible:ring-destructive" : ""}`}
                         />
                       </div>
 
                       <div>
-                        <Label className="text-xs">Ism *</Label>
+                        <div className="flex justify-between items-center mb-1">
+                          <Label className="text-xs">Ism *</Label>
+                          {errors.firstName && (
+                            <span className="text-[10px] text-destructive font-medium">
+                              {errors.firstName}
+                            </span>
+                          )}
+                        </div>
                         <Input
                           value={formData.firstName || ""}
                           onChange={(e) => {
@@ -714,12 +749,12 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             });
                           }}
                           placeholder="Masalan: Sardor"
-                          className="h-8 font-medium"
+                          className={`h-8 font-medium ${errors.firstName ? "border-destructive focus-visible:ring-destructive" : ""}`}
                         />
                       </div>
 
                       <div>
-                        <Label className="text-xs">Otasining ismi</Label>
+                        <Label className="text-xs mb-1 block">Otasining ismi</Label>
                         <Input
                           value={formData.middleName || ""}
                           onChange={(e) => {
@@ -738,15 +773,22 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                       </div>
 
                       <div>
-                        <Label className="text-xs">Sex / Bo'lim *</Label>
+                        <div className="flex justify-between items-center mb-1">
+                          <Label className="text-xs">Sex / Bo'lim *</Label>
+                          {errors.departmentName && (
+                            <span className="text-[10px] text-destructive font-medium">
+                              {errors.departmentName}
+                            </span>
+                          )}
+                        </div>
                         <Select
                           value={formData.departmentName || formData.department || ""}
                           onValueChange={(val) => {
                             if (val) handleUpdate({ departmentName: val, department: val });
                           }}
                         >
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
+                          <SelectTrigger className={`h-8 ${errors.departmentName ? "border-destructive focus:ring-destructive" : ""}`}>
+                            <SelectValue placeholder="Bo'limni tanlang..." />
                           </SelectTrigger>
                           <SelectContent>
                             {departmentOptions.map((dept) => (
@@ -759,19 +801,26 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                       </div>
 
                       <div>
-                        <Label className="text-xs">Lavozim *</Label>
+                        <div className="flex justify-between items-center mb-1">
+                          <Label className="text-xs">Lavozim *</Label>
+                          {errors.positionTitle && (
+                            <span className="text-[10px] text-destructive font-medium">
+                              {errors.positionTitle}
+                            </span>
+                          )}
+                        </div>
                         <Input
                           value={formData.positionTitle || formData.position || ""}
                           onChange={(e) =>
                             handleUpdate({ positionTitle: e.target.value, position: e.target.value })
                           }
                           placeholder="Masalan: Pechatnik"
-                          className="h-8"
+                          className={`h-8 ${errors.positionTitle ? "border-destructive focus-visible:ring-destructive" : ""}`}
                         />
                       </div>
 
                       <div>
-                        <Label className="text-xs">Holati *</Label>
+                        <Label className="text-xs mb-1 block">Holati *</Label>
                         <Select
                           value={formData.status}
                           onValueChange={(val) => {
@@ -791,16 +840,24 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                       </div>
 
                       <div>
-                        <Label className="text-xs">Telefon raqami *</Label>
+                        <div className="flex justify-between items-center mb-1">
+                          <Label className="text-xs">Telefon raqami *</Label>
+                          {errors.phone && (
+                            <span className="text-[10px] text-destructive font-medium">
+                              {errors.phone}
+                            </span>
+                          )}
+                        </div>
                         <Input
-                          value={formData.phone}
+                          value={formData.phone || ""}
                           onChange={(e) => handleUpdate({ phone: e.target.value })}
-                          className="h-8 font-mono"
+                          placeholder="+998 90 123-45-67"
+                          className={`h-8 font-mono ${errors.phone ? "border-destructive focus-visible:ring-destructive" : ""}`}
                         />
                       </div>
 
                       <div>
-                        <Label className="text-xs">Elektron pochta</Label>
+                        <Label className="text-xs mb-1 block">Elektron pochta</Label>
                         <Input
                           value={formData.email || ""}
                           onChange={(e) => handleUpdate({ email: e.target.value })}
@@ -810,12 +867,19 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                       </div>
 
                       <div>
-                        <Label className="text-xs">Ishga qabul sanasi *</Label>
+                        <div className="flex justify-between items-center mb-1">
+                          <Label className="text-xs">Ishga qabul sanasi *</Label>
+                          {errors.hireDate && (
+                            <span className="text-[10px] text-destructive font-medium">
+                              {errors.hireDate}
+                            </span>
+                          )}
+                        </div>
                         <Input
                           type="date"
                           value={formData.hireDate}
                           onChange={(e) => handleUpdate({ hireDate: e.target.value })}
-                          className="h-8 font-mono"
+                          className={`h-8 font-mono ${errors.hireDate ? "border-destructive focus-visible:ring-destructive" : ""}`}
                         />
                       </div>
 

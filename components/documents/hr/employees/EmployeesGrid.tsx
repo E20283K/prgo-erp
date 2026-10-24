@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useMemo } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
   DataEditor,
   GridCell,
@@ -10,6 +10,7 @@ import {
   GridSelection,
   CompactSelection,
   GridColumnIcon,
+  GridMouseEventArgs,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -43,7 +44,7 @@ import {
 } from "lucide-react";
 
 export function EmployeesGrid() {
-  const { theme, openTab, employees, updateGridStats } = useWorkspaceStore();
+  const { theme, openTab, employees, setEmployees, updateGridStats } = useWorkspaceStore();
 
   const isDark = theme === "dark";
   const [data, setData] = useState<EmployeeRecord[]>([]);
@@ -57,14 +58,43 @@ export function EmployeesGrid() {
     rows: CompactSelection.empty(),
   });
 
+  const [hoveredPreview, setHoveredPreview] = useState<{
+    url: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const mouseCoordsRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const getCursorCardPosition = useCallback((clientX: number, clientY: number) => {
+    const cardWidth = 240;
+    const cardHeight = 280;
+    let x = clientX + 16;
+    let y = clientY + 12;
+
+    if (typeof window !== "undefined") {
+      if (x + cardWidth > window.innerWidth - 16) {
+        x = clientX - cardWidth - 16;
+      }
+      if (x < 16) x = 16;
+
+      if (y + cardHeight > window.innerHeight - 16) {
+        y = clientY - cardHeight - 12;
+      }
+      if (y < 16) y = 16;
+    }
+
+    return { x, y };
+  }, []);
+
   // Load from API with fallback to store
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/v1/hr/employees");
       const json = await res.json();
-      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      if (json.success && Array.isArray(json.data)) {
         setData(json.data);
+        setEmployees(json.data);
       } else {
         setData(employees);
       }
@@ -73,7 +103,7 @@ export function EmployeesGrid() {
     } finally {
       setLoading(false);
     }
-  }, [employees]);
+  }, [setEmployees]);
 
   useEffect(() => {
     fetchEmployees();
@@ -121,7 +151,8 @@ export function EmployeesGrid() {
   // Columns definition
   const columns: GridColumn[] = useMemo(
     () => [
-      { id: "badgeNumber", title: "Tabel №", width: 100, icon: GridColumnIcon.HeaderString },
+      { id: "badgeNumber", title: "Tabel №", width: 95, icon: GridColumnIcon.HeaderString },
+      { id: "avatarUrl", title: "Rasm", width: 55, icon: GridColumnIcon.HeaderImage },
       { id: "fullName", title: "F.I.O. (Xodim)", width: 230, icon: GridColumnIcon.HeaderString },
       { id: "positionTitle", title: "Lavozim", width: 180, icon: GridColumnIcon.HeaderString },
       { id: "departmentName", title: "Sex / Bo'lim", width: 180, icon: GridColumnIcon.HeaderString },
@@ -133,6 +164,38 @@ export function EmployeesGrid() {
       { id: "status", title: "Holati", width: 115, icon: GridColumnIcon.HeaderString },
     ],
     []
+  );
+
+  const onItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      if (args.kind === "cell") {
+        const [col, row] = args.location;
+        const column = columns[col];
+        if (column?.id === "avatarUrl") {
+          const rowData = filtered[row];
+          if (rowData && rowData.avatarUrl && rowData.avatarUrl.trim().length > 0) {
+            let clientX = mouseCoordsRef.current.x;
+            let clientY = mouseCoordsRef.current.y;
+            if (clientX === 0 && clientY === 0 && typeof document !== "undefined") {
+              const rect = (args as any).bounds;
+              if (rect) {
+                clientX = rect.x + rect.width / 2;
+                clientY = rect.y + rect.height / 2;
+              }
+            }
+            const { x, y } = getCursorCardPosition(clientX, clientY);
+            setHoveredPreview({
+              url: rowData.avatarUrl.trim(),
+              x,
+              y,
+            });
+            return;
+          }
+        }
+      }
+      setHoveredPreview(null);
+    },
+    [columns, filtered, getCursorCardPosition]
   );
 
   const getCellContent = useCallback(
@@ -167,6 +230,18 @@ export function EmployeesGrid() {
             textDark: "#2563eb",
             baseFontStyle: "bold 11px monospace",
           },
+        };
+      }
+
+      if (col.id === "avatarUrl") {
+        const photo = row.avatarUrl?.trim() || "";
+        return {
+          kind: GridCellKind.Image,
+          data: photo ? [photo] : [],
+          displayData: photo ? [photo] : [],
+          allowOverlay: false,
+          rounding: 4,
+          contentAlign: "center",
         };
       }
 
@@ -270,23 +345,24 @@ export function EmployeesGrid() {
       badgeNo: nextBadge,
       firstName: "",
       lastName: "",
+      middleName: "",
       fullName: "",
-      phone: "+998 90 ",
+      phone: "",
       email: "",
       status: "active",
       wageType: "piecework",
-      baseSalary: 4000000,
+      baseSalary: 0,
       hourlyRate: 0,
       pieceworkMultiplier: 1.0,
       pieceworkRateMultiplier: 1.0,
       currentShift: "day",
       hireDate: new Date().toISOString().split("T")[0],
-      departmentName: "Flekso bosma sexi",
-      department: "Flekso bosma sexi",
-      positionTitle: "Pechatnik",
-      position: "Pechatnik",
+      departmentName: "",
+      department: "",
+      positionTitle: "",
+      position: "",
       plant: "PrintGoo Bosh Zavod",
-      skills: ["Flekso bosma", "OTK nazorat"],
+      skills: [],
       notes: "",
     };
 
@@ -403,7 +479,17 @@ export function EmployeesGrid() {
       {/* ── High-Performance Canvas Data Grid ── */}
       <ContextMenu>
         <ContextMenuTrigger className="flex-1 w-full h-full relative overflow-hidden">
-          <div className="absolute inset-0">
+          <div
+            className="absolute inset-0"
+            onMouseMove={(e) => {
+              mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
+              if (hoveredPreview) {
+                const { x, y } = getCursorCardPosition(e.clientX, e.clientY);
+                setHoveredPreview((prev) => (prev ? { ...prev, x, y } : null));
+              }
+            }}
+            onMouseLeave={() => setHoveredPreview(null)}
+          >
             <DataEditor
               width="100%"
               height="100%"
@@ -411,16 +497,31 @@ export function EmployeesGrid() {
               rows={filtered.length}
               getCellContent={getCellContent}
               rowMarkers="both"
-              freezeColumns={1}
+              freezeColumns={2}
               headerHeight={28}
-              rowHeight={27}
+              rowHeight={32}
               gridSelection={selection}
               onGridSelectionChange={setSelection}
               onCellActivated={handleCellActivated}
+              onItemHovered={onItemHovered}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
               smoothScrollX
               smoothScrollY
             />
+
+            {/* Hover Image Preview (Full format avatar popup like Work Order preview) */}
+            {hoveredPreview && (
+              <div
+                style={{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }}
+                className="fixed z-50 pointer-events-none rounded-lg bg-popover/95 backdrop-blur-xs border border-border shadow-2xl p-1 animate-in fade-in-0 zoom-in-95 duration-75 max-w-[240px] max-h-[300px] flex items-center justify-center overflow-hidden"
+              >
+                <img
+                  src={hoveredPreview.url}
+                  alt="Xodim fotosurati"
+                  className="max-h-[280px] w-auto rounded object-cover"
+                />
+              </div>
+            )}
           </div>
         </ContextMenuTrigger>
 

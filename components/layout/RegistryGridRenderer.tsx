@@ -23,6 +23,7 @@ const PieceworkGrid = dynamic(() => import("@/components/documents/hr/piecework/
 const PayrollGrid = dynamic(() => import("@/components/documents/hr/payroll/PayrollGrid").then((mod) => mod.PayrollGrid), { ssr: false });
 const TelegramInbox = dynamic(() => import("@/components/documents/crm/TelegramInbox").then((mod) => mod.TelegramInbox), { ssr: false });
 const TelegramSettingsView = dynamic(() => import("@/components/documents/settings/TelegramSettingsView").then((mod) => mod.TelegramSettingsView), { ssr: false });
+const NotificationSoundSettingsView = dynamic(() => import("@/components/documents/settings/NotificationSoundSettingsView").then((mod) => mod.NotificationSoundSettingsView), { ssr: false });
 
 export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
   if (tab.id.includes("tasks")) {
@@ -61,6 +62,7 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("accounts")) return <FinanceGrid type="accounts" />;
     return <FinanceGrid type="settlements" />;
   } else if (tab.module === "settings") {
+    if (tab.id.includes("notifications-sound") || tab.id.includes("sound")) return <NotificationSoundSettingsView />;
     if (tab.id.includes("telegram-settings")) return <TelegramSettingsView />;
     if (tab.id.includes("users")) return <SettingsGrid type="users" />;
     if (tab.id.includes("tariffs")) return <SettingsGrid type="tariffs" />;

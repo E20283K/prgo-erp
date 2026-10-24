@@ -363,6 +363,7 @@
     "users": "Kullanıcılar ve Roller",
     "plants": "Şirket, Şubeler ve Atölyeler",
     "tariffs": "Operasyon ve Kur Tarifeleri",
+    "notifications-sound": "Bildirimler ve Ses",
     "integrations": "Entegrasyonlar & API",
     "telegram-settings": "Telegram Bot & API",
     "api": "API ve Webhook'lar",
@@ -1267,5 +1268,32 @@
       "ipWhitelist": "Güvenli IP Beyaz Listesi",
       "auditTitle": "Kullanıcı İşlem ve Giriş Günlüğü"
     }
+  },
+  "NotificationSoundSettings": {
+    "title": "Bildirimler ve Ses",
+    "description": "Toast ve sistem bildirimleri için ses tonlarını yapılandırın",
+    "masterTitle": "Sesli Bildirimler",
+    "masterDesc": "Sipariş kaydedildiğinde, işlemler bittiğinde veya uyarı çıktığında ses çalınması",
+    "enabled": "Etkin",
+    "disabled": "Devre Dışı",
+    "themeTitle": "Ses Paketi",
+    "themeDesc": "Tercih ettiğiniz bildirim ses profilini seçin",
+    "volumeTitle": "Ses Seviyesi",
+    "volumeDesc": "Sinyal ses yüksekliğini ayarlayın (0% - 100%)",
+    "testTitle": "Test ve Önizleme",
+    "testDesc": "Her durum için Toast bildirimini ve sesini test edin",
+    "testSuccess": "Başarılı",
+    "testError": "Hata",
+    "testWarning": "Uyarı",
+    "testInfo": "Bilgi",
+    "preview": "Dinle",
+    "testSuccessTitle": "Sipariş Kaydedildi",
+    "testSuccessDesc": "WOOF-26-0357 — Neggrr, Ürün, 50x80 mm başarıyla kaydedildi.",
+    "testErrorTitle": "İşlem Başarısız",
+    "testErrorDesc": "Depoda bu işlem için yeterli hammadde bulunamadı.",
+    "testWarningTitle": "Termin Yaklaşıyor",
+    "testWarningDesc": "WOOF-26-0351 siparişinin teslimine 2 gün kaldı.",
+    "testInfoTitle": "Senkronizasyon Tamamlandı",
+    "testInfoDesc": "Telegram bot mesajları güncellendi."
   }
 }

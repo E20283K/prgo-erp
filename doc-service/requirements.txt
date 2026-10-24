@@ -10,4 +10,6 @@ openpyxl==3.1.5
 boto3==1.37.11
 python-multipart==0.0.20
 svglib>=2.3.0
+pypdfium2>=5.0.0
+pymupdf>=1.25.0
 

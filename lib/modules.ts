@@ -61,6 +61,7 @@ import {
   Code,
   Coins,
   Stamp,
+  Volume2,
   // HR icons
   UserCheck,
   CalendarClock,
@@ -280,6 +281,7 @@ export const MODULE_NAV: ModuleDef[] = [
           { id: "plants", label: "Company & Branches", icon: Building },
           { id: "users", label: "Users & Roles", icon: Shield },
           { id: "tariffs", label: "Tariffs & Pricing Rules", icon: Coins },
+          { id: "notifications-sound", label: "Notifications & Sound", icon: Volume2 },
         ],
       },
       {

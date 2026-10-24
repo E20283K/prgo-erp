@@ -16,7 +16,10 @@ import {
   ChevronLeft,
   Layers,
   ArrowRight,
+  Volume2,
+  ExternalLink,
 } from "lucide-react";
+import { playToastSound } from "@/lib/sound/soundService";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -234,7 +237,16 @@ interface RulesSettingsViewProps {
 
 function RulesSettingsView({ onBack }: RulesSettingsViewProps) {
   const t = useTranslations("NotificationPanel");
-  const { notificationRules, updateNotificationRules } = useWorkspaceStore();
+  const {
+    notificationRules,
+    updateNotificationRules,
+    toastSoundConfig,
+    setToastSoundConfig,
+    openTab,
+    setActiveModule,
+    setModule,
+    setNotifPanelOpen,
+  } = useWorkspaceStore();
 
   const handleToggle = (key: keyof typeof notificationRules) => {
     updateNotificationRules({ [key]: !notificationRules[key] });
@@ -316,6 +328,52 @@ function RulesSettingsView({ onBack }: RulesSettingsViewProps) {
             </span>
           </div>
         </label>
+      </div>
+
+      {/* Audio Notification Settings Shortcut */}
+      <div className="pt-2 border-t border-border/60 space-y-2">
+        <label className="flex items-start gap-2.5 p-2 rounded border border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={toastSoundConfig?.enabled ?? true}
+            onChange={(e) => {
+              setToastSoundConfig({ enabled: e.target.checked });
+              if (e.target.checked) playToastSound("success", { force: true });
+            }}
+            className="mt-0.5 rounded border-border text-primary focus:ring-primary size-3.5"
+          />
+          <div className="space-y-0.5 flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-foreground block">Ovozli signallar</span>
+              <span className="text-[10px] font-mono text-muted-foreground uppercase">{toastSoundConfig?.theme || "modern"}</span>
+            </div>
+            <span className="text-[10px] text-muted-foreground block">
+              Toast bildirishnomalari chiqqanda ovoz yangrashi
+            </span>
+          </div>
+        </label>
+
+        <button
+          type="button"
+          onClick={() => {
+            setNotifPanelOpen(false);
+            setActiveModule("settings");
+            setModule("settings", "notifications-sound");
+            openTab({
+              id: "tab-settings-notifications-sound",
+              title: "Bildirishnomalar va Ovoz",
+              type: "registry",
+              module: "settings",
+            });
+          }}
+          className="w-full flex items-center justify-between p-2 rounded border border-border/60 hover:bg-muted/40 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-1.5">
+            <Volume2 className="size-3.5 text-primary" />
+            <span>Barcha ovoz sozlamalari</span>
+          </div>
+          <ExternalLink className="size-3 text-muted-foreground" />
+        </button>
       </div>
     </div>
   );

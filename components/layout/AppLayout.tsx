@@ -12,26 +12,26 @@ import { AiChatSheet } from "./AiChatSheet";
 
 import { MODULE_NAV } from "@/lib/modules";
 import { ElementInspectorOverlay } from "@/components/dev/ElementInspectorOverlay";
-import { Toaster } from "@/components/ui/toast";
-
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const { 
-    setTheme, 
-    isCommandOpen, 
-    toggleCommand, 
-    sidebarWidth, 
-    setSidebarWidth, 
+  const {
+    setTheme,
+    isCommandOpen,
+    toggleCommand,
+    sidebarWidth,
+    setSidebarWidth,
     activeTabId,
     showStatusBar,
-    setShowStatusBar
+    setShowStatusBar,
+    setToastSoundConfig,
   } = useWorkspaceStore();
 
   const isPOSActive = activeTabId.includes("pos");
 
   useEffect(() => {
     try {
-      const savedTheme = localStorage.getItem("printgoo_theme") as "dark" | "light" | null;
+      const savedTheme = localStorage.getItem("printgoo_theme") as
+        "dark" | "light" | null;
       if (savedTheme) {
         setTheme(savedTheme);
       } else {
@@ -50,13 +50,23 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       if (savedStatusBar !== null) {
         setShowStatusBar(savedStatusBar === "true");
       }
+
+      const savedSound = localStorage.getItem("printgoo_toast_sound");
+      if (savedSound) {
+        try {
+          setToastSoundConfig(JSON.parse(savedSound));
+        } catch (e) {}
+      }
     } catch (e) {}
-  }, [setTheme, setSidebarWidth, setShowStatusBar]);
+  }, [setTheme, setSidebarWidth, setShowStatusBar, setToastSoundConfig]);
   useEffect(() => {
     // 1. Block the default right-click context menu
     const handleContextMenu = (e: MouseEvent) => {
       // Allow right-click on input fields
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
         return;
       }
       e.preventDefault();
@@ -65,7 +75,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     // 2. Block standard browser keyboard shortcuts & unify F11 fullscreen
     const handleKeyDown = (e: KeyboardEvent) => {
       // 0. Ctrl+Shift+C / Cmd+Shift+C: Toggle AI Element & Container Inspector
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key.toLowerCase() === "c" || e.code === "KeyC")) {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        (e.key.toLowerCase() === "c" || e.code === "KeyC")
+      ) {
         e.preventDefault();
         e.stopPropagation();
         useWorkspaceStore.getState().toggleInspectorMode();
@@ -73,7 +87,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       }
 
       // 1. Ctrl+K / Cmd+K: Activate or toggle Command Palette
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         e.stopPropagation();
         useWorkspaceStore.getState().toggleCommand();
@@ -92,7 +106,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       }
 
       // 3. Ctrl+J / Cmd+J: Toggle AI Copilot Chat Sheet
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
         e.stopPropagation();
         useWorkspaceStore.getState().toggleAiChat();
@@ -100,14 +114,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       }
 
       // Explicitly block Ctrl+T / Cmd+T (New Tab in browser)
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t") {
         e.preventDefault();
         e.stopPropagation();
         return;
       }
 
       // 4. Ctrl+W / Cmd+W: Close active tab
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
         e.preventDefault();
         e.stopPropagation();
         const store = useWorkspaceStore.getState();
@@ -125,53 +139,78 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         return;
       }
 
-
-      // 6. Switch ERP Module: Alt+1..6, Ctrl+Shift+1..6, or Ctrl/Cmd+1..6
+      // 6. Switch ERP Module: Alt+1..9, Ctrl+Shift+1..9, or Ctrl/Cmd+1..9
       // IMPORTANT: Never intercept when focus is inside an editable input/textarea/contenteditable!
       const isInputFocused =
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
         (e.target instanceof HTMLElement && e.target.isContentEditable);
 
-      const codeMatch = e.code.match(/^(?:Digit|Numpad)([1-6])$/);
-      const keyMatch = e.key.match(/^[1-6]$/);
-      const digit = codeMatch ? parseInt(codeMatch[1], 10) : (keyMatch ? parseInt(keyMatch[0], 10) : null);
+      const codeMatch = e.code.match(/^(?:Digit|Numpad)([1-9])$/);
+      const keyMatch = e.key.match(/^[1-9]$/);
+      const digit = codeMatch
+        ? parseInt(codeMatch[1], 10)
+        : keyMatch
+          ? parseInt(keyMatch[0], 10)
+          : null;
 
-      if (!isInputFocused && digit !== null && digit >= 1 && digit <= MODULE_NAV.length) {
-        const isAlt = e.altKey && !e.ctrlKey && !e.metaKey;
-        const isCtrlShift = (e.ctrlKey || e.metaKey) && e.shiftKey;
-        const isCtrlCmd = (e.ctrlKey || e.metaKey) && !e.altKey;
-
-        if (isAlt || isCtrlShift || isCtrlCmd) {
-          e.preventDefault();
-          e.stopPropagation();
-          const targetMod = MODULE_NAV[digit - 1];
-          if (targetMod) {
-            const store = useWorkspaceStore.getState();
-            if (store.isCommandOpen) {
-              store.setCommandOpen(false);
-            }
-            const firstItem = targetMod.sections[0]?.items[0];
-            store.setActiveModule(targetMod.id);
-            if (firstItem) {
-              store.setModule(targetMod.id, firstItem.id);
-              store.openTab({
-                id: firstItem.id === "work-orders" ? "registry-work-orders" : `tab-${targetMod.id}-${firstItem.id}`,
-                title: firstItem.id === "work-orders" ? `${firstItem.label} (Registry)` : firstItem.label,
-                type: "registry",
-                module: targetMod.id,
+      if (!isInputFocused && digit !== null) {
+        const store = useWorkspaceStore.getState();
+        const currentUser = store.currentUser;
+        const modules =
+          !currentUser ||
+          currentUser.role === "admin" ||
+          !currentUser.permissions
+            ? MODULE_NAV
+            : MODULE_NAV.filter((mod) => {
+                const perm = (currentUser.permissions as any)?.[mod.id];
+                return perm ? perm.view === true : true;
               });
+
+        if (digit >= 1 && digit <= modules.length) {
+          const isAlt = e.altKey && !e.ctrlKey && !e.metaKey;
+          const isCtrlShift = (e.ctrlKey || e.metaKey) && e.shiftKey;
+          const isCtrlCmd = (e.ctrlKey || e.metaKey) && !e.altKey;
+
+          if (isAlt || isCtrlShift || isCtrlCmd) {
+            e.preventDefault();
+            e.stopPropagation();
+            const targetMod = modules[digit - 1];
+            if (targetMod) {
+              const store = useWorkspaceStore.getState();
+              if (store.isCommandOpen) {
+                store.setCommandOpen(false);
+              }
+              const firstItem = targetMod.sections[0]?.items[0];
+              store.setActiveModule(targetMod.id);
+              if (firstItem) {
+                store.setModule(targetMod.id, firstItem.id);
+                store.openTab({
+                  id:
+                    firstItem.id === "work-orders"
+                      ? "registry-work-orders"
+                      : `tab-${targetMod.id}-${firstItem.id}`,
+                  title:
+                    firstItem.id === "work-orders"
+                      ? `${firstItem.label} (Registry)`
+                      : firstItem.label,
+                  type: "registry",
+                  module: targetMod.id,
+                });
+              }
             }
+            return;
           }
-          return;
         }
       }
 
       // Allow standard text operations: Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+A, Ctrl+Z, Ctrl+J
-      const allowedCtrlKeys = ['c', 'v', 'x', 'a', 'z', 'j'];
+      const allowedCtrlKeys = ["c", "v", "x", "a", "z", "j"];
 
-      
-      if ((e.ctrlKey || e.metaKey) && !allowedCtrlKeys.includes(e.key.toLowerCase())) {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !allowedCtrlKeys.includes(e.key.toLowerCase())
+      ) {
         e.preventDefault(); // Blocks Ctrl+S, Ctrl+P, Ctrl+F, etc.
       }
 
@@ -183,15 +222,20 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         toggleAppFullscreen();
         return;
       }
-      
+
       // Block common function keys like F3 (Find), F12 (DevTools)
-      if (['F3', 'F12'].includes(e.key)) {
+      if (["F3", "F12"].includes(e.key)) {
         e.preventDefault();
       }
     };
 
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement && typeof navigator !== "undefined" && "keyboard" in navigator && (navigator as any).keyboard?.unlock) {
+      if (
+        !document.fullscreenElement &&
+        typeof navigator !== "undefined" &&
+        "keyboard" in navigator &&
+        (navigator as any).keyboard?.unlock
+      ) {
         (navigator as any).keyboard.unlock();
       }
     };
@@ -235,13 +279,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {/* AI Copilot Chat Sheet (Ctrl+J or Topbar/Command) */}
       <AiChatSheet />
 
-      {/* Global Toast Notification System */}
-      <Toaster />
-
-
       {/* AI UI Element & Container Inspector Overlay (Ctrl+Shift+C) */}
       <ElementInspectorOverlay />
     </SidebarProvider>
   );
 }
-

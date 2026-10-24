@@ -12,15 +12,15 @@ export const ERP_FONT_CACHE_NAME = "erp-fonts-v1";
 
 export const ERP_CORE_FONTS = [
   {
-    family: "Roboto",
-    url: "/fonts/Roboto-Regular.ttf",
-    weight: "400",
+    family: "Inter",
+    url: "/fonts/inter-latin.woff2",
+    weight: "100 900",
     style: "normal",
   },
   {
-    family: "Roboto",
-    url: "/fonts/Roboto-Bold.ttf",
-    weight: "700",
+    family: "Inter",
+    url: "/fonts/inter-cyrillic.woff2",
+    weight: "100 900",
     style: "normal",
   },
 ] as const;

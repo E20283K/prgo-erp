@@ -28,6 +28,7 @@ import type {
   TradingCatalogItemRecord,
   TradingSettlementLedgerEntry,
 } from "@/components/documents/trading/types";
+import type { ToastSoundConfig } from "@/lib/sound/soundService";
 import {
   INITIAL_YTT_ENTITIES,
   INITIAL_TRADING_SALES,
@@ -737,6 +738,7 @@ interface WorkspaceState {
   departmentsList: DepartmentRecord[];
   positionsList: PositionRecord[];
   shiftsList: ShiftRecord[];
+  setEmployees: (employees: EmployeeRecord[]) => void;
   upsertEmployee: (emp: EmployeeRecord) => void;
   upsertAttendance: (att: AttendanceRecord) => void;
   upsertPiecework: (pw: PieceworkRecord) => void;
@@ -807,6 +809,10 @@ interface WorkspaceState {
     stockLowEnabled: boolean;
     financeDocsEnabled: boolean;
   }>, companyCode?: string) => Promise<void>;
+
+  // ── Toast Sound Configuration ──────────────────────────────────────────────
+  toastSoundConfig: ToastSoundConfig;
+  setToastSoundConfig: (config: Partial<ToastSoundConfig>) => void;
 
   // ── AI Copilot Chat ────────────────────────────────────────────────────────
   isAiChatOpen: boolean;
@@ -2329,6 +2335,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return false;
   },
 
+  setEmployees: (employees) => set({ employees }),
+
   upsertEmployee: (emp) =>
     set((state) => {
       const exists = state.employees.some((e) => e.id === emp.id);
@@ -3436,7 +3444,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } catch (_) {}
   },
 
-  // ── AI Copilot Chat state & actions ─────────────────────────────────────────
+  // ── Toast Sound Configuration state & actions ─────────────────────────────
+  toastSoundConfig: {
+    enabled: true,
+    theme: "modern",
+    volume: 0.75,
+  },
+  setToastSoundConfig: (config) => {
+    set((state) => {
+      const next = { ...state.toastSoundConfig, ...config };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("printgoo_toast_sound", JSON.stringify(next));
+        } catch (e) {}
+      }
+      return { toastSoundConfig: next };
+    });
+  },
   isAiChatOpen: false,
   setAiChatOpen: (open) => set({ isAiChatOpen: open }),
   toggleAiChat: () => set((state) => ({ isAiChatOpen: !state.isAiChatOpen })),
