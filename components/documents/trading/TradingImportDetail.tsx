@@ -44,7 +44,15 @@ const DataEditor = dynamic(
 );
 
 export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, addNotification, theme, openTab } = useWorkspaceStore();
+  const {
+    setTabUnsaved,
+    closeTab,
+    addNotification,
+    theme,
+    openTab,
+    upsertTradingImportAsync,
+    allocateTradingImportToStockAsync,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingImportBatchRecord> = tab.documentData || {};
 
@@ -315,26 +323,75 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
     [items, openTab, batchNo, origin, exchangeRate]
   );
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const payload: Partial<TradingImportBatchRecord> = {
+      id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+      batchNo,
+      date,
+      origin,
+      supplier,
+      containerNo,
+      fobAmountUSD,
+      internationalCargoUSD,
+      grossWeightKg,
+      customsDutyUZS,
+      exchangeRate,
+      totalLandedCostUZS: grandLandedCostUZS,
+      landedCostMarkupPercent: Number(landedMarkupPercent.toFixed(1)),
+      status,
+      items,
+      notes,
+    };
+    await upsertTradingImportAsync(payload);
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Partiya saqlandi",
-      description: `${batchNo} import partiyasi ma'lumotlari saqlandi.`,
+      description: `${batchNo} import partiyasi ma'lumotlari bazaga muvaffaqiyatli saqlandi.`,
       severity: "success",
       link: { module: "trading", subModule: "trading-imports" },
     });
   };
 
-  const handleAllocateToStock = () => {
-    setStatus("Allocated to Stock");
-    setTabUnsaved(tab.id, false);
-    addNotification({
-      title: "Omborga kirim qilindi",
-      description: `${batchNo} partiyasidagi ${items.length} ta pozitsiya markaziy ombor zaxirasiga kirim qilindi.`,
-      severity: "success",
-      link: { module: "trading", subModule: "trading-catalog" },
-    });
-    closeTab(tab.id);
+  const handleAllocateToStock = async () => {
+    try {
+      const payload: Partial<TradingImportBatchRecord> = {
+        id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+        batchNo,
+        date,
+        origin,
+        supplier,
+        containerNo,
+        fobAmountUSD,
+        internationalCargoUSD,
+        grossWeightKg,
+        customsDutyUZS,
+        exchangeRate,
+        totalLandedCostUZS: grandLandedCostUZS,
+        landedCostMarkupPercent: Number(landedMarkupPercent.toFixed(1)),
+        status: "Allocated to Stock",
+        items,
+        notes,
+      };
+      const saved = await upsertTradingImportAsync(payload);
+      if (saved && saved.id) {
+        await allocateTradingImportToStockAsync(saved.id);
+      }
+      setStatus("Allocated to Stock");
+      setTabUnsaved(tab.id, false);
+      addNotification({
+        title: "Omborga kirim qilindi",
+        description: `${batchNo} partiyasidagi ${items.length} ta pozitsiya markaziy savdo ombor zaxirasiga kirim qilindi.`,
+        severity: "success",
+        link: { module: "trading", subModule: "trading-catalog" },
+      });
+      closeTab(tab.id);
+    } catch (err: any) {
+      addNotification({
+        title: "Xatolik",
+        description: err.message || "Omborga kirim qilib bo'lmadi",
+        severity: "error",
+      });
+    }
   };
 
   return (

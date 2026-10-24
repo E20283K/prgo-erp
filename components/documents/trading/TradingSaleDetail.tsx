@@ -66,8 +66,17 @@ const DataEditor = dynamic(
 );
 
 export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, addNotification, clientSettlements, theme, openTab } =
-    useWorkspaceStore();
+  const {
+    setTabUnsaved,
+    closeTab,
+    addNotification,
+    clientSettlements,
+    theme,
+    openTab,
+    tradingCatalog,
+    tradingYttEntities,
+    upsertTradingSaleAsync,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingSaleRecord> = tab.documentData || {};
 
@@ -103,6 +112,14 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   const [notes, setNotes] = useState<string>(
     rawData.notes || "Tekstil fabrikasiga 1-partiya aksessuar va furnituralar."
   );
+
+  const availableEntities = useMemo(() => {
+    return tradingYttEntities.length > 0 ? tradingYttEntities : INITIAL_YTT_ENTITIES;
+  }, [tradingYttEntities]);
+
+  const availableCatalog = useMemo(() => {
+    return tradingCatalog.length > 0 ? tradingCatalog : INITIAL_TRADING_CATALOG;
+  }, [tradingCatalog]);
 
   const [items, setItems] = useState<TradingSaleItem[]>(
     rawData.items && rawData.items.length > 0
@@ -160,10 +177,10 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   // Selected YTT entity calculations
   const selectedEntity = useMemo(() => {
     return (
-      INITIAL_YTT_ENTITIES.find((e) => e.id === sellerEntityId) ||
-      INITIAL_YTT_ENTITIES[0]
+      availableEntities.find((e) => e.id === sellerEntityId || e.code === sellerEntityId) ||
+      availableEntities[0]
     );
-  }, [sellerEntityId]);
+  }, [sellerEntityId, availableEntities]);
 
   // Grand totals
   const { totalAmount, totalUZS, totalUSD } = useMemo(() => {
@@ -435,28 +452,67 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const payload: Partial<TradingSaleRecord> = {
+      id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+      docNo,
+      date,
+      sellerEntityId,
+      sellerEntityName: selectedEntity.name,
+      customer,
+      customerTin,
+      contractNo,
+      currency,
+      exchangeRate,
+      totalAmount,
+      totalUSD,
+      totalUZS,
+      paymentMethod,
+      status: "Draft",
+      notes,
+      items,
+    };
+    await upsertTradingSaleAsync(payload);
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Hujjat saqlandi",
-      description: `${docNo} qoralama muvaffaqiyatli saqlandi.`,
+      description: `${docNo} qoralama bazaga muvaffaqiyatli saqlandi.`,
       severity: "success",
       link: { module: "trading", subModule: "trading-sales" },
     });
   };
 
-  const handlePostAndClose = () => {
+  const handlePostAndClose = async () => {
     if (simulatedPercent > 100 && selectedEntity.legalType === "YTT") {
       alert(
-        `Xatolik! Ushbu hujjat ${selectedEntity.name} yillik aylanma limitidan (1 mlrd UZS) oshib ketadi. Boshqa YTT ni tanlang!`
+        `Diqqat! Ushbu hujjat ${selectedEntity.name} yillik aylanma limitidan (1 mlrd UZS) oshib ketadi. Boshqa YTT ni tanlash tavsiya etiladi.`
       );
-      return;
     }
+    const payload: Partial<TradingSaleRecord> = {
+      id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+      docNo,
+      date,
+      sellerEntityId,
+      sellerEntityName: selectedEntity.name,
+      customer,
+      customerTin,
+      contractNo,
+      currency,
+      exchangeRate,
+      totalAmount,
+      totalUSD,
+      totalUZS,
+      paymentMethod,
+      status: "Posted",
+      notes,
+      items,
+    };
+    await upsertTradingSaleAsync(payload);
     setStatus("Posted");
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Sotuv o'tkazildi (Проведено)",
-      description: `${docNo} muvaffaqiyatli o'tkazildi. Sotuvchi: ${selectedEntity.name}, Jami: ${totalUZS.toLocaleString()} UZS.`,
+      description: `${docNo} muvaffaqiyatli o'tkazildi. Ombor zaxirasidan kamaytirildi va YTT aylanmasi yangilandi.`,
       severity: "success",
       link: { module: "trading", subModule: "trading-sales" },
     });
@@ -464,15 +520,15 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const filteredCatalogItems = useMemo(() => {
-    if (!warehouseSearch.trim()) return INITIAL_TRADING_CATALOG;
+    if (!warehouseSearch.trim()) return availableCatalog;
     const q = warehouseSearch.toLowerCase();
-    return INITIAL_TRADING_CATALOG.filter(
+    return availableCatalog.filter(
       (c) =>
         c.sku.toLowerCase().includes(q) ||
         c.name.toLowerCase().includes(q) ||
         c.category.toLowerCase().includes(q)
     );
-  }, [warehouseSearch]);
+  }, [warehouseSearch, availableCatalog]);
 
   return (
     <div className="w-full h-full bg-background flex flex-col overflow-hidden text-xs">

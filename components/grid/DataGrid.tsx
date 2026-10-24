@@ -51,6 +51,8 @@ import {
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useTranslations } from "next-intl";
 import { WorkOrderCalendarView } from "./WorkOrderCalendarView";
+import { WorkOrdersPrintModal } from "./WorkOrdersPrintModal";
+import { evaluateOrderReadiness } from "@/components/documents/work-order/utils/readinessEngine";
 
 export const GLIDE_LIGHT_THEME: Partial<Theme> = {
   accentColor: "#2563eb",
@@ -114,6 +116,8 @@ export interface OrderRow {
   machine: string;
   qty: number;
   unit: string;
+  readyCount: number;
+  readinessLabel: string;
   priceTotal: number;
   status: "Draft" | "Active" | "Completed" | "Cancelled";
   priority: "Normal" | "Urgent" | "High";
@@ -131,6 +135,7 @@ const INITIAL_COLUMNS: GridColumn[] = [
   { id: "customer", title: "Customer Organization", width: 220, icon: GridColumnIcon.HeaderString, hasMenu: true },
   { id: "product", title: "Product / Specification", width: 260, icon: GridColumnIcon.HeaderTextTemplate, hasMenu: true },
   { id: "qty", title: "Quantity", width: 110, icon: GridColumnIcon.HeaderNumber, hasMenu: true },
+  { id: "readiness", title: "Tayyorgarlik", width: 85, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
   { id: "status", title: "1C Status", width: 110, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
   { id: "priority", title: "Priority", width: 95, icon: GridColumnIcon.HeaderIfThenElse, hasMenu: true },
   { id: "deadline", title: "Deadline", width: 115, icon: GridColumnIcon.HeaderDate, hasMenu: true },
@@ -141,13 +146,26 @@ export function DataGrid() {
   const tCommon = useTranslations("Common");
   const tWork = useTranslations("Workspace");
   const tTasks = useTranslations("Tasks");
-  const { openTab, updateGridStats, theme, setCreateWorkOrderOpen, productionQueue, loadProductionQueue, isProductionQueueLoading } = useWorkspaceStore();
+  const {
+    openTab,
+    updateGridStats,
+    theme,
+    setCreateWorkOrderOpen,
+    productionQueue,
+    loadProductionQueue,
+    isProductionQueueLoading,
+    warehouseStock,
+    loadWarehouseStock,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [columns, setColumns] = useState<GridColumn[]>(INITIAL_COLUMNS);
 
   useEffect(() => {
     loadProductionQueue();
-  }, [loadProductionQueue]);
+    if (!warehouseStock || warehouseStock.length === 0) {
+      loadWarehouseStock();
+    }
+  }, [loadProductionQueue, loadWarehouseStock, warehouseStock]);
 
   const localizedColumns = React.useMemo(() => {
     const colMap: Record<string, string> = {
@@ -156,6 +174,7 @@ export function DataGrid() {
       customer: tGrid("colCustomer"),
       product: tGrid("colProduct"),
       qty: tGrid("colQty"),
+      readiness: tGrid("colReadiness"),
       status: tGrid("colStatus"),
       priority: tGrid("colPriority"),
       deadline: tGrid("colDeadline"),
@@ -210,6 +229,14 @@ export function DataGrid() {
         }
       }
 
+      const evaluatedChecks = evaluateOrderReadiness(wo, warehouseStock || []);
+      const readyCount =
+        (evaluatedChecks.designReady ? 1 : 0) +
+        (evaluatedChecks.paperReady ? 1 : 0) +
+        (evaluatedChecks.platesReady ? 1 : 0) +
+        (evaluatedChecks.toolingReady ? 1 : 0);
+      const readinessLabel = `${readyCount}/4`;
+
       return {
         id: wo.id,
         preview: photos,
@@ -223,6 +250,8 @@ export function DataGrid() {
         machine: wo.pressMachine,
         qty: wo.quantity,
         unit: wo.unit || "pcs",
+        readyCount,
+        readinessLabel,
         priceTotal: wo.priceTotal || 0,
         status: wo.status || "Draft",
         priority: (wo.priority as any) || "Normal",
@@ -234,6 +263,7 @@ export function DataGrid() {
     });
   }, [productionQueue]);
   const [viewMode, setViewMode] = useState<"grid" | "calendar">("grid");
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
   const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
   const [searchFilter, setSearchFilter] = useState("");
@@ -251,6 +281,7 @@ export function DataGrid() {
         r.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.customer.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.product.toLowerCase().includes(searchFilter.toLowerCase()) ||
+        r.readinessLabel.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.sampleStatusLabel.toLowerCase().includes(searchFilter.toLowerCase());
 
       const matchesStatus = statusFilter === "ALL" || r.status === statusFilter;
@@ -262,7 +293,10 @@ export function DataGrid() {
       result = [...result].sort((a, b) => {
         let valA: any = "";
         let valB: any = "";
-        if (colId === "sampleStatus") {
+        if (colId === "readiness") {
+          valA = a.readyCount;
+          valB = b.readyCount;
+        } else if (colId === "sampleStatus") {
           valA = a.sampleStatusLabel;
           valB = b.sampleStatusLabel;
         } else {
@@ -470,6 +504,30 @@ export function DataGrid() {
           allowOverlay: true,
           contentAlign: "right",
         };
+      case "readiness": {
+        let colorDark = "#94a3b8"; // slate-400 (0/4)
+        let colorLight = "#64748b"; // slate-500
+
+        if (rowData.readyCount === 4) {
+          colorDark = "#4ade80"; // emerald-400
+          colorLight = "#16a34a"; // emerald-600
+        } else if (rowData.readyCount > 0) {
+          colorDark = "#fbbf24"; // amber-400
+          colorLight = "#d97706"; // amber-600
+        }
+
+        return {
+          kind: GridCellKind.Text,
+          data: rowData.readinessLabel,
+          displayData: rowData.readinessLabel,
+          contentAlign: "center",
+          allowOverlay: false,
+          themeOverride: {
+            textDark: isDark ? colorDark : colorLight,
+            baseFontStyle: "700 12px monospace",
+          },
+        };
+      }
       case "priceTotal":
         return {
           kind: GridCellKind.Number,
@@ -758,7 +816,13 @@ export function DataGrid() {
                 <span>{tCommon("export")}</span>
               </Button>
 
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground" title={tGrid("printRegistry")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsPrintModalOpen(true)}
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                title={tGrid("printRegistry")}
+              >
                 <Printer className="w-3.5 h-3.5" />
               </Button>
             </div>
@@ -857,7 +921,7 @@ export function DataGrid() {
           <Copy className="w-3.5 h-3.5 text-zinc-500" />
           <span>{tGrid("contextCopy")}</span>
         </ContextMenuItem>
-        <ContextMenuItem className="gap-2">
+        <ContextMenuItem onClick={() => setIsPrintModalOpen(true)} className="gap-2">
           <Printer className="w-3.5 h-3.5 text-zinc-500" />
           <span>{tGrid("printRegistry")}</span>
         </ContextMenuItem>
@@ -867,6 +931,12 @@ export function DataGrid() {
           <span>{tGrid("contextDelete")}</span>
         </ContextMenuItem>
       </ContextMenuContent>
+
+      <WorkOrdersPrintModal
+        open={isPrintModalOpen}
+        onOpenChange={setIsPrintModalOpen}
+        rows={rows}
+      />
     </ContextMenu>
   );
 }

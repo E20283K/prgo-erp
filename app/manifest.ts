@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Polygraph ERP',
-    short_name: 'Polygraph',
+    name: 'PrintGoo ERP/MES',
+    short_name: 'PrintGoo',
     description: 'Enterprise CRM + ERP System',
     start_url: '/',
     display: 'standalone',

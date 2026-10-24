@@ -52,7 +52,14 @@ interface StockMovementRow {
 }
 
 export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, addNotification, openTab, theme } = useWorkspaceStore();
+  const {
+    setTabUnsaved,
+    closeTab,
+    addNotification,
+    openTab,
+    theme,
+    upsertTradingCatalogItemAsync,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingCatalogItemRecord> = tab.documentData || {};
 
@@ -263,11 +270,31 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
     [stockMovements, openTab]
   );
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const payload: Partial<TradingCatalogItemRecord> = {
+      id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+      sku,
+      name,
+      category,
+      unit,
+      priceUZS,
+      priceUSD,
+      wholesalePriceUZS,
+      retailPriceUZS,
+      stockQty,
+      minStockLevel,
+      origin,
+      material,
+      colorCode,
+      dimensions,
+      supplier,
+      notes,
+    };
+    await upsertTradingCatalogItemAsync(payload);
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Mahsulot saqlandi",
-      description: `${sku}: ${name} narxlari va parametrlari yangilandi.`,
+      description: `${sku}: ${name} narxlari va parametrlari bazaga muvaffaqiyatli saqlandi.`,
       severity: "success",
       link: { module: "trading", subModule: "trading-catalog" },
     });

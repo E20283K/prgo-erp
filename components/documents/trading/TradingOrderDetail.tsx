@@ -51,7 +51,15 @@ const DataEditor = dynamic(
 );
 
 export function TradingOrderDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, addNotification, theme, openTab } = useWorkspaceStore();
+  const {
+    setTabUnsaved,
+    closeTab,
+    addNotification,
+    theme,
+    openTab,
+    upsertTradingOrderAsync,
+    convertTradingOrderToSaleAsync,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingOrderRecord> = tab.documentData || {};
 
@@ -288,58 +296,61 @@ export function TradingOrderDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const payload: Partial<TradingOrderRecord> = {
+      id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+      orderNo,
+      date,
+      customer,
+      contractNo,
+      category: "Tekstil Furnitura",
+      deliveryDate,
+      chinaStatus,
+      advanceStatus,
+      advancePercent: advanceStatus.includes("30%") ? 30 : advanceStatus.includes("50%") ? 50 : advanceStatus.includes("100%") ? 100 : 0,
+      advanceAmountUSD: (grandTotalUSD * (advanceStatus.includes("30%") ? 30 : advanceStatus.includes("50%") ? 50 : advanceStatus.includes("100%") ? 100 : 0)) / 100,
+      totalUSD: grandTotalUSD,
+      exchangeRate,
+      shippingMethod,
+      trackingNo,
+      notes,
+      items,
+    };
+    await upsertTradingOrderAsync(payload);
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Buyurtma saqlandi",
-      description: `${orderNo} mijoz buyurtmasi muvaffaqiyatli saqlandi.`,
+      description: `${orderNo} mijoz buyurtmasi bazaga muvaffaqiyatli saqlandi.`,
       severity: "success",
     });
   };
 
-  const handleConvertToSale = () => {
-    // Convert this back-to-back order directly into a Trading Sale (Hisob-faktura)
-    const saleId = `TRD-2026-${String(Math.floor(1000 + Math.random() * 9000))}`;
-    openTab({
-      id: saleId,
-      title: `${saleId} (${customer})`,
-      type: "trading-sale",
-      module: "trading",
-      isUnsaved: false,
-      documentData: {
-        id: saleId,
-        docNo: saleId,
-        date: new Date().toISOString().split("T")[0],
-        sellerEntityId: "ytt-qodirov",
-        sellerEntityName: "YTT Qodirov Baxtiyor",
-        customer: customer,
-        contractNo: contractNo,
-        currency: "USD",
-        exchangeRate: exchangeRate,
-        totalAmount: grandTotalUSD,
-        totalUSD: grandTotalUSD,
-        totalUZS: grandTotalUZS,
-        status: "Draft",
-        items: items.map((i) => ({
-          id: `item-${Date.now()}-${i.id}`,
-          sku: i.sku,
-          name: i.name,
-          category: "Furnitura",
-          unit: i.unit,
-          quantity: i.quantity,
-          unitPrice: i.unitPriceUSD,
-          unitPriceUSD: i.unitPriceUSD,
-          unitPriceUZS: i.unitPriceUSD * exchangeRate,
-          totalAmount: i.totalUSD,
-          totalUSD: i.totalUSD,
-        })),
-      },
-    });
-    addNotification({
-      title: "Sotuv hujjati yaratildi",
-      description: `Buyurtma ${orderNo} asosida yangi Sotuv hujjati (${saleId}) ochildi.`,
-      severity: "success",
-    });
+  const handleConvertToSale = async () => {
+    try {
+      const res = await convertTradingOrderToSaleAsync(rawData.id || orderNo);
+      if (res) {
+        addNotification({
+          title: "Sotuv hujjati yaratildi",
+          description: `Buyurtma ${orderNo} asosida yangi Sotuv hujjati (${res.docNo}) ochildi.`,
+          severity: "success",
+        });
+        openTab({
+          id: res.saleId,
+          title: `${res.docNo} (${customer})`,
+          type: "trading-sale",
+          module: "trading",
+          isUnsaved: false,
+          documentData: { id: res.saleId, docNo: res.docNo },
+        });
+        closeTab(tab.id);
+      }
+    } catch (err: any) {
+      addNotification({
+        title: "Xatolik",
+        description: err.message || "Buyurtmani sotuvga aylantirib bo'lmadi",
+        severity: "error",
+      });
+    }
   };
 
   return (

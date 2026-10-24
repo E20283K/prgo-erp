@@ -69,7 +69,15 @@ export interface YttInvoiceHistoryRow {
 }
 
 export function TradingYttLimitDetail({ tab }: { tab: DocumentTab }) {
-  const { setTabUnsaved, closeTab, addNotification, theme, openTab } = useWorkspaceStore();
+  const {
+    setTabUnsaved,
+    closeTab,
+    addNotification,
+    theme,
+    openTab,
+    tradingSales,
+    upsertYttEntityAsync,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<YttTurnoverLimitRecord> = tab.documentData || {};
 
@@ -432,11 +440,25 @@ export function TradingYttLimitDetail({ tab }: { tab: DocumentTab }) {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const payload: Partial<YttTurnoverLimitRecord> = {
+      id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+      code,
+      name,
+      legalType,
+      inn,
+      bankName,
+      bankAccount,
+      annualLimit,
+      currentTurnover: currentTurnover,
+      status: statusType,
+      notes,
+    };
+    await upsertYttEntityAsync(payload);
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "YTT ma'lumotlari saqlandi",
-      description: `${name} yuridik rekvizitlari va bank ma'lumotlari yangilandi.`,
+      description: `${name} yuridik rekvizitlari va bank ma'lumotlari bazaga muvaffaqiyatli saqlandi.`,
       severity: "success",
     });
   };

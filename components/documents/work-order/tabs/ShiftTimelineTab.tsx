@@ -20,6 +20,7 @@ import {
   Hourglass,
   Gauge,
   Pencil,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -164,6 +165,8 @@ export function ShiftTimelineTab({
         totalWaste: 0,
         goodOutput: 0,
         outputPieces: 0,
+        makeReadyPct: "0.0",
+        defectPct: "0.0",
         wastePct: "0.0",
         percentCompleted: 0,
         downtimeTotalMinutes: 0,
@@ -196,6 +199,10 @@ export function ShiftTimelineTab({
         : selectedOpEvents.reduce((sum, ev) => sum + (ev.wasteQty || 0), 0);
 
     const grossInput = inputTotal > 0 ? inputTotal : goodTotal + totalWaste;
+    const makeReadyPct =
+      grossInput > 0 ? ((makeReadyTotal / grossInput) * 100).toFixed(1) : "0.0";
+    const defectPct =
+      grossInput > 0 ? ((defectTotal / grossInput) * 100).toFixed(1) : "0.0";
     const wastePct =
       grossInput > 0 ? ((totalWaste / grossInput) * 100).toFixed(1) : "0.0";
     const percentCompleted =
@@ -209,6 +216,8 @@ export function ShiftTimelineTab({
       totalWaste,
       goodOutput: goodTotal,
       outputPieces: piecesTotal,
+      makeReadyPct,
+      defectPct,
       wastePct,
       percentCompleted,
       downtimeTotalMinutes: downtimeMinutesTotal,
@@ -274,8 +283,9 @@ export function ShiftTimelineTab({
       "Tavsif",
       "Turi",
       "Kirish",
-      "Chiqish",
+      "Priladka",
       "Brak",
+      "Chiqish",
       "Sabab",
       "Operator",
       "Izoh",
@@ -292,8 +302,9 @@ export function ShiftTimelineTab({
           : ev.batchLabel || ev.palletCode || "Palet",
         ev.type,
         isDt ? "" : ev.inputQty || 0,
+        isDt ? "" : ev.makeReadyQty || 0,
+        isDt ? "" : ev.defectQty || 0,
         isDt ? "" : ev.goodQty || 0,
-        isDt ? "" : ev.wasteQty || 0,
         ev.downtimeReason || ev.wasteReason || "",
         ev.operator || selectedOp.operator || "",
         `"${(ev.note || "").replace(/"/g, '""')}"`,
@@ -668,15 +679,15 @@ export function ShiftTimelineTab({
         )}
       </div>
 
-      {/* 3. Minimalist KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {/* Kirgan qog'oz */}
+      {/* 3. Minimalist KPI Cards (Neutral Borders & Backgrounds, Icon + Value Semantic Accent) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+        {/* 1. Kirgan qog'oz */}
         <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
               Kirgan qog&apos;oz
             </span>
-            <Layers className="size-3.5 text-muted-foreground" />
+            <Layers className="size-3.5 text-blue-500/80" />
           </div>
           <div className="mt-2">
             <div className="text-xl font-black font-mono text-foreground leading-none">
@@ -693,88 +704,63 @@ export function ShiftTimelineTab({
           </div>
         </div>
 
-        {/* Jami brak */}
-        <div
-          className={cn(
-            "p-3 rounded-lg border shadow-2xs flex flex-col justify-between transition-colors",
-            stepStats.totalWaste > 0
-              ? "border-rose-500/30 bg-rose-500/5"
-              : "border-border bg-card"
-          )}
-        >
+        {/* 2. Priladka (Technological Setup) */}
+        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span
-              className={cn(
-                "text-[10px] font-bold uppercase tracking-wider",
-                stepStats.totalWaste > 0
-                  ? "text-rose-600 dark:text-rose-400"
-                  : "text-muted-foreground"
-              )}
-            >
-              Jami brak
+            <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
+              Priladka
             </span>
-            <TrendingDown
-              className={cn(
-                "size-3.5",
-                stepStats.totalWaste > 0
-                  ? "text-rose-500"
-                  : "text-muted-foreground"
-              )}
-            />
+            <SlidersHorizontal className="size-3.5 text-amber-500/80" />
+          </div>
+          <div className="mt-2">
+            <div className="text-xl font-black font-mono text-foreground leading-none">
+              {stepStats.makeReady.toLocaleString()}
+            </div>
+            <span className="text-[10px] text-muted-foreground mt-1.5 block font-mono">
+              {stepStats.makeReadyPct}% sozlash
+            </span>
+          </div>
+        </div>
+
+        {/* 3. Brak (Actual Process Defect) */}
+        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
+              Brak
+            </span>
+            <TrendingDown className="size-3.5 text-rose-500/80" />
           </div>
           <div className="mt-2">
             <div
               className={cn(
                 "text-xl font-black font-mono leading-none",
-                stepStats.totalWaste > 0
+                stepStats.defect > 0
                   ? "text-rose-600 dark:text-rose-400"
                   : "text-foreground"
               )}
             >
-              {stepStats.totalWaste.toLocaleString()}
+              {stepStats.defect.toLocaleString()}
             </div>
             <span
               className={cn(
                 "text-[10px] mt-1.5 block font-mono",
-                stepStats.totalWaste > 0
+                stepStats.defect > 0
                   ? "text-rose-600/80 dark:text-rose-400/80"
                   : "text-muted-foreground"
               )}
             >
-              {stepStats.wastePct}% ({stepStats.makeReady} pril. +{" "}
-              {stepStats.defect} brak)
+              {stepStats.defectPct}% yaroqsiz
             </span>
           </div>
         </div>
 
-        {/* Sof chiqish */}
-        <div
-          className={cn(
-            "p-3 rounded-lg border shadow-2xs flex flex-col justify-between transition-colors",
-            effectiveGoodOutput > 0
-              ? "border-emerald-500/30 bg-emerald-500/5"
-              : "border-border bg-card"
-          )}
-        >
+        {/* 4. Sof chiqish */}
+        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span
-              className={cn(
-                "text-[10px] font-bold uppercase tracking-wider",
-                effectiveGoodOutput > 0
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-muted-foreground"
-              )}
-            >
+            <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
               Sof chiqish
             </span>
-            <CheckCircle2
-              className={cn(
-                "size-3.5",
-                effectiveGoodOutput > 0
-                  ? "text-emerald-500"
-                  : "text-muted-foreground"
-              )}
-            />
+            <CheckCircle2 className="size-3.5 text-emerald-500/80" />
           </div>
           <div className="mt-2">
             <div
@@ -787,14 +773,7 @@ export function ShiftTimelineTab({
             >
               {effectiveGoodOutput.toLocaleString()}
             </div>
-            <span
-              className={cn(
-                "text-[10px] mt-1.5 block font-mono",
-                effectiveGoodOutput > 0
-                  ? "text-emerald-600/80 dark:text-emerald-400/80"
-                  : "text-muted-foreground"
-              )}
-            >
+            <span className="text-[10px] text-muted-foreground mt-1.5 block font-mono">
               {isMultipiece && stepStats.outputPieces > 0
                 ? `${stepStats.outputPieces.toLocaleString()} dona`
                 : `reja: ${target.toLocaleString()}`}
@@ -802,13 +781,13 @@ export function ShiftTimelineTab({
           </div>
         </div>
 
-        {/* Bajarilishi */}
-        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
+        {/* 5. Bajarilishi */}
+        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between col-span-2 sm:col-span-1">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
               Bajarilishi
             </span>
-            <Gauge className="size-3.5 text-primary" />
+            <Gauge className="size-3.5 text-primary/80" />
           </div>
           <div className="mt-2">
             <div className="flex items-baseline justify-between">
@@ -949,8 +928,9 @@ export function ShiftTimelineTab({
                   <th className="py-2 px-3 font-semibold">Turi</th>
                   <th className="py-2 px-3 font-semibold">Tavsif</th>
                   <th className="py-2 px-3 font-semibold text-right">Kirish</th>
-                  <th className="py-2 px-3 font-semibold text-right">Chiqish</th>
+                  <th className="py-2 px-3 font-semibold text-right">Priladka</th>
                   <th className="py-2 px-3 font-semibold text-right">Brak</th>
+                  <th className="py-2 px-3 font-semibold text-right">Chiqish</th>
                   <th className="py-2 px-3 font-semibold">Operator</th>
                   <th className="py-2 px-3 font-semibold text-right">Amallar</th>
                 </tr>
@@ -959,10 +939,13 @@ export function ShiftTimelineTab({
                 {filteredEvents.map((ev) => {
                   const isDowntime =
                     ev.type === "Delay" || ev.type === "Maintenance";
-                  const wasteTotal =
-                    (ev.makeReadyQty || 0) + (ev.defectQty || 0) ||
-                    ev.wasteQty ||
-                    0;
+                  const makeReadyQty = ev.makeReadyQty || 0;
+                  const defectQty =
+                    ev.defectQty !== undefined
+                      ? ev.defectQty
+                      : !ev.makeReadyQty && ev.wasteQty
+                      ? ev.wasteQty
+                      : 0;
                   const effectiveShift = ev.shift || "1-smena";
                   const effectiveOperator =
                     ev.operator || selectedOp.operator || "Navbatchi";
@@ -992,7 +975,7 @@ export function ShiftTimelineTab({
                             <Pause className="size-2.5 mr-0.5" />
                             {ev.downtimeDurationMinutes || 15} daq.
                           </Badge>
-                        ) : wasteTotal > 0 ? (
+                        ) : defectQty > 0 ? (
                           <Badge className="bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30 text-[9px] px-1.5 py-0 h-4">
                             Brakli
                           </Badge>
@@ -1041,27 +1024,39 @@ export function ShiftTimelineTab({
                           : "—"}
                       </td>
 
-                      <td className="py-2 px-3 text-right font-mono font-bold text-foreground">
+                      <td className="py-2 px-3 text-right font-mono">
                         {isDowntime ? (
-                          "—"
-                        ) : ev.goodQty !== undefined ? (
-                          <span className="text-emerald-700 dark:text-emerald-400">
-                            {ev.goodQty.toLocaleString()}
+                          <span className="text-muted-foreground">—</span>
+                        ) : makeReadyQty > 0 ? (
+                          <span className="text-foreground font-medium">
+                            {makeReadyQty.toLocaleString()}
                           </span>
                         ) : (
-                          "—"
+                          <span className="text-muted-foreground">0</span>
                         )}
                       </td>
 
                       <td className="py-2 px-3 text-right font-mono">
                         {isDowntime ? (
                           <span className="text-muted-foreground">—</span>
-                        ) : wasteTotal > 0 ? (
+                        ) : defectQty > 0 ? (
                           <span className="text-rose-600 dark:text-rose-400 font-semibold">
-                            {wasteTotal.toLocaleString()}
+                            {defectQty.toLocaleString()}
                           </span>
                         ) : (
                           <span className="text-muted-foreground">0</span>
+                        )}
+                      </td>
+
+                      <td className="py-2 px-3 text-right font-mono font-bold text-foreground">
+                        {isDowntime ? (
+                          "—"
+                        ) : ev.goodQty !== undefined ? (
+                          <span className="text-emerald-600 dark:text-emerald-400">
+                            {ev.goodQty.toLocaleString()}
+                          </span>
+                        ) : (
+                          "—"
                         )}
                       </td>
 

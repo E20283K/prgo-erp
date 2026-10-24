@@ -1,5 +1,5 @@
 /**
- * Enterprise Font Device Cache Manager for Polygraph ERP
+ * Enterprise Font Device Cache Manager for PrintGoo ERP/MES
  *
  * Implements a true Local-First / Cache-First strategy for all ERP fonts:
  * 1. Checks user device cache (CacheStorage API: `erp-fonts-v1`) before making any network request.

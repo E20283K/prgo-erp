@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Polygraph ERP",
+  title: "PrintGoo ERP/MES",
   description: "Enterprise CRM + ERP System",
   manifest: "/manifest.webmanifest",
   icons: {
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Polygraph ERP",
+    title: "PrintGoo ERP/MES",
   },
 };
 

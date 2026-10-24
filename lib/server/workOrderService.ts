@@ -43,6 +43,10 @@ import {
   getCurrentYearSuffix,
   formatWorkOrderNo,
 } from "@/components/documents/work-order/utils/workOrderNumbering";
+import {
+  computeAndRecordWorkOrderDiffs,
+  recordWorkOrderAuditLog,
+} from "./workOrderAuditService";
 
 /**
  * Bazadan barcha real ishlab chiqarish buyruqlarini (Work Orders) yuklash
@@ -292,6 +296,8 @@ export async function upsertWorkOrder(
     sampleData?: any;
     packagingData?: any;
     events?: any[];
+    user?: { id?: string; name?: string; role?: string; initials?: string };
+    author?: { id?: string; name?: string; role?: string; initials?: string };
   },
   companyCode: string = "PRINTGOO"
 ): Promise<{ success: boolean; workOrder: any }> {
@@ -436,12 +442,56 @@ export async function upsertWorkOrder(
 
   let targetId: string;
 
+  const currentAuthor = {
+    id: data.author?.id || data.user?.id,
+    name: data.author?.name || data.user?.name || "Operator",
+    role: data.author?.role || data.user?.role || "Operator",
+    initials: data.author?.initials || data.user?.initials,
+  };
+
   if (existingOrder) {
     targetId = existingOrder.id;
     await db.update(workOrders).set(payload).where(eq(workOrders.id, targetId));
+
+    // Audit Log: Server-side difflarni hisoblash va saqlash
+    try {
+      await computeAndRecordWorkOrderDiffs({
+        companyId,
+        docNo,
+        workOrderId: targetId,
+        existingOrder,
+        payload,
+        author: currentAuthor,
+      });
+    } catch (auditErr) {
+      console.error("[WorkOrder Audit] Diff yozishda xatolik:", auditErr);
+    }
   } else {
     const [inserted] = await db.insert(workOrders).values(payload).returning({ id: workOrders.id });
     targetId = inserted.id;
+
+    // Audit Log: Yangi buyurtma yaratilish hodisasi
+    try {
+      await recordWorkOrderAuditLog({
+        companyId,
+        workOrderId: targetId,
+        docNo,
+        action: "create",
+        author: {
+          ...currentAuthor,
+          role: currentAuthor.role !== "Operator" ? currentAuthor.role : "Yaratuvchi",
+        },
+        category: "status",
+        actionText: `Buyurtma yaratildi: ${docNo}`,
+        details: customerName
+          ? `Mijoz: ${customerName} • Mahsulot: ${data.product || "Noma'lum"}`
+          : "Yangi buyurtma rasmiylashtirildi.",
+        badgeText: payload.status || "Draft",
+        badgeVariant: "default",
+      });
+    } catch (auditErr) {
+      console.error("[WorkOrder Audit] Boshlang'ich log yozishda xatolik:", auditErr);
+    }
   }
 
   // 3. Marshrut operatsiyalarini (operations) saqlash

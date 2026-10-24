@@ -251,6 +251,110 @@ export const tradingCatalog = pgTable(
   ]
 );
 
+// ─── 7. Trading Orders (Oldindan Buyurtmalar / Forward Pre-Orders) ─────────────
+
+export const tradingOrders = pgTable(
+  "trading_orders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    orderNo: varchar("order_no", { length: 64 }).notNull(), // ORD-2026-OCT-101
+    date: varchar("date", { length: 32 }).notNull(),
+    clientId: uuid("client_id").references(() => clients.id, {
+      onDelete: "set null",
+    }),
+    customer: varchar("customer", { length: 255 }).notNull(),
+    customerTin: varchar("customer_tin", { length: 32 }),
+    contractNo: varchar("contract_no", { length: 64 }),
+    category: varchar("category", { length: 128 }),
+    deliveryDate: varchar("delivery_date", { length: 32 }),
+    chinaStatus: varchar("china_status", { length: 128 }).default("Navbatda").notNull(),
+    advanceStatus: varchar("advance_status", { length: 64 }).default("0% Kutilmoqda").notNull(),
+    advancePercent: numeric("advance_percent", { precision: 5, scale: 2 }).default("0.00").notNull(),
+    advanceAmountUsd: numeric("advance_amount_usd", { precision: 14, scale: 2 }).default("0.00").notNull(),
+    totalUsd: numeric("total_usd", { precision: 14, scale: 2 }).default("0.00").notNull(),
+    totalUzs: numeric("total_uzs", { precision: 18, scale: 2 }).default("0.00").notNull(),
+    exchangeRate: numeric("exchange_rate", { precision: 12, scale: 2 }).default("12850.00").notNull(),
+    shippingMethod: varchar("shipping_method", { length: 128 }).default("Avto Fura Kargo (12-16 kun)"),
+    trackingNo: varchar("tracking_no", { length: 64 }),
+    status: tradingDocStatusEnum("status").default("Draft").notNull(),
+    linkedSaleId: uuid("linked_sale_id").references(() => tradingSales.id, {
+      onDelete: "set null",
+    }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("trading_orders_company_order_uq").on(table.companyId, table.orderNo),
+    index("trading_orders_company_idx").on(table.companyId),
+    index("trading_orders_client_idx").on(table.clientId),
+    index("trading_orders_china_status_idx").on(table.chinaStatus),
+  ]
+);
+
+// ─── 8. Trading Order Items (Oldindan Buyurtma Qatorlari) ──────────────────────
+
+export const tradingOrderItems = pgTable(
+  "trading_order_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => tradingOrders.id, { onDelete: "cascade" }),
+    sku: varchar("sku", { length: 64 }),
+    name: varchar("name", { length: 255 }).notNull(),
+    spec: text("spec"),
+    category: varchar("category", { length: 128 }),
+    unit: varchar("unit", { length: 32 }).default("dona").notNull(),
+    quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+    unitPriceUsd: numeric("unit_price_usd", { precision: 14, scale: 4 }).default("0.0000").notNull(),
+    totalUsd: numeric("total_usd", { precision: 14, scale: 2 }).default("0.00").notNull(),
+    chinaFactoryStatus: varchar("china_factory_status", { length: 64 }).default("Navbatda").notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+  },
+  (table) => [
+    index("trading_order_items_order_idx").on(table.orderId),
+  ]
+);
+
+// ─── 9. Trading Settlements (YTT/MChJ Kesimidagi Akt-sverka Daftari) ───────────
+
+export const tradingSettlements = pgTable(
+  "trading_settlements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    docNo: varchar("doc_no", { length: 64 }).notNull(),
+    date: varchar("date", { length: 32 }).notNull(),
+    docType: varchar("doc_type", { length: 64 }).default("Sotuv Hujjati").notNull(),
+    sellerEntityId: uuid("seller_entity_id").references(() => tradingYttEntities.id, {
+      onDelete: "restrict",
+    }),
+    sellerEntityName: varchar("seller_entity_name", { length: 255 }),
+    clientId: uuid("client_id").references(() => clients.id, {
+      onDelete: "set null",
+    }),
+    customer: varchar("customer", { length: 255 }).notNull(),
+    debit: numeric("debit", { precision: 18, scale: 2 }).default("0.00").notNull(),
+    credit: numeric("credit", { precision: 18, scale: 2 }).default("0.00").notNull(),
+    currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
+    balance: numeric("balance", { precision: 18, scale: 2 }).default("0.00").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("trading_settlements_company_idx").on(table.companyId),
+    index("trading_settlements_seller_idx").on(table.sellerEntityId),
+    index("trading_settlements_client_idx").on(table.clientId),
+    index("trading_settlements_date_idx").on(table.date),
+  ]
+);
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const tradingYttEntitiesRelations = relations(tradingYttEntities, ({ one, many }) => ({
@@ -259,6 +363,7 @@ export const tradingYttEntitiesRelations = relations(tradingYttEntities, ({ one,
     references: [companies.id],
   }),
   sales: many(tradingSales),
+  settlements: many(tradingSettlements),
 }));
 
 export const tradingSalesRelations = relations(tradingSales, ({ one, many }) => ({
@@ -284,6 +389,29 @@ export const tradingSaleItemsRelations = relations(tradingSaleItems, ({ one }) =
   }),
 }));
 
+export const tradingOrdersRelations = relations(tradingOrders, ({ one, many }) => ({
+  company: one(companies, {
+    fields: [tradingOrders.companyId],
+    references: [companies.id],
+  }),
+  client: one(clients, {
+    fields: [tradingOrders.clientId],
+    references: [clients.id],
+  }),
+  linkedSale: one(tradingSales, {
+    fields: [tradingOrders.linkedSaleId],
+    references: [tradingSales.id],
+  }),
+  items: many(tradingOrderItems),
+}));
+
+export const tradingOrderItemsRelations = relations(tradingOrderItems, ({ one }) => ({
+  order: one(tradingOrders, {
+    fields: [tradingOrderItems.orderId],
+    references: [tradingOrders.id],
+  }),
+}));
+
 export const tradingImportBatchesRelations = relations(tradingImportBatches, ({ one, many }) => ({
   company: one(companies, {
     fields: [tradingImportBatches.companyId],
@@ -303,5 +431,20 @@ export const tradingCatalogRelations = relations(tradingCatalog, ({ one }) => ({
   company: one(companies, {
     fields: [tradingCatalog.companyId],
     references: [companies.id],
+  }),
+}));
+
+export const tradingSettlementsRelations = relations(tradingSettlements, ({ one }) => ({
+  company: one(companies, {
+    fields: [tradingSettlements.companyId],
+    references: [companies.id],
+  }),
+  sellerEntity: one(tradingYttEntities, {
+    fields: [tradingSettlements.sellerEntityId],
+    references: [tradingYttEntities.id],
+  }),
+  client: one(clients, {
+    fields: [tradingSettlements.clientId],
+    references: [clients.id],
   }),
 }));

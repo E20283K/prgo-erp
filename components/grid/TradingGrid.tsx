@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState, useMemo } from "react";
+import React, { useCallback, useState, useMemo, useEffect } from "react";
 import {
   DataEditor,
   GridCell,
@@ -16,6 +16,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Plus,
   Download,
@@ -33,16 +48,14 @@ import {
   Sparkles,
   AlertTriangle,
   CheckCircle2,
+  RefreshCw,
+  ArrowRight,
+  PackageCheck,
+  CreditCard,
+  Trash2,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
-import {
-  INITIAL_YTT_ENTITIES,
-  INITIAL_TRADING_SALES,
-  INITIAL_IMPORT_BATCHES,
-  INITIAL_SETTLEMENT_LEDGERS,
-  INITIAL_TRADING_CATALOG,
-} from "@/components/documents/trading/data";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -56,23 +69,54 @@ interface TradingGridProps {
 }
 
 export function TradingGrid({ type }: TradingGridProps) {
-  const { theme, openTab } = useWorkspaceStore();
+  const {
+    theme,
+    openTab,
+    addNotification,
+    tradingSales,
+    tradingOrders,
+    tradingYttEntities,
+    tradingImports,
+    tradingCatalog,
+    tradingSettlements,
+    isTradingLoading,
+    loadTradingData,
+    convertTradingOrderToSaleAsync,
+    allocateTradingImportToStockAsync,
+    deleteTradingSaleAsync,
+    deleteTradingOrderAsync,
+    deleteTradingCatalogItemAsync,
+    recordTradingPaymentAsync,
+  } = useWorkspaceStore();
+
   const isDark = theme === "dark";
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedSeller, setSelectedSeller] = useState<string>("all");
   const [gridSelection, setGridSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   });
 
-  // Columns & Mock Rows configuration based on registry type
+  // Payment Dialog state for Settlements
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentCustomer, setPaymentCustomer] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState(10_000_000);
+  const [paymentSeller, setPaymentSeller] = useState("ytt-qodirov");
+  const [paymentDocNo, setPaymentDocNo] = useState("");
+  const [isActionLoading, setIsActionLoading] = useState(false);
+
+  // Load real data from PostgreSQL on mount and when type changes
+  useEffect(() => {
+    loadTradingData(type);
+  }, [type, loadTradingData]);
+
+  // Columns & Rows configuration based on registry type
   const { columns, rows } = useMemo(() => {
     let cols: GridColumn[] = [];
     let rawRows: any[] = [];
 
     if (type === "sales") {
       cols = [
-        { id: "id", title: "Hujjat №", width: 130, icon: GridColumnIcon.HeaderReference },
+        { id: "docNo", title: "Hujjat №", width: 140, icon: GridColumnIcon.HeaderReference },
         { id: "date", title: "Sana", width: 110, icon: GridColumnIcon.HeaderDate },
         { id: "sellerEntityName", title: "Sotuvchi (YTT / MChJ)", width: 250, icon: GridColumnIcon.HeaderString },
         { id: "customer", title: "Xaridor (Tekstil)", width: 230, icon: GridColumnIcon.HeaderString },
@@ -81,56 +125,29 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "paymentMethod", title: "To'lov Shakli", width: 180, icon: GridColumnIcon.HeaderLookup },
         { id: "status", title: "Holat", width: 130, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      rawRows = INITIAL_TRADING_SALES.map((s) => ({
+      rawRows = (tradingSales || []).map((s) => ({
         ...s,
         totalAmountFormatted:
           s.currency === "UZS"
-            ? `${s.totalUZS.toLocaleString()} UZS`
-            : `$${s.totalUSD.toFixed(2)} USD`,
+            ? `${(Number(s.totalUZS) || Number(s.totalAmount) || 0).toLocaleString()} UZS`
+            : `$${(Number(s.totalUSD) || 0).toFixed(2)} USD`,
       }));
     } else if (type === "orders") {
       cols = [
-        { id: "id", title: "Buyurtma №", width: 120, icon: GridColumnIcon.HeaderReference },
+        { id: "orderNo", title: "Buyurtma №", width: 140, icon: GridColumnIcon.HeaderReference },
         { id: "date", title: "Sana", width: 110, icon: GridColumnIcon.HeaderDate },
         { id: "customer", title: "Buyurtmachi (Tekstil)", width: 230, icon: GridColumnIcon.HeaderString },
-        { id: "category", title: "Furnitura Turi", width: 150, icon: GridColumnIcon.HeaderSingleValue },
-        { id: "qtyFormatted", title: "Miqdor", width: 120, icon: GridColumnIcon.HeaderNumber },
-        { id: "chinaStatus", title: "Xitoy Buyurtmasi (Back-to-back)", width: 200, icon: GridColumnIcon.HeaderLookup },
-        { id: "advancePaid", title: "Avans Holati", width: 130, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "category", title: "Furnitura Turi", width: 160, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "totalFormatted", title: "Qiymat ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
+        { id: "chinaStatus", title: "Xitoy / Zavod Holati", width: 220, icon: GridColumnIcon.HeaderLookup },
+        { id: "advanceStatus", title: "Avans Holati", width: 140, icon: GridColumnIcon.HeaderSingleValue },
         { id: "deliveryDate", title: "Yetkazish Muddat", width: 120, icon: GridColumnIcon.HeaderDate },
+        { id: "trackingNo", title: "Kargo Treking", width: 140, icon: GridColumnIcon.HeaderString },
       ];
-      rawRows = [
-        {
-          id: "ORD-ACC-091",
-          date: "2026-10-18",
-          customer: "'REAL TEXTILE INVEST' MChJ",
-          category: "Gravirovka Tugmalar (18mm)",
-          qtyFormatted: "50,000 dona",
-          chinaStatus: "Guangzhou Zavodida Ishlab Chiqarilmoqda",
-          advancePaid: "30% Avans Olingan",
-          deliveryDate: "2026-11-05",
-        },
-        {
-          id: "ORD-ACC-089",
-          date: "2026-10-16",
-          customer: "'BUKHARA COTTON WEAVE' XK",
-          category: "Neylon Fermuarlar N5",
-          qtyFormatted: "30,000 dona",
-          chinaStatus: "Kargo Avto Yo'lda (CN-2026-OCT-14)",
-          advancePaid: "100% To'langan",
-          deliveryDate: "2026-10-25",
-        },
-        {
-          id: "ORD-ACC-084",
-          date: "2026-10-14",
-          customer: "'SAMARKAND APPAREL' MChJ",
-          category: "Metall Fermuarlar (Jinsi)",
-          qtyFormatted: "20,000 dona",
-          chinaStatus: "Ombordan Zaxiradan Ajratildi",
-          advancePaid: "Shartnoma Bo'yicha",
-          deliveryDate: "2026-10-20",
-        },
-      ];
+      rawRows = (tradingOrders || []).map((o) => ({
+        ...o,
+        totalFormatted: `$${(Number(o.totalUSD) || 0).toLocaleString()}`,
+      }));
     } else if (type === "ytt-limits") {
       cols = [
         { id: "name", title: "YTT / Korxona Nomi", width: 260, icon: GridColumnIcon.HeaderString },
@@ -143,7 +160,7 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "statusBadge", title: "Limit Holati", width: 140, icon: GridColumnIcon.HeaderSingleValue },
         { id: "recommendation", title: "Tizim Tavsiyasi", width: 160, icon: GridColumnIcon.HeaderLookup },
       ];
-      rawRows = INITIAL_YTT_ENTITIES.map((e) => {
+      rawRows = (tradingYttEntities || []).map((e) => {
         const remaining = Math.max(0, e.annualLimit - e.currentTurnover);
         return {
           ...e,
@@ -153,32 +170,32 @@ export function TradingGrid({ type }: TradingGridProps) {
           turnoverPercentFormatted: e.annualLimit > 10_000_000_000 ? "—" : `${e.turnoverPercent.toFixed(1)}%`,
           statusBadge:
             e.status === "Safe"
-              ? "✓ Xavfsiz (58%)"
+              ? "Xavfsiz"
               : e.status === "Warning"
-              ? "⚠ Diqqat (85%)"
+              ? "Diqqat"
               : e.status === "Critical"
-              ? "⛔ LIMIT XAVFI (98%)"
+              ? "LIMIT XAVFI"
               : "Cheksiz (QQS)",
-          recommendation: e.isRecommended ? "★ Keyingi sotuvga tavsiya" : e.status === "Critical" ? "Bloklangan" : "Zaxirada",
+          recommendation: e.isRecommended ? "Keyingi sotuvga tavsiya" : e.status === "Critical" ? "Bloklangan" : "Zaxirada",
         };
       });
     } else if (type === "settlements") {
       cols = [
         { id: "customer", title: "Mijoz (Tekstil Korxonasi)", width: 230, icon: GridColumnIcon.HeaderString },
         { id: "sellerEntityName", title: "Bizning Yuridik Shaxs", width: 250, icon: GridColumnIcon.HeaderString },
-        { id: "docNo", title: "Oxirgi Hujjat №", width: 130, icon: GridColumnIcon.HeaderReference },
+        { id: "docNo", title: "Oxirgi Hujjat №", width: 140, icon: GridColumnIcon.HeaderReference },
         { id: "date", title: "Sana", width: 110, icon: GridColumnIcon.HeaderDate },
         { id: "debitFormatted", title: "Berilgan Tovar (Debet)", width: 150, icon: GridColumnIcon.HeaderNumber },
         { id: "creditFormatted", title: "Tushgan To'lov (Kredit)", width: 150, icon: GridColumnIcon.HeaderNumber },
         { id: "balanceFormatted", title: "Qoldiq Qarz (Saldo)", width: 160, icon: GridColumnIcon.HeaderNumber },
         { id: "status", title: "Akt-Sverka Holati", width: 150, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      rawRows = INITIAL_SETTLEMENT_LEDGERS.map((l) => ({
+      rawRows = (tradingSettlements || []).map((l) => ({
         ...l,
-        debitFormatted: l.currency === "UZS" ? `${l.debit.toLocaleString()} UZS` : `$${l.debit.toFixed(2)} USD`,
-        creditFormatted: l.currency === "UZS" ? `${l.credit.toLocaleString()} UZS` : `$${l.credit.toFixed(2)} USD`,
-        balanceFormatted: l.currency === "UZS" ? `${l.balance.toLocaleString()} UZS` : `$${l.balance.toFixed(2)} USD`,
-        status: l.balance > 0 ? "Mijozdan qarz bor" : "Tenglashgan (0)",
+        debitFormatted: l.currency === "UZS" ? `${(Number(l.debit) || 0).toLocaleString()} UZS` : `$${(Number(l.debit) || 0).toFixed(2)} USD`,
+        creditFormatted: l.currency === "UZS" ? `${(Number(l.credit) || 0).toLocaleString()} UZS` : `$${(Number(l.credit) || 0).toFixed(2)} USD`,
+        balanceFormatted: l.currency === "UZS" ? `${(Number(l.balance) || 0).toLocaleString()} UZS` : `$${(Number(l.balance) || 0).toFixed(2)} USD`,
+        status: Number(l.balance) > 0 ? "Mijozdan qarz bor" : "Tenglashgan (0)",
       }));
     } else if (type === "imports") {
       cols = [
@@ -192,11 +209,11 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "markupFormatted", title: "Tannarxga Ustama", width: 130, icon: GridColumnIcon.HeaderSingleValue },
         { id: "status", title: "Yuk Holati", width: 160, icon: GridColumnIcon.HeaderLookup },
       ];
-      rawRows = INITIAL_IMPORT_BATCHES.map((b) => ({
+      rawRows = (tradingImports || []).map((b) => ({
         ...b,
-        fobAmountFormatted: `$${b.fobAmountUSD.toLocaleString()}`,
-        cargoFormatted: `$${b.internationalCargoUSD.toLocaleString()}`,
-        customsDutyFormatted: `${(b.customsDutyUZS / 1_000_000).toFixed(1)} mln UZS`,
+        fobAmountFormatted: `$${(Number(b.fobAmountUSD) || 0).toLocaleString()}`,
+        cargoFormatted: `$${(Number(b.internationalCargoUSD) || 0).toLocaleString()}`,
+        customsDutyFormatted: `${((Number(b.customsDutyUZS) || 0) / 1_000_000).toFixed(1)} mln UZS`,
         markupFormatted: `+${b.landedCostMarkupPercent}% (Landed)`,
       }));
     } else {
@@ -208,15 +225,15 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "unit", title: "O'lchov Birligi", width: 90, icon: GridColumnIcon.HeaderString },
         { id: "priceUZSFormatted", title: "Sotuv Narxi (UZS)", width: 140, icon: GridColumnIcon.HeaderNumber },
         { id: "priceUSDFormatted", title: "Ekvivalent ($)", width: 120, icon: GridColumnIcon.HeaderNumber },
-        { id: "stockQty", title: "Ombor Qoldig'i", width: 120, icon: GridColumnIcon.HeaderNumber },
+        { id: "stockQtyFormatted", title: "Ombor Qoldig'i", width: 130, icon: GridColumnIcon.HeaderNumber },
         { id: "origin", title: "Manba", width: 140, icon: GridColumnIcon.HeaderLookup },
       ];
-      rawRows = INITIAL_TRADING_CATALOG.map((c) => ({
+      rawRows = (tradingCatalog || []).map((c) => ({
         ...c,
         id: c.sku,
-        priceUZSFormatted: `${c.priceUZS.toLocaleString()} UZS`,
-        priceUSDFormatted: `$${c.priceUSD.toFixed(3)}`,
-        stockQty: `${c.stockQty.toLocaleString()} ${c.unit}`,
+        priceUZSFormatted: `${(Number(c.priceUZS) || 0).toLocaleString()} UZS`,
+        priceUSDFormatted: `$${(Number(c.priceUSD) || 0).toFixed(3)}`,
+        stockQtyFormatted: `${(Number(c.stockQty) || 0).toLocaleString()} ${c.unit}`,
       }));
     }
 
@@ -229,7 +246,16 @@ export function TradingGrid({ type }: TradingGridProps) {
     }
 
     return { columns: cols, rows: rawRows };
-  }, [type, searchQuery]);
+  }, [
+    type,
+    searchQuery,
+    tradingSales,
+    tradingOrders,
+    tradingYttEntities,
+    tradingSettlements,
+    tradingImports,
+    tradingCatalog,
+  ]);
 
   // Glide Data Editor cell provider
   const getCellContent = useCallback(
@@ -261,23 +287,23 @@ export function TradingGrid({ type }: TradingGridProps) {
 
       if (type === "sales") {
         openTab({
-          id: row.id || `TRD-${Date.now()}`,
-          title: `${row.id || "TRD"} (${row.customer || "Tekstil"})`,
+          id: row.id || row.docNo || `TRD-${Date.now()}`,
+          title: `${row.docNo || row.id} (${row.customer || "Tekstil"})`,
           type: "trading-sale",
           module: "trading",
           documentData: row,
         });
       } else if (type === "orders") {
         openTab({
-          id: row.id || `ORD-${Date.now()}`,
-          title: `${row.id} (${row.customer || "Tekstil"})`,
+          id: row.id || row.orderNo || `ORD-${Date.now()}`,
+          title: `${row.orderNo || row.id} (${row.customer || "Tekstil"})`,
           type: "trading-order",
           module: "trading",
           documentData: row,
         });
       } else if (type === "settlements") {
         openTab({
-          id: `stl-${row.customer.replace(/[^a-zA-Z0-9]/g, "")}`,
+          id: `stl-${(row.customer || "cust").replace(/[^a-zA-Z0-9]/g, "")}`,
           title: `${row.customer}`,
           type: "trading-settlement",
           module: "trading",
@@ -285,8 +311,8 @@ export function TradingGrid({ type }: TradingGridProps) {
         });
       } else if (type === "imports") {
         openTab({
-          id: row.batchNo || row.id || `imp-${Date.now()}`,
-          title: `${row.batchNo}`,
+          id: row.id || row.batchNo || `imp-${Date.now()}`,
+          title: `${row.batchNo || "Partiya"}`,
           type: "trading-import",
           module: "trading",
           documentData: row,
@@ -312,9 +338,97 @@ export function TradingGrid({ type }: TradingGridProps) {
     [openTab, rows, type]
   );
 
+  const selectedRow = useMemo(() => {
+    const firstRowIndex = gridSelection.rows.first();
+    if (firstRowIndex !== undefined && rows[firstRowIndex]) {
+      return rows[firstRowIndex];
+    }
+    return null;
+  }, [gridSelection, rows]);
+
+  // Convert Selected Order to Sale
+  const handleConvertSelectedOrder = async () => {
+    if (!selectedRow || type !== "orders") return;
+    try {
+      setIsActionLoading(true);
+      const res = await convertTradingOrderToSaleAsync(selectedRow.id || selectedRow.orderNo);
+      if (res) {
+        addNotification({
+          title: "Sotuv hujjati yaratildi",
+          description: `Buyurtma ${selectedRow.orderNo} bo'yicha ${res.docNo} sotuv hujjati ochildi.`,
+          severity: "success",
+        });
+        openTab({
+          id: res.saleId,
+          title: `${res.docNo} (${selectedRow.customer})`,
+          type: "trading-sale",
+          module: "trading",
+          documentData: { id: res.saleId, docNo: res.docNo },
+        });
+      }
+    } catch (err: any) {
+      addNotification({
+        title: "Xatolik",
+        description: err.message || "Buyurtmani sotuvga aylantirib bo'lmadi",
+        severity: "error",
+      });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  // Allocate Selected Import Batch to Stock
+  const handleAllocateSelectedImport = async () => {
+    if (!selectedRow || type !== "imports") return;
+    try {
+      setIsActionLoading(true);
+      const success = await allocateTradingImportToStockAsync(selectedRow.id);
+      if (success) {
+        addNotification({
+          title: "Omborga kirim qilindi",
+          description: `${selectedRow.batchNo} partiyasi to'liq tannarx bilan aksessuarlar katalogiga kirim qilindi.`,
+          severity: "success",
+        });
+      }
+    } catch (err: any) {
+      addNotification({
+        title: "Xatolik",
+        description: err.message || "Importni zaxiraga kirim qilib bo'lmadi",
+        severity: "error",
+      });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  // Quick Payment submission
+  const handleSavePayment = async () => {
+    if (!paymentCustomer || !paymentAmount) return;
+    try {
+      setIsActionLoading(true);
+      const success = await recordTradingPaymentAsync({
+        sellerEntityId: paymentSeller,
+        customer: paymentCustomer,
+        amount: Number(paymentAmount),
+        docNo: paymentDocNo || `PAY-TRD-${Date.now().toString().slice(-4)}`,
+        notes: "Mijozdan to'lov qabul qilindi",
+      });
+      if (success) {
+        setIsPaymentModalOpen(false);
+        addNotification({
+          title: "To'lov qayd etildi",
+          description: `${paymentCustomer} hisobiga ${Number(paymentAmount).toLocaleString()} UZS to'lov kiritildi.`,
+          severity: "success",
+        });
+      }
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   const handleCreateNew = () => {
     if (type === "orders") {
-      const newId = `ORD-ACC-${String(Math.floor(100 + Math.random() * 900))}`;
+      const newId = `ORD-2026-${String(Math.floor(100 + Math.random() * 900))}`;
       openTab({
         id: newId,
         title: `${newId} (Yangi Buyurtma)`,
@@ -338,6 +452,61 @@ export function TradingGrid({ type }: TradingGridProps) {
           shippingMethod: "Avto Fura Kargo (12-16 kun)",
           trackingNo: "CN-NEW",
           items: [],
+        },
+      });
+      return;
+    }
+
+    if (type === "imports") {
+      const newId = `IMP-2026-${String(Math.floor(1000 + Math.random() * 9000))}`;
+      openTab({
+        id: newId,
+        title: `${newId} (Yangi Import)`,
+        type: "trading-import",
+        module: "trading",
+        isUnsaved: false,
+        documentData: {
+          id: newId,
+          batchNo: newId,
+          date: new Date().toISOString().split("T")[0],
+          origin: "Guangzhou, Xitoy",
+          supplier: "Zhejiang Accessories Factory",
+          fobAmountUSD: 0,
+          internationalCargoUSD: 0,
+          grossWeightKg: 0,
+          customsDutyUZS: 0,
+          exchangeRate: 12850,
+          totalLandedCostUZS: 0,
+          landedCostMarkupPercent: 0,
+          status: "In Transit",
+          containerNo: "",
+          items: [],
+        },
+      });
+      return;
+    }
+
+    if (type === "catalog") {
+      const newSku = `TRD-ACC-${String(Math.floor(100 + Math.random() * 900))}`;
+      openTab({
+        id: newSku,
+        title: `${newSku} (Yangi Tovar)`,
+        type: "trading-catalog",
+        module: "trading",
+        isUnsaved: false,
+        documentData: {
+          id: newSku,
+          sku: newSku,
+          name: "Yangi Furnitura Turi",
+          category: "Tugmalar",
+          unit: "dona",
+          priceUZS: 1500,
+          priceUSD: 0.116,
+          wholesalePriceUZS: 1300,
+          retailPriceUZS: 1700,
+          stockQty: 0,
+          minStockLevel: 500,
+          origin: "Xitoy",
         },
       });
       return;
@@ -384,35 +553,109 @@ export function TradingGrid({ type }: TradingGridProps) {
               className="h-7 px-2.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1 shadow-xs cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Yangi Sotuv Hujjati (Ins)</span>
+              <span>Yangi Sotuv Hujjati</span>
             </Button>
           )}
 
           {type === "orders" && (
+            <>
+              <Button
+                size="sm"
+                onClick={handleCreateNew}
+                className="h-7 px-2.5 text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 flex items-center gap-1 shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Yangi Buyurtma (Pre-order)</span>
+              </Button>
+              {selectedRow && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleConvertSelectedOrder}
+                  disabled={isActionLoading}
+                  className="h-7 px-2 text-xs font-medium text-sky-600 border-sky-300 hover:bg-sky-50 flex items-center gap-1 cursor-pointer"
+                >
+                  <ArrowRight className="w-3 h-3" />
+                  <span>Sotuvga aylantirish</span>
+                </Button>
+              )}
+            </>
+          )}
+
+          {type === "imports" && (
+            <>
+              <Button
+                size="sm"
+                onClick={handleCreateNew}
+                className="h-7 px-2.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Yangi Import Partiyasi</span>
+              </Button>
+              {selectedRow && selectedRow.status !== "Allocated to Stock" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleAllocateSelectedImport}
+                  disabled={isActionLoading}
+                  className="h-7 px-2 text-xs font-medium text-emerald-600 border-emerald-300 hover:bg-emerald-50 flex items-center gap-1 cursor-pointer"
+                >
+                  <PackageCheck className="w-3 h-3" />
+                  <span>Omborga kirim qilish</span>
+                </Button>
+              )}
+            </>
+          )}
+
+          {type === "catalog" && (
             <Button
               size="sm"
               onClick={handleCreateNew}
-              className="h-7 px-2.5 text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 flex items-center gap-1 shadow-xs cursor-pointer"
+              className="h-7 px-2.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 shadow-xs cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Yangi Buyurtma (Back-to-back Ins)</span>
+              <span>Yangi Tovar (Katalog)</span>
+            </Button>
+          )}
+
+          {type === "settlements" && (
+            <Button
+              size="sm"
+              onClick={() => {
+                setPaymentCustomer(selectedRow?.customer || "'REAL TEXTILE INVEST' MChJ");
+                setIsPaymentModalOpen(true);
+              }}
+              className="h-7 px-2.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1 shadow-xs cursor-pointer"
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              <span>To'lov qabul qilish</span>
             </Button>
           )}
 
           {type === "ytt-limits" && (
             <div className="flex items-center gap-2">
-              <Badge variant="outline" className="h-6 bg-emerald-50 text-emerald-800 border-emerald-300 font-mono text-[11px] gap-1">
-                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                <span>YTT Qodirov: 58.7% (Bo'sh: 412.5 mln)</span>
-              </Badge>
-              <Badge variant="outline" className="h-6 bg-amber-50 text-amber-800 border-amber-300 font-mono text-[11px] gap-1">
-                <AlertTriangle className="w-3 h-3 text-amber-600" />
-                <span>YTT Aliyev: 85.2%</span>
-              </Badge>
-              <Badge variant="outline" className="h-6 bg-red-50 text-red-800 border-red-300 font-mono text-[11px] gap-1">
-                <AlertTriangle className="w-3 h-3 text-red-600" />
-                <span>YTT Toshmatov: 98.1% (XAVFLI)</span>
-              </Badge>
+              {(tradingYttEntities || []).slice(0, 3).map((ytt) => {
+                const isSafe = ytt.status === "Safe";
+                const isCrit = ytt.status === "Critical";
+                return (
+                  <Badge
+                    key={ytt.id}
+                    variant="outline"
+                    className={`h-6 font-mono text-[11px] gap-1 ${
+                      isSafe
+                        ? "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300"
+                        : isCrit
+                        ? "bg-red-50 text-red-800 border-red-300 dark:bg-red-950/40 dark:text-red-300"
+                        : "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300"
+                    }`}
+                  >
+                    <span>
+                      {ytt.code}: {ytt.turnoverPercent.toFixed(1)}% (
+                      {(Math.max(0, ytt.annualLimit - ytt.currentTurnover) / 1_000_000).toFixed(0)}M bo'sh)
+                    </span>
+                  </Badge>
+                );
+              })}
             </div>
           )}
 
@@ -436,11 +679,21 @@ export function TradingGrid({ type }: TradingGridProps) {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => loadTradingData(type)}
+            disabled={isTradingLoading}
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isTradingLoading ? "animate-spin" : ""}`} />
+            <span>Yangilash</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
             onClick={() => {
-              useWorkspaceStore.getState().addNotification({
+              addNotification({
                 title: "Excel eksport",
-                description: "Reyestr ma'lumotlari Excel (XLSX) formatida yuklab olinmoqda.",
+                description: "Reyestr ma'lumotlari Excel (XLSX) formatida tayyorlanmoqda.",
                 severity: "info",
               });
             }}
@@ -453,7 +706,7 @@ export function TradingGrid({ type }: TradingGridProps) {
             size="sm"
             className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
             onClick={() => {
-              useWorkspaceStore.getState().addNotification({
+              addNotification({
                 title: "Chop etish",
                 description: "Reyestr PDF formatida tayyorlanmoqda.",
                 severity: "info",
@@ -493,6 +746,18 @@ export function TradingGrid({ type }: TradingGridProps) {
               <ExternalLink className="w-3.5 h-3.5 mr-2" />
               <span>Hujjatni ochish (F12)</span>
             </ContextMenuItem>
+            {type === "orders" && selectedRow && (
+              <ContextMenuItem onClick={handleConvertSelectedOrder}>
+                <ArrowRight className="w-3.5 h-3.5 mr-2 text-sky-600" />
+                <span>Sotuvga aylantirish</span>
+              </ContextMenuItem>
+            )}
+            {type === "imports" && selectedRow && selectedRow.status !== "Allocated to Stock" && (
+              <ContextMenuItem onClick={handleAllocateSelectedImport}>
+                <PackageCheck className="w-3.5 h-3.5 mr-2 text-emerald-600" />
+                <span>Omborga kirim qilish</span>
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
             <ContextMenuItem onClick={handleCreateNew}>
               <Plus className="w-3.5 h-3.5 mr-2" />
@@ -501,6 +766,86 @@ export function TradingGrid({ type }: TradingGridProps) {
           </ContextMenuContent>
         </ContextMenu>
       </div>
+
+      {/* QUICK PAYMENT MODAL FOR SETTLEMENTS */}
+      <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
+        <DialogContent className="max-w-md text-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-1.5">
+              <CreditCard className="size-4 text-emerald-600" />
+              To'lov Qabul Qilish (Bank / Kassa)
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">Mijoz (Tekstil Korxonasi)</Label>
+              <Input
+                value={paymentCustomer}
+                onChange={(e) => setPaymentCustomer(e.target.value)}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">To'lov Summasi (UZS)</Label>
+                <Input
+                  type="number"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(Number(e.target.value))}
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Qabul qiluvchi YTT/MChJ</Label>
+                <Select value={paymentSeller} onValueChange={(val) => setPaymentSeller(val || "ytt-qodirov")}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="text-xs">
+                    {(tradingYttEntities || []).map((ytt) => (
+                      <SelectItem key={ytt.id} value={ytt.id}>
+                        {ytt.code}: {ytt.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">To'lov Hujjati № (Platyojka)</Label>
+              <Input
+                placeholder="PP-2026-0981"
+                value={paymentDocNo}
+                onChange={(e) => setPaymentDocNo(e.target.value)}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsPaymentModalOpen(false)}
+              className="h-7 text-xs"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSavePayment}
+              disabled={isActionLoading || !paymentAmount}
+              className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              Qayd etish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

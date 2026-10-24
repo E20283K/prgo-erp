@@ -737,6 +737,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     rows: CompactSelection.empty(),
   });
   const [isOpDialogOpen, setIsOpDialogOpen] = useState(false);
+  const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
   const [editingOpIndex, setEditingOpIndex] = useState<number | null>(null);
   const [opDialogForm, setOpDialogForm] = useState<Omit<RouteStep, "id">>({
     stepNumber: 10,
@@ -1283,6 +1284,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const handleSave = async () => {
     const savedId = await persistOrderDetails();
+    setHistoryRefreshTrigger((prev) => prev + 1);
     addNotification({
       title: "Buyurtma saqlandi",
       description: `${savedId} — ${formData.product || "Buyurtma"} (${formData.customer || "Mijoz"}) muvaffaqiyatli saqlandi.`,
@@ -1753,6 +1755,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       window.dispatchEvent(new Event("resize"));
     }, 20);
     return () => clearTimeout(timer);
+  }, [activeTab]);
+
+  React.useEffect(() => {
+    if (activeTab === "history") {
+      setHistoryRefreshTrigger((prev) => prev + 1);
+    }
   }, [activeTab]);
 
   return (
@@ -2478,8 +2486,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
             {/* Tab 8: History */}
             <HistoryTab
-              docNo={data.docNo || tab.id}
+              docNo={docNo || data.docNo || tab.id}
               formData={{ ...formData, skuArtworks }}
+              refreshTrigger={historyRefreshTrigger}
             />
           </div>
         </div>

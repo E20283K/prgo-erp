@@ -20,6 +20,21 @@ import type { SystemUserRecord } from "@/components/documents/user/types";
 import { INITIAL_SYSTEM_USERS } from "@/components/documents/user/data";
 import type { SupplierRecord } from "@/lib/server/supplierService";
 export type { SupplierRecord };
+import type {
+  TradingSaleRecord,
+  TradingOrderRecord,
+  YttTurnoverLimitRecord,
+  TradingImportBatchRecord,
+  TradingCatalogItemRecord,
+  TradingSettlementLedgerEntry,
+} from "@/components/documents/trading/types";
+import {
+  INITIAL_YTT_ENTITIES,
+  INITIAL_TRADING_SALES,
+  INITIAL_IMPORT_BATCHES,
+  INITIAL_SETTLEMENT_LEDGERS,
+  INITIAL_TRADING_CATALOG,
+} from "@/components/documents/trading/data";
 
 export interface DocumentTab {
   id: string;
@@ -730,6 +745,27 @@ interface WorkspaceState {
   upsertPosition: (pos: PositionRecord) => void;
   upsertShift: (shift: ShiftRecord) => void;
 
+  // ── Trading & Accessories (Aksessuarlar Savdosi va Import) ────────────────
+  tradingSales: TradingSaleRecord[];
+  tradingOrders: TradingOrderRecord[];
+  tradingYttEntities: YttTurnoverLimitRecord[];
+  tradingImports: TradingImportBatchRecord[];
+  tradingCatalog: TradingCatalogItemRecord[];
+  tradingSettlements: TradingSettlementLedgerEntry[];
+  isTradingLoading: boolean;
+  loadTradingData: (type: "sales" | "orders" | "ytt-limits" | "settlements" | "imports" | "catalog", companyCode?: string) => Promise<void>;
+  upsertTradingSaleAsync: (sale: Partial<TradingSaleRecord>, companyCode?: string) => Promise<TradingSaleRecord | null>;
+  deleteTradingSaleAsync: (id: string, companyCode?: string) => Promise<boolean>;
+  upsertTradingOrderAsync: (order: Partial<TradingOrderRecord>, companyCode?: string) => Promise<TradingOrderRecord | null>;
+  deleteTradingOrderAsync: (id: string, companyCode?: string) => Promise<boolean>;
+  convertTradingOrderToSaleAsync: (orderId: string, companyCode?: string) => Promise<{ saleId: string; docNo: string } | null>;
+  upsertTradingImportAsync: (batch: Partial<TradingImportBatchRecord>, companyCode?: string) => Promise<TradingImportBatchRecord | null>;
+  allocateTradingImportToStockAsync: (batchId: string, companyCode?: string) => Promise<boolean>;
+  upsertTradingCatalogItemAsync: (item: Partial<TradingCatalogItemRecord>, companyCode?: string) => Promise<TradingCatalogItemRecord | null>;
+  deleteTradingCatalogItemAsync: (id: string, companyCode?: string) => Promise<boolean>;
+  upsertYttEntityAsync: (ytt: Partial<YttTurnoverLimitRecord>, companyCode?: string) => Promise<YttTurnoverLimitRecord | null>;
+  recordTradingPaymentAsync: (payload: any, companyCode?: string) => Promise<boolean>;
+
   // ── Unified Production Queue & Readiness ─────────────────────────────────
   productionQueue: ProductionQueueItem[];
   toggleReadinessCheck: (
@@ -1365,10 +1401,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   upsertWorkOrderAsync: async (payload: any, companyCode = "PRINTGOO") => {
     try {
+      const cu = get().currentUser;
+      const bodyPayload = {
+        ...payload,
+        author: payload.author || (cu ? { id: cu.id, name: cu.name, role: cu.role } : undefined),
+      };
       const res = await fetch("/api/v1/production/work-orders?company=" + encodeURIComponent(companyCode), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(bodyPayload),
       });
       if (res.ok) {
         const json = await res.json();
@@ -1528,6 +1569,250 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   shiftsList: [],
   customerTooling: INITIAL_CUSTOMER_TOOLING,
   finishedGoods: INITIAL_FINISHED_GOODS,
+
+  // ── Trading & Accessories State & Methods ─────────────────────────────────
+  tradingSales: INITIAL_TRADING_SALES,
+  tradingOrders: [],
+  tradingYttEntities: INITIAL_YTT_ENTITIES,
+  tradingImports: INITIAL_IMPORT_BATCHES,
+  tradingCatalog: INITIAL_TRADING_CATALOG,
+  tradingSettlements: INITIAL_SETTLEMENT_LEDGERS,
+  isTradingLoading: false,
+
+  loadTradingData: async (type, companyCode = "PRINTGOO") => {
+    set({ isTradingLoading: true });
+    try {
+      if (type === "sales") {
+        const res = await fetch(`/api/v1/trading/sales?company=${encodeURIComponent(companyCode)}`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) set({ tradingSales: json.data });
+      } else if (type === "orders") {
+        const res = await fetch(`/api/v1/trading/orders?company=${encodeURIComponent(companyCode)}`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) set({ tradingOrders: json.data });
+      } else if (type === "ytt-limits") {
+        const res = await fetch(`/api/v1/trading/ytt-limits?company=${encodeURIComponent(companyCode)}`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) set({ tradingYttEntities: json.data });
+      } else if (type === "imports") {
+        const res = await fetch(`/api/v1/trading/imports?company=${encodeURIComponent(companyCode)}`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) set({ tradingImports: json.data });
+      } else if (type === "catalog") {
+        const res = await fetch(`/api/v1/trading/catalog?company=${encodeURIComponent(companyCode)}`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) set({ tradingCatalog: json.data });
+      } else if (type === "settlements") {
+        const res = await fetch(`/api/v1/trading/settlements?company=${encodeURIComponent(companyCode)}`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) set({ tradingSettlements: json.data });
+      }
+    } catch (err) {
+      console.error(`loadTradingData (${type}) error:`, err);
+    } finally {
+      set({ isTradingLoading: false });
+    }
+  },
+
+  upsertTradingSaleAsync: async (sale, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/sales?company=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sale),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        get().loadTradingData("sales", companyCode);
+        get().loadTradingData("ytt-limits", companyCode);
+        get().loadTradingData("catalog", companyCode);
+        get().loadTradingData("settlements", companyCode);
+        return json.data;
+      }
+    } catch (err) {
+      console.error("upsertTradingSaleAsync error:", err);
+    }
+    return null;
+  },
+
+  deleteTradingSaleAsync: async (id, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/sales?id=${id}&company=${encodeURIComponent(companyCode)}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        set((state) => ({
+          tradingSales: state.tradingSales.filter((s) => s.id !== id),
+        }));
+        return true;
+      }
+    } catch (err) {
+      console.error("deleteTradingSaleAsync error:", err);
+    }
+    return false;
+  },
+
+  upsertTradingOrderAsync: async (order, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/orders?company=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(order),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        get().loadTradingData("orders", companyCode);
+        return json.data;
+      }
+    } catch (err) {
+      console.error("upsertTradingOrderAsync error:", err);
+    }
+    return null;
+  },
+
+  deleteTradingOrderAsync: async (id, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/orders?id=${id}&company=${encodeURIComponent(companyCode)}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        set((state) => ({
+          tradingOrders: state.tradingOrders.filter((o) => o.id !== id),
+        }));
+        return true;
+      }
+    } catch (err) {
+      console.error("deleteTradingOrderAsync error:", err);
+    }
+    return false;
+  },
+
+  convertTradingOrderToSaleAsync: async (orderId, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/orders/${orderId}/convert?company=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (json.success) {
+        get().loadTradingData("orders", companyCode);
+        get().loadTradingData("sales", companyCode);
+        return { saleId: json.saleId, docNo: json.docNo };
+      }
+    } catch (err) {
+      console.error("convertTradingOrderToSaleAsync error:", err);
+    }
+    return null;
+  },
+
+  upsertTradingImportAsync: async (batch, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/imports?company=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(batch),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        get().loadTradingData("imports", companyCode);
+        get().loadTradingData("catalog", companyCode);
+        return json.data;
+      }
+    } catch (err) {
+      console.error("upsertTradingImportAsync error:", err);
+    }
+    return null;
+  },
+
+  allocateTradingImportToStockAsync: async (batchId, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/imports/${batchId}/allocate?company=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (json.success) {
+        get().loadTradingData("imports", companyCode);
+        get().loadTradingData("catalog", companyCode);
+        return true;
+      }
+    } catch (err) {
+      console.error("allocateTradingImportToStockAsync error:", err);
+    }
+    return false;
+  },
+
+  upsertTradingCatalogItemAsync: async (item, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/catalog?company=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        get().loadTradingData("catalog", companyCode);
+        return json.data;
+      }
+    } catch (err) {
+      console.error("upsertTradingCatalogItemAsync error:", err);
+    }
+    return null;
+  },
+
+  deleteTradingCatalogItemAsync: async (id, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/catalog?id=${id}&company=${encodeURIComponent(companyCode)}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (json.success) {
+        set((state) => ({
+          tradingCatalog: state.tradingCatalog.filter((c) => c.id !== id),
+        }));
+        return true;
+      }
+    } catch (err) {
+      console.error("deleteTradingCatalogItemAsync error:", err);
+    }
+    return false;
+  },
+
+  upsertYttEntityAsync: async (ytt, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/ytt-limits?company=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ytt),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        get().loadTradingData("ytt-limits", companyCode);
+        return json.data;
+      }
+    } catch (err) {
+      console.error("upsertYttEntityAsync error:", err);
+    }
+    return null;
+  },
+
+  recordTradingPaymentAsync: async (payload, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/trading/settlements?company=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (json.success) {
+        get().loadTradingData("settlements", companyCode);
+        return true;
+      }
+    } catch (err) {
+      console.error("recordTradingPaymentAsync error:", err);
+    }
+    return false;
+  },
   masterSpecifications: [],
   isSpecificationsLoading: false,
 

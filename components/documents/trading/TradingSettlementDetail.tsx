@@ -44,23 +44,35 @@ const DataEditor = dynamic(
 );
 
 export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
-  const { clientSettlements, addNotification, theme } = useWorkspaceStore();
+  const {
+    clientSettlements,
+    addNotification,
+    theme,
+    tradingSettlements,
+    tradingYttEntities,
+    recordTradingPaymentAsync,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData = tab.documentData || {};
   const customerName = rawData.customer || "'REAL TEXTILE INVEST' MChJ";
   const [selectedEntityId, setSelectedEntityId] = useState<string>("ytt-aliyev");
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
+  const availableEntities = useMemo(() => {
+    return tradingYttEntities.length > 0 ? tradingYttEntities : INITIAL_YTT_ENTITIES;
+  }, [tradingYttEntities]);
+
   const selectedEntity = useMemo(() => {
     return (
-      INITIAL_YTT_ENTITIES.find((e) => e.id === selectedEntityId) ||
-      INITIAL_YTT_ENTITIES[0]
+      availableEntities.find((e) => e.id === selectedEntityId || e.code === selectedEntityId) ||
+      availableEntities[0]
     );
-  }, [selectedEntityId]);
+  }, [selectedEntityId, availableEntities]);
 
   // Filter ledger strictly by selected legal entity
   const filteredLedger = useMemo(() => {
-    return INITIAL_SETTLEMENT_LEDGERS.filter(
+    const sourceLedger = tradingSettlements.length > 0 ? tradingSettlements : INITIAL_SETTLEMENT_LEDGERS;
+    return sourceLedger.filter(
       (entry) =>
         entry.customer === customerName &&
         (selectedEntityId === "ytt-aliyev"
@@ -69,7 +81,7 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
           ? entry.sellerEntityName.includes("Qodirov")
           : entry.sellerEntityName.includes("PRINTGOO"))
     );
-  }, [customerName, selectedEntityId]);
+  }, [customerName, selectedEntityId, tradingSettlements]);
 
   const { totalDebit, totalCredit, closingBalance, currency } = useMemo(() => {
     let d = 0;
