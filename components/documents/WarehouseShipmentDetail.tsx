@@ -27,6 +27,7 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid"
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -680,13 +681,15 @@ export function CarrierCombobox({
                     {c.driverName && c.driverName !== "—" && (
                       <>
                         <span className="text-muted-foreground/40">•</span>
-                        <span className="truncate">👤 {c.driverName}</span>
+                        <span className="truncate">{c.driverName}</span>
                       </>
                     )}
                     {c.driverPhone && c.driverPhone !== "—" && (
                       <>
                         <span className="text-muted-foreground/40">•</span>
-                        <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400">📞 {c.driverPhone}</span>
+                        <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400 flex items-center gap-0.5">
+                          <Phone className="size-2.5 inline" /> {c.driverPhone}
+                        </span>
                       </>
                     )}
                   </div>
@@ -839,7 +842,7 @@ export function CarrierDialog({
             </div>
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">Haydovchi telefoni</Label>
-              <Input
+              <PhoneInput
                 value={driverPhone}
                 onChange={(e) => setDriverPhone(e.target.value)}
                 placeholder="+998 90 123-45-67"
@@ -1731,7 +1734,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                       vehicleModel: "",
                       vehicleNo: "",
                       driverName: "",
-                      driverPhone: "+998 90 ",
+                      driverPhone: "",
                       type: "fleet",
                     });
                     setIsCarrierModalOpen(true);

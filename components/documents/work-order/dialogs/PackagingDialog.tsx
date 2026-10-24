@@ -9,11 +9,9 @@ import {
   Printer,
   CheckCircle2,
   AlertCircle,
-  Tag,
-  Layers,
-  Box,
-  Scale,
+  Copy,
   UserCheck,
+  RotateCcw,
 } from "lucide-react";
 import {
   Dialog,
@@ -33,7 +31,16 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableFooter,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
 import {
   PackagingBoxItem,
   WorkOrderPackagingSummary,
@@ -42,14 +49,22 @@ import {
   FLOOR_OPERATORS,
 } from "../types";
 
-const BOX_TYPE_OPTIONS = [
-  "Gofrokarobka T-23 (300×200×150 mm)",
-  "Gofrokarobka T-24 (400×300×250 mm)",
-  "Mikrogofro E-Flute (250×200×100 mm)",
-  "Termoplyonka (Shrink Film Roll)",
-  "Plastik quti / Konteyner",
-  "Maxsus o'ram / Qop",
+const BOX_TYPE_OPTIONS: ComboboxItem[] = [
+  { value: "Gofrokarobka T-23 (300×200×150 mm)", label: "Gofrokarobka T-23 (300×200×150 mm)", badge: "T-23" },
+  { value: "Gofrokarobka T-24 (400×300×250 mm)", label: "Gofrokarobka T-24 (400×300×250 mm)", badge: "T-24" },
+  { value: "Mikrogofro E-Flute (250×200×100 mm)", label: "Mikrogofro E-Flute (250×200×100 mm)", badge: "E-Flute" },
+  { value: "Termoplyonka (Shrink Film Roll)", label: "Termoplyonka (Shrink Film Roll)", badge: "Plyonka" },
+  { value: "Plastik quti / Konteyner", label: "Plastik quti / Konteyner", badge: "Konteyner" },
+  { value: "Maxsus o'ram / Qop", label: "Maxsus o'ram / Qop", badge: "Qop" },
 ];
+
+const OPERATOR_OPTIONS: ComboboxItem[] = FLOOR_OPERATORS.map((op) => ({
+  value: op,
+  label: op,
+  icon: UserCheck,
+}));
+
+const CAPACITY_PRESETS = [100, 250, 500, 1000];
 
 interface PackagingDialogProps {
   isOpen: boolean;
@@ -81,7 +96,7 @@ export function PackagingDialog({
   onOpenPrintModal,
 }: PackagingDialogProps) {
   const [standardCapacity, setStandardCapacity] = useState<number>(500);
-  const [boxType, setBoxType] = useState<string>(BOX_TYPE_OPTIONS[0]);
+  const [boxType, setBoxType] = useState<string>(BOX_TYPE_OPTIONS[0].value);
   const [packerName, setPackerName] = useState<string>("N. Fedorov (Packaging)");
   const [boxes, setBoxes] = useState<PackagingBoxItem[]>([]);
 
@@ -96,7 +111,7 @@ export function PackagingDialog({
       if (existingPackaging && existingPackaging.boxes && existingPackaging.boxes.length > 0) {
         setBoxes(existingPackaging.boxes);
         setStandardCapacity(existingPackaging.standardBoxCapacity || 500);
-        setBoxType(existingPackaging.boxType || BOX_TYPE_OPTIONS[0]);
+        setBoxType(existingPackaging.boxType || BOX_TYPE_OPTIONS[0].value);
       } else {
         const initialCapacity = targetQuantity >= 20000 ? 1000 : targetQuantity >= 5000 ? 500 : 250;
         setStandardCapacity(initialCapacity);
@@ -124,6 +139,41 @@ export function PackagingDialog({
     setBoxes(generated);
   };
 
+  // Add manual box
+  const handleAddManualBox = () => {
+    const nextNum = boxes.length + 1;
+    const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
+    const defaultSize = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].size : undefined;
+    const defaultModel = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].model : undefined;
+    const newBox: PackagingBoxItem = {
+      id: `box-manual-${Date.now()}-${nextNum}`,
+      boxNumber: nextNum,
+      boxCode: `BX-${cleanWo}-${String(nextNum).padStart(2, "0")}`,
+      model: defaultModel,
+      sizeCode: defaultSize,
+      quantity: standardCapacity,
+      packerName,
+      packedAt: new Date().toISOString(),
+      barcode: `${cleanWo}-B${String(nextNum).padStart(2, "0")}`,
+    };
+    setBoxes((prev) => [...prev, newBox]);
+  };
+
+  // Duplicate box
+  const handleDuplicateBox = (box: PackagingBoxItem) => {
+    const nextNum = boxes.length + 1;
+    const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
+    const newBox: PackagingBoxItem = {
+      ...box,
+      id: `box-dup-${Date.now()}-${nextNum}`,
+      boxNumber: nextNum,
+      boxCode: `BX-${cleanWo}-${String(nextNum).padStart(2, "0")}`,
+      barcode: `${cleanWo}-B${String(nextNum).padStart(2, "0")}`,
+      packedAt: new Date().toISOString(),
+    };
+    setBoxes((prev) => [...prev, newBox]);
+  };
+
   // Box cell edits
   const handleBoxQtyChange = (boxId: string, val: number) => {
     setBoxes((prev) =>
@@ -137,27 +187,54 @@ export function PackagingDialog({
     );
   };
 
-  const handleDeleteBox = (boxId: string) => {
+  const handleBoxPackerChange = (boxId: string, newPacker: string) => {
     setBoxes((prev) =>
-      prev
-        .filter((b) => b.id !== boxId)
-        .map((b, idx) => ({ ...b, boxNumber: idx + 1, boxCode: `BX-${workOrderNo}-${String(idx + 1).padStart(2, "0")}` }))
+      prev.map((b) => (b.id === boxId ? { ...b, packerName: newPacker } : b))
     );
   };
 
-  const handleAddManualBox = () => {
-    const nextNum = boxes.length + 1;
+  const handleBoxSizeCodeChange = (boxId: string, newSize: string) => {
+    const matchedSize = sizes.find((s) => s.size === newSize);
+    setBoxes((prev) =>
+      prev.map((b) =>
+        b.id === boxId
+          ? {
+              ...b,
+              sizeCode: newSize === "all" ? undefined : newSize,
+              model: matchedSize?.model || b.model,
+            }
+          : b
+      )
+    );
+  };
+
+  const handleBoxNotesChange = (boxId: string, notes: string) => {
+    setBoxes((prev) =>
+      prev.map((b) => (b.id === boxId ? { ...b, notes } : b))
+    );
+  };
+
+  const handleDeleteBox = (boxId: string) => {
     const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
-    const newBox: PackagingBoxItem = {
-      id: `box-manual-${Date.now()}`,
-      boxNumber: nextNum,
-      boxCode: `BX-${cleanWo}-${String(nextNum).padStart(2, "0")}`,
-      quantity: standardCapacity,
-      packerName,
-      packedAt: new Date().toISOString(),
-      barcode: `${cleanWo}-B${String(nextNum).padStart(2, "0")}`,
-    };
-    setBoxes((prev) => [...prev, newBox]);
+    setBoxes((prev) =>
+      prev
+        .filter((b) => b.id !== boxId)
+        .map((b, idx) => ({
+          ...b,
+          boxNumber: idx + 1,
+          boxCode: `BX-${cleanWo}-${String(idx + 1).padStart(2, "0")}`,
+          barcode: `${cleanWo}-B${String(idx + 1).padStart(2, "0")}`,
+        }))
+    );
+  };
+
+  // Bulk actions
+  const handleApplyPackerToAll = () => {
+    setBoxes((prev) => prev.map((b) => ({ ...b, packerName })));
+  };
+
+  const handleClearAllBoxes = () => {
+    setBoxes([]);
   };
 
   // Calculations
@@ -165,8 +242,13 @@ export function PackagingDialog({
     return boxes.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
   }, [boxes]);
 
+  const totalGrossWeight = useMemo(() => {
+    return boxes.reduce((sum, b) => sum + (Number(b.grossWeightKg) || 0), 0);
+  }, [boxes]);
+
   const diffQty = totalPackedQty - targetQuantity;
   const isExactMatch = totalPackedQty === targetQuantity;
+  const completionPercent = targetQuantity > 0 ? Math.min(100, Math.round((totalPackedQty / targetQuantity) * 100)) : 0;
 
   const currentSummary: WorkOrderPackagingSummary = useMemo(() => {
     return {
@@ -202,108 +284,145 @@ export function PackagingDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[840px] max-h-[92vh] flex flex-col p-0 overflow-hidden text-xs">
+      <DialogContent className="sm:max-w-[880px] max-h-[92vh] flex flex-col p-0 overflow-hidden text-xs">
         {/* Header */}
-        <DialogHeader className="p-4 border-b border-border bg-card shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600">
-                <Box className="w-4 h-4" />
+        <DialogHeader className="px-4 py-3 border-b border-border bg-card shrink-0">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="size-7 rounded-md border border-border bg-muted flex items-center justify-center text-foreground shrink-0">
+                <Package className="size-4" />
               </div>
-              <div>
-                <DialogTitle className="text-sm font-semibold flex items-center gap-2">
-                  <span>Qadoqlash va Sifat Qabuli (Final Packaging & QC)</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <DialogTitle className="text-sm font-semibold text-foreground">
+                    Qadoqlash va sifat qabuli
+                  </DialogTitle>
+                  <Badge variant="outline" className="font-mono text-[11px] shrink-0">
+                    {workOrderNo}
+                  </Badge>
                   {hasValidSizeMatrix ? (
-                    <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 border-blue-500/30 font-medium">
-                      Model va O&apos;lcham (Size Matrix) rejimi
+                    <Badge variant="secondary" className="text-[10px] font-medium shrink-0">
+                      O&apos;lchamli tiraj
                     </Badge>
                   ) : (
-                    <Badge variant="outline" className="text-[10px] bg-neutral-500/10 text-neutral-600 border-neutral-500/30 font-medium">
-                      Monotip Tiraj rejimi
+                    <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
+                      Yagona tiraj
                     </Badge>
                   )}
-                </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                  Buyurtma: <strong className="text-foreground">{workOrderNo}</strong> · Mijoz:{" "}
-                  <strong className="text-foreground">{customer}</strong> · Reja:{" "}
-                  <strong className="text-foreground">{targetQuantity.toLocaleString()} {unit}</strong>
+                </div>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5 truncate">
+                  Mijoz: <span className="font-medium text-foreground">{customer}</span>
+                  {product ? <> · Mahsulot: <span className="font-medium text-foreground">{product}</span></> : null}
+                  {" "}· Reja: <span className="font-mono font-medium text-foreground">{targetQuantity.toLocaleString()} {unit}</span>
                 </DialogDescription>
               </div>
             </div>
 
-            {/* Quick Print Button in Header if boxes exist */}
             {boxes.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handlePrintLabelsClick}
-                className="h-7 text-xs font-medium gap-1 text-blue-600 border-blue-600/30 hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer"
+                className="h-7.5 text-xs font-medium gap-1.5 shrink-0 cursor-pointer"
               >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Yorliqlarni chop etish</span>
+                <Printer className="size-3.5" />
+                <span>Yorliqlar</span>
               </Button>
             )}
           </div>
         </DialogHeader>
 
         {/* Configuration Bar */}
-        <div className="p-3 bg-muted/40 border-b border-border grid grid-cols-4 gap-2.5 shrink-0 items-end">
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-              Standart quti sig&apos;imi (dona):
-            </label>
+        <div className="p-3 bg-muted/40 border-b border-border grid grid-cols-1 sm:grid-cols-4 gap-2.5 shrink-0 items-end">
+          {/* Capacity */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-medium text-muted-foreground">
+                Quti sig&apos;imi (dona):
+              </label>
+              <div className="flex items-center gap-1">
+                {CAPACITY_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setStandardCapacity(preset)}
+                    className={`text-[10px] px-1 py-0.2 rounded border font-mono transition-colors cursor-pointer ${
+                      standardCapacity === preset
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:bg-muted"
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
             <Input
               type="number"
               step="50"
+              min="1"
               value={standardCapacity}
               onChange={(e) => setStandardCapacity(Math.max(1, Number(e.target.value) || 1))}
-              className="h-7.5 text-xs font-mono font-bold"
+              className="h-7.5 text-xs font-mono font-bold bg-background"
             />
           </div>
 
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-              Qadoq / Tara turi:
+          {/* Box Type Combobox */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground block">
+              Tara turi:
             </label>
-            <select
+            <SmartCombobox
               value={boxType}
-              onChange={(e) => setBoxType(e.target.value)}
-              className="w-full h-7.5 text-xs bg-background border border-border rounded px-2 font-medium"
-            >
-              {BOX_TYPE_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+              onChange={setBoxType}
+              options={BOX_TYPE_OPTIONS}
+              placeholder="Tara turini tanlang..."
+              searchPlaceholder="Tara turi bo'yicha qidirish..."
+              allowCustom={true}
+              className="h-7.5 text-xs bg-background"
+              popoverWidth="w-[320px]"
+            />
           </div>
 
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-              Mas&apos;ul Qadoqlovchi:
-            </label>
-            <select
+          {/* Packer Combobox */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-medium text-muted-foreground block">
+                Mas&apos;ul xodim:
+              </label>
+              {boxes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleApplyPackerToAll}
+                  className="text-[10px] text-primary hover:underline font-medium cursor-pointer"
+                  title="Ushbu mas'ulni jadvaldagi barcha qutilarga biriktirish"
+                >
+                  Barchasiga
+                </button>
+              )}
+            </div>
+            <SmartCombobox
               value={packerName}
-              onChange={(e) => setPackerName(e.target.value)}
-              className="w-full h-7.5 text-xs bg-background border border-border rounded px-2 font-medium"
-            >
-              {FLOOR_OPERATORS.map((op) => (
-                <option key={op} value={op}>
-                  {op}
-                </option>
-              ))}
-            </select>
+              onChange={setPackerName}
+              options={OPERATOR_OPTIONS}
+              placeholder="Xodimni tanlang..."
+              searchPlaceholder="Xodim qidirish..."
+              allowCustom={true}
+              className="h-7.5 text-xs bg-background"
+              popoverWidth="w-[280px]"
+            />
           </div>
 
+          {/* Actions */}
           <div className="flex items-center gap-1.5">
             <Button
               onClick={handleAutoSplit}
               size="sm"
               variant="secondary"
-              className="h-7.5 text-xs font-medium gap-1 flex-1 cursor-pointer"
+              className="h-7.5 text-xs font-medium gap-1.5 flex-1 cursor-pointer"
               title="Kiritilgan quti sig'imi bo'yicha qayta taqsimlash"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <Sparkles className="size-3.5 text-amber-500" />
               <span>Avto-taqsimlash</span>
             </Button>
             <Button
@@ -311,60 +430,84 @@ export function PackagingDialog({
               size="sm"
               variant="outline"
               className="h-7.5 text-xs font-medium gap-1 shrink-0 cursor-pointer"
-              title="Yangi bo'sh quti qo'shish"
+              title="Yangi quti qo'shish"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="size-3.5" />
               <span>Quti</span>
             </Button>
           </div>
         </div>
 
         {/* Live Counters Banner */}
-        <div className="px-4 py-2 bg-card border-b border-border flex items-center justify-between text-xs shrink-0">
-          <div className="flex items-center gap-4">
-            <div>
-              <span className="text-muted-foreground text-[11px]">Reja: </span>
-              <strong className="font-mono text-sm">{targetQuantity.toLocaleString()}</strong> {unit}
+        <div className="border-b border-border bg-card shrink-0">
+          <div className="px-4 py-2 flex items-center justify-between text-xs gap-3">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-baseline gap-1">
+                <span className="text-muted-foreground text-[11px]">Reja:</span>
+                <strong className="font-mono text-xs">{targetQuantity.toLocaleString()}</strong>
+                <span className="text-[10px] text-muted-foreground">{unit}</span>
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-muted-foreground text-[11px]">Qadoqlandi:</span>
+                <strong
+                  className={`font-mono text-xs ${
+                    isExactMatch
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : diffQty > 0
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-amber-600 dark:text-amber-400"
+                  }`}
+                >
+                  {totalPackedQty.toLocaleString()}
+                </strong>
+                <span className="text-[10px] text-muted-foreground">{unit}</span>
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-muted-foreground text-[11px]">Qutilar:</span>
+                <Badge variant="secondary" className="font-mono text-[11px] h-5 px-1.5 font-bold">
+                  {boxes.length} ta
+                </Badge>
+              </div>
+              {totalGrossWeight > 0 && (
+                <div className="flex items-baseline gap-1">
+                  <span className="text-muted-foreground text-[11px]">Jami brutto:</span>
+                  <strong className="font-mono text-xs">{totalGrossWeight.toFixed(1)}</strong>
+                  <span className="text-[10px] text-muted-foreground">kg</span>
+                </div>
+              )}
             </div>
-            <div>
-              <span className="text-muted-foreground text-[11px]">Qadoqlandi: </span>
-              <strong
-                className={`font-mono text-sm ${
-                  isExactMatch
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : diffQty > 0
-                    ? "text-blue-600 dark:text-blue-400"
-                    : "text-amber-600 dark:text-amber-400"
-                }`}
-              >
-                {totalPackedQty.toLocaleString()}
-              </strong>{" "}
-              {unit}
-            </div>
-            <div>
-              <span className="text-muted-foreground text-[11px]">Jami qutilar: </span>
-              <Badge variant="secondary" className="font-mono font-bold text-xs h-5">
-                {boxes.length} ta
-              </Badge>
+
+            <div className="shrink-0">
+              {isExactMatch ? (
+                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 gap-1 text-[11px] font-medium py-0.5">
+                  <CheckCircle2 className="size-3.5" />
+                  <span>Mos keldi</span>
+                </Badge>
+              ) : diffQty > 0 ? (
+                <Badge variant="outline" className="bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30 text-[11px] font-medium py-0.5">
+                  +{diffQty.toLocaleString()} {unit} ortiqcha
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 gap-1 text-[11px] font-medium py-0.5">
+                  <AlertCircle className="size-3.5" />
+                  <span>-{Math.abs(diffQty).toLocaleString()} {unit} yetishmayapti</span>
+                </Badge>
+              )}
             </div>
           </div>
 
-          <div>
-            {isExactMatch ? (
-              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium text-[11px]">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Rejaga 100% mos keldi</span>
-              </span>
-            ) : diffQty > 0 ? (
-              <span className="text-blue-600 dark:text-blue-400 font-medium text-[11px]">
-                +{diffQty.toLocaleString()} {unit} ortiqcha qadoq
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium text-[11px]">
-                <AlertCircle className="w-3.5 h-3.5" />
-                <span>Qoldiq: {Math.abs(diffQty).toLocaleString()} {unit} yetishmayapti</span>
-              </span>
-            )}
+          {/* Completion Progress Bar */}
+          <div className="h-0.5 w-full bg-muted overflow-hidden">
+            <div
+              className={`h-full transition-all duration-300 ${
+                isExactMatch
+                  ? "bg-emerald-600"
+                  : diffQty > 0
+                  ? "bg-blue-600"
+                  : "bg-amber-500"
+              }`}
+              style={{ width: `${completionPercent}%` }}
+            />
           </div>
         </div>
 
@@ -372,29 +515,47 @@ export function PackagingDialog({
         <div className="flex-1 overflow-y-auto p-0 bg-background">
           {boxes.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
-              <Box className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <Package className="size-8 mx-auto mb-2 opacity-40" />
               <p className="font-medium text-xs">Hozircha birorta ham quti shakllantirilmadi.</p>
-              <p className="text-[11px] mt-1">
-                Yuqoridagi &quot;Avto-taqsimlash&quot; tugmasini bosing yoki qo&apos;lda quti qo&apos;shing.
-              </p>
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleAutoSplit}
+                  className="h-7 text-xs font-medium gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="size-3.5 text-amber-500" />
+                  <span>Avto-taqsimlash</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleAddManualBox}
+                  className="h-7 text-xs font-medium gap-1.5 cursor-pointer"
+                >
+                  <Plus className="size-3.5" />
+                  <span>Quti qo&apos;shish</span>
+                </Button>
+              </div>
             </div>
           ) : (
             <Table>
-              <TableHeader className="bg-muted/60 sticky top-0 z-10 text-[11px]">
+              <TableHeader className="bg-muted/70 sticky top-0 z-10 text-[11px]">
                 <TableRow className="h-7 hover:bg-transparent">
-                  <TableHead className="w-12 text-center">#</TableHead>
-                  <TableHead className="w-32">Quti Kori</TableHead>
-                  {hasValidSizeMatrix && <TableHead className="w-32">Model / Artikul</TableHead>}
-                  {hasValidSizeMatrix && <TableHead className="w-24">O&apos;lcham (Size)</TableHead>}
-                  <TableHead className="w-28 text-right">Miqdori (dona)</TableHead>
-                  <TableHead className="w-28 text-right">Brutto (kg)</TableHead>
+                  <TableHead className="w-10 text-center">#</TableHead>
+                  <TableHead className="w-32">Quti kodi</TableHead>
+                  {hasValidSizeMatrix && <TableHead className="w-28">Model</TableHead>}
+                  {hasValidSizeMatrix && <TableHead className="w-28">O&apos;lcham</TableHead>}
+                  <TableHead className="w-24 text-right">Miqdor (dona)</TableHead>
+                  <TableHead className="w-24 text-right">Brutto (kg)</TableHead>
                   <TableHead className="w-36">Mas&apos;ul xodim</TableHead>
-                  <TableHead className="w-10 text-center"></TableHead>
+                  <TableHead className="w-28">Izoh</TableHead>
+                  <TableHead className="w-16 text-center">Amallar</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {boxes.map((box, index) => (
-                  <TableRow key={box.id} className="h-8.5 hover:bg-muted/40 text-xs">
+                {boxes.map((box) => (
+                  <TableRow key={box.id} className="h-8 hover:bg-muted/40 text-xs">
                     <TableCell className="text-center font-mono font-bold text-muted-foreground">
                       {box.boxNumber}
                     </TableCell>
@@ -402,61 +563,140 @@ export function PackagingDialog({
                       {box.boxCode}
                     </TableCell>
                     {hasValidSizeMatrix && (
-                      <TableCell className="font-medium text-foreground truncate max-w-[120px]">
+                      <TableCell className="font-medium text-foreground truncate max-w-[110px]">
                         {box.model || "—"}
                       </TableCell>
                     )}
                     {hasValidSizeMatrix && (
                       <TableCell>
-                        <Badge
-                          variant="outline"
-                          className="font-mono text-[11px] font-bold text-blue-700 dark:text-blue-400 bg-blue-500/10 border-blue-500/30"
+                        <Select
+                          value={box.sizeCode || "all"}
+                          onValueChange={(val) => handleBoxSizeCodeChange(box.id, val || "all")}
                         >
-                          {box.sizeCode || "All"}
-                        </Badge>
+                          <SelectTrigger className="h-6 w-24 text-[11px] font-mono bg-background px-2">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all" className="text-xs font-mono">
+                              Barchasi
+                            </SelectItem>
+                            {sizes.map((s) => (
+                              <SelectItem key={s.id || s.size} value={s.size} className="text-xs font-mono">
+                                {s.size} ({Number(s.quantity).toLocaleString()})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                     )}
                     <TableCell className="text-right">
                       <Input
                         type="number"
+                        min="0"
                         value={box.quantity}
                         onChange={(e) => handleBoxQtyChange(box.id, Number(e.target.value) || 0)}
-                        className="h-6 w-24 text-right font-mono font-bold ml-auto text-xs"
+                        className="h-6 w-20 text-right font-mono font-bold ml-auto text-xs"
                       />
                     </TableCell>
                     <TableCell className="text-right">
                       <Input
                         type="number"
                         step="0.1"
+                        min="0"
                         placeholder="0.0"
-                        value={box.grossWeightKg || ""}
-                        onChange={(e) => handleBoxWeightChange(box.id, Number(e.target.value) || 0)}
-                        className="h-6 w-20 text-right font-mono text-xs ml-auto"
+                        value={box.grossWeightKg ?? ""}
+                        onChange={(e) =>
+                          handleBoxWeightChange(
+                            box.id,
+                            e.target.value === "" ? 0 : Number(e.target.value)
+                          )
+                        }
+                        className="h-6 w-18 text-right font-mono text-xs ml-auto"
                       />
                     </TableCell>
-                    <TableCell className="text-muted-foreground truncate max-w-[140px]">
-                      {box.packerName || packerName}
+                    <TableCell>
+                      <Select
+                        value={box.packerName || packerName}
+                        onValueChange={(val) => handleBoxPackerChange(box.id, val || packerName)}
+                      >
+                        <SelectTrigger className="h-6 w-34 text-[11px] bg-background px-2 truncate">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FLOOR_OPERATORS.map((op) => (
+                            <SelectItem key={op} value={op} className="text-xs">
+                              {op}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        type="text"
+                        placeholder="Izoh..."
+                        value={box.notes || ""}
+                        onChange={(e) => handleBoxNotesChange(box.id, e.target.value)}
+                        className="h-6 text-[11px] bg-background px-1.5"
+                      />
                     </TableCell>
                     <TableCell className="text-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteBox(box.id)}
-                        className="w-6 h-6 text-muted-foreground hover:text-red-600 cursor-pointer"
-                        title="O'chirish"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
+                      <div className="flex items-center justify-center gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDuplicateBox(box)}
+                          className="size-6 text-muted-foreground hover:text-foreground cursor-pointer"
+                          title="Nusxalash"
+                        >
+                          <Copy className="size-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteBox(box.id)}
+                          className="size-6 text-muted-foreground hover:text-destructive cursor-pointer"
+                          title="O'chirish"
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
+              <TableFooter className="bg-muted/70 sticky bottom-0 z-10 text-xs font-semibold border-t border-border">
+                <TableRow className="h-8 hover:bg-transparent">
+                  <TableCell colSpan={hasValidSizeMatrix ? 4 : 2} className="text-left font-medium">
+                    Jami ({boxes.length} ta quti)
+                  </TableCell>
+                  <TableCell className="text-right font-mono font-bold">
+                    {totalPackedQty.toLocaleString()} {unit}
+                  </TableCell>
+                  <TableCell className="text-right font-mono font-bold">
+                    {totalGrossWeight > 0 ? `${totalGrossWeight.toFixed(1)} kg` : "—"}
+                  </TableCell>
+                  <TableCell colSpan={3} className="text-muted-foreground text-[11px]">
+                    {isExactMatch ? (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                        Rejaga to&apos;liq mos
+                      </span>
+                    ) : (
+                      <span>
+                        {diffQty > 0
+                          ? `+${diffQty.toLocaleString()} ortiqcha`
+                          : `${Math.abs(diffQty).toLocaleString()} yetishmayapti`}
+                      </span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              </TableFooter>
             </Table>
           )}
         </div>
 
         {/* Footer */}
-        <DialogFooter className="m-0 p-3 sm:p-3 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between">
+        <DialogFooter className="m-0 px-4 py-2.5 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between">
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -466,6 +706,18 @@ export function PackagingDialog({
             >
               Qoralama saqlash
             </Button>
+            {boxes.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearAllBoxes}
+                className="h-8 text-xs text-muted-foreground hover:text-destructive cursor-pointer gap-1"
+                title="Barcha qutilarni tozalash"
+              >
+                <RotateCcw className="size-3" />
+                <span>Tozalash</span>
+              </Button>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -482,8 +734,8 @@ export function PackagingDialog({
               size="sm"
               className="h-8 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 cursor-pointer shadow-xs"
             >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Qadoqlashni Yakunlash (Tayyor Omboriga)</span>
+              <CheckCircle2 className="size-3.5" />
+              <span>Qadoqlashni yakunlash</span>
             </Button>
           </div>
         </DialogFooter>

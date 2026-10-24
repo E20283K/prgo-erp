@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -64,7 +65,10 @@ export function PieceworkGrid() {
   const fetchPiecework = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/hr/piecework");
+      const [res] = await Promise.all([
+        fetch("/api/v1/hr/piecework"),
+        new Promise((resolve) => setTimeout(resolve, 400)),
+      ]);
       const json = await res.json();
       if (json.success && Array.isArray(json.data) && json.data.length > 0) {
         setData(json.data);
@@ -270,62 +274,86 @@ export function PieceworkGrid() {
 
   return (
     <div className="flex flex-col h-full bg-background select-none">
-      <div className="border-b bg-card p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 font-semibold text-sm mr-2 text-foreground">
-            <Award className="size-4 text-amber-600" />
-            Ishbay Ishlab Chiqarish Naryadlari (Sdelka)
-            <Badge variant="outline" className="font-mono text-xs ml-1 bg-emerald-50 text-emerald-700 border-emerald-300">
-              Jami: {totalSum.toLocaleString("uz-UZ")} UZS
-            </Badge>
-          </div>
-
-          <div className="relative w-56">
-            <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
-            <Input
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="F.I.O. yoki Work Order..."
-              className="h-7 pl-8 text-xs font-sans"
-            />
-          </div>
-
-          <Select value={statusFilter} onValueChange={(val) => { if (val) setStatusFilter(val); }}>
-            <SelectTrigger className="h-7 text-xs w-36">
-              <SelectValue placeholder="Barcha holatlar" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Barcha holatlar</SelectItem>
-              <SelectItem value="verified">Tasdiqlangan (Verified)</SelectItem>
-              <SelectItem value="approved">Oylikka kiritilgan</SelectItem>
-              <SelectItem value="paid">To'langan</SelectItem>
-              <SelectItem value="draft">Qoralama</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
+      {/* ── 1C Enterprise Industrial Toolbar ── */}
+      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
+        {/* Left Actions */}
         <div className="flex items-center gap-1.5">
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchPiecework}>
-            <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-            Yangilash
-          </Button>
-
           <Button
             size="sm"
-            className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1 font-medium"
+            className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
             onClick={() => {
               setSelectedEmpId(employees[0]?.id || "");
               setIsAddOpen(true);
             }}
           >
-            <Plus className="size-3.5" />
-            Naryad qo'shish
+            <Plus className="w-3.5 h-3.5" />
+            <span>Naryad qo'shish</span>
           </Button>
 
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => window.print()}>
-            <Printer className="size-3.5" />
-            Chop etish
+          <Separator orientation="vertical" className="h-4 mx-1" />
+
+          {/* Status Segment Filter Pills */}
+          <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+            {[
+              { key: "ALL", label: "Hammasi" },
+              { key: "verified", label: "Tasdiqlangan" },
+              { key: "approved", label: "Oylikka kiritilgan" },
+              { key: "paid", label: "To'langan" },
+              { key: "draft", label: "Qoralama" },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(key)}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  statusFilter === key
+                    ? "bg-background text-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Right Search & Controls */}
+        <div className="flex items-center gap-2">
+          <div className="relative w-52">
+            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              placeholder="F.I.O. yoki Work Order..."
+              className="pl-7 h-7 text-xs bg-background border-input rounded"
+            />
+          </div>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={fetchPiecework}
+            disabled={loading}
+            title="Ro'yxatni yangilash"
+            aria-label="Ro'yxatni yangilash"
+          >
+            <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+            onClick={() => window.print()}
+            title="Chop etish"
+          >
+            <Printer className="size-3.5" />
+            <span className="hidden sm:inline">Chop etish</span>
+          </Button>
+
+          <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 font-normal">
+            {totalSum.toLocaleString("uz-UZ")} UZS
+          </Badge>
         </div>
       </div>
 

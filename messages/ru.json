@@ -355,6 +355,7 @@
     "attendance-sec": "Учет времени и табель",
     "attendance": "Табель учета (Т-13)",
     "shifts": "Графики смен",
+    "devices": "Биометрические терминалы",
     "compensation": "Оплата труда и расчеты",
     "piecework": "Сдельный наряд (Сдельщина)",
     "payroll": "Ведомость начисления зарплаты",
@@ -944,7 +945,7 @@
     "unlockAspectRatio": "Свободный размер (Разблокировать)"
   },
   "JobTicket": {
-    "title": "Паспорт заказа (Наряд-заказ)",
+    "title": "Паспорт заказа",
     "subtitle": "Единый производственный паспорт тиража и технологическая карта",
     "badge": "ПАСПОРТ • НАРЯД-ЗАКАЗ",
     "button": "Паспорт заказа (Ctrl+P)",
@@ -1029,7 +1030,12 @@
     "dateLabel": "Дата:",
     "pass": "ГОТОВО",
     "footerSystem": "PRINTGOO ERP • ЕДИНЫЙ ПРОИЗВОДСТВЕННЫЙ ПАСПОРТ ЗАКАЗА",
-    "printDate": "СФОРМИРОВАН"
+    "printDate": "СФОРМИРОВАН",
+    "status": "Статус",
+    "priority": "Приоритет",
+    "priorityNormal": "Обычный",
+    "priorityUrgent": "Срочный",
+    "priorityHigh": "Высокий"
   },
   "OverviewEnhancements": {
     "managerView": "Вид менеджера",
@@ -1149,8 +1155,7 @@
     "hidePanel": "Закрыть панель",
     "showPanel": "Открыть панель",
     "collapseLeftPanel": "Свернуть панель чатов",
-    "expandLeftPanel": "Развернуть панель чатов",
-    "copyText": "Копировать"
+    "expandLeftPanel": "Развернуть панель чатов"
   },
   "LeadModal": {
     "title": "Карточка лида",

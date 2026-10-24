@@ -613,11 +613,11 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
       sizeCode: sCode,
       quantity: sQty,
       share,
-      frontSrc: art?.frontArtworkThumb || art?.frontArtworkUrl,
-      backSrc: art?.backArtworkThumb || art?.backArtworkUrl,
+      frontSrc: art?.frontArtworkUrl || art?.frontArtworkThumb,
+      backSrc: art?.backArtworkUrl || art?.backArtworkThumb,
       frontName: art?.frontArtworkName,
       backName: art?.backArtworkName,
-      hasArtwork: Boolean(art && (art.frontArtworkThumb || art.frontArtworkUrl || art.backArtworkThumb || art.backArtworkUrl)),
+      hasArtwork: Boolean(art && (art.frontArtworkUrl || art.frontArtworkThumb || art.backArtworkUrl || art.backArtworkThumb)),
     };
   });
 
@@ -634,8 +634,8 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
         sizeCode: aCode,
         quantity: 0,
         share: 0,
-        frontSrc: a.frontArtworkThumb || a.frontArtworkUrl,
-        backSrc: a.backArtworkThumb || a.backArtworkUrl,
+        frontSrc: a.frontArtworkUrl || a.frontArtworkThumb,
+        backSrc: a.backArtworkUrl || a.backArtworkThumb,
         frontName: a.frontArtworkName,
         backName: a.backArtworkName,
         hasArtwork: Boolean(a.frontArtworkThumb || a.frontArtworkUrl || a.backArtworkThumb || a.backArtworkUrl),
@@ -751,25 +751,14 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           <View style={styles.headerLeft}>
             <View style={styles.brandRow}>
               <Text style={styles.brandTitle}>PRINTGOO ERP</Text>
-              <Text style={styles.badgeDark}>{L.badge}</Text>
-              <Text
-                style={
-                  orderData.priority === "Urgent" || orderData.priority === "High"
-                    ? styles.badgePriorityUrgent
-                    : styles.badgePriorityNormal
-                }
-              >
-                {(orderData.priority || "NORMAL").toUpperCase()}
-              </Text>
             </View>
-            <Text style={styles.brandSubtitle}>{L.subtitle}</Text>
           </View>
 
           <View style={styles.headerRight}>
             <View style={styles.docMetaBox}>
               <Text style={styles.docNoText}>{docNo || "WOOF-26-0351"}</Text>
               <Text style={styles.docSubText}>
-                {orderData.status || "Active"} • {new Date().toISOString().slice(0, 10)}
+                {new Date().toISOString().slice(0, 10)}
               </Text>
               {orderData.linkedOrderId && (
                 <Text style={styles.docSubText}>Ref: {orderData.linkedOrderId}</Text>
@@ -784,7 +773,7 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
                     y={m.r}
                     width={1.02}
                     height={1.02}
-                    fill="#0f172a"
+                    fill="#000000"
                   />
                 ))}
               </Svg>
@@ -815,6 +804,37 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
             <Text style={styles.reqSub}>
               {L.recipe}: {orderData.recipe || "STD_V1"}
             </Text>
+          </View>
+          <View style={styles.reqCol}>
+            <Text style={styles.reqLabel}>{L.status || "HOLATI"}</Text>
+            <View style={{ backgroundColor: "#f1f5f9", borderWidth: 0.5, borderColor: "#cbd5e1", borderRadius: 2, paddingVertical: 1.5, paddingHorizontal: 4, alignSelf: "flex-start", marginTop: 1 }}>
+              <Text style={{ fontSize: 6.5, fontWeight: "bold", color: "#0f172a" }}>
+                {(orderData.status || "Active").toUpperCase()}
+              </Text>
+            </View>
+            <Text style={styles.reqSub}>{new Date().toISOString().slice(0, 10)}</Text>
+          </View>
+          <View style={styles.reqCol}>
+            <Text style={styles.reqLabel}>{L.priority || "MUHIMLIGI"}</Text>
+            <View style={{
+              backgroundColor: orderData.priority === "Urgent" || orderData.priority === "High" ? "#fef2f2" : "#eff6ff",
+              borderWidth: 0.5,
+              borderColor: orderData.priority === "Urgent" || orderData.priority === "High" ? "#fca5a5" : "#bfdbfe",
+              borderRadius: 2,
+              paddingVertical: 1.5,
+              paddingHorizontal: 4,
+              alignSelf: "flex-start",
+              marginTop: 1
+            }}>
+              <Text style={{
+                fontSize: 6.5,
+                fontWeight: "bold",
+                color: orderData.priority === "Urgent" || orderData.priority === "High" ? "#dc2626" : "#1d4ed8"
+              }}>
+                {(orderData.priority || "NORMAL").toUpperCase()}
+              </Text>
+            </View>
+            <Text style={styles.reqSub}>{orderData.deadline || "—"}</Text>
           </View>
         </View>
 
@@ -1368,29 +1388,64 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           )}
         </View>
 
-        {/* 7. 4-STAGE SHOP-FLOOR SIGN-OFF STAMPS */}
-        <View style={styles.signoffSection}>
-          <View style={styles.signoffRow}>
-            {[
-              { title: L.signPrepress, sub: L.signPrepressSub },
-              { title: L.signPress, sub: L.signPressSub },
-              { title: L.signFinish, sub: L.signFinishSub },
-              { title: L.signQc, sub: L.signQcSub },
-            ].map((b, i) => (
-              <View key={i} style={styles.signoffBox}>
-                <View>
-                  <Text style={styles.signoffTitle}>{b.title}</Text>
-                  <Text style={styles.signoffSub}>{b.sub}</Text>
-                </View>
-                <View style={styles.signoffLine} />
-                <View style={styles.signoffFooter}>
-                  <Text>{L.signLabel}</Text>
-                  <Text>{L.dateLabel}</Text>
-                </View>
-              </View>
-            ))}
+        {/* 7. SKU ARTWORKS (ON PAGE 1 - REPLACES SIGNATURES ROW) */}
+        {itemsWithArtwork.length > 0 && (
+          <View style={{ marginTop: 4, borderWidth: 0.6, borderColor: "#cbd5e1", borderRadius: 2, backgroundColor: "#ffffff", overflow: "hidden" }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#0f172a", paddingHorizontal: 6, paddingVertical: 2.5 }}>
+              <Text style={{ color: "#ffffff", fontSize: 6.5, fontWeight: "bold" }}>SKU ARTWORK PASPORTI (1:1 PREPRESS PROOFLAR)</Text>
+              <Text style={{ color: "#93c5fd", fontSize: 6, fontWeight: "bold" }}>{itemsWithArtwork.length} SKU</Text>
+            </View>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, padding: 4, backgroundColor: "#ffffff" }}>
+              {itemsWithArtwork.map((card, idx) => {
+                const cardWidth =
+                  itemsWithArtwork.length <= 4
+                    ? `${Math.floor((100 - (itemsWithArtwork.length - 1) * 2) / itemsWithArtwork.length)}%`
+                    : "31%";
+                return (
+                  <View
+                    key={card.id || idx}
+                    style={{
+                      width: cardWidth,
+                      borderWidth: 0.5,
+                      borderColor: "#cbd5e1",
+                      borderRadius: 2,
+                      overflow: "hidden",
+                      backgroundColor: "#ffffff",
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        backgroundColor: "#0f172a",
+                        paddingHorizontal: 4,
+                        paddingVertical: 2,
+                      }}
+                    >
+                      <Text style={{ color: "#ffffff", fontSize: 6, fontWeight: "bold" }}>
+                        {`${card.model} • ${card.sizeCode}`.toUpperCase()}
+                      </Text>
+                      <Text style={{ color: "#93c5fd", fontSize: 5.5, fontWeight: "bold" }}>
+                        {card.quantity > 0 ? `${card.quantity.toLocaleString()} pcs` : "NAMUNA"}
+                      </Text>
+                    </View>
+                    <View style={{ height: 60, alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", padding: 2 }}>
+                      {card.frontSrc ? (
+                        <Image src={card.frontSrc} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                      ) : (
+                        <Text style={{ fontSize: 6, color: "#94a3b8" }}>1:1 PROOF</Text>
+                      )}
+                    </View>
+                    <View style={{ backgroundColor: "#f8fafc", borderTopWidth: 0.4, borderTopColor: "#e2e8f0", paddingVertical: 1.5, alignItems: "center" }}>
+                      <Text style={{ color: "#047857", fontSize: 4.8, fontWeight: "bold" }}>1:1 PREPRESS OK</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* 8. FOOTER */}
         <View style={styles.footer} fixed>
@@ -1405,186 +1460,6 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           />
         </View>
       </Page>
-
-      {/* ─── PAGE 2: SKU ARTWORK PROOFS (If SKU Artworks exist) ─── */}
-      {itemsWithArtwork.length > 0 && (
-        <Page size="A4" style={styles.page}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <View style={styles.brandRow}>
-                <Text style={styles.brandTitle}>PRINTGOO ERP</Text>
-                <Text style={styles.badgeDark}>SKU ARTWORK PASPORTI (1:1 PROOF)</Text>
-              </View>
-              <Text style={styles.brandSubtitle}>
-                Buyurtmachi: {orderData.customer || "—"} • Mahsulot: {orderData.product || "—"} • {width}×{height} {dimUnit} (+{bleed}{dimUnit} bleed)
-              </Text>
-            </View>
-            <View style={styles.headerRight}>
-              <View style={styles.docMetaBox}>
-                <Text style={styles.docNoText}>{docNo}</Text>
-                <Text style={styles.docSubText}>
-                  Jami {itemsWithArtwork.length} ta razmer • {new Date().toISOString().slice(0, 10)}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Grid of SKU Cards */}
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
-            {itemsWithArtwork.map((card, idx) => (
-              <View
-                key={card.id || idx}
-                style={{
-                  width: "48.5%",
-                  borderWidth: 0.6,
-                  borderColor: "#cbd5e1",
-                  borderRadius: 2,
-                  backgroundColor: "#ffffff",
-                  marginBottom: 6,
-                  overflow: "hidden",
-                }}
-              >
-                {/* Card Header Bar */}
-                <View
-                  style={{
-                    flexDirection: "row",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    backgroundColor: "#0f172a",
-                    paddingHorizontal: 6,
-                    paddingVertical: 3,
-                  }}
-                >
-                  <Text style={{ color: "#ffffff", fontSize: 7, fontWeight: "bold" }}>
-                    {`${card.model} • ${card.sizeCode}`.toUpperCase()}
-                  </Text>
-                  <Text style={{ color: "#93c5fd", fontSize: 6.2, fontWeight: "bold" }}>
-                    {card.quantity > 0 ? `${card.quantity.toLocaleString()} pcs (${card.share}%)` : "NAMUNA"}
-                  </Text>
-                </View>
-
-                {/* Proof Body (Side-by-side Front & Back) */}
-                <View
-                  style={{
-                    flexDirection: "row",
-                    justifyContent: "space-around",
-                    alignItems: "center",
-                    paddingVertical: 8,
-                    paddingHorizontal: 4,
-                    backgroundColor: "#f8fafc",
-                  }}
-                >
-                  {/* Front */}
-                  <View style={{ alignItems: "center", width: "46%" }}>
-                    <View
-                      style={{
-                        width: 64,
-                        height: 74,
-                        borderWidth: 0.8,
-                        borderColor: "#10b981",
-                        borderRadius: orderData.cornerType?.toLowerCase().includes("round") ? 3 : 1,
-                        overflow: "hidden",
-                        backgroundColor: "#ffffff",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      {card.frontSrc ? (
-                        <Image src={card.frontSrc} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                      ) : (
-                        <Text style={{ fontSize: 4.8, color: "#94a3b8" }}>YUKLANMAGAN</Text>
-                      )}
-                    </View>
-                    <Text style={{ fontSize: 5, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
-                      Oldi (Front)
-                    </Text>
-                    {card.frontName && (
-                      <Text style={{ fontSize: 4.2, color: "#64748b" }}>{card.frontName}</Text>
-                    )}
-                  </View>
-
-                  {/* Back */}
-                  <View style={{ alignItems: "center", width: "46%" }}>
-                    <View
-                      style={{
-                        width: 64,
-                        height: 74,
-                        borderWidth: 0.8,
-                        borderColor: "#10b981",
-                        borderRadius: orderData.cornerType?.toLowerCase().includes("round") ? 3 : 1,
-                        overflow: "hidden",
-                        backgroundColor: "#ffffff",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      {card.backSrc ? (
-                        <Image src={card.backSrc} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                      ) : (
-                        <View style={{ alignItems: "center", justifyContent: "center", padding: 4 }}>
-                          <Text style={{ fontSize: 4.5, color: "#94a3b8", textAlign: "center" }}>
-                            1-TOMONLAMA (OQ)
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={{ fontSize: 5, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
-                      Orqa (Back)
-                    </Text>
-                    {card.backName && (
-                      <Text style={{ fontSize: 4.2, color: "#64748b" }}>{card.backName}</Text>
-                    )}
-                  </View>
-                </View>
-
-                {/* Card Footer Bar */}
-                <View
-                  style={{
-                    flexDirection: "row",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    backgroundColor: "#f1f5f9",
-                    paddingHorizontal: 6,
-                    paddingVertical: 3,
-                    borderTopWidth: 0.6,
-                    borderTopColor: "#cbd5e1",
-                  }}
-                >
-                  <Text style={{ fontSize: 5.5, color: "#475569" }}>
-                    {width}×{height} {dimUnit} (+{bleed}{dimUnit}) • {orderData.cornerType || "Square"}
-                  </Text>
-                  <View
-                    style={{
-                      backgroundColor: "#16a34a",
-                      paddingHorizontal: 4,
-                      paddingVertical: 1,
-                      borderRadius: 2,
-                    }}
-                  >
-                    <Text style={{ color: "#ffffff", fontSize: 4.8, fontWeight: "bold" }}>
-                      1:1 PREPRESS OK
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Footer */}
-          <View style={styles.footer} fixed>
-            <Text style={styles.footerText}>
-              {L.footerSystem} • DOC: {docNo} • SKU ARTWORK SPECIFICATION
-            </Text>
-            <Text
-              style={styles.footerText}
-              render={({ pageNumber, totalPages }) =>
-                `${L.printDate}: ${new Date().toISOString().slice(0, 10)} • Page ${pageNumber} / ${totalPages}`
-              }
-            />
-          </View>
-        </Page>
-      )}
     </Document>
   );
 };

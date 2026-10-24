@@ -3,13 +3,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import {
-  Printer,
-  Download,
   X,
   RefreshCw,
   FileText,
   Sparkles,
-  ExternalLink,
 } from "lucide-react";
 import {
   Dialog,
@@ -45,6 +42,11 @@ const LABEL_KEYS = [
   "title",
   "subtitle",
   "badge",
+  "status",
+  "priority",
+  "priorityNormal",
+  "priorityUrgent",
+  "priorityHigh",
   "customer",
   "product",
   "departmentSite",
@@ -170,7 +172,13 @@ export function JobTicketDialog({
           type: "job-ticket-pdf",
           payload: {
             docNo: workOrderId,
-            orderData: formData,
+            orderData: {
+              ...formData,
+              appUrl:
+                typeof window !== "undefined"
+                  ? window.location.origin
+                  : process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+            },
             operations: routeSteps,
             materials: bomMaterials,
             shiftNotes,
@@ -186,11 +194,14 @@ export function JobTicketDialog({
       }
 
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const filename = `Order_Passport_${workOrderId || "PRINTGOO"}.pdf`;
+      const file = new File([blob], filename, { type: "application/pdf" });
+      const url = `${URL.createObjectURL(file)}#filename=${encodeURIComponent(filename)}`;
       setPdfBlobUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
+        if (prev) URL.revokeObjectURL(prev.split("#")[0]);
         return url;
       });
+      onExportSuccess?.(workOrderId);
     } catch (err) {
       console.warn("ReportLab service unavailable, falling back to client-side PDF renderer...", err);
       try {
@@ -205,11 +216,14 @@ export function JobTicketDialog({
             labels={labelsMap}
           />
         ).toBlob();
-        const url = URL.createObjectURL(clientBlob);
+        const filename = `Order_Passport_${workOrderId || "PRINTGOO"}.pdf`;
+        const file = new File([clientBlob], filename, { type: "application/pdf" });
+        const url = `${URL.createObjectURL(file)}#filename=${encodeURIComponent(filename)}`;
         setPdfBlobUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
+          if (prev) URL.revokeObjectURL(prev.split("#")[0]);
           return url;
         });
+        onExportSuccess?.(workOrderId);
       } catch (clientErr) {
         console.error("Failed to generate Order Passport PDF:", clientErr);
         setErrorMsg(
@@ -229,38 +243,12 @@ export function JobTicketDialog({
       generateReportLabPdf();
     } else {
       setPdfBlobUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
+        if (prev) URL.revokeObjectURL(prev.split("#")[0]);
         return null;
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-
-  const handleDownloadPdf = async () => {
-    const filename = `Order_Passport_${workOrderId || "PRINTGOO"}.pdf`;
-    if (pdfBlobUrl) {
-      const link = document.createElement("a");
-      link.href = pdfBlobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      onExportSuccess?.(workOrderId);
-      return;
-    }
-    await generateReportLabPdf();
-  };
-
-  const handlePrint = () => {
-    if (pdfBlobUrl) {
-      const printWin = window.open(pdfBlobUrl, "_blank");
-      if (printWin) {
-        printWin.addEventListener("load", () => {
-          printWin.print();
-        });
-      }
-    }
-  };
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -273,7 +261,7 @@ export function JobTicketDialog({
           <div className="flex items-center gap-2.5 min-w-0">
             <FileText className="w-4 h-4 text-primary shrink-0" />
             <DialogTitle className="text-sm font-semibold text-foreground truncate">
-              {t("title")}
+              Order Passport
             </DialogTitle>
             <Badge variant="outline" className="font-mono text-xs shrink-0">
               {workOrderId}
@@ -283,7 +271,7 @@ export function JobTicketDialog({
               className="gap-1 text-[10px] font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 shrink-0"
             >
               <Sparkles className="w-3 h-3" />
-              <span>Python ReportLab PDF</span>
+              <span>Vector PDF</span>
             </Badge>
           </div>
 
@@ -295,46 +283,10 @@ export function JobTicketDialog({
               onClick={generateReportLabPdf}
               disabled={isGeneratingPdf}
               className="h-8 gap-1.5 text-xs cursor-pointer"
-              title="Qayta generatsiya qilish (Refresh ReportLab PDF)"
+              title="Qayta generatsiya qilish"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPdf ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">Yangilash</span>
-            </Button>
-
-            {pdfBlobUrl && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => window.open(pdfBlobUrl, "_blank")}
-                className="h-8 gap-1.5 text-xs cursor-pointer hidden md:inline-flex"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Yangi oynada</span>
-              </Button>
-            )}
-
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleDownloadPdf}
-              disabled={isGeneratingPdf || !pdfBlobUrl}
-              className="h-8 gap-1.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>{isGeneratingPdf ? t("downloadingPdf") : t("downloadPdf")}</span>
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handlePrint}
-              disabled={!pdfBlobUrl}
-              className="h-8 gap-1.5 text-xs cursor-pointer"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>{t("print")}</span>
+              <span>Yangilash</span>
             </Button>
 
             <Button
@@ -357,17 +309,17 @@ export function JobTicketDialog({
               <RefreshCw className="w-7 h-7 text-primary animate-spin" />
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-foreground">
-                  ReportLab (Python) PDF hujjatni generatsiya qilmoqda...
+                  PDF hujjat generatsiya qilinmoqda...
                 </p>
                 <p className="text-[11px] text-muted-foreground font-mono">
-                  POST /generate/pdf/job-ticket • QR + Code128 Barcode + 2D Vector
+                  {`Order_Passport_${workOrderId || "PRINTGOO"}.pdf`} • 100% Native Vector PDF
                 </p>
               </div>
             </div>
           ) : errorMsg ? (
             <div className="max-w-md p-6 bg-card border border-destructive/40 rounded-lg text-center space-y-3 shadow-sm">
               <p className="text-xs font-bold text-destructive">
-                ReportLab PDF Xatoligi
+                PDF Xatoligi
               </p>
               <p className="text-[11px] text-muted-foreground font-mono break-all">
                 {errorMsg}
@@ -378,8 +330,8 @@ export function JobTicketDialog({
             </div>
           ) : pdfBlobUrl ? (
             <iframe
-              src={`${pdfBlobUrl}#toolbar=1&navpanes=0&view=FitH`}
-              title={`Order Passport ${workOrderId}`}
+              src={`${pdfBlobUrl}&toolbar=1&navpanes=0&view=FitH`}
+              title={`Order_Passport_${workOrderId || "PRINTGOO"}.pdf`}
               className="w-full h-full border-0"
             />
           ) : null}

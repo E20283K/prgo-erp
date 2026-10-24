@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "../globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toast";
@@ -10,15 +9,7 @@ import { routing } from '@/i18n/routing';
 import QueryProvider from "@/components/providers/QueryProvider";
 import { FontCacheInitializer } from "@/components/providers/FontCacheInitializer";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin", "latin-ext"],
-});
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin", "latin-ext"],
-});
 
 export const metadata: Metadata = {
   title: "PrintGoo ERP/MES",
@@ -68,7 +59,7 @@ export default async function RootLayout({
   return (
     <html lang={locale} className="dark" suppressHydrationWarning>
       <head>
-        <link
+                <link
           rel="preload"
           href="/fonts/inter-latin.woff2"
           as="font"
@@ -82,10 +73,17 @@ export default async function RootLayout({
           type="font/woff2"
           crossOrigin="anonymous"
         />
+        <link
+          rel="preload"
+          href="/fonts/jetbrains-mono-latin.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
       </head>
       <body
         suppressHydrationWarning
-        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased bg-background text-foreground h-screen w-screen overflow-hidden`}
+        className="font-sans antialiased bg-background text-foreground h-screen w-screen overflow-hidden"
       >
         <FontCacheInitializer />
         <NextIntlClientProvider messages={messages}>

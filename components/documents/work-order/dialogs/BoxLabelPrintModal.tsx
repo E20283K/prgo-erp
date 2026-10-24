@@ -15,6 +15,13 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PackagingBoxItem } from "../types";
 
 interface BoxLabelPrintModalProps {
@@ -145,50 +152,53 @@ export function BoxLabelPrintModal({
         className="w-[96vw] max-w-[96vw]! sm:max-w-[96vw]! h-[94vh] max-h-[94vh]! flex flex-col overflow-hidden p-0 gap-0 border border-border bg-zinc-100 dark:bg-zinc-950 text-foreground print:p-0 print:border-none print:bg-white print:max-h-none print:overflow-visible shadow-2xl"
       >
         {/* Header Bar */}
-        <div className="shrink-0 flex items-center justify-between px-5 py-3 bg-card border-b border-border shadow-xs print:hidden">
+        <div className="shrink-0 flex items-center justify-between px-4 py-2.5 bg-card border-b border-border shadow-xs print:hidden">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-md bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-              <PackageCheck className="w-4 h-4" />
+            <div className="size-7 rounded-md border border-border bg-muted flex items-center justify-center text-foreground shrink-0">
+              <PackageCheck className="size-4" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold text-foreground truncate">
-                  Quti Pasportlari (100×150 mm Termoetiketka)
+                  Quti pasportlari
                 </span>
                 <Badge variant="outline" className="font-mono text-xs shrink-0">
                   {workOrderNo}
                 </Badge>
                 <Badge
                   variant="secondary"
-                  className="gap-1 text-[10px] font-mono bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30 shrink-0"
+                  className="text-[10px] font-mono shrink-0"
                 >
-                  Python ReportLab PDF
+                  100×150 mm
                 </Badge>
               </div>
-              <p className="text-[11px] text-muted-foreground truncate">
-                Termoprinter (Zebra / Xprinter) va A4 varag&apos;ida chop etish uchun Code128 va QR-kodli yorliqlar
-              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
             {/* Filter by box */}
-            <div className="flex items-center gap-1.5 mr-2">
+            <div className="flex items-center gap-1.5 mr-1">
               <span className="text-[11px] text-muted-foreground">Quti:</span>
-              <select
-                value={selectedBoxIndex}
-                onChange={(e) =>
-                  setSelectedBoxIndex(e.target.value === "all" ? "all" : Number(e.target.value))
+              <Select
+                value={String(selectedBoxIndex)}
+                onValueChange={(val) =>
+                  setSelectedBoxIndex(!val || val === "all" ? "all" : Number(val))
                 }
-                className="h-8 text-xs bg-muted border border-border rounded px-2 font-medium"
               >
-                <option value="all">Barchasi ({boxes.length} ta)</option>
-                {boxes.map((b, idx) => (
-                  <option key={b.id || idx} value={idx}>
-                    Quti #{b.boxNumber} ({b.quantity} dona {b.sizeCode ? `· ${b.sizeCode}` : ""})
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="h-8 min-w-[170px] text-xs bg-muted font-medium">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">
+                    Barchasi ({boxes.length} ta)
+                  </SelectItem>
+                  {boxes.map((b, idx) => (
+                    <SelectItem key={b.id || idx} value={String(idx)} className="text-xs font-mono">
+                      Quti #{b.boxNumber} ({b.quantity} dona{b.sizeCode ? ` · ${b.sizeCode}` : ""})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <Button

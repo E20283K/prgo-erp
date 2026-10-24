@@ -4,6 +4,7 @@ import React from "react";
 import { PlantRecord, PlantWarehouseInfo } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -238,7 +239,7 @@ export function PlantWarehousesTab({ plant, onUpdate }: PlantWarehousesTabProps)
                   <Label className="text-[10px] text-muted-foreground">
                     Mudir Telefoni
                   </Label>
-                  <Input
+                  <PhoneInput
                     value={wh.phone || ""}
                     onChange={(e) =>
                       handleUpdateWarehouse(wh.id, { phone: e.target.value })

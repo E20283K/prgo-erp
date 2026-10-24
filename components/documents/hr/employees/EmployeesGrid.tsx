@@ -19,6 +19,7 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -90,7 +91,10 @@ export function EmployeesGrid() {
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/hr/employees");
+      const [res] = await Promise.all([
+        fetch("/api/v1/hr/employees"),
+        new Promise((resolve) => setTimeout(resolve, 400)),
+      ]);
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         setData(json.data);
@@ -395,29 +399,52 @@ export function EmployeesGrid() {
 
   return (
     <div className="flex flex-col h-full bg-background select-none">
-      {/* ── Top Industrial Toolbar ── */}
-      <div className="border-b bg-card p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 font-semibold text-sm mr-2 text-foreground">
-            <Users className="size-4 text-primary" />
-            Xodimlar
-            <Badge variant="secondary" className="font-mono text-xs ml-1 h-5">
-              {filtered.length}
-            </Badge>
+      {/* ── 1C Enterprise Industrial Toolbar ── */}
+      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
+        {/* Left Actions */}
+        <div className="flex items-center gap-1.5">
+          <Button
+            onClick={handleCreateNew}
+            size="sm"
+            className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Yangi xodim</span>
+          </Button>
+
+          <Separator orientation="vertical" className="h-4 mx-1" />
+
+          {/* Status Segment Filter Pills */}
+          <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+            {[
+              { key: "ALL", label: "Hammasi" },
+              { key: "active", label: "Faol" },
+              { key: "probation", label: "Sinov" },
+              { key: "on_leave", label: "Ta'tilda" },
+              { key: "terminated", label: "Bo'shatilgan" },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(key)}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  statusFilter === key
+                    ? "bg-background text-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
-          <div className="relative w-56">
-            <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
-            <Input
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="F.I.O. yoki tabel №..."
-              className="h-7 pl-8 text-xs font-sans"
-            />
-          </div>
-
-          <Select value={departmentFilter} onValueChange={(val) => { if (val) setDepartmentFilter(val); }}>
-            <SelectTrigger className="h-7 text-xs w-44">
+          {/* Department Select Filter */}
+          <Select
+            value={departmentFilter}
+            onValueChange={(val) => {
+              if (val) setDepartmentFilter(val);
+            }}
+          >
+            <SelectTrigger className="h-7 text-xs w-36 bg-background border-input rounded">
               <SelectValue placeholder="Barcha sexlar" />
             </SelectTrigger>
             <SelectContent>
@@ -429,50 +456,46 @@ export function EmployeesGrid() {
               <SelectItem value="Sifat nazorati (OTK)">Sifat nazorati (OTK)</SelectItem>
             </SelectContent>
           </Select>
-
-          <Select value={statusFilter} onValueChange={(val) => { if (val) setStatusFilter(val); }}>
-            <SelectTrigger className="h-7 text-xs w-36">
-              <SelectValue placeholder="Barcha holatlar" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Barcha holatlar</SelectItem>
-              <SelectItem value="active">Faol</SelectItem>
-              <SelectItem value="probation">Sinov</SelectItem>
-              <SelectItem value="on_leave">Ta'tilda</SelectItem>
-              <SelectItem value="terminated">Bo'shatilgan</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        {/* Right Search & Controls */}
+        <div className="flex items-center gap-2">
+          <div className="relative w-52">
+            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              placeholder="F.I.O. yoki tabel №..."
+              className="pl-7 h-7 text-xs bg-background border-input rounded"
+            />
+          </div>
+
           <Button
+            variant="ghost"
             size="sm"
-            variant="outline"
-            className="h-7 text-xs gap-1"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
             onClick={fetchEmployees}
+            disabled={loading}
+            title="Ro'yxatni yangilash"
+            aria-label="Ro'yxatni yangilash"
           >
             <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-            Yangilash
           </Button>
 
           <Button
+            variant="ghost"
             size="sm"
-            className="h-7 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1 font-medium"
-            onClick={handleCreateNew}
-          >
-            <UserPlus className="size-3.5" />
-            Yangi xodim (Ins)
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs gap-1"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
             onClick={() => window.print()}
+            title="Chop etish"
           >
             <Printer className="size-3.5" />
-            Chop etish
+            <span className="hidden sm:inline">Chop etish</span>
           </Button>
+
+          <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 font-normal">
+            {filtered.length}
+          </Badge>
         </div>
       </div>
 

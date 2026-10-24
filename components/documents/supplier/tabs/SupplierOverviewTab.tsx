@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -394,7 +395,7 @@ export function SupplierOverviewTab({
             </Label>
             <div className="relative">
               <Phone className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
-              <Input
+              <PhoneInput
                 value={supplier.phone || ""}
                 onChange={(e) => onChange({ phone: e.target.value })}
                 className="h-8 pl-8 text-xs font-mono bg-background"

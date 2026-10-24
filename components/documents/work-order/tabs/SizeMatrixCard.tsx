@@ -1424,7 +1424,7 @@ export function SizeMatrixCard({
                                 isTargetSampleCol
                                   ? "font-bold text-amber-950 dark:text-amber-200 bg-amber-500/20 border-amber-500 focus:ring-1 focus:ring-amber-500"
                                   : val > 0
-                                  ? "font-bold text-foreground bg-primary/10 border-primary/40 focus:ring-1 focus:ring-primary"
+                                  ? "font-semibold text-foreground bg-primary/10 border-primary/40 focus:ring-1 focus:ring-primary"
                                   : "text-muted-foreground/40 border-border/40 hover:border-border/80 bg-background/50 focus:bg-background"
                               )}
                             />
@@ -1436,7 +1436,7 @@ export function SizeMatrixCard({
                       {!isOperator && <TableCell className="p-1" />}
 
                       {/* Row Total */}
-                      <TableCell className="p-1 px-3 text-right font-mono font-bold text-xs text-foreground border-l border-border whitespace-nowrap">
+                      <TableCell className="p-1 px-3 text-right font-mono font-semibold text-xs text-foreground border-l border-border whitespace-nowrap">
                         {rowTotal.toLocaleString()}
                       </TableCell>
 

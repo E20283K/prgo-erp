@@ -510,7 +510,50 @@ export const employeeHistoryRelations = relations(employeeHistory, ({ one }) => 
   }),
 }));
 
+// ─── Biometric Devices (Face ID & Turnstile Terminals) ─────────────────────────
+
+export const biometricDevices = pgTable(
+  "biometric_devices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    branchId: uuid("branch_id").references(() => branches.id, {
+      onDelete: "set null",
+    }),
+    name: varchar("name", { length: 128 }).notNull(),
+    deviceCode: varchar("device_code", { length: 64 }).notNull(),
+    model: varchar("model", { length: 64 }).default("Hikvision MinMoe").notNull(),
+    ipAddress: varchar("ip_address", { length: 64 }).notNull(),
+    port: integer("port").default(80).notNull(),
+    username: varchar("username", { length: 64 }).default("admin").notNull(),
+    password: text("password").notNull(),
+    direction: varchar("direction", { length: 32 }).default("in").notNull(), // "in" | "out" | "both"
+    location: varchar("location", { length: 128 }).default("Asosiy kirish"),
+    isEnabled: boolean("is_enabled").default(true).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    status: varchar("status", { length: 32 }).default("unknown").notNull(), // "online" | "offline" | "error" | "unknown"
+    metadata: jsonb("metadata").default({}).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("biometric_devices_company_code_uq").on(table.companyId, table.deviceCode),
+  ]
+);
+
+export const biometricDevicesRelations = relations(biometricDevices, ({ one }) => ({
+  company: one(companies, {
+    fields: [biometricDevices.companyId],
+    references: [companies.id],
+  }),
+}));
+
 // ─── Schema Inferred Types ────────────────────────────────────────────────────
+
+export type BiometricDevice = typeof biometricDevices.$inferSelect;
+export type NewBiometricDevice = typeof biometricDevices.$inferInsert;
 
 export type Department = typeof departments.$inferSelect;
 export type NewDepartment = typeof departments.$inferInsert;

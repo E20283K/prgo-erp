@@ -14,13 +14,19 @@ export const ERP_CORE_FONTS = [
   {
     family: "Inter",
     url: "/fonts/inter-latin.woff2",
-    weight: "100 900",
+    weight: "400",
     style: "normal",
   },
   {
     family: "Inter",
     url: "/fonts/inter-cyrillic.woff2",
-    weight: "100 900",
+    weight: "400",
+    style: "normal",
+  },
+  {
+    family: "JetBrains Mono",
+    url: "/fonts/jetbrains-mono-latin.woff2",
+    weight: "400",
     style: "normal",
   },
 ] as const;

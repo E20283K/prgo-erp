@@ -943,7 +943,7 @@
     "unlockAspectRatio": "Oranı serbest bırak (Bağımsız)"
   },
   "JobTicket": {
-    "title": "Sipariş Pasaportu (Üretim İş Emri)",
+    "title": "Sipariş pasaportu",
     "subtitle": "Birleşik Atölye Üretim Pasaportu ve Teknik Rota Kartı",
     "badge": "SİPARİŞ PASAPORTU • İŞ EMRİ",
     "button": "Sipariş Pasaportu (Ctrl+P)",
@@ -1028,7 +1028,12 @@
     "dateLabel": "Tarih:",
     "pass": "HAZIR",
     "footerSystem": "PRINTGOO ERP • BİRLEŞİK ÜRETİM SİPARİŞ PASAPORTU",
-    "printDate": "TARİH"
+    "printDate": "TARİH",
+    "status": "Durum",
+    "priority": "Öncelik",
+    "priorityNormal": "Normal",
+    "priorityUrgent": "Acil",
+    "priorityHigh": "Yüksek"
   },
   "OverviewEnhancements": {
     "managerView": "Yönetici Görünümü",

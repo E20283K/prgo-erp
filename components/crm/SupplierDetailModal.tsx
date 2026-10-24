@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -264,8 +265,8 @@ export function SupplierDetailModal({
               <Label className="text-xs">Telefon raqami</Label>
               <div className="relative">
                 <Phone className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
-                <Input
-                  className="pl-8 text-sm"
+                <PhoneInput
+                  className="h-8 pl-8 text-xs font-mono"
                   placeholder="+998 90 123-45-67"
                   value={form.phone || ""}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}

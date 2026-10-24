@@ -27,6 +27,7 @@ import type {
   EmployeeHistoryItem,
 } from "@/components/documents/hr/types";
 import { getCompanyIdByCode } from "./crmService";
+import { syncEmployeeToAllActiveDevices, removeEmployeeFromAllActiveDevices } from "./hikvisionService";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -290,6 +291,22 @@ export async function upsertEmployeeRecord(
           })
           .where(eq(employees.id, existing.id));
 
+        // Auto sync with biometric turnstiles in background
+        const finalBadge = data.badgeNumber || data.badgeNo || existing.badgeNumber;
+        if (data.status === "terminated") {
+          removeEmployeeFromAllActiveDevices(finalBadge, companyCode).catch(() => {});
+        } else if (data.avatarUrl) {
+          syncEmployeeToAllActiveDevices(
+            {
+              id: existing.id,
+              badgeNumber: finalBadge,
+              fullName,
+              avatarUrl: data.avatarUrl,
+            },
+            companyCode
+          ).catch(() => {});
+        }
+
         return { success: true, employeeId: existing.id };
       }
     }
@@ -320,6 +337,19 @@ export async function upsertEmployeeRecord(
         details,
       })
       .returning();
+
+    // Auto sync with biometric turnstiles in background
+    if (data.avatarUrl) {
+      syncEmployeeToAllActiveDevices(
+        {
+          id: inserted.id,
+          badgeNumber,
+          fullName,
+          avatarUrl: data.avatarUrl,
+        },
+        companyCode
+      ).catch(() => {});
+    }
 
     return { success: true, employeeId: inserted.id };
   } catch (error) {

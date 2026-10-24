@@ -3,6 +3,7 @@
 import React from "react";
 import { PlantRecord, PlantBankAccount } from "../types";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -138,8 +139,7 @@ export function PlantRequisitesTab({ plant, onUpdate }: PlantRequisitesTabProps)
             <Label className="text-[11px] font-medium text-muted-foreground">
               Aloqa Telefoni (Hisob-kitoblar bo&apos;yicha)
             </Label>
-            <Input
-              type="tel"
+            <PhoneInput
               value={plant.phone}
               onChange={(e) => onUpdate({ phone: e.target.value })}
               className="h-8 text-xs font-mono"

@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Clock, Plus, Search, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Clock, Plus, Search, RefreshCw, CheckCircle2, Printer } from "lucide-react";
 
 export function ShiftsGrid() {
   const { theme, openTab, shiftsList, upsertShift, updateGridStats, addNotification } =
@@ -61,7 +61,10 @@ export function ShiftsGrid() {
   const fetchShifts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/hr/shifts");
+      const [res] = await Promise.all([
+        fetch("/api/v1/hr/shifts"),
+        new Promise((resolve) => setTimeout(resolve, 400)),
+      ]);
       const json = await res.json();
       if (json.success && Array.isArray(json.data) && json.data.length > 0) {
         setData(json.data);
@@ -222,41 +225,58 @@ export function ShiftsGrid() {
 
   return (
     <div className="flex flex-col h-full bg-background select-none">
-      <div className="border-b bg-card p-2.5 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 font-semibold text-sm mr-2 text-foreground">
-            <Clock className="size-4 text-primary" />
-            Smenalar va Ish Rejimlari
-            <Badge variant="secondary" className="font-mono text-xs ml-1 h-5">
-              {filtered.length} ta
-            </Badge>
-          </div>
+      {/* ── 1C Enterprise Industrial Toolbar ── */}
+      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
+        {/* Left Actions */}
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
+            onClick={() => setIsAddOpen(true)}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Yangi smena</span>
+          </Button>
+        </div>
 
-          <div className="relative w-64">
-            <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
+        {/* Right Search & Controls */}
+        <div className="flex items-center gap-2">
+          <div className="relative w-52">
+            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Smena nomi yoki kodi..."
-              className="h-7 pl-8 text-xs font-sans"
+              className="pl-7 h-7 text-xs bg-background border-input rounded"
             />
           </div>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchShifts}>
-            <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-            Yangilash
-          </Button>
 
           <Button
             size="sm"
-            className="h-7 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1 font-medium"
-            onClick={() => setIsAddOpen(true)}
+            variant="ghost"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={fetchShifts}
+            disabled={loading}
+            title="Ro'yxatni yangilash"
+            aria-label="Ro'yxatni yangilash"
           >
-            <Plus className="size-3.5" />
-            Yangi smena qo'shish
+            <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+            onClick={() => window.print()}
+            title="Chop etish"
+          >
+            <Printer className="size-3.5" />
+            <span className="hidden sm:inline">Chop etish</span>
+          </Button>
+
+          <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 font-normal">
+            {filtered.length}
+          </Badge>
         </div>
       </div>
 

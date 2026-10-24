@@ -12,6 +12,7 @@ import {
   DepartmentRecord,
   PositionRecord,
   ShiftRecord,
+  BiometricDeviceRecord,
 } from "@/components/documents/hr/types";
 import { getMaterialImage } from "@/lib/materialImages";
 import { getUserInitials } from "@/lib/utils";
@@ -738,6 +739,12 @@ interface WorkspaceState {
   departmentsList: DepartmentRecord[];
   positionsList: PositionRecord[];
   shiftsList: ShiftRecord[];
+  biometricDevices: BiometricDeviceRecord[];
+  setBiometricDevices: (devices: BiometricDeviceRecord[]) => void;
+  upsertBiometricDevice: (device: BiometricDeviceRecord) => void;
+  removeBiometricDevice: (id: string) => void;
+  setDepartmentsList: (departmentsList: DepartmentRecord[]) => void;
+  setPositionsList: (positionsList: PositionRecord[]) => void;
   setEmployees: (employees: EmployeeRecord[]) => void;
   upsertEmployee: (emp: EmployeeRecord) => void;
   upsertAttendance: (att: AttendanceRecord) => void;
@@ -1573,6 +1580,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   departmentsList: [],
   positionsList: [],
   shiftsList: [],
+  biometricDevices: [],
   customerTooling: INITIAL_CUSTOMER_TOOLING,
   finishedGoods: INITIAL_FINISHED_GOODS,
 
@@ -2337,6 +2345,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   setEmployees: (employees) => set({ employees }),
 
+  setBiometricDevices: (biometricDevices) => set({ biometricDevices }),
+
+  upsertBiometricDevice: (device) =>
+    set((state) => {
+      const exists = state.biometricDevices.some((d) => d.id === device.id);
+      return {
+        biometricDevices: exists
+          ? state.biometricDevices.map((d) => (d.id === device.id ? device : d))
+          : [device, ...state.biometricDevices],
+      };
+    }),
+
+  removeBiometricDevice: (id) =>
+    set((state) => ({
+      biometricDevices: state.biometricDevices.filter((d) => d.id !== id),
+    })),
+
   upsertEmployee: (emp) =>
     set((state) => {
       const exists = state.employees.some((e) => e.id === emp.id);
@@ -2376,6 +2401,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           : [pay, ...state.payrolls],
       };
     }),
+
+  setDepartmentsList: (departmentsList) => set({ departmentsList }),
+  setPositionsList: (positionsList) => set({ positionsList }),
 
   upsertDepartment: (dept) =>
     set((state) => {

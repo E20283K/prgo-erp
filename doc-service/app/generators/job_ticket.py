@@ -1,65 +1,78 @@
 import io
 import os
 import math
+import base64
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from fastapi.responses import StreamingResponse
 from reportlab.lib import colors
 from reportlab.lib.units import mm
+from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.barcode import code128, qr
 from reportlab.lib.utils import ImageReader
-import base64
 from PIL import Image as PILImage
+import pymupdf as fitz
 
-class LoadedArtwork:
-    def __init__(self, kind: str, content: Any, width: float, height: float):
-        self.kind = kind  # "image" or "drawing"
-        self.content = content  # ImageReader or Drawing
-        self.width = max(1.0, float(width))
-        self.height = max(1.0, float(height))
+from svglib.svglib import svg2rlg
+from reportlab.graphics import renderPDF
+from copy import deepcopy
 
-def load_pdf_page_as_image(pdf_bytes: bytes, page_index: int = 0, scale: float = 3.0) -> Optional[LoadedArtwork]:
-    try:
-        import pypdfium2 as pdfium
-        pdf = pdfium.PdfDocument(pdf_bytes)
-        if len(pdf) > page_index:
-            page = pdf[page_index]
-            pil_img = page.render(scale=scale).to_pil()
-            w, h = pil_img.size
-            if pil_img.mode in ("RGBA", "P"):
-                bg = PILImage.new("RGB", pil_img.size, (255, 255, 255))
-                if pil_img.mode == "RGBA":
-                    bg.paste(pil_img, mask=pil_img.split()[3])
-                else:
-                    bg.paste(pil_img)
-                pil_img = bg
-            buf = io.BytesIO()
-            pil_img.save(buf, format="JPEG", quality=95)
-            buf.seek(0)
-            return LoadedArtwork("image", ImageReader(buf), w, h)
-    except Exception as e:
-        print(f"pypdfium2 render error: {e}", flush=True)
+from app.core.fonts import FONT_REGULAR, FONT_BOLD
+from app.core.s3 import upload_buffer_to_s3
+from app.schemas.documents import JobTicketPdfRequest, JobTicketShiftNote
+from app.core.constants import DEFAULT_JOB_TICKET_LABELS, trunc
+
+_LOGO_DRAWING_CACHE = None
+
+def get_logo_drawing():
+    global _LOGO_DRAWING_CACHE
+    if _LOGO_DRAWING_CACHE is not None:
+        return _LOGO_DRAWING_CACHE
+    logo_paths = [
+        "/app/printgoo_logo.svg",
+        os.path.join(os.path.dirname(__file__), "..", "core", "printgoo_logo.svg"),
+        os.path.join(os.path.dirname(__file__), "..", "..", "printgoo_logo.svg"),
+        "printgoo_logo.svg",
+    ]
+    for p in logo_paths:
+        if os.path.exists(p):
+            try:
+                _LOGO_DRAWING_CACHE = svg2rlg(p)
+                return _LOGO_DRAWING_CACHE
+            except Exception as e:
+                print(f"Error loading logo from {p}: {e}", flush=True)
     return None
 
-def probe_artwork_url(doc_no: str, s_code: str, side: str = "front") -> Optional[str]:
+def probe_artwork_url(doc_no: str, s_code: str, side: str = "front", sku_id: str = "") -> Optional[str]:
     clean_code = str(s_code).strip().upper()
-    candidates = [
+    clean_sku = str(sku_id).strip()
+    candidates = []
+    if clean_sku:
+        candidates.extend([
+            f"/artwork/{doc_no}/{clean_sku}-{clean_code}-{side}.pdf",
+            f"/artwork/{doc_no}/{clean_sku}-{side}.pdf",
+        ])
+    candidates.extend([
         f"/artwork/{doc_no}/sku-0-0-{clean_code}-{side}.pdf",
         f"/artwork/{doc_no}/sku-0-1-{clean_code}-{side}.pdf",
         f"/artwork/{doc_no}/sku-0-2-{clean_code}-{side}.pdf",
         f"/artwork/{doc_no}/sku-0-3-{clean_code}-{side}.pdf",
         f"/artwork/{doc_no}/sku-0-4-{clean_code}-{side}.pdf",
         f"/artwork/{doc_no}/sku-0-5-{clean_code}-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-{side}.pdf",
+        f"/artwork/{doc_no}/sku-1-{side}.pdf",
+        f"/artwork/{doc_no}/sku-2-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-0-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-1-{side}.pdf",
+        f"/artwork/{doc_no}/sku-0-2-{side}.pdf",
         f"/artwork/{doc_no}/{clean_code}-{side}.pdf",
         f"/artwork/{doc_no}/{clean_code}-{side}.svg",
-        f"/artwork/{doc_no}/{clean_code}-{side}.png",
         f"/artwork/{doc_no}/{side}.pdf",
         f"/artwork/{doc_no}/{side}.svg",
-        f"/artwork/{doc_no}/{side}.png",
-    ]
+    ])
     import urllib.request
     for cand in candidates:
         for base in ["http://host.docker.internal:3000", "http://localhost:3000", "http://127.0.0.1:3000"]:
@@ -73,51 +86,31 @@ def probe_artwork_url(doc_no: str, s_code: str, side: str = "front") -> Optional
                 continue
     return None
 
-def load_artwork_source(img_src: Optional[str]) -> Optional[LoadedArtwork]:
-    if not img_src or not isinstance(img_src, str):
+def get_raw_artwork(src: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not src or not isinstance(src, str):
         return None
     try:
-        if img_src.startswith("data:application/pdf") or ";base64," in img_src and "pdf" in img_src[:30].lower():
-            _, body = img_src.split(",", 1)
+        if src.startswith("data:application/pdf") or (";base64," in src and "pdf" in src[:30].lower()):
+            _, body = src.split(",", 1)
             pdf_bytes = base64.b64decode(body)
-            return load_pdf_page_as_image(pdf_bytes)
-        elif img_src.startswith("data:image"):
-            header, body = img_src.split(",", 1)
+            return {"kind": "pdf", "bytes": pdf_bytes, "source": src}
+        elif src.startswith("data:image"):
+            header, body = src.split(",", 1)
             if "svg" in header:
-                try:
-                    import urllib.parse
-                    from svglib.svglib import svg2rlg
-                    svg_str = base64.b64decode(body).decode("utf-8") if ";base64" in header else urllib.parse.unquote(body)
-                    d = svg2rlg(io.StringIO(svg_str))
-                    if d and getattr(d, "width", 0) and getattr(d, "height", 0):
-                        return LoadedArtwork("drawing", d, d.width, d.height)
-                except Exception as svg_err:
-                    print(f"svglib parse error: {svg_err}", flush=True)
-                return None
+                svg_bytes = base64.b64decode(body) if ";base64" in header else body.encode("utf-8")
+                return {"kind": "svg", "bytes": svg_bytes, "source": src}
             else:
                 img_bytes = base64.b64decode(body)
                 if img_bytes.startswith(b"%PDF"):
-                    return load_pdf_page_as_image(img_bytes)
-                pil_img = PILImage.open(io.BytesIO(img_bytes))
-                w, h = pil_img.size
-                if pil_img.mode in ("RGBA", "P"):
-                    bg = PILImage.new("RGB", pil_img.size, (255, 255, 255))
-                    if pil_img.mode == "RGBA":
-                        bg.paste(pil_img, mask=pil_img.split()[3])
-                    else:
-                        bg.paste(pil_img)
-                    pil_img = bg
-                buf = io.BytesIO()
-                pil_img.save(buf, format="JPEG", quality=92)
-                buf.seek(0)
-                return LoadedArtwork("image", ImageReader(buf), w, h)
-        elif img_src.startswith("/"):
+                    return {"kind": "pdf", "bytes": img_bytes, "source": src}
+                return {"kind": "image", "bytes": img_bytes, "source": src}
+        elif src.startswith("/"):
             app_hosts = ["http://host.docker.internal:3000", "http://localhost:3000", "http://127.0.0.1:3000"]
             import urllib.request
             data = None
             for base in app_hosts:
                 try:
-                    full_url = f"{base}{img_src}"
+                    full_url = f"{base}{src}"
                     req = urllib.request.Request(full_url, headers={"User-Agent": "PrintGoo-DocService"})
                     with urllib.request.urlopen(req, timeout=3) as resp:
                         if resp.status == 200:
@@ -126,154 +119,147 @@ def load_artwork_source(img_src: Optional[str]) -> Optional[LoadedArtwork]:
                 except Exception:
                     continue
             if data:
-                if data.startswith(b"%PDF") or img_src.lower().endswith(".pdf"):
-                    return load_pdf_page_as_image(data)
-                elif img_src.lower().endswith(".svg") or b"<svg" in data[:100]:
-                    try:
-                        from svglib.svglib import svg2rlg
-                        d = svg2rlg(io.BytesIO(data))
-                        if d and getattr(d, "width", 0) and getattr(d, "height", 0):
-                            return LoadedArtwork("drawing", d, d.width, d.height)
-                    except Exception as svg_err:
-                        print(f"svglib relative url error: {svg_err}", flush=True)
+                if data.startswith(b"%PDF") or src.lower().endswith(".pdf"):
+                    return {"kind": "pdf", "bytes": data, "source": src}
+                elif src.lower().endswith(".svg") or b"<svg" in data[:100]:
+                    return {"kind": "svg", "bytes": data, "source": src}
                 else:
-                    pil_img = PILImage.open(io.BytesIO(data))
-                    w, h = pil_img.size
-                    buf = io.BytesIO()
-                    pil_img.convert("RGB").save(buf, format="JPEG", quality=92)
-                    buf.seek(0)
-                    return LoadedArtwork("image", ImageReader(buf), w, h)
-        elif img_src.startswith("http://") or img_src.startswith("https://"):
+                    return {"kind": "image", "bytes": data, "source": src}
+        elif src.startswith("http://") or src.startswith("https://"):
             import urllib.request
-            req = urllib.request.Request(img_src, headers={"User-Agent": "PrintGoo-DocService"})
+            req = urllib.request.Request(src, headers={"User-Agent": "PrintGoo-DocService"})
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = resp.read()
-                if data.startswith(b"%PDF") or img_src.lower().endswith(".pdf"):
-                    return load_pdf_page_as_image(data)
-                elif img_src.lower().endswith(".svg") or b"<svg" in data[:100]:
-                    try:
-                        from svglib.svglib import svg2rlg
-                        d = svg2rlg(io.BytesIO(data))
-                        if d and getattr(d, "width", 0) and getattr(d, "height", 0):
-                            return LoadedArtwork("drawing", d, d.width, d.height)
-                    except Exception:
-                        pass
-                pil_img = PILImage.open(io.BytesIO(data))
-                w, h = pil_img.size
-                buf = io.BytesIO()
-                pil_img.convert("RGB").save(buf, format="JPEG", quality=90)
-                buf.seek(0)
-                return LoadedArtwork("image", ImageReader(buf), w, h)
+                if data.startswith(b"%PDF") or src.lower().endswith(".pdf"):
+                    return {"kind": "pdf", "bytes": data, "source": src}
+                elif src.lower().endswith(".svg") or b"<svg" in data[:100]:
+                    return {"kind": "svg", "bytes": data, "source": src}
+                else:
+                    return {"kind": "image", "bytes": data, "source": src}
     except Exception as e:
-        print(f"Failed to load artwork source in ReportLab ({img_src}): {e}", flush=True)
-        return None
+        print(f"Failed to fetch raw artwork ({src}): {e}", flush=True)
     return None
+
+def draw_raster_or_svg(c, raw_art: Dict[str, Any], card_x_mm: float, card_top_mm: float, card_w_mm: float, card_h_mm: float, y_mm_func):
     try:
-        if img_src.startswith("data:image"):
-            header, body = img_src.split(",", 1)
-            if "svg" in header:
-                try:
-                    import urllib.parse
-                    from svglib.svglib import svg2rlg
-                    svg_str = base64.b64decode(body).decode("utf-8") if ";base64" in header else urllib.parse.unquote(body)
-                    d = svg2rlg(io.StringIO(svg_str))
-                    if d and getattr(d, "width", 0) and getattr(d, "height", 0):
-                        return LoadedArtwork("drawing", d, d.width, d.height)
-                except Exception as svg_err:
-                    print(f"svglib parse error: {svg_err}", flush=True)
-                return None
-            else:
-                img_bytes = base64.b64decode(body)
-                pil_img = PILImage.open(io.BytesIO(img_bytes))
-                w, h = pil_img.size
-                if pil_img.mode in ("RGBA", "P"):
-                    bg = PILImage.new("RGB", pil_img.size, (255, 255, 255))
-                    if pil_img.mode == "RGBA":
-                        bg.paste(pil_img, mask=pil_img.split()[3])
-                    else:
-                        bg.paste(pil_img)
-                    pil_img = bg
-                buf = io.BytesIO()
-                pil_img.save(buf, format="JPEG", quality=92)
-                buf.seek(0)
-                return LoadedArtwork("image", ImageReader(buf), w, h)
-        elif img_src.startswith("/"):
-            # Server-relative path: fetch from Next.js server
-            app_hosts = ["http://host.docker.internal:3000", "http://localhost:3000", "http://127.0.0.1:3000"]
-            import urllib.request
-            data = None
-            for base in app_hosts:
-                try:
-                    full_url = f"{base}{img_src}"
-                    req = urllib.request.Request(full_url, headers={"User-Agent": "PrintGoo-DocService"})
-                    with urllib.request.urlopen(req, timeout=3) as resp:
-                        if resp.status == 200:
-                            data = resp.read()
-                            break
-                except Exception:
-                    continue
-            if data:
-                if img_src.lower().endswith(".svg"):
-                    try:
-                        from svglib.svglib import svg2rlg
-                        d = svg2rlg(io.BytesIO(data))
-                        if d and getattr(d, "width", 0) and getattr(d, "height", 0):
-                            return LoadedArtwork("drawing", d, d.width, d.height)
-                    except Exception:
-                        pass
-                else:
-                    pil_img = PILImage.open(io.BytesIO(data))
-                    w, h = pil_img.size
-                    buf = io.BytesIO()
-                    pil_img.convert("RGB").save(buf, format="JPEG", quality=92)
-                    buf.seek(0)
-                    return LoadedArtwork("image", ImageReader(buf), w, h)
-        elif img_src.startswith("http://") or img_src.startswith("https://"):
-            import urllib.request
-            req = urllib.request.Request(img_src, headers={"User-Agent": "PrintGoo-DocService"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = resp.read()
-                pil_img = PILImage.open(io.BytesIO(data))
-                w, h = pil_img.size
-                buf = io.BytesIO()
-                pil_img.convert("RGB").save(buf, format="JPEG", quality=90)
-                buf.seek(0)
-                return LoadedArtwork("image", ImageReader(buf), w, h)
+        if raw_art["kind"] == "image":
+            pil_img = PILImage.open(io.BytesIO(raw_art["bytes"]))
+            buf = io.BytesIO()
+            pil_img.convert("RGB").save(buf, format="JPEG", quality=92)
+            buf.seek(0)
+            c.drawImage(
+                ImageReader(buf),
+                card_x_mm * mm,
+                y_mm_func(card_top_mm + card_h_mm),
+                card_w_mm * mm,
+                card_h_mm * mm,
+                preserveAspectRatio=True,
+            )
+        elif raw_art["kind"] == "svg":
+            from svglib.svglib import svg2rlg
+            from reportlab.graphics import renderPDF
+            d = svg2rlg(io.BytesIO(raw_art["bytes"]))
+            if d and getattr(d, "width", 0) and getattr(d, "height", 0):
+                sx = (card_w_mm * mm) / d.width
+                sy = (card_h_mm * mm) / d.height
+                d.scale(sx, sy)
+                renderPDF.draw(d, c, card_x_mm * mm, y_mm_func(card_top_mm + card_h_mm))
     except Exception as e:
-        print(f"Failed to load artwork source in ReportLab: {e}", flush=True)
-        return None
-    return None
+        print(f"Error drawing raster/svg: {e}", flush=True)
 
-def draw_artwork_item(c, art: LoadedArtwork, card_x_mm: float, card_top_mm: float, card_w_mm: float, card_h_mm: float, y_mm_func):
-    if art.kind == "image":
-        c.drawImage(
-            art.content,
-            card_x_mm * mm,
-            y_mm_func(card_top_mm + card_h_mm),
-            card_w_mm * mm,
-            card_h_mm * mm,
-            preserveAspectRatio=True,
-        )
-    elif art.kind == "drawing":
-        from reportlab.graphics import renderPDF
-        d = art.content
-        sx = (card_w_mm * mm) / art.width
-        sy = (card_h_mm * mm) / art.height
-        d.scale(sx, sy)
-        renderPDF.draw(d, c, card_x_mm * mm, y_mm_func(card_top_mm + card_h_mm))
+def calculate_single_page_layout(n_items: int, is_one_sided: bool, width: float, height: float) -> Dict[str, Any]:
+    avail_w = 192.0
+    avail_h = 252.0
+    start_y_base = 31.0
 
-from reportlab.lib.pagesizes import A4
+    if n_items <= 1:
+        cols, rows = 1, 1
+        gap_x, gap_y = 0.0, 0.0
+        card_w = 120.0
+        card_h = 160.0
+        start_x = 9.0 + (avail_w - card_w) / 2.0
+        start_y = start_y_base + (avail_h - card_h) / 2.0
+    elif n_items == 2:
+        cols, rows = 2, 1
+        gap_x, gap_y = 8.0, 0.0
+        card_w = (avail_w - gap_x) / 2.0  # 92.0 mm
+        card_h = 160.0
+        start_x = 9.0
+        start_y = start_y_base + (avail_h - card_h) / 2.0
+    elif n_items == 3:
+        if is_one_sided:
+            cols, rows = 3, 1
+            gap_x, gap_y = 6.0, 0.0
+            card_w = (avail_w - 2 * gap_x) / 3.0  # 60.0 mm
+            aspect = width / max(1.0, height)
+            slot_w = card_w - 6.0
+            art_h = min(220.0, slot_w / aspect)
+            card_h = min(250.0, max(130.0, art_h + 26.0))
+            start_x = 9.0
+            start_y = start_y_base + (avail_h - card_h) / 2.0
+        else:
+            cols, rows = 2, 2
+            gap_x, gap_y = 6.0, 6.0
+            card_w = (avail_w - gap_x) / 2.0  # 93.0 mm
+            card_h = (avail_h - gap_y) / 2.0  # 126.0 mm
+            start_x = 9.0
+            start_y = start_y_base
+    elif n_items == 4:
+        cols, rows = 2, 2
+        gap_x, gap_y = 6.0, 6.0
+        card_w = (avail_w - gap_x) / 2.0  # 93.0 mm
+        card_h = (avail_h - gap_y) / 2.0  # 126.0 mm
+        start_x = 9.0
+        start_y = start_y_base
+    elif n_items <= 6:
+        if is_one_sided:
+            cols, rows = 3, 2
+            gap_x, gap_y = 6.0, 6.0
+            card_w = (avail_w - 2 * gap_x) / 3.0  # 60.0 mm
+            card_h = (avail_h - gap_y) / 2.0     # 126.0 mm
+            start_x = 9.0
+            start_y = start_y_base
+        else:
+            cols, rows = 2, 3
+            gap_x, gap_y = 6.0, 5.0
+            card_w = (avail_w - gap_x) / 2.0      # 93.0 mm
+            card_h = (avail_h - 2 * gap_y) / 3.0  # 82.6 mm
+            start_x = 9.0
+            start_y = start_y_base
+    elif n_items <= 8:
+        cols = 4 if is_one_sided else 2
+        rows = 2 if is_one_sided else 4
+        gap_x, gap_y = 5.0, 5.0
+        card_w = (avail_w - (cols - 1) * gap_x) / cols
+        card_h = (avail_h - (rows - 1) * gap_y) / rows
+        start_x = 9.0
+        start_y = start_y_base
+    else:
+        cols = 3 if is_one_sided else 2
+        rows = math.ceil(n_items / cols)
+        gap_x, gap_y = 4.0, 4.0
+        card_w = (avail_w - (cols - 1) * gap_x) / cols
+        card_h = (avail_h - (rows - 1) * gap_y) / rows
+        start_x = 9.0
+        start_y = start_y_base
 
-from app.core.fonts import FONT_REGULAR, FONT_BOLD
-from app.core.s3 import upload_buffer_to_s3
-from app.schemas.documents import *
-from app.core.constants import DEFAULT_JOB_TICKET_LABELS, trunc
+    return {
+        "cols": cols,
+        "rows": rows,
+        "card_w": card_w,
+        "card_h": card_h,
+        "gap_x": gap_x,
+        "gap_y": gap_y,
+        "start_x": start_x,
+        "start_y": start_y,
+    }
 
 def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     """
-    Generates the unified Order Passport (Job Ticket / Наряд-заказ) A4 PDF using ReportLab.
-    Includes native QR code, Code128 Barcode, 2D Vector Die-Cut & Bleed schematic,
-    CMYK + Pantone stations, Stage-Gates, SKU Matrix, BOM Materials, Tech Route, and 4-Stage Sign-offs.
+    Generates the unified Order Passport (Job Ticket / Наряд-заказ) A4 PDF.
+    - Page 1: Requisites, KPIs, Section 3 CAD + Vector Hybrid Proof, Stage-Gates, SKU Matrix, BOM, Tech Route, Sign-offs.
+    - Page 2: Single-Page Auto-Layout of 100% Pure Vector PDF Artworks for all SKU sizes.
+    - Zero rasterization: Vector PDF pages are preserved as native Form XObjects via PyMuPDF.
     """
     L = {**DEFAULT_JOB_TICKET_LABELS, **(req.labels or {})}
     od = req.orderData or {}
@@ -281,6 +267,11 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
+    filename = f"Order_Passport_{doc_no}.pdf"
+    c.setTitle(filename)
+    c.setAuthor("PrintGoo ERP")
+    c.setSubject(f"Order Passport {doc_no}")
+    c.setCreator("PrintGoo Industrial Prepress Engine")
     page_w, page_h = A4  # 210mm x 297mm
     margin_x = 9 * mm
 
@@ -338,81 +329,158 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     start_date = str(od.get("startDate") or "—")
     deadline = str(od.get("deadline") or "—")
 
-    # ─── 1. TOP HEADER WITH QR CODE & CODE128 BARCODE ─────────────────────────
-    c.setFillColor(colors.HexColor("#0f172a"))
-    c.setFont(FONT_BOLD, 13)
-    c.drawString(margin_x, y_mm(12), "PRINTGOO ERP")
+    # ─── UNIFIED HEADER (PAGES 1 & 2) WITH PRINTGOO SVG LOGO & KATTA BARCODE ──
+    def draw_unified_header():
+        # 1. Top Left: Vector SVG Logo (Prominent, vertically centered)
+        logo_d = get_logo_drawing()
+        if logo_d and getattr(logo_d, "width", 0) and getattr(logo_d, "height", 0):
+            try:
+                d_copy = deepcopy(logo_d)
+                logo_target_h = 12.0 * mm
+                logo_scale = logo_target_h / d_copy.height
+                d_copy.width = d_copy.width * logo_scale
+                d_copy.height = logo_target_h
+                d_copy.scale(logo_scale, logo_scale)
+                renderPDF.draw(d_copy, c, margin_x, y_mm(4.6 + 12.0))
+            except Exception as e:
+                print(f"Error rendering logo: {e}", flush=True)
+                c.setFillColor(colors.HexColor("#0f172a"))
+                c.setFont(FONT_BOLD, 13)
+                c.drawString(margin_x, y_mm(12.0), "PRINTGOO ERP")
+        else:
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(FONT_BOLD, 13)
+            c.drawString(margin_x, y_mm(12.0), "PRINTGOO ERP")
 
-    # Dark Badge
-    badge_text = L["badge"]
-    badge_w = max(32, len(badge_text) * 1.65)
-    draw_box(39, 8.2, badge_w, 4.8, fill_hex="#0f172a", stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 6.3)
-    c.drawCentredString((39 + badge_w / 2) * mm, y_mm(11.6), badge_text)
+        # 2. CENTER ZONE: PURE BLACK 1D KATTA BARCODE
+        bc = code128.Code128(doc_no, barHeight=11.0 * mm, barWidth=0.75)
+        center_x = 112.0 * mm
+        bc_x = center_x - (bc.width / 2.0)
+        c.setFillColor(colors.black)
+        c.setStrokeColor(colors.black)
+        bc.drawOn(c, bc_x, y_mm(15.6))
 
-    # Priority Badge
-    prio_hex = "#dc2626" if priority.lower() in ("urgent", "high") else "#2563eb"
-    prio_x = 39 + badge_w + 2
-    draw_box(prio_x, 8.2, 16, 4.8, fill_hex=prio_hex, stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 6.3)
-    c.drawCentredString((prio_x + 8) * mm, y_mm(11.6), priority.upper())
+        # Human-readable document number centered under barcode bars
+        c.setFillColor(colors.black)
+        c.setFont(FONT_BOLD, 7.5)
+        c.drawCentredString(center_x, y_mm(19.4), doc_no)
 
-    c.setFillColor(colors.HexColor("#475569"))
-    c.setFont(FONT_REGULAR, 7)
-    c.drawString(margin_x, y_mm(17), L["subtitle"])
+        # 3. RIGHT ZONE: DOC NO, DATE & PURE BLACK 2D QR CODE
+        app_url = str(
+            od.get("appUrl")
+            or os.getenv("APP_URL")
+            or os.getenv("NEXT_PUBLIC_APP_URL")
+            or "http://localhost:3000"
+        ).rstrip("/")
+        qr_payload = f"{app_url}?wo={doc_no}"
 
-    # Code128 Barcode in Header Center-Right
-    bc = code128.Code128(doc_no, barHeight=7.5 * mm, barWidth=0.75)
-    bc.drawOn(c, 118 * mm, y_mm(16.5))
+        qr_widget = qr.QrCodeWidget(qr_payload)
+        qr_widget.barFillColor = colors.black
+        qr_bounds = qr_widget.getBounds()
+        qr_w = qr_bounds[2] - qr_bounds[0]
+        qr_h = qr_bounds[3] - qr_bounds[1]
+        qr_pt = 13.5 * mm
+        d_qr = Drawing(qr_pt, qr_pt, transform=[qr_pt / qr_w, 0, 0, qr_pt / qr_h, 0, 0])
+        d_qr.add(qr_widget)
+        draw_box(186.5, 4.5, 14.5, 14.5, fill_hex="#ffffff", stroke_hex=None)
+        d_qr.drawOn(c, 187.0 * mm, y_mm(18.5))
 
-    # DocNo & Status Right
-    c.setFillColor(colors.HexColor("#0f172a"))
-    c.setFont(FONT_BOLD, 11.5)
-    c.drawRightString(185 * mm, y_mm(12), doc_no)
-    c.setFillColor(colors.HexColor("#475569"))
-    c.setFont(FONT_REGULAR, 6.5)
-    c.drawRightString(185 * mm, y_mm(16.5), f"{status} • {datetime.now().strftime('%Y-%m-%d')}")
+        # Right-aligned Doc No & Generation Date (No priority, no status in header)
+        c.setFillColor(colors.HexColor("#0f172a"))
+        c.setFont(FONT_BOLD, 10.5)
+        c.drawRightString(184.5 * mm, y_mm(10.5), doc_no)
 
-    # QR Code on far right (14x14 mm)
-    draw_box(187, 6.5, 14, 14, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-    qr_payload = f"WO:{doc_no}|CUST:{customer}|QTY:{net_qty}|MACH:{press_machine}"
-    qr_widget = qr.QrCodeWidget(qr_payload)
-    qr_bounds = qr_widget.getBounds()
-    qr_w = qr_bounds[2] - qr_bounds[0]
-    qr_h = qr_bounds[3] - qr_bounds[1]
-    qr_pt = 13 * mm
-    d_qr = Drawing(qr_pt, qr_pt, transform=[qr_pt / qr_w, 0, 0, qr_pt / qr_h, 0, 0])
-    d_qr.add(qr_widget)
-    d_qr.drawOn(c, 187.5 * mm, y_mm(20.0))
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont(FONT_REGULAR, 6.5)
+        c.drawRightString(184.5 * mm, y_mm(15.0), datetime.now().strftime("%Y-%m-%d"))
 
-    # Header Bottom Divider Line
-    c.setStrokeColor(colors.HexColor("#0f172a"))
-    c.setLineWidth(1.3)
-    c.line(margin_x, y_mm(22), page_w - margin_x, y_mm(22))
+        # Header Bottom Divider Line
+        c.setStrokeColor(colors.HexColor("#0f172a"))
+        c.setLineWidth(1.2)
+        c.line(margin_x, y_mm(22), page_w - margin_x, y_mm(22))
 
-    # ─── 2. CORE REQUISITES & KPI STRIP ────────────────────────────────────────
+    # ─── 1. TOP HEADER (PAGE 1) ────────────────────────────────────────────────
+    draw_unified_header()
+
+    # ─── 2. CORE REQUISITES & KPI STRIP (WITH STATUS & PRIORITY) ───────────────
     full_w_mm = 210 - 18  # 192mm
     draw_box(9, 24, full_w_mm, 13.5, fill_hex="#ffffff", stroke_hex="#cbd5e1")
 
-    req_cols = [
-        (L["customer"], trunc(customer, 28), str(od.get("orderType") or "Production Order")),
-        (L["product"], trunc(product, 28), str(od.get("itemCategory") or "Commercial Print")),
-        (L["departmentSite"], department, site),
-        (L["pressMachine"], trunc(press_machine, 28), f"{L['recipe']}: {recipe}"),
+    # Localized status & priority labels and badge formatting
+    status_label = str(L.get("status") or L.get("colStatus") or "HOLATI").upper()
+    status_val = str(od.get("status") or "Active").strip()
+
+    prio_label = str(L.get("priority") or "MUHIMLIGI").upper()
+    prio_raw = str(od.get("priority") or "Normal").strip()
+    prio_lower = prio_raw.lower()
+
+    if prio_lower in ("urgent", "shoshilinch", "срочный", "acil"):
+        prio_display = L.get("priorityUrgent", prio_raw)
+        prio_fill = "#fef2f2"
+        prio_stroke = "#fca5a5"
+        prio_text_col = "#dc2626"
+    elif prio_lower in ("high", "yuqori", "высокий", "yüksek"):
+        prio_display = L.get("priorityHigh", prio_raw)
+        prio_fill = "#fffbeb"
+        prio_stroke = "#fde68a"
+        prio_text_col = "#b45309"
+    else:
+        prio_display = L.get("priorityNormal", prio_raw)
+        prio_fill = "#eff6ff"
+        prio_stroke = "#bfdbfe"
+        prio_text_col = "#1d4ed8"
+
+    req_cols_data = [
+        (9, 38, L["customer"], trunc(customer, 24), str(od.get("orderType") or "Production Order")),
+        (47, 38, L["product"], trunc(product, 24), str(od.get("itemCategory") or "Commercial Print")),
+        (85, 30, L["departmentSite"], department, site),
+        (115, 36, L["pressMachine"], trunc(press_machine, 22), f"{L.get('recipe', 'Retsept')}: {recipe}"),
     ]
-    for i, (lbl, val, sub) in enumerate(req_cols):
-        cx = 11 + i * 47.5
+
+    for (cx, cw, lbl, val, sub) in req_cols_data:
         c.setFillColor(colors.HexColor("#64748b"))
         c.setFont(FONT_BOLD, 5.8)
-        c.drawString(cx * mm, y_mm(27.5), lbl.upper())
+        c.drawString((cx + 2) * mm, y_mm(27.5), lbl.upper())
         c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_BOLD, 7.8)
-        c.drawString(cx * mm, y_mm(31.8), val)
+        c.setFont(FONT_BOLD, 7.5)
+        c.drawString((cx + 2) * mm, y_mm(31.8), val)
         c.setFillColor(colors.HexColor("#475569"))
-        c.setFont(FONT_REGULAR, 6.3)
-        c.drawString(cx * mm, y_mm(35.5), trunc(sub, 32))
+        c.setFont(FONT_REGULAR, 6.2)
+        c.drawString((cx + 2) * mm, y_mm(35.5), trunc(sub, 26))
+
+    # Col 5: Status (151 to 176 mm, width 25mm)
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.setFont(FONT_BOLD, 5.8)
+    c.drawString(153 * mm, y_mm(27.5), status_label)
+    status_text = trunc(status_val, 16).upper()
+    s_font = 5.2 if len(status_text) > 10 else 6.2
+    draw_box(152.5, 29.2, 22.0, 4.2, fill_hex="#f1f5f9", stroke_hex="#cbd5e1", lw=0.4)
+    c.setFillColor(colors.HexColor("#0f172a"))
+    c.setFont(FONT_BOLD, s_font)
+    c.drawCentredString(163.5 * mm, y_mm(32.2), status_text)
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.setFont(FONT_REGULAR, 6.0)
+    c.drawString(153 * mm, y_mm(35.5), datetime.now().strftime("%Y-%m-%d"))
+
+    # Col 6: Priority (176 to 201 mm, width 25mm)
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.setFont(FONT_BOLD, 5.8)
+    c.drawString(178 * mm, y_mm(27.5), prio_label)
+    p_text = str(prio_display).upper()
+    p_font = 5.2 if len(p_text) > 10 else 6.2
+    draw_box(177.5, 29.2, 22.0, 4.2, fill_hex=prio_fill, stroke_hex=prio_stroke, lw=0.4)
+    c.setFillColor(colors.HexColor(prio_text_col))
+    c.setFont(FONT_BOLD, p_font)
+    c.drawCentredString(188.5 * mm, y_mm(32.2), p_text)
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.setFont(FONT_REGULAR, 6.0)
+    c.drawString(178 * mm, y_mm(35.5), trunc(deadline, 16))
+
+    # Column vertical divider lines
+    c.setStrokeColor(colors.HexColor("#e2e8f0"))
+    c.setLineWidth(0.5)
+    for div_x in [47, 85, 115, 151, 176]:
+        c.line(div_x * mm, y_mm(24), div_x * mm, y_mm(37.5))
 
     # KPI Strip
     draw_box(9, 39, full_w_mm, 11, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
@@ -433,7 +501,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     # ─── PREPARE SIZES & SKU ARTWORKS ──────────────────────────────────────────
     sizes_raw = od.get("sizes") or [{"size": "ALL", "quantity": net_qty}]
-    sku_artworks_raw = od.get("skuArtworks") or []
+    sku_artworks_raw = od.get("skuArtworks") or od.get("artworks") or []
 
     sku_art_map: Dict[str, Dict[str, Any]] = {}
     for a in sku_artworks_raw:
@@ -450,7 +518,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     seen_keys = set()
     for s_idx, s_item in enumerate(sizes_raw):
         s_id = str(s_item.get("id") or f"sku-{s_idx}")
-        s_str = str(s_item.get("size") or "ALL")
+        s_str = str(s_item.get("size") or s_item.get("sizeCode") or "ALL")
         s_model = str(s_item.get("model") or (s_str.split(" - ")[0] if " - " in s_str else "STD"))
         s_code = (s_str.split(" - ")[1] if " - " in s_str else s_str).strip().upper()
         s_qty = int(s_item.get("quantity") or 0)
@@ -466,16 +534,32 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         seen_keys.add(key)
         seen_keys.add(s_id)
 
-        front_src = (art.get("frontArtworkThumb") or art.get("frontArtworkUrl")) if art else None
-        back_src = (art.get("backArtworkThumb") or art.get("backArtworkUrl")) if art else None
+        # Resolve front artwork: ALWAYS prioritize real vector URL / PDF over raster thumbnail
+        front_src = art.get("frontArtworkUrl") if art else None
+        if not front_src or str(front_src).startswith("data:image"):
+            probed_f = probe_artwork_url(doc_no, s_code, "front", s_id)
+            if probed_f:
+                front_src = probed_f
+            elif art and art.get("frontArtworkThumb"):
+                front_src = art.get("frontArtworkThumb")
+            elif not front_src:
+                front_src = probe_artwork_url(doc_no, s_code, "front", s_id)
 
-        # Auto-discover uploaded files if not in payload map
-        if not front_src:
-            front_src = probe_artwork_url(doc_no, s_code, "front")
-        if not back_src:
-            back_src = probe_artwork_url(doc_no, s_code, "back")
+        # Resolve back artwork: ALWAYS prioritize real vector URL / PDF over raster thumbnail
+        back_src = art.get("backArtworkUrl") if art else None
+        if not back_src or str(back_src).startswith("data:image"):
+            probed_b = probe_artwork_url(doc_no, s_code, "back", s_id)
+            if probed_b:
+                back_src = probed_b
+            elif art and art.get("backArtworkThumb"):
+                back_src = art.get("backArtworkThumb")
+            elif not back_src:
+                back_src = probe_artwork_url(doc_no, s_code, "back", s_id)
 
-        has_art = bool(front_src or back_src)
+        front_raw = get_raw_artwork(front_src) if front_src else None
+        back_raw = get_raw_artwork(back_src) if back_src else None
+
+        has_art = bool(front_raw or back_raw)
         sku_cards_data.append({
             "id": s_id,
             "model": s_model,
@@ -484,6 +568,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
             "share": pct,
             "frontSrc": front_src,
             "backSrc": back_src,
+            "frontRaw": front_raw,
+            "backRaw": back_raw,
             "frontName": art.get("frontArtworkName") if art else (front_src.split("/")[-1] if front_src else None),
             "backName": art.get("backArtworkName") if art else (back_src.split("/")[-1] if back_src else None),
             "hasArtwork": has_art,
@@ -497,25 +583,37 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         a_model = str(a.get("model") or "STD").strip()
         key = f"{a_model}___{a_code}"
         if key not in seen_keys and a_id not in seen_keys:
+            f_src = a.get("frontArtworkUrl")
+            if not f_src or str(f_src).startswith("data:image"):
+                probed_f = probe_artwork_url(doc_no, a_code, "front", a_id)
+                f_src = probed_f if probed_f else a.get("frontArtworkThumb")
+
+            b_src = a.get("backArtworkUrl")
+            if not b_src or str(b_src).startswith("data:image"):
+                probed_b = probe_artwork_url(doc_no, a_code, "back", a_id)
+                b_src = probed_b if probed_b else a.get("backArtworkThumb")
+
+            f_raw = get_raw_artwork(f_src) if f_src else None
+            b_raw = get_raw_artwork(b_src) if b_src else None
             sku_cards_data.append({
                 "id": a_id,
                 "model": a_model,
                 "sizeCode": a_code,
                 "quantity": 0,
                 "share": 0,
-                "frontSrc": a.get("frontArtworkThumb") or a.get("frontArtworkUrl"),
-                "backSrc": a.get("backArtworkThumb") or a.get("backArtworkUrl"),
+                "frontSrc": f_src,
+                "backSrc": b_src,
+                "frontRaw": f_raw,
+                "backRaw": b_raw,
                 "frontName": a.get("frontArtworkName"),
                 "backName": a.get("backArtworkName"),
-                "hasArtwork": bool(a.get("frontArtworkThumb") or a.get("frontArtworkUrl") or a.get("backArtworkThumb") or a.get("backArtworkUrl")),
+                "hasArtwork": bool(f_raw or b_raw),
             })
             seen_keys.add(key)
 
     items_with_art = [c_item for c_item in sku_cards_data if c_item["hasArtwork"]]
-
-    cards_per_page = 6
-    art_pages_count = (len(items_with_art) + cards_per_page - 1) // cards_per_page if items_with_art else 0
-    total_pages = 1 + art_pages_count
+    total_pages = 1
+    vector_overlays: List[Dict[str, Any]] = []
 
     # ─── 3. PHYSICAL GEOMETRY & 2D SCHEMATIC + INKS & COLORS ───────────────────
     sec3_top = 52
@@ -524,7 +622,6 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     right_w = full_w_mm - left_w - 2  # 86mm
     right_x = 9 + left_w + 2
 
-    # Left Panel: Physical Specs & 2D Cut Schematic
     draw_box(9, sec3_top, left_w, sec3_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
     panel3_badge = (
         f"{width:g}×{height:g} {dim_unit} • {len(items_with_art)} SKU ART"
@@ -533,101 +630,146 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     )
     draw_panel_header(9.8, sec3_top + 0.8, left_w - 1.6, L["physicalSpecs"], panel3_badge)
 
-    # Drill Hole parameters
     hole_size = float(od.get("holeSize") if od.get("holeSize") is not None else (4 if od.get("itemCategory") == "Hangtag" else 0))
     hole_pos = str(od.get("holePosition") or ("top-center" if od.get("itemCategory") == "Hangtag" else "none"))
     hole_offset = float(od.get("holeOffset") if od.get("holeOffset") is not None else 6)
 
-    # Check for Real Artwork (Front & Back) — Fallback to primary SKU artwork if global is empty
     primary_sku_art = items_with_art[0] if items_with_art else None
-    front_src = od.get("artworkFront") or (primary_sku_art.get("frontSrc") if primary_sku_art else None)
-    back_src = od.get("artworkBack") or (primary_sku_art.get("backSrc") if primary_sku_art else None)
-    art_front = load_artwork_source(front_src)
-    art_back = load_artwork_source(back_src)
+    front_raw_p1 = (primary_sku_art.get("frontRaw") if primary_sku_art else None) or get_raw_artwork(od.get("artworkFront"))
+    back_raw_p1 = (primary_sku_art.get("backRaw") if primary_sku_art else None) or get_raw_artwork(od.get("artworkBack"))
 
     sch_x, sch_top = 11.0, sec3_top + 8.0
 
-    if art_front or art_back:
-        # ── FRONT & BACK SIDE-BY-SIDE PROOF BOX ──
+    if front_raw_p1 or back_raw_p1:
         proof_w = 48.0
         proof_h = 36.0
         draw_box(sch_x, sch_top, proof_w, proof_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
 
-        # Proportional Aspect Ratio Calculation
-        slot_max_w = 20.0
-        slot_max_h = 24.0
+        is_p1_twosided = bool(front_raw_p1 and back_raw_p1)
         aspect = width / max(1.0, height)
-        if aspect >= slot_max_w / slot_max_h:
-            card_w = slot_max_w
-            card_h = max(6.0, slot_max_w / aspect)
+
+        if not is_p1_twosided:
+            # 1-Sided Proof: Expanded single card for maximum clarity
+            slot_max_w = 40.0
+            slot_max_h = 24.0
+            if aspect >= slot_max_w / slot_max_h:
+                card_w = slot_max_w
+                card_h = max(6.0, slot_max_w / aspect)
+            else:
+                card_h = slot_max_h
+                card_w = max(6.0, slot_max_h * aspect)
+
+            card1_x = sch_x + (proof_w - card_w) / 2
+            card1_top = sch_top + 2.5 + (slot_max_h - card_h) / 2
+
+            if front_raw_p1 and front_raw_p1["kind"] == "pdf":
+                vector_overlays.append({
+                    "page_idx": 0,
+                    "x_mm": card1_x,
+                    "y_mm": card1_top,
+                    "w_mm": card_w,
+                    "h_mm": card_h,
+                    "pdf_bytes": front_raw_p1["bytes"],
+                    "draw_contour": True,
+                    "draw_bleed_box": True,
+                    "bleed_mm": bleed,
+                    "hole_size": hole_size,
+                    "hole_pos": hole_pos,
+                })
+            elif front_raw_p1:
+                draw_raster_or_svg(c, front_raw_p1, card1_x, card1_top, card_w, card_h, y_mm)
+                c.setStrokeColor(colors.HexColor("#10b981"))
+                c.setLineWidth(0.6)
+                c.rect(card1_x * mm, y_mm(card1_top + card_h), card_w * mm, card_h * mm, fill=0, stroke=1)
+            else:
+                draw_box(card1_x, card1_top, card_w, card_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
+
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(FONT_BOLD, 5.0)
+            front_caption = f"OLDI ({primary_sku_art['sizeCode']})" if primary_sku_art and not od.get("artworkFront") else "OLD / FRONT"
+            c.drawCentredString((sch_x + proof_w / 2) * mm, y_mm(sch_top + 29.5), front_caption)
         else:
-            card_h = slot_max_h
-            card_w = max(6.0, slot_max_h * aspect)
+            # 2-Sided Proof: Side-by-side front and back
+            slot_max_w = 20.0
+            slot_max_h = 24.0
+            if aspect >= slot_max_w / slot_max_h:
+                card_w = slot_max_w
+                card_h = max(6.0, slot_max_w / aspect)
+            else:
+                card_h = slot_max_h
+                card_w = max(6.0, slot_max_h * aspect)
 
-        # Slot 1: Front Side
-        slot1_x = sch_x + 2.5
-        card1_x = slot1_x + (slot_max_w - card_w) / 2
-        card1_top = sch_top + 2.5 + (slot_max_h - card_h) / 2
+            slot1_x = sch_x + 2.5
+            card1_x = slot1_x + (slot_max_w - card_w) / 2
+            card1_top = sch_top + 2.5 + (slot_max_h - card_h) / 2
 
-        if art_front:
-            draw_artwork_item(c, art_front, card1_x, card1_top, card_w, card_h, y_mm)
-        else:
-            draw_box(card1_x, card1_top, card_w, card_h, fill_hex="#ffffff", stroke_hex="#e2e8f0")
+            if front_raw_p1 and front_raw_p1["kind"] == "pdf":
+                vector_overlays.append({
+                    "page_idx": 0,
+                    "x_mm": card1_x,
+                    "y_mm": card1_top,
+                    "w_mm": card_w,
+                    "h_mm": card_h,
+                    "pdf_bytes": front_raw_p1["bytes"],
+                    "draw_contour": True,
+                    "draw_bleed_box": True,
+                    "bleed_mm": bleed,
+                    "hole_size": hole_size,
+                    "hole_pos": hole_pos,
+                })
+            elif front_raw_p1:
+                draw_raster_or_svg(c, front_raw_p1, card1_x, card1_top, card_w, card_h, y_mm)
+                c.setStrokeColor(colors.HexColor("#10b981"))
+                c.setLineWidth(0.6)
+                c.rect(card1_x * mm, y_mm(card1_top + card_h), card_w * mm, card_h * mm, fill=0, stroke=1)
 
-        # Emerald cut contour outline
-        c.setStrokeColor(colors.HexColor("#10b981"))
-        c.setLineWidth(0.6)
-        c.rect(card1_x * mm, y_mm(card1_top + card_h), card_w * mm, card_h * mm, fill=0, stroke=1)
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(FONT_BOLD, 5.0)
+            front_caption = f"OLDI ({primary_sku_art['sizeCode']})" if primary_sku_art and not od.get("artworkFront") else "OLD / FRONT"
+            c.drawCentredString((slot1_x + slot_max_w / 2) * mm, y_mm(sch_top + 29.5), front_caption)
 
-        # Punch hole guide
-        if hole_size > 0 and hole_pos != "none":
-            c.setStrokeColor(colors.HexColor("#ef4444"))
-            c.setFillColor(colors.white)
-            c.setLineWidth(0.6)
-            c.circle((card1_x + card_w / 2) * mm, y_mm(card1_top + 2.0), 0.9 * mm, fill=1, stroke=1)
+            # Slot 2: Back Side
+            slot2_x = sch_x + 25.0
+            card2_x = slot2_x + (slot_max_w - card_w) / 2
+            card2_top = card1_top
 
-        c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_BOLD, 5.0)
-        front_caption = f"OLDI ({primary_sku_art['sizeCode']})" if primary_sku_art and not od.get("artworkFront") else "OLD / FRONT"
-        c.drawCentredString((slot1_x + slot_max_w / 2) * mm, y_mm(sch_top + 29.5), front_caption)
+            if back_raw_p1 and back_raw_p1["kind"] == "pdf":
+                vector_overlays.append({
+                    "page_idx": 0,
+                    "x_mm": card2_x,
+                    "y_mm": card2_top,
+                    "w_mm": card_w,
+                    "h_mm": card_h,
+                    "pdf_bytes": back_raw_p1["bytes"],
+                    "draw_contour": True,
+                    "draw_bleed_box": True,
+                    "bleed_mm": bleed,
+                    "hole_size": hole_size,
+                    "hole_pos": hole_pos,
+                })
+            elif back_raw_p1:
+                draw_raster_or_svg(c, back_raw_p1, card2_x, card2_top, card_w, card_h, y_mm)
+                c.setStrokeColor(colors.HexColor("#10b981"))
+                c.setLineWidth(0.6)
+                c.rect(card2_x * mm, y_mm(card2_top + card_h), card_w * mm, card_h * mm, fill=0, stroke=1)
+            else:
+                draw_box(card2_x, card2_top, card_w, card_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
+                c.setFillColor(colors.HexColor("#94a3b8"))
+                c.setFont(FONT_REGULAR, 4.2)
+                c.drawCentredString((card2_x + card_w / 2) * mm, y_mm(card2_top + card_h / 2 + 1.0), "1-SIDED (WHITE)")
 
-        # Slot 2: Back Side
-        slot2_x = sch_x + 25.0
-        card2_x = slot2_x + (slot_max_w - card_w) / 2
-        card2_top = card1_top
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(FONT_BOLD, 5.0)
+            back_caption = f"ORQA ({primary_sku_art['sizeCode']})" if primary_sku_art and not od.get("artworkBack") else "ORQA / BACK"
+            c.drawCentredString((slot2_x + slot_max_w / 2) * mm, y_mm(sch_top + 29.5), back_caption)
 
-        if art_back:
-            draw_artwork_item(c, art_back, card2_x, card2_top, card_w, card_h, y_mm)
-            c.setStrokeColor(colors.HexColor("#10b981"))
-            c.setLineWidth(0.6)
-            c.rect(card2_x * mm, y_mm(card2_top + card_h), card_w * mm, card_h * mm, fill=0, stroke=1)
-        else:
-            # White 1-sided back placeholder
-            draw_box(card2_x, card2_top, card_w, card_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-            c.setFillColor(colors.HexColor("#94a3b8"))
-            c.setFont(FONT_REGULAR, 4.2)
-            c.drawCentredString((card2_x + card_w / 2) * mm, y_mm(card2_top + card_h / 2 + 1.0), "1-SIDED (WHITE)")
-
-        # Punch hole on back
-        if hole_size > 0 and hole_pos != "none":
-            c.setStrokeColor(colors.HexColor("#ef4444"))
-            c.setFillColor(colors.white)
-            c.setLineWidth(0.6)
-            c.circle((card2_x + card_w / 2) * mm, y_mm(card2_top + 2.0), 0.9 * mm, fill=1, stroke=1)
-
-        c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_BOLD, 5.0)
-        back_caption = f"ORQA ({primary_sku_art['sizeCode']})" if primary_sku_art and not od.get("artworkBack") else "ORQA / BACK"
-        c.drawCentredString((slot2_x + slot_max_w / 2) * mm, y_mm(sch_top + 29.5), back_caption)
-
-        # Physical dimension tag
+        # Dimension annotation tag
         c.setFillColor(colors.HexColor("#475569"))
         c.setFont(FONT_BOLD, 5.2)
         c.drawCentredString((sch_x + proof_w / 2) * mm, y_mm(sch_top + proof_h - 2.0), f"{width:g} × {height:g} {dim_unit} (+{bleed:g}{dim_unit})")
-
         text_start_x = 61.0
     else:
-        # Fallback 2D Schematic Box (30mm x 35mm)
+        # Fallback CAD Schematic Box
         sch_w, sch_h = 30.0, 35.0
         draw_box(sch_x, sch_top, sch_w, sch_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
 
@@ -691,11 +833,11 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     for idx, (k_lbl, k_val) in enumerate(phys_rows):
         ry = sec3_top + 11.5 + idx * 5.6
         c.setFillColor(colors.HexColor("#475569"))
-        c.setFont(FONT_REGULAR, 6.2)
-        c.drawString(text_start_x * mm, y_mm(ry), f"{k_lbl}:")
+        c.setFont(FONT_REGULAR, 5.8)
+        c.drawString(text_start_x * mm, y_mm(ry), f"{trunc(k_lbl, 16)}:")
         c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_BOLD, 6.4)
-        c.drawRightString((9 + left_w - 2.5) * mm, y_mm(ry), k_val)
+        c.setFont(FONT_BOLD, 6.0)
+        c.drawRightString((9 + left_w - 2.5) * mm, y_mm(ry), trunc(k_val, 26))
         c.setStrokeColor(colors.HexColor("#f1f5f9"))
         c.setLineWidth(0.3)
         c.line(text_start_x * mm, y_mm(ry + 1.5), (9 + left_w - 2.5) * mm, y_mm(ry + 1.5))
@@ -745,7 +887,6 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.setFont(FONT_REGULAR, 6.5)
         c.drawString((right_x + 2.5) * mm, y_mm(sec3_top + 28), "—")
 
-    # Conditional Flexo or Kashirovka summary at bottom of Right Panel
     kash_mode = str(od.get("kashirovkaMode") or "none")
     if department == "Flexo":
         c.setFillColor(colors.HexColor("#1d4ed8"))
@@ -814,7 +955,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     for idx, s_item in enumerate(sizes_raw[:6]):
         ry = th_y + 4.8 + idx * 5.0
-        s_str = str(s_item.get("size") or "ALL")
+        s_str = str(s_item.get("size") or s_item.get("sizeCode") or "ALL")
         s_model = str(s_item.get("model") or (s_str.split(" - ")[0] if " - " in s_str else "STD"))
         s_code = s_str.split(" - ")[1] if " - " in s_str else s_str
         s_qty = int(s_item.get("quantity") or 0)
@@ -863,54 +1004,10 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.line((bom_x + 1) * mm, y_mm(ry + 4.9), (bom_x + bom_w - 1) * mm, y_mm(ry + 4.9))
 
     # ─── 6. TECHNOLOGICAL MANUFACTURING ROUTE & SHIFT NOTES ───────────────────
-    sec6_top = sec5_top + sec5_h + 2.5
+    sec6_top = sec5_top + sec5_h + 2.0
     ops_list = req.operations or []
-    ops_count = max(len(ops_list[:7]), 1)
-    sec6_h = 26 + ops_count * 5.2
-
-    draw_box(9, sec6_top, full_w_mm, sec6_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-    draw_panel_header(9.8, sec6_top + 0.8, full_w_mm - 1.6, L["techRoute"], f"{len(ops_list)} Steps")
-
-    r_th_y = sec6_top + 7.2
-    draw_box(9.8, r_th_y, full_w_mm - 1.6, 4.8, fill_hex="#f1f5f9", stroke_hex="#cbd5e1")
-    c.setFillColor(colors.HexColor("#334155"))
-    c.setFont(FONT_BOLD, 5.8)
-    c.drawString(12 * mm, y_mm(r_th_y + 3.4), L["colStep"].upper())
-    c.drawString(28 * mm, y_mm(r_th_y + 3.4), L["colOperation"].upper())
-    c.drawString(92 * mm, y_mm(r_th_y + 3.4), L["colMachine"].upper())
-    c.drawString(142 * mm, y_mm(r_th_y + 3.4), L["colOperator"].upper())
-    c.drawRightString(176 * mm, y_mm(r_th_y + 3.4), L["colDuration"].upper())
-    c.drawCentredString(190 * mm, y_mm(r_th_y + 3.4), L["colSign"].upper())
-
-    for idx, op in enumerate(ops_list[:7]):
-        ry = r_th_y + 4.8 + idx * 5.2
-        c.setFillColor(colors.HexColor("#475569"))
-        c.setFont(FONT_BOLD, 6.5)
-        c.drawString(12 * mm, y_mm(ry + 3.6), f"#{op.stepNumber}")
-        c.setFillColor(colors.HexColor("#0f172a"))
-        c.drawString(28 * mm, y_mm(ry + 3.6), trunc(op.name, 34))
-        c.setFont(FONT_REGULAR, 6.5)
-        c.drawString(92 * mm, y_mm(ry + 3.6), trunc(op.machine, 26))
-        c.setFillColor(colors.HexColor("#475569"))
-        c.drawString(142 * mm, y_mm(ry + 3.6), trunc(op.operator, 18))
-        c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_BOLD, 6.5)
-        c.drawRightString(176 * mm, y_mm(ry + 3.6), f"{op.duration:g}h")
-        # Dashed Sign Line
-        c.setStrokeColor(colors.HexColor("#94a3b8"))
-        c.setDash(2, 1.5)
-        c.line(182 * mm, y_mm(ry + 4.0), 198 * mm, y_mm(ry + 4.0))
-        c.setDash()
-        c.setStrokeColor(colors.HexColor("#e2e8f0"))
-        c.setLineWidth(0.3)
-        c.line(10 * mm, y_mm(ry + 5.1), 200 * mm, y_mm(ry + 5.1))
-
-    # Shift Handover Notes inside Route Panel
-    notes_y = r_th_y + 6.2 + ops_count * 5.2
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont(FONT_BOLD, 5.8)
-    c.drawString(11 * mm, y_mm(notes_y), f"{L['shiftNotesTitle'].upper()}:")
-
+    ops_count = min(len(ops_list), 3) if items_with_art else min(len(ops_list), 6)
+    ops_count = max(ops_count, 1)
     notes = req.shiftNotes or [
         JobTicketShiftNote(
             author="M. Ivanova (Press Lead)",
@@ -925,43 +1022,239 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
             text="Cutting rule aligned with 0.4mm crease channel. First sample signed off.",
         ),
     ]
-    note_w = (full_w_mm - 6) / 2
-    for n_idx, note in enumerate(notes[:2]):
-        nx = 11 + n_idx * (note_w + 2)
-        draw_box(nx, notes_y + 1.2, note_w - 1, 9.5, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
-        c.setFillColor(colors.HexColor("#334155"))
-        c.setFont(FONT_BOLD, 6.0)
-        c.drawString((nx + 2) * mm, y_mm(notes_y + 4.8), f"[{note.shift}] {note.author} ({note.time})")
-        c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_REGULAR, 5.8)
-        c.drawString((nx + 2) * mm, y_mm(notes_y + 8.8), trunc(note.text, 68))
+    notes_h = 10.0 if notes else 0.0
+    sec6_h = 11.5 + ops_count * 4.6 + notes_h
 
-    # ─── 7. 4-PARTY SHOP-FLOOR SIGN-OFF STAMPS ────────────────────────────────
-    sign_top = min(sec6_top + sec6_h + 3, 263)
-    signs = [
-        (L["signPrepress"], L["signPrepressSub"]),
-        (L["signPress"], L["signPressSub"]),
-        (L["signFinish"], L["signFinishSub"]),
-        (L["signQc"], L["signQcSub"]),
-    ]
-    sign_w = (full_w_mm - 6) / 4
-    for i, (s_title, s_sub) in enumerate(signs):
-        sx = 9 + i * (sign_w + 2)
-        draw_box(sx, sign_top, sign_w, 20, fill_hex="#f8fafc", stroke_hex="#94a3b8")
+    draw_box(9, sec6_top, full_w_mm, sec6_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
+    draw_panel_header(9.8, sec6_top + 0.8, full_w_mm - 1.6, L["techRoute"], f"{len(ops_list)} Steps")
+
+    r_th_y = sec6_top + 6.8
+    draw_box(9.8, r_th_y, full_w_mm - 1.6, 4.4, fill_hex="#f1f5f9", stroke_hex="#cbd5e1")
+    c.setFillColor(colors.HexColor("#334155"))
+    c.setFont(FONT_BOLD, 5.8)
+    c.drawString(12 * mm, y_mm(r_th_y + 3.1), L["colStep"].upper())
+    c.drawString(28 * mm, y_mm(r_th_y + 3.1), L["colOperation"].upper())
+    c.drawString(92 * mm, y_mm(r_th_y + 3.1), L["colMachine"].upper())
+    c.drawString(136 * mm, y_mm(r_th_y + 3.1), L["colOperator"].upper())
+    c.drawRightString(178 * mm, y_mm(r_th_y + 3.1), L["colDuration"].upper())
+    c.drawCentredString(190 * mm, y_mm(r_th_y + 3.1), L["colSign"].upper())
+
+    for idx, op in enumerate(ops_list[:ops_count]):
+        ry = r_th_y + 4.4 + idx * 4.6
+        c.setFillColor(colors.HexColor("#475569"))
+        c.setFont(FONT_BOLD, 6.2)
+        c.drawString(12 * mm, y_mm(ry + 3.2), f"#{op.stepNumber}")
         c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_BOLD, 6.3)
-        c.drawString((sx + 2) * mm, y_mm(sign_top + 4.2), trunc(s_title, 26))
-        c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont(FONT_REGULAR, 5.4)
-        c.drawString((sx + 2) * mm, y_mm(sign_top + 7.5), trunc(s_sub, 30))
-        # Dashed Signature Line
-        c.setStrokeColor(colors.HexColor("#64748b"))
+        c.drawString(28 * mm, y_mm(ry + 3.2), trunc(op.name, 34))
+        c.setFont(FONT_REGULAR, 6.2)
+        c.drawString(92 * mm, y_mm(ry + 3.2), trunc(op.machine, 26))
+        c.setFillColor(colors.HexColor("#475569"))
+        c.drawString(136 * mm, y_mm(ry + 3.2), trunc(op.operator, 18))
+        c.setFillColor(colors.HexColor("#0f172a"))
+        c.setFont(FONT_BOLD, 6.2)
+        c.drawRightString(178 * mm, y_mm(ry + 3.2), f"{op.duration:g}h")
+        # Dashed Sign Line
+        c.setStrokeColor(colors.HexColor("#94a3b8"))
         c.setDash(2, 1.5)
-        c.line((sx + 2) * mm, y_mm(sign_top + 14.8), (sx + sign_w - 2) * mm, y_mm(sign_top + 14.8))
+        c.line(182 * mm, y_mm(ry + 3.6), 198 * mm, y_mm(ry + 3.6))
         c.setDash()
-        c.setFont(FONT_REGULAR, 5.4)
-        c.drawString((sx + 2) * mm, y_mm(sign_top + 18.2), L["signLabel"])
-        c.drawRightString((sx + sign_w - 12) * mm, y_mm(sign_top + 18.2), L["dateLabel"])
+        c.setStrokeColor(colors.HexColor("#e2e8f0"))
+        c.setLineWidth(0.3)
+        c.line(10 * mm, y_mm(ry + 4.5), 200 * mm, y_mm(ry + 4.5))
+
+    # Shift Handover Notes inside Route Panel
+    if notes:
+        notes_y = r_th_y + 5.4 + ops_count * 4.6
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont(FONT_BOLD, 5.5)
+        c.drawString(11 * mm, y_mm(notes_y), f"{L['shiftNotesTitle'].upper()}:")
+
+        note_w = (full_w_mm - 6) / 2
+        for n_idx, note in enumerate(notes[:2]):
+            nx = 11 + n_idx * (note_w + 2)
+            draw_box(nx, notes_y + 1.0, note_w - 1, 8.2, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
+            c.setFillColor(colors.HexColor("#334155"))
+            c.setFont(FONT_BOLD, 5.6)
+            c.drawString((nx + 2) * mm, y_mm(notes_y + 3.8), f"[{note.shift}] {note.author} ({note.time})")
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(FONT_REGULAR, 5.5)
+            c.drawString((nx + 2) * mm, y_mm(notes_y + 7.2), trunc(note.text, 68))
+
+    # ─── 7. SKU ARTWORK PROOFS (ON PAGE 1 - REPLACES SIGNATURES ROW) ──────────
+    art_sec_top = sec6_top + sec6_h + 2.0
+    art_sec_bottom = 285.0
+    art_sec_h = max(38.0, art_sec_bottom - art_sec_top)
+
+    if items_with_art:
+        draw_box(9, art_sec_top, full_w_mm, art_sec_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
+        panel_art_title = L.get("skuArtworksTitle", "SKU ARTWORK PASPORTI (1:1 PREPRESS PROOFLAR)")
+        draw_panel_header(9.8, art_sec_top + 0.8, full_w_mm - 1.6, panel_art_title, f"{len(items_with_art)} SKU")
+
+        cards_y = art_sec_top + 6.8
+        avail_card_h = art_sec_h - 8.0
+        n_art = len(items_with_art)
+
+        # Multi-card horizontal auto-layout on Page 1
+        if n_art <= 5:
+            gap_art = 4.0
+            c_art_w = (full_w_mm - 4.0 - (n_art - 1) * gap_art) / n_art
+            c_art_w = min(c_art_w, 92.0)
+            start_art_x = 9.0 + (full_w_mm - (n_art * c_art_w + (n_art - 1) * gap_art)) / 2.0
+
+            for a_idx, card_item in enumerate(items_with_art):
+                acx = start_art_x + a_idx * (c_art_w + gap_art)
+                acy = cards_y
+
+                # Card Container
+                draw_box(acx, acy, c_art_w, avail_card_h, fill_hex="#ffffff", stroke_hex="#cbd5e1", lw=0.5)
+
+                # Card Top Bar (4.6mm)
+                draw_box(acx, acy, c_art_w, 4.6, fill_hex="#0f172a", stroke_hex=None)
+                c.setFillColor(colors.white)
+                c.setFont(FONT_BOLD, 6.2)
+                sku_lbl = f"{card_item['model']} • {card_item['sizeCode']}".upper()
+                c.drawString((acx + 2.0) * mm, y_mm(acy + 3.3), trunc(sku_lbl, 20))
+
+                qty_str = f"{card_item['quantity']:,} {unit}" if card_item['quantity'] > 0 else "NAMUNA"
+                c.setFillColor(colors.HexColor("#93c5fd"))
+                c.setFont(FONT_BOLD, 5.8)
+                c.drawRightString((acx + c_art_w - 2.0) * mm, y_mm(acy + 3.3), qty_str)
+
+                # Artwork Slot
+                slot_h = avail_card_h - 11.5
+                slot_w = c_art_w - 4.0
+                aspect = width / max(1.0, height)
+
+                f_raw = card_item.get("frontRaw")
+                b_raw = card_item.get("backRaw")
+                is_two_sided = bool(f_raw and b_raw)
+
+                if not is_two_sided:
+                    if aspect >= slot_w / slot_h:
+                        art_w = slot_w
+                        art_h = max(8.0, slot_w / aspect)
+                    else:
+                        art_h = slot_h
+                        art_w = max(8.0, slot_h * aspect)
+
+                    art_x = acx + 2.0 + (slot_w - art_w) / 2.0
+                    art_y = acy + 5.2 + (slot_h - art_h) / 2.0
+
+                    if f_raw and f_raw["kind"] == "pdf":
+                        vector_overlays.append({
+                            "page_idx": 0,  # Page 1
+                            "x_mm": art_x,
+                            "y_mm": art_y,
+                            "w_mm": art_w,
+                            "h_mm": art_h,
+                            "pdf_bytes": f_raw["bytes"],
+                            "draw_contour": True,
+                            "draw_bleed_box": True,
+                            "bleed_mm": bleed,
+                            "hole_size": hole_size,
+                            "hole_pos": hole_pos,
+                        })
+                    elif f_raw:
+                        draw_raster_or_svg(c, f_raw, art_x, art_y, art_w, art_h, y_mm)
+                        c.setStrokeColor(colors.HexColor("#10b981"))
+                        c.setLineWidth(0.6)
+                        c.rect(art_x * mm, y_mm(art_y + art_h), art_w * mm, art_h * mm, fill=0, stroke=1)
+                else:
+                    half_w = (slot_w - 2.0) / 2.0
+                    if aspect >= half_w / slot_h:
+                        art_w = half_w
+                        art_h = max(8.0, half_w / aspect)
+                    else:
+                        art_h = slot_h
+                        art_w = max(8.0, slot_h * aspect)
+
+                    art_x1 = acx + 1.0 + (half_w - art_w) / 2.0
+                    art_y = acy + 5.2 + (slot_h - art_h) / 2.0
+
+                    if f_raw and f_raw["kind"] == "pdf":
+                        vector_overlays.append({
+                            "page_idx": 0,
+                            "x_mm": art_x1,
+                            "y_mm": art_y,
+                            "w_mm": art_w,
+                            "h_mm": art_h,
+                            "pdf_bytes": f_raw["bytes"],
+                            "draw_contour": True,
+                        })
+                    elif f_raw:
+                        draw_raster_or_svg(c, f_raw, art_x1, art_y, art_w, art_h, y_mm)
+
+                    art_x2 = acx + 1.0 + half_w + 2.0 + (half_w - art_w) / 2.0
+                    if b_raw and b_raw["kind"] == "pdf":
+                        vector_overlays.append({
+                            "page_idx": 0,
+                            "x_mm": art_x2,
+                            "y_mm": art_y,
+                            "w_mm": art_w,
+                            "h_mm": art_h,
+                            "pdf_bytes": b_raw["bytes"],
+                            "draw_contour": True,
+                        })
+                    elif b_raw:
+                        draw_raster_or_svg(c, b_raw, art_x2, art_y, art_w, art_h, y_mm)
+
+                # Card Bottom Status Pill
+                pill_top = acy + avail_card_h - 4.5
+                draw_box(acx + 1.0, pill_top, c_art_w - 2.0, 3.8, fill_hex="#f8fafc", stroke_hex="#e2e8f0", lw=0.4)
+                c.setFillColor(colors.HexColor("#047857"))
+                c.setFont(FONT_BOLD, 5.0)
+                c.drawCentredString((acx + c_art_w / 2.0) * mm, y_mm(pill_top + 2.8), "1:1 PREPRESS OK")
+        else:
+            # 2-Row layout for 6+ items
+            cols_art = math.ceil(n_art / 2)
+            gap_art = 4.0
+            c_art_w = (full_w_mm - 4.0 - (cols_art - 1) * gap_art) / cols_art
+            c_art_h = (avail_card_h - gap_art) / 2.0
+
+            for a_idx, card_item in enumerate(items_with_art):
+                col_i = a_idx % cols_art
+                row_i = a_idx // cols_art
+                acx = 11.0 + col_i * (c_art_w + gap_art)
+                acy = cards_y + row_i * (c_art_h + gap_art)
+
+                draw_box(acx, acy, c_art_w, c_art_h, fill_hex="#ffffff", stroke_hex="#cbd5e1", lw=0.5)
+                draw_box(acx, acy, c_art_w, 4.0, fill_hex="#0f172a", stroke_hex=None)
+                c.setFillColor(colors.white)
+                c.setFont(FONT_BOLD, 5.8)
+                c.drawString((acx + 2.0) * mm, y_mm(acy + 2.8), trunc(f"{card_item['sizeCode']}", 14))
+
+                f_raw = card_item.get("frontRaw")
+                slot_h = c_art_h - 8.5
+                slot_w = c_art_w - 4.0
+                aspect = width / max(1.0, height)
+                if aspect >= slot_w / slot_h:
+                    art_w = slot_w
+                    art_h = max(6.0, slot_w / aspect)
+                else:
+                    art_h = slot_h
+                    art_w = max(6.0, slot_h * aspect)
+
+                art_x = acx + 2.0 + (slot_w - art_w) / 2.0
+                art_y = acy + 4.5 + (slot_h - art_h) / 2.0
+
+                if f_raw and f_raw["kind"] == "pdf":
+                    vector_overlays.append({
+                        "page_idx": 0,
+                        "x_mm": art_x,
+                        "y_mm": art_y,
+                        "w_mm": art_w,
+                        "h_mm": art_h,
+                        "pdf_bytes": f_raw["bytes"],
+                        "draw_contour": True,
+                    })
+                elif f_raw:
+                    draw_raster_or_svg(c, f_raw, art_x, art_y, art_w, art_h, y_mm)
+    else:
+        draw_box(9, art_sec_top, full_w_mm, art_sec_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
+        draw_panel_header(9.8, art_sec_top + 0.8, full_w_mm - 1.6, "SKU ARTWORK PROOFLAR", "0 SKU")
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont(FONT_REGULAR, 7.5)
+        c.drawCentredString((9 + full_w_mm / 2.0) * mm, y_mm(art_sec_top + art_sec_h / 2.0), "SKU o'lchamlari bo'yicha alohida artwork fayllar biriktirilmagan")
 
     # ─── 8. FOOTER ─────────────────────────────────────────────────────────────
     c.setStrokeColor(colors.HexColor("#cbd5e1"))
@@ -969,190 +1262,67 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.line(margin_x, y_mm(287), page_w - margin_x, y_mm(287))
     c.setFillColor(colors.HexColor("#64748b"))
     c.setFont(FONT_REGULAR, 6.0)
-    c.drawString(margin_x, y_mm(291), f"{L['footerSystem']} • DOC: {doc_no}")
+    c.drawString(margin_x, y_mm(291), f"{L['footerSystem']} • DOC: {doc_no} • SKU ARTWORK PROOFLAR")
     c.drawRightString(page_w - margin_x, y_mm(291), f"{L['printDate']}: {datetime.now().strftime('%Y-%m-%d %H:%M')} • Page 1 / {total_pages}")
 
     c.showPage()
 
-    # ─── 9. PAGE 2+: SKU ARTWORK SPECIFICATION SHEETS ────────────────────────
-    if items_with_art:
-        cards_per_page = 6
-        for page_idx in range(art_pages_count):
-            if page_idx > 0:
-                c.showPage()
-            current_page = 2 + page_idx
-
-            # Header for Artwork Page
-            c.setFillColor(colors.HexColor("#0f172a"))
-            c.setFont(FONT_BOLD, 12)
-            c.drawString(margin_x, y_mm(12), "PRINTGOO ERP")
-
-            art_badge = "SKU ARTWORK PASPORTI (1:1 PROOF)"
-            badge_w = max(42, len(art_badge) * 1.65)
-            draw_box(39, 8.2, badge_w, 4.8, fill_hex="#0f172a", stroke_hex=None)
-            c.setFillColor(colors.white)
-            c.setFont(FONT_BOLD, 6.2)
-            c.drawCentredString((39 + badge_w / 2) * mm, y_mm(11.6), art_badge)
-
-            # DocNo Right
-            c.setFillColor(colors.HexColor("#0f172a"))
-            c.setFont(FONT_BOLD, 11)
-            c.drawRightString(185 * mm, y_mm(12), doc_no)
-            c.setFillColor(colors.HexColor("#475569"))
-            c.setFont(FONT_REGULAR, 6.5)
-            c.drawRightString(185 * mm, y_mm(16.5), f"Jami {len(items_with_art)} ta razmer • {datetime.now().strftime('%Y-%m-%d')}")
-
-            c.setFillColor(colors.HexColor("#475569"))
-            c.setFont(FONT_REGULAR, 7)
-            c.drawString(margin_x, y_mm(17), f"Buyurtmachi: {trunc(customer, 24)}  •  Mahsulot: {trunc(product, 28)}  •  Kesim: {width:g}×{height:g} {dim_unit} (+{bleed:g}{dim_unit} bleed)")
-
-            c.setStrokeColor(colors.HexColor("#0f172a"))
-            c.setLineWidth(1.3)
-            c.line(margin_x, y_mm(21), page_w - margin_x, y_mm(21))
-
-            chunk = items_with_art[page_idx * cards_per_page : (page_idx + 1) * cards_per_page]
-            n_chunk = len(chunk)
-
-            if n_chunk <= 2:
-                card_h = 115.0
-                max_dw = 38.0
-                max_dh = 80.0
-            elif n_chunk <= 4:
-                card_h = 106.0
-                max_dw = 38.0
-                max_dh = 72.0
-            else:
-                card_h = 78.0
-                max_dw = 38.0
-                max_dh = 46.0
-
-            col_w = 93.0
-            gap_x = 6.0
-            gap_y = 6.0
-            start_y = 25.0
-
-            for c_i, card_item in enumerate(chunk):
-                col_i = c_i % 2
-                row_i = c_i // 2
-                cx = 9.0 + col_i * (col_w + gap_x)
-                cy = start_y + row_i * (card_h + gap_y)
-
-                draw_box(cx, cy, col_w, card_h, fill_hex="#ffffff", stroke_hex="#cbd5e1", lw=0.6)
-
-                # Card Top Bar (5.8mm)
-                draw_box(cx, cy, col_w, 5.8, fill_hex="#0f172a", stroke_hex=None)
-                c.setFillColor(colors.white)
-                c.setFont(FONT_BOLD, 7.0)
-                sku_title = f"{card_item['model']} • {card_item['sizeCode']}".upper()
-                c.drawString((cx + 2.5) * mm, y_mm(cy + 4.1), sku_title)
-
-                c.setFillColor(colors.HexColor("#93c5fd"))
-                c.setFont(FONT_BOLD, 6.2)
-                qty_str = f"{card_item['quantity']:,} {unit} ({card_item['share']}%)" if card_item['quantity'] > 0 else "NAMUNA"
-                c.drawRightString((cx + col_w - 2.5) * mm, y_mm(cy + 4.1), qty_str)
-
-                aspect = width / max(1.0, height)
-                if aspect >= max_dw / max_dh:
-                    art_w = max_dw
-                    art_h = max(8.0, max_dw / aspect)
-                else:
-                    art_h = max_dh
-                    art_w = max(8.0, max_dh * aspect)
-
-                slot_w = (col_w - 9.0) / 2
-                slot_h = card_h - 13.0
-
-                # ── FRONT SLOT ──
-                slot1_x = cx + 3.0
-                art1_x = slot1_x + (slot_w - art_w) / 2
-                art1_y = cy + 7.5 + (max_dh - art_h) / 2
-
-                loaded_f = load_artwork_source(card_item.get("frontSrc"))
-                if loaded_f:
-                    draw_artwork_item(c, loaded_f, art1_x, art1_y, art_w, art_h, y_mm)
-                else:
-                    draw_box(art1_x, art1_y, art_w, art_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
-                    c.setFillColor(colors.HexColor("#94a3b8"))
-                    c.setFont(FONT_REGULAR, 4.5)
-                    c.drawCentredString((art1_x + art_w / 2) * mm, y_mm(art1_y + art_h / 2 + 1), "YUKLANMAGAN")
-
-                c.setStrokeColor(colors.HexColor("#10b981"))
-                c.setLineWidth(0.6)
-                c.rect(art1_x * mm, y_mm(art1_y + art_h), art_w * mm, art_h * mm, fill=0, stroke=1)
-
-                if hole_size > 0 and hole_pos != "none":
-                    c.setStrokeColor(colors.HexColor("#ef4444"))
-                    c.setFillColor(colors.white)
-                    c.setLineWidth(0.6)
-                    c.circle((art1_x + art_w / 2) * mm, y_mm(art1_y + 2.0), 0.9 * mm, fill=1, stroke=1)
-
-                label_y = cy + card_h - 9.0
-                c.setFillColor(colors.HexColor("#0f172a"))
-                c.setFont(FONT_BOLD, 5.0)
-                c.drawCentredString((slot1_x + slot_w / 2) * mm, y_mm(label_y), "OLDI (FRONT)")
-                c.setFillColor(colors.HexColor("#64748b"))
-                c.setFont(FONT_REGULAR, 4.2)
-                c.drawCentredString((slot1_x + slot_w / 2) * mm, y_mm(label_y + 2.6), trunc(card_item.get("frontName") or "front.pdf", 24))
-
-                # ── BACK SLOT ──
-                slot2_x = cx + 3.0 + slot_w + 3.0
-                art2_x = slot2_x + (slot_w - art_w) / 2
-                art2_y = art1_y
-
-                loaded_b = load_artwork_source(card_item.get("backSrc"))
-                if loaded_b:
-                    draw_artwork_item(c, loaded_b, art2_x, art2_y, art_w, art_h, y_mm)
-                    c.setStrokeColor(colors.HexColor("#10b981"))
-                    c.setLineWidth(0.6)
-                    c.rect(art2_x * mm, y_mm(art2_y + art_h), art_w * mm, art_h * mm, fill=0, stroke=1)
-                    if hole_size > 0 and hole_pos != "none":
-                        c.setStrokeColor(colors.HexColor("#ef4444"))
-                        c.setFillColor(colors.white)
-                        c.setLineWidth(0.6)
-                        c.circle((art2_x + art_w / 2) * mm, y_mm(art2_y + 2.0), 0.9 * mm, fill=1, stroke=1)
-                    c.setFillColor(colors.HexColor("#0f172a"))
-                    c.setFont(FONT_BOLD, 5.0)
-                    c.drawCentredString((slot2_x + slot_w / 2) * mm, y_mm(label_y), "ORQA (BACK)")
-                    c.setFillColor(colors.HexColor("#64748b"))
-                    c.setFont(FONT_REGULAR, 4.2)
-                    c.drawCentredString((slot2_x + slot_w / 2) * mm, y_mm(label_y + 2.6), trunc(card_item.get("backName") or "back.pdf", 24))
-                else:
-                    draw_box(art2_x, art2_y, art_w, art_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
-                    c.setFillColor(colors.HexColor("#94a3b8"))
-                    c.setFont(FONT_REGULAR, 4.2)
-                    c.drawCentredString((art2_x + art_w / 2) * mm, y_mm(art2_y + art_h / 2 + 1), "1-TOMONLAMA (OQ)")
-                    c.setFillColor(colors.HexColor("#0f172a"))
-                    c.setFont(FONT_BOLD, 5.0)
-                    c.drawCentredString((slot2_x + slot_w / 2) * mm, y_mm(label_y), "ORQA (OQ)")
-
-                # Bottom Footer strip of card (5.5mm)
-                strip_top = cy + card_h - 5.5
-                draw_box(cx, strip_top, col_w, 5.5, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
-                c.setFillColor(colors.HexColor("#475569"))
-                c.setFont(FONT_REGULAR, 5.2)
-                c.drawString((cx + 2.5) * mm, y_mm(strip_top + 3.8), f"{width:g}×{height:g} {dim_unit} (+{bleed:g}{dim_unit}) • {od.get('cornerType') or 'Square'}")
-
-                pill_w = 26.0
-                draw_box(cx + col_w - pill_w - 2.0, strip_top + 1.1, pill_w, 3.5, fill_hex="#16a34a", stroke_hex=None)
-                c.setFillColor(colors.white)
-                c.setFont(FONT_BOLD, 4.5)
-                c.drawCentredString((cx + col_w - pill_w / 2 - 2.0) * mm, y_mm(strip_top + 3.6), "1:1 PREPRESS OK")
-
-            # Page Footer
-            c.setStrokeColor(colors.HexColor("#cbd5e1"))
-            c.setLineWidth(0.5)
-            c.line(margin_x, y_mm(287), page_w - margin_x, y_mm(287))
-            c.setFillColor(colors.HexColor("#64748b"))
-            c.setFont(FONT_REGULAR, 6.0)
-            c.drawString(margin_x, y_mm(291), f"{L['footerSystem']} • DOC: {doc_no} • SKU ARTWORK PROOFLAR")
-            c.drawRightString(page_w - margin_x, y_mm(291), f"{L['printDate']}: {datetime.now().strftime('%Y-%m-%d %H:%M')} • Page {current_page} / {total_pages}")
-
-        c.showPage()
-
     c.save()
     buf.seek(0)
+    base_pdf_bytes = buf.getvalue()
 
-    filename = f"Order_Passport_{doc_no}.pdf"
+    # ─── 10. PYMUPDF VECTOR OVERLAY & DOCUMENT METADATA ───────────────────────
+    try:
+        import pymupdf as fitz
+        pt_per_mm = 72.0 / 25.4
+        doc = fitz.open(stream=base_pdf_bytes, filetype="pdf")
+
+        if vector_overlays:
+            for vo in vector_overlays:
+                p_idx = vo["page_idx"]
+                if p_idx >= len(doc):
+                    continue
+                target_page = doc[p_idx]
+                x0 = vo["x_mm"] * pt_per_mm
+                y0 = vo["y_mm"] * pt_per_mm
+                x1 = (vo["x_mm"] + vo["w_mm"]) * pt_per_mm
+                y1 = (vo["y_mm"] + vo["h_mm"]) * pt_per_mm
+                rect = fitz.Rect(x0, y0, x1, y1)
+
+                src_doc = fitz.open(stream=vo["pdf_bytes"], filetype="pdf")
+                target_page.show_pdf_page(rect, src_doc, pno=0, keep_proportion=True)
+
+                # Outer Bleed Box (Dashed red)
+                if vo.get("draw_bleed_box") and vo.get("bleed_mm", 0) > 0:
+                    b_pt = 1.5 * pt_per_mm
+                    bleed_rect = fitz.Rect(x0 - b_pt, y0 - b_pt, x1 + b_pt, y1 + b_pt)
+                    target_page.draw_rect(bleed_rect, color=(0xef/255, 0x44/255, 0x44/255), dashes="[2 1.5]", width=0.5)
+
+                # Emerald Cut Contour (#10b981)
+                if vo.get("draw_contour"):
+                    target_page.draw_rect(rect, color=(0x10/255, 0xb9/255, 0x81/255), width=0.6)
+
+                # Punch Hole Guide
+                h_size = vo.get("hole_size", 0)
+                if h_size > 0 and vo.get("hole_pos") != "none":
+                    hx = (x0 + x1) / 2.0
+                    hy = y0 + 2.5 * pt_per_mm
+                    target_page.draw_circle(fitz.Point(hx, hy), 1.0 * pt_per_mm, color=(0xef/255, 0x44/255, 0x44/255), fill=(1, 1, 1), width=0.6)
+
+        # Ensure document metadata title is permanently set so PDF viewers display real filename instead of 'untitled'
+        meta = doc.metadata or {}
+        meta["title"] = filename
+        meta["author"] = "PrintGoo ERP"
+        meta["subject"] = f"Order Passport {doc_no}"
+        meta["creator"] = "PrintGoo Industrial Prepress Engine"
+        doc.set_metadata(meta)
+
+        final_pdf_bytes = doc.tobytes(deflate=True)
+        buf = io.BytesIO(final_pdf_bytes)
+    except Exception as e:
+        print(f"PyMuPDF vector overlay / metadata error: {e}", flush=True)
+        buf.seek(0)
+
     if req.saveToS3:
         bucket = os.getenv("S3_BUCKET_DOCS", "printgoo-docs")
         key = req.s3Key or f"job-tickets/{filename}"
@@ -1162,7 +1332,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     return StreamingResponse(
         buf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "X-Filename": filename,
+        },
     )
-
-

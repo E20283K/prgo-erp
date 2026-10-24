@@ -5,6 +5,7 @@ import { SystemUserRecord } from "../types";
 import { ROLE_TEMPLATES } from "../data";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -368,7 +369,7 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
             <Label className="text-[11px] font-medium text-foreground">
               Bog&apos;lanish Telefoni
             </Label>
-            <Input
+            <PhoneInput
               value={data.phone || ""}
               onChange={(e) => onChange({ phone: e.target.value })}
               placeholder="+998 90 123-45-67"

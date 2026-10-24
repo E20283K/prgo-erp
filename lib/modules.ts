@@ -67,6 +67,7 @@ import {
   CalendarClock,
   Clock,
   Award,
+  Server,
   // Trading icons
   Ship,
 } from "lucide-react";
@@ -253,6 +254,7 @@ export const MODULE_NAV: ModuleDef[] = [
         items: [
           { id: "attendance", label: "Timesheet (T-13)", icon: CalendarClock },
           { id: "shifts", label: "Shift Schedules", icon: Clock },
+          { id: "devices", label: "Biometric Devices", icon: Server },
         ],
       },
       {

@@ -49,7 +49,8 @@ export async function POST(req: NextRequest) {
     const contentType =
       upstreamRes.headers.get("content-type") ?? "application/octet-stream";
     const contentDisposition =
-      upstreamRes.headers.get("content-disposition") ?? "attachment";
+      upstreamRes.headers.get("content-disposition") ??
+      `inline; filename="Order_Passport_${payload?.docNo || "PRINTGOO"}.pdf"`;
 
     return new NextResponse(fileBuffer, {
       status: 200,

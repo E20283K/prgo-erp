@@ -1,8 +1,56 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
+import { cn } from "@/lib/utils";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
-import { EmployeeRecord, EmployeeHistoryItem } from "../types";
+import {
+  EmployeeRecord,
+  EmployeeHistoryItem,
+  PieceworkRecord,
+  AttendanceRecord,
+} from "../types";
+import {
+  GridCell,
+  GridCellKind,
+  GridColumn,
+  Item,
+  GridSelection,
+  CompactSelection,
+  GridColumnIcon,
+} from "@glideapps/glide-data-grid";
+import "@glideapps/glide-data-grid/dist/index.css";
+import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
+
+const DataEditor = dynamic(
+  () => import("@glideapps/glide-data-grid").then((m) => m.DataEditor),
+  { ssr: false }
+);
+
+const DEFAULT_PIECEWORK_COLUMNS: GridColumn[] = [
+  { id: "workDate", title: "Sana", width: 105, icon: GridColumnIcon.HeaderDate },
+  { id: "workOrderId", title: "Work Order №", width: 130, icon: GridColumnIcon.HeaderString },
+  { id: "machine", title: "Stanok / Uskuna", width: 145, icon: GridColumnIcon.HeaderString },
+  { id: "operationName", title: "Bajarilgan operatsiya", width: 220, icon: GridColumnIcon.HeaderString },
+  { id: "quantity", title: "Bajarilgan hajm", width: 125, icon: GridColumnIcon.HeaderNumber },
+  { id: "rate", title: "Tarif (UZS)", width: 100, icon: GridColumnIcon.HeaderNumber },
+  { id: "totalAmount", title: "Summa (UZS)", width: 140, icon: GridColumnIcon.HeaderNumber },
+  { id: "status", title: "Holati", width: 110, icon: GridColumnIcon.HeaderString },
+  { id: "approvedBy", title: "Tasdiqladi", width: 150, icon: GridColumnIcon.HeaderString },
+  { id: "notes", title: "Izoh", width: 180, icon: GridColumnIcon.HeaderString },
+];
+
+const DEFAULT_ATTENDANCE_COLUMNS: GridColumn[] = [
+  { id: "workDate", title: "Sana", width: 105, icon: GridColumnIcon.HeaderDate },
+  { id: "shiftType", title: "Smena", width: 140, icon: GridColumnIcon.HeaderString },
+  { id: "checkIn", title: "Kirish", width: 90, icon: GridColumnIcon.HeaderTime },
+  { id: "checkOut", title: "Chiqish", width: 90, icon: GridColumnIcon.HeaderTime },
+  { id: "workedHours", title: "Ish soati", width: 105, icon: GridColumnIcon.HeaderNumber },
+  { id: "delayMinutes", title: "Kechikish", width: 110, icon: GridColumnIcon.HeaderNumber },
+  { id: "status", title: "Holati", width: 110, icon: GridColumnIcon.HeaderString },
+  { id: "sourceDevice", title: "Qurilma / Manba", width: 170, icon: GridColumnIcon.HeaderString },
+  { id: "notes", title: "Izoh", width: 200, icon: GridColumnIcon.HeaderString },
+];
 import {
   DocumentHeader,
   DocumentSidebar,
@@ -12,11 +60,13 @@ import {
 } from "../../common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import {
   Select,
   SelectContent,
@@ -43,6 +93,7 @@ import {
   Loader2,
   Camera,
   Upload,
+  UploadCloud,
   Trash2,
 } from "lucide-react";
 
@@ -95,7 +146,14 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     closeTab,
     addNotification,
     departmentsList,
+    positionsList,
+    setDepartmentsList,
+    setPositionsList,
+    openTab,
+    theme,
   } = useWorkspaceStore();
+
+  const isDark = theme === "dark";
 
   const isInitialNew = useMemo(() => {
     const docId = tab.documentData?.id || tab.id;
@@ -166,6 +224,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
   const [historyList, setHistoryList] = useState<EmployeeHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [newSkillText, setNewSkillText] = useState("");
+  const [syncingBiometric, setSyncingBiometric] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Fetch full details and history from API if ID is valid UUID and not draft
@@ -193,30 +252,359 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     }
   }, [empId, isInitialNew]);
 
-  // Filter piecework and attendance for this employee
+  // Load departments and positions from database
+  useEffect(() => {
+    fetch("/api/v1/hr/departments")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+          setDepartmentsList(res.data);
+        }
+      })
+      .catch(() => {});
+
+    fetch("/api/v1/hr/positions")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+          setPositionsList(res.data);
+        }
+      })
+      .catch(() => {});
+  }, [setDepartmentsList, setPositionsList]);
+
+  // API load for employee's piecework and attendance
+  const [apiPieceworks, setApiPieceworks] = useState<PieceworkRecord[] | null>(null);
+  const [apiAttendance, setApiAttendance] = useState<AttendanceRecord[] | null>(null);
+
+  useEffect(() => {
+    const id = formData.id || empId;
+    if (id && id.length > 20 && !id.startsWith("emp-new")) {
+      fetch(`/api/v1/hr/piecework?employeeId=${id}`)
+        .then((r) => r.json())
+        .then((res) => {
+          if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+            setApiPieceworks(res.data);
+          }
+        })
+        .catch(() => {});
+
+      fetch(`/api/v1/hr/attendance?employeeId=${id}`)
+        .then((r) => r.json())
+        .then((res) => {
+          if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+            setApiAttendance(res.data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [formData.id, empId]);
+
+  // Filter piecework and attendance for this employee (with fallback to store)
   const employeePieceworks = useMemo(() => {
+    if (apiPieceworks && apiPieceworks.length > 0) return apiPieceworks;
     return (piecework || []).filter(
       (pw) =>
         pw.employeeId === formData.id ||
         (pw.badgeNumber || pw.badgeNo) === (formData.badgeNumber || formData.badgeNo)
     );
-  }, [piecework, formData]);
+  }, [apiPieceworks, piecework, formData]);
 
   const totalPieceworkEarned = useMemo(() => {
     return employeePieceworks.reduce((sum, pw) => sum + pw.totalAmount, 0);
   }, [employeePieceworks]);
 
   const employeeAttendance = useMemo(() => {
+    if (apiAttendance && apiAttendance.length > 0) return apiAttendance;
     return (attendance || []).filter(
       (att) =>
         att.employeeId === formData.id ||
         (att.badgeNumber || att.badgeNo) === (formData.badgeNumber || formData.badgeNo)
     );
-  }, [attendance, formData]);
+  }, [apiAttendance, attendance, formData]);
 
   const totalHoursWorked = useMemo(() => {
     return employeeAttendance.reduce((sum, att) => sum + att.workedHours, 0);
   }, [employeeAttendance]);
+
+  const lateCount = useMemo(
+    () => employeeAttendance.filter((a) => (a.delayMinutes || 0) > 0 || a.status === "late").length,
+    [employeeAttendance]
+  );
+
+  // Glide Data Grid states & handlers for Piecework
+  const [pwCols, setPwCols] = useState<GridColumn[]>(DEFAULT_PIECEWORK_COLUMNS);
+  const [pwSelection, setPwSelection] = useState<GridSelection>({
+    columns: CompactSelection.empty(),
+    rows: CompactSelection.empty(),
+  });
+
+  const handlePieceworkColumnResize = useCallback((col: GridColumn, newSize: number) => {
+    setPwCols((prev) => prev.map((c) => (c.id === col.id ? { ...c, width: newSize } : c)));
+  }, []);
+
+  const handlePieceworkActivated = useCallback(
+    (cell: Item) => {
+      const [, rowIndex] = cell;
+      const pw = employeePieceworks[rowIndex];
+      if (pw?.workOrderId && openTab) {
+        openTab({
+          id: pw.workOrderId,
+          type: "work-order",
+          title: `WO-${pw.workOrderId}`,
+          module: "production",
+          isUnsaved: false,
+          documentData: { id: pw.workOrderId },
+        });
+      }
+    },
+    [employeePieceworks, openTab]
+  );
+
+  const getPieceworkCellContent = useCallback(
+    (cell: Item): GridCell => {
+      const [colIndex, rowIndex] = cell;
+      const col = pwCols[colIndex];
+      const row = employeePieceworks[rowIndex];
+
+      if (!col || !col.id || !row) {
+        return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+      }
+
+      if (col.id === "workDate") {
+        const d = row.workDate || row.date || "";
+        return {
+          kind: GridCellKind.Text,
+          data: d,
+          displayData: d,
+          allowOverlay: false,
+          themeOverride: { baseFontStyle: "11px monospace" },
+        };
+      }
+
+      if (col.id === "workOrderId") {
+        return {
+          kind: GridCellKind.Text,
+          data: row.workOrderId,
+          displayData: row.workOrderId,
+          allowOverlay: false,
+          themeOverride: { textDark: "#2563eb", baseFontStyle: "bold 11px monospace" },
+        };
+      }
+
+      if (col.id === "machine") {
+        const m = row.machineCode || row.machine || "—";
+        return { kind: GridCellKind.Text, data: m, displayData: m, allowOverlay: false };
+      }
+
+      if (col.id === "operationName") {
+        const op = row.operationName || row.operation || "—";
+        return { kind: GridCellKind.Text, data: op, displayData: op, allowOverlay: false };
+      }
+
+      if (col.id === "quantity") {
+        const q = row.completedQuantity ?? row.quantity ?? 0;
+        const u = row.unit || "dona";
+        return {
+          kind: GridCellKind.Text,
+          data: String(q),
+          displayData: `${q.toLocaleString("uz-UZ")} ${u}`,
+          allowOverlay: false,
+          themeOverride: { baseFontStyle: "11px monospace" },
+        };
+      }
+
+      if (col.id === "rate") {
+        const r = row.pieceRate ?? row.rate ?? 0;
+        return {
+          kind: GridCellKind.Text,
+          data: String(r),
+          displayData: r.toLocaleString("uz-UZ"),
+          allowOverlay: false,
+          themeOverride: { baseFontStyle: "11px monospace" },
+        };
+      }
+
+      if (col.id === "totalAmount") {
+        return {
+          kind: GridCellKind.Text,
+          data: String(row.totalAmount),
+          displayData: `${(row.totalAmount || 0).toLocaleString("uz-UZ")} UZS`,
+          allowOverlay: false,
+          themeOverride: { textDark: "#059669", baseFontStyle: "bold 11px monospace" },
+        };
+      }
+
+      if (col.id === "status") {
+        const raw = String(row.status || "").toLowerCase();
+        let label = String(row.status || "—");
+        let color = "#2563eb";
+        if (raw === "approved") {
+          label = "Tasdiqlangan";
+          color = "#059669";
+        } else if (raw === "verified") {
+          label = "Tekshirilgan";
+          color = "#0284c7";
+        } else if (raw === "paid") {
+          label = "To'langan";
+          color = "#16a34a";
+        } else if (raw === "draft") {
+          label = "Qoralama";
+          color = "#6b7280";
+        }
+        return {
+          kind: GridCellKind.Text,
+          data: String(row.status || ""),
+          displayData: label,
+          allowOverlay: false,
+          themeOverride: {
+            textDark: color,
+            baseFontStyle: "bold 11px sans-serif",
+          },
+        };
+      }
+
+      if (col.id === "approvedBy") {
+        const a = row.approvedBy || "—";
+        return { kind: GridCellKind.Text, data: a, displayData: a, allowOverlay: false };
+      }
+
+      if (col.id === "notes") {
+        const n = row.notes || "—";
+        return { kind: GridCellKind.Text, data: n, displayData: n, allowOverlay: false };
+      }
+
+      return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+    },
+    [pwCols, employeePieceworks]
+  );
+
+  // Glide Data Grid states & handlers for Attendance
+  const [attCols, setAttCols] = useState<GridColumn[]>(DEFAULT_ATTENDANCE_COLUMNS);
+  const [attSelection, setAttSelection] = useState<GridSelection>({
+    columns: CompactSelection.empty(),
+    rows: CompactSelection.empty(),
+  });
+
+  const handleAttendanceColumnResize = useCallback((col: GridColumn, newSize: number) => {
+    setAttCols((prev) => prev.map((c) => (c.id === col.id ? { ...c, width: newSize } : c)));
+  }, []);
+
+  const getAttendanceCellContent = useCallback(
+    (cell: Item): GridCell => {
+      const [colIndex, rowIndex] = cell;
+      const col = attCols[colIndex];
+      const row = employeeAttendance[rowIndex];
+
+      if (!col || !col.id || !row) {
+        return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+      }
+
+      if (col.id === "workDate") {
+        const d = row.workDate || row.date || "";
+        return {
+          kind: GridCellKind.Text,
+          data: d,
+          displayData: d,
+          allowOverlay: false,
+          themeOverride: { baseFontStyle: "11px monospace" },
+        };
+      }
+
+      if (col.id === "shiftType") {
+        const s = row.shiftType || row.shift || "—";
+        return { kind: GridCellKind.Text, data: s, displayData: s, allowOverlay: false };
+      }
+
+      if (col.id === "checkIn") {
+        const t = row.checkIn || "—";
+        return {
+          kind: GridCellKind.Text,
+          data: t,
+          displayData: t,
+          allowOverlay: false,
+          themeOverride: { baseFontStyle: "11px monospace" },
+        };
+      }
+
+      if (col.id === "checkOut") {
+        const t = row.checkOut || "—";
+        return {
+          kind: GridCellKind.Text,
+          data: t,
+          displayData: t,
+          allowOverlay: false,
+          themeOverride: { baseFontStyle: "11px monospace" },
+        };
+      }
+
+      if (col.id === "workedHours") {
+        return {
+          kind: GridCellKind.Text,
+          data: String(row.workedHours),
+          displayData: `${row.workedHours} soat`,
+          allowOverlay: false,
+          themeOverride: { baseFontStyle: "bold 11px monospace" },
+        };
+      }
+
+      if (col.id === "delayMinutes") {
+        const d = row.delayMinutes || 0;
+        return {
+          kind: GridCellKind.Text,
+          data: String(d),
+          displayData: d > 0 ? `+${d} daq` : "—",
+          allowOverlay: false,
+          themeOverride: {
+            textDark: d > 0 ? "#dc2626" : "#6b7280",
+            baseFontStyle: d > 0 ? "bold 11px monospace" : "11px monospace",
+          },
+        };
+      }
+
+      if (col.id === "status") {
+        const raw = String(row.status || "").toLowerCase();
+        let label = String(row.status || "—");
+        let color = "#6b7280";
+        if (raw === "present") {
+          label = "Kelgan";
+          color = "#059669";
+        } else if (raw === "late") {
+          label = "Kechikkan";
+          color = "#d97706";
+        } else if (raw === "absent") {
+          label = "Kelmagan";
+          color = "#dc2626";
+        } else if (raw === "sick_leave" || raw === "onleave" || raw === "vacation" || raw === "day_off") {
+          label = "Ta'tilda / Kasallik";
+          color = "#2563eb";
+        }
+        return {
+          kind: GridCellKind.Text,
+          data: String(row.status || ""),
+          displayData: label,
+          allowOverlay: false,
+          themeOverride: {
+            textDark: color,
+            baseFontStyle: "bold 11px sans-serif",
+          },
+        };
+      }
+
+      if (col.id === "sourceDevice") {
+        const dev = row.sourceDevice || "—";
+        return { kind: GridCellKind.Text, data: dev, displayData: dev, allowOverlay: false };
+      }
+
+      if (col.id === "notes") {
+        const n = row.notes || "—";
+        return { kind: GridCellKind.Text, data: n, displayData: n, allowOverlay: false };
+      }
+
+      return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+    },
+    [attCols, employeeAttendance]
+  );
 
   const handleUpdate = (updated: Partial<EmployeeRecord>) => {
     setFormData((prev) => ({ ...prev, ...updated }));
@@ -276,6 +664,52 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     }
   };
 
+  const handleSyncToTerminals = async () => {
+    if (!formData.id || isNewRecord) {
+      addNotification({
+        title: "Ogohlantirish",
+        description: "Terminallarga yuklashdan oldin xodimni saqlang.",
+        severity: "warning",
+      });
+      return;
+    }
+
+    if (!formData.avatarUrl) {
+      addNotification({
+        title: "Fotosurat kerak",
+        description: "Face ID uchun avval 3x4 fotosurat yuklang.",
+        severity: "error",
+      });
+      return;
+    }
+
+    setSyncingBiometric(true);
+    try {
+      const res = await fetch(`/api/v1/hr/employees/${formData.id}/sync-biometric`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (json.success) {
+        const count = json.results?.length || 0;
+        addNotification({
+          title: "Face ID yuklandi",
+          description: `${formData.fullName} ma'lumotlari ${count} ta faol terminalga yuborildi.`,
+          severity: "success",
+        });
+      } else {
+        throw new Error(json.error || "Terminallarga yuklashda xatolik");
+      }
+    } catch (err: any) {
+      addNotification({
+        title: "Xatolik",
+        description: err.message,
+        severity: "error",
+      });
+    } finally {
+      setSyncingBiometric(false);
+    }
+  };
+
   const handleAddSkill = () => {
     const s = newSkillText.trim();
     if (!s) return;
@@ -291,8 +725,8 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     handleUpdate({ skills: current.filter((s) => s !== skillToRemove) });
   };
 
-  const departmentOptions = useMemo(() => {
-    const list = (departmentsList || []).map((d) => d.name);
+  const departmentOptions = useMemo<ComboboxOption[]>(() => {
+    const list = departmentsList || [];
     const defaults = [
       "Flekso bosma sexi",
       "Tikuvchilik va lenta sexi",
@@ -302,13 +736,85 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       "Ombor va logistika",
       "Boshqaruv va ma'muriyat",
     ];
-    const combined = Array.from(new Set([...list, ...defaults]));
+    const seen = new Set<string>();
+    const result: ComboboxOption[] = [];
+
+    list.forEach((d) => {
+      if (d.name && !seen.has(d.name)) {
+        seen.add(d.name);
+        result.push({
+          value: d.name,
+          label: d.name,
+          description: d.code ? `Kodi: ${d.code}` : undefined,
+        });
+      }
+    });
+
+    defaults.forEach((def) => {
+      if (!seen.has(def)) {
+        seen.add(def);
+        result.push({ value: def, label: def });
+      }
+    });
+
     const current = formData.departmentName || formData.department;
-    if (current && !combined.includes(current)) {
-      combined.push(current);
+    if (current && !seen.has(current)) {
+      result.push({ value: current, label: current });
     }
-    return combined;
+
+    return result;
   }, [departmentsList, formData.departmentName, formData.department]);
+
+  const positionOptions = useMemo<ComboboxOption[]>(() => {
+    const list = positionsList || [];
+    const defaults = [
+      "Pechatnik",
+      "Bosh mutaxassis",
+      "Operator",
+      "Yordamchi ishchi",
+      "Bosh texnolog",
+      "Sex boshlig'i",
+      "Dizayner",
+      "Sifat nazoratchisi",
+      "Ombor mudiri",
+      "Mexanik-sozlovchi",
+    ];
+    const seen = new Set<string>();
+    const result: ComboboxOption[] = [];
+
+    list.forEach((p) => {
+      if (p.title && !seen.has(p.title)) {
+        seen.add(p.title);
+        result.push({
+          value: p.title,
+          label: p.title,
+          description: p.departmentName ? `Bo'lim: ${p.departmentName}` : (p.code ? `Kodi: ${p.code}` : undefined),
+        });
+      }
+    });
+
+    defaults.forEach((def) => {
+      if (!seen.has(def)) {
+        seen.add(def);
+        result.push({ value: def, label: def });
+      }
+    });
+
+    const current = formData.positionTitle || formData.position;
+    if (current && !seen.has(current)) {
+      result.push({ value: current, label: current });
+    }
+
+    return result;
+  }, [positionsList, formData.positionTitle, formData.position]);
+
+  const plantOptions = useMemo<ComboboxOption[]>(() => {
+    return [
+      { value: "PrintGoo Bosh Zavod", label: "PrintGoo Bosh Zavod", description: "Bosh ishlab chiqarish majmuasi" },
+      { value: "PrintGoo Chilonzor Filiali", label: "PrintGoo Chilonzor Filiali", description: "Kesish va qadoqlash" },
+      { value: "PrintGoo Yangiyo'l Markazi", label: "PrintGoo Yangiyo'l Markazi", description: "Ombor va logistika" },
+    ];
+  }, []);
 
   const handleSave = async (shouldClose = false) => {
     const lName = formData.lastName?.trim() || "";
@@ -556,7 +1062,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       />
 
       {/* ── Main Layout: Sidebar + Document Workspace ── */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex-1 flex flex-row min-h-0 min-w-0 overflow-hidden">
         {/* Left Document Sidebar */}
         <DocumentSidebar
           summary={
@@ -613,11 +1119,18 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         />
 
         {/* Right Content Area: Level 3 Tabs */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div
+          className={cn(
+            "flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden",
+            activeTab === "piecework" || activeTab === "attendance"
+              ? "p-0"
+              : "overflow-y-auto p-4 space-y-4"
+          )}
+        >
           {/* TAB 1: OVERVIEW */}
           {activeTab === "overview" && (
-            <div className="space-y-4 max-w-4xl">
-              <Card>
+            <div className="space-y-4 w-full">
+              <Card className="w-full">
                 <CardHeader className="py-3 px-4 border-b">
                   <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <User className="size-4 text-primary" />
@@ -686,10 +1199,29 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                           </Button>
                         )}
                       </div>
+
+                      {!isNewRecord && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-6 text-[10px] px-2 gap-1 w-full text-blue-600 border-blue-200 hover:bg-blue-50 dark:border-blue-900 dark:hover:bg-blue-950 mt-0.5"
+                          disabled={syncingBiometric}
+                          onClick={handleSyncToTerminals}
+                          title="Xodim yuzini Hikvision turniketlariga yuborish"
+                        >
+                          {syncingBiometric ? (
+                            <Loader2 className="size-3 animate-spin" />
+                          ) : (
+                            <UploadCloud className="size-3" />
+                          )}
+                          Face ID yuklash
+                        </Button>
+                      )}
                     </div>
 
                     {/* Form Fields Grid */}
-                    <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 w-full">
                       <div>
                         <Label className="text-xs">Tabel raqami *</Label>
                         <Input
@@ -781,23 +1313,38 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             </span>
                           )}
                         </div>
-                        <Select
+                        <ComboboxSelect
+                          items={departmentOptions}
                           value={formData.departmentName || formData.department || ""}
                           onValueChange={(val) => {
                             if (val) handleUpdate({ departmentName: val, department: val });
                           }}
-                        >
-                          <SelectTrigger className={`h-8 ${errors.departmentName ? "border-destructive focus:ring-destructive" : ""}`}>
-                            <SelectValue placeholder="Bo'limni tanlang..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {departmentOptions.map((dept) => (
-                              <SelectItem key={dept} value={dept}>
-                                {dept}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          allowCustom
+                          placeholder="Bo'limni tanlang..."
+                          className={cn(
+                            "h-8 text-xs bg-muted/20 w-full font-medium",
+                            errors.departmentName && "border-destructive focus-visible:ring-destructive"
+                          )}
+                          contentClassName="w-[320px]"
+                          actionLabel="Yangi bo'lim yaratish..."
+                          onAction={(query) => {
+                            openTab({
+                              id: `dept-new-${Date.now()}`,
+                              title: query?.trim() || "Yangi bo'lim",
+                              type: "department-detail",
+                              module: "hr",
+                              documentData: { name: query?.trim() || "", isNew: true },
+                            });
+                          }}
+                          renderItem={(dept) => (
+                            <div className="flex items-center justify-between w-full min-w-0 pr-1 py-0.5">
+                              <span className="text-xs font-medium text-foreground truncate">{dept.label}</span>
+                              {dept.description && (
+                                <span className="text-[10px] text-muted-foreground font-mono ml-2 shrink-0">{dept.description}</span>
+                              )}
+                            </div>
+                          )}
+                        />
                       </div>
 
                       <div>
@@ -809,13 +1356,37 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             </span>
                           )}
                         </div>
-                        <Input
+                        <ComboboxSelect
+                          items={positionOptions}
                           value={formData.positionTitle || formData.position || ""}
-                          onChange={(e) =>
-                            handleUpdate({ positionTitle: e.target.value, position: e.target.value })
-                          }
-                          placeholder="Masalan: Pechatnik"
-                          className={`h-8 ${errors.positionTitle ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                          onValueChange={(val) => {
+                            if (val) handleUpdate({ positionTitle: val, position: val });
+                          }}
+                          allowCustom
+                          placeholder="Lavozimni tanlang..."
+                          className={cn(
+                            "h-8 text-xs bg-muted/20 w-full font-medium",
+                            errors.positionTitle && "border-destructive focus-visible:ring-destructive"
+                          )}
+                          contentClassName="w-[320px]"
+                          actionLabel="Yangi lavozim yaratish..."
+                          onAction={(query) => {
+                            openTab({
+                              id: `pos-new-${Date.now()}`,
+                              title: query?.trim() || "Yangi lavozim",
+                              type: "position-detail",
+                              module: "hr",
+                              documentData: { title: query?.trim() || "", isNew: true },
+                            });
+                          }}
+                          renderItem={(pos) => (
+                            <div className="flex items-center justify-between w-full min-w-0 pr-1 py-0.5">
+                              <span className="text-xs font-medium text-foreground truncate">{pos.label}</span>
+                              {pos.description && (
+                                <span className="text-[10px] text-muted-foreground font-mono ml-2 shrink-0">{pos.description}</span>
+                              )}
+                            </div>
+                          )}
                         />
                       </div>
 
@@ -848,7 +1419,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             </span>
                           )}
                         </div>
-                        <Input
+                        <PhoneInput
                           value={formData.phone || ""}
                           onChange={(e) => handleUpdate({ phone: e.target.value })}
                           placeholder="+998 90 123-45-67"
@@ -907,14 +1478,14 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
               </Card>
 
               {/* Passport & Legal Data */}
-              <Card>
+              <Card className="w-full">
                 <CardHeader className="py-3 px-4 border-b">
                   <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <ShieldCheck className="size-4 text-primary" />
                     Pasport va soliq rekvizitlari
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <CardContent className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
                   <div>
                     <Label className="text-xs">Pasport seriya va raqam</Label>
                     <Input
@@ -939,15 +1510,19 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                   </div>
 
                   <div>
-                    <Label className="text-xs">Korxona / filial</Label>
-                    <Input
+                    <Label className="text-xs mb-1 block">Korxona / filial</Label>
+                    <ComboboxSelect
+                      items={plantOptions}
                       value={formData.plant || "PrintGoo Bosh Zavod"}
-                      onChange={(e) => handleUpdate({ plant: e.target.value })}
-                      className="h-8"
+                      onValueChange={(val) => handleUpdate({ plant: val })}
+                      allowCustom
+                      placeholder="Filialni tanlang..."
+                      className="h-8 text-xs bg-muted/20 w-full"
+                      contentClassName="w-[320px]"
                     />
                   </div>
 
-                  <div className="md:col-span-3">
+                  <div className="sm:col-span-2 md:col-span-3 xl:col-span-4">
                     <Label className="text-xs">Qo'shimcha izohlar</Label>
                     <Input
                       value={formData.notes || ""}
@@ -963,15 +1538,15 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
           {/* TAB 2: WAGE & RATES */}
           {activeTab === "wage" && (
-            <div className="space-y-4 max-w-4xl">
-              <Card>
+            <div className="space-y-4 w-full">
+              <Card className="w-full">
                 <CardHeader className="py-3 px-4 border-b">
                   <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <CreditCard className="size-4 text-emerald-600" />
                     Mehnatga haq to'lash stavkalari
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <CardContent className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
                   <div>
                     <Label className="text-xs">To'lov shakli *</Label>
                     <Select
@@ -1028,7 +1603,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                     />
                   </div>
 
-                  <div className="md:col-span-2">
+                  <div className="sm:col-span-2 md:col-span-2 xl:col-span-2">
                     <Label className="text-xs">Ish haqi bank kartasi (Uzcard / Humo)</Label>
                     <Input
                       value={formData.bankCardNo || ""}
@@ -1041,7 +1616,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
               </Card>
 
               {/* Wage Calculation Rules Box */}
-              <div className="p-3.5 rounded border bg-muted/20 space-y-1.5">
+              <div className="p-3.5 rounded border bg-muted/20 space-y-1.5 w-full">
                 <div className="font-semibold text-xs text-foreground flex items-center gap-1.5">
                   <CheckCircle2 className="size-3.5 text-primary" />
                   Ishbay hisoblash qoidasi
@@ -1053,15 +1628,19 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
             </div>
           )}
 
-          {/* TAB 3: PIECEWORK HISTORY */}
+          {/* TAB 3: PIECEWORK HISTORY (GLIDE DATA GRID) */}
           {activeTab === "piecework" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold flex items-center gap-2">
-                    <Layers className="size-4 text-primary" />
-                    Bajarilgan ishbay naryadlar
-                  </h3>
+            <div className="flex flex-col flex-1 h-full min-h-0 w-full overflow-hidden">
+              <div className="h-9 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <Layers className="size-4 text-primary" />
+                  <span className="font-semibold text-xs">Bajarilgan ishbay naryadlar</span>
+                  <Badge variant="outline" className="font-mono text-[10px] h-5">
+                    {employeePieceworks.length} ta yozuv
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground font-mono hidden md:inline ml-1">
+                    2 marta bosish — Work Order ochish
+                  </span>
                 </div>
                 <Badge
                   variant="outline"
@@ -1071,147 +1650,80 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                 </Badge>
               </div>
 
-              <div className="rounded border bg-card overflow-hidden">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b bg-muted/60 text-muted-foreground font-medium h-7 text-[11px]">
-                      <th className="px-3 py-1">Sana</th>
-                      <th className="px-3 py-1">Work Order №</th>
-                      <th className="px-3 py-1">Stanok</th>
-                      <th className="px-3 py-1">Operatsiya</th>
-                      <th className="px-3 py-1 text-right">Bajarilgan hajm</th>
-                      <th className="px-3 py-1 text-right">Tarif</th>
-                      <th className="px-3 py-1 text-right">Summa (UZS)</th>
-                      <th className="px-3 py-1">Holati</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {employeePieceworks.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="p-6 text-center text-muted-foreground">
-                          Hozircha ishbay naryadlar qayd etilmagan.
-                        </td>
-                      </tr>
-                    ) : (
-                      employeePieceworks.map((pw) => (
-                        <tr key={pw.id} className="border-b hover:bg-muted/30 h-7">
-                          <td className="px-3 py-1 font-mono text-[11px]">{pw.workDate || pw.date}</td>
-                          <td className="px-3 py-1 font-mono font-semibold text-primary">
-                            {pw.workOrderId}
-                          </td>
-                          <td className="px-3 py-1">{pw.machineCode || pw.machine}</td>
-                          <td className="px-3 py-1 font-medium">{pw.operationName || pw.operation}</td>
-                          <td className="px-3 py-1 text-right font-mono">
-                            {(pw.completedQuantity || pw.quantity || 0).toLocaleString("uz-UZ")} {pw.unit}
-                          </td>
-                          <td className="px-3 py-1 text-right font-mono text-muted-foreground">
-                            {(pw.pieceRate || pw.rate || 0).toLocaleString("uz-UZ")}
-                          </td>
-                          <td className="px-3 py-1 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                            {pw.totalAmount.toLocaleString("uz-UZ")}
-                          </td>
-                          <td className="px-3 py-1">
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] h-4.5 px-1.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-300"
-                            >
-                              {pw.status}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+              {/* Glide Canvas - full height and width like OperationsTab */}
+              <div className="flex-1 w-full h-full relative" id="glide-emp-piecework-root">
+                <DataEditor
+                  columns={pwCols}
+                  rows={employeePieceworks.length}
+                  getCellContent={getPieceworkCellContent}
+                  onColumnResize={handlePieceworkColumnResize}
+                  onCellActivated={handlePieceworkActivated}
+                  gridSelection={pwSelection}
+                  onGridSelectionChange={setPwSelection}
+                  rowMarkers="both"
+                  freezeColumns={1}
+                  smoothScrollX
+                  smoothScrollY
+                  theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+                  width="100%"
+                  height="100%"
+                  headerHeight={28}
+                  rowHeight={32}
+                />
               </div>
             </div>
           )}
 
-          {/* TAB 4: ATTENDANCE & TIMESHEET */}
+          {/* TAB 4: ATTENDANCE & TIMESHEET (GLIDE DATA GRID) */}
           {activeTab === "attendance" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold flex items-center gap-2">
-                    <CalendarClock className="size-4 text-primary" />
-                    Davomat tabeli
-                  </h3>
+            <div className="flex flex-col flex-1 h-full min-h-0 w-full overflow-hidden">
+              <div className="h-9 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <CalendarClock className="size-4 text-primary" />
+                  <span className="font-semibold text-xs">Davomat tabeli</span>
+                  <Badge variant="outline" className="font-mono text-[10px] h-5">
+                    {employeeAttendance.length} kun
+                  </Badge>
                 </div>
-                <Badge variant="outline" className="font-mono text-xs">
-                  Ishlangan: {totalHoursWorked} soat
-                </Badge>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="outline" className="font-mono text-xs">
+                    Ishlangan: {totalHoursWorked} soat
+                  </Badge>
+                  {lateCount > 0 && (
+                    <Badge variant="outline" className="font-mono text-xs text-amber-600 border-amber-300">
+                      {lateCount} kechikish
+                    </Badge>
+                  )}
+                </div>
               </div>
 
-              <div className="rounded border bg-card overflow-hidden">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b bg-muted/60 text-muted-foreground font-medium h-7 text-[11px]">
-                      <th className="px-3 py-1">Sana</th>
-                      <th className="px-3 py-1">Smena</th>
-                      <th className="px-3 py-1">Kirish</th>
-                      <th className="px-3 py-1">Chiqish</th>
-                      <th className="px-3 py-1 text-right">Ish soati</th>
-                      <th className="px-3 py-1 text-right">Kechikish</th>
-                      <th className="px-3 py-1">Status</th>
-                      <th className="px-3 py-1">Izoh</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {employeeAttendance.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="p-6 text-center text-muted-foreground">
-                          Davomat yozuvlari mavjud emas.
-                        </td>
-                      </tr>
-                    ) : (
-                      employeeAttendance.map((att) => (
-                        <tr key={att.id} className="border-b hover:bg-muted/30 h-7">
-                          <td className="px-3 py-1 font-mono text-[11px]">{att.workDate || att.date}</td>
-                          <td className="px-3 py-1 text-[11px]">{att.shiftType || att.shift}</td>
-                          <td className="px-3 py-1 font-mono">{att.checkIn || "—"}</td>
-                          <td className="px-3 py-1 font-mono">{att.checkOut || "—"}</td>
-                          <td className="px-3 py-1 text-right font-mono font-medium">
-                            {att.workedHours} soat
-                          </td>
-                          <td className="px-3 py-1 text-right font-mono">
-                            {att.delayMinutes > 0 ? (
-                              <span className="text-red-600 font-semibold">
-                                +{att.delayMinutes} daq
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-1">
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] h-4.5 px-1.5 ${
-                                att.status === "present"
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
-                                  : att.status === "late"
-                                  ? "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
-                                  : "bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:text-zinc-300"
-                              }`}
-                            >
-                              {att.status}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-1 text-muted-foreground text-[11px]">
-                            {att.notes || "—"}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+              {/* Glide Canvas - full height and width like OperationsTab */}
+              <div className="flex-1 w-full h-full relative" id="glide-emp-attendance-root">
+                <DataEditor
+                  columns={attCols}
+                  rows={employeeAttendance.length}
+                  getCellContent={getAttendanceCellContent}
+                  onColumnResize={handleAttendanceColumnResize}
+                  gridSelection={attSelection}
+                  onGridSelectionChange={setAttSelection}
+                  rowMarkers="both"
+                  freezeColumns={1}
+                  smoothScrollX
+                  smoothScrollY
+                  theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+                  width="100%"
+                  height="100%"
+                  headerHeight={28}
+                  rowHeight={32}
+                />
               </div>
             </div>
           )}
 
           {/* TAB 5: SKILLS & CERTIFICATES */}
           {activeTab === "skills" && (
-            <div className="space-y-4 max-w-4xl">
-              <Card>
+            <div className="space-y-4 w-full">
+              <Card className="w-full">
                 <CardHeader className="py-3 px-4 border-b">
                   <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <Award className="size-4 text-primary" />
@@ -1298,8 +1810,8 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
           {/* TAB 6: HISTORY OF CHANGES */}
           {activeTab === "history" && (
-            <div className="space-y-4 max-w-4xl">
-              <Card>
+            <div className="space-y-4 w-full">
+              <Card className="w-full">
                 <CardHeader className="py-3 px-4 border-b">
                   <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <History className="size-4 text-primary" />

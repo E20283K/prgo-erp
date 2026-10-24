@@ -12,6 +12,7 @@ import {
 } from "../../common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -206,9 +207,10 @@ export function DepartmentDetail({ tab }: DepartmentDetailProps) {
 
                   <div>
                     <Label className="text-xs">Aloqa telefoni</Label>
-                    <Input
+                    <PhoneInput
                       value={formData.phone || ""}
                       onChange={(e) => handleUpdate({ phone: e.target.value })}
+                      placeholder="+998 71 200-00-00"
                       className="h-8 font-mono"
                     />
                   </div>

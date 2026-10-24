@@ -244,3 +244,21 @@ export interface EmployeeHistoryItem {
   changedBy?: string | null;
   changedAt: string;
 }
+
+export interface BiometricDeviceRecord {
+  id: string;
+  name: string;
+  deviceCode: string;
+  model: string;
+  ipAddress: string;
+  port: number;
+  username: string;
+  password?: string;
+  direction: "in" | "out" | "both";
+  location?: string;
+  isEnabled: boolean;
+  lastSeenAt?: string | null;
+  status: "online" | "offline" | "error" | "unknown";
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}

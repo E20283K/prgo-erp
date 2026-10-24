@@ -59,6 +59,38 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       }
     } catch (e) {}
   }, [setTheme, setSidebarWidth, setShowStatusBar, setToastSoundConfig]);
+
+  // Deep-link auto opener: scan QR code (?wo=WOOF-26-0357) to open work order directly
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const woParam = params.get("wo");
+      if (woParam) {
+        const store = useWorkspaceStore.getState();
+        const existingTab = store.tabs.find((t) => t.id === woParam);
+        if (existingTab) {
+          store.setActiveTab(woParam);
+        } else {
+          const item = store.productionQueue.find(
+            (q) => q.id === woParam || q.docNo === woParam
+          );
+          store.openTab({
+            id: woParam,
+            title: item?.customer
+              ? `${woParam} (${item.customer.split(" ")[0]})`
+              : woParam,
+            type: "work-order",
+            module: "production",
+            activeLevel3Tab: "overview",
+            documentData: item || { id: woParam, docNo: woParam },
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to process ?wo deep link:", err);
+    }
+  }, []);
   useEffect(() => {
     // 1. Block the default right-click context menu
     const handleContextMenu = (e: MouseEvent) => {

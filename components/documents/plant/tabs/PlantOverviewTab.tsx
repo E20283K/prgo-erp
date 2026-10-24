@@ -3,6 +3,7 @@
 import React from "react";
 import { PlantRecord } from "../types";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -215,8 +216,7 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
             <Label className="text-[11px] font-medium text-muted-foreground">
               Direktor Telefoni
             </Label>
-            <Input
-              type="tel"
+            <PhoneInput
               value={plant.directorPhone || ""}
               onChange={(e) => onUpdate({ directorPhone: e.target.value })}
               className="h-8 text-xs font-mono"
@@ -253,8 +253,7 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
             <Label className="text-[11px] font-medium text-muted-foreground">
               Bosh Buxgalter Telefoni
             </Label>
-            <Input
-              type="tel"
+            <PhoneInput
               value={plant.chiefAccountantPhone || ""}
               onChange={(e) => onUpdate({ chiefAccountantPhone: e.target.value })}
               className="h-8 text-xs font-mono"

@@ -1,9 +1,14 @@
 from typing import Any
 
 DEFAULT_JOB_TICKET_LABELS = {
-    "title": "ISH PASPORTI / НАРЯД-ЗАКАЗ",
+    "title": "BUYURTMA PASPORTI",
     "subtitle": "TEXNOLOGIK MARSHRUT VA SIFAT PASPORTI",
     "badge": "OFFSET STD V1",
+    "status": "Holati",
+    "priority": "Muhimligi",
+    "priorityNormal": "Oddiy",
+    "priorityUrgent": "Shoshilinch",
+    "priorityHigh": "Yuqori",
     "customer": "Buyurtmachi",
     "product": "Mahsulot",
     "departmentSite": "Sex / Maydon",

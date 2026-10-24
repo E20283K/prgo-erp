@@ -32,6 +32,7 @@ import {
   Plus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -182,7 +183,7 @@ export function CustomerOverviewTab({
       role: "procurement",
       roleLabel: "Ta'minot / Buyurtmachi",
       name: "",
-      phone: "+998 ",
+      phone: "",
       email: "",
       telegram: "",
       isPrimary: false,
@@ -1333,7 +1334,7 @@ export function CustomerOverviewTab({
                   <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
                     <Phone className="w-3 h-3 text-emerald-600" /> Telefon raqami *
                   </Label>
-                  <Input
+                  <PhoneInput
                     value={editingContact.phone}
                     onChange={(e) =>
                       setEditingContact({ ...editingContact, phone: e.target.value })

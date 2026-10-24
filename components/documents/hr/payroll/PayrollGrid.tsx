@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   Calculator,
   RefreshCw,
@@ -48,7 +49,10 @@ export function PayrollGrid() {
   const fetchPayroll = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/hr/payroll?period=${selectedPeriod}`);
+      const [res] = await Promise.all([
+        fetch(`/api/v1/hr/payroll?period=${selectedPeriod}`),
+        new Promise((resolve) => setTimeout(resolve, 400)),
+      ]);
       const json = await res.json();
       if (json.success && Array.isArray(json.data) && json.data.length > 0) {
         setData(json.data);
@@ -228,62 +232,76 @@ export function PayrollGrid() {
 
   return (
     <div className="flex flex-col h-full bg-background select-none">
-      {/* ── Top Industrial Toolbar & KPI strip ── */}
-      <div className="border-b bg-card p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 font-semibold text-sm mr-2 text-foreground">
-            <Calculator className="size-4 text-purple-600" />
-            Ish Haqi Fondi (Payroll Ledger)
-          </div>
+      {/* ── 1C Enterprise Industrial Toolbar ── */}
+      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
+        {/* Left Actions */}
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
+            disabled={calculating}
+            onClick={handleCalculatePayroll}
+          >
+            <Coins className={`w-3.5 h-3.5 ${calculating ? "animate-spin" : ""}`} />
+            <span>{calculating ? "Hisoblanmoqda..." : "Avtomatik hisoblash"}</span>
+          </Button>
 
-          <div className="flex items-center gap-1.5 bg-muted/50 px-2 py-0.5 rounded border">
-            <span className="text-muted-foreground">Hisob davri:</span>
+          <Separator orientation="vertical" className="h-4 mx-1" />
+
+          <div className="flex items-center gap-1.5 bg-muted/60 px-2 h-7 rounded border border-border/70 text-xs">
+            <Calendar className="size-3 text-muted-foreground" />
             <input
               type="month"
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="bg-transparent font-mono text-xs font-semibold focus:outline-none"
-            />
-          </div>
-
-          <div className="relative w-56">
-            <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
-            <Input
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Xodim yoki tabel №..."
-              className="h-7 pl-8 text-xs font-sans"
+              className="bg-transparent font-mono text-xs focus:outline-none"
             />
           </div>
         </div>
 
+        {/* Right Search & Controls */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 text-xs font-mono border-r pr-3">
-            <span className="text-muted-foreground">Jami FOT:</span>
-            <span className="font-bold text-foreground">{totalGross.toLocaleString("uz-UZ")} UZS</span>
-            <span className="text-muted-foreground ml-2">Sof to'lov:</span>
-            <span className="font-bold text-emerald-600">{totalNet.toLocaleString("uz-UZ")} UZS</span>
+          <div className="relative w-52">
+            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              placeholder="Xodim yoki tabel №..."
+              className="pl-7 h-7 text-xs bg-background border-input rounded"
+            />
           </div>
 
           <Button
             size="sm"
-            className="h-7 text-xs bg-purple-600 hover:bg-purple-700 text-white gap-1.5 font-medium"
-            disabled={calculating}
-            onClick={handleCalculatePayroll}
+            variant="ghost"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={fetchPayroll}
+            disabled={loading}
+            title="Ro'yxatni yangilash"
+            aria-label="Ro'yxatni yangilash"
           >
-            <Coins className={`size-3.5 ${calculating ? "animate-spin" : ""}`} />
-            {calculating ? "Hisoblanmoqda..." : "Avtomatik hisoblash"}
-          </Button>
-
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchPayroll}>
             <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-            Yangilash
           </Button>
 
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => window.print()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+            onClick={() => window.print()}
+            title="Chop etish"
+          >
             <Printer className="size-3.5" />
-            Chop etish
+            <span className="hidden sm:inline">Chop etish</span>
           </Button>
+
+          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+            <Badge variant="outline" className="h-6 px-1.5 font-normal">
+              FOT: {totalGross.toLocaleString("uz-UZ")}
+            </Badge>
+            <Badge variant="outline" className="h-6 px-1.5 font-normal text-emerald-600 border-emerald-300">
+              Sof: {totalNet.toLocaleString("uz-UZ")}
+            </Badge>
+          </div>
         </div>
       </div>
 

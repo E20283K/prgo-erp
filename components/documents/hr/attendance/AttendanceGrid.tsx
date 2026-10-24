@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +42,7 @@ import {
   Printer,
   Plus,
   ScanFace,
+  Server,
   CheckCircle2,
   Clock,
   AlertTriangle,
@@ -68,7 +70,10 @@ export function AttendanceGrid() {
   const fetchAttendance = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/hr/attendance");
+      const [res] = await Promise.all([
+        fetch("/api/v1/hr/attendance"),
+        new Promise((resolve) => setTimeout(resolve, 400)),
+      ]);
       const json = await res.json();
       if (json.success && Array.isArray(json.data) && json.data.length > 0) {
         setData(json.data);
@@ -261,76 +266,116 @@ export function AttendanceGrid() {
 
   return (
     <div className="flex flex-col h-full bg-background select-none">
-      {/* ── Top Industrial Toolbar ── */}
-      <div className="border-b bg-card p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 font-semibold text-sm mr-2 text-foreground">
-            <CalendarClock className="size-4 text-emerald-600" />
-            T-13 Davomat va Ish Vaqti Tabeli
-            <Badge variant="outline" className="font-mono text-xs ml-1 bg-emerald-50 text-emerald-700 border-emerald-300">
-              {presentCount} kelgan
-            </Badge>
-            {lateCount > 0 && (
-              <Badge variant="outline" className="font-mono text-xs bg-amber-50 text-amber-700 border-amber-300">
-                {lateCount} kechikkan
-              </Badge>
-            )}
-          </div>
+      {/* ── 1C Enterprise Industrial Toolbar ── */}
+      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
+        {/* Left Actions */}
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
+            onClick={() => {
+              setSelectedBadge(employees[0]?.badgeNumber || employees[0]?.badgeNo || "EMP-0101");
+              setIsFaceIdSimOpen(true);
+            }}
+          >
+            <ScanFace className="w-3.5 h-3.5" />
+            <span>Face ID Qayd etish</span>
+          </Button>
 
-          <div className="relative w-56">
-            <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
-            <Input
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="F.I.O. yoki tabel №..."
-              className="h-7 pl-8 text-xs font-sans"
-            />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs gap-1 border-border/80"
+            onClick={() => {
+              openTab({
+                id: "registry-hr-devices",
+                title: "Biometrik Qurilmalar",
+                type: "registry",
+                module: "hr",
+              });
+            }}
+            title="Face ID va turniket qurilmalari registri"
+          >
+            <Server className="w-3.5 h-3.5 text-blue-600" />
+            <span>Qurilmalar</span>
+          </Button>
+
+          <Separator orientation="vertical" className="h-4 mx-1" />
+
+          {/* Status Segment Filter Pills */}
+          <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+            {[
+              { key: "ALL", label: "Hammasi" },
+              { key: "present", label: "Kelgan" },
+              { key: "late", label: "Kechikkan" },
+              { key: "absent", label: "Kelmagan" },
+              { key: "on_leave", label: "Ta'tilda" },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(key)}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  statusFilter === key
+                    ? "bg-background text-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           <Input
             type="date"
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value)}
-            className="h-7 text-xs w-36 font-mono"
+            className="h-7 text-xs w-32 font-mono bg-background border-input rounded"
           />
-
-          <Select value={statusFilter} onValueChange={(val) => { if (val) setStatusFilter(val); }}>
-            <SelectTrigger className="h-7 text-xs w-36">
-              <SelectValue placeholder="Barcha status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Barcha status</SelectItem>
-              <SelectItem value="present">Kelgan (Present)</SelectItem>
-              <SelectItem value="late">Kechikkan (Late)</SelectItem>
-              <SelectItem value="absent">Kelmagan</SelectItem>
-              <SelectItem value="on_leave">Ta'tilda</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        {/* Right Search & Controls */}
+        <div className="flex items-center gap-2">
+          <div className="relative w-52">
+            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              placeholder="F.I.O. yoki tabel №..."
+              className="pl-7 h-7 text-xs bg-background border-input rounded"
+            />
+          </div>
+
           <Button
             size="sm"
-            variant="outline"
-            className="h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-300 gap-1.5 font-medium"
-            onClick={() => {
-              setSelectedBadge(employees[0]?.badgeNumber || employees[0]?.badgeNo || "EMP-0101");
-              setIsFaceIdSimOpen(true);
-            }}
+            variant="ghost"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={fetchAttendance}
+            disabled={loading}
+            title="Ro'yxatni yangilash"
+            aria-label="Ro'yxatni yangilash"
           >
-            <ScanFace className="size-3.5 text-emerald-600" />
-            Face ID Simulyatsiyasi
-          </Button>
-
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchAttendance}>
             <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-            Yangilash
           </Button>
 
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => window.print()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+            onClick={() => window.print()}
+            title="Tabelni chop etish"
+          >
             <Printer className="size-3.5" />
-            Tabelni chop etish
+            <span className="hidden sm:inline">Chop etish</span>
           </Button>
+
+          <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 font-normal">
+            {presentCount} kelgan
+          </Badge>
+          {lateCount > 0 && (
+            <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 text-amber-600 border-amber-300 font-normal">
+              {lateCount} kechikkan
+            </Badge>
+          )}
         </div>
       </div>
 

@@ -355,6 +355,7 @@
     "attendance-sec": "Ish vaqti va davomat",
     "attendance": "Tabel (T-13)",
     "shifts": "Smena jadvallari",
+    "devices": "Biometrik qurilmalar",
     "compensation": "Ish haqi va to'lovlar",
     "piecework": "Ishbay hisobi (Sdelka)",
     "payroll": "Oylik ish haqi qaydnomasi",
@@ -944,7 +945,7 @@
     "unlockAspectRatio": "Proporsiyani yechish (Mustaqil o'lcham)"
   },
   "JobTicket": {
-    "title": "Buyurtma Pasporti (Наряд-заказ)",
+    "title": "Buyurtma pasporti",
     "subtitle": "Yagona ishlab chiqarish pasporti va texnologik marshrut xaritasi",
     "badge": "PASPORT • НАРЯД-ЗАКАЗ",
     "button": "Buyurtma Pasporti (Ctrl+P)",
@@ -1029,7 +1030,12 @@
     "dateLabel": "Sana:",
     "pass": "TAYYOR",
     "footerSystem": "PRINTGOO ERP • YAGONA ISHLAB CHIQARISH BUYURTMA PASPORTI",
-    "printDate": " SANA"
+    "printDate": " SANA",
+    "status": "Holati",
+    "priority": "Muhimligi",
+    "priorityNormal": "Oddiy",
+    "priorityUrgent": "Shoshilinch",
+    "priorityHigh": "Yuqori"
   },
   "OverviewEnhancements": {
     "managerView": "Menejer ko'rinishi",
@@ -1149,8 +1155,7 @@
     "hidePanel": "Panelni yopish",
     "showPanel": "Panelni ochish",
     "collapseLeftPanel": "Chatlar panelini yig'ish",
-    "expandLeftPanel": "Chatlar panelini yoyish",
-    "copyText": "Nusxa olish"
+    "expandLeftPanel": "Chatlar panelini yoyish"
   },
   "LeadModal": {
     "title": "Lid ma'lumotlari",

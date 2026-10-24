@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -331,7 +332,7 @@ export function LeadDetailModal({
                   <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-muted-foreground">
                     <Phone className="size-3.5" />
                   </div>
-                  <Input
+                  <PhoneInput
                     value={formState.phone}
                     onChange={(e) =>
                       setFormState({ ...formState, phone: e.target.value })

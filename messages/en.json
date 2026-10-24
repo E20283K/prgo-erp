@@ -355,6 +355,7 @@
     "attendance-sec": "Time & Attendance",
     "attendance": "Timesheet (T-13)",
     "shifts": "Shift Schedules",
+    "devices": "Biometric Devices",
     "compensation": "Compensation & Wages",
     "piecework": "Piecework Wages (Sdelka)",
     "payroll": "Payroll Ledger",
@@ -944,7 +945,7 @@
     "unlockAspectRatio": "Unlock aspect ratio (Free resize)"
   },
   "JobTicket": {
-    "title": "Order Passport (Job Ticket)",
+    "title": "Order Passport",
     "subtitle": "Unified Shop-Floor Manufacturing Passport & Technical Traveler",
     "badge": "ORDER PASSPORT • НАРЯД",
     "button": "Order Passport (Ctrl+P)",
@@ -1029,7 +1030,12 @@
     "dateLabel": "Date:",
     "pass": "READY",
     "footerSystem": "PRINTGOO ERP • UNIFIED PRODUCTION ORDER PASSPORT",
-    "printDate": "GENERATED"
+    "printDate": "GENERATED",
+    "status": "Status",
+    "priority": "Priority",
+    "priorityNormal": "Normal",
+    "priorityUrgent": "Urgent",
+    "priorityHigh": "High"
   },
   "OverviewEnhancements": {
     "managerView": "Manager View",
