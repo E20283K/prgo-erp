@@ -167,6 +167,21 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // 4b. Ctrl+S / Cmd+S: Save active document
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        e.stopPropagation();
+        const store = useWorkspaceStore.getState();
+        if (store.activeTabId) {
+          window.dispatchEvent(
+            new CustomEvent("printgo:shortcut-save", {
+              detail: { tabId: store.activeTabId },
+            })
+          );
+        }
+        return;
+      }
+
       // 5. Ctrl+Tab / Ctrl+Shift+Tab: Switch between tabs
       if ((e.ctrlKey || e.metaKey) && (e.key === "Tab" || e.code === "Tab")) {
         e.preventDefault();

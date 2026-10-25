@@ -3557,6 +3557,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const draftId = `draft-wo-${Date.now()}`;
     const today = new Date().toISOString().split("T")[0];
     const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+    const state = get();
+    if (state.masterSpecifications.length === 0 && state.loadSpecificationsAsync) {
+      state.loadSpecificationsAsync();
+    }
+    const defaultSpec = state.masterSpecifications.find((s) => s.department === "Offset");
+    const initialRecipe = defaultSpec ? defaultSpec.code : "OFFSET_STD_V1";
+    const initialProduct = defaultSpec ? defaultSpec.name : "New Print Order";
     get().openTab({
       id: draftId,
       title: "Yangi buyruq (Qoralama)",
@@ -3568,10 +3575,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         docNo: "",
         orderType: "Production",
         customer: "",
-        product: "New Print Order",
+        product: initialProduct,
         department: "Offset",
         site: "Building 1",
-        recipe: "OFFSET_STD_V1",
+        recipe: initialRecipe,
         quantity: 5000,
         unit: "pcs",
         status: "Draft",

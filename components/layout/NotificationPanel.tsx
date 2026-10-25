@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useMemo } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
   Bell,
   CheckCheck,
@@ -89,13 +89,22 @@ interface NotifItemProps {
   notif: AppNotification;
   onOpen: (notif: AppNotification) => void;
   onToggleRead: (id: string, e: React.MouseEvent) => void;
-  onDismiss: (id: string, e: React.MouseEvent) => void;
+  onDismiss: (id: string, e?: React.MouseEvent) => void;
 }
 
 function NotifItem({ notif, onOpen, onToggleRead, onDismiss }: NotifItemProps) {
   const t = useTranslations("NotificationPanel");
   const cfg = SEVERITY_CONFIG[notif.severity] || SEVERITY_CONFIG.info;
   const Icon = cfg.icon;
+
+  const [offsetX, setOffsetX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(false);
+
+  const startXRef = useRef(0);
+  const startYRef = useRef(0);
+  const isHorizontalSwipeRef = useRef<boolean | null>(null);
+  const hasMovedRef = useRef(false);
 
   const categoryLabel = useMemo(() => {
     switch (notif.category) {
@@ -112,117 +121,231 @@ function NotifItem({ notif, onOpen, onToggleRead, onDismiss }: NotifItemProps) {
     }
   }, [notif.category, t]);
 
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("button, a, input")) return;
+    startXRef.current = e.clientX;
+    startYRef.current = e.clientY;
+    isHorizontalSwipeRef.current = null;
+    hasMovedRef.current = false;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (startXRef.current === 0 && startYRef.current === 0) return;
+    if (isHorizontalSwipeRef.current === false) return;
+
+    const diffX = e.clientX - startXRef.current;
+    const diffY = e.clientY - startYRef.current;
+
+    if (isHorizontalSwipeRef.current === null) {
+      if (Math.abs(diffX) > 6 || Math.abs(diffY) > 6) {
+        if (Math.abs(diffX) > Math.abs(diffY)) {
+          isHorizontalSwipeRef.current = true;
+          hasMovedRef.current = true;
+          setIsDragging(true);
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {}
+        } else {
+          isHorizontalSwipeRef.current = false;
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+
+    if (isHorizontalSwipeRef.current) {
+      setOffsetX(diffX);
+    }
+  };
+
+  const handlePointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    const SWIPE_THRESHOLD = 75;
+
+    if (isHorizontalSwipeRef.current && Math.abs(offsetX) > SWIPE_THRESHOLD) {
+      const exitOffset = offsetX > 0 ? 420 : -420;
+      setOffsetX(exitOffset);
+      setIsDragging(false);
+      setIsDismissed(true);
+      setTimeout(() => {
+        onDismiss(notif.id);
+      }, 200);
+    } else {
+      setOffsetX(0);
+      setIsDragging(false);
+    }
+
+    startXRef.current = 0;
+    startYRef.current = 0;
+    isHorizontalSwipeRef.current = null;
+    setTimeout(() => {
+      hasMovedRef.current = false;
+    }, 60);
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (hasMovedRef.current || Math.abs(offsetX) > 5 || isDismissed) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    onOpen(notif);
+  };
+
+  const isPastThreshold = Math.abs(offsetX) >= 75;
+  const isRightSwipe = offsetX > 0;
+
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen(notif)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen(notif);
-        }
-      }}
       className={cn(
-        "group relative w-full text-left flex items-start gap-2.5 px-3 py-2.5 transition-colors cursor-pointer select-none border-b border-border/40 last:border-b-0",
-        "hover:bg-muted/40 focus-visible:outline-none focus-visible:bg-muted/50",
-        notif.read ? "bg-background opacity-65" : "bg-muted/15 font-normal"
+        "relative overflow-hidden transition-[max-height,opacity] duration-200 ease-out border-b border-border/40 last:border-b-0",
+        isDismissed ? "max-h-0 opacity-0 border-b-0" : "max-h-36"
       )}
     >
-      {/* Severity Icon */}
-      <div className="mt-0.5 shrink-0">
-        <Icon className={cn("size-3.5", cfg.iconCls)} />
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 min-w-0 pr-12 space-y-1">
-        {/* Top row: Entity code badge + Title */}
-        <div className="flex items-center gap-1.5 min-w-0">
-          {notif.entityCode && (
-            <span className="font-mono text-[9px] font-semibold px-1 py-0.5 rounded bg-muted border border-border/70 text-foreground shrink-0 leading-tight">
-              {notif.entityCode}
-            </span>
-          )}
-          <span
-            className={cn(
-              "text-xs leading-snug truncate",
-              notif.read ? "text-muted-foreground font-normal" : "text-foreground font-medium"
-            )}
-            title={notif.title}
-          >
-            {notif.title}
-          </span>
-        </div>
-
-        {/* Description snippet */}
-        {notif.description && (
-          <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
-            {notif.description}
-          </p>
-        )}
-
-        {/* Meta row: Category · Timestamp */}
-        <div className="flex items-center gap-1.5 pt-0.5 text-[10px] text-muted-foreground/75">
-          <span className="font-medium text-foreground/80">{categoryLabel}</span>
-          <span>·</span>
-          <span className="font-mono">{relativeTime(notif.timestamp, t)}</span>
-          {notif.targetTab && (
-            <span className="text-[10px] text-primary hidden group-hover:inline-flex items-center gap-0.5 ml-auto">
-              {t("openDocument")} <ArrowRight className="size-2.5" />
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Action Slot (Top-Right): Quiet dot in idle, Quick action buttons on hover */}
+      {/* Background Swipe Dismiss Indicator */}
       <div
-        className="absolute top-2.5 right-2.5 flex items-center justify-end"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Idle unread indicator dot */}
-        {!notif.read && (
-          <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 transition-opacity group-hover:hidden pointer-events-none" />
+        className={cn(
+          "absolute inset-0 flex items-center px-4 select-none pointer-events-none transition-colors",
+          isRightSwipe ? "justify-start" : "justify-end",
+          isPastThreshold
+            ? "bg-destructive text-destructive-foreground"
+            : "bg-destructive/15 text-destructive"
         )}
+        style={{ opacity: Math.min(Math.abs(offsetX) / 35, 1) }}
+      >
+        <div className="flex items-center gap-1.5 text-xs font-medium">
+          <Trash2 className="size-3.5 shrink-0" />
+          <span className="text-[11px] font-medium">{t("dismiss")}</span>
+        </div>
+      </div>
 
-        {/* Hover action buttons (clean 18px icons, zero overlap) */}
-        <div className="hidden group-hover:flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => onToggleRead(notif.id, e)}
-                  className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
-                  aria-label={notif.read ? t("markUnread") : t("markRead")}
-                >
-                  {notif.read ? <CircleDot className="size-3" /> : <Check className="size-3 text-primary" />}
-                </Button>
-              }
-            />
-            <TooltipContent side="top" className="text-[10px]">
-              {notif.read ? t("markUnread") : t("markRead")}
-            </TooltipContent>
-          </Tooltip>
+      {/* Main Notification Card */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={handleClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen(notif);
+          }
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        style={{
+          transform: `translateX(${offsetX}px)`,
+          transition: isDragging
+            ? "none"
+            : "transform 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease",
+        }}
+        className={cn(
+          "group relative w-full text-left flex items-start gap-2.5 px-3 py-2.5 select-none touch-pan-y bg-card",
+          "hover:bg-muted/40 focus-visible:outline-none focus-visible:bg-muted/50",
+          notif.read ? "opacity-70 hover:opacity-100" : "font-normal",
+          isDragging ? "cursor-grabbing" : "cursor-pointer"
+        )}
+      >
+        {/* Severity Icon */}
+        <div className="mt-0.5 shrink-0">
+          <Icon className={cn("size-3.5", cfg.iconCls)} />
+        </div>
 
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => onDismiss(notif.id, e)}
-                  className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
-                  aria-label={t("dismiss")}
-                >
-                  <X className="size-3" />
-                </Button>
-              }
-            />
-            <TooltipContent side="top" className="text-[10px]">
-              {t("dismiss")}
-            </TooltipContent>
-          </Tooltip>
+        {/* Main Content */}
+        <div className="flex-1 min-w-0 pr-12 space-y-1">
+          {/* Top row: Entity code badge + Title */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            {notif.entityCode && (
+              <span className="font-mono text-[9px] font-semibold px-1 py-0.5 rounded bg-muted border border-border/70 text-foreground shrink-0 leading-tight">
+                {notif.entityCode}
+              </span>
+            )}
+            <span
+              className={cn(
+                "text-xs leading-snug truncate",
+                notif.read ? "text-muted-foreground font-normal" : "text-foreground font-medium"
+              )}
+              title={notif.title}
+            >
+              {notif.title}
+            </span>
+          </div>
+
+          {/* Description snippet */}
+          {notif.description && (
+            <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
+              {notif.description}
+            </p>
+          )}
+
+          {/* Meta row: Category · Timestamp */}
+          <div className="flex items-center gap-1.5 pt-0.5 text-[10px] text-muted-foreground/75">
+            <span className="font-medium text-foreground/80">{categoryLabel}</span>
+            <span>·</span>
+            <span className="font-mono">{relativeTime(notif.timestamp, t)}</span>
+            {notif.targetTab && (
+              <span className="text-[10px] text-primary hidden group-hover:inline-flex items-center gap-0.5 ml-auto">
+                {t("openDocument")} <ArrowRight className="size-2.5" />
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Action Slot (Top-Right): Quiet dot in idle, Quick action buttons on hover */}
+        <div
+          className="absolute top-2.5 right-2.5 flex items-center justify-end"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Idle unread indicator dot */}
+          {!notif.read && (
+            <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 transition-opacity group-hover:hidden pointer-events-none" />
+          )}
+
+          {/* Hover action buttons (clean 18px icons, zero overlap) */}
+          <div className="hidden group-hover:flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => onToggleRead(notif.id, e)}
+                    className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+                    aria-label={notif.read ? t("markUnread") : t("markRead")}
+                  >
+                    {notif.read ? <CircleDot className="size-3" /> : <Check className="size-3 text-primary" />}
+                  </Button>
+                }
+              />
+              <TooltipContent side="top" className="text-[10px]">
+                {notif.read ? t("markUnread") : t("markRead")}
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => onDismiss(notif.id, e)}
+                    className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
+                    aria-label={t("dismiss")}
+                  >
+                    <X className="size-3" />
+                  </Button>
+                }
+              />
+              <TooltipContent side="top" className="text-[10px]">
+                {t("dismiss")}
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </div>
     </div>
@@ -487,8 +610,8 @@ export function NotificationPanel() {
   );
 
   const handleDismiss = useCallback(
-    (id: string, e: React.MouseEvent) => {
-      e.stopPropagation();
+    (id: string, e?: React.MouseEvent) => {
+      if (e) e.stopPropagation();
       dismissNotification(id);
     },
     [dismissNotification]

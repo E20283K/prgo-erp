@@ -132,12 +132,14 @@ export function HeaderIconAction({
   onClick,
   variant = "ghost",
   className,
+  disabled,
 }: {
   icon: LucideIcon;
   label: string;
   onClick: () => void;
   variant?: "ghost" | "outline";
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <Tooltip>
@@ -148,7 +150,8 @@ export function HeaderIconAction({
             variant={variant}
             size="icon-sm"
             aria-label={label}
-            className={cn("h-7 w-7 cursor-pointer", className)}
+            disabled={disabled}
+            className={cn("h-7 w-7 cursor-pointer", disabled && "opacity-50 cursor-not-allowed pointer-events-none", className)}
           >
             <Icon className="w-3.5 h-3.5" />
           </Button>

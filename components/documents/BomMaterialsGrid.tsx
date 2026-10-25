@@ -171,7 +171,7 @@ export function buildMaterialSpec(form: Partial<BomItem>): string {
 }
 
 export function normalizeBomItem(item: any): BomItem {
-  const planQty = item.planQty !== undefined ? Number(item.planQty) : (item.qty !== undefined ? Number(item.qty) : 0);
+  const planQty = item.planQty !== undefined ? Number(item.planQty) : (item.quantity !== undefined ? Number(item.quantity) : (item.qty !== undefined ? Number(item.qty) : 0));
   const actualQty = item.actualQty !== undefined ? Number(item.actualQty) : planQty;
   const wasteQty = item.wasteQty !== undefined ? Number(item.wasteQty) : Math.max(0, actualQty - planQty);
   const unitPrice = Number(item.unitPrice) || 0;
@@ -258,15 +258,17 @@ export function BomMaterialsGrid({
     suppliers,
     loadSuppliers,
     masterSpecifications,
+    loadSpecificationsAsync,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
-  const [isSpecComboboxOpen, setIsSpecComboboxOpen] = useState(false);
+  const [isSpecPickerOpen, setIsSpecPickerOpen] = useState(false);
   const [isWarehousePickerOpen, setIsWarehousePickerOpen] = useState(false);
 
   useEffect(() => {
     if (warehouseStock.length === 0 && loadWarehouseStock) loadWarehouseStock();
     if (suppliers.length === 0 && loadSuppliers) loadSuppliers();
-  }, [warehouseStock.length, loadWarehouseStock, suppliers.length, loadSuppliers]);
+    if (masterSpecifications.length === 0 && loadSpecificationsAsync) loadSpecificationsAsync();
+  }, [warehouseStock.length, loadWarehouseStock, suppliers.length, loadSuppliers, masterSpecifications.length, loadSpecificationsAsync]);
 
   const supplierOptions = useMemo(() => {
     const set = new Set<string>();
@@ -422,17 +424,18 @@ export function BomMaterialsGrid({
   const selectedRowIndex = selection.rows.toArray()[0];
   const hasSelectedRow = selectedRowIndex !== undefined && items[selectedRowIndex] !== undefined;
 
-  // Synchronize items when initialItems prop is updated from parent (e.g. SpecificationsTab sync)
-  const isInitialMount = React.useRef(true);
+  // Synchronize items when initialItems prop is updated from parent or activeSpec is populated
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
+    if (initialItems && initialItems.length > 0) {
+      setItems(initialItems.map(normalizeBomItem));
       return;
     }
-    if (initialItems && initialItems.length > 0) {
-      setItems(initialItems);
+    if ((!items || items.length === 0) && activeSpec && (activeSpec as any).materials && Array.isArray((activeSpec as any).materials) && (activeSpec as any).materials.length > 0) {
+      const specMats = (activeSpec as any).materials.map(normalizeBomItem);
+      setItems(specMats);
+      if (onItemsChange) onItemsChange(specMats);
     }
-  }, [initialItems]);
+  }, [initialItems, activeSpec, onItemsChange]);
 
   // Compute Shortage Items (items out of stock or requiring procurement)
   const shortageItems = useMemo(() => {
@@ -547,6 +550,25 @@ export function BomMaterialsGrid({
     if (onItemsChange) onItemsChange(next);
     if (tabId) setTabUnsaved(tabId, true);
   }, [hasSelectedRow, selectedRowIndex, items, onItemsChange, tabId, setTabUnsaved]);
+
+  const handleSelectSpecification = useCallback((spec: any) => {
+    if (onRecipeChange) {
+      onRecipeChange(spec.code, spec.department);
+    }
+    const specMaterials = spec.materials;
+    if (specMaterials && Array.isArray(specMaterials) && specMaterials.length > 0) {
+      const mapped = specMaterials.map(normalizeBomItem);
+      setItems(mapped);
+      if (onItemsChange) onItemsChange(mapped);
+    }
+    if (tabId) setTabUnsaved(tabId, true);
+    toast.add({
+      title: "Shablon biriktirildi",
+      description: `${spec.code}: ${spec.name}`,
+      type: "success",
+    });
+    setIsSpecPickerOpen(false);
+  }, [onRecipeChange, onItemsChange, tabId, setTabUnsaved]);
 
   // Compute total BOM costs (Plan vs Fact vs Waste)
   const { planTotalCost, actualTotalCost, wasteTotalCost, remakeCount } = useMemo(() => {
@@ -1256,104 +1278,150 @@ export function BomMaterialsGrid({
         {/* Left Action Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
           {/* Master BOM Specification Indicator & Action Menu */}
-          {(activeSpec || recipe) && (
+          {(activeSpec || recipe) ? (
+            <div className="flex items-center gap-1.5 shrink-0 bg-muted/40 hover:bg-muted/70 transition-colors border border-border/80 rounded px-2 py-0.5">
+              <span className="text-[11px] font-medium text-muted-foreground hidden xl:inline shrink-0">
+                Retsept:
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsSpecPickerOpen(true)}
+                title="Boshqa shablon tanlash uchun bosing"
+                className="flex items-center gap-1.5 min-w-0 text-left cursor-pointer hover:opacity-85"
+              >
+                <span className="font-mono text-[11px] font-semibold text-primary shrink-0">
+                  {activeSpec?.code || recipe}
+                </span>
+                {activeSpec?.name && activeSpec.name !== (activeSpec.code || recipe) && (
+                  <span className="truncate text-xs font-medium text-foreground max-w-[140px] sm:max-w-[200px]">
+                    {activeSpec.name}
+                  </span>
+                )}
+              </button>
+
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="h-5 w-5 p-0 ml-1 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+                          >
+                            <MoreHorizontal className="w-3.5 h-3.5" />
+                          </Button>
+                        }
+                      />
+                    }
+                  />
+                  <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                    Spetsifikatsiya amallari
+                  </TooltipContent>
+                </Tooltip>
+
+                <DropdownMenuContent align="start" className="w-60 text-xs">
+                  <DropdownMenuItem
+                    onClick={() => setIsSpecPickerOpen(true)}
+                    className="gap-2 cursor-pointer font-medium text-foreground"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-primary" />
+                    <span>Shablonni almashtirish / tanlash</span>
+                  </DropdownMenuItem>
+
+                  {onOpenTab && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        const specToOpen = activeSpec || MASTER_SPECIFICATIONS[0];
+                        onOpenTab({
+                          id: specToOpen.id,
+                          title: `${specToOpen.id}: ${specToOpen.name}`,
+                          type: "product-spec",
+                          module: "production",
+                          documentData: {
+                            id: specToOpen.id,
+                            name: specToOpen.name,
+                            code: specToOpen.code,
+                            department: specToOpen.department,
+                            desc: specToOpen.description,
+                            materials: items,
+                          },
+                        });
+                      }}
+                      className="gap-2 cursor-pointer"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Spetsifikatsiya kartasini ochish</span>
+                    </DropdownMenuItem>
+                  )}
+
+                  {onSaveAsSpec && (
+                    <DropdownMenuItem
+                      onClick={() => onSaveAsSpec(items)}
+                      className="gap-2 cursor-pointer font-medium text-violet-700 dark:text-violet-400"
+                    >
+                      <BookmarkPlus className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+                      <span>Yangi spetsifikatsiya qilib saqlash</span>
+                    </DropdownMenuItem>
+                  )}
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (onRecipeChange) onRecipeChange("", "");
+                      setItems([]);
+                      if (onItemsChange) onItemsChange([]);
+                      if (tabId) setTabUnsaved(tabId, true);
+                      toast.add({
+                        title: "Shablon olib tashlandi",
+                        description: "Buyruq erkin retseptsiz rejimga o'tkazildi",
+                        type: "info",
+                      });
+                    }}
+                    className="gap-2 cursor-pointer text-muted-foreground"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Shablonni olib tashlash (bo'shatish)</span>
+                  </DropdownMenuItem>
+
+                  {recipe && RECIPE_BOM_MAP[recipe] && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setItems(RECIPE_BOM_MAP[recipe]);
+                        if (tabId) setTabUnsaved(tabId, true);
+                        toast.add({
+                          title: "Texkarta tiklandi",
+                          description: "Standart me'yorlariga muvaffaqiyatli qaytarildi",
+                          type: "success",
+                        });
+                      }}
+                      className="gap-2 cursor-pointer text-muted-foreground"
+                    >
+                      <Boxes className="w-3.5 h-3.5" />
+                      <span>Standart me&apos;yorga qaytarish</span>
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Separator orientation="vertical" className="h-4 mx-0.5" />
+            </div>
+          ) : (
             <div className="flex items-center gap-1.5 shrink-0 bg-muted/40 border border-border/80 rounded px-2 py-0.5">
               <span className="text-[11px] font-medium text-muted-foreground hidden xl:inline shrink-0">
                 Retsept:
               </span>
-              <div className="flex items-center gap-1.5 min-w-0 text-left">
-                <span className="font-mono text-[11px] font-semibold text-primary shrink-0">
-                  {activeSpec?.code || recipe}
-                </span>
-                <span className="truncate text-xs font-medium text-foreground max-w-[140px] sm:max-w-[200px]">
-                  {activeSpec?.name || recipe}
-                </span>
-              </div>
-
-              {(onOpenTab || onSaveAsSpec) && (
-                <DropdownMenu>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <DropdownMenuTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              className="h-5 w-5 p-0 ml-1 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
-                            >
-                              <MoreHorizontal className="w-3.5 h-3.5" />
-                            </Button>
-                          }
-                        />
-                      }
-                    />
-                    <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                      Spetsifikatsiya amallari
-                    </TooltipContent>
-                  </Tooltip>
-
-                  <DropdownMenuContent align="start" className="w-56 text-xs">
-                    {onOpenTab && (
-                      <DropdownMenuItem
-                        onClick={() => {
-                          const specToOpen = activeSpec || MASTER_SPECIFICATIONS[0];
-                          onOpenTab({
-                            id: specToOpen.id,
-                            title: `${specToOpen.id}: ${specToOpen.name}`,
-                            type: "product-spec",
-                            module: "production",
-                            documentData: {
-                              id: specToOpen.id,
-                              name: specToOpen.name,
-                              code: specToOpen.code,
-                              department: specToOpen.department,
-                              desc: specToOpen.description,
-                              materials: items,
-                            },
-                          });
-                        }}
-                        className="gap-2 cursor-pointer"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                        <span>Spetsifikatsiya kartasini ochish</span>
-                      </DropdownMenuItem>
-                    )}
-
-                    {onSaveAsSpec && (
-                      <DropdownMenuItem
-                        onClick={() => onSaveAsSpec(items)}
-                        className="gap-2 cursor-pointer font-medium text-violet-700 dark:text-violet-400"
-                      >
-                        <BookmarkPlus className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
-                        <span>Yangi spetsifikatsiya qilib saqlash</span>
-                      </DropdownMenuItem>
-                    )}
-
-                    {recipe && RECIPE_BOM_MAP[recipe] && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setItems(RECIPE_BOM_MAP[recipe]);
-                            if (tabId) setTabUnsaved(tabId, true);
-                            toast.add({
-                              title: "Texkarta tiklandi",
-                              description: "Standart me'yorlariga muvaffaqiyatli qaytarildi",
-                              type: "success",
-                            });
-                          }}
-                          className="gap-2 cursor-pointer text-muted-foreground"
-                        >
-                          <Boxes className="w-3.5 h-3.5" />
-                          <span>Standart me&apos;yorga qaytarish</span>
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsSpecPickerOpen(true)}
+                className="h-5 px-1.5 text-xs text-muted-foreground hover:text-foreground font-normal gap-1 cursor-pointer"
+              >
+                <Layers className="size-3 text-primary" />
+                <span>Shablon biriktirish</span>
+              </Button>
               <Separator orientation="vertical" className="h-4 mx-0.5" />
             </div>
           )}
@@ -2322,6 +2390,82 @@ export function BomMaterialsGrid({
         isOpen={!!previewMaterial}
         onClose={() => setPreviewMaterial(null)}
       />
+
+      {/* ── 3. SPECIFICATION / BOM TEMPLATE PICKER DIALOG ── */}
+      <Dialog open={isSpecPickerOpen} onOpenChange={setIsSpecPickerOpen}>
+        <DialogContent className="max-w-lg p-0 overflow-hidden bg-card border border-border">
+          <DialogHeader className="px-4 py-3 border-b border-border bg-muted/20">
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Layers className="size-4 text-primary" />
+              <span>Spetsifikatsiya / Shablon tanlash</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Buyurtmaga biriktirish uchun texkarta va standart xomashyo normasini tanlang.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Command className="w-full">
+            <CommandInput placeholder="Shablon yoki mahsulot nomi bo'yicha qidirish..." className="h-9 text-xs" />
+            <CommandList className="max-h-80 p-2">
+              <CommandEmpty className="py-6 text-center text-xs text-muted-foreground">
+                Mos keluvchi spetsifikatsiya topilmadi.
+              </CommandEmpty>
+
+              {(["Offset", "Flexo", "Jacquard", "Post-press"] as const).map((dept) => {
+                const deptSpecs = (masterSpecifications || []).filter((s) => s.department === dept);
+                if (deptSpecs.length === 0) return null;
+
+                return (
+                  <CommandGroup key={dept} heading={`${dept} bo'limi`} className="mb-2">
+                    {deptSpecs.map((spec) => {
+                      const isSelected = (activeSpec?.code || recipe) === spec.code;
+                      return (
+                        <CommandItem
+                          key={spec.code}
+                          value={`${spec.code} ${spec.name} ${spec.department} ${spec.description || ""}`}
+                          onSelect={() => handleSelectSpecification(spec)}
+                          className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5 rounded hover:bg-muted"
+                        >
+                          <div className="mt-0.5 shrink-0">
+                            <Check className={cn("size-3.5 text-primary", isSelected ? "opacity-100" : "opacity-0")} />
+                          </div>
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-semibold text-[11px] text-primary">
+                                {spec.code}
+                              </span>
+                              <span className="font-medium text-foreground truncate">
+                                {spec.name}
+                              </span>
+                              <Badge variant="outline" className="ml-auto text-[10px] px-1 py-0 shrink-0 font-normal">
+                                {spec.department}
+                              </Badge>
+                            </div>
+                            {spec.description && (
+                              <p className="text-[11px] text-muted-foreground line-clamp-1">
+                                {spec.description}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5 font-mono">
+                              <span>{(spec as any).materialsCount || (Array.isArray((spec as any).materials) ? (spec as any).materials.length : 0)} xomashyo</span>
+                              {spec.estimatedCost && (
+                                <>
+                                  <span>•</span>
+                                  <span>{spec.estimatedCost}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                );
+              })}
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

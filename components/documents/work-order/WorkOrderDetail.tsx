@@ -29,6 +29,7 @@ import {
   RotateCw,
   MoreVertical,
   BookmarkPlus,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -387,6 +388,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     addNotification,
     createDeliveryActFromOrder,
     masterSpecifications,
+    loadSpecificationsAsync,
     upsertMasterSpecification,
     loadCrmCustomers,
     machines: storeMachines,
@@ -401,13 +403,19 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (warehouseStock.length === 0 && loadWarehouseStock) {
       loadWarehouseStock();
     }
-  }, [loadCrmCustomers, loadMachines, warehouseStock.length, loadWarehouseStock]);
+    if (masterSpecifications.length === 0 && loadSpecificationsAsync) {
+      loadSpecificationsAsync();
+    }
+  }, [loadCrmCustomers, loadMachines, warehouseStock.length, loadWarehouseStock, masterSpecifications.length, loadSpecificationsAsync]);
   const isDark = theme === "dark";
   const data = tab.documentData || {};
 
   // Find real queue item from workspaceStore to ensure all photos and attachments are 100% available
   const initialDocNo = data.docNo || (tab.id.startsWith("draft-") || tab.id.startsWith("temp-") ? "" : tab.id);
   const [docNo, setDocNo] = useState(initialDocNo);
+  const savedDocNoRef = React.useRef<string>(initialDocNo);
+  const isSavingRef = React.useRef<boolean>(false);
+  const [isSaving, setIsSaving] = useState(false);
   const isDraft = !docNo || tab.id.startsWith("draft-") || tab.id.startsWith("temp-");
 
   const queueLookupKey = docNo || tab.id;
@@ -1020,10 +1028,24 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const activeSpec = useMemo(
     () =>
-      (masterSpecifications || []).find((s) => s.code === formData.recipe) ||
-      (dbSpecs && dbSpecs.find((s: any) => s.code === formData.recipe)),
+      (masterSpecifications || []).find((s) => s.code === formData.recipe || s.id === formData.recipe) ||
+      (dbSpecs && dbSpecs.find((s: any) => s.code === formData.recipe || s.id === formData.recipe)),
     [masterSpecifications, dbSpecs, formData.recipe]
   );
+
+  // Auto-populate materials from activeSpec if currentBomItems is empty
+  const hasAutoPopulatedSpecRef = React.useRef(false);
+  useEffect(() => {
+    if (hasAutoPopulatedSpecRef.current) return;
+    if (activeSpec && (activeSpec as any).materials && Array.isArray((activeSpec as any).materials) && (activeSpec as any).materials.length > 0) {
+      if (!currentBomItems || currentBomItems.length === 0) {
+        hasAutoPopulatedSpecRef.current = true;
+        const loaded = (activeSpec as any).materials.map(normalizeBomItem);
+        setCurrentBomItems(loaded);
+        updateTabData(tab.id, { materials: loaded });
+      }
+    }
+  }, [activeSpec, currentBomItems, tab.id, updateTabData]);
   const activeSite = useMemo(
     () =>
       (dbSites && dbSites.find((s: any) => s.id === formData.site || s.name === formData.site)) ||
@@ -1209,7 +1231,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleDepartmentChange = (newDept: string) => {
-    const defaultRecipe = newDept === "Flexo" ? "FLEXO_NYLON_V1" : newDept === "Jacquard" ? "JACQ_WOVEN_V1" : "OFFSET_STD_V1";
+    const matchedSpec = (masterSpecifications || []).find((s) => s.department === newDept);
+    const defaultRecipe = matchedSpec
+      ? matchedSpec.code
+      : newDept === "Flexo"
+      ? "FLEXO_NYLON_V1"
+      : newDept === "Jacquard"
+      ? "JACQ_WOVEN_V1"
+      : "OFFSET_STD_V1";
     const available = MACHINE_MAP[newDept] || [];
     const defaultMachine = available[0] || formData.pressMachine;
     setFormData((prev) => ({
@@ -1227,103 +1256,125 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const persistOrderDetails = async (): Promise<string> => {
-    let currentDocNo = docNo;
-    const isCurrentlyDraft = isDraft || !currentDocNo || tab.id.startsWith("draft-") || tab.id.startsWith("temp-");
-
-    if (upsertWorkOrderAsync) {
-      const savedResult = await upsertWorkOrderAsync({
-        ...formData,
-        docNo: isCurrentlyDraft ? undefined : currentDocNo,
-        operations,
-        sampleData,
-        attachments: orderAttachments,
-        skuArtworks,
-        materials: currentBomItems,
-      });
-
-      if (savedResult && typeof savedResult === "object" && savedResult.docNo) {
-        currentDocNo = savedResult.docNo;
-        setDocNo(currentDocNo);
-        if (isCurrentlyDraft) {
-          replaceTabId(
-            tab.id,
-            currentDocNo,
-            `${currentDocNo}: ${formData.product || "Yangi buyruq"}`,
-            {
-              ...data,
-              ...formData,
-              docNo: currentDocNo,
-            }
-          );
-        }
-      }
+    // If a save operation is already in flight, return existing doc ID to avoid duplicates
+    if (isSavingRef.current) {
+      return savedDocNoRef.current || docNo || tab.id;
     }
 
-    const effectiveId = currentDocNo || tab.id;
+    isSavingRef.current = true;
+    setIsSaving(true);
 
-    updateTabData(
-      effectiveId,
-      {
-        ...data,
+    try {
+      let currentDocNo = savedDocNoRef.current || docNo;
+      const hasRealDocNo = Boolean(
+        currentDocNo &&
+        !currentDocNo.startsWith("draft-") &&
+        !currentDocNo.startsWith("temp-") &&
+        currentDocNo !== "NEW" &&
+        currentDocNo !== "[Avtomatik]"
+      );
+      const isCurrentlyDraft = !hasRealDocNo;
+
+      if (upsertWorkOrderAsync) {
+        const savedResult = await upsertWorkOrderAsync({
+          ...formData,
+          docNo: isCurrentlyDraft ? undefined : currentDocNo,
+          operations,
+          sampleData,
+          attachments: orderAttachments,
+          skuArtworks,
+          materials: currentBomItems,
+        });
+
+        if (savedResult && typeof savedResult === "object" && savedResult.docNo) {
+          currentDocNo = savedResult.docNo;
+          savedDocNoRef.current = currentDocNo;
+          setDocNo(currentDocNo);
+          if (isCurrentlyDraft) {
+            replaceTabId(
+              tab.id,
+              currentDocNo,
+              `${currentDocNo}: ${formData.product || "Yangi buyruq"}`,
+              {
+                ...data,
+                ...formData,
+                docNo: currentDocNo,
+              }
+            );
+          }
+        }
+      }
+
+      const effectiveId = currentDocNo || tab.id;
+
+      updateTabData(
+        effectiveId,
+        {
+          ...data,
+          ...formData,
+          operations,
+          shiftEvents,
+          docNo: currentDocNo,
+          sampleData,
+          sampleQty: sampleData.sampleQty,
+          sampleRequired: formData.orderType === "Sample",
+          sampleApprovalStatus: sampleData.approvalStatus,
+          sampleTestPurpose: sampleData.testPurpose,
+          sampleTestMachine: sampleData.testMachine,
+          sampleProduced: sampleData.isProduced,
+          sampleQcPassed: sampleData.qcPassed,
+          sampleRevisions: sampleData.revisions,
+          attachments: orderAttachments,
+          skuArtworks,
+        },
+        `${effectiveId}: ${formData.product || "Yangi buyruq"}`
+      );
+
+      const isSampleNeeded = formData.orderType === "Sample" || Boolean(sampleData?.isRequired);
+
+      upsertProductionQueueItem({
         ...formData,
-        operations,
-        shiftEvents,
-        docNo: currentDocNo,
-        sampleData,
+        id: effectiveId,
+        docNo: effectiveId,
+        customer: formData.customer,
+        product: formData.product,
+        quantity:
+          formData.orderType === "Sample" && sampleData.approvalStatus !== "approved"
+            ? sampleData.sampleQty
+            : formData.quantity,
+        unit: formData.unit,
+        pressMachine: formData.pressMachine,
+        department: formData.department,
+        priority: (formData.priority as "Normal" | "High" | "Urgent") || "Normal",
+        deadline: formData.deadline,
+        orderType: formData.orderType,
+        sampleRequired: isSampleNeeded,
+        sampleStatus: isSampleNeeded
+          ? sampleData.approvalStatus === "approved"
+            ? "approved"
+            : sampleData.approvalStatus === "revision_requested"
+            ? "revision_requested"
+            : sampleData.isProduced
+            ? "awaiting_approval"
+            : "in_production"
+          : "none",
         sampleQty: sampleData.sampleQty,
-        sampleRequired: formData.orderType === "Sample",
-        sampleApprovalStatus: sampleData.approvalStatus,
-        sampleTestPurpose: sampleData.testPurpose,
-        sampleTestMachine: sampleData.testMachine,
-        sampleProduced: sampleData.isProduced,
-        sampleQcPassed: sampleData.qcPassed,
-        sampleRevisions: sampleData.revisions,
+        sampleData,
+        operations,
         attachments: orderAttachments,
         skuArtworks,
-      },
-      `${effectiveId}: ${formData.product || "Yangi buyruq"}`
-    );
+      });
 
-    const isSampleNeeded = formData.orderType === "Sample" || Boolean(sampleData?.isRequired);
-
-    upsertProductionQueueItem({
-      ...formData,
-      id: effectiveId,
-      docNo: effectiveId,
-      customer: formData.customer,
-      product: formData.product,
-      quantity:
-        formData.orderType === "Sample" && sampleData.approvalStatus !== "approved"
-          ? sampleData.sampleQty
-          : formData.quantity,
-      unit: formData.unit,
-      pressMachine: formData.pressMachine,
-      department: formData.department,
-      priority: (formData.priority as "Normal" | "High" | "Urgent") || "Normal",
-      deadline: formData.deadline,
-      orderType: formData.orderType,
-      sampleRequired: isSampleNeeded,
-      sampleStatus: isSampleNeeded
-        ? sampleData.approvalStatus === "approved"
-          ? "approved"
-          : sampleData.approvalStatus === "revision_requested"
-          ? "revision_requested"
-          : sampleData.isProduced
-          ? "awaiting_approval"
-          : "in_production"
-        : "none",
-      sampleQty: sampleData.sampleQty,
-      sampleData,
-      operations,
-      attachments: orderAttachments,
-      skuArtworks,
-    });
-
-    setTabUnsaved(effectiveId, false);
-    return effectiveId;
+      setTabUnsaved(effectiveId, false);
+      return effectiveId;
+    } finally {
+      isSavingRef.current = false;
+      setIsSaving(false);
+    }
   };
 
   const handleSave = async () => {
+    if (isSavingRef.current) return;
     const savedId = await persistOrderDetails();
     setHistoryRefreshTrigger((prev) => prev + 1);
     addNotification({
@@ -1334,9 +1385,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleSaveAndClose = async () => {
+    if (isSavingRef.current) return;
     const savedId = await persistOrderDetails();
     closeTab(savedId);
   };
+
+  const handleSaveRef = React.useRef(handleSave);
+  handleSaveRef.current = handleSave;
 
   const handleSaveAndCloseRef = React.useRef(handleSaveAndClose);
   handleSaveAndCloseRef.current = handleSaveAndClose;
@@ -1345,12 +1400,24 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   React.useEffect(() => {
     const handleSaveAndCloseEvent = (e: Event) => {
       const detail = (e as CustomEvent<{ tabId: string }>).detail;
-      if (detail?.tabId === tab.id) {
+      if (detail?.tabId === tab.id || detail?.tabId === savedDocNoRef.current) {
         handleSaveAndCloseRef.current();
       }
     };
     window.addEventListener("printgo:save-and-close", handleSaveAndCloseEvent);
     return () => window.removeEventListener("printgo:save-and-close", handleSaveAndCloseEvent);
+  }, [tab.id]);
+
+  // Listen for global Ctrl+S / Cmd+S save event
+  React.useEffect(() => {
+    const handleShortcutSaveEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ tabId: string }>).detail;
+      if (detail?.tabId === tab.id || detail?.tabId === savedDocNoRef.current) {
+        handleSaveRef.current();
+      }
+    };
+    window.addEventListener("printgo:shortcut-save", handleShortcutSaveEvent);
+    return () => window.removeEventListener("printgo:shortcut-save", handleShortcutSaveEvent);
   }, [tab.id]);
 
   // Prevent accidental browser tab close / refresh when unsaved
@@ -1417,6 +1484,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
         e.preventDefault();
         setIsJobTicketOpen(true);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        handleSaveRef.current();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -1952,15 +2023,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               <Separator orientation="vertical" className="h-4 mx-0.5" />
 
               {/* 4. Save icon button */}
-              <HeaderIconAction icon={Save} label={`${tOrder("save")} (Ctrl+S)`} variant="outline" onClick={handleSave} />
+              <HeaderIconAction
+                icon={isSaving ? Loader2 : Save}
+                label={`${tOrder("save")} (Ctrl+S)`}
+                variant="outline"
+                onClick={handleSave}
+                disabled={isSaving}
+                className={isSaving ? "opacity-60 pointer-events-none" : ""}
+              />
 
               {/* 5. Primary Post & Close button */}
               <Button
                 onClick={handleSaveAndClose}
                 size="sm"
+                disabled={isSaving}
                 className="h-7 px-2.5 text-xs gap-1.5 font-medium shadow-none cursor-pointer"
               >
-                <Check className="w-3.5 h-3.5" />
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                 <span className="hidden sm:inline">{tOrder("postAndClose")}</span>
               </Button>
             </>
