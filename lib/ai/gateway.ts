@@ -132,6 +132,35 @@ export async function executeCopilotGateway(
 
 // ─── SMART LOCAL INTENT & TOOL ENGINE ─────────────────────────────────────────
 
+/**
+ * Intelligent stemmer to strip generic conversational words in Uzbek, Russian, and English
+ * so that questions like "qanday buyurtmalarimiz bor?" become undefined (match all items)
+ * instead of filtering by the word "buyurtmalarimiz".
+ */
+function cleanSearchTerm(input: string): string | undefined {
+  const genericRoots = [
+    "buyurtm", "zakaz", "hujjat", "order",
+    "ombor", "sklad", "mahsul", "tovar", "material", "qoldiq", "ostatk",
+    "qarz", "dolg", "balans", "moliya",
+    "dastgoh", "stanok", "apparat", "mashin",
+    "qanday", "qanaqa", "nima", "qaysi", "hamma", "barcha", "bor", "mavjud",
+    "ko'rsat", "korsat", "ber", "ayt", "haqida", "tekshir", "ro'yxat", "royxat",
+    "shu", "ushbu", "bizning", "bizda", "bizga", "menga", "bormi", "bormikin",
+    "qani", "holat", "holati", "barcha", "keltir"
+  ];
+
+  const words = input
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, " ")
+    .split(/\s+/)
+    .filter((w) => {
+      if (w.length < 3) return false;
+      return !genericRoots.some((root) => w.startsWith(root));
+    });
+
+  return words.length > 0 ? words.join(" ") : undefined;
+}
+
 export async function executeSmartLocalEngine(
   query: string,
   context: CopilotUiContext,
@@ -264,9 +293,7 @@ export async function executeSmartLocalEngine(
     lower.includes("catalog")
   ) {
     const docMatch = query.match(/(wo[ofldge]*-[\w\d-]+)/i)?.[1];
-    const stopWords = ["buyurtmalar", "buyurtma", "qanday", "zakazlar", "zakaz", "bor", "qanaqa", "nimalar", "ko'rsat", "ro'yxati", "reja", "ishlar", "qaysi"];
-    const words = lower.replace(/[^\w\s-]/g, "").split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
-    const orderTerm = docMatch || (words.length > 0 ? words.join(" ") : undefined);
+    const orderTerm = docMatch || cleanSearchTerm(query);
 
     const res = await executeErpTool(
       "queryWorkOrders",
@@ -292,9 +319,7 @@ export async function executeSmartLocalEngine(
     lower.includes("mahsulot") ||
     lower.includes("остаток")
   ) {
-    const stopWords = ["omborda", "ombor", "qanday", "mahsulotlar", "mahsulot", "bor", "qoldiq", "qoldiqlari", "qancha", "haqida", "ma'lumot", "ber", "nimalar", "ko'rsat", "ro'yxati", "sklad", "ostatki", "chto", "est", "tekshir", "qaysi"];
-    const words = lower.replace(/[^\w\s-]/g, "").split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
-    const materialTerm = words.length > 0 ? words.join(" ") : undefined;
+    const materialTerm = cleanSearchTerm(query);
 
     const res = await executeErpTool(
       "checkWarehouseInventory",

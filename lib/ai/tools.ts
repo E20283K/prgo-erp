@@ -453,16 +453,18 @@ export async function executeQueryWorkOrders(
   };
 
   let textResult = `**Ishlab chiqarish buyruqlari (${filtered.length} ta topildi):**\n\n`;
-  if (primaryMatch) {
-    textResult += `• **Hujjat**: ${primaryMatch.docNo}\n`;
-    textResult += `• **Mijoz**: ${primaryMatch.customer}\n`;
-    textResult += `• **Mahsulot**: ${primaryMatch.product}\n`;
-    textResult += `• **Tiraj**: ${Number(primaryMatch.quantity || 0).toLocaleString()} ${primaryMatch.unit || "dona"}\n`;
-    textResult += `• **Dastgoh**: ${primaryMatch.pressMachine || "Biriktirilmagan"}\n`;
-    textResult += `• **Bosqich**: ${primaryMatch.stage || "Queue"} (Ustuvorlik: ${primaryMatch.priority || "Normal"})\n`;
-    textResult += `• **Xomashyo**: ${primaryMatch.paperStock || "Belgilanmagan"}\n`;
-    textResult += `• **Dedlayn**: ${primaryMatch.deadline || "Muddatsiz"}\n`;
-    textResult += `• **Qiymati**: $${Number(primaryMatch.priceTotal || 0).toLocaleString()} ${primaryMatch.currency || "USD"}`;
+  if (sliced.length > 0) {
+    sliced.forEach((wo) => {
+      const cust = wo.customer || "Mijoz ko'rsatilmagan";
+      const prod = wo.product || "Mahsulot";
+      const qty = Number(wo.quantity || 0).toLocaleString();
+      const unit = wo.unit || "dona";
+      const mach = wo.pressMachine ? ` (${wo.pressMachine})` : "";
+      textResult += `• **${wo.docNo}** — ${cust}: ${prod} [${qty} ${unit}]${mach} — Bosqich: ${wo.stage || "Queue"}, Holat: ${wo.status || "Draft"}\n`;
+    });
+    if (filtered.length > sliced.length) {
+      textResult += `\n*... yana ${filtered.length - sliced.length} ta buyurtma ro'yxatda mavjud.*\n`;
+    }
   } else {
     textResult += "Belgilangan parametrlar bo'yicha buyurtmalar topilmadi.";
   }
