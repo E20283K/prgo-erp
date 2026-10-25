@@ -873,26 +873,27 @@ export function AiChatSheet() {
                                   </div>
                                 )}
 
-                                <Bubble
-                                  variant={isUser ? "default" : "secondary"}
-                                  align={isUser ? "end" : "start"}
-                                  className={cn(!isUser && "w-full max-w-full")}
-                                >
-                                  <BubbleContent
-                                    className={cn(
-                                      "text-xs leading-relaxed select-text",
-                                      isUser
-                                        ? "p-2.5 rounded-lg whitespace-pre-line"
-                                        : "p-2.5 rounded-lg w-full max-w-full bg-secondary/70 border border-border/40"
-                                    )}
+                                {isUser ? (
+                                  <Bubble variant="default" align="end">
+                                    <BubbleContent className="text-xs p-2.5 rounded-lg whitespace-pre-line leading-relaxed select-text text-primary-foreground font-medium">
+                                      {msg.content}
+                                    </BubbleContent>
+                                  </Bubble>
+                                ) : (
+                                  <Bubble
+                                    variant="secondary"
+                                    align="start"
+                                    className="w-full max-w-full"
                                   >
-                                    <CopilotMessageRenderer
-                                      content={msg.content}
-                                      role={msg.role}
-                                      onOpenDocument={handleOpenDocumentFromCard}
-                                    />
-                                  </BubbleContent>
-                                </Bubble>
+                                    <BubbleContent className="text-xs p-2.5 rounded-lg w-full max-w-full leading-relaxed select-text bg-secondary/70 border border-border/40 text-foreground">
+                                      <CopilotMessageRenderer
+                                        content={msg.content}
+                                        role={msg.role}
+                                        onOpenDocument={handleOpenDocumentFromCard}
+                                      />
+                                    </BubbleContent>
+                                  </Bubble>
+                                )}
 
                                 {/* Structured Metrics Strip */}
                                 {msg.metrics && msg.metrics.length > 0 && (
