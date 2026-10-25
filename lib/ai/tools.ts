@@ -219,6 +219,31 @@ const FALLBACK_WORK_ORDERS = [
     operator: "Jasur Rahimov",
     shift: "Smena 1",
   },
+  {
+    id: "WOCUT-26-0359",
+    docNo: "WOCUT-26-0359",
+    customer: "Korzinka Supermarket LLC",
+    product: "Promo Flyer 10k",
+    quantity: 700,
+    unit: "pcs",
+    status: "Draft",
+    priority: "Normal",
+    stage: "Queue",
+    pressMachine: "Polar N 115 Plus High-Speed Guillotine",
+    startDate: "2026-10-20",
+    deadline: "2026-10-24",
+    prepressStatus: "Approved by Client",
+    paperStock: "Galerie Art Silk 150g/m² (700×1000 mm, 735 varaq rejalashtirilgan)",
+    colors: "6+1 (Spot: PANTONE 021 C, PANTONE Yellow 012 C)",
+    coating: "2 tomonlama (2s)",
+    lamination: "2 tomonlama (2s)",
+    attachmentsCount: 5,
+    priceTotal: 420.0,
+    currency: "USD",
+    department: "Post-press",
+    operator: "Murod Usmonov",
+    shift: "Smena 1",
+  },
 ];
 
 const FALLBACK_STOCK = [
@@ -452,21 +477,44 @@ export async function executeQueryWorkOrders(
     ]),
   };
 
-  let textResult = `**Ishlab chiqarish buyruqlari (${filtered.length} ta topildi):**\n\n`;
-  if (sliced.length > 0) {
-    sliced.forEach((wo) => {
-      const cust = wo.customer || "Mijoz ko'rsatilmagan";
-      const prod = wo.product || "Mahsulot";
-      const qty = Number(wo.quantity || 0).toLocaleString();
-      const unit = wo.unit || "dona";
-      const mach = wo.pressMachine ? ` (${wo.pressMachine})` : "";
-      textResult += `• **${wo.docNo}** — ${cust}: ${prod} [${qty} ${unit}]${mach} — Bosqich: ${wo.stage || "Queue"}, Holat: ${wo.status || "Draft"}\n`;
-    });
-    if (filtered.length > sliced.length) {
-      textResult += `\n*... yana ${filtered.length - sliced.length} ta buyurtma ro'yxatda mavjud.*\n`;
-    }
+  let textResult = "";
+
+  // If exactly one order is queried specifically (e.g. by docNo or specific query), format as structured Entity Card
+  if (sliced.length === 1 && (params.docNo || (params.query && filtered.length === 1))) {
+    const o = sliced[0];
+    const qty = Number(o.quantity || 0).toLocaleString();
+    const unit = o.unit || "pcs";
+    textResult = `**${o.docNo} buyurtma kartochkasi ma'lumotlari:**\n\n` +
+      `• **Hujjat raqami**: ${o.docNo}\n` +
+      `• **Mijoz**: ${o.customer || "—"}\n` +
+      `• **Mahsulot**: ${o.product || "—"}\n` +
+      `• **Tiraj**: ${qty} ${unit}\n` +
+      `• **Bo'lim**: ${o.department || "Ishlab chiqarish"}\n` +
+      `• **Uskuna**: ${o.pressMachine || "Dastgoh belgilanmagan"}\n` +
+      `• **Bosqich / Holat**: ${o.stage || "Queue"} / ${o.status || "Draft"}\n` +
+      `• **Ustuvorlik**: ${o.priority || "Normal"}\n` +
+      `• **Dedlayn**: ${o.deadline || "Belgilanmagan"}\n` +
+      `• **Xomashyo**: ${o.paperStock || "Material ko'rsatilmagan"}\n` +
+      (o.colors ? `• **Ranglar**: ${o.colors}\n` : "") +
+      (o.coating || o.lamination ? `• **Laminatsiya**: ${o.coating || o.lamination}\n` : "") +
+      (o.attachmentsCount ? `• **Biriktirilgan fayllar**: ${o.attachmentsCount} ta hujjat va tasvir fayllari (PDF/JPG/PNG)\n` : "");
   } else {
-    textResult += "Belgilangan parametrlar bo'yicha buyurtmalar topilmadi.";
+    textResult = `**Ishlab chiqarish buyruqlari (${filtered.length} ta topildi):**\n\n`;
+    if (sliced.length > 0) {
+      sliced.forEach((wo) => {
+        const cust = wo.customer || "Mijoz ko'rsatilmagan";
+        const prod = wo.product || "Mahsulot";
+        const qty = Number(wo.quantity || 0).toLocaleString();
+        const unit = wo.unit || "dona";
+        const mach = wo.pressMachine ? ` (${wo.pressMachine})` : "";
+        textResult += `• **${wo.docNo}** — ${cust}: ${prod} [${qty} ${unit}]${mach} — Bosqich: ${wo.stage || "Queue"}, Holat: ${wo.status || "Draft"}\n`;
+      });
+      if (filtered.length > sliced.length) {
+        textResult += `\n*... yana ${filtered.length - sliced.length} ta buyurtma ro'yxatda mavjud.*\n`;
+      }
+    } else {
+      textResult += "Belgilangan parametrlar bo'yicha buyurtmalar topilmadi.";
+    }
   }
 
   return {
@@ -651,26 +699,47 @@ export async function executeCheckWarehouseInventory(
     }),
   };
 
-  let textResult = `**Ombor xomashyo va mahsulotlar qoldiqlari (${filtered.length} ta pozitsiya):**\n\n`;
-  if (filtered.length > 0) {
-    filtered.slice(0, 5).forEach((item) => {
-      const stock = Number(item.stockLevel || 0);
-      const res = Number(item.reserved || 0);
-      const free = Math.max(0, stock - res);
-      const statusText = free <= 0 ? "Kritik kam" : (item.status || "Zaxirada");
-      textResult += `• **${item.name}** (${item.sku || "—"}): Jami: ${stock.toLocaleString()} ${item.unit || "dona"}, Erkin: ${free.toLocaleString()} ${item.unit || "dona"} [${statusText}]\n`;
-    });
-    if (filtered.length > 5) {
-      textResult += `\n*... yana ${filtered.length - 5} ta material ro'yxatda mavjud.*\n`;
-    }
-  } else {
-    textResult += "Ko'rsatilgan so'rov bo'yicha omborda xomashyo topilmadi.\n";
-  }
+  let textResult = "";
 
-  if (criticalItems.length > 0) {
-    const crit = criticalItems[0];
-    const free = Math.max(0, Number(crit.stockLevel || 0) - Number(crit.reserved || 0));
-    textResult += `\n⚠️ **Diqqat (Yetishmovchilik)**: ${crit.name} xomashyosidan atigi ${free} ${crit.unit || "varaq"} erkin qolgan (chegara: ${crit.reorder || 1000}). Yangi kirim orderi talab etiladi.`;
+  if (filtered.length === 1 && params.query) {
+    const item = filtered[0];
+    const stock = Number(item.stockLevel || 0);
+    const res = Number(item.reserved || 0);
+    const free = Math.max(0, stock - res);
+    const statusText = free <= 0 ? "Kritik yetishmovchilik" : (item.status || "Zaxirada");
+
+    textResult = `**${item.name} ombor qoldig'i ma'lumotlari:**\n\n` +
+      `• **SKU**: ${item.sku || "—"}\n` +
+      `• **Mahsulot**: ${item.name}\n` +
+      `• **Kategoriya**: ${item.category || "Xomashyo"}\n` +
+      `• **Joylashuv**: ${item.locationName || "Asosiy Ombor"}\n` +
+      `• **Jami fizik qoldiq**: ${stock.toLocaleString()} ${item.unit || "dona"}\n` +
+      `• **Band qilingan**: ${res.toLocaleString()} ${item.unit || "dona"}\n` +
+      `• **Erkin qoldiq**: ${free.toLocaleString()} ${item.unit || "dona"}\n` +
+      `• **Minimal chegara**: ${Number(item.reorder || 1000).toLocaleString()} ${item.unit || "dona"}\n` +
+      `• **Holat**: ${statusText}\n`;
+  } else {
+    textResult = `**Ombor xomashyo va mahsulotlar qoldiqlari (${filtered.length} ta pozitsiya):**\n\n`;
+    if (filtered.length > 0) {
+      filtered.slice(0, 5).forEach((item) => {
+        const stock = Number(item.stockLevel || 0);
+        const res = Number(item.reserved || 0);
+        const free = Math.max(0, stock - res);
+        const statusText = free <= 0 ? "Kritik kam" : (item.status || "Zaxirada");
+        textResult += `• **${item.name}** (${item.sku || "—"}): Jami: ${stock.toLocaleString()} ${item.unit || "dona"}, Erkin: ${free.toLocaleString()} ${item.unit || "dona"} [${statusText}]\n`;
+      });
+      if (filtered.length > 5) {
+        textResult += `\n*... yana ${filtered.length - 5} ta material ro'yxatda mavjud.*\n`;
+      }
+    } else {
+      textResult += "Ko'rsatilgan so'rov bo'yicha omborda xomashyo topilmadi.\n";
+    }
+
+    if (criticalItems.length > 0) {
+      const crit = criticalItems[0];
+      const free = Math.max(0, Number(crit.stockLevel || 0) - Number(crit.reserved || 0));
+      textResult += `\n**Diqqat (Yetishmovchilik)**: ${crit.name} xomashyosidan atigi ${free} ${crit.unit || "varaq"} erkin qolgan (chegara: ${crit.reorder || 1000}). Yangi kirim orderi talab etiladi.`;
+    }
   }
 
   return {

@@ -208,4 +208,21 @@ QAT'IY ANTI-SLOP VA DISPIRATSIYA STANDARTLARI:
    - Agar erkin qoldiq minimal chegara (safety reorder point) dan past bo'lsa, xomashyo yetishmovchiligi (Critical Shortage) deb hisoblanadi.
    - Mijoz qarzdorligi (Client Settlement) = Berilgan yuklar (Debit) - To'langan mablag'lar (Credit).
 6. TILLAR: Foydalanuvchi qaysi tilda yozsa, shu tilda javob bering (O'zbekcha / Русский / English / Türkçe). Default til: O'zbekcha.
+7. STRUKTURALANGAN HUJJAT KARTOCHKASI (ENTITY CARD FORMATI):
+   Agar muayyan buyurtma yoki hujjat so'ralsa, uni doimo quyidagi ixcham kalit-qiymat kartochka formatida taqdim eting:
+   **[Hujjat kodi] buyurtma kartochkasi ma'lumotlari:**
+   • **Hujjat raqami**: [kod]
+   • **Mijoz**: [mijoz nomi]
+   • **Mahsulot**: [mahsulot nomi]
+   • **Tiraj**: [soni] [birligi]
+   • **Bo'lim**: [bo'lim]
+   • **Uskuna**: [dastgoh nomi]
+   • **Bosqich / Holat**: [bosqich] / [holat]
+   • **Ustuvorlik**: [Normal/High/Urgent]
+   • **Dedlayn**: [YYYY-MM-DD]
+   • **Xomashyo**: [material]
+   • **Ranglar**: [rangdorlik]
+   • **Laminatsiya**: [laminatsiya turi]
+   • **Biriktirilgan fayllar**: [fayllar soni va turi]
+   Ushbu format UI tomonidan avtomatik ravishda chiroyli, interaktiv sanoat kartochkasiga (Industrial Card) aylantiriladi.
 `;

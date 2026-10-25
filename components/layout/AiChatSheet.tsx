@@ -60,6 +60,7 @@ import {
   CopilotTable,
   CopilotProviderMode,
 } from "@/lib/ai/types";
+import { CopilotMessageRenderer } from "@/components/ai/CopilotMessageRenderer";
 
 type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
@@ -410,6 +411,49 @@ export function AiChatSheet() {
       };
       openTab(newTab);
     }
+  };
+
+  // Open Document Directly From Card
+  const handleOpenDocumentFromCard = (docNo: string, cardTitle?: string) => {
+    let type: DocumentTab["type"] = "work-order";
+    let module = "production";
+
+    const upper = docNo.toUpperCase();
+    if (upper.startsWith("WO")) {
+      type = "work-order";
+      module = "production";
+    } else if (upper.startsWith("SPEC")) {
+      type = "product-spec";
+      module = "production";
+    } else if (upper.startsWith("RCV")) {
+      type = "warehouse-receipt";
+      module = "warehouse";
+    } else if (upper.startsWith("SHP")) {
+      type = "warehouse-shipment";
+      module = "warehouse";
+    } else if (upper.startsWith("ACT")) {
+      type = "delivery-act";
+      module = "warehouse";
+    } else if (upper.startsWith("STK") || upper.startsWith("BRD") || upper.startsWith("PAP") || upper.startsWith("FLM") || upper.startsWith("PLT")) {
+      type = "warehouse-stock";
+      module = "warehouse";
+    }
+
+    const cleanTitle = cardTitle
+      ? cardTitle.replace(/buyurtma kartochkasi ma'lumotlari:?/i, "").replace(/tafsilotlar:?/i, "").trim()
+      : "";
+
+    openTab({
+      id: docNo,
+      title: cleanTitle ? `${docNo}: ${cleanTitle}` : docNo,
+      type,
+      module,
+      isUnsaved: false,
+      activeLevel3Tab: "overview",
+      documentData: {
+        docNo,
+      },
+    });
   };
 
   // Main Send Handler with API Integration
@@ -790,7 +834,7 @@ export function AiChatSheet() {
                                 )}
                               </MessageAvatar>
 
-                              <MessageContent className="max-w-[88%]">
+                              <MessageContent className={cn(isUser ? "max-w-[88%]" : "max-w-full w-full flex-1")}>
                                 <MessageHeader className="gap-2 text-[10px] py-0 px-1">
                                   <span className="font-semibold text-foreground">
                                     {isUser ? (currentUser?.name || "User") : "PrintGoo AI"}
@@ -832,9 +876,21 @@ export function AiChatSheet() {
                                 <Bubble
                                   variant={isUser ? "default" : "secondary"}
                                   align={isUser ? "end" : "start"}
+                                  className={cn(!isUser && "w-full max-w-full")}
                                 >
-                                  <BubbleContent className="text-xs p-2.5 rounded-lg whitespace-pre-line leading-relaxed select-text">
-                                    {msg.content}
+                                  <BubbleContent
+                                    className={cn(
+                                      "text-xs leading-relaxed select-text",
+                                      isUser
+                                        ? "p-2.5 rounded-lg whitespace-pre-line"
+                                        : "p-2.5 rounded-lg w-full max-w-full bg-secondary/70 border border-border/40"
+                                    )}
+                                  >
+                                    <CopilotMessageRenderer
+                                      content={msg.content}
+                                      role={msg.role}
+                                      onOpenDocument={handleOpenDocumentFromCard}
+                                    />
                                   </BubbleContent>
                                 </Bubble>
 
