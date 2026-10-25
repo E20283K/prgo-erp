@@ -268,7 +268,9 @@
     "suggestShiftLeadPrompt": "Bugün Heidelberg XL 106 makinesinde vardiya şefi kim?",
     "inputPlaceholder": "Asistana sorun (Ctrl+J)...",
     "sendButton": "Mesaj gönder",
-    "clearChat": "Sohbeti temizle"
+    "clearChat": "Sohbeti temizle",
+    "minimize": "Küçült",
+    "expand": "Genişlet"
   },
   "CommandPalette": {
     "placeholder": "Bir komut, modül adı veya sipariş no yazın...",
@@ -1300,5 +1302,32 @@
     "testWarningDesc": "WOOF-26-0351 siparişinin teslimine 2 gün kaldı.",
     "testInfoTitle": "Senkronizasyon Tamamlandı",
     "testInfoDesc": "Telegram bot mesajları güncellendi."
+  },
+  "AiChatSheet": {
+    "title": "AI Asistan",
+    "clearChat": "Geçmişi temizle",
+    "minimize": "Küçült",
+    "expand": "Genişlet",
+    "welcomeMessage": "PrintGoo ERP AI Asistanına hoş geldiniz. Üretim iş emirlerini, hammadde stoklarını, makine telemetrisini veya cari hesap bakiyelerini analiz edebilirsiniz.",
+    "inputPlaceholder": "Bir soru sorun veya komut yazın (/wo, /stock, /calc, /debt)...",
+    "sendButton": "Gönder",
+    "activeContext": "Canlı bağlam",
+    "activeContextTooltip": "Aktif sekme verilerini sorguya dahil et",
+    "suggestWo351": "WOOF-26-0351",
+    "suggestWo351Prompt": "WOOF-26-0351 iş emrinin durumunu ve kağıt stok tahsisatını kontrol et",
+    "suggestPaperStock": "Kağıt Stoğu",
+    "suggestPaperStockPrompt": "Depodaki kritik hammadde açıklarını ve stok bakiyelerini göster",
+    "suggestShiftLead": "Baskı Telemetrisi",
+    "suggestShiftLeadPrompt": "Baskı makineleri kuyruğunu ve anlık OEE verimliliğini göster",
+    "suggestDebt": "Müşteri Borçları",
+    "suggestDebtPrompt": "Borçlu müşterileri ve cari hesap mutabakatlarını listele",
+    "suggestCalc": "Baskı Hesaplama",
+    "suggestCalcPrompt": "5000 adet A4 katalog için kağıt ve fire/hazırlık hesabını yap",
+    "localModeBadge": "Yerel Motor",
+    "cloudModeBadge": "Bulut Yapay Zeka",
+    "toolsExecuted": "Yürütülen işlemler",
+    "openTab": "Belgeyi aç",
+    "createDraft": "Taslağı aç",
+    "copied": "Kopyalandı"
   }
 }

@@ -269,7 +269,9 @@
     "suggestShiftLeadPrompt": "Who is the lead operator assigned to Heidelberg XL 106 today?",
     "inputPlaceholder": "Ask PrintGoo Copilot (Ctrl+J)...",
     "sendButton": "Send message",
-    "clearChat": "Clear conversation"
+    "clearChat": "Clear conversation",
+    "minimize": "Minimize",
+    "expand": "Expand"
   },
   "CommandPalette": {
     "placeholder": "Type a command, module name, or search records...",
@@ -1302,5 +1304,32 @@
     "testWarningDesc": "Work order WOOF-26-0351 is due in 2 days.",
     "testInfoTitle": "Sync Completed",
     "testInfoDesc": "Telegram bot messaging cache refreshed."
+  },
+  "AiChatSheet": {
+    "title": "AI Copilot",
+    "clearChat": "Clear history",
+    "minimize": "Minimize",
+    "expand": "Expand",
+    "welcomeMessage": "Welcome to PrintGoo ERP AI Copilot. You can analyze production work orders, raw material stock, press machine telemetry, or client settlements in real time.",
+    "inputPlaceholder": "Ask a question or enter a slash command (/wo, /stock, /calc, /debt)...",
+    "sendButton": "Send",
+    "activeContext": "Live context",
+    "activeContextTooltip": "Include active document tab data in query",
+    "suggestWo351": "WOOF-26-0351",
+    "suggestWo351Prompt": "Check status and paper stock allocation for WOOF-26-0351",
+    "suggestPaperStock": "Paper Stock",
+    "suggestPaperStockPrompt": "Show critical paper shortages and stock balances in warehouse",
+    "suggestShiftLead": "Press Telemetry",
+    "suggestShiftLeadPrompt": "Inspect press machine queue and real-time OEE efficiency",
+    "suggestDebt": "Client Debt",
+    "suggestDebtPrompt": "Show clients with outstanding debt and settlement balances",
+    "suggestCalc": "Print Run Calc",
+    "suggestCalcPrompt": "Calculate paper and make-ready waste for 5000 pcs A4 catalog",
+    "localModeBadge": "Local Engine",
+    "cloudModeBadge": "Cloud AI",
+    "toolsExecuted": "Executed operations",
+    "openTab": "Open document",
+    "createDraft": "Open draft",
+    "copied": "Copied"
   }
 }

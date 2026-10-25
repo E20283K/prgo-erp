@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { RouteStep, MACHINE_OPTIONS, FLOOR_OPERATORS } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useShallow } from "zustand/react/shallow";
 import { computeTariffEstimate, TARIFF_CALC_UNITS } from "@/components/documents/tariff/types";
 
 interface OperationDialogProps {
@@ -86,17 +87,24 @@ export function OperationDialog({
   customerName,
   orderQuantity = 1000,
 }: OperationDialogProps) {
-  const { customerTooling, users, fetchUsers, tariffs, fetchTariffs } = useWorkspaceStore();
+  const { customerTooling, users, tariffs } = useWorkspaceStore(
+    useShallow((s) => ({
+      customerTooling: s.customerTooling,
+      users: s.users,
+      tariffs: s.tariffs,
+    }))
+  );
   const anchor = useComboboxAnchor();
 
   React.useEffect(() => {
-    if (users.length === 0 && fetchUsers) {
-      fetchUsers();
+    const s = useWorkspaceStore.getState();
+    if (s.users.length === 0 && s.fetchUsers) {
+      s.fetchUsers();
     }
-    if (tariffs.length === 0 && fetchTariffs) {
-      fetchTariffs();
+    if (s.tariffs.length === 0 && s.fetchTariffs) {
+      s.fetchTariffs();
     }
-  }, [users.length, fetchUsers, tariffs.length, fetchTariffs]);
+  }, []);
 
   const machineOptions = React.useMemo(
     () =>

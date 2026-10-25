@@ -39,6 +39,7 @@ import {
 import { ShiftEvent, WorkOrderFormData, RouteStep } from "../types";
 import { PrintPlanningResult } from "../planningEngine";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useShallow } from "zustand/react/shallow";
 import { formatMoney } from "../../common/DocumentShell";
 import { BomItem } from "../../BomMaterialsGrid";
 
@@ -74,7 +75,14 @@ export function FinancialsTab({
   docNo = "WOOF-26-0001",
   onPriceChange,
 }: FinancialsTabProps) {
-  const { warehouseStock, addNotification, theme, machines } = useWorkspaceStore();
+  const { warehouseStock, theme, machines } = useWorkspaceStore(
+    useShallow((s) => ({
+      warehouseStock: s.warehouseStock,
+      theme: s.theme,
+      machines: s.machines,
+    }))
+  );
+  const addNotification = useWorkspaceStore((s) => s.addNotification);
   const isDark = theme === "dark";
 
   const targetQty = formData?.quantity || 0;

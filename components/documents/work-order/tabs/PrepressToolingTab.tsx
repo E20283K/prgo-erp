@@ -85,6 +85,7 @@ import {
   WorkOrderFormData,
 } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useShallow } from "zustand/react/shallow";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 
 const DataEditor = dynamic(
@@ -166,19 +167,28 @@ export function PrepressToolingTab({
 }: PrepressToolingTabProps) {
   const {
     suppliers,
-    loadSuppliers,
     diesTooling,
+    theme,
+  } = useWorkspaceStore(
+    useShallow((s) => ({
+      suppliers: s.suppliers,
+      diesTooling: s.diesTooling,
+      theme: s.theme,
+    }))
+  );
+  const {
+    loadSuppliers,
     loadDiesToolingAsync,
     addNotification,
     openTab,
-    theme,
-  } = useWorkspaceStore();
+  } = useWorkspaceStore.getState();
   const isDark = theme === "dark";
 
   useEffect(() => {
-    loadSuppliers();
-    if (loadDiesToolingAsync) loadDiesToolingAsync();
-  }, [loadSuppliers, loadDiesToolingAsync]);
+    const s = useWorkspaceStore.getState();
+    if (s.suppliers.length === 0 && s.loadSuppliers) s.loadSuppliers();
+    if (s.diesTooling.length === 0 && s.loadDiesToolingAsync) s.loadDiesToolingAsync();
+  }, []);
 
   const items = useMemo(() => formData.toolingItems || [], [formData.toolingItems]);
   const filteredItems = items;

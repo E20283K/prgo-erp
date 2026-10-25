@@ -12,10 +12,11 @@ export function TabContentWrapper({
 
   useEffect(() => {
     if (isActive && containerRef.current) {
-      // Force window resize event to make canvas grids (Glide Data Grid) redraw
-      setTimeout(() => {
+      // Force window resize event to make canvas grids (Glide Data Grid) redraw on next frame
+      const raf = requestAnimationFrame(() => {
         window.dispatchEvent(new Event("resize"));
-      }, 10);
+      });
+      return () => cancelAnimationFrame(raf);
     }
   }, [isActive]);
 

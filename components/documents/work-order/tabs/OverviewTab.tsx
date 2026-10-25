@@ -58,6 +58,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore, type CrmCustomerRecord } from "@/store/workspaceStore";
+import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -276,21 +277,32 @@ export function OverviewTab({
   const {
     masterSpecifications,
     crmCustomers,
+    plants,
+  } = useWorkspaceStore(
+    useShallow((s) => ({
+      masterSpecifications: s.masterSpecifications,
+      crmCustomers: s.crmCustomers,
+      plants: s.plants,
+    }))
+  );
+  const {
     loadCrmCustomers,
     upsertCustomerAsync,
     openTab,
     openNewPlantTab,
-    plants,
     fetchPlants,
-  } = useWorkspaceStore();
+  } = useWorkspaceStore.getState();
 
   useEffect(() => {
-    loadCrmCustomers();
-    syncWithServer();
-    if (!plants || plants.length === 0) {
-      fetchPlants();
+    const s = useWorkspaceStore.getState();
+    if (s.crmCustomers.length === 0 && s.loadCrmCustomers) {
+      s.loadCrmCustomers();
     }
-  }, [loadCrmCustomers, syncWithServer, fetchPlants, plants]);
+    syncWithServer();
+    if (!s.plants || s.plants.length === 0) {
+      if (s.fetchPlants) s.fetchPlants();
+    }
+  }, [syncWithServer]);
 
   // Real customer options from CRM database (PostgreSQL)
   const customerOptions = useMemo(() => {
@@ -551,6 +563,22 @@ export function OverviewTab({
       hourlyRate: mach.hourlyRate,
     }));
   }, [currentDeptMachines]);
+
+  const readinessFallbackData = useMemo(() => ({
+    customer: formData.customer,
+    product: formData.product,
+    machine: formData.pressMachine,
+    department: formData.department,
+    quantity: formData.quantity,
+    deadline: formData.deadline,
+  }), [
+    formData.customer,
+    formData.product,
+    formData.pressMachine,
+    formData.department,
+    formData.quantity,
+    formData.deadline,
+  ]);
 
   const [previewFile, setPreviewFile] = useState<ViewableFile | null>(null);
   const [carouselApi, setCarouselApi] = useState<CarouselApi>();
@@ -1999,14 +2027,7 @@ export function OverviewTab({
                 variant="compact"
                 workOrderId={data?.docNo || tabId}
                 onOpenFullRoute={() => onSwitchTab("operations")}
-                fallbackData={{
-                  customer: formData.customer,
-                  product: formData.product,
-                  machine: formData.pressMachine,
-                  department: formData.department,
-                  quantity: formData.quantity,
-                  deadline: formData.deadline,
-                }}
+                fallbackData={readinessFallbackData}
               />
             </div>
           </div>

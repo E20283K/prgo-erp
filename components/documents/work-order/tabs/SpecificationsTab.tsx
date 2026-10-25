@@ -281,13 +281,15 @@ export function SpecificationsTab({
 }: SpecificationsTabProps) {
   const tDie = useTranslations("DieLine");
   const { paperStocks, addPaperStock, coatings, addCoating } = useLookupStore();
-  const { warehouseStock, loadWarehouseStock, addNotification } = useWorkspaceStore();
+  const warehouseStock = useWorkspaceStore((s) => s.warehouseStock);
+  const { loadWarehouseStock, addNotification } = useWorkspaceStore.getState();
 
   useEffect(() => {
-    if (warehouseStock.length === 0 && loadWarehouseStock) {
-      loadWarehouseStock();
+    const s = useWorkspaceStore.getState();
+    if (s.warehouseStock.length === 0 && s.loadWarehouseStock) {
+      s.loadWarehouseStock();
     }
-  }, [warehouseStock.length, loadWarehouseStock]);
+  }, []);
 
   // Paper stock options for Base UI Combobox (connected to Real Warehouse Stock)
   const [paperInput, setPaperInput] = useState(formData.paperStock || "");

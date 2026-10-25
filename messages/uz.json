@@ -269,7 +269,9 @@
     "suggestShiftLeadPrompt": "Bugun Heidelberg XL 106 mashinasida kim katta usta?",
     "inputPlaceholder": "Yordamchidan so'rang (Ctrl+J)...",
     "sendButton": "Xabarni yuborish",
-    "clearChat": "Muloqotni tozalash"
+    "clearChat": "Muloqotni tozalash",
+    "minimize": "Yig'ish",
+    "expand": "Kengaytirish"
   },
   "CommandPalette": {
     "placeholder": "Buyruq, bo'lim nomi yoki buyurtma raqamini kiriting...",
@@ -1302,5 +1304,32 @@
     "testWarningDesc": "WOOF-26-0351 buyurtmasi topshirilishiga 2 kun qoldi.",
     "testInfoTitle": "Sinxronizatsiya yakunlandi",
     "testInfoDesc": "Telegram bot xabarlari yangilandi."
+  },
+  "AiChatSheet": {
+    "title": "AI Yordamchi",
+    "clearChat": "Tarixni tozalash",
+    "minimize": "Kichraytirish",
+    "expand": "Kengaytirish",
+    "welcomeMessage": "PrintGoo ERP AI Yordamchisiga xush kelibsiz. Ishlab chiqarish buyruqlari, ombor qoldiqlari, smena telemetriyasi yoki o'zaro hisob-kitoblar bo'yicha so'rov yuborishingiz mumkin.",
+    "inputPlaceholder": "Savol bering yoki buyruq yozing (/wo, /stock, /calc, /debt)...",
+    "sendButton": "Yuborish",
+    "activeContext": "Faol kontekst",
+    "activeContextTooltip": "Faol hujjat ma'lumotlarini so'rovga qo'shish",
+    "suggestWo351": "WOOF-26-0351",
+    "suggestWo351Prompt": "WOOF-26-0351 buyurtmasining holati va qog'oz ta'minotini tekshirib ber",
+    "suggestPaperStock": "Qog'oz qoldig'i",
+    "suggestPaperStockPrompt": "Ombordagi kritik qog'oz qoldiqlarini va defitsitni ko'rsat",
+    "suggestShiftLead": "Stanoklar telemetriyasi",
+    "suggestShiftLeadPrompt": "Bosma dastgohlari navbati va OEE samaradorligini ko'rsat",
+    "suggestDebt": "Mijozlar qarzi",
+    "suggestDebtPrompt": "Qarzdorligi mavjud mijozlar va o'zaro hisob-kitoblarni ko'rsat",
+    "suggestCalc": "Tiraj hisoblash",
+    "suggestCalcPrompt": "5000 dona A4 katalog uchun qog'oz va priladka isrofini hisobla",
+    "localModeBadge": "Lokal Motor",
+    "cloudModeBadge": "Bulut AI",
+    "toolsExecuted": "Bajarilgan amallar",
+    "openTab": "Hujjatni ochish",
+    "createDraft": "Qoralamani ochish",
+    "copied": "Nusxalandi"
   }
 }

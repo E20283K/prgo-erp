@@ -92,6 +92,13 @@ export function OrderReadinessRouteCard({
     });
   }, [productionQueue, normalizedKey]);
 
+  const fallbackCustomer = fallbackData?.customer;
+  const fallbackProduct = fallbackData?.product;
+  const fallbackMachine = fallbackData?.machine;
+  const fallbackQuantity = fallbackData?.quantity;
+  const fallbackDeadline = fallbackData?.deadline;
+  const fallbackDept = fallbackData?.department;
+
   // Ensure an item exists if opening an ad-hoc work order (never create ghost items for unsaved drafts)
   React.useEffect(() => {
     const isDraft = !workOrderId || workOrderId.startsWith("draft-") || workOrderId.startsWith("temp-");
@@ -100,12 +107,12 @@ export function OrderReadinessRouteCard({
     if (!currentItem && workOrderId) {
       upsertProductionQueueItem({
         id: workOrderId,
-        customer: fallbackData?.customer || "Customer",
-        product: fallbackData?.product || "Production Job",
-        pressMachine: fallbackData?.machine || "Heidelberg Speedmaster XL 106-8P",
-        quantity: fallbackData?.quantity || 5000,
-        deadline: fallbackData?.deadline || new Date().toISOString().split("T")[0],
-        department: fallbackData?.department || "Offset",
+        customer: fallbackCustomer || "Customer",
+        product: fallbackProduct || "Production Job",
+        pressMachine: fallbackMachine || "Heidelberg Speedmaster XL 106-8P",
+        quantity: fallbackQuantity || 5000,
+        deadline: fallbackDeadline || new Date().toISOString().split("T")[0],
+        department: fallbackDept || "Offset",
         stage: "Queue",
         checks: {
           designReady: true,
@@ -115,7 +122,17 @@ export function OrderReadinessRouteCard({
         },
       });
     }
-  }, [currentItem, workOrderId, fallbackData, upsertProductionQueueItem]);
+  }, [
+    currentItem,
+    workOrderId,
+    fallbackCustomer,
+    fallbackProduct,
+    fallbackMachine,
+    fallbackQuantity,
+    fallbackDeadline,
+    fallbackDept,
+    upsertProductionQueueItem,
+  ]);
 
   const checks: ProductionReadinessChecks = currentItem?.checks || {
     designReady: false,

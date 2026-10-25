@@ -269,7 +269,9 @@
     "suggestShiftLeadPrompt": "Кто сегодня старший печатник на Heidelberg XL 106?",
     "inputPlaceholder": "Спросить ассистента PrintGoo (Ctrl+J)...",
     "sendButton": "Отправить сообщение",
-    "clearChat": "Очистить диалог"
+    "clearChat": "Очистить диалог",
+    "minimize": "Свернуть",
+    "expand": "Развернуть"
   },
   "CommandPalette": {
     "placeholder": "Введите команду, название раздела или номер заказа...",
@@ -1302,5 +1304,32 @@
     "testWarningDesc": "До сдачи заказа WOOF-26-0351 осталось 2 дня.",
     "testInfoTitle": "Синхронизация завершена",
     "testInfoDesc": "Сообщения Telegram бота успешно обновлены."
+  },
+  "AiChatSheet": {
+    "title": "AI Помощник",
+    "clearChat": "Очистить историю",
+    "minimize": "Свернуть",
+    "expand": "Развернуть",
+    "welcomeMessage": "Добро пожаловать в AI Помощник PrintGoo ERP. Вы можете анализировать производственные заказы, остатки сырья, телеметрию станков или взаиморасчеты с клиентами.",
+    "inputPlaceholder": "Задайте вопрос или введите команду (/wo, /stock, /calc, /debt)...",
+    "sendButton": "Отправить",
+    "activeContext": "Активный контекст",
+    "activeContextTooltip": "Включить данные активной вкладки в запрос",
+    "suggestWo351": "WOOF-26-0351",
+    "suggestWo351Prompt": "Проверь статус и остаток бумаги для заказа WOOF-26-0351",
+    "suggestPaperStock": "Остатки бумаги",
+    "suggestPaperStockPrompt": "Покажи критические остатки сырья и дефицит на складе",
+    "suggestShiftLead": "Телеметрия станков",
+    "suggestShiftLeadPrompt": "Покажи очередь печатных машин и показатели OEE",
+    "suggestDebt": "Дебиторская задолженность",
+    "suggestDebtPrompt": "Покажи клиентов с задолженностью и взаиморасчеты",
+    "suggestCalc": "Технологический расчет",
+    "suggestCalcPrompt": "Рассчитай бумагу и приладку на 5000 шт каталога А4",
+    "localModeBadge": "Локальный Движок",
+    "cloudModeBadge": "Облачный ИИ",
+    "toolsExecuted": "Выполненные операции",
+    "openTab": "Открыть документ",
+    "createDraft": "Открыть черновик",
+    "copied": "Скопировано"
   }
 }

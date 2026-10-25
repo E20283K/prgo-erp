@@ -64,6 +64,7 @@ import {
 } from "../common/DocumentShell";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
 import { useWorkspaceStore, DocumentTab } from "@/store/workspaceStore";
+import { useShallow } from "zustand/react/shallow";
 import { useLookupStore } from "@/store/lookupStore";
 import { useTranslations } from "next-intl";
 import { CompactSelection, GridSelection } from "@glideapps/glide-data-grid";
@@ -382,6 +383,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tShell = useTranslations("DocumentShell");
   const {
     currentUser,
+    theme,
+    masterSpecifications,
+    machines: storeMachines,
+    warehouseStock,
+    plants,
+  } = useWorkspaceStore(
+    useShallow((s) => ({
+      currentUser: s.currentUser,
+      theme: s.theme,
+      masterSpecifications: s.masterSpecifications,
+      machines: s.machines,
+      warehouseStock: s.warehouseStock,
+      plants: s.plants,
+    }))
+  );
+
+  const {
     setTabUnsaved,
     updateTabData,
     replaceTabId,
@@ -393,35 +411,35 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     closeTab,
     requestCloseTab,
     setLevel3Tab,
-    theme,
     openTab,
     addNotification,
     createDeliveryActFromOrder,
-    masterSpecifications,
     loadSpecificationsAsync,
     upsertMasterSpecification,
     loadCrmCustomers,
-    machines: storeMachines,
     loadMachines,
-    warehouseStock,
     loadWarehouseStock,
-    plants,
     fetchPlants,
-  } = useWorkspaceStore();
+  } = useWorkspaceStore.getState();
 
   useEffect(() => {
-    loadCrmCustomers();
-    loadMachines();
-    if (warehouseStock.length === 0 && loadWarehouseStock) {
-      loadWarehouseStock();
+    const s = useWorkspaceStore.getState();
+    if (s.crmCustomers.length === 0 && s.loadCrmCustomers) {
+      s.loadCrmCustomers();
     }
-    if (masterSpecifications.length === 0 && loadSpecificationsAsync) {
-      loadSpecificationsAsync();
+    if (s.machines.length === 0 && s.loadMachines) {
+      s.loadMachines();
     }
-    if (!plants || plants.length === 0) {
-      fetchPlants();
+    if (s.warehouseStock.length === 0 && s.loadWarehouseStock) {
+      s.loadWarehouseStock();
     }
-  }, [loadCrmCustomers, loadMachines, warehouseStock.length, loadWarehouseStock, masterSpecifications.length, loadSpecificationsAsync, fetchPlants, plants]);
+    if (s.masterSpecifications.length === 0 && s.loadSpecificationsAsync) {
+      s.loadSpecificationsAsync();
+    }
+    if (!s.plants || s.plants.length === 0) {
+      if (s.fetchPlants) s.fetchPlants();
+    }
+  }, []);
   const isDark = theme === "dark";
   const data = tab.documentData || {};
 
@@ -1977,6 +1995,26 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     ? "specs"
     : rawActiveTab;
 
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set([activeTab]));
+
+  React.useEffect(() => {
+    setVisitedTabs((prev) => {
+      if (prev.has(activeTab)) return prev;
+      const next = new Set(prev);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
+
+  const readinessFallbackData = useMemo(() => ({
+    customer: formData.customer,
+    product: formData.product,
+    machine: formData.pressMachine,
+    department: formData.department,
+    quantity: formData.quantity,
+    deadline: formData.deadline,
+  }), [formData.customer, formData.product, formData.pressMachine, formData.department, formData.quantity, formData.deadline]);
+
   React.useEffect(() => {
     const timer = setTimeout(() => {
       window.dispatchEvent(new Event("resize"));
@@ -2348,53 +2386,57 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           {/* ── RIGHT MAIN VIEWPORT (flex-1) ── */}
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
             {/* Tab 1: Overview */}
-            <OverviewTab
-              onSelectProductTemplate={handleSelectProductTemplate}
-              formData={{ ...formData, skuArtworks }}
-              handleFieldChange={handleFieldChange}
-              handleSizesChange={handleSizesChange}
-              handleDepartmentChange={handleDepartmentChange}
-              data={data}
-              tabId={tab.id}
-              activeSpec={activeSpec}
-              activeSite={activeSite}
-              activeTech={activeTech}
-              activeMachine={activeMachine}
-              currentDeptMachines={currentDeptMachines}
-              currentRecipeMaterials={currentRecipeMaterials}
-              materials={currentBomItems}
-              operations={operations}
-              hasShortage={hasShortage}
-              orderAttachments={orderAttachments}
-              setOrderAttachments={setOrderAttachments}
-              sampleData={sampleData}
-              onSampleChange={handleSampleChange}
-              onApproveAndReleaseMassRun={handleApproveSampleAndRelease}
-              onRejectSample={handleRejectSample}
-              onOpenLightbox={() => setIsLightboxOpen(true)}
-              onOpenTab={openTab}
-              onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
-              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-              isOperator={isOperator}
-              tOrder={tOrder}
-            />
+            {visitedTabs.has("overview") && (
+              <OverviewTab
+                onSelectProductTemplate={handleSelectProductTemplate}
+                formData={{ ...formData, skuArtworks }}
+                handleFieldChange={handleFieldChange}
+                handleSizesChange={handleSizesChange}
+                handleDepartmentChange={handleDepartmentChange}
+                data={data}
+                tabId={tab.id}
+                activeSpec={activeSpec}
+                activeSite={activeSite}
+                activeTech={activeTech}
+                activeMachine={activeMachine}
+                currentDeptMachines={currentDeptMachines}
+                currentRecipeMaterials={currentRecipeMaterials}
+                materials={currentBomItems}
+                operations={operations}
+                hasShortage={hasShortage}
+                orderAttachments={orderAttachments}
+                setOrderAttachments={setOrderAttachments}
+                sampleData={sampleData}
+                onSampleChange={handleSampleChange}
+                onApproveAndReleaseMassRun={handleApproveSampleAndRelease}
+                onRejectSample={handleRejectSample}
+                onOpenLightbox={() => setIsLightboxOpen(true)}
+                onOpenTab={openTab}
+                onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+                onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+                isOperator={isOperator}
+                tOrder={tOrder}
+              />
+            )}
 
             {/* Tab 2: Specifications & Die-Line (Extracted & Enhanced) */}
-            <SpecificationsTab
-              formData={{ ...formData, skuArtworks }}
-              handleFieldChange={handleFieldChange}
-              handleSizesChange={handleSizesChange}
-              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-              onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
-              isOperator={isOperator}
-              sampleData={sampleData}
-              onSampleChange={handleSampleChange}
-              orderAttachments={orderAttachments}
-              setOrderAttachments={setOrderAttachments}
-              skuArtworks={skuArtworks}
-              onSkuArtworksChange={handleSkuArtworksChange}
-              docNo={docNo || tab.id}
-            />
+            {visitedTabs.has("specs") && (
+              <SpecificationsTab
+                formData={{ ...formData, skuArtworks }}
+                handleFieldChange={handleFieldChange}
+                handleSizesChange={handleSizesChange}
+                onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+                onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
+                isOperator={isOperator}
+                sampleData={sampleData}
+                onSampleChange={handleSampleChange}
+                orderAttachments={orderAttachments}
+                setOrderAttachments={setOrderAttachments}
+                skuArtworks={skuArtworks}
+                onSkuArtworksChange={handleSkuArtworksChange}
+                docNo={docNo || tab.id}
+              />
+            )}
 
             {/* Tab: Imposition / Layout for Offset & Front-Back Print Planning */}
             {isOffset && (
@@ -2545,163 +2587,164 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             )}
 
             {/* Tab: Prepress & Tooling (CTP, Klishe, Shtamp) */}
-            <TabsContent value="prepress-tooling" className="flex-1 overflow-hidden p-0 m-0 h-full flex flex-col data-[state=inactive]:hidden">
-              <PrepressToolingTab
-                formData={formData}
-                docNo={data.docNo || tab.id}
-                isOperator={isOperator}
-                onUpdateTooling={(newItems) => {
-                  handleFieldChange("toolingItems", newItems);
-                  const totalCost = newItems.reduce(
-                    (sum, it) => sum + (it.actualCost !== undefined ? it.actualCost : it.estimatedCost || 0),
-                    0
-                  );
-                  handleFieldChange("toolingProcurementCost", totalCost);
-                  handleFieldChange(
-                    "toolingProcurementNeeded",
-                    newItems.some((it) => it.status === "Draft" || it.status === "Ordered")
-                  );
+            {visitedTabs.has("prepress-tooling") && (
+              <TabsContent value="prepress-tooling" className="flex-1 overflow-hidden p-0 m-0 h-full flex flex-col data-[state=inactive]:hidden">
+                <PrepressToolingTab
+                  formData={formData}
+                  docNo={data.docNo || tab.id}
+                  isOperator={isOperator}
+                  onUpdateTooling={(newItems) => {
+                    handleFieldChange("toolingItems", newItems);
+                    const totalCost = newItems.reduce(
+                      (sum, it) => sum + (it.actualCost !== undefined ? it.actualCost : it.estimatedCost || 0),
+                      0
+                    );
+                    handleFieldChange("toolingProcurementCost", totalCost);
+                    handleFieldChange(
+                      "toolingProcurementNeeded",
+                      newItems.some((it) => it.status === "Draft" || it.status === "Ordered")
+                    );
 
-                  // ─── Live Auto-Sync to Production Readiness Gates ───
-                  const ctpItems = newItems.filter(
-                    (i) => i.category === "ctp_plates" || i.category === "flexo_polymer"
-                  );
-                  const dieItems = newItems.filter(
-                    (i) =>
-                      i.category === "die_cutting" ||
-                      i.category === "foil_cliche" ||
-                      i.category === "emboss_cliche" ||
-                      i.category === "varnish_plate"
-                  );
+                    // ─── Live Auto-Sync to Production Readiness Gates ───
+                    const ctpItems = newItems.filter(
+                      (i) => i.category === "ctp_plates" || i.category === "flexo_polymer"
+                    );
+                    const dieItems = newItems.filter(
+                      (i) =>
+                        i.category === "die_cutting" ||
+                        i.category === "foil_cliche" ||
+                        i.category === "emboss_cliche" ||
+                        i.category === "varnish_plate"
+                    );
 
-                  const platesReady =
-                    ctpItems.length > 0
-                      ? ctpItems.every((i) => i.status === "Ready")
-                      : true;
-                  const toolingReady =
-                    dieItems.length > 0
-                      ? dieItems.every((i) => i.status === "Ready")
-                      : true;
+                    const platesReady =
+                      ctpItems.length > 0
+                        ? ctpItems.every((i) => i.status === "Ready")
+                        : true;
+                    const toolingReady =
+                      dieItems.length > 0
+                        ? dieItems.every((i) => i.status === "Ready")
+                        : true;
 
-                  const targetId = data.docNo || tab.id;
-                  if (toggleReadinessCheck) {
-                    toggleReadinessCheck(targetId, "platesReady", {
-                      forceStatus: platesReady ? "ready" : "pending",
+                    const targetId = data.docNo || tab.id;
+                    if (toggleReadinessCheck) {
+                      toggleReadinessCheck(targetId, "platesReady", {
+                        forceStatus: platesReady ? "ready" : "pending",
+                      });
+                      toggleReadinessCheck(targetId, "toolingReady", {
+                        forceStatus: toolingReady ? "ready" : "pending",
+                      });
+                    }
+
+                    handleFieldChange("checks", {
+                      ...((formData as any).checks || {}),
+                      platesReady,
+                      toolingReady,
                     });
-                    toggleReadinessCheck(targetId, "toolingReady", {
-                      forceStatus: toolingReady ? "ready" : "pending",
-                    });
-                  }
-
-                  handleFieldChange("checks", {
-                    ...((formData as any).checks || {}),
-                    platesReady,
-                    toolingReady,
-                  });
-                }}
-                onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-              />
-            </TabsContent>
+                  }}
+                  onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+                />
+              </TabsContent>
+            )}
 
             {/* Tab 3: Materials BOM */}
-            <MaterialsTab
-              tabId={tab.id}
-              department={formData.department}
-              recipe={formData.recipe}
-              activeSpec={activeSpec}
-              initialItems={currentBomItems}
-              onRecipeChange={(code, dept) => {
-                handleFieldChange("recipe", code);
-                if (dept && formData.department !== dept) {
-                  handleDepartmentChange(dept);
-                }
-              }}
-              onOpenTab={openTab}
-              isOperator={isOperator}
-              onItemsChange={(newItems) => {
-                setCurrentBomItems(newItems);
-                handleFieldChange("materials", newItems);
-                const primarySubstrate = newItems.find(
-                  (i) => i.category === "Paper & Board" || i.category === "Roll & Label"
-                );
-                if (primarySubstrate?.name && primarySubstrate.name !== formData.paperStock) {
-                  setFormData((prev) => ({ ...prev, paperStock: primarySubstrate.name }));
-                  updateTabData(tab.id, { paperStock: primarySubstrate.name });
-                  setTabUnsaved(tab.id, true);
-                }
-                syncPaperReadiness(newItems);
-              }}
-              onSaveAsSpec={(items) => {
-                setCurrentBomItems(items);
-                setIsSaveSpecDialogOpen(true);
-              }}
-            />
+            {visitedTabs.has("materials") && (
+              <MaterialsTab
+                tabId={tab.id}
+                department={formData.department}
+                recipe={formData.recipe}
+                activeSpec={activeSpec}
+                initialItems={currentBomItems}
+                onRecipeChange={(code, dept) => {
+                  handleFieldChange("recipe", code);
+                  if (dept && formData.department !== dept) {
+                    handleDepartmentChange(dept);
+                  }
+                }}
+                onOpenTab={openTab}
+                isOperator={isOperator}
+                onItemsChange={(newItems) => {
+                  setCurrentBomItems(newItems);
+                  handleFieldChange("materials", newItems);
+                  const primarySubstrate = newItems.find(
+                    (i) => i.category === "Paper & Board" || i.category === "Roll & Label"
+                  );
+                  if (primarySubstrate?.name && primarySubstrate.name !== formData.paperStock) {
+                    setFormData((prev) => ({ ...prev, paperStock: primarySubstrate.name }));
+                    updateTabData(tab.id, { paperStock: primarySubstrate.name });
+                    setTabUnsaved(tab.id, true);
+                  }
+                  syncPaperReadiness(newItems);
+                }}
+                onSaveAsSpec={(items) => {
+                  setCurrentBomItems(items);
+                  setIsSaveSpecDialogOpen(true);
+                }}
+              />
+            )}
 
             {/* Tab 4: Technological Route */}
-            <OperationsTab
-              workOrderId={data.docNo || tab.id}
-              fallbackData={{
-                customer: formData.customer,
-                product: formData.product,
-                machine: formData.pressMachine,
-                department: formData.department,
-                quantity: formData.quantity,
-                deadline: formData.deadline,
-              }}
-              operations={operations}
-              setOperations={setOperations}
-              opSelection={opSelection}
-              setOpSelection={setOpSelection}
-              onOpenAddOperation={handleOpenAddOperation}
-              onOpenEditOperation={handleOpenEditOperation}
-              onDeleteSelectedOperation={handleDeleteSelectedOperation}
-              isDark={isDark}
-              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-              onSyncFromPlan={() => handleApplyRouteFromPlan()}
-              onOpenInTimeline={(opId) => {
-                setSelectedTimelineOpId(opId);
-                setLevel3Tab(tab.id, "timeline");
-              }}
-              onOpenPackaging={() => setIsPackagingOpen(true)}
-              isPacked={formData.packagingData?.isCompleted}
-              packagesCount={formData.packagingData?.totalBoxes}
-            />
+            {visitedTabs.has("operations") && (
+              <OperationsTab
+                workOrderId={data.docNo || tab.id}
+                fallbackData={readinessFallbackData}
+                operations={operations}
+                setOperations={setOperations}
+                opSelection={opSelection}
+                setOpSelection={setOpSelection}
+                onOpenAddOperation={handleOpenAddOperation}
+                onOpenEditOperation={handleOpenEditOperation}
+                onDeleteSelectedOperation={handleDeleteSelectedOperation}
+                isDark={isDark}
+                onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+                onSyncFromPlan={() => handleApplyRouteFromPlan()}
+                onOpenInTimeline={(opId) => {
+                  setSelectedTimelineOpId(opId);
+                  setLevel3Tab(tab.id, "timeline");
+                }}
+                onOpenPackaging={() => setIsPackagingOpen(true)}
+                isPacked={formData.packagingData?.isCompleted}
+                packagesCount={formData.packagingData?.totalBoxes}
+              />
+            )}
 
             {/* Tab 5: Shift Timeline & Notes */}
-            <ShiftTimelineTab
-              workOrderNo={data.docNo || tab.id}
-              productName={formData.product}
-              customerName={formData.customer}
-              operations={operations}
-              selectedTimelineOpId={selectedTimelineOpId}
-              setSelectedTimelineOpId={setSelectedTimelineOpId}
-              selectedOp={selectedOp}
-              selectedOpEvents={selectedOpEvents}
-              allEvents={shiftEvents}
-              onOpenQuickPalletLog={handleOpenLogEvent}
-              onOpenEditPalletLog={handleOpenEditPalletEvent}
-              onOpenDowntimeLog={() => {
-                setEditingDowntimeEvent(null);
-                setIsDowntimeDialogOpen(true);
-              }}
-              onOpenEditDowntimeLog={handleOpenEditDowntimeEvent}
-              onOpenPalletTagPrint={handleOpenPalletTagPrint}
-              onStartStep={handleStartStep}
-              onPauseStep={handlePauseStep}
-              onResumeStep={handleResumeStep}
-              onFinishStep={handleFinishStep}
-              onChangeStepStatus={(opId, status) => {
-                setOperations((prev) =>
-                  prev.map((op) => (op.id === opId ? { ...op, status } : op))
-                );
-                setTabUnsaved(tab.id, true);
-              }}
-              onDeleteEvent={handleDeleteShiftEvent}
-              piecesPerSheet={activePrintPlan.piecesPerSheet}
-            />
+            {visitedTabs.has("timeline") && (
+              <ShiftTimelineTab
+                workOrderNo={data.docNo || tab.id}
+                productName={formData.product}
+                customerName={formData.customer}
+                operations={operations}
+                selectedTimelineOpId={selectedTimelineOpId}
+                setSelectedTimelineOpId={setSelectedTimelineOpId}
+                selectedOp={selectedOp}
+                selectedOpEvents={selectedOpEvents}
+                allEvents={shiftEvents}
+                onOpenQuickPalletLog={handleOpenLogEvent}
+                onOpenEditPalletLog={handleOpenEditPalletEvent}
+                onOpenDowntimeLog={() => {
+                  setEditingDowntimeEvent(null);
+                  setIsDowntimeDialogOpen(true);
+                }}
+                onOpenEditDowntimeLog={handleOpenEditDowntimeEvent}
+                onOpenPalletTagPrint={handleOpenPalletTagPrint}
+                onStartStep={handleStartStep}
+                onPauseStep={handlePauseStep}
+                onResumeStep={handleResumeStep}
+                onFinishStep={handleFinishStep}
+                onChangeStepStatus={(opId, status) => {
+                  setOperations((prev) =>
+                    prev.map((op) => (op.id === opId ? { ...op, status } : op))
+                  );
+                  setTabUnsaved(tab.id, true);
+                }}
+                onDeleteEvent={handleDeleteShiftEvent}
+                piecesPerSheet={activePrintPlan.piecesPerSheet}
+              />
+            )}
 
             {/* Tab 6: Financials (Hidden for Operators) */}
-            {!isOperator && (
+            {!isOperator && visitedTabs.has("financials") && (
               <FinancialsTab
                 shiftEvents={shiftEvents}
                 formData={{ ...formData, skuArtworks }}
@@ -2720,100 +2763,112 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             )}
 
             {/* Tab 7: Files & Tech Documents */}
-            <FilesTab
-              orderAttachments={orderAttachments}
-              setOrderAttachments={setOrderAttachments}
-              onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-              docNo={data.docNo || tab.id}
-              onFileUploaded={(newAtt) => {
-                if (newAtt.isImage) {
-                  if (!formData.photoUrl) {
-                    handleFieldChange("photoUrl", newAtt.url);
+            {visitedTabs.has("files") && (
+              <FilesTab
+                orderAttachments={orderAttachments}
+                setOrderAttachments={setOrderAttachments}
+                onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+                docNo={data.docNo || tab.id}
+                onFileUploaded={(newAtt) => {
+                  if (newAtt.isImage) {
+                    if (!formData.photoUrl) {
+                      handleFieldChange("photoUrl", newAtt.url);
+                    }
+                    if (!formData.photoUrls || formData.photoUrls.length === 0) {
+                      handleFieldChange("photoUrls", [newAtt.url]);
+                    }
+                    if (!formData.artworkFront) {
+                      handleFieldChange("artworkFront", newAtt.url);
+                    }
                   }
-                  if (!formData.photoUrls || formData.photoUrls.length === 0) {
-                    handleFieldChange("photoUrls", [newAtt.url]);
-                  }
-                  if (!formData.artworkFront) {
-                    handleFieldChange("artworkFront", newAtt.url);
-                  }
-                }
-              }}
-            />
+                }}
+              />
+            )}
 
             {/* Tab 8: History */}
-            <HistoryTab
-              docNo={docNo || data.docNo || tab.id}
-              formData={{ ...formData, skuArtworks }}
-              refreshTrigger={historyRefreshTrigger}
-            />
+            {visitedTabs.has("history") && (
+              <HistoryTab
+                docNo={docNo || data.docNo || tab.id}
+                formData={{ ...formData, skuArtworks }}
+                refreshTrigger={historyRefreshTrigger}
+              />
+            )}
           </div>
         </div>
       </Tabs>
 
       {/* Dialog: Routing Operation */}
-      <OperationDialog
-        isOpen={isOpDialogOpen}
-        onOpenChange={setIsOpDialogOpen}
-        editingOpIndex={editingOpIndex}
-        form={opDialogForm}
-        setForm={setOpDialogForm}
-        onSave={handleSaveOperationDialog}
-        customerName={formData.customer}
-        orderQuantity={formData.quantity}
-      />
+      {isOpDialogOpen && (
+        <OperationDialog
+          isOpen={isOpDialogOpen}
+          onOpenChange={setIsOpDialogOpen}
+          editingOpIndex={editingOpIndex}
+          form={opDialogForm}
+          setForm={setOpDialogForm}
+          onSave={handleSaveOperationDialog}
+          customerName={formData.customer}
+          orderQuantity={formData.quantity}
+        />
+      )}
 
       {/* Dialog: Shift Downtime Event */}
-      <LogEventDialog
-        isOpen={isLogEventDialogOpen}
-        onOpenChange={setIsLogEventDialogOpen}
-        selectedOp={selectedOp}
-        form={logEventForm}
-        setForm={setLogEventForm}
-        onSave={handleSaveLogEvent}
-      />
+      {isLogEventDialogOpen && (
+        <LogEventDialog
+          isOpen={isLogEventDialogOpen}
+          onOpenChange={setIsLogEventDialogOpen}
+          selectedOp={selectedOp}
+          form={logEventForm}
+          setForm={setLogEventForm}
+          onSave={handleSaveLogEvent}
+        />
+      )}
 
       {/* Dialog: Floor Pallet & Step Execution Report */}
-      <PalletReportDialog
-        isOpen={isPalletReportDialogOpen}
-        onOpenChange={(open) => {
-          setIsPalletReportDialogOpen(open);
-          if (!open) setEditingPalletEvent(null);
-        }}
-        selectedOp={selectedOp}
-        allOperations={operations}
-        previousOp={(() => {
-          const idx = operations.findIndex((o) => o.id === selectedOp.id);
-          return idx > 0 ? operations[idx - 1] : undefined;
-        })()}
-        previousOpGoodOutput={(() => {
-          const idx = operations.findIndex((o) => o.id === selectedOp.id);
-          if (idx <= 0) return 0;
-          const prev = operations[idx - 1];
-          const prevEvents = shiftEvents.filter((ev) => ev.opId === prev.id);
-          if (prevEvents.length > 0) {
-            return prevEvents.reduce((sum, ev) => sum + (ev.goodQty || 0), 0);
-          }
-          const parsed = (prev.qtyCompleted || "").split("/");
-          return parseInt(parsed[0]?.replace(/[^\d]/g, "") || "0", 10);
-        })()}
-        existingOpEvents={selectedOpEvents}
-        piecesPerSheet={activePrintPlan.piecesPerSheet}
-        editingEvent={editingPalletEvent}
-        onSaveEvent={handleSavePalletEvent}
-        onOpenPrintTag={handleOpenPalletTagPrint}
-      />
+      {isPalletReportDialogOpen && (
+        <PalletReportDialog
+          isOpen={isPalletReportDialogOpen}
+          onOpenChange={(open) => {
+            setIsPalletReportDialogOpen(open);
+            if (!open) setEditingPalletEvent(null);
+          }}
+          selectedOp={selectedOp}
+          allOperations={operations}
+          previousOp={(() => {
+            const idx = operations.findIndex((o) => o.id === selectedOp.id);
+            return idx > 0 ? operations[idx - 1] : undefined;
+          })()}
+          previousOpGoodOutput={(() => {
+            const idx = operations.findIndex((o) => o.id === selectedOp.id);
+            if (idx <= 0) return 0;
+            const prev = operations[idx - 1];
+            const prevEvents = shiftEvents.filter((ev) => ev.opId === prev.id);
+            if (prevEvents.length > 0) {
+              return prevEvents.reduce((sum, ev) => sum + (ev.goodQty || 0), 0);
+            }
+            const parsed = (prev.qtyCompleted || "").split("/");
+            return parseInt(parsed[0]?.replace(/[^\d]/g, "") || "0", 10);
+          })()}
+          existingOpEvents={selectedOpEvents}
+          piecesPerSheet={activePrintPlan.piecesPerSheet}
+          editingEvent={editingPalletEvent}
+          onSaveEvent={handleSavePalletEvent}
+          onOpenPrintTag={handleOpenPalletTagPrint}
+        />
+      )}
 
       {/* Dialog: Machine Downtime / Prostoy Log */}
-      <DowntimeLogDialog
-        isOpen={isDowntimeDialogOpen}
-        onOpenChange={(open) => {
-          setIsDowntimeDialogOpen(open);
-          if (!open) setEditingDowntimeEvent(null);
-        }}
-        selectedOp={selectedOp}
-        editingDowntime={editingDowntimeEvent}
-        onSaveDowntime={handleSaveDowntime}
-      />
+      {isDowntimeDialogOpen && (
+        <DowntimeLogDialog
+          isOpen={isDowntimeDialogOpen}
+          onOpenChange={(open) => {
+            setIsDowntimeDialogOpen(open);
+            if (!open) setEditingDowntimeEvent(null);
+          }}
+          selectedOp={selectedOp}
+          editingDowntime={editingDowntimeEvent}
+          onSaveDowntime={handleSaveDowntime}
+        />
+      )}
 
       {/* Dialog: Pallet Tag QR Print Slip */}
       {selectedTagPrintEvent && (
@@ -2829,77 +2884,87 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       )}
 
       {/* Unified Order Passport / Job Ticket Dialog */}
-      <JobTicketDialog
-        isOpen={isJobTicketOpen}
-        onOpenChange={setIsJobTicketOpen}
-        workOrderId={data.docNo || tab.id}
-        formData={{ ...formData, skuArtworks }}
-        activeSpec={activeSpec}
-        activeMachine={activeMachine}
-        operations={operations}
-        materials={currentRecipeMaterials}
-        shiftEvents={shiftEvents}
-        onExportSuccess={(docId) =>
-          addNotification({
-            title: tOrder("printSpec"),
-            description: `PDF exported: ${docId}`,
-            severity: "success",
-          })
-        }
-      />
+      {isJobTicketOpen && (
+        <JobTicketDialog
+          isOpen={isJobTicketOpen}
+          onOpenChange={setIsJobTicketOpen}
+          workOrderId={data.docNo || tab.id}
+          formData={{ ...formData, skuArtworks }}
+          activeSpec={activeSpec}
+          activeMachine={activeMachine}
+          operations={operations}
+          materials={currentRecipeMaterials}
+          shiftEvents={shiftEvents}
+          onExportSuccess={(docId) =>
+            addNotification({
+              title: tOrder("printSpec"),
+              description: `PDF exported: ${docId}`,
+              severity: "success",
+            })
+          }
+        />
+      )}
 
       {/* Quick Packaging Dialog */}
-      <PackagingDialog
-        isOpen={isPackagingOpen}
-        onOpenChange={setIsPackagingOpen}
-        workOrderNo={data.docNo || tab.id}
-        clientOrderNo={formData.linkedOrderId}
-        customer={formData.customer}
-        product={formData.product}
-        targetQuantity={formData.quantity}
-        unit={formData.unit}
-        sizes={formData.sizes}
-        existingPackaging={formData.packagingData}
-        onSavePackaging={handleSavePackaging}
-        onOpenPrintModal={(summary) => {
-          handleFieldChange("packagingData", summary);
-          setIsLabelPrintOpen(true);
-        }}
-      />
+      {isPackagingOpen && (
+        <PackagingDialog
+          isOpen={isPackagingOpen}
+          onOpenChange={setIsPackagingOpen}
+          workOrderNo={data.docNo || tab.id}
+          clientOrderNo={formData.linkedOrderId}
+          customer={formData.customer}
+          product={formData.product}
+          targetQuantity={formData.quantity}
+          unit={formData.unit}
+          sizes={formData.sizes}
+          existingPackaging={formData.packagingData}
+          onSavePackaging={handleSavePackaging}
+          onOpenPrintModal={(summary) => {
+            handleFieldChange("packagingData", summary);
+            setIsLabelPrintOpen(true);
+          }}
+        />
+      )}
 
       {/* Box Label Passport Print Modal (100x150 mm) */}
-      <BoxLabelPrintModal
-        isOpen={isLabelPrintOpen}
-        onOpenChange={setIsLabelPrintOpen}
-        workOrderNo={data.docNo || tab.id}
-        clientOrderNo={formData.linkedOrderId}
-        customer={formData.customer}
-        product={formData.product}
-        boxes={formData.packagingData?.boxes || []}
-        totalBoxes={formData.packagingData?.totalBoxes || 0}
-      />
+      {isLabelPrintOpen && (
+        <BoxLabelPrintModal
+          isOpen={isLabelPrintOpen}
+          onOpenChange={setIsLabelPrintOpen}
+          workOrderNo={data.docNo || tab.id}
+          clientOrderNo={formData.linkedOrderId}
+          customer={formData.customer}
+          product={formData.product}
+          boxes={formData.packagingData?.boxes || []}
+          totalBoxes={formData.packagingData?.totalBoxes || 0}
+        />
+      )}
 
       {/* Lightbox for Sample Proof */}
-      <ImageLightbox
-        isOpen={isLightboxOpen}
-        onClose={() => setIsLightboxOpen(false)}
-        src={getDisplayImageUrl(formData.photoUrl)}
-        alt={formData.product || "Sample Proof"}
-        title={`${tab.documentData?.docNo || tab.id}: Sample Proof`}
-        subtitle={`${formData.product} • ${formData.customer} (${formData.department})`}
-      />
+      {isLightboxOpen && (
+        <ImageLightbox
+          isOpen={isLightboxOpen}
+          onClose={() => setIsLightboxOpen(false)}
+          src={getDisplayImageUrl(formData.photoUrl)}
+          alt={formData.product || "Sample Proof"}
+          title={`${tab.documentData?.docNo || tab.id}: Sample Proof`}
+          subtitle={`${formData.product} • ${formData.customer} (${formData.department})`}
+        />
+      )}
 
       {/* Save As Specification Dialog */}
-      <SaveSpecDialog
-        isOpen={isSaveSpecDialogOpen}
-        onOpenChange={setIsSaveSpecDialogOpen}
-        department={formData.department}
-        currentRecipeCode={formData.recipe}
-        currentRecipeName={activeSpec?.name}
-        materials={currentBomItems}
-        operations={operations}
-        onSaveSpec={handleSaveAsNewSpec}
-      />
+      {isSaveSpecDialogOpen && (
+        <SaveSpecDialog
+          isOpen={isSaveSpecDialogOpen}
+          onOpenChange={setIsSaveSpecDialogOpen}
+          department={formData.department}
+          currentRecipeCode={formData.recipe}
+          currentRecipeName={activeSpec?.name}
+          materials={currentBomItems}
+          operations={operations}
+          onSaveSpec={handleSaveAsNewSpec}
+        />
+      )}
 
       {/* ── Delete / Cancel Work Order Modal ── */}
       <Dialog open={isDeleteModalOpen} onOpenChange={(open) => !isDeleting && setIsDeleteModalOpen(open)}>
