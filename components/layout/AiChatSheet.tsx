@@ -153,15 +153,49 @@ export function AiChatSheet() {
   }>({ mouseX: 0, mouseY: 0, x: 0, y: 0, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
 
   const windowRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const latestMessageRef = useRef<HTMLDivElement>(null);
+  const latestUserMsgRef = useRef<HTMLDivElement>(null);
+  const typingRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
-  }, []);
-
+  // ChatGPT-style Smart Reading Alignment:
+  // 1. When user sends a query -> keep user query and typing indicator in comfortable view
+  // 2. When assistant reply lands -> if it's compact, keep turn in view; if it's long, anchor to the START of the assistant reply so user reads line 1 without scrolling up!
   useEffect(() => {
-    scrollToBottom("smooth");
-  }, [messages.length, isTyping, scrollToBottom]);
+    if (isTyping) {
+      const timer = setTimeout(() => {
+        if (typingRef.current) {
+          typingRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        } else if (latestUserMsgRef.current) {
+          latestUserMsgRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg) return;
+
+    const timer = setTimeout(() => {
+      if (lastMsg.role === "assistant") {
+        if (latestMessageRef.current && viewportRef.current) {
+          const msgHeight = latestMessageRef.current.offsetHeight;
+          const vpHeight = viewportRef.current.clientHeight;
+
+          // If the message is long (> 65% of viewport), anchor to the START so reading starts at line 1!
+          if (msgHeight > vpHeight * 0.65) {
+            latestMessageRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+          } else {
+            latestMessageRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+        }
+      } else if (lastMsg.role === "user") {
+        latestUserMsgRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 60);
+
+    return () => clearTimeout(timer);
+  }, [messages, isTyping]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Persist messages to localStorage
@@ -726,13 +760,17 @@ export function AiChatSheet() {
           <div className="flex-1 min-h-0 relative bg-background/50">
             <MessageScrollerProvider autoScroll defaultScrollPosition="end">
               <MessageScroller className="h-full">
-                <MessageScrollerViewport className="p-3">
+                <MessageScrollerViewport ref={viewportRef} className="p-3">
                   <MessageScrollerContent aria-busy={isTyping} className="gap-3">
-                    {messages.map((msg) => {
+                    {messages.map((msg, idx) => {
                       const isUser = msg.role === "user";
+                      const isLastMessage = idx === messages.length - 1;
+                      const isLastUser = isUser && (isLastMessage || idx === messages.length - 2);
+
                       return (
                         <MessageScrollerItem
                           key={msg.id}
+                          ref={isLastMessage ? latestMessageRef : isLastUser ? latestUserMsgRef : undefined}
                           scrollAnchor={isUser}
                           className="gap-2"
                         >
@@ -921,7 +959,11 @@ export function AiChatSheet() {
                       })}
 
                       {isTyping && (
-                        <MessageScrollerItem key="typing-indicator" className="gap-2">
+                        <MessageScrollerItem
+                          key="typing-indicator"
+                          ref={typingRef}
+                          className="gap-2"
+                        >
                           <Message align="start" className="gap-2">
                             <MessageAvatar className="w-6 h-6 rounded-md bg-muted border border-border flex items-center justify-center">
                               <Bot className="size-3.5 text-primary animate-pulse" />
@@ -938,8 +980,6 @@ export function AiChatSheet() {
                           </Message>
                         </MessageScrollerItem>
                       )}
-
-                      <div ref={messagesEndRef} className="h-px w-full shrink-0" />
                     </MessageScrollerContent>
                   </MessageScrollerViewport>
 
