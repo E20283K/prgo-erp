@@ -2225,14 +2225,41 @@ export function SpecificationsTab({
                         type="button"
                         disabled={isOperator}
                         onClick={() => handleToggleFrontColor(ink.key as any)}
+                        title={active ? `${ink.label} faol` : `${ink.label} mavjud emas`}
                         className={cn(
-                          "flex-1 h-7 rounded text-xs font-mono font-bold flex items-center justify-center transition-all cursor-pointer border",
+                          "relative flex-1 h-7 rounded text-xs font-mono font-bold flex items-center justify-center transition-all cursor-pointer border select-none overflow-hidden",
                           active
                             ? `${ink.bg} ${ink.text} border-transparent shadow-xs scale-[1.02]`
-                            : "bg-muted/40 text-muted-foreground border-border hover:bg-muted"
+                            : "bg-muted/15 text-muted-foreground/40 border-border/40 opacity-40 hover:opacity-75 hover:bg-muted/30"
                         )}
                       >
-                        {ink.label}
+                        <span className="relative z-10">{ink.label}</span>
+                        {!active && (
+                          <svg
+                            className="absolute inset-0 w-full h-full pointer-events-none text-muted-foreground/50"
+                            preserveAspectRatio="none"
+                            viewBox="0 0 100 100"
+                          >
+                            <line
+                              x1="12"
+                              y1="12"
+                              x2="88"
+                              y2="88"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1="88"
+                              y1="12"
+                              x2="12"
+                              y2="88"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </svg>
+                        )}
                       </button>
                     );
                   })}
@@ -2348,14 +2375,41 @@ export function SpecificationsTab({
                         type="button"
                         disabled={isOperator}
                         onClick={() => handleToggleBackColor(ink.key as any)}
+                        title={active ? `${ink.label} faol` : `${ink.label} mavjud emas`}
                         className={cn(
-                          "flex-1 h-7 rounded text-xs font-mono font-bold flex items-center justify-center transition-all cursor-pointer border",
+                          "relative flex-1 h-7 rounded text-xs font-mono font-bold flex items-center justify-center transition-all cursor-pointer border select-none overflow-hidden",
                           active
                             ? `${ink.bg} ${ink.text} border-transparent shadow-xs scale-[1.02]`
-                            : "bg-muted/40 text-muted-foreground border-border hover:bg-muted"
+                            : "bg-muted/15 text-muted-foreground/40 border-border/40 opacity-40 hover:opacity-75 hover:bg-muted/30"
                         )}
                       >
-                        {ink.label}
+                        <span className="relative z-10">{ink.label}</span>
+                        {!active && (
+                          <svg
+                            className="absolute inset-0 w-full h-full pointer-events-none text-muted-foreground/50"
+                            preserveAspectRatio="none"
+                            viewBox="0 0 100 100"
+                          >
+                            <line
+                              x1="12"
+                              y1="12"
+                              x2="88"
+                              y2="88"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1="88"
+                              y1="12"
+                              x2="12"
+                              y2="88"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </svg>
+                        )}
                       </button>
                     );
                   })}
