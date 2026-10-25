@@ -79,6 +79,25 @@ services:
       timeout: 5s
       retries: 5
 
+  isup-gateway:
+    build:
+      context: ./services/isup-gateway
+    container_name: printgoo-isup-gateway-dev
+    restart: unless-stopped
+    ports:
+      - "${ISUP_CMS_PORT:-7660}:7660"
+      - "${ISUP_ALARM_PORT:-7661}:7661"
+      - "${ISUP_HTTP_PORT:-7662}:7662"
+    environment:
+      - ISUP_CMS_PORT=7660
+      - ISUP_ALARM_PORT=7661
+      - HTTP_PORT=7662
+      - ERP_WEBHOOK_URL=http://host.docker.internal:3000/api/v1/hr/attendance/hikvision-event
+      - GATEWAY_SECRET=${GATEWAY_SECRET:-printgoo_isup_secret_2026}
+      - COMPANY_CODE=${COMPANY_CODE:-PRINTGOO}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   pgdata_dev:
   redisdata_dev:

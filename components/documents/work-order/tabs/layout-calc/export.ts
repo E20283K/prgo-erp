@@ -1,5 +1,7 @@
 import { jsPDF } from "jspdf";
 import { CalculatedPlate, GridCell, ImpositionLayout, PrepressMargins, TrimMarkSegment } from "./types";
+import { ProductShapeType, ProductCustomShape } from "../../types";
+import { parseSvgContour } from "../../utils/svgContour";
 
 interface DrawPlateToPdfOptions {
   plate: CalculatedPlate;
@@ -289,5 +291,214 @@ export function exportPdf(
       totalPlates: plateCalculations.length,
     });
     doc.save(`${docNo}_${activePlate.name.replace(/\s+/g, "_")}.pdf`);
+  }
+}
+
+export interface ProductionImpositionExportOptions {
+  docNo: string;
+  orderName: string;
+  pressMachine: string;
+  paperStock: string;
+  sheetW: number;
+  sheetH: number;
+  prodW: number;
+  prodH: number;
+  bleed: number;
+  gap: number;
+  gripper: number;
+  activeGripperEdge: "Bottom" | "Top" | "Left" | "Right";
+  prepressMargins: PrepressMargins;
+  layout: ImpositionLayout;
+  outerTrimMarks: TrimMarkSegment[];
+  plateCalculations: CalculatedPlate[];
+  activePlateIndex: number;
+  activeSideLabel: string;
+  splitCutAxisX?: number;
+  splitAxisLabel?: string;
+  shapeType?: ProductShapeType;
+  customShape?: ProductCustomShape;
+  customSvgPath?: string;
+  cornerType?: string;
+  holeSize?: number;
+  holePosition?: string;
+  holeOffset?: number;
+  buildCellsForPlate: (plate: CalculatedPlate) => GridCell[];
+  exportAll?: boolean;
+}
+
+export async function exportProductionImpositionPdf(opts: ProductionImpositionExportOptions): Promise<void> {
+  const {
+    docNo,
+    orderName,
+    pressMachine,
+    paperStock,
+    sheetW,
+    sheetH,
+    prodW,
+    prodH,
+    bleed,
+    gap,
+    gripper,
+    activeGripperEdge,
+    prepressMargins,
+    layout,
+    outerTrimMarks,
+    plateCalculations,
+    activePlateIndex,
+    activeSideLabel,
+    splitCutAxisX,
+    splitAxisLabel,
+    shapeType,
+    customShape,
+    customSvgPath,
+    cornerType,
+    holeSize,
+    holePosition,
+    holeOffset,
+    buildCellsForPlate,
+    exportAll = false,
+  } = opts;
+
+  const gridLeft = prepressMargins.gridLeft + layout.offsetX;
+  const gridTop = prepressMargins.gridTop + layout.offsetY;
+
+  let parsedSvgPathD: string | undefined;
+  let parsedSvgViewBox: { x: number; y: number; width: number; height: number } | undefined;
+  if (shapeType === "custom_die" && customShape === "vector_svg" && customSvgPath) {
+    const parsed = parseSvgContour(customSvgPath);
+    if (parsed) {
+      parsedSvgPathD = parsed.pathD;
+      parsedSvgViewBox = parsed.computedBox || parsed.viewBox;
+    }
+  }
+
+  const targetPlates = exportAll
+    ? plateCalculations.map((p, idx) => ({ plate: p, idx }))
+    : [{ plate: plateCalculations[activePlateIndex] || plateCalculations[0], idx: activePlateIndex }];
+
+  const pages = targetPlates.map(({ plate, idx }) => {
+    const rawCells = buildCellsForPlate(plate);
+    const cells = [];
+    for (let i = 0; i < layout.pieces; i++) {
+      const row = Math.floor(i / layout.cols);
+      const col = i % layout.cols;
+      const x = gridLeft + col * (layout.itemW + gap);
+      const y = gridTop + row * (layout.itemH + gap);
+      const cell = rawCells[i] || { label: "Bo'sh", color: "#f4f4f5", sizeId: "empty" };
+      cells.push({
+        index: i,
+        row,
+        col,
+        x,
+        y,
+        itemW: layout.itemW,
+        itemH: layout.itemH,
+        label: cell.label || "",
+        model: cell.model,
+        sizeCode: cell.sizeCode || cell.label || "",
+        color: cell.color || "#dbeafe",
+        sizeId: cell.sizeId || "empty",
+        sideBadge: cell.sideBadge || (activeSideLabel === "ORQA" ? "BACK" : "FRONT"),
+        artworkUrl: cell.artworkUrl,
+        rawArtworkUrl: cell.rawArtworkUrl || cell.artworkUrl,
+      });
+    }
+
+    return {
+      plateName: plate.name,
+      plateIndex: idx,
+      totalPlates: plateCalculations.length,
+      sideLabel: activeSideLabel,
+      requiredSheets: plate.requiredSheets,
+      cells,
+    };
+  });
+
+  const payload = {
+    docNo,
+    orderName,
+    pressMachine,
+    paperStock,
+    sheetW,
+    sheetH,
+    prodW,
+    prodH,
+    bleed,
+    gap,
+    gripper,
+    activeGripperEdge,
+    gridLeft,
+    gridTop,
+    cols: layout.cols,
+    rows: layout.rows,
+    itemW: layout.itemW,
+    itemH: layout.itemH,
+    shapeType: shapeType || "rectangle",
+    customShape,
+    customSvgPath,
+    parsedSvgPathD,
+    parsedSvgViewBox,
+    cornerType,
+    holeSize,
+    holePosition,
+    holeOffset,
+    splitCutAxisX,
+    splitAxisLabel,
+    outerTrimMarks,
+    pages,
+  };
+
+  try {
+    const res = await fetch("/api/docs/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "imposition-pdf", payload }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Imposition PDF service returned ${res.status}`);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const activePlate = plateCalculations[activePlateIndex] || plateCalculations[0];
+    const fileName = exportAll
+      ? `${docNo}_barcha_formalar_CTP.pdf`
+      : `${docNo}_${activePlate.name.replace(/\s+/g, "_")}_${activeSideLabel}_CTP.pdf`;
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.warn("[exportProductionImpositionPdf] Falling back to client jsPDF:", err);
+    const activePlate = plateCalculations[activePlateIndex] || plateCalculations[0];
+    exportPdf(
+      sheetW,
+      sheetH,
+      docNo,
+      plateCalculations,
+      activePlateIndex,
+      {
+        orderName,
+        sheetW,
+        sheetH,
+        gripper,
+        activeGripperEdge,
+        prepressMargins,
+        layout,
+        bleed,
+        gap,
+        outerTrimMarks,
+        gridCells: buildCellsForPlate(activePlate),
+        splitCutAxisX,
+        splitAxisLabel,
+        activeSideLabel,
+      },
+      exportAll
+    );
   }
 }

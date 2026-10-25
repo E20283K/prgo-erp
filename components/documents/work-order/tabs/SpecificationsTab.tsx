@@ -1949,6 +1949,7 @@ export function SpecificationsTab({
                 formData.artworkBack ||
                 undefined
               }
+              skuArtworks={formData.skuArtworks}
               artworkBleedIncluded={formData.artworkBleedIncluded}
               artworkDielineOpacity={formData.artworkDielineOpacity}
               onArtworkChange={(front, back, sourcePdf, detectedW, detectedH, rawFile) => {

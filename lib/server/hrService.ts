@@ -683,31 +683,81 @@ export async function recordBiometricTurnstileEvent(
         delayMinutes,
         status: delayMinutes > 15 ? "late" : "present",
         sourceDevice: params.deviceId,
-        notes: `Turniket (${params.deviceId}) orqali avtomatik qayd`,
+        notes: `Turniket (${params.deviceId}) orqali qayd`,
       })
       .returning();
 
     return { success: true, message: "Kirish (Check-in) muvaffaqiyatli qayd etildi", recordId: newLog.id };
   } else {
-    // Check-out qayd etiladi va ishlangan soatlar hisoblanadi
-    const checkInDate = existingLog.checkIn ? new Date(existingLog.checkIn) : eventDate;
-    const durationMs = eventDate.getTime() - checkInDate.getTime();
-    const workedHours = Math.max(0, parseFloat((durationMs / (1000 * 60 * 60)).toFixed(2)));
-    const overtime = workedHours > 8 ? parseFloat((workedHours - 8).toFixed(2)) : 0;
+    // Agar mavjud yozuv bo'lsa - Oflayn va tartibsiz kelgan loglarni aqlli rekonsilyatsiya qilish
+    const currentCheckIn = existingLog.checkIn ? new Date(existingLog.checkIn) : null;
+    const currentCheckOut = existingLog.checkOut ? new Date(existingLog.checkOut) : null;
+
+    let updatedCheckIn = currentCheckIn;
+    let updatedCheckOut = currentCheckOut;
+
+    if (params.eventType === "check_in") {
+      // Yangi kelgan vaqt avvalgidan erta bo'lsa, check-in ni yangilaymiz
+      if (!updatedCheckIn || eventDate.getTime() < updatedCheckIn.getTime()) {
+        updatedCheckIn = eventDate;
+      }
+    } else if (params.eventType === "check_out") {
+      // Yangi kelgan vaqt avvalgisidan kechroq bo'lsa, check-out ni yangilaymiz
+      if (!updatedCheckOut || eventDate.getTime() > updatedCheckOut.getTime()) {
+        updatedCheckOut = eventDate;
+      }
+    } else {
+      // auto rejimida:
+      if (!updatedCheckIn) {
+        updatedCheckIn = eventDate;
+      } else if (eventDate.getTime() < updatedCheckIn.getTime()) {
+        // Avvalgi check-in dan ham ertaroq kelgan bo'lsa, uni check-in qilamiz
+        if (!updatedCheckOut) updatedCheckOut = updatedCheckIn;
+        updatedCheckIn = eventDate;
+      } else if (!updatedCheckOut || eventDate.getTime() > updatedCheckOut.getTime()) {
+        updatedCheckOut = eventDate;
+      }
+    }
+
+    // Kechikish va ishlangan soatlarni qayta hisoblash
+    let delayMinutes = existingLog.delayMinutes || 0;
+    if (updatedCheckIn) {
+      const targetTime = new Date(updatedCheckIn);
+      targetTime.setHours(8, 0, 0, 0);
+      delayMinutes = updatedCheckIn.getTime() > targetTime.getTime()
+        ? Math.floor((updatedCheckIn.getTime() - targetTime.getTime()) / 60000)
+        : 0;
+    }
+
+    let workedHours = parseFloat(existingLog.workedHours || "0");
+    let overtime = parseFloat(existingLog.overtimeHours || "0");
+
+    if (updatedCheckIn && updatedCheckOut && updatedCheckOut.getTime() > updatedCheckIn.getTime()) {
+      const durationMs = updatedCheckOut.getTime() - updatedCheckIn.getTime();
+      workedHours = Math.max(0, parseFloat((durationMs / (1000 * 60 * 60)).toFixed(2)));
+      overtime = workedHours > 8 ? parseFloat((workedHours - 8).toFixed(2)) : 0;
+    }
 
     await db
       .update(attendanceLogs)
       .set({
-        checkOut: eventDate,
+        checkIn: updatedCheckIn,
+        checkOut: updatedCheckOut,
+        delayMinutes,
+        status: delayMinutes > 15 ? "late" : "present",
         workedHours: String(workedHours),
         overtimeHours: String(overtime),
-        sourceDevice: `${existingLog.sourceDevice || ""}, ${params.deviceId}`,
+        sourceDevice: existingLog.sourceDevice?.includes(params.deviceId)
+          ? existingLog.sourceDevice
+          : `${existingLog.sourceDevice || ""}, ${params.deviceId}`.replace(/^,\s*/, ""),
       })
       .where(eq(attendanceLogs.id, existingLog.id));
 
     return {
       success: true,
-      message: `Chiqish (Check-out) qayd etildi. Ishlangan vaqt: ${workedHours} soat.`,
+      message: updatedCheckOut
+        ? `Chiqish (Check-out) qayd etildi. Ishlangan vaqt: ${workedHours} soat.`
+        : "Kirish (Check-in) vaqti yangilandi.",
       recordId: existingLog.id,
     };
   }

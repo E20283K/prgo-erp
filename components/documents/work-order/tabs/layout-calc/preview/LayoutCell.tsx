@@ -220,7 +220,7 @@ export function LayoutCell({
 
   const imageSrc =
     cellData.artworkUrl ||
-    (cellData.sideBadge === "BACK" ? artworkBack || artworkFront : artworkFront || artworkBack);
+    (cellData.sideBadge === "BACK" ? artworkBack : artworkFront);
 
   const hasVisibleArtwork = !isEmpty && viewMode === "artwork" && Boolean(imageSrc);
 

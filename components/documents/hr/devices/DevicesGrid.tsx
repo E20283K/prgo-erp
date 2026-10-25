@@ -20,6 +20,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -28,7 +35,6 @@ import {
 } from "@/components/ui/context-menu";
 import { DeviceDetailModal } from "./DeviceDetailModal";
 import {
-  Server,
   Plus,
   Search,
   RefreshCw,
@@ -37,18 +43,25 @@ import {
   UploadCloud,
   Edit,
   Trash2,
-  Loader2,
+  DoorOpen,
 } from "lucide-react";
+
+interface BranchItem {
+  id: string;
+  code: string;
+  name: string;
+}
 
 export function DevicesGrid() {
   const { theme, biometricDevices, setBiometricDevices, removeBiometricDevice, addNotification } =
     useWorkspaceStore();
 
   const isDark = theme === "dark";
-  const [data, setData] = useState<BiometricDeviceRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [branchFilter, setBranchFilter] = useState<string>("ALL");
+  const [branchesList, setBranchesList] = useState<BranchItem[]>([]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<BiometricDeviceRecord | null>(null);
@@ -59,64 +72,78 @@ export function DevicesGrid() {
     rows: CompactSelection.empty(),
   });
 
+  // Filiallarni yuklash (Faqat bir marta mount bo'lganda)
+  useEffect(() => {
+    let active = true;
+    async function loadBranches() {
+      try {
+        const res = await fetch("/api/v1/branches");
+        const json = await res.json();
+        if (active && json.success && Array.isArray(json.data)) {
+          setBranchesList(json.data);
+        }
+      } catch {
+        // filiallar xatosi
+      }
+    }
+    loadBranches();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Qurilmalarni yuklash (Dependencyda biometricDevices bo'lmasligi kerak - cheksiz loop oldini oladi)
   const fetchDevices = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/v1/hr/devices");
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
-        setData(json.data);
         setBiometricDevices(json.data);
-      } else {
-        setData(biometricDevices);
       }
     } catch {
-      setData(biometricDevices);
+      // tarmoq xatosi
     } finally {
       setLoading(false);
     }
-  }, [biometricDevices, setBiometricDevices]);
+  }, [setBiometricDevices]);
 
+  // Faqat mount bo'lganda bir marta chaqirish
   useEffect(() => {
     fetchDevices();
   }, [fetchDevices]);
 
-  // Keep local data in sync with store
-  useEffect(() => {
-    if (biometricDevices && biometricDevices.length > 0) {
-      setData((prev) => {
-        const map = new Map<string, BiometricDeviceRecord>();
-        prev.forEach((d) => map.set(d.id, d));
-        biometricDevices.forEach((d) => map.set(d.id, d));
-        return Array.from(map.values());
-      });
-    }
-  }, [biometricDevices]);
-
-  // Filtered rows
+  // Filtrlash (Qidiruv, Holat, Filial)
   const filtered = useMemo(() => {
-    return data.filter((d) => {
+    return biometricDevices.filter((d) => {
       const s = searchFilter.toLowerCase();
+      const meta = d.metadata || {};
       const matchSearch =
         d.name.toLowerCase().includes(s) ||
         d.deviceCode.toLowerCase().includes(s) ||
         d.ipAddress.toLowerCase().includes(s) ||
+        (d.branchName || "").toLowerCase().includes(s) ||
+        (meta.isupDeviceId || "").toLowerCase().includes(s) ||
         (d.location || "").toLowerCase().includes(s);
 
       const matchStatus = statusFilter === "ALL" || d.status === statusFilter;
-      return matchSearch && matchStatus;
-    });
-  }, [data, searchFilter, statusFilter]);
+      const matchBranch = branchFilter === "ALL" || d.branchId === branchFilter;
 
+      return matchSearch && matchStatus && matchBranch;
+    });
+  }, [biometricDevices, searchFilter, statusFilter, branchFilter]);
+
+  // Glide Data Grid ustunlari
   const columns: GridColumn[] = useMemo(
     () => [
       { id: "status", title: "Holati", width: 95, icon: GridColumnIcon.HeaderLookup },
-      { id: "deviceCode", title: "Qurilma kodi", width: 130, icon: GridColumnIcon.HeaderString },
-      { id: "name", title: "Nomi", width: 220, icon: GridColumnIcon.HeaderString },
-      { id: "ipAddress", title: "IP Manzili", width: 130, icon: GridColumnIcon.HeaderString },
-      { id: "port", title: "Port", width: 75, icon: GridColumnIcon.HeaderNumber },
-      { id: "direction", title: "Yo'nalishi", width: 120, icon: GridColumnIcon.HeaderString },
-      { id: "location", title: "Joylashuvi", width: 170, icon: GridColumnIcon.HeaderString },
+      { id: "name", title: "Qurilma nomi", width: 220, icon: GridColumnIcon.HeaderString },
+      { id: "branchName", title: "Filial / Sex", width: 170, icon: GridColumnIcon.HeaderLookup },
+      { id: "connectionMode", title: "Ulanish usuli", width: 120, icon: GridColumnIcon.HeaderLookup },
+      { id: "address", title: "Manzil / Terminal ID", width: 170, icon: GridColumnIcon.HeaderString },
+      { id: "direction", title: "Yo'nalishi (T-13)", width: 120, icon: GridColumnIcon.HeaderString },
+      { id: "enrolledUsersCount", title: "Xodimlar", width: 90, icon: GridColumnIcon.HeaderNumber },
+      { id: "location", title: "O'rnatilgan joyi", width: 160, icon: GridColumnIcon.HeaderString },
       { id: "lastSeenAt", title: "Oxirgi aloqa", width: 140, icon: GridColumnIcon.HeaderDate },
     ],
     []
@@ -132,6 +159,7 @@ export function DevicesGrid() {
         return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
       }
 
+      // Holat ustuni
       if (col.id === "status") {
         const isOnline = row.status === "online";
         const isOffline = row.status === "offline";
@@ -150,29 +178,70 @@ export function DevicesGrid() {
         };
       }
 
-      if (col.id === "deviceCode") {
+      // Qurilma nomi
+      if (col.id === "name") {
         return {
           kind: GridCellKind.Text,
-          data: row.deviceCode,
-          displayData: row.deviceCode,
+          data: row.name,
+          displayData: row.name,
           allowOverlay: true,
           themeOverride: {
-            textDark: "#2563eb",
-            baseFontStyle: "bold 11px monospace",
+            textDark: isDark ? "#ffffff" : "#0f172a",
+            baseFontStyle: "600 11px sans-serif",
           },
         };
       }
 
-      if (col.id === "ipAddress") {
+      // Filial nomi
+      if (col.id === "branchName") {
+        const val = row.branchName || "Barcha filiallar";
         return {
           kind: GridCellKind.Text,
-          data: row.ipAddress,
-          displayData: row.ipAddress,
+          data: val,
+          displayData: val,
+          allowOverlay: false,
+          themeOverride: {
+            textDark: "#2563eb",
+            baseFontStyle: "500 11px sans-serif",
+          },
+        };
+      }
+
+      // Ulanish usuli
+      if (col.id === "connectionMode") {
+        const meta = row.metadata || {};
+        const isIsup = meta.connectionMode === "isup" || row.port === 7660;
+        const val = isIsup ? "ISUP 5.0 (Bulut)" : "Lokal / ISAPI";
+        return {
+          kind: GridCellKind.Text,
+          data: val,
+          displayData: val,
+          allowOverlay: false,
+          themeOverride: {
+            textDark: isIsup ? "#0284c7" : "#475569",
+            baseFontStyle: "11px sans-serif",
+          },
+        };
+      }
+
+      // Manzil / Terminal ID
+      if (col.id === "address") {
+        const meta = row.metadata || {};
+        const isIsup = meta.connectionMode === "isup" || row.port === 7660;
+        const val = isIsup
+          ? meta.isupDeviceId || row.deviceCode || "ISUP-ID"
+          : `${row.ipAddress}:${row.port}`;
+
+        return {
+          kind: GridCellKind.Text,
+          data: val,
+          displayData: val,
           allowOverlay: true,
           themeOverride: { baseFontStyle: "11px monospace" },
         };
       }
 
+      // Yo'nalish
       if (col.id === "direction") {
         const map: Record<string, string> = {
           in: "Kirish",
@@ -183,6 +252,19 @@ export function DevicesGrid() {
         return { kind: GridCellKind.Text, data: row.direction, displayData: text, allowOverlay: false };
       }
 
+      // Xodimlar / Yuzlar soni
+      if (col.id === "enrolledUsersCount") {
+        const count = row.metadata?.enrolledUsersCount ?? 0;
+        return {
+          kind: GridCellKind.Text,
+          data: String(count),
+          displayData: count > 0 ? `${count} nafar` : "—",
+          allowOverlay: false,
+          themeOverride: { baseFontStyle: "11px monospace" },
+        };
+      }
+
+      // Oxirgi aloqa
       if (col.id === "lastSeenAt") {
         if (!row.lastSeenAt) {
           return { kind: GridCellKind.Text, data: "", displayData: "—", allowOverlay: false };
@@ -203,9 +285,10 @@ export function DevicesGrid() {
         allowOverlay: true,
       };
     },
-    [columns, filtered]
+    [columns, filtered, isDark]
   );
 
+  // Aloqani tekshirish
   const handleTestConnection = async (device: BiometricDeviceRecord) => {
     setActionLoading(true);
     try {
@@ -217,19 +300,18 @@ export function DevicesGrid() {
           description: `${device.name} bilan aloqa o'rnatildi (Online).`,
           severity: "success",
         });
-        fetchDevices();
       } else {
         addNotification({
           title: "Aloqa yo'q",
           description: `${device.name}: ${json.message}`,
           severity: "error",
         });
-        fetchDevices();
       }
+      fetchDevices();
     } catch (err: any) {
       addNotification({
         title: "Xatolik",
-        description: err.message || "Tekshirishda xatolik",
+        description: err.message || "Tekshirishda xatolik yuz berdi",
         severity: "error",
       });
     } finally {
@@ -237,28 +319,61 @@ export function DevicesGrid() {
     }
   };
 
-  const handleSyncAllEmployees = async (device: BiometricDeviceRecord) => {
-    if (!confirm(`${device.name} qurilmasiga barcha faol xodimlarni yuklashni tasdiqlaysizmi?`)) {
+  // Turniket relayini sinash (Eshikni ochish)
+  const handleTriggerRelay = async (device: BiometricDeviceRecord) => {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/v1/hr/devices/${device.id}/open-relay`, { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        addNotification({
+          title: "Turniket ochildi",
+          description: `${device.name} relay signali muvaffaqiyatli uzatildi.`,
+          severity: "success",
+        });
+      } else {
+        addNotification({
+          title: "Buyruq yetib bormadi",
+          description: `${device.name}: ${json.message}`,
+          severity: "error",
+        });
+      }
+    } catch (err: any) {
+      addNotification({
+        title: "Xatolik",
+        description: err.message || "Turniketga buyruq yuborishda xatolik",
+        severity: "error",
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Filial xodimlarini sinxronlash
+  const handleSyncEmployees = async (device: BiometricDeviceRecord) => {
+    const branchText = device.branchName || "korxona";
+    if (!confirm(`${device.name} qurilmasiga ${branchText} xodimlarini yuklashni tasdiqlaysizmi?`)) {
       return;
     }
 
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/hr/devices/${device.id}/sync-all`, { method: "POST" });
+      const res = await fetch(`/api/v1/hr/devices/${device.id}/sync`, { method: "POST" });
       const json = await res.json();
       if (json.success) {
         addNotification({
-          title: "Xodimlar yuklandi",
-          description: `Jami ${json.totalSynced} ta xodim ${device.name} ga muvaffaqiyatli yuborildi.`,
+          title: "Sinxronlash yakunlandi",
+          description: `Jami ${json.totalSynced} nafar xodim ${device.name} ga muvaffaqiyatli yuborildi.`,
           severity: "success",
         });
       } else {
         addNotification({
-          title: "Qisman xatolik",
-          description: `${json.totalSynced} ta xodim yuklandi. Ba'zilarida xatolik yuz berdi.`,
+          title: "Qisman yuklandi",
+          description: `${json.totalSynced} ta xodim yuklandi. Xatolar: ${json.errors?.slice(0, 2)?.join("; ")}`,
           severity: "warning",
         });
       }
+      fetchDevices();
     } catch (err: any) {
       addNotification({
         title: "Xatolik",
@@ -270,6 +385,7 @@ export function DevicesGrid() {
     }
   };
 
+  // Qurilmani o'chirish
   const handleDeleteDevice = async (device: BiometricDeviceRecord) => {
     if (!confirm(`${device.name} qurilmasini ro'yxatdan o'chirishni tasdiqlaysizmi?`)) {
       return;
@@ -280,7 +396,6 @@ export function DevicesGrid() {
       const json = await res.json();
       if (json.success) {
         removeBiometricDevice(device.id);
-        setData((prev) => prev.filter((d) => d.id !== device.id));
         addNotification({
           title: "Qurilma o'chirildi",
           description: `${device.name} tizimdan olib tashlandi.`,
@@ -296,12 +411,21 @@ export function DevicesGrid() {
     }
   };
 
+  // Hozir tanlangan qurilma
+  const currentSelectedDevice = useMemo(() => {
+    const selectedRows = selection.rows.toArray();
+    if (selectedRows.length > 0 && filtered[selectedRows[0]]) {
+      return filtered[selectedRows[0]];
+    }
+    return filtered[0] || null;
+  }, [selection, filtered]);
+
   return (
     <div className="flex flex-col h-full bg-background select-none">
-      {/* ── 1C Enterprise Industrial Toolbar ── */}
-      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
-        {/* Left Actions */}
-        <div className="flex items-center gap-1.5">
+      {/* ── 1C Industrial Toolbar & Filters ── */}
+      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0 gap-2">
+        {/* Chap panel: Yangi qurilma, Tezkor amallar */}
+        <div className="flex items-center gap-1.5 flex-wrap">
           <Button
             size="sm"
             className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
@@ -314,9 +438,60 @@ export function DevicesGrid() {
             <span>Yangi qurilma</span>
           </Button>
 
+          {currentSelectedDevice && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs gap-1"
+                disabled={actionLoading}
+                onClick={() => handleSyncEmployees(currentSelectedDevice)}
+                title="Tanlangan qurilmaga filial xodimlarini sinxronlash"
+              >
+                <UploadCloud className="size-3.5 text-blue-600" />
+                <span>Sinxronlash</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs gap-1"
+                disabled={actionLoading}
+                onClick={() => handleTriggerRelay(currentSelectedDevice)}
+                title="Turniket relayini 3 soniyaga ochish"
+              >
+                <DoorOpen className="size-3.5 text-emerald-600" />
+                <span>Eshikni ochish</span>
+              </Button>
+            </>
+          )}
+
           <Separator orientation="vertical" className="h-4 mx-1" />
 
-          {/* Status Segment Filter Pills */}
+          {/* Filial bo'yicha filtr */}
+          <div className="flex items-center gap-1">
+            <span className="text-[11px] text-muted-foreground">Filial:</span>
+            <Select
+              value={branchFilter}
+              onValueChange={(val: string | null) => setBranchFilter(val || "ALL")}
+            >
+              <SelectTrigger className="h-7 w-36 text-xs bg-background">
+                <SelectValue placeholder="Barcha filiallar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Barcha filiallar</SelectItem>
+                {branchesList.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Separator orientation="vertical" className="h-4 mx-1" />
+
+          {/* Status Segment Filter */}
           <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
             {[
               { key: "ALL", label: "Hammasi" },
@@ -339,14 +514,14 @@ export function DevicesGrid() {
           </div>
         </div>
 
-        {/* Right Search & Controls */}
+        {/* O'ng panel: Qidiruv, Yangilash, Hisob */}
         <div className="flex items-center gap-2">
-          <div className="relative w-52">
+          <div className="relative w-48">
             <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Qurilma nomi yoki IP..."
+              placeholder="Qurilma, filial, IP..."
               className="pl-7 h-7 text-xs bg-background border-input rounded"
             />
           </div>
@@ -371,7 +546,6 @@ export function DevicesGrid() {
             title="Chop etish"
           >
             <Printer className="size-3.5" />
-            <span className="hidden sm:inline">Chop etish</span>
           </Button>
 
           <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 font-normal">
@@ -380,7 +554,7 @@ export function DevicesGrid() {
         </div>
       </div>
 
-      {/* ── High-Performance Canvas Data Grid ── */}
+      {/* ── Glide Data Grid (Canvas) ── */}
       <ContextMenu>
         <ContextMenuTrigger className="flex-1 w-full h-full relative overflow-hidden">
           <div className="absolute inset-0">
@@ -427,11 +601,22 @@ export function DevicesGrid() {
             onClick={() => {
               const selectedRow = selection.rows.toArray()[0] ?? 0;
               const d = filtered[selectedRow];
-              if (d) handleSyncAllEmployees(d);
+              if (d) handleSyncEmployees(d);
             }}
           >
-            <UploadCloud className="size-3.5 mr-2 text-emerald-600" />
-            Barcha xodimlarni yuklash (ISAPI)
+            <UploadCloud className="size-3.5 mr-2 text-blue-600" />
+            Filial xodimlarini yuklash
+          </ContextMenuItem>
+
+          <ContextMenuItem
+            onClick={() => {
+              const selectedRow = selection.rows.toArray()[0] ?? 0;
+              const d = filtered[selectedRow];
+              if (d) handleTriggerRelay(d);
+            }}
+          >
+            <DoorOpen className="size-3.5 mr-2 text-emerald-600" />
+            Turniket relayini ochish
           </ContextMenuItem>
 
           <ContextMenuSeparator />

@@ -163,3 +163,63 @@ class BoxLabelsPdfRequest(BaseModel):
     boxes: List[BoxLabelItemData] = Field(default_factory=list)
     saveToS3: bool = False
     s3Key: Optional[str] = None
+
+class ImpositionCellData(BaseModel):
+    index: int = 0
+    row: int = 0
+    col: int = 0
+    x: float
+    y: float
+    itemW: float
+    itemH: float
+    label: str = ""
+    model: Optional[str] = None
+    sizeCode: Optional[str] = None
+    color: str = "#dbeafe"
+    sizeId: str = "empty"
+    sideBadge: Optional[str] = "FRONT"
+    artworkUrl: Optional[str] = None
+    rawArtworkUrl: Optional[str] = None
+
+class ImpositionPageData(BaseModel):
+    plateName: str = "Forma 1"
+    plateIndex: int = 0
+    totalPlates: int = 1
+    sideLabel: str = "OLDI"
+    requiredSheets: int = 100
+    cells: List[ImpositionCellData] = Field(default_factory=list)
+
+class ImpositionPdfRequest(BaseModel):
+    docNo: str = "WOOF-26-0001"
+    orderName: str = "Client Order"
+    pressMachine: str = "Offset Press"
+    paperStock: str = "300 g/m²"
+    sheetW: float = 500.0
+    sheetH: float = 350.0
+    prodW: float = 50.0
+    prodH: float = 90.0
+    bleed: float = 2.0
+    gap: float = 4.0
+    gripper: float = 10.0
+    activeGripperEdge: str = "Bottom"
+    gridLeft: float = 10.0
+    gridTop: float = 10.0
+    cols: int = 1
+    rows: int = 1
+    itemW: float = 54.0
+    itemH: float = 94.0
+    shapeType: Optional[str] = "rectangle"
+    customShape: Optional[str] = None
+    customSvgPath: Optional[str] = None
+    parsedSvgPathD: Optional[str] = None
+    parsedSvgViewBox: Optional[Dict[str, float]] = None
+    cornerType: Optional[str] = None
+    holeSize: Optional[float] = None
+    holePosition: Optional[str] = None
+    holeOffset: Optional[float] = None
+    splitCutAxisX: Optional[float] = None
+    splitAxisLabel: Optional[str] = None
+    outerTrimMarks: List[Dict[str, float]] = Field(default_factory=list)
+    pages: List[ImpositionPageData] = Field(default_factory=list)
+    saveToS3: bool = False
+    s3Key: Optional[str] = None

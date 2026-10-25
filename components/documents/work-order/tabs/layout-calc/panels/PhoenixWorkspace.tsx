@@ -1206,8 +1206,8 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
             customShape={props.customShape}
             customSvgPath={props.customSvgPath}
             cornerType={props.cornerType}
-            artworkFront={props.artworkFront}
-            artworkBack={props.artworkBack}
+            artworkFront={calc.effectiveArtworkFront || props.artworkFront}
+            artworkBack={calc.effectiveArtworkBack || props.artworkBack}
             activeSide={calc.activeSide}
           />
         </div>

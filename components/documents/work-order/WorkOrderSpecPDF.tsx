@@ -745,21 +745,40 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
 
   return (
     <Document title={`${L.title} - ${docNo}`} author="PrintGoo ERP">
+      {/* ══════════════════════════════════════════════════════════════════════════
+          PAGE 1: REQUISITES, KPIS, 3-CARD PHYSICAL PROOFS, COATINGS & SIGN-OFFS
+          ══════════════════════════════════════════════════════════════════════════ */}
       <Page size="A4" style={styles.page}>
-        {/* 1. TOP HEADER WITH QR CODE */}
+        {/* 1. TOP HEADER WITH ENLARGED LOGO & BARCODE */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <View style={styles.brandRow}>
-              <Text style={styles.brandTitle}>PRINTGOO ERP</Text>
-            </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Image src="/printgoo_logo.png" style={{ width: 115, height: 28, objectFit: "contain" }} />
           </View>
 
+          {/* 1D Center Barcode */}
+          <View style={{ alignItems: "center", justifyContent: "center" }}>
+            <View style={{ width: 110, height: 24, backgroundColor: "#ffffff", alignItems: "center", justifyContent: "center" }}>
+              <Svg viewBox="0 0 110 24" style={{ width: 105, height: 20 }}>
+                {Array.from({ length: 32 }).map((_, i) => (
+                  <Rect
+                    key={i}
+                    x={i * 3.3 + (i % 3 === 0 ? 0.8 : 0)}
+                    y={0}
+                    width={i % 4 === 0 ? 2.0 : i % 2 === 0 ? 1.4 : 0.8}
+                    height={20}
+                    fill="#000000"
+                  />
+                ))}
+              </Svg>
+            </View>
+            <Text style={{ fontSize: 7, fontWeight: "bold", color: "#000000", marginTop: 1 }}>{docNo}</Text>
+          </View>
+
+          {/* Right Doc Meta & QR */}
           <View style={styles.headerRight}>
             <View style={styles.docMetaBox}>
               <Text style={styles.docNoText}>{docNo || "WOOF-26-0351"}</Text>
-              <Text style={styles.docSubText}>
-                {new Date().toISOString().slice(0, 10)}
-              </Text>
+              <Text style={styles.docSubText}>{new Date().toISOString().slice(0, 10)}</Text>
               {orderData.linkedOrderId && (
                 <Text style={styles.docSubText}>Ref: {orderData.linkedOrderId}</Text>
               )}
@@ -781,7 +800,7 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           </View>
         </View>
 
-        {/* 2. CORE REQUISITES & TARGET RUN KPI STRIP */}
+        {/* 2. CORE REQUISITES & STATUS/PRIORITY STRIP */}
         <View style={styles.reqGrid}>
           <View style={styles.reqCol}>
             <Text style={styles.reqLabel}>{L.customer}</Text>
@@ -801,9 +820,7 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           <View style={styles.reqCol}>
             <Text style={styles.reqLabel}>{L.pressMachine}</Text>
             <Text style={styles.reqValue}>{orderData.pressMachine || "—"}</Text>
-            <Text style={styles.reqSub}>
-              {L.recipe}: {orderData.recipe || "STD_V1"}
-            </Text>
+            <Text style={styles.reqSub}>{L.recipe}: {orderData.recipe || "STD_V1"}</Text>
           </View>
           <View style={styles.reqCol}>
             <Text style={styles.reqLabel}>{L.status || "HOLATI"}</Text>
@@ -838,12 +855,11 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           </View>
         </View>
 
+        {/* KPI Strip */}
         <View style={styles.kpiStrip}>
           <View style={styles.reqCol}>
             <Text style={styles.reqLabel}>{L.netRun}</Text>
-            <Text style={styles.kpiValueBlue}>
-              {netQuantity.toLocaleString()} {orderData.unit || "pcs"}
-            </Text>
+            <Text style={styles.kpiValueBlue}>{netQuantity.toLocaleString()} {orderData.unit || "pcs"}</Text>
           </View>
           <View style={styles.reqCol}>
             <Text style={styles.reqLabel}>{L.grossSheets}</Text>
@@ -851,383 +867,190 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           </View>
           <View style={styles.reqCol}>
             <Text style={styles.reqLabel}>{L.impositionYield}</Text>
-            <Text style={styles.kpiValueGreen}>
-              {yieldPerSheet} pcs / sht ({cols}×{rows})
-            </Text>
+            <Text style={styles.kpiValueGreen}>{yieldPerSheet} pcs / sht ({cols}×{rows})</Text>
           </View>
           <View style={styles.reqCol}>
             <Text style={styles.reqLabel}>{L.scheduleWindow}</Text>
-            <Text style={styles.kpiValueDark}>
-              {orderData.startDate || "—"} → {orderData.deadline || "—"}
-            </Text>
+            <Text style={styles.kpiValueDark}>{orderData.startDate || "—"} → {orderData.deadline || "—"}</Text>
           </View>
         </View>
 
-        {/* 3. PHYSICAL GEOMETRY & 2D SCHEMATIC + INKS & COLOR STATIONS */}
-        <View style={styles.twoColRow}>
-          {/* Left Panel: Physical Geometry, 2D Schematic & Substrate */}
-          <View style={[styles.panel, { flex: 1.15 }]}>
-            <View style={styles.panelHeader}>
-              <Text style={styles.panelHeaderTitle}>{L.physicalSpecs}</Text>
-              <Text style={styles.panelHeaderBadge}>
-                {width}×{height} {dimUnit} (+{bleed}{dimUnit})
+        {/* 3. PHYSICAL GEOMETRY (3 CARDS: FRONT, BACK, DIELINE CAD) */}
+        <View style={[styles.panel, { marginBottom: 6 }]}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelHeaderTitle}>{L.physicalSpecs}</Text>
+            <Text style={styles.panelHeaderBadge}>{width}×{height} {dimUnit} (+{bleed}{dimUnit}) • {orderData.shapeType || "STANDARD"}</Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 6, marginBottom: 5 }}>
+            {/* Card 1: Front */}
+            <View style={{ flex: 1, borderWidth: 0.6, borderColor: "#cbd5e1", borderRadius: 2, backgroundColor: "#f8fafc", overflow: "hidden" }}>
+              <View style={{ backgroundColor: "#0f172a", paddingHorizontal: 4, paddingVertical: 2, flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: "#ffffff", fontSize: 5.8, fontWeight: "bold" }}>OLDI / FRONT</Text>
+                <Text style={{ color: "#93c5fd", fontSize: 5.2, fontWeight: "bold" }}>1:1 PREPRESS</Text>
+              </View>
+              <View style={{ height: 62, alignItems: "center", justifyContent: "center", padding: 2 }}>
+                {effectiveArtworkFront ? (
+                  <Image src={effectiveArtworkFront} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                ) : (
+                  <Text style={{ fontSize: 5.5, color: "#94a3b8" }}>FRONT ARTWORK</Text>
+                )}
+              </View>
+              <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#475569", textAlign: "center", paddingBottom: 2 }}>OLD YUZI • {width}×{height}{dimUnit}</Text>
+            </View>
+
+            {/* Card 2: Back */}
+            <View style={{ flex: 1, borderWidth: 0.6, borderColor: "#cbd5e1", borderRadius: 2, backgroundColor: "#f8fafc", overflow: "hidden" }}>
+              <View style={{ backgroundColor: "#0f172a", paddingHorizontal: 4, paddingVertical: 2, flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: "#ffffff", fontSize: 5.8, fontWeight: "bold" }}>ORQA / BACK</Text>
+                <Text style={{ color: effectiveArtworkBack ? "#93c5fd" : "#cbd5e1", fontSize: 5.2, fontWeight: "bold" }}>{effectiveArtworkBack ? "2-SIDED" : "1-SIDED"}</Text>
+              </View>
+              <View style={{ height: 62, alignItems: "center", justifyContent: "center", padding: 2 }}>
+                {effectiveArtworkBack ? (
+                  <Image src={effectiveArtworkBack} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                ) : (
+                  <Text style={{ fontSize: 5.0, color: "#94a3b8" }}>1-TOMONLI (ORQASI OQ)</Text>
+                )}
+              </View>
+              <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#475569", textAlign: "center", paddingBottom: 2 }}>
+                {effectiveArtworkBack ? `ORQA YUZI • ${width}×${height}${dimUnit}` : "ORQA BOSMA MAVJUD EMAS"}
               </Text>
             </View>
 
-            <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-              {/* Real Artwork Proof (Front & Back Side-by-Side) */}
-              {effectiveArtworkFront ? (
-                <View
-                  style={{
-                    width: 126,
-                    minHeight: 80,
-                    borderWidth: 0.6,
-                    borderColor: "#cbd5e1",
-                    backgroundColor: "#f8fafc",
-                    borderRadius: 3,
-                    padding: 3,
-                    flexDirection: "row",
-                    justifyContent: "space-around",
-                    alignItems: "flex-end",
-                  }}
-                >
-                  {/* Front Side */}
-                  <View style={{ alignItems: "center", width: 56 }}>
-                    {holeSize > 0 && holePos !== "none" && (
-                      <Text style={{ fontSize: 4.2, color: "#dc2626", fontWeight: "bold", marginBottom: 1 }}>
-                        ↓ {holeOffset || 5.5}mm (Ø{holeSize}mm)
-                      </Text>
-                    )}
-                    <View
-                      style={{
-                        width: 50,
-                        height: 60,
-                        borderWidth: 0.6,
-                        borderColor: "#10b981",
-                        borderRadius: orderData.cornerType?.toLowerCase().includes("round") ? 3 : 1,
-                        overflow: "hidden",
-                        backgroundColor: "#18181b",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Image
-                        src={effectiveArtworkFront}
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                      />
-                    </View>
-                    <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
-                      {primarySkuArt && !orderData.artworkFront ? `Oldi (${primarySkuArt.sizeCode})` : "Oldi (Front)"}
-                    </Text>
-                    <Text style={{ fontSize: 3.6, color: "#64748b" }}>
-                      Yuz tomon
-                    </Text>
-                  </View>
-
-                  {/* Back Side */}
-                  <View style={{ alignItems: "center", width: 56 }}>
-                    <View
-                      style={{
-                        width: 50,
-                        height: 60,
-                        borderWidth: 0.6,
-                        borderColor: "#10b981",
-                        borderRadius: orderData.cornerType?.toLowerCase().includes("round") ? 3 : 1,
-                        overflow: "hidden",
-                        backgroundColor: "#18181b",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      {effectiveArtworkBack ? (
-                        <Image
-                          src={effectiveArtworkBack}
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                        />
-                      ) : (
-                        <View style={{ alignItems: "center", justifyContent: "center", padding: 2 }}>
-                          <Text style={{ fontSize: 4.2, color: "#94a3b8", textAlign: "center" }}>
-                            1-TOMONLAMA
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#0f172a", marginTop: 2 }}>
-                      {primarySkuArt && !orderData.artworkBack ? `Orqa (${primarySkuArt.sizeCode})` : "Orqa (Back)"}
-                    </Text>
-                    <Text style={{ fontSize: 3.6, color: "#64748b" }}>
-                      Orqa tomon
-                    </Text>
-                  </View>
-                </View>
-              ) : (
-                /* 2D Vector Cut & Bleed Schematic (Fallback when no artwork) */
-                <View
-                  style={{
-                    width: 86,
-                    height: 76,
-                    borderWidth: 0.6,
-                    borderColor: "#cbd5e1",
-                    backgroundColor: "#f8fafc",
-                    borderRadius: 2,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Svg viewBox="0 0 86 66" style={{ width: 82, height: 62 }}>
-                    {/* Outer Bleed Box */}
-                    <Rect
-                      x={trimX - 3}
-                      y={trimY - 3}
-                      width={drawW + 6}
-                      height={drawH + 6}
-                      fill="#fef2f2"
-                      stroke="#ef4444"
-                      strokeWidth={0.7}
-                      strokeDasharray="2,2"
-                    />
-                    {/* Trim Cut Box */}
-                    <Rect
-                      x={trimX}
-                      y={trimY}
-                      width={drawW}
-                      height={drawH}
-                      rx={orderData.cornerType?.toLowerCase().includes("round") ? 3 : 0}
-                      fill="#ffffff"
-                      stroke="#1d4ed8"
-                      strokeWidth={1.1}
-                    />
-                    {/* Center Crosshair */}
-                    <Line
-                      x1={trimX + 4}
-                      y1={trimY + drawH / 2}
-                      x2={trimX + drawW - 4}
-                      y2={trimY + drawH / 2}
-                      stroke="#cbd5e1"
-                      strokeWidth={0.5}
-                      strokeDasharray="1.5,1.5"
-                    />
-                    <Line
-                      x1={trimX + drawW / 2}
-                      y1={trimY + 4}
-                      x2={trimX + drawW / 2}
-                      y2={trimY + drawH - 4}
-                      stroke="#cbd5e1"
-                      strokeWidth={0.5}
-                      strokeDasharray="1.5,1.5"
-                    />
-                    {/* Drill Hole if present */}
-                    {holeSize > 0 && holePos !== "none" && pdfHoles.map((ph, phIdx) => (
-                      <Circle
-                        key={phIdx}
-                        cx={ph.cx}
-                        cy={ph.cy}
-                        r={2.5}
-                        fill="#eff6ff"
-                        stroke="#2563eb"
-                        strokeWidth={0.9}
-                      />
-                    ))}
-                  </Svg>
-                  <Text style={{ fontSize: 5.5, fontWeight: "bold", color: "#334155" }}>
-                    {width}×{height} {dimUnit} {holeSize > 0 && holePos !== "none" ? `• Ø${holeSize}mm` : ""}
-                  </Text>
-                </View>
-              )}
-
-              {/* Specs List */}
-              <View style={{ flex: 1 }}>
-                <View style={styles.kvRow}>
-                  <Text style={styles.kvLabel}>{L.trimDimensions}:</Text>
-                  <Text style={styles.kvVal}>
-                    {width} × {height} {dimUnit} ({L.bleedMargin}: +{bleed}{dimUnit})
-                  </Text>
-                </View>
-                <View style={styles.kvRow}>
-                  <Text style={styles.kvLabel}>{L.cornerCut}:</Text>
-                  <Text style={styles.kvVal}>{orderData.cornerType || "Square"}</Text>
-                </View>
-                <View style={styles.kvRow}>
-                  <Text style={styles.kvLabel}>{L.holeEyelet}:</Text>
-                  <Text style={styles.kvVal}>
-                    {holeSize > 0 && holePos !== "none"
-                      ? `Ø${holeSize}mm • ${holePos} (${holeOffset}mm)`
-                      : "—"}
-                  </Text>
-                </View>
-                <View style={styles.kvRow}>
-                  <Text style={styles.kvLabel}>{L.paperSubstrate}:</Text>
-                  <Text style={styles.kvVal}>{orderData.paperStock || "—"}</Text>
-                </View>
-                <View style={styles.kvRow}>
-                  <Text style={styles.kvLabel}>{L.laminationSpec}:</Text>
-                  <Text style={styles.kvVal}>
-                    {orderData.lamination && orderData.lamination !== "None"
-                      ? `${orderData.lamination} (${(orderData.laminationSides || "1s").toUpperCase()}, ${
-                          orderData.laminationMicron || 28
-                        }μm)`
-                      : "—"}
-                  </Text>
-                </View>
-                <View style={styles.kvRow}>
-                  <Text style={styles.kvLabel}>{L.surfaceCoating}:</Text>
-                  <Text style={styles.kvVal}>
-                    {orderData.coating || "—"}
-                    {orderData.embellishment && orderData.embellishment !== "None"
-                      ? ` • ${orderData.embellishment}`
-                      : ""}
-                  </Text>
-                </View>
+            {/* Card 3: Dieline CAD */}
+            <View style={{ flex: 1, borderWidth: 0.6, borderColor: "#cbd5e1", borderRadius: 2, backgroundColor: "#f8fafc", overflow: "hidden" }}>
+              <View style={{ backgroundColor: "#0f172a", paddingHorizontal: 4, paddingVertical: 2, flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: "#ffffff", fontSize: 5.8, fontWeight: "bold" }}>DIELINE / SHTANS</Text>
+                <Text style={{ color: "#93c5fd", fontSize: 5.2, fontWeight: "bold" }}>CAD 1:1</Text>
               </View>
+              <View style={{ height: 62, alignItems: "center", justifyContent: "center", padding: 2 }}>
+                <Svg viewBox="0 0 86 64" style={{ width: 78, height: 56 }}>
+                  <Rect x={trimX - 3} y={trimY - 3} width={drawW + 6} height={drawH + 6} fill="#fef2f2" stroke="#ef4444" strokeWidth={0.7} strokeDasharray="2,2" />
+                  <Rect x={trimX} y={trimY} width={drawW} height={drawH} rx={orderData.cornerType?.toLowerCase().includes("round") ? 3 : 0} fill="#ffffff" stroke="#1d4ed8" strokeWidth={1.1} />
+                  <Line x1={trimX + 3} y1={trimY + drawH / 2} x2={trimX + drawW - 3} y2={trimY + drawH / 2} stroke="#d946ef" strokeWidth={0.7} strokeDasharray="2.5,1.5" />
+                  {holeSize > 0 && holePos !== "none" && (
+                    <Circle cx={trimX + drawW / 2} cy={trimY + 5} r={2.2} fill="#eff6ff" stroke="#2563eb" strokeWidth={0.9} />
+                  )}
+                </Svg>
+              </View>
+              <Text style={{ fontSize: 4.8, fontWeight: "bold", color: "#475569", textAlign: "center", paddingBottom: 2 }}>
+                SHTAMP: {orderData.selectedToolingName || "Standart pichoq"} (+{bleed}mm)
+              </Text>
             </View>
           </View>
 
-          {/* Right Panel: Inks & Color Stations + Kashirovka / Flexo */}
-          <View style={[styles.panel, { flex: 0.95 }]}>
-            <View style={styles.panelHeader}>
-              <Text style={styles.panelHeaderTitle}>{L.inksAndColors}</Text>
-              <Text style={styles.panelHeaderBadge}>{orderData.colorsConfig || "4+0 (CMYK)"}</Text>
-            </View>
-
-            {/* Front & Back CMYK Channels */}
-            <View style={styles.kvRow}>
-              <Text style={styles.kvLabel}>{L.frontSide}:</Text>
-              <View style={styles.channelRow}>
-                {(["c", "m", "y", "k"] as const).map((ch) => {
-                  const active = frontColors[ch];
-                  const bg =
-                    ch === "c"
-                      ? "#06b6d4"
-                      : ch === "m"
-                      ? "#ec4899"
-                      : ch === "y"
-                      ? "#eab308"
-                      : "#0f172a";
-                  return (
-                    <Text
-                      key={ch}
-                      style={[
-                        styles.channelPill,
-                        {
-                          backgroundColor: active ? bg : "#e2e8f0",
-                          color: active ? "#ffffff" : "#94a3b8",
-                        },
-                      ]}
-                    >
-                      {ch.toUpperCase()}
-                    </Text>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View style={styles.kvRow}>
-              <Text style={styles.kvLabel}>{L.backSide}:</Text>
-              <View style={styles.channelRow}>
-                {(["c", "m", "y", "k"] as const).map((ch) => {
-                  const active = backColors[ch];
-                  const bg =
-                    ch === "c"
-                      ? "#06b6d4"
-                      : ch === "m"
-                      ? "#ec4899"
-                      : ch === "y"
-                      ? "#eab308"
-                      : "#0f172a";
-                  return (
-                    <Text
-                      key={ch}
-                      style={[
-                        styles.channelPill,
-                        {
-                          backgroundColor: active ? bg : "#e2e8f0",
-                          color: active ? "#ffffff" : "#94a3b8",
-                        },
-                      ]}
-                    >
-                      {ch.toUpperCase()}
-                    </Text>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Spot / Pantone Swatches */}
-            <View style={{ marginTop: 2, marginBottom: 3 }}>
-              <Text style={styles.reqLabel}>{L.spotStations}:</Text>
-              {spotColorItems.length > 0 ? (
-                <View style={styles.spotWrap}>
-                  {spotColorItems.map((sp) => (
-                    <View key={sp.id} style={styles.spotChip}>
-                      <View style={[styles.spotSwatch, { backgroundColor: sp.hex || "#fe5000" }]} />
-                      <Text style={{ fontSize: 6.2, fontWeight: "bold", color: "#0f172a" }}>
-                        {sp.name} ({sp.side.toUpperCase()})
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={{ fontSize: 6.5, color: "#64748b" }}>—</Text>
-              )}
-            </View>
-
-            {/* Conditional Kashirovka or Flexo Technical Specs */}
-            {kashirovkaMode !== "none" && (
-              <View
-                style={{
-                  borderTopWidth: 0.6,
-                  borderTopColor: "#cbd5e1",
-                  paddingTop: 3,
-                  marginTop: 2,
-                }}
-              >
-                <Text style={[styles.reqLabel, { color: "#1d4ed8" }]}>
-                  {L.kashirovkaTitle}: {kashirovkaMode.toUpperCase()} ({kashirovkaTotals.totalMountedGsm} g/m² • ~
-                  {kashirovkaTotals.estimatedCaliperMm}mm)
-                </Text>
-                <Text style={{ fontSize: 6, color: "#334155", marginTop: 1 }}>
-                  {orderData.kashirovkaStrategy === "split_half_sheet"
-                    ? "1-CTP Work & Mount"
-                    : "2-CTP Sheet-to-Sheet"}{" "}
-                  • {L.kashirovkaGlue}: {orderData.kashirovkaGlueGsm ?? 25}g/m² • Pause:{" "}
-                  {orderData.kashirovkaCuringHours ?? 12}h
-                </Text>
-                {kashirovkaLayers.map((ly, i) => (
-                  <Text key={ly.id || i} style={{ fontSize: 5.8, color: "#475569", marginTop: 0.5 }}>
-                    • L{i + 1}: {ly.paperStock} ({ly.grammage}g, {ly.colors})
-                  </Text>
-                ))}
-              </View>
-            )}
-
-            {orderData.department === "Flexo" && (
-              <View
-                style={{
-                  borderTopWidth: 0.6,
-                  borderTopColor: "#cbd5e1",
-                  paddingTop: 3,
-                  marginTop: 2,
-                }}
-              >
-                <Text style={[styles.reqLabel, { color: "#1d4ed8" }]}>{L.flexoTitle}</Text>
-                <View style={styles.kvRow}>
-                  <Text style={styles.kvLabel}>{L.flexoTeeth} / {L.flexoWebWidth}:</Text>
-                  <Text style={styles.kvVal}>
-                    {orderData.flexoCylinderTeeth || 100}T • {orderData.flexoWebWidth || 35}mm
-                  </Text>
-                </View>
-                <View style={styles.kvRow}>
-                  <Text style={styles.kvLabel}>{L.flexoPlate} / {L.flexoGap}:</Text>
-                  <Text style={styles.kvVal}>
-                    {orderData.flexoPlateThickness || 1.7}mm • {orderData.flexoGapX ?? 2}×{orderData.flexoGapY ?? 2.5}mm
-                  </Text>
-                </View>
-              </View>
-            )}
+          {/* Specs Bar */}
+          <View style={{ flexDirection: "row", backgroundColor: "#f8fafc", borderWidth: 0.5, borderColor: "#e2e8f0", borderRadius: 2, padding: 3, gap: 6 }}>
+            <View style={{ flex: 1 }}><Text style={styles.reqLabel}>{L.trimDimensions}</Text><Text style={styles.tdBold}>{width} × {height} {dimUnit} (+{bleed}{dimUnit})</Text></View>
+            <View style={{ flex: 1 }}><Text style={styles.reqLabel}>{L.cornerCut}</Text><Text style={styles.tdBold}>{orderData.cornerType || "Square"}</Text></View>
+            <View style={{ flex: 1 }}><Text style={styles.reqLabel}>{L.holeEyelet}</Text><Text style={styles.tdBold}>{holeSize > 0 && holePos !== "none" ? `Ø${holeSize}mm • ${holePos}` : "—"}</Text></View>
+            <View style={{ flex: 1.5 }}><Text style={styles.reqLabel}>{L.paperSubstrate}</Text><Text style={styles.tdBold}>{orderData.paperStock || "—"}</Text></View>
           </View>
         </View>
 
-        {/* 4. PRE-FLIGHT STAGE-GATES STRIP */}
+        {/* 4. TECHNICAL COATINGS, LAK & KASHIROVKA SPECIFICATION */}
+        <View style={[styles.panel, { marginBottom: 6 }]}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelHeaderTitle}>TEXNOLOGIK QOPLAMALAR, LAK VA KASHIROVKA SPECIFIKATSIYASI</Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            {/* Left: Lamination, Varnish, Inks */}
+            <View style={{ flex: 1, gap: 4 }}>
+              {/* Lamination */}
+              <View style={{ borderWidth: 0.5, borderColor: "#e2e8f0", borderRadius: 2, padding: 3, backgroundColor: "#f8fafc" }}>
+                <Text style={{ fontSize: 6, fontWeight: "bold", color: "#0f172a" }}>LAMINATSIYA (LAMINATION FILM)</Text>
+                <Text style={{ fontSize: 6.2, fontWeight: "bold", color: "#1d4ed8", marginTop: 1 }}>{orderData.lamination || "None"}</Text>
+                <Text style={{ fontSize: 5.5, color: "#475569" }}>
+                  Tomoni: {(orderData.laminationSides || "1s").toUpperCase()} • Qalinligi: {orderData.laminationMicron || 28} μm • BOPP Thermal
+                </Text>
+              </View>
+
+              {/* Varnish / Coating */}
+              <View style={{ borderWidth: 0.5, borderColor: "#e2e8f0", borderRadius: 2, padding: 3, backgroundColor: "#f8fafc" }}>
+                <Text style={{ fontSize: 6, fontWeight: "bold", color: "#0f172a" }}>LAK VA PARDOZLASH (COATING & EMBELLISHMENT)</Text>
+                <Text style={{ fontSize: 6.2, fontWeight: "bold", color: "#0f172a", marginTop: 1 }}>{orderData.coating || "—"}</Text>
+                <Text style={{ fontSize: 5.5, color: "#475569" }}>Maxsus effekt: {orderData.embellishment || "None"}</Text>
+              </View>
+
+              {/* Inks & CMYK */}
+              <View style={{ borderWidth: 0.5, borderColor: "#e2e8f0", borderRadius: 2, padding: 3, backgroundColor: "#f8fafc" }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                  <Text style={{ fontSize: 6, fontWeight: "bold", color: "#0f172a" }}>BO'YOQLAR (CMYK + SPOT)</Text>
+                  <Text style={{ fontSize: 5.5, fontWeight: "bold", color: "#1d4ed8" }}>{orderData.colorsConfig || "4+0"}</Text>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+                  <Text style={{ fontSize: 5.5, color: "#475569" }}>Old:</Text>
+                  {(["c", "m", "y", "k"] as const).map(ch => (
+                    <Text key={ch} style={[styles.channelPill, { backgroundColor: frontColors[ch] ? (ch === "c" ? "#06b6d4" : ch === "m" ? "#ec4899" : ch === "y" ? "#eab308" : "#0f172a") : "#e2e8f0", color: frontColors[ch] ? "#fff" : "#94a3b8" }]}>
+                      {ch.toUpperCase()}
+                    </Text>
+                  ))}
+                  <Text style={{ fontSize: 5.5, color: "#475569", marginLeft: 4 }}>Orqa:</Text>
+                  {(["c", "m", "y", "k"] as const).map(ch => (
+                    <Text key={ch} style={[styles.channelPill, { backgroundColor: backColors[ch] ? (ch === "c" ? "#06b6d4" : ch === "m" ? "#ec4899" : ch === "y" ? "#eab308" : "#0f172a") : "#e2e8f0", color: backColors[ch] ? "#fff" : "#94a3b8" }]}>
+                      {ch.toUpperCase()}
+                    </Text>
+                  ))}
+                </View>
+                {spotColorItems.length > 0 && (
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 3, marginTop: 2 }}>
+                    {spotColorItems.map(sp => (
+                      <View key={sp.id} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                        <View style={{ width: 5, height: 5, backgroundColor: sp.hex || "#fe5000", borderRadius: 1 }} />
+                        <Text style={{ fontSize: 5.2, fontWeight: "bold", color: "#0f172a" }}>{sp.name}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {/* Right: Kashirovka / Substrate */}
+            <View style={{ flex: 1.1, borderWidth: 0.5, borderColor: "#e2e8f0", borderRadius: 2, padding: 4, backgroundColor: "#f8fafc" }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 2 }}>
+                <Text style={{ fontSize: 6.2, fontWeight: "bold", color: "#0f172a" }}>KASHIROVKA VA QATLAMLAR MATRITSASI</Text>
+                <Text style={{ fontSize: 5.8, fontWeight: "bold", color: "#1d4ed8" }}>{kashirovkaMode.toUpperCase()}</Text>
+              </View>
+              {kashirovkaMode !== "none" ? (
+                <View>
+                  <Text style={{ fontSize: 5.5, color: "#64748b" }}>
+                    Yelim: {orderData.kashirovkaGlueGsm || 25} g/m² • Quritish: {orderData.kashirovkaCuringHours || 12}h • Priladka: {orderData.kashirovkaMakeReadySheets || 50} sht
+                  </Text>
+                  <View style={{ marginTop: 2, borderWidth: 0.5, borderColor: "#cbd5e1", borderRadius: 1.5, overflow: "hidden" }}>
+                    <View style={{ flexDirection: "row", backgroundColor: "#e2e8f0", padding: 2 }}>
+                      <Text style={{ width: "35%", fontSize: 5.2, fontWeight: "bold" }}>QATLAM (ROLE)</Text>
+                      <Text style={{ width: "45%", fontSize: 5.2, fontWeight: "bold" }}>QOG'OZ MARKASI</Text>
+                      <Text style={{ width: "20%", fontSize: 5.2, fontWeight: "bold", textAlign: "right" }}>GSM</Text>
+                    </View>
+                    {kashirovkaLayers.map((ly, idx) => (
+                      <View key={idx} style={{ flexDirection: "row", padding: 2, borderTopWidth: 0.3, borderTopColor: "#e2e8f0" }}>
+                        <Text style={{ width: "35%", fontSize: 5.5, fontWeight: "bold", color: "#0f172a" }}>{ly.label}</Text>
+                        <Text style={{ width: "45%", fontSize: 5.2, color: "#475569" }}>{ly.paperStock}</Text>
+                        <Text style={{ width: "20%", fontSize: 5.2, fontWeight: "bold", textAlign: "right" }}>{ly.grammage}g</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={{ marginTop: 3, backgroundColor: "#eff6ff", padding: 3, borderRadius: 2 }}>
+                    <Text style={{ fontSize: 6, fontWeight: "bold", color: "#1d4ed8" }}>
+                      Jami qalinlik: ~{kashirovkaTotals.estimatedCaliperMm} mm • Jami zichlik: {kashirovkaTotals.totalMountedGsm} g/m²
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={{ gap: 2 }}>
+                  <Text style={{ fontSize: 6.5, fontWeight: "bold", color: "#0f172a" }}>YAGONA ASOSIY QOG'OZ</Text>
+                  <Text style={{ fontSize: 6, color: "#475569" }}>Marka: {orderData.paperStock || "Coated Cardboard 300g/m²"}</Text>
+                  <Text style={{ fontSize: 5.5, color: "#64748b" }}>Bichim listi: {orderData.pressSheetW || 700} × {orderData.pressSheetH || 1000} mm</Text>
+                  <Text style={{ fontSize: 5.5, color: "#64748b" }}>Tolalar: Bo'ylama (Long Grain ||) • Namlik: 50-55% RH</Text>
+                  <View style={{ marginTop: 2, backgroundColor: "#f1f5f9", padding: 2, borderRadius: 1.5 }}>
+                    <Text style={{ fontSize: 5.5, color: "#0f172a", fontWeight: "bold" }}>Standart monip qog'oz (kashirovka talab etilmaydi)</Text>
+                  </View>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+
+        {/* 5. PRE-FLIGHT STAGE-GATES */}
         <View style={styles.gatesRow}>
           {[
             { title: L.gate1Title, sub: L.gate1Sub },
@@ -1245,15 +1068,133 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           ))}
         </View>
 
-        {/* 5. SIDE-BY-SIDE: SIZE/SKU MATRIX & BOM RAW MATERIALS */}
+        {/* 6. TECHNOLOGICAL MANUFACTURING ROUTE (ALL OPERATIONS) */}
+        <View style={[styles.panel, { marginBottom: 6 }]}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelHeaderTitle}>{L.techRoute}</Text>
+            <Text style={styles.panelHeaderBadge}>{operations.length} BOSQICHLAR</Text>
+          </View>
+          <View style={styles.table}>
+            <View style={styles.thRow}>
+              <Text style={[styles.th, { width: "7%" }]}>№</Text>
+              <Text style={[styles.th, { width: "35%" }]}>{L.colOperation}</Text>
+              <Text style={[styles.th, { width: "23%" }]}>{L.colMachine}</Text>
+              <Text style={[styles.th, { width: "15%" }]}>OPERATOR</Text>
+              <Text style={[styles.th, { width: "7%", textAlign: "right" }]}>VAQT</Text>
+              <Text style={[styles.th, { width: "8%", textAlign: "center" }]}>HOLAT</Text>
+              <Text style={[styles.th, { width: "10%", textAlign: "center" }]}>IMZO</Text>
+            </View>
+            {operations.map((op, idx) => (
+              <View key={op.id || idx} style={[styles.tdRow, { backgroundColor: idx % 2 === 0 ? "#ffffff" : "#f8fafc" }]}>
+                <Text style={[styles.tdBold, { width: "7%", color: "#475569" }]}>#{op.stepNumber}</Text>
+                <Text style={[styles.tdBold, { width: "35%" }]}>{op.name}</Text>
+                <Text style={[styles.td, { width: "23%", color: "#334155" }]}>{op.machine}</Text>
+                <Text style={[styles.td, { width: "15%", color: "#475569" }]}>{op.operator}</Text>
+                <Text style={[styles.tdBold, { width: "7%", textAlign: "right" }]}>{op.duration}h</Text>
+                <View style={{ width: "8%", alignItems: "center" }}>
+                  <Text style={{
+                    fontSize: 4.8,
+                    fontWeight: "bold",
+                    paddingVertical: 1,
+                    paddingHorizontal: 3,
+                    borderRadius: 1.5,
+                    backgroundColor: op.status === "Finished" ? "#dcfce7" : op.status === "In Progress" ? "#fef9c3" : "#f1f5f9",
+                    color: op.status === "Finished" ? "#15803d" : op.status === "In Progress" ? "#a16207" : "#475569",
+                  }}>
+                    {op.status?.toUpperCase() || "QUEUED"}
+                  </Text>
+                </View>
+                <View style={{ width: "10%", paddingHorizontal: 3 }}>
+                  <View style={{ borderBottomWidth: 0.6, borderBottomColor: "#94a3b8", borderStyle: "dashed", height: 7 }} />
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* 7. PAGE 1 FOOTER */}
+        <View style={styles.footer} fixed>
+          <Text style={styles.footerText}>{L.footerSystem} • DOC: {docNo} • MAXSULOT PASPORTI</Text>
+          <Text style={styles.footerText} render={({ pageNumber, totalPages }) => `${L.printDate}: ${new Date().toISOString().slice(0, 10)} • Sahifa ${pageNumber} / ${totalPages}`} />
+        </View>
+      </Page>
+
+      {/* ══════════════════════════════════════════════════════════════════════════
+          PAGE 2: FULL TECH ROUTE, SHIFT NOTES, BOM MATERIALS & SKU PREPRESS GALLERY
+          ══════════════════════════════════════════════════════════════════════════ */}
+      <Page size="A4" style={styles.page}>
+        {/* Unified Header Page 2 */}
+        <View style={styles.header}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Image src="/printgoo_logo.png" style={{ width: 115, height: 28, objectFit: "contain" }} />
+          </View>
+
+          <View style={{ alignItems: "center", justifyContent: "center" }}>
+            <View style={{ width: 110, height: 24, backgroundColor: "#ffffff", alignItems: "center", justifyContent: "center" }}>
+              <Svg viewBox="0 0 110 24" style={{ width: 105, height: 20 }}>
+                {Array.from({ length: 32 }).map((_, i) => (
+                  <Rect
+                    key={i}
+                    x={i * 3.3 + (i % 3 === 0 ? 0.8 : 0)}
+                    y={0}
+                    width={i % 4 === 0 ? 2.0 : i % 2 === 0 ? 1.4 : 0.8}
+                    height={20}
+                    fill="#000000"
+                  />
+                ))}
+              </Svg>
+            </View>
+            <Text style={{ fontSize: 7, fontWeight: "bold", color: "#000000", marginTop: 1 }}>{docNo}</Text>
+          </View>
+
+          <View style={styles.headerRight}>
+            <View style={styles.docMetaBox}>
+              <Text style={styles.docNoText}>{docNo || "WOOF-26-0351"}</Text>
+              <Text style={styles.docSubText}>{new Date().toISOString().slice(0, 10)}</Text>
+            </View>
+            <View style={styles.qrBox}>
+              <Svg viewBox="0 0 21 21">
+                {qrModules.map((m, idx) => (
+                  <Rect
+                    key={idx}
+                    x={m.c}
+                    y={m.r}
+                    width={1.02}
+                    height={1.02}
+                    fill="#000000"
+                  />
+                ))}
+              </Svg>
+            </View>
+          </View>
+        </View>
+
+        {/* Shift Handover Notes */}
+        {shiftNotes.length > 0 && (
+          <View style={[styles.panel, { marginBottom: 6 }]}>
+            <View style={styles.panelHeader}>
+              <Text style={styles.panelHeaderTitle}>{L.shiftNotesTitle}</Text>
+            </View>
+            <View style={[styles.notesGrid, { padding: 4 }]}>
+              {shiftNotes.slice(0, 2).map((n) => (
+                <View key={n.id} style={styles.noteBox}>
+                  <Text style={styles.noteHeader}>
+                    [{n.shift}] {n.author} ({n.time})
+                  </Text>
+                  <Text style={styles.noteText}>{n.text}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* 9. SIDE-BY-SIDE: SIZE MATRIX & BOM MATERIALS */}
         <View style={styles.twoColRow}>
-          {/* Left: Size / Model Breakdown */}
+          {/* Left: Size Matrix */}
           <View style={[styles.panel, { flex: 1 }]}>
             <View style={styles.panelHeader}>
               <Text style={styles.panelHeaderTitle}>{L.sizeBreakdown}</Text>
-              <Text style={styles.panelHeaderBadge}>
-                {orderData.sizes?.length || 1} SKU • {netQuantity.toLocaleString()} {orderData.unit || "pcs"}
-              </Text>
+              <Text style={styles.panelHeaderBadge}>{orderData.sizes?.length || 1} SKU</Text>
             </View>
             <View style={styles.table}>
               <View style={styles.thRow}>
@@ -1268,16 +1209,10 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
                   const pct = netQuantity > 0 ? Math.round((s.quantity / netQuantity) * 100) : 0;
                   return (
                     <View key={s.id || idx} style={styles.tdRow}>
-                      <Text style={[styles.td, { width: "28%", color: "#475569" }]}>
-                        {parsed.model || "STD"}
-                      </Text>
+                      <Text style={[styles.td, { width: "28%", color: "#475569" }]}>{parsed.model || "STD"}</Text>
                       <Text style={[styles.tdBold, { width: "27%" }]}>{parsed.sizeCode || s.size}</Text>
-                      <Text style={[styles.tdBold, { width: "27%", textAlign: "right" }]}>
-                        {s.quantity.toLocaleString()}
-                      </Text>
-                      <Text style={[styles.td, { width: "18%", textAlign: "right", color: "#64748b" }]}>
-                        {pct}%
-                      </Text>
+                      <Text style={[styles.tdBold, { width: "27%", textAlign: "right" }]}>{s.quantity.toLocaleString()}</Text>
+                      <Text style={[styles.td, { width: "18%", textAlign: "right", color: "#64748b" }]}>{pct}%</Text>
                     </View>
                   );
                 })
@@ -1285,9 +1220,7 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
                 <View style={styles.tdRow}>
                   <Text style={[styles.td, { width: "28%" }]}>STD</Text>
                   <Text style={[styles.tdBold, { width: "27%" }]}>ALL</Text>
-                  <Text style={[styles.tdBold, { width: "27%", textAlign: "right" }]}>
-                    {netQuantity.toLocaleString()}
-                  </Text>
+                  <Text style={[styles.tdBold, { width: "27%", textAlign: "right" }]}>{netQuantity.toLocaleString()}</Text>
                   <Text style={[styles.td, { width: "18%", textAlign: "right" }]}>100%</Text>
                 </View>
               )}
@@ -1311,20 +1244,8 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
                 return (
                   <View key={idx} style={styles.tdRow}>
                     <Text style={[styles.tdBold, { width: "46%" }]}>{m.name}</Text>
-                    <Text style={[styles.tdBold, { width: "24%", textAlign: "right" }]}>
-                      {m.req.toLocaleString()} {m.unit}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.td,
-                        {
-                          width: "30%",
-                          textAlign: "right",
-                          color: isShort ? "#dc2626" : "#047857",
-                          fontWeight: "bold",
-                        },
-                      ]}
-                    >
+                    <Text style={[styles.tdBold, { width: "24%", textAlign: "right" }]}>{m.req.toLocaleString()} {m.unit}</Text>
+                    <Text style={[styles.td, { width: "30%", textAlign: "right", color: isShort ? "#dc2626" : "#047857", fontWeight: "bold" }]}>
                       {m.stock.toLocaleString()} ({isShort ? L.stockShortage : L.stockOk})
                     </Text>
                   </View>
@@ -1334,130 +1255,46 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
           </View>
         </View>
 
-        {/* 6. TECHNOLOGICAL MANUFACTURING ROUTE */}
-        <View style={[styles.panel, { marginBottom: 5 }]}>
+        {/* 10. SKU ARTWORK PREPRESS GALLERY */}
+        <View style={[styles.panel, { flex: 1 }]}>
           <View style={styles.panelHeader}>
-            <Text style={styles.panelHeaderTitle}>{L.techRoute}</Text>
-            <Text style={styles.panelHeaderBadge}>{operations.length} Steps</Text>
+            <Text style={styles.panelHeaderTitle}>SKU ARTWORK PASPORTI (1:1 PREPRESS PROOFLAR)</Text>
+            <Text style={styles.panelHeaderBadge}>{itemsWithArtwork.length || normalizedSkuCards.length} SKU</Text>
           </View>
-          <View style={styles.table}>
-            <View style={styles.thRow}>
-              <Text style={[styles.th, { width: "9%" }]}>{L.colStep}</Text>
-              <Text style={[styles.th, { width: "31%" }]}>{L.colOperation}</Text>
-              <Text style={[styles.th, { width: "25%" }]}>{L.colMachine}</Text>
-              <Text style={[styles.th, { width: "14%" }]}>{L.colOperator}</Text>
-              <Text style={[styles.th, { width: "8%", textAlign: "right" }]}>{L.colDuration}</Text>
-              <Text style={[styles.th, { width: "13%", textAlign: "center" }]}>{L.colSign}</Text>
-            </View>
-            {operations.map((op, idx) => (
-              <View key={op.id || idx} style={styles.tdRow}>
-                <Text style={[styles.tdBold, { width: "9%", color: "#475569" }]}>#{op.stepNumber}</Text>
-                <Text style={[styles.tdBold, { width: "31%" }]}>{op.name}</Text>
-                <Text style={[styles.td, { width: "25%" }]}>{op.machine}</Text>
-                <Text style={[styles.td, { width: "14%", color: "#475569" }]}>{op.operator}</Text>
-                <Text style={[styles.tdBold, { width: "8%", textAlign: "right" }]}>{op.duration}h</Text>
-                <View style={{ width: "13%", paddingHorizontal: 4 }}>
-                  <View
-                    style={{
-                      borderBottomWidth: 0.6,
-                      borderBottomColor: "#94a3b8",
-                      borderStyle: "dashed",
-                      height: 8,
-                    }}
-                  />
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Shift Handover Notes inside route panel */}
-          {shiftNotes.length > 0 && (
-            <View style={{ marginTop: 4 }}>
-              <Text style={styles.reqLabel}>{L.shiftNotesTitle}:</Text>
-              <View style={styles.notesGrid}>
-                {shiftNotes.slice(0, 2).map((n) => (
-                  <View key={n.id} style={styles.noteBox}>
-                    <Text style={styles.noteHeader}>
-                      [{n.shift}] {n.author} ({n.time})
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {(itemsWithArtwork.length > 0 ? itemsWithArtwork : normalizedSkuCards).map((card, idx) => {
+              const cardWidth =
+                (itemsWithArtwork.length > 0 ? itemsWithArtwork.length : normalizedSkuCards.length) <= 4
+                  ? `${Math.floor((100 - ((itemsWithArtwork.length || 1) - 1) * 2) / (itemsWithArtwork.length || 1))}%`
+                  : "31%";
+              return (
+                <View key={card.id || idx} style={{ width: cardWidth, borderWidth: 0.5, borderColor: "#cbd5e1", borderRadius: 2, overflow: "hidden", backgroundColor: "#ffffff" }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#0f172a", paddingHorizontal: 4, paddingVertical: 2 }}>
+                    <Text style={{ color: "#ffffff", fontSize: 5.8, fontWeight: "bold" }}>{`${card.model} • ${card.sizeCode}`.toUpperCase()}</Text>
+                    <Text style={{ color: "#93c5fd", fontSize: 5.2, fontWeight: "bold" }}>
+                      {card.quantity > 0 ? `${card.quantity.toLocaleString()} pcs` : "NAMUNA"}
                     </Text>
-                    <Text style={styles.noteText}>{n.text}</Text>
                   </View>
-                ))}
-              </View>
-            </View>
-          )}
+                  <View style={{ height: 60, alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", padding: 3 }}>
+                    {card.frontSrc ? (
+                      <Image src={card.frontSrc} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                    ) : (
+                      <Text style={{ fontSize: 6, color: "#94a3b8" }}>1:1 PROOF</Text>
+                    )}
+                  </View>
+                  <View style={{ backgroundColor: "#f8fafc", borderTopWidth: 0.4, borderTopColor: "#e2e8f0", paddingVertical: 2, alignItems: "center" }}>
+                    <Text style={{ color: "#047857", fontSize: 5.0, fontWeight: "bold" }}>1:1 PREPRESS OK</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
         </View>
 
-        {/* 7. SKU ARTWORKS (ON PAGE 1 - REPLACES SIGNATURES ROW) */}
-        {itemsWithArtwork.length > 0 && (
-          <View style={{ marginTop: 4, borderWidth: 0.6, borderColor: "#cbd5e1", borderRadius: 2, backgroundColor: "#ffffff", overflow: "hidden" }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#0f172a", paddingHorizontal: 6, paddingVertical: 2.5 }}>
-              <Text style={{ color: "#ffffff", fontSize: 6.5, fontWeight: "bold" }}>SKU ARTWORK PASPORTI (1:1 PREPRESS PROOFLAR)</Text>
-              <Text style={{ color: "#93c5fd", fontSize: 6, fontWeight: "bold" }}>{itemsWithArtwork.length} SKU</Text>
-            </View>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, padding: 4, backgroundColor: "#ffffff" }}>
-              {itemsWithArtwork.map((card, idx) => {
-                const cardWidth =
-                  itemsWithArtwork.length <= 4
-                    ? `${Math.floor((100 - (itemsWithArtwork.length - 1) * 2) / itemsWithArtwork.length)}%`
-                    : "31%";
-                return (
-                  <View
-                    key={card.id || idx}
-                    style={{
-                      width: cardWidth,
-                      borderWidth: 0.5,
-                      borderColor: "#cbd5e1",
-                      borderRadius: 2,
-                      overflow: "hidden",
-                      backgroundColor: "#ffffff",
-                    }}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        backgroundColor: "#0f172a",
-                        paddingHorizontal: 4,
-                        paddingVertical: 2,
-                      }}
-                    >
-                      <Text style={{ color: "#ffffff", fontSize: 6, fontWeight: "bold" }}>
-                        {`${card.model} • ${card.sizeCode}`.toUpperCase()}
-                      </Text>
-                      <Text style={{ color: "#93c5fd", fontSize: 5.5, fontWeight: "bold" }}>
-                        {card.quantity > 0 ? `${card.quantity.toLocaleString()} pcs` : "NAMUNA"}
-                      </Text>
-                    </View>
-                    <View style={{ height: 60, alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", padding: 2 }}>
-                      {card.frontSrc ? (
-                        <Image src={card.frontSrc} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
-                      ) : (
-                        <Text style={{ fontSize: 6, color: "#94a3b8" }}>1:1 PROOF</Text>
-                      )}
-                    </View>
-                    <View style={{ backgroundColor: "#f8fafc", borderTopWidth: 0.4, borderTopColor: "#e2e8f0", paddingVertical: 1.5, alignItems: "center" }}>
-                      <Text style={{ color: "#047857", fontSize: 4.8, fontWeight: "bold" }}>1:1 PREPRESS OK</Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        )}
-
-        {/* 8. FOOTER */}
+        {/* 11. PAGE 2 FOOTER */}
         <View style={styles.footer} fixed>
-          <Text style={styles.footerText}>
-            {L.footerSystem} • DOC: {docNo}
-          </Text>
-          <Text
-            style={styles.footerText}
-            render={({ pageNumber, totalPages }) =>
-              `${L.printDate}: ${new Date().toISOString().slice(0, 10)} • Page ${pageNumber} / ${totalPages}`
-            }
-          />
+          <Text style={styles.footerText}>{L.footerSystem} • DOC: {docNo} • ISHLAB CHIQARISH MARSHRUTI</Text>
+          <Text style={styles.footerText} render={({ pageNumber, totalPages }) => `${L.printDate}: ${new Date().toISOString().slice(0, 10)} • Sahifa ${pageNumber} / ${totalPages}`} />
         </View>
       </Page>
     </Document>

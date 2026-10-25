@@ -2205,6 +2205,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     customShape={formData.customShape}
                     customSvgPath={formData.customSvgPath}
                     cornerType={formData.cornerType}
+                    holeSize={formData.holeSize}
+                    holePosition={formData.holePosition}
+                    holeOffset={formData.holeOffset}
                     artworkFront={formData.artworkFront}
                     artworkBack={formData.artworkBack}
                     skuArtworks={skuArtworks}

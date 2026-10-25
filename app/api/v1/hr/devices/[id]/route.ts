@@ -14,6 +14,7 @@ export async function PATCH(
     const body = await request.json();
 
     const updateData: any = { updatedAt: new Date() };
+    if (body.branchId !== undefined) updateData.branchId = body.branchId || null;
     if (body.name !== undefined) updateData.name = body.name.trim();
     if (body.deviceCode !== undefined) updateData.deviceCode = body.deviceCode.trim();
     if (body.model !== undefined) updateData.model = body.model.trim();
@@ -26,6 +27,7 @@ export async function PATCH(
     if (body.direction !== undefined) updateData.direction = body.direction;
     if (body.location !== undefined) updateData.location = body.location;
     if (body.isEnabled !== undefined) updateData.isEnabled = Boolean(body.isEnabled);
+    if (body.metadata !== undefined) updateData.metadata = body.metadata;
 
     const [updated] = await db
       .update(biometricDevices)

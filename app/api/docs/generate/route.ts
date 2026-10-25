@@ -8,6 +8,7 @@ const ENDPOINT_MAP: Record<string, string> = {
   "job-ticket-pdf": "/generate/pdf/job-ticket",
   "pallet-passport-pdf": "/generate/pdf/pallet-passport",
   "box-labels-pdf": "/generate/pdf/box-labels",
+  "imposition-pdf": "/generate/pdf/imposition",
   xlsx: "/generate/xlsx",
   docx: "/generate/docx",
 };

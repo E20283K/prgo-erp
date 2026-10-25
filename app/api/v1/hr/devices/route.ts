@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const {
+      branchId,
       name,
       deviceCode,
       model = "Hikvision MinMoe",
@@ -35,34 +36,58 @@ export async function POST(request: NextRequest) {
       password,
       direction = "in",
       location = "Asosiy kirish",
+      metadata = {},
     } = body;
 
-    if (!name || !ipAddress || !password) {
+    const connectionMode = metadata.connectionMode || (Number(port) === 7660 ? "isup" : "isapi");
+    const finalIp = (ipAddress && ipAddress.trim()) || (connectionMode === "isup" ? "ISUP-CLOUD" : "");
+    const finalPassword = password || metadata.isupKey || "none";
+
+    if (!name?.trim()) {
       return NextResponse.json(
-        { success: false, error: "Nomi, IP manzili va paroli majburiy" },
+        { success: false, error: "Qurilma nomi majburiy" },
+        { status: 400 }
+      );
+    }
+
+    if (connectionMode === "isapi" && (!finalIp || !password)) {
+      return NextResponse.json(
+        { success: false, error: "Lokal rejimda IP manzil va parol kiritilishi shart" },
         { status: 400 }
       );
     }
 
     const code =
       deviceCode?.trim() ||
-      `DEV-${Date.now().toString().slice(-4)}`;
+      (connectionMode === "isup" && metadata.isupDeviceId
+        ? metadata.isupDeviceId
+        : `DEV-${Date.now().toString().slice(-4)}`);
 
     const [inserted] = await db
       .insert(biometricDevices)
       .values({
         companyId,
+        branchId: branchId || null,
         name: name.trim(),
         deviceCode: code,
         model,
-        ipAddress: ipAddress.trim(),
-        port: Number(port) || 80,
+        ipAddress: finalIp,
+        port: Number(port) || (connectionMode === "isup" ? 7660 : 80),
         username: username.trim(),
-        password: password.trim(),
+        password: finalPassword.trim(),
         direction,
-        location: location.trim(),
+        location: location?.trim() || "Asosiy kirish",
         isEnabled: true,
         status: "unknown",
+        metadata: {
+          connectionMode,
+          isupDeviceId: metadata.isupDeviceId || code,
+          isupKey: metadata.isupKey || "",
+          protocol: metadata.protocol || "http",
+          syncScope: metadata.syncScope || "branch",
+          enrolledUsersCount: 0,
+          ...metadata,
+        },
       })
       .returning();
 

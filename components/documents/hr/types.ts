@@ -245,8 +245,21 @@ export interface EmployeeHistoryItem {
   changedAt: string;
 }
 
+export interface BiometricDeviceMetadata {
+  connectionMode?: "isup" | "isapi";
+  isupDeviceId?: string;
+  isupKey?: string;
+  protocol?: "http" | "https";
+  syncScope?: "branch" | "all";
+  enrolledUsersCount?: number;
+  enrolledFacesCount?: number;
+  [key: string]: unknown;
+}
+
 export interface BiometricDeviceRecord {
   id: string;
+  branchId?: string | null;
+  branchName?: string;
   name: string;
   deviceCode: string;
   model: string;
@@ -259,6 +272,6 @@ export interface BiometricDeviceRecord {
   isEnabled: boolean;
   lastSeenAt?: string | null;
   status: "online" | "offline" | "error" | "unknown";
-  metadata?: Record<string, unknown>;
+  metadata?: BiometricDeviceMetadata;
   createdAt?: string;
 }

@@ -41,7 +41,8 @@ import {
   computeTotalCtpPlatesForConfig,
   compareImpositionPlans,
 } from "./engine";
-import { exportSvg, exportPdf } from "./export";
+import { exportSvg, exportPdf, exportProductionImpositionPdf } from "./export";
+import { extractPdfPagesToImages } from "../../utils/artworkExtractor";
 import {
   calculatePrintPlanning,
   PrintMethod,
@@ -84,6 +85,13 @@ export function useLayoutCalc({
   defaultProdW,
   defaultProdH,
   defaultBleed,
+  shapeType,
+  customShape,
+  customSvgPath,
+  cornerType,
+  holeSize,
+  holePosition,
+  holeOffset,
   frontColors = { c: true, m: true, y: true, k: true },
   backColors = { c: false, m: false, y: false, k: false },
   spotColors = [],
@@ -626,13 +634,88 @@ export function useLayoutCalc({
     hasMultipleModels,
   ]);
 
-  // Lookup map for per-SKU artwork
-  const skuArtworkMap = useMemo(() => {
-    const map = new Map<string, { front?: string; back?: string }>();
+  // In-memory cache for on-the-fly extracted PDF thumbnails (when viewing PDF artwork in browser SVG preview)
+  const [pdfThumbnails, setPdfThumbnails] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const urlsToExtract: string[] = [];
+    const checkUrl = (url?: string, thumb?: string) => {
+      if (url && !thumb && url.toLowerCase().endsWith(".pdf") && !pdfThumbnails[url]) {
+        urlsToExtract.push(url);
+      }
+    };
+
+    checkUrl(artworkFront);
+    checkUrl(artworkBack);
     skuArtworks.forEach((art) => {
+      checkUrl(art.frontArtworkUrl, art.frontArtworkThumb);
+      checkUrl(art.backArtworkUrl, art.backArtworkThumb);
+    });
+
+    if (urlsToExtract.length === 0) return;
+
+    let cancelled = false;
+    urlsToExtract.forEach(async (url) => {
+      try {
+        const res = await extractPdfPagesToImages(url, { scale: 1.5, maxPages: 1, autoTrim: false });
+        if (!cancelled && res.front) {
+          setPdfThumbnails((prev) => ({ ...prev, [url]: res.front }));
+        }
+      } catch (err) {
+        console.warn(`[useLayoutCalc] Failed to extract thumbnail for ${url}:`, err);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [artworkFront, artworkBack, skuArtworks, pdfThumbnails]);
+
+  // Shared Artwork Fallbacks (e.g. single back artwork shared across multiple SKUs)
+  const sharedBackArt = useMemo(() => {
+    const found = skuArtworks.find((s) => s.backArtworkThumb || s.backArtworkUrl);
+    if (found) {
+      if (found.backArtworkThumb) return found.backArtworkThumb;
+      if (found.backArtworkUrl) return pdfThumbnails[found.backArtworkUrl] || found.backArtworkUrl;
+    }
+    return artworkBack ? (pdfThumbnails[artworkBack] || artworkBack) : undefined;
+  }, [skuArtworks, artworkBack, pdfThumbnails]);
+
+  const sharedFrontArt = useMemo(() => {
+    const found = skuArtworks.find((s) => s.frontArtworkThumb || s.frontArtworkUrl);
+    if (found) {
+      if (found.frontArtworkThumb) return found.frontArtworkThumb;
+      if (found.frontArtworkUrl) return pdfThumbnails[found.frontArtworkUrl] || found.frontArtworkUrl;
+    }
+    return artworkFront ? (pdfThumbnails[artworkFront] || artworkFront) : undefined;
+  }, [skuArtworks, artworkFront, pdfThumbnails]);
+
+  const sharedRawBackArt = useMemo(() => {
+    const found = skuArtworks.find((s) => s.backArtworkUrl || s.backArtworkThumb);
+    return (found ? found.backArtworkUrl || found.backArtworkThumb : undefined) || artworkBack;
+  }, [skuArtworks, artworkBack]);
+
+  const sharedRawFrontArt = useMemo(() => {
+    const found = skuArtworks.find((s) => s.frontArtworkUrl || s.frontArtworkThumb);
+    return (found ? found.frontArtworkUrl || found.frontArtworkThumb : undefined) || artworkFront;
+  }, [skuArtworks, artworkFront]);
+
+  // Lookup map for per-SKU artwork with raster thumbnail resolution for SVG preview + raw vector URL for PDF generator
+  const skuArtworkMap = useMemo(() => {
+    const map = new Map<string, { front?: string; back?: string; rawFront?: string; rawBack?: string }>();
+    skuArtworks.forEach((art) => {
+      const frontSrc =
+        art.frontArtworkThumb ||
+        (art.frontArtworkUrl ? pdfThumbnails[art.frontArtworkUrl] || art.frontArtworkUrl : undefined);
+      const backSrc =
+        art.backArtworkThumb ||
+        (art.backArtworkUrl ? pdfThumbnails[art.backArtworkUrl] || art.backArtworkUrl : undefined);
+
       const entry = {
-        front: art.frontArtworkThumb || art.frontArtworkUrl,
-        back: art.backArtworkThumb || art.backArtworkUrl,
+        front: frontSrc,
+        back: backSrc,
+        rawFront: art.frontArtworkUrl || art.frontArtworkThumb,
+        rawBack: art.backArtworkUrl || art.backArtworkThumb,
       };
       if (art.skuId) map.set(art.skuId, entry);
       if (art.sizeCode) {
@@ -644,7 +727,7 @@ export function useLayoutCalc({
       }
     });
     return map;
-  }, [skuArtworks]);
+  }, [skuArtworks, pdfThumbnails]);
 
   // Plate Actions
   const handleAddPlate = () => {
@@ -817,9 +900,9 @@ export function useLayoutCalc({
     );
   };
 
-  // Grid cells for SVG preview: Column-First contiguous blocks + per-SKU artwork + Work-and-Turn / Kashirovka split
-  const gridCells = useMemo<GridCell[]>(() => {
-    if (!activePlate || layout.cols === 0 || layout.rows === 0) return [];
+  // Grid cells builder for any plate: Column-First contiguous blocks + per-SKU artwork + raw vector URLs
+  const buildCellsForPlate = (targetPlate?: typeof activePlate): GridCell[] => {
+    if (!targetPlate || layout.cols === 0 || layout.rows === 0) return [];
 
     const getCellColor = (assignment: { model?: string }, index: number) => {
       if (hasMultipleModels && assignment.model) {
@@ -840,15 +923,29 @@ export function useLayoutCalc({
         skuEntry = skuArtworkMap.get(sizeCode.toUpperCase()) || skuArtworkMap.get(sizeCode.toLowerCase());
       }
       if (side === "front") {
-        return skuEntry?.front || artworkFront;
+        return skuEntry?.front || sharedFrontArt;
       }
-      return skuEntry?.back || artworkBack || skuEntry?.front || artworkFront;
+      return skuEntry?.back || sharedBackArt || undefined;
+    };
+
+    const getSkuRawArt = (sizeId: string, side: "front" | "back", sizeCode?: string, model?: string) => {
+      let skuEntry = skuArtworkMap.get(sizeId);
+      if (!skuEntry && model && sizeCode) {
+        skuEntry = skuArtworkMap.get(`${model.toUpperCase()}___${sizeCode.toUpperCase()}`);
+      }
+      if (!skuEntry && sizeCode) {
+        skuEntry = skuArtworkMap.get(sizeCode.toUpperCase()) || skuArtworkMap.get(sizeCode.toLowerCase());
+      }
+      if (side === "front") {
+        return skuEntry?.rawFront || sharedRawFrontArt;
+      }
+      return skuEntry?.rawBack || sharedRawBackArt || undefined;
     };
 
     // 1. Split-Half Kashirovka OR Work-and-Turn: Left Half = FRONT, Right Half = BACK (Mirrored horizontally)
     if (isSplitSheetLayout && layout.cols >= 2) {
       const halfPool: GridCell[] = [];
-      activePlate.assignments.forEach((assignment, index) => {
+      targetPlate.assignments.forEach((assignment, index) => {
         for (let i = 0; i < assignment.slots; i++) {
           halfPool.push({
             label: assignment.sizeCode || assignment.sizeLabel,
@@ -864,7 +961,6 @@ export function useLayoutCalc({
         halfPool.push({ label: "Bo'sh", color: "#f4f4f5", sizeId: "empty" });
       }
 
-      // Arrange halfPool in column-first order across the left half (rows x halfCols)
       const leftHalfGrid: GridCell[] = new Array(layout.rows * halfCols);
       let poolIdx = 0;
       for (let c = 0; c < halfCols; c++) {
@@ -882,6 +978,7 @@ export function useLayoutCalc({
               ...base,
               sideBadge: "FRONT",
               artworkUrl: base.sizeId !== "empty" ? getSkuArt(base.sizeId, "front", base.sizeCode, base.model) : undefined,
+              rawArtworkUrl: base.sizeId !== "empty" ? getSkuRawArt(base.sizeId, "front", base.sizeCode, base.model) : undefined,
             });
           } else if (c >= layout.cols - halfCols) {
             const mirrorCol = layout.cols - 1 - c;
@@ -890,9 +987,9 @@ export function useLayoutCalc({
               ...base,
               sideBadge: "BACK",
               artworkUrl: base.sizeId !== "empty" ? getSkuArt(base.sizeId, "back", base.sizeCode, base.model) : undefined,
+              rawArtworkUrl: base.sizeId !== "empty" ? getSkuRawArt(base.sizeId, "back", base.sizeCode, base.model) : undefined,
             });
           } else {
-            // Odd center column when cols is odd
             fullGrid.push({ label: "Zaxira", color: "#f4f4f5", sizeId: "empty" });
           }
         }
@@ -902,7 +999,7 @@ export function useLayoutCalc({
 
     // 2. Build Column-First (vertical lane) pool for full sheet
     const linearPool: GridCell[] = [];
-    activePlate.assignments.forEach((assignment, index) => {
+    targetPlate.assignments.forEach((assignment, index) => {
       const isSharedFrontView =
         activeSide === "front" &&
         ctpSideRelation === "shared_front_variable_back" &&
@@ -918,6 +1015,7 @@ export function useLayoutCalc({
           slotsCount: assignment.slots,
           sideBadge: activeSide === "front" ? "FRONT" : "BACK",
           artworkUrl: getSkuArt(assignment.sizeId, activeSide, assignment.sizeCode, assignment.model),
+          rawArtworkUrl: getSkuRawArt(assignment.sizeId, activeSide, assignment.sizeCode, assignment.model),
         });
       }
     });
@@ -926,7 +1024,6 @@ export function useLayoutCalc({
       linearPool.push({ label: "Bo'sh", color: "#f4f4f5", sizeId: "empty" });
     }
 
-    // Fill column by column (vertical strips for straight guillotine cutting)
     const colOrderedGrid: GridCell[] = new Array(layout.pieces);
     let pIdx = 0;
     for (let c = 0; c < layout.cols; c++) {
@@ -935,7 +1032,6 @@ export function useLayoutCalc({
       }
     }
 
-    // Mirror horizontally when viewing BACK side in sheetwise printing
     if (activeSide === "back" && layout.cols >= 2 && layout.rows >= 1) {
       const mirroredBackGrid: GridCell[] = [];
       for (let r = 0; r < layout.rows; r++) {
@@ -949,6 +1045,10 @@ export function useLayoutCalc({
     }
 
     return colOrderedGrid;
+  };
+
+  const gridCells = useMemo<GridCell[]>(() => {
+    return buildCellsForPlate(activePlate);
   }, [
     activePlate,
     activeSide,
@@ -964,6 +1064,10 @@ export function useLayoutCalc({
     effectivePieces,
     artworkFront,
     artworkBack,
+    sharedFrontArt,
+    sharedBackArt,
+    sharedRawFrontArt,
+    sharedRawBackArt,
     skuArtworkMap,
   ]);
 
@@ -1253,30 +1357,37 @@ export function useLayoutCalc({
       ? "KASHIROVKA KESISH O'QI"
       : undefined;
 
-    exportPdf(
+    void exportProductionImpositionPdf({
+      docNo,
+      orderName,
+      pressMachine,
+      paperStock: selectedPaperName || paperStock || "300 g/m²",
       sheetW,
       sheetH,
-      docNo,
+      prodW,
+      prodH,
+      bleed,
+      gap,
+      gripper,
+      activeGripperEdge: prepressMargins.activeGripperEdge,
+      prepressMargins,
+      layout,
+      outerTrimMarks,
       plateCalculations,
       activePlateIndex,
-      {
-        orderName,
-        sheetW,
-        sheetH,
-        gripper,
-        activeGripperEdge: prepressMargins.activeGripperEdge,
-        prepressMargins,
-        layout,
-        bleed,
-        gap,
-        outerTrimMarks,
-        gridCells,
-        splitCutAxisX,
-        splitAxisLabel: splitLabel,
-        activeSideLabel: activeSide === "back" ? "ORQA" : "OLDI",
-      },
-      exportAll
-    );
+      activeSideLabel: activeSide === "back" ? "ORQA" : "OLDI",
+      splitCutAxisX,
+      splitAxisLabel: splitLabel,
+      shapeType,
+      customShape,
+      customSvgPath,
+      cornerType,
+      holeSize,
+      holePosition,
+      holeOffset,
+      buildCellsForPlate,
+      exportAll,
+    });
   };
 
   return {
@@ -1441,6 +1552,8 @@ export function useLayoutCalc({
 
     // Canvas ref & exports
     svgRef,
+    effectiveArtworkFront: sharedFrontArt,
+    effectiveArtworkBack: sharedBackArt,
     handleExportSVG,
     handleExportPDF,
   };

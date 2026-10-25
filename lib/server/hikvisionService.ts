@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { db } from "@/db";
-import { biometricDevices, employees } from "@/db/schema";
+import { biometricDevices, employees, branches } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import type { BiometricDeviceRecord } from "@/components/documents/hr/types";
 import { getCompanyIdByCode } from "./crmService";
@@ -38,6 +38,15 @@ function getDigestHeader(
     response = crypto.createHash("md5").update(`${ha1}:${nonce}:${ha2}`).digest("hex");
     return `Digest username="${username}", realm="${realm}", nonce="${nonce}", uri="${uri}", response="${response}"`;
   }
+}
+
+// ISUP Gateway config
+const ISUP_GATEWAY_URL = process.env.ISUP_GATEWAY_URL || "http://localhost:7662";
+const GATEWAY_SECRET = process.env.GATEWAY_SECRET || "printgoo_isup_secret_2026";
+
+export function isIsupDevice(device: { port?: number; metadata?: any }): boolean {
+  const meta = device.metadata || {};
+  return meta.connectionMode === "isup" || device.port === 7660;
 }
 
 // Low-level ISAPI request sender with Digest Auth support
@@ -118,27 +127,106 @@ export async function getBiometricDevicesList(
 ): Promise<BiometricDeviceRecord[]> {
   const companyId = await getCompanyIdByCode(companyCode);
 
-  const list = await db.query.biometricDevices.findMany({
-    where: eq(biometricDevices.companyId, companyId),
-    orderBy: [desc(biometricDevices.createdAt)],
+  const [deviceRows, branchRows] = await Promise.all([
+    db.query.biometricDevices.findMany({
+      where: eq(biometricDevices.companyId, companyId),
+      orderBy: [desc(biometricDevices.createdAt)],
+    }),
+    db.query.branches.findMany({
+      where: eq(branches.companyId, companyId),
+    }),
+  ]);
+
+  const branchMap = new Map<string, string>();
+  branchRows.forEach((b) => branchMap.set(b.id, b.name));
+
+  return deviceRows.map((d) => {
+    const meta = (d.metadata as any) || {};
+    return {
+      id: d.id,
+      branchId: d.branchId || null,
+      branchName: d.branchId ? branchMap.get(d.branchId) || "Noma'lum filial" : "Barcha filiallar",
+      name: d.name,
+      deviceCode: d.deviceCode,
+      model: d.model,
+      ipAddress: d.ipAddress,
+      port: d.port,
+      username: d.username,
+      direction: d.direction as "in" | "out" | "both",
+      location: d.location || "Asosiy kirish",
+      isEnabled: d.isEnabled,
+      lastSeenAt: d.lastSeenAt ? d.lastSeenAt.toISOString() : null,
+      status: (d.status as any) || "unknown",
+      metadata: {
+        connectionMode: meta.connectionMode || (d.port === 7660 ? "isup" : "isapi"),
+        isupDeviceId: meta.isupDeviceId || d.deviceCode,
+        isupKey: meta.isupKey || "",
+        protocol: meta.protocol || "http",
+        syncScope: meta.syncScope || "branch",
+        enrolledUsersCount: meta.enrolledUsersCount || 0,
+        enrolledFacesCount: meta.enrolledFacesCount || 0,
+        ...meta,
+      },
+      createdAt: d.createdAt.toISOString(),
+    };
+  });
+}
+
+/**
+ * Turniket relayini ochish (Eshikni masofadan 3 soniyaga ochish)
+ */
+export async function triggerRemoteDoorOpen(
+  deviceId: string
+): Promise<{ success: boolean; message: string }> {
+  const device = await db.query.biometricDevices.findFirst({
+    where: eq(biometricDevices.id, deviceId),
   });
 
-  return list.map((d) => ({
-    id: d.id,
-    name: d.name,
-    deviceCode: d.deviceCode,
-    model: d.model,
-    ipAddress: d.ipAddress,
-    port: d.port,
-    username: d.username,
-    direction: d.direction as "in" | "out" | "both",
-    location: d.location || "Asosiy kirish",
-    isEnabled: d.isEnabled,
-    lastSeenAt: d.lastSeenAt ? d.lastSeenAt.toISOString() : null,
-    status: (d.status as any) || "unknown",
-    metadata: d.metadata as any,
-    createdAt: d.createdAt.toISOString(),
-  }));
+  if (!device) {
+    return { success: false, message: "Qurilma topilmadi" };
+  }
+
+  // Agar ISUP 5.0 bo'lsa, Go Gateway orqali ochiladi
+  if (isIsupDevice(device)) {
+    const meta = (device.metadata as any) || {};
+    const isupDeviceId = meta.isupDeviceId || device.deviceCode || device.name;
+    try {
+      const res = await fetch(`${ISUP_GATEWAY_URL}/devices/${isupDeviceId}/open-door`, {
+        method: "POST",
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        return { success: true, message: "Turniket ochildi (ISUP 5.0 kanali orqali)" };
+      }
+      return { success: false, message: data.message || `ISUP Gateway xatolik qaytardi (HTTP ${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: `ISUP Gateway bilan aloqa yo'q (${ISUP_GATEWAY_URL}): ${err.message}` };
+    }
+  }
+
+  // Lokal ISAPI orqali ochish
+  try {
+    const payload = JSON.stringify({
+      RemoteControlDoor: {
+        cmd: "open",
+      },
+    });
+
+    const res = await sendHikvisionRequest(
+      device,
+      "PUT",
+      "/ISAPI/AccessControl/RemoteControl/door/1",
+      payload
+    );
+
+    if (res.status >= 200 && res.status < 300) {
+      return { success: true, message: "Turniket ochildi (Relay faollashtirildi)" };
+    }
+    return { success: false, message: `Qurilma xatolik qaytardi (HTTP ${res.status})` };
+  } catch (err: any) {
+    return { success: false, message: err.message || "Turniketga buyruq uzatib bo'lmadi" };
+  }
 }
 
 export async function testDeviceConnection(
@@ -152,6 +240,57 @@ export async function testDeviceConnection(
     return { success: false, message: "Qurilma topilmadi" };
   }
 
+  // Agar ISUP 5.0 qurilmasi bo'lsa, Go Gateway dagi faol sessiyasini tekshiramiz
+  if (isIsupDevice(device)) {
+    const meta = (device.metadata as any) || {};
+    const isupDeviceId = meta.isupDeviceId || device.deviceCode || device.name;
+    try {
+      const res = await fetch(`${ISUP_GATEWAY_URL}/devices/${isupDeviceId}`, {
+        method: "GET",
+        signal: AbortSignal.timeout(4000),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.status === "online") {
+        await db
+          .update(biometricDevices)
+          .set({
+            status: "online",
+            lastSeenAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(biometricDevices.id, device.id));
+
+        return {
+          success: true,
+          message: "ISUP 5.0 orqali aloqa faol (Online)",
+          deviceInfo: data,
+        };
+      } else {
+        await db
+          .update(biometricDevices)
+          .set({ status: "offline", updatedAt: new Date() })
+          .where(eq(biometricDevices.id, device.id));
+
+        return {
+          success: false,
+          message: data.message || "Qurilma ISUP 5.0 Gatewayga ulanmagan (Oflayn)",
+        };
+      }
+    } catch (err: any) {
+      await db
+        .update(biometricDevices)
+        .set({ status: "offline", updatedAt: new Date() })
+        .where(eq(biometricDevices.id, device.id));
+
+      return {
+        success: false,
+        message: `ISUP Gateway xizmati (port 7662) ishlamayapti: ${err.message}`,
+      };
+    }
+  }
+
+  // Lokal ISAPI orqali tekshirish
   try {
     const res = await sendHikvisionRequest(device, "GET", "/ISAPI/System/deviceInfo");
     if (res.status >= 200 && res.status < 300) {
@@ -196,9 +335,40 @@ export async function testDeviceConnection(
  * Xodim ma'lumotlari va yuz suratini bitta Hikvision terminaliga yuklash
  */
 export async function syncEmployeeToDevice(
-  device: { id: string; ipAddress: string; port: number; username: string; password: string; name: string },
+  device: { id: string; ipAddress: string; port: number; username: string; password: string; name: string; deviceCode?: string; metadata?: any },
   emp: { id: string; badgeNumber: string; fullName: string; avatarUrl?: string | null }
 ): Promise<{ success: boolean; message: string }> {
+  // Agar ISUP 5.0 qurilmasi bo'lsa, Go Gateway ga yo'naltiriladi
+  if (isIsupDevice(device)) {
+    const meta = (device.metadata as any) || {};
+    const isupDeviceId = meta.isupDeviceId || device.deviceCode || device.name;
+    try {
+      const res = await fetch(`${ISUP_GATEWAY_URL}/devices/${isupDeviceId}/sync-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          badgeNumber: emp.badgeNumber,
+          fullName: emp.fullName,
+          avatarBase64: emp.avatarUrl || "",
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        return {
+          success: true,
+          message: data.message || `${emp.fullName} (${emp.badgeNumber}) ISUP 5.0 orqali ${device.name} ga yuklandi.`,
+        };
+      }
+      return {
+        success: false,
+        message: data.message || `ISUP Gateway yuklashda xatolik qaytardi (HTTP ${res.status})`,
+      };
+    } catch (err: any) {
+      return { success: false, message: `ISUP Gateway bilan aloqa yo'q (${ISUP_GATEWAY_URL}): ${err.message}` };
+    }
+  }
+
   try {
     // 1. UserInfo Record qo'shish/yangilash
     const userInfoPayload = JSON.stringify({
@@ -312,9 +482,34 @@ export async function syncEmployeeToAllActiveDevices(
  * Xodimni terminaldan o'chirish (Ishdan bo'shatilganda)
  */
 export async function removeEmployeeFromDevice(
-  device: { ipAddress: string; port: number; username: string; password: string; name: string },
+  device: { id?: string; ipAddress: string; port: number; username: string; password: string; name: string; deviceCode?: string; metadata?: any },
   badgeNumber: string
 ): Promise<{ success: boolean; message: string }> {
+  // Agar ISUP 5.0 qurilmasi bo'lsa
+  if (isIsupDevice(device)) {
+    const meta = (device.metadata as any) || {};
+    const isupDeviceId = meta.isupDeviceId || device.deviceCode || device.name;
+    try {
+      const res = await fetch(`${ISUP_GATEWAY_URL}/devices/${isupDeviceId}/user/${badgeNumber}`, {
+        method: "DELETE",
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        return {
+          success: true,
+          message: data.message || `${badgeNumber} raqamli xodim ruxsati ISUP orqali o'chirildi.`,
+        };
+      }
+      return {
+        success: false,
+        message: data.message || `ISUP Gateway o'chirishda xatolik qaytardi (HTTP ${res.status})`,
+      };
+    } catch (err: any) {
+      return { success: false, message: `ISUP Gateway bilan aloqa yo'q (${ISUP_GATEWAY_URL}): ${err.message}` };
+    }
+  }
+
   try {
     const deletePayload = JSON.stringify({
       UserInfoDetail: {
@@ -369,7 +564,7 @@ export async function removeEmployeeFromAllActiveDevices(
 }
 
 /**
- * Barcha faol xodimlarni tanlangan bitta terminalga ommaviy yuklash
+ * Xodimlarni tanlangan terminalga yuklash (Filial va umumiy xodimlar filtri bilan)
  */
 export async function syncAllEmployeesToDevice(
   deviceId: string,
@@ -385,14 +580,23 @@ export async function syncAllEmployeesToDevice(
     throw new Error("Qurilma topilmadi");
   }
 
-  const activeEmployees = await db.query.employees.findMany({
+  const meta = (device.metadata as any) || {};
+  const syncScope = meta.syncScope || "branch";
+
+  // Agar filial bo'yicha cheklangan bo'lsa, faqat shu filial yoki bosh ofis xodimlari
+  const allActive = await db.query.employees.findMany({
     where: and(eq(employees.companyId, companyId), eq(employees.status, "active")),
+  });
+
+  const targetEmployees = allActive.filter((emp) => {
+    if (syncScope === "all" || !device.branchId) return true;
+    return !emp.branchId || emp.branchId === device.branchId;
   });
 
   let totalSynced = 0;
   const errors: string[] = [];
 
-  for (const emp of activeEmployees) {
+  for (const emp of targetEmployees) {
     const res = await syncEmployeeToDevice(device, {
       id: emp.id,
       badgeNumber: emp.badgeNumber,
@@ -406,6 +610,19 @@ export async function syncAllEmployeesToDevice(
       errors.push(`${emp.fullName}: ${res.message}`);
     }
   }
+
+  // Update enrolled count in metadata
+  await db
+    .update(biometricDevices)
+    .set({
+      metadata: {
+        ...meta,
+        enrolledUsersCount: totalSynced,
+        lastSyncAt: new Date().toISOString(),
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(biometricDevices.id, device.id));
 
   return { success: errors.length === 0, totalSynced, errors };
 }

@@ -286,36 +286,24 @@ export function PackagingDialog({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[880px] max-h-[92vh] flex flex-col p-0 overflow-hidden text-xs">
         {/* Header */}
-        <DialogHeader className="px-4 py-3 border-b border-border bg-card shrink-0">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
+        <DialogHeader className="p-3 pr-12 border-b border-border bg-card shrink-0">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="flex items-center gap-2 min-w-0">
               <div className="size-7 rounded-md border border-border bg-muted flex items-center justify-center text-foreground shrink-0">
                 <Package className="size-4" />
               </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <DialogTitle className="text-sm font-semibold text-foreground">
-                    Qadoqlash va sifat qabuli
-                  </DialogTitle>
-                  <Badge variant="outline" className="font-mono text-[11px] shrink-0">
-                    {workOrderNo}
-                  </Badge>
-                  {hasValidSizeMatrix ? (
-                    <Badge variant="secondary" className="text-[10px] font-medium shrink-0">
-                      O&apos;lchamli tiraj
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
-                      Yagona tiraj
-                    </Badge>
-                  )}
-                </div>
-                <DialogDescription className="text-xs text-muted-foreground mt-0.5 truncate">
-                  Mijoz: <span className="font-medium text-foreground">{customer}</span>
-                  {product ? <> · Mahsulot: <span className="font-medium text-foreground">{product}</span></> : null}
-                  {" "}· Reja: <span className="font-mono font-medium text-foreground">{targetQuantity.toLocaleString()} {unit}</span>
-                </DialogDescription>
-              </div>
+              <DialogTitle className="text-sm font-semibold text-foreground">
+                Qadoqlash va sifat qabuli
+              </DialogTitle>
+              {hasValidSizeMatrix ? (
+                <Badge variant="secondary" className="text-[10px] font-medium shrink-0">
+                  O&apos;lchamli tiraj
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
+                  Yagona tiraj
+                </Badge>
+              )}
             </div>
 
             {boxes.length > 0 && (
@@ -323,12 +311,68 @@ export function PackagingDialog({
                 variant="outline"
                 size="sm"
                 onClick={handlePrintLabelsClick}
-                className="h-7.5 text-xs font-medium gap-1.5 shrink-0 cursor-pointer"
+                className="h-7 text-xs font-medium gap-1.5 shrink-0 cursor-pointer mr-1"
               >
                 <Printer className="size-3.5" />
                 <span>Yorliqlar</span>
               </Button>
             )}
+          </div>
+
+          <DialogDescription className="sr-only">
+            Buyurtma: {workOrderNo}, Mijoz: {customer}, Reja: {targetQuantity} {unit}
+          </DialogDescription>
+
+          {/* Mini Order Specs Table */}
+          <div className="rounded border border-border overflow-hidden bg-background">
+            <table className="w-full text-xs border-collapse">
+              <thead className="bg-muted/60 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold border-b border-border">
+                <tr>
+                  <th className="py-1 px-2.5 text-left border-r border-border font-medium w-32">Buyurtma</th>
+                  <th className="py-1 px-2.5 text-left border-r border-border font-medium">Mijoz</th>
+                  <th className="py-1 px-2.5 text-left border-r border-border font-medium">Mahsulot</th>
+                  <th className="py-1 px-2.5 text-right font-medium w-28">Reja miqdori</th>
+                  {hasValidSizeMatrix && (
+                    <th className="py-1 px-2.5 text-left border-l border-border font-medium">O&apos;lchamlar taqsimoti</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="text-[11px]">
+                <tr className="h-6.5">
+                  <td className="py-1 px-2.5 border-r border-border font-mono font-medium text-foreground whitespace-nowrap">
+                    {workOrderNo}
+                    {clientOrderNo && (
+                      <span className="text-muted-foreground text-[10px] ml-1">({clientOrderNo})</span>
+                    )}
+                  </td>
+                  <td className="py-1 px-2.5 border-r border-border font-medium text-foreground truncate max-w-[150px]" title={customer}>
+                    {customer || "—"}
+                  </td>
+                  <td className="py-1 px-2.5 border-r border-border text-muted-foreground truncate max-w-[240px]" title={product}>
+                    {product || "—"}
+                  </td>
+                  <td className="py-1 px-2.5 text-right font-mono font-bold text-foreground whitespace-nowrap">
+                    {targetQuantity.toLocaleString()}{" "}
+                    <span className="font-normal text-[10px] text-muted-foreground">{unit}</span>
+                  </td>
+                  {hasValidSizeMatrix && (
+                    <td className="py-1 px-2.5 border-l border-border">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {sizes.filter((s) => Number(s.quantity) > 0).map((s) => (
+                          <span
+                            key={s.id || s.size}
+                            className="inline-flex items-center gap-1 font-mono text-[10px] bg-muted px-1.5 py-0.2 rounded border border-border/70"
+                          >
+                            <span className="font-semibold text-foreground">{s.size}:</span>
+                            <span className="text-muted-foreground">{Number(s.quantity).toLocaleString()}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              </tbody>
+            </table>
           </div>
         </DialogHeader>
 
@@ -706,6 +750,17 @@ export function PackagingDialog({
             >
               Qoralama saqlash
             </Button>
+            {boxes.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePrintLabelsClick}
+                className="h-8 text-xs font-medium gap-1.5 cursor-pointer text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900"
+              >
+                <Printer className="size-3.5" />
+                <span>Chop etish</span>
+              </Button>
+            )}
             {boxes.length > 0 && (
               <Button
                 variant="ghost"

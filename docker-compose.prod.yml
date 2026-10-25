@@ -35,6 +35,7 @@ services:
       REDIS_URL: redis://redis:6379
       S3_INTERNAL_ENDPOINT: http://minio:9000
       DOC_SERVICE_URL: http://doc-service:8000
+      ISUP_GATEWAY_URL: http://isup-gateway:7662
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,6 +60,7 @@ services:
       REDIS_URL: redis://redis:6379
       S3_INTERNAL_ENDPOINT: http://minio:9000
       DOC_SERVICE_URL: http://doc-service:8000
+      ISUP_GATEWAY_URL: http://isup-gateway:7662
     depends_on:
       postgres:
         condition: service_healthy
@@ -155,6 +157,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  isup-gateway:
+    build:
+      context: ./services/isup-gateway
+    container_name: printgoo-isup-gateway
+    restart: unless-stopped
+    ports:
+      - "${ISUP_CMS_PORT:-7660}:7660"
+      - "${ISUP_ALARM_PORT:-7661}:7661"
+      - "127.0.0.1:${ISUP_HTTP_PORT:-7662}:7662"
+    environment:
+      - ISUP_CMS_PORT=7660
+      - ISUP_ALARM_PORT=7661
+      - HTTP_PORT=7662
+      - ERP_WEBHOOK_URL=http://app:3000/api/v1/hr/attendance/hikvision-event
+      - GATEWAY_SECRET=${GATEWAY_SECRET:-printgoo_isup_secret_2026}
+      - COMPANY_CODE=${COMPANY_CODE:-PRINTGOO}
+    depends_on:
+      - app
 
 volumes:
   caddy_data:

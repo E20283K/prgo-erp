@@ -72,6 +72,9 @@ export interface LayoutCalcTabProps {
   customShape?: ProductCustomShape;
   customSvgPath?: string;
   cornerType?: string;
+  holeSize?: number;
+  holePosition?: string;
+  holeOffset?: number;
   artworkFront?: string;
   artworkBack?: string;
   skuArtworks?: SkuArtwork[];
@@ -228,6 +231,7 @@ export interface GridCell {
   slotsCount?: number;
   sideBadge?: "FRONT" | "BACK";
   artworkUrl?: string;
+  rawArtworkUrl?: string;
 }
 
 export interface TrimMarkSegment {

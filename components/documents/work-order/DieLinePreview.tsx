@@ -30,6 +30,7 @@ import {
   ProductFoldType,
   ProductBoxType,
   ProductCustomShape,
+  SkuArtwork,
 } from "./types";
 import { parseSvgContour, offsetPolygon, polygonToPathD } from "./utils/svgContour";
 
@@ -55,6 +56,7 @@ interface DieLinePreviewProps {
   artworkBack?: string;
   artworkBleedIncluded?: boolean;
   artworkDielineOpacity?: number;
+  skuArtworks?: SkuArtwork[];
   onArtworkChange?: (
     front: string, 
     back?: string, 
@@ -90,6 +92,7 @@ export function DieLinePreview({
   artworkBack,
   artworkBleedIncluded = true,
   artworkDielineOpacity = 0.85,
+  skuArtworks,
   onArtworkChange,
   onFlipOrientation,
   onOpenLayoutTab,
@@ -97,8 +100,20 @@ export function DieLinePreview({
 }: DieLinePreviewProps) {
   const t = useTranslations("DieLine");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeSkuIdx, setActiveSkuIdx] = useState<number>(0);
+  const activeSku = skuArtworks && skuArtworks.length > 0 ? skuArtworks[activeSkuIdx] || skuArtworks[0] : null;
+
+  // Find shared back artwork if any exists across all SKUs
+  const sharedBackArt = useMemo(() => {
+    if (!skuArtworks || skuArtworks.length === 0) return null;
+    return skuArtworks.find((a) => a.backArtworkThumb || a.backArtworkUrl);
+  }, [skuArtworks]);
+
+  const effectiveFront = activeSku?.frontArtworkThumb || activeSku?.frontArtworkUrl || artworkFront || "";
+  const effectiveBack = activeSku?.backArtworkThumb || activeSku?.backArtworkUrl || artworkBack || sharedBackArt?.backArtworkThumb || sharedBackArt?.backArtworkUrl || "";
+
   const [viewMode, setViewMode] = useState<"proof" | "front" | "back" | "cad">(
-    artworkFront ? "proof" : "cad"
+    effectiveFront || artworkFront ? "proof" : "cad"
   );
   const [showDielineOverlay, setShowDielineOverlay] = useState<boolean>(true);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
@@ -289,8 +304,8 @@ export function DieLinePreview({
     const rightHoleCx = rightX + cardW * holeRelX;
     const rightHoleCy = startY + holeDistance;
 
-    const frontImg = artworkFront || "";
-    const backImg = artworkBack || artworkFront || "";
+    const frontImg = effectiveFront || artworkFront || "";
+    const backImg = effectiveBack || artworkBack || "";
 
     // Tag clip path D
     const getTagPathD = (x: number, y: number, w: number, h: number) => {
@@ -469,7 +484,7 @@ export function DieLinePreview({
 
   // ── SINGLE ARTWORK VIEW (Large Front or Back with full CAD measurements) ──
   const renderSingleArtworkSvg = (side: "front" | "back", cW: number, cH: number) => {
-    const imgUrl = side === "back" ? (artworkBack || "") : (artworkFront || "");
+    const imgUrl = side === "back" ? (effectiveBack || artworkBack || "") : (effectiveFront || artworkFront || "");
     const aspect = safeW / safeH;
     const maxW = cW - 70;
     const maxH = cH - 44;
@@ -1495,6 +1510,32 @@ export function DieLinePreview({
             CAD Chizma
           </button>
         </div>
+
+        {/* SKU Selector Switcher (when multiple SKUs exist) */}
+        {skuArtworks && skuArtworks.length > 1 && (
+          <div className="flex items-center gap-1 border border-border rounded px-1.5 py-0.5 bg-muted/40">
+            <span className="text-[10px] text-muted-foreground font-mono">Razmer:</span>
+            {skuArtworks.map((sku, sIdx) => {
+              const label = sku.sizeCode || sku.skuId || `S${sIdx + 1}`;
+              const isActive = sIdx === activeSkuIdx;
+              return (
+                <button
+                  key={sku.skuId || sIdx}
+                  type="button"
+                  onClick={() => setActiveSkuIdx(sIdx)}
+                  className={cn(
+                    "h-5 px-1.5 text-[10px] font-mono font-bold rounded cursor-pointer transition-colors",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Artwork Action Tools */}
         <div className="flex items-center gap-1">
