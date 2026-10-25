@@ -788,6 +788,12 @@ interface WorkspaceState {
   isProductionQueueLoading?: boolean;
   loadProductionQueue: (companyCode?: string) => Promise<void>;
   upsertWorkOrderAsync: (payload: any, companyCode?: string) => Promise<any>;
+  deleteWorkOrderAsync: (
+    docNoOrId: string,
+    mode?: "auto" | "cancel" | "hard_delete",
+    reason?: string,
+    companyCode?: string
+  ) => Promise<{ success: boolean; mode?: string; docNo?: string; error?: string; message?: string }>;
   upsertProductionQueueItem: (item: Partial<ProductionQueueItem> & { id: string }) => void;
 
   // ── Notifications ──────────────────────────────────────────────────────────
@@ -1441,6 +1447,122 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } catch (e) {
       console.error("Failed to persist work order to DB:", e);
       return false;
+    }
+  },
+
+  deleteWorkOrderAsync: async (
+    docNoOrId: string,
+    mode = "auto",
+    reason?: string,
+    companyCode = "PRINTGOO"
+  ) => {
+    try {
+      const cu = get().currentUser;
+      const params = new URLSearchParams({
+        company: companyCode,
+        mode,
+      });
+      if (reason) params.set("reason", reason);
+
+      const res = await fetch(
+        `/api/v1/production/work-orders/${encodeURIComponent(docNoOrId)}?${params.toString()}`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            author: cu ? { id: cu.id, name: cu.fullName || cu.username, role: cu.role } : undefined,
+          }),
+        }
+      );
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return {
+          success: false,
+          error: json.error || "Buyurtmani o'chirishda xatolik yuz berdi",
+        };
+      }
+
+      // Local state yangilash
+      const docNo = json.docNo || docNoOrId;
+      const returnMode = json.mode || mode;
+
+      set((state) => {
+        let updatedQueue = [...state.productionQueue];
+        if (returnMode === "deleted") {
+          updatedQueue = updatedQueue.filter(
+            (q) =>
+              q.id !== docNo &&
+              q.docNo !== docNo &&
+              q.id !== docNoOrId &&
+              q.docNo !== docNoOrId
+          );
+        } else if (returnMode === "cancelled") {
+          updatedQueue = updatedQueue.map((q) =>
+            q.id === docNo ||
+            q.docNo === docNo ||
+            q.id === docNoOrId ||
+            q.docNo === docNoOrId
+              ? { ...q, status: "Cancelled", stage: "Queue" as any }
+              : q
+          );
+        }
+
+        // Agar ochiq vkladka bo'lsa, uni yopish yoki yangilash
+        const targetTab = state.tabs.find(
+          (t) =>
+            t.id === docNo ||
+            t.id === docNoOrId ||
+            (t.documentData &&
+              (t.documentData.docNo === docNo || t.documentData.docNo === docNoOrId))
+        );
+        let updatedTabs = state.tabs;
+        let newActiveTabId = state.activeTabId;
+
+        if (targetTab) {
+          if (returnMode === "deleted") {
+            updatedTabs = state.tabs.filter((t) => t.id !== targetTab.id);
+            if (newActiveTabId === targetTab.id) {
+              const remaining = updatedTabs.filter((t) => t.type !== "registry");
+              newActiveTabId = remaining.length > 0 ? remaining[remaining.length - 1].id : "registry-work-orders";
+            }
+          } else {
+            updatedTabs = state.tabs.map((t) =>
+              t.id === targetTab.id
+                ? {
+                    ...t,
+                    title: `[Bekor qilindi] ${targetTab.title.replace(/^\[Bekor qilindi\]\s*/, "")}`,
+                    documentData: {
+                      ...(t.documentData || {}),
+                      status: "Cancelled",
+                    },
+                  }
+                : t
+            );
+          }
+        }
+
+        return {
+          productionQueue: updatedQueue,
+          tabs: updatedTabs,
+          activeTabId: newActiveTabId,
+        };
+      });
+
+      get().loadProductionQueue(companyCode);
+
+      return {
+        success: true,
+        mode: returnMode,
+        docNo,
+        message: json.message,
+      };
+    } catch (e) {
+      console.error("deleteWorkOrderAsync error:", e);
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : "Tarmoq xatoligi yuz berdi",
+      };
     }
   },
   machines: [],
@@ -3346,15 +3468,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   addNotification: (notif) => {
-    // 1. Toast vs. Bell Inbox filtrlash
-    const isToastOnly =
+    // 1. Toast ko'rsatish sharti:
+    // Xatolik va ogohlantirishlar (error/warning) doim ekranda toast bo'lib ko'rinsin.
+    // Shuningdek, channel "toast" yoki "both" bo'lganda, yoki oddiy info/success bildirishnomalarida.
+    const shouldShowToast =
       notif.channel === "toast" ||
-      (!notif.targetTab &&
-        !notif.entityCode &&
-        !notif.link &&
-        (notif.severity === "info" || notif.severity === "success"));
+      notif.channel === "both" ||
+      notif.severity === "error" ||
+      notif.severity === "warning" ||
+      (!notif.targetTab && !notif.entityCode && !notif.link);
 
-    if (isToastOnly || notif.channel === "both") {
+    if (shouldShowToast && notif.channel !== "inbox") {
       try {
         const hasAction = Boolean(notif.targetTab || notif.link);
         toast.add({

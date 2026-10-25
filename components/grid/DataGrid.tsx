@@ -19,6 +19,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 import {
   ContextMenu,
@@ -46,6 +54,8 @@ import {
   Image as ImageIcon,
   CalendarDays,
   Table as TableIcon,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -156,6 +166,11 @@ export function DataGrid() {
     isProductionQueueLoading,
     warehouseStock,
     loadWarehouseStock,
+    plants,
+    fetchPlants,
+    currentUser,
+    deleteWorkOrderAsync,
+    addNotification,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [columns, setColumns] = useState<GridColumn[]>(INITIAL_COLUMNS);
@@ -165,7 +180,10 @@ export function DataGrid() {
     if (!warehouseStock || warehouseStock.length === 0) {
       loadWarehouseStock();
     }
-  }, [loadProductionQueue, loadWarehouseStock, warehouseStock]);
+    if (!plants || plants.length === 0) {
+      fetchPlants();
+    }
+  }, [loadProductionQueue, loadWarehouseStock, warehouseStock, fetchPlants, plants]);
 
   const localizedColumns = React.useMemo(() => {
     const colMap: Record<string, string> = {
@@ -244,7 +262,7 @@ export function DataGrid() {
         sampleStage,
         sampleStatusLabel,
         department: (wo.department as any) || "Offset",
-        site: wo.site || "Building 1",
+        site: (plants && plants.find((p) => p.id === wo.site)?.name) || wo.site || "Bosh sex",
         customer: wo.customer,
         product: wo.product,
         machine: wo.pressMachine,
@@ -261,7 +279,7 @@ export function DataGrid() {
         rawOrder: wo,
       };
     });
-  }, [productionQueue]);
+  }, [productionQueue, plants]);
   const [viewMode, setViewMode] = useState<"grid" | "calendar">("grid");
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
@@ -325,6 +343,91 @@ export function DataGrid() {
       return { colId, asc: true };
     });
   }, [columns]);
+
+  // Delete / Cancellation State & Handlers
+  const [orderToDelete, setOrderToDelete] = useState<OrderRow | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteMode, setDeleteMode] = useState<"cancel" | "hard_delete">("cancel");
+  const [deleteReason, setDeleteReason] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const isAdmin =
+    currentUser?.role === "admin" ||
+    currentUser?.role === "System Administrator" ||
+    currentUser?.role === "Administrator" ||
+    currentUser?.role === "Admin";
+  const canDelete = isAdmin || currentUser?.permissions?.production?.delete === true;
+
+  const selectedRowIndex = selection.current?.cell
+    ? selection.current.cell[1]
+    : (selection.rows.toArray()[0] ?? -1);
+  const selectedOrder = selectedRowIndex >= 0 && selectedRowIndex < filteredRows.length
+    ? filteredRows[selectedRowIndex]
+    : null;
+
+  const handleRequestDelete = (order?: OrderRow | null) => {
+    const target = order || selectedOrder;
+    if (!target) {
+      addNotification({
+        title: "Tanlanmagan",
+        description: "O'chirish uchun avval jadvaldan buyurtmani tanlang.",
+        severity: "warning",
+      });
+      return;
+    }
+    if (!canDelete) {
+      addNotification({
+        title: "Huquq yetarli emas",
+        description: "Buyurtmani o'chirish yoki bekor qilish uchun huquqingiz yetarli emas (production.delete talab qilinadi).",
+        severity: "error",
+      });
+      return;
+    }
+
+    setOrderToDelete(target);
+    setDeleteReason("");
+    const isCleanDraft = target.status === "Draft" || target.status === "Active" && target.readyCount === 0;
+    setDeleteMode(isCleanDraft ? "hard_delete" : "cancel");
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!orderToDelete) return;
+    setIsDeleting(true);
+    try {
+      const res = await deleteWorkOrderAsync(orderToDelete.id, deleteMode, deleteReason);
+      if (res.success) {
+        addNotification({
+          title: res.mode === "deleted" ? "Buyurtma o'chirildi" : "Buyurtma bekor qilindi",
+          description: res.message || `${orderToDelete.id} muvaffaqiyatli ${res.mode === "deleted" ? "bazadan tozalab tashlandi" : "bekor qilindi"}.`,
+          severity: "success",
+        });
+        setIsDeleteModalOpen(false);
+        setOrderToDelete(null);
+      } else {
+        addNotification({
+          title: "Xatolik",
+          description: res.error || "Buyurtmani o'chirishda xatolik yuz berdi.",
+          severity: "error",
+        });
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Delete" && selectedOrder && !isDeleteModalOpen) {
+        const target = e.target as HTMLElement;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+        e.preventDefault();
+        handleRequestDelete(selectedOrder);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedOrder, isDeleteModalOpen, canDelete]);
 
   // Lightweight Hover & Dialog order overview state
   const mouseCoordsRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -926,9 +1029,15 @@ export function DataGrid() {
           <span>{tGrid("printRegistry")}</span>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem className="gap-2 text-red-600">
+        <ContextMenuItem
+          onClick={() => handleRequestDelete(selectedOrder)}
+          className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+        >
           <Trash2 className="w-3.5 h-3.5" />
           <span>{tGrid("contextDelete")}</span>
+          {!canDelete && (
+            <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ruxsatsiz</span>
+          )}
         </ContextMenuItem>
       </ContextMenuContent>
 
@@ -937,6 +1046,112 @@ export function DataGrid() {
         onOpenChange={setIsPrintModalOpen}
         rows={rows}
       />
+
+      {/* ── Delete / Cancel Work Order Modal ── */}
+      <Dialog open={isDeleteModalOpen} onOpenChange={(open) => !isDeleting && setIsDeleteModalOpen(open)}>
+        <DialogContent className="max-w-md p-5 bg-card border border-border">
+          <DialogHeader className="gap-2">
+            <div className="flex items-center gap-2.5 text-destructive">
+              <div className="w-8 h-8 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-4 h-4 text-destructive" />
+              </div>
+              <DialogTitle className="text-sm font-semibold text-foreground">
+                Buyurtmani o&apos;chirish yoki bekor qilish
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
+              Hujjat: <strong className="font-mono text-foreground font-semibold">{orderToDelete?.id}</strong> — {orderToDelete?.customer} ({orderToDelete?.product})
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 text-xs">
+            {orderToDelete?.status === "Draft" || !orderToDelete?.status || orderToDelete.status === "Active" ? (
+              <div className="space-y-2">
+                <label className="font-medium text-foreground block">Amal turini tanlang:</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteMode("hard_delete")}
+                    className={`p-2.5 rounded border text-left cursor-pointer transition-colors space-y-1 ${
+                      deleteMode === "hard_delete"
+                        ? "border-destructive bg-destructive/10 text-destructive font-medium"
+                        : "border-border bg-muted/30 hover:bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    <div className="font-semibold text-xs flex items-center gap-1.5">
+                      <Trash2 className="size-3.5" />
+                      <span>Bazadan tozalash</span>
+                    </div>
+                    <div className="text-[10px] opacity-80 leading-tight">
+                      Xato ochilgan qoralama yoki dublni butunlay o&apos;chiradi
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeleteMode("cancel")}
+                    className={`p-2.5 rounded border text-left cursor-pointer transition-colors space-y-1 ${
+                      deleteMode === "cancel"
+                        ? "border-amber-600 dark:border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium"
+                        : "border-border bg-muted/30 hover:bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    <div className="font-semibold text-xs flex items-center gap-1.5">
+                      <AlertTriangle className="size-3.5" />
+                      <span>Bekor qilish (Cancel)</span>
+                    </div>
+                    <div className="text-[10px] opacity-80 leading-tight">
+                      Tarixda saqlab, navbat va rejalardan chiqaradi
+                    </div>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-2.5 rounded bg-muted/40 border border-border text-muted-foreground leading-relaxed">
+                Ushbu buyurtma holati <strong className="font-semibold text-foreground">{orderToDelete?.status}</strong>. Boshlangan yoki o&apos;tgan buyurtmalarni faqat bekor qilish mumkin.
+              </div>
+            )}
+
+            {deleteMode === "cancel" && (
+              <div className="space-y-1.5 pt-1">
+                <label className="font-medium text-foreground text-xs block">
+                  Bekor qilish sababi (Audit jurnali uchun):
+                </label>
+                <Input
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="Masalan: Mijoz buyurtmani bekor qildi / Xato ochilgan nusxa"
+                  className="h-8 text-xs"
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 pt-2 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsDeleteModalOpen(false)}
+              disabled={isDeleting}
+              className="text-xs h-7 px-3"
+            >
+              Yopish
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="text-xs h-7 px-3 gap-1.5"
+            >
+              {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+              <span>{deleteMode === "hard_delete" ? "Bazadan o'chirish" : "Buyurtmani bekor qilish"}</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ContextMenu>
   );
 }

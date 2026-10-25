@@ -30,7 +30,16 @@ import {
   MoreVertical,
   BookmarkPlus,
   Loader2,
+  Trash2,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -378,6 +387,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     replaceTabId,
     upsertProductionQueueItem,
     upsertWorkOrderAsync,
+    deleteWorkOrderAsync,
     toggleReadinessCheck,
     loadProductionQueue,
     closeTab,
@@ -395,6 +405,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     loadMachines,
     warehouseStock,
     loadWarehouseStock,
+    plants,
+    fetchPlants,
   } = useWorkspaceStore();
 
   useEffect(() => {
@@ -406,7 +418,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (masterSpecifications.length === 0 && loadSpecificationsAsync) {
       loadSpecificationsAsync();
     }
-  }, [loadCrmCustomers, loadMachines, warehouseStock.length, loadWarehouseStock, masterSpecifications.length, loadSpecificationsAsync]);
+    if (!plants || plants.length === 0) {
+      fetchPlants();
+    }
+  }, [loadCrmCustomers, loadMachines, warehouseStock.length, loadWarehouseStock, masterSpecifications.length, loadSpecificationsAsync, fetchPlants, plants]);
   const isDark = theme === "dark";
   const data = tab.documentData || {};
 
@@ -454,6 +469,96 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     }
     return false;
   }, [currentUser]);
+
+  const isAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    const role = (currentUser.role || "").toLowerCase();
+    return (
+      role === "admin" ||
+      role === "system administrator" ||
+      role === "administrator" ||
+      role === "boshliq"
+    );
+  }, [currentUser]);
+
+  const canDelete = useMemo(() => {
+    return isAdmin || currentUser?.permissions?.production?.delete === true;
+  }, [isAdmin, currentUser]);
+
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteMode, setDeleteMode] = useState<"cancel" | "hard_delete">("cancel");
+  const [deleteReason, setDeleteReason] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleRequestDelete = () => {
+    if (!canDelete) {
+      addNotification({
+        title: "Huquq yetarli emas",
+        description: "Buyurtmani o'chirish yoki bekor qilish uchun huquqingiz yetarli emas (production.delete talab qilinadi).",
+        severity: "error",
+      });
+      return;
+    }
+
+    const currentTargetId = savedDocNoRef.current || docNo || tab.id;
+    if (currentTargetId.startsWith("draft-") || currentTargetId.startsWith("temp-")) {
+      closeTab(tab.id);
+      addNotification({
+        title: "Qoralama yopildi",
+        description: "Saqlanmagan qoralama buyurtma bekor qilindi.",
+        severity: "info",
+      });
+      return;
+    }
+
+    setDeleteReason("");
+    const isCleanDraft =
+      formData.status === "Draft" ||
+      operations.length === 0 ||
+      operations.every((op) => op.status === "Queued" || !op.qtyCompleted || op.qtyCompleted.startsWith("0 /"));
+    setDeleteMode(isCleanDraft ? "hard_delete" : "cancel");
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    const targetDocNo = savedDocNoRef.current || docNo || tab.id;
+    setIsDeleting(true);
+    try {
+      const res = await deleteWorkOrderAsync(targetDocNo, deleteMode, deleteReason);
+      if (res.success) {
+        addNotification({
+          title: res.mode === "deleted" ? "Buyurtma o'chirildi" : "Buyurtma bekor qilindi",
+          description:
+            res.message ||
+            `${targetDocNo} muvaffaqiyatli ${res.mode === "deleted" ? "bazadan butunlay tozalab tashlandi" : "bekor qilindi"}.`,
+          severity: "success",
+          channel: "toast",
+        });
+        setIsDeleteModalOpen(false);
+        if (res.mode === "deleted") {
+          closeTab(tab.id);
+        } else {
+          setFormData((prev) => ({ ...prev, status: "Cancelled" }));
+        }
+      } else {
+        addNotification({
+          title: "Xatolik",
+          description: res.error || "Buyurtmani o'chirishda xatolik yuz berdi.",
+          severity: "error",
+          channel: "toast",
+        });
+      }
+    } catch (err: any) {
+      addNotification({
+        title: "Xatolik",
+        description: err?.message || "Buyurtmani o'chirishda kutilmagan xatolik yuz berdi.",
+        severity: "error",
+        channel: "toast",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const [formData, setFormData] = useState<WorkOrderFormData>({
     customer: data.customer || initialQueueItem?.customer || "",
@@ -1048,16 +1153,26 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   }, [activeSpec, currentBomItems, tab.id, updateTabData]);
   const activeSite = useMemo(
     () =>
+      (plants && plants.find((p: any) => p.id === formData.site || p.name === formData.site)
+        ? {
+            id: formData.site,
+            name: plants.find((p: any) => p.id === formData.site || p.name === formData.site)!.name,
+            label: plants.find((p: any) => p.id === formData.site || p.name === formData.site)!.name,
+            location: "Asosiy bino",
+            facilities: "Ishlab chiqarish",
+            status: "Active",
+          }
+        : null) ||
       (dbSites && dbSites.find((s: any) => s.id === formData.site || s.name === formData.site)) ||
       SITE_OPTIONS.find((s) => s.id === formData.site || s.name === formData.site) || {
         id: formData.site || "site-1",
-        name: formData.site || "Bosh sex",
-        label: formData.site || "Bosh sex",
+        name: (plants && plants.find((p: any) => p.id === formData.site)?.name) || formData.site || "Bosh sex",
+        label: (plants && plants.find((p: any) => p.id === formData.site)?.name) || formData.site || "Bosh sex",
         location: "Asosiy bino",
         facilities: "Ishlab chiqarish",
         status: "Active",
       },
-    [dbSites, formData.site]
+    [plants, dbSites, formData.site]
   );
   const activeTech = useMemo(
     () => TECHNOLOGY_OPTIONS.find((t) => t.id === formData.department) || TECHNOLOGY_OPTIONS[0],
@@ -2017,6 +2132,19 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     <Package className="w-3.5 h-3.5" />
                     <span>Qutilarga qadoqlash</span>
                   </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+
+                  <DropdownMenuItem
+                    onClick={handleRequestDelete}
+                    className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                    <span>Buyurtmani bekor qilish / o&apos;chirish</span>
+                    {!canDelete && (
+                      <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ruxsatsiz</span>
+                    )}
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
 
@@ -2772,6 +2900,113 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         operations={operations}
         onSaveSpec={handleSaveAsNewSpec}
       />
+
+      {/* ── Delete / Cancel Work Order Modal ── */}
+      <Dialog open={isDeleteModalOpen} onOpenChange={(open) => !isDeleting && setIsDeleteModalOpen(open)}>
+        <DialogContent className="max-w-md p-5 bg-card border border-border">
+          <DialogHeader className="gap-2">
+            <div className="flex items-center gap-2.5 text-destructive">
+              <div className="w-8 h-8 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-4 h-4 text-destructive" />
+              </div>
+              <DialogTitle className="text-sm font-semibold text-foreground">
+                Buyurtmani o&apos;chirish yoki bekor qilish
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
+              Hujjat: <strong className="font-mono text-foreground font-semibold">{savedDocNoRef.current || docNo || tab.id}</strong> — {formData.customer} ({formData.product})
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 text-xs">
+            {formData.status === "Draft" || !formData.status || formData.status === "Active" ? (
+              <div className="space-y-2">
+                <label className="font-medium text-foreground block">Amal turini tanlang:</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteMode("hard_delete")}
+                    className={`p-2.5 rounded border text-left cursor-pointer transition-colors space-y-1 ${
+                      deleteMode === "hard_delete"
+                        ? "border-destructive bg-destructive/10 text-destructive font-medium"
+                        : "border-border bg-muted/30 hover:bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    <div className="font-semibold text-xs flex items-center gap-1.5">
+                      <Trash2 className="size-3.5" />
+                      <span>Bazadan tozalash</span>
+                    </div>
+                    <div className="text-[10px] opacity-80 leading-tight">
+                      Xato ochilgan qoralama yoki dublni butunlay o&apos;chiradi
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeleteMode("cancel")}
+                    className={`p-2.5 rounded border text-left cursor-pointer transition-colors space-y-1 ${
+                      deleteMode === "cancel"
+                        ? "border-amber-600 dark:border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium"
+                        : "border-border bg-muted/30 hover:bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    <div className="font-semibold text-xs flex items-center gap-1.5">
+                      <AlertTriangle className="size-3.5" />
+                      <span>Bekor qilish</span>
+                    </div>
+                    <div className="text-[10px] opacity-80 leading-tight">
+                      Tarixda saqlab, navbat va rejalardan chiqaradi
+                    </div>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-2.5 rounded bg-muted/40 border border-border text-muted-foreground leading-relaxed">
+                Ushbu buyurtma holati <strong className="font-semibold text-foreground">{formData.status}</strong>. Boshlangan yoki yakunlangan buyurtmalarni faqat bekor qilish mumkin.
+              </div>
+            )}
+
+            {deleteMode === "cancel" && (
+              <div className="space-y-1.5 pt-1">
+                <label className="font-medium text-foreground text-xs block">
+                  Bekor qilish sababi (Audit jurnali uchun):
+                </label>
+                <input
+                  type="text"
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="Masalan: Mijoz buyurtmani bekor qildi / Xato ochilgan nusxa"
+                  className="w-full h-8 px-2.5 rounded border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 pt-2 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsDeleteModalOpen(false)}
+              disabled={isDeleting}
+              className="text-xs h-7 px-3"
+            >
+              Yopish
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="text-xs h-7 px-3 gap-1.5"
+            >
+              {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+              <span>{deleteMode === "hard_delete" ? "Bazadan o'chirish" : "Buyurtmani bekor qilish"}</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -280,12 +280,17 @@ export function OverviewTab({
     upsertCustomerAsync,
     openTab,
     openNewPlantTab,
+    plants,
+    fetchPlants,
   } = useWorkspaceStore();
 
   useEffect(() => {
     loadCrmCustomers();
     syncWithServer();
-  }, [loadCrmCustomers, syncWithServer]);
+    if (!plants || plants.length === 0) {
+      fetchPlants();
+    }
+  }, [loadCrmCustomers, syncWithServer, fetchPlants, plants]);
 
   // Real customer options from CRM database (PostgreSQL)
   const customerOptions = useMemo(() => {
@@ -471,14 +476,57 @@ export function OverviewTab({
   };
 
   const siteOptions = useMemo<ComboboxOption[]>(() => {
-    return sites.map((site) => ({
+    const combined: Array<{ id: string; name: string; label?: string; location?: string; facilities?: string }> = [];
+    const seen = new Set<string>();
+
+    if (plants && plants.length > 0) {
+      plants.forEach((p) => {
+        if (!seen.has(p.id)) {
+          seen.add(p.id);
+          combined.push({
+            id: p.id,
+            name: p.name,
+            label: p.name,
+            location: (p as any).address || (p as any).location || "Asosiy bino",
+            facilities: (p as any).description || "Ishlab chiqarish",
+          });
+        }
+      });
+    }
+
+    if (sites && sites.length > 0) {
+      sites.forEach((s) => {
+        if (!seen.has(s.id)) {
+          seen.add(s.id);
+          combined.push(s);
+        }
+      });
+    }
+
+    if (combined.length === 0) {
+      SITE_OPTIONS.forEach((s) => combined.push(s));
+    }
+
+    return combined.map((site) => ({
       value: site.id,
       label: site.name,
       description: site.label,
       location: site.location,
       facilities: site.facilities,
     }));
-  }, [sites]);
+  }, [plants, sites]);
+
+  const displaySiteName = useMemo(() => {
+    if (!formData.site) return "Bosh sex";
+    if (activeSite?.name && activeSite.name !== formData.site) return activeSite.name;
+    const plantMatch = plants?.find((p) => p.id === formData.site || p.name === formData.site);
+    if (plantMatch) return plantMatch.name;
+    const siteMatch = sites?.find((s) => s.id === formData.site || s.name === formData.site);
+    if (siteMatch) return siteMatch.name || siteMatch.label;
+    const defaultMatch = SITE_OPTIONS.find((s) => s.id === formData.site || s.name === formData.site);
+    if (defaultMatch) return defaultMatch.name;
+    return formData.site;
+  }, [formData.site, plants, sites, activeSite]);
 
   const techOptions = useMemo<ComboboxOption[]>(() => {
     return TECHNOLOGY_OPTIONS.map((tech) => ({
@@ -765,7 +813,7 @@ export function OverviewTab({
           {/* Site & Order Type (Clean text, no badge clutter) */}
           <div className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground">
             <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <span className="font-medium text-foreground">{formData.site || "Building 1"}</span>
+            <span className="font-medium text-foreground">{displaySiteName}</span>
             <span className="text-border mx-0.5">•</span>
             <span>{data.orderType === "Sample" ? "Sample Order" : "Production Order"}</span>
           </div>

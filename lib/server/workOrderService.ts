@@ -30,6 +30,7 @@ import {
   branches,
   companies,
   clients,
+  deliveryActs,
 } from "@/db/schema";
 import { eq, desc, and, or, ilike } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
@@ -47,6 +48,9 @@ import {
   computeAndRecordWorkOrderDiffs,
   recordWorkOrderAuditLog,
 } from "./workOrderAuditService";
+
+const isUuid = (val: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 /**
  * Bazadan barcha real ishlab chiqarish buyruqlarini (Work Orders) yuklash
@@ -604,6 +608,141 @@ export async function upsertWorkOrder(
   };
 }
 
+/**
+ * Buyurtmani xavfsiz o'chirish yoki bekor qilish (Soft Delete / Hard Delete)
+ */
+export async function deleteWorkOrder(
+  docNoOrId: string,
+  companyCode: string = "PRINTGOO",
+  author?: { id?: string; name?: string; role?: string },
+  mode: "auto" | "cancel" | "hard_delete" = "auto",
+  cancelReason?: string
+): Promise<{ success: boolean; mode: "deleted" | "cancelled"; docNo: string; message: string }> {
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  const hasValidUuid = isUuid(docNoOrId);
+  const existingOrder = await db.query.workOrders.findFirst({
+    where: (wo, { and, eq, or }) =>
+      and(
+        eq(wo.companyId, companyId),
+        hasValidUuid ? or(eq(wo.docNo, docNoOrId), eq(wo.id, docNoOrId)) : eq(wo.docNo, docNoOrId)
+      ),
+    with: {
+      operations: true,
+      events: true,
+    },
+  });
+
+  if (!existingOrder) {
+    throw new Error(`Buyurtma topilmadi: ${docNoOrId}`);
+  }
+
+  // 1. Bog'langan yetkazib berish aktlarini tekshirish
+  const linkedActs = await db.query.deliveryActs.findMany({
+    where: (act, { eq }) => eq(act.workOrderId, existingOrder.id),
+  });
+
+  // 2. Ishlab chiqarish jarayoni boshlanganligini tekshirish
+  const hasOperationsProgress = existingOrder.operations?.some(
+    (op) => Number(op.completedQty) > 0 || op.status === "completed" || op.status === "in_progress"
+  );
+  const hasEventsProgress = existingOrder.events?.some(
+    (ev) => (ev.goodOutput !== null && ev.goodOutput > 0) || (ev.wasteQty !== null && ev.wasteQty > 0)
+  );
+  const isStarted = existingOrder.stage !== "Queue" || Boolean(hasOperationsProgress) || Boolean(hasEventsProgress);
+  const hasDependencies = linkedActs.length > 0 || isStarted;
+
+  // Agar ishlab chiqarish boshlangan yoki akt chiqarilgan bo'lsa, butunlay o'chirib bo'lmaydi
+  if (hasDependencies && mode === "hard_delete") {
+    throw new Error(
+      `Buyurtma (${existingOrder.docNo}) bo'yicha ishlab chiqarish boshlangan yoki yetkazib berish akti mavjud. Uni bazadan butunlay o'chirib bo'lmaydi, faqat bekor qilish (Cancel) mumkin.`
+    );
+  }
+
+  const effectiveMode = hasDependencies || mode === "cancel" ? "cancel" : "hard_delete";
+
+  const currentAuthor = author || {
+    id: "system",
+    name: "Tizim administratori",
+    role: "System Administrator",
+  };
+
+  if (effectiveMode === "cancel") {
+    // Bekor qilish (Пометка на удаление / Cancel)
+    await db
+      .update(workOrders)
+      .set({
+        status: "Cancelled",
+        recipeCode: cancelReason
+          ? `${existingOrder.recipeCode ? `[${existingOrder.recipeCode}] ` : ""}[BEKOR QILINDI]: ${cancelReason}`
+          : existingOrder.recipeCode,
+      })
+      .where(eq(workOrders.id, existingOrder.id));
+
+    const safeAuthor = {
+      id: currentAuthor.id || "system",
+      name: currentAuthor.name || "System Administrator",
+      role: currentAuthor.role || "Administrator",
+    };
+
+    try {
+      await recordWorkOrderAuditLog({
+        companyId,
+        workOrderId: existingOrder.id,
+        docNo: existingOrder.docNo,
+        action: "update",
+        author: safeAuthor,
+        category: "status",
+        actionText: `Buyurtma bekor qilindi (O'chirishga belgilandi): ${existingOrder.docNo}`,
+        details: cancelReason ? `Sabab: ${cancelReason}` : "Buyurtma foydalanuvchi tomonidan bekor qilindi.",
+        badgeText: "Cancelled",
+        badgeVariant: "destructive",
+      });
+    } catch (_) {}
+
+    return {
+      success: true,
+      mode: "cancelled",
+      docNo: existingOrder.docNo,
+      message: `${existingOrder.docNo} buyurtmasi bekor qilindi va navbatdan chiqarildi.`,
+    };
+  } else {
+    // Butunlay tozalash (Hard Delete — toza qoralama / dubl uchun)
+    await db.delete(workOrderOperations).where(eq(workOrderOperations.workOrderId, existingOrder.id));
+    await db.delete(workOrderEvents).where(eq(workOrderEvents.workOrderId, existingOrder.id));
+    await db.delete(workOrderAttachments).where(eq(workOrderAttachments.workOrderId, existingOrder.id));
+    await db.delete(workOrders).where(eq(workOrders.id, existingOrder.id));
+
+    const safeAuthor = {
+      id: currentAuthor.id || "system",
+      name: currentAuthor.name || "System Administrator",
+      role: currentAuthor.role || "Administrator",
+    };
+
+    try {
+      await recordWorkOrderAuditLog({
+        companyId,
+        workOrderId: existingOrder.id,
+        docNo: existingOrder.docNo,
+        action: "delete",
+        author: safeAuthor,
+        category: "status",
+        actionText: `Buyurtma bazadan butunlay o'chirildi: ${existingOrder.docNo}`,
+        details: `Mijoz: ${existingOrder.customerName} • Mahsulot: ${existingOrder.productName}`,
+        badgeText: "Deleted",
+        badgeVariant: "destructive",
+      });
+    } catch (_) {}
+
+    return {
+      success: true,
+      mode: "deleted",
+      docNo: existingOrder.docNo,
+      message: `${existingOrder.docNo} buyurtmasi bazadan butunlay o'chirildi.`,
+    };
+  }
+}
+
 // ─── Production Machines CRUD ───────────────────────────────────────────────
 
 function formatMachineDbToRecord(m: any): any {
@@ -830,8 +969,6 @@ export async function deleteProductionMachine(id: string, companyCode: string = 
 }
 
 // ─── Production Specifications CRUD ─────────────────────────────────────────
-
-const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 export async function getProductionSpecifications(companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
