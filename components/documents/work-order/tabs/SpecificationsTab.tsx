@@ -18,7 +18,9 @@ import {
   Boxes,
   Lock,
   Unlock,
+  Info,
 } from "lucide-react";
+import { requestArtworkColorAnalysis } from "../utils/artworkExtractor";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -520,6 +522,108 @@ export function SpecificationsTab({
     onMarkUnsaved();
   };
 
+  const [detectedColorPrompt, setDetectedColorPrompt] = useState<{
+    formula: string;
+    frontCount: number;
+    backCount: number;
+    frontSummary: string;
+    backSummary: string;
+    frontColors: any;
+    backColors: any;
+    printMethod: string;
+    spotColors?: any[];
+  } | null>(null);
+
+  const triggerArtworkColorAnalysis = async (frontData?: string, backData?: string) => {
+    if (!frontData && !backData) return;
+    try {
+      const result = await requestArtworkColorAnalysis({
+        dataUrl: frontData?.startsWith("data:") ? frontData : undefined,
+        url: frontData && !frontData.startsWith("data:") ? frontData : undefined,
+        backDataUrl: backData?.startsWith("data:") ? backData : undefined,
+        backUrl: backData && !backData.startsWith("data:") ? backData : undefined,
+      });
+
+      if (!result || !result.success) return;
+
+      const df = result.front;
+      const db = result.back;
+      const formula = result.detectedFormula;
+
+      const newFrontColors = {
+        c: df.c,
+        m: df.m,
+        y: df.y,
+        k: df.k,
+      };
+
+      const newBackColors = db && db.hasContent
+        ? { c: db.c, m: db.m, y: db.y, k: db.k }
+        : { c: false, m: false, y: false, k: false };
+
+      const newPrintMethod = db && db.hasContent
+        ? (formData.printMethod === "work_and_turn" ? "work_and_turn" : "sheetwise")
+        : "single_sided";
+
+      const commercialSpots = result.commercialSpotColors || [];
+      const newSpotItems = [...(formData.spotColorItems || [])];
+      const existingSpotNames = new Set(newSpotItems.map((s) => s.name.toLowerCase().trim()));
+      commercialSpots.forEach((sName) => {
+        if (!existingSpotNames.has(sName.toLowerCase().trim())) {
+          newSpotItems.push({
+            id: `spot-auto-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            name: sName,
+            code: sName,
+            hex: "#2563eb",
+            side: db && db.hasContent ? "both" : "front",
+          });
+        }
+      });
+
+      const applyAction = () => {
+        handleFieldChange({
+          frontColors: newFrontColors,
+          backColors: newBackColors,
+          colorsConfig: formula,
+          printMethod: newPrintMethod,
+          spotColorItems: newSpotItems,
+          spotColors: newSpotItems.map((s) => s.name),
+        });
+        setDetectedColorPrompt(null);
+        addNotification({
+          severity: "success",
+          title: "Rang profili qo'llandi",
+          description: `Maketdan ${formula} (${df.colorCount} oldi + ${db?.colorCount || 0} orqa) ranglar tatbiq etildi`,
+        });
+        onMarkUnsaved();
+      };
+
+      // Check if colors were empty or default initial (e.g. only 1 color or 0)
+      const isFrontEmptyOrInitial =
+        !formData.frontColors ||
+        (frontProcessCount <= 1 && !formData.frontColors.c && !formData.frontColors.m && !formData.frontColors.y);
+      const isBackEmptyOrInitial = !formData.backColors || backProcessCount === 0;
+
+      if (isFrontEmptyOrInitial && isBackEmptyOrInitial) {
+        applyAction();
+      } else {
+        setDetectedColorPrompt({
+          formula,
+          frontCount: df.colorCount,
+          backCount: db?.colorCount || 0,
+          frontSummary: df.k && !df.c ? "K (Qora)" : (df.c || df.m ? "CMYK" : "1 rang"),
+          backSummary: db && db.hasContent ? (db.k && !db.c ? "K (Qora)" : "CMYK") : "bo'sh (0 rang)",
+          frontColors: newFrontColors,
+          backColors: newBackColors,
+          printMethod: newPrintMethod,
+          spotColors: newSpotItems,
+        });
+      }
+    } catch (err) {
+      console.warn("[SpecificationsTab] Color analysis failed:", err);
+    }
+  };
+
   const handleRemoveSpotColor = (id: string) => {
     if (isOperator) return;
     const updated = spotColorItems.filter((s) => s.id !== id);
@@ -744,6 +848,13 @@ export function SpecificationsTab({
             onSkuArtworksChange(artworks);
           } else {
             handleFieldChange("skuArtworks", artworks);
+          }
+          const latest = artworks[artworks.length - 1];
+          if (latest) {
+            void triggerArtworkColorAnalysis(
+              latest.frontArtworkUrl || latest.frontArtworkThumb,
+              latest.backArtworkUrl || latest.backArtworkThumb
+            );
           }
           onMarkUnsaved();
         }}
@@ -1961,6 +2072,7 @@ export function SpecificationsTab({
                   updates.height = detectedH;
                 }
                 handleFieldChange(updates);
+                void triggerArtworkColorAnalysis(front, back);
 
                 // Keep photoUrl and production artwork cleanly separated
                 if (rawFile && setOrderAttachments) {
@@ -2032,6 +2144,55 @@ export function SpecificationsTab({
                 </span>
               </div>
             </div>
+
+            {detectedColorPrompt && (
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded border border-blue-500/30 bg-blue-500/10 text-xs">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                  <div>
+                    <span className="font-semibold text-foreground">Maket tahlili: </span>
+                    <span className="font-bold text-blue-600 font-mono">{detectedColorPrompt.formula}</span>
+                    <span className="text-muted-foreground ml-1">
+                      (Oldi: {detectedColorPrompt.frontSummary}, Orqa: {detectedColorPrompt.backSummary})
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-6 text-[11px] px-2.5 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                    onClick={() => {
+                      handleFieldChange({
+                        frontColors: detectedColorPrompt.frontColors,
+                        backColors: detectedColorPrompt.backColors,
+                        colorsConfig: detectedColorPrompt.formula,
+                        printMethod: detectedColorPrompt.printMethod,
+                        spotColorItems: detectedColorPrompt.spotColors,
+                        spotColors: (detectedColorPrompt.spotColors || []).map((s: any) => s.name),
+                      });
+                      setDetectedColorPrompt(null);
+                      addNotification({
+                        severity: "success",
+                        title: "Rang profili yangilandi",
+                        description: `${detectedColorPrompt.formula} ranglari tasdiqlandi va qo'llandi`,
+                      });
+                      onMarkUnsaved();
+                    }}
+                  >
+                    Qo'llash ({detectedColorPrompt.formula})
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    onClick={() => setDetectedColorPrompt(null)}
+                  >
+                    Bekor qilish
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
               {/* Front Colors (Old tomon) */}

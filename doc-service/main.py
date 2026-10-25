@@ -2,6 +2,8 @@ from datetime import datetime
 from fastapi import FastAPI
 from app.core.fonts import FONT_REGULAR
 from app.routers import pdf, office
+from app.schemas.documents import ArtworkAnalysisRequest, ArtworkAnalysisResponse
+from app.generators.artwork_analyzer import analyze_artwork_payload
 
 app = FastAPI(
     title="PrintGoo Document Generation Service",
@@ -17,6 +19,10 @@ def health_check():
         "font": FONT_REGULAR,
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+@app.post("/api/pdf/analyze-artwork", response_model=ArtworkAnalysisResponse)
+def direct_analyze_artwork(req: ArtworkAnalysisRequest):
+    return analyze_artwork_payload(req)
 
 # Register Routers
 app.include_router(pdf.router)

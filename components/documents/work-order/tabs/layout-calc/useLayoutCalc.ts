@@ -1570,6 +1570,7 @@ export function useLayoutCalc({
     svgRef,
     effectiveArtworkFront: sharedFrontArt,
     effectiveArtworkBack: sharedBackArt,
+    hasAnyBackArtwork: Boolean(sharedBackArt || artworkBack),
     handleExportSVG,
     handleExportPDF,
   };

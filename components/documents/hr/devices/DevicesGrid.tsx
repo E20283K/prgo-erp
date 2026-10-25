@@ -16,16 +16,9 @@ import { useWorkspaceStore } from "@/store/workspaceStore";
 import { BiometricDeviceRecord } from "../types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ComboboxSelect } from "@/components/ui/combobox";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -36,7 +29,6 @@ import {
 import { DeviceDetailModal } from "./DeviceDetailModal";
 import {
   Plus,
-  Search,
   RefreshCw,
   Printer,
   Activity,
@@ -58,7 +50,6 @@ export function DevicesGrid() {
 
   const isDark = theme === "dark";
   const [loading, setLoading] = useState(false);
-  const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [branchFilter, setBranchFilter] = useState<string>("ALL");
   const [branchesList, setBranchesList] = useState<BranchItem[]>([]);
@@ -113,25 +104,22 @@ export function DevicesGrid() {
     fetchDevices();
   }, [fetchDevices]);
 
-  // Filtrlash (Qidiruv, Holat, Filial)
+  // Filial variantlari (ComboboxSelect uchun)
+  const branchOptions = useMemo(() => {
+    return [
+      { value: "ALL", label: "Barcha filiallar" },
+      ...branchesList.map((b) => ({ value: b.id, label: b.name })),
+    ];
+  }, [branchesList]);
+
+  // Filtrlash (Holat va Filial bo'yicha)
   const filtered = useMemo(() => {
     return biometricDevices.filter((d) => {
-      const s = searchFilter.toLowerCase();
-      const meta = d.metadata || {};
-      const matchSearch =
-        d.name.toLowerCase().includes(s) ||
-        d.deviceCode.toLowerCase().includes(s) ||
-        d.ipAddress.toLowerCase().includes(s) ||
-        (d.branchName || "").toLowerCase().includes(s) ||
-        (meta.isupDeviceId || "").toLowerCase().includes(s) ||
-        (d.location || "").toLowerCase().includes(s);
-
       const matchStatus = statusFilter === "ALL" || d.status === statusFilter;
       const matchBranch = branchFilter === "ALL" || d.branchId === branchFilter;
-
-      return matchSearch && matchStatus && matchBranch;
+      return matchStatus && matchBranch;
     });
-  }, [biometricDevices, searchFilter, statusFilter, branchFilter]);
+  }, [biometricDevices, statusFilter, branchFilter]);
 
   // Glide Data Grid ustunlari
   const columns: GridColumn[] = useMemo(
@@ -423,19 +411,19 @@ export function DevicesGrid() {
   return (
     <div className="flex flex-col h-full bg-background select-none">
       {/* ── 1C Industrial Toolbar & Filters ── */}
-      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0 gap-2">
-        {/* Chap panel: Yangi qurilma, Tezkor amallar */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0 gap-2 overflow-x-auto scrollbar-none">
+        {/* Chap panel: Yangi qurilma, Tezkor amallar, Filial, Status */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <Button
             size="sm"
-            className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
+            className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer shrink-0"
             onClick={() => {
               setEditingDevice(null);
               setIsModalOpen(true);
             }}
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Yangi qurilma</span>
+            <span className="whitespace-nowrap">Yangi qurilma</span>
           </Button>
 
           {currentSelectedDevice && (
@@ -443,56 +431,49 @@ export function DevicesGrid() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 px-2 text-xs gap-1"
+                className="h-7 px-2 text-xs gap-1 shrink-0"
                 disabled={actionLoading}
                 onClick={() => handleSyncEmployees(currentSelectedDevice)}
                 title="Tanlangan qurilmaga filial xodimlarini sinxronlash"
               >
                 <UploadCloud className="size-3.5 text-blue-600" />
-                <span>Sinxronlash</span>
+                <span className="hidden xl:inline whitespace-nowrap">Sinxronlash</span>
               </Button>
 
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 px-2 text-xs gap-1"
+                className="h-7 px-2 text-xs gap-1 shrink-0"
                 disabled={actionLoading}
                 onClick={() => handleTriggerRelay(currentSelectedDevice)}
                 title="Turniket relayini 3 soniyaga ochish"
               >
                 <DoorOpen className="size-3.5 text-emerald-600" />
-                <span>Eshikni ochish</span>
+                <span className="hidden xl:inline whitespace-nowrap">Eshikni ochish</span>
               </Button>
             </>
           )}
 
-          <Separator orientation="vertical" className="h-4 mx-1" />
+          <Separator orientation="vertical" className="h-4 mx-0.5 shrink-0" />
 
           {/* Filial bo'yicha filtr */}
-          <div className="flex items-center gap-1">
-            <span className="text-[11px] text-muted-foreground">Filial:</span>
-            <Select
-              value={branchFilter}
-              onValueChange={(val: string | null) => setBranchFilter(val || "ALL")}
-            >
-              <SelectTrigger className="h-7 w-36 text-xs bg-background">
-                <SelectValue placeholder="Barcha filiallar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">Barcha filiallar</SelectItem>
-                {branchesList.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[11px] text-muted-foreground whitespace-nowrap">Filial:</span>
+            <div className="w-36 lg:w-44">
+              <ComboboxSelect
+                value={branchFilter}
+                onValueChange={(val: string | null) => setBranchFilter(val || "ALL")}
+                items={branchOptions}
+                placeholder="Barcha filiallar"
+                className="h-7 text-xs bg-background font-normal"
+              />
+            </div>
           </div>
 
-          <Separator orientation="vertical" className="h-4 mx-1" />
+          <Separator orientation="vertical" className="h-4 mx-0.5 shrink-0" />
 
           {/* Status Segment Filter */}
-          <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
+          <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
             {[
               { key: "ALL", label: "Hammasi" },
               { key: "online", label: "Online" },
@@ -502,7 +483,7 @@ export function DevicesGrid() {
               <button
                 key={key}
                 onClick={() => setStatusFilter(key)}
-                className={`px-2 py-0.5 rounded transition-colors ${
+                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap cursor-pointer ${
                   statusFilter === key
                     ? "bg-background text-foreground font-semibold shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
@@ -514,42 +495,32 @@ export function DevicesGrid() {
           </div>
         </div>
 
-        {/* O'ng panel: Qidiruv, Yangilash, Hisob */}
-        <div className="flex items-center gap-2">
-          <div className="relative w-48">
-            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Qurilma, filial, IP..."
-              className="pl-7 h-7 text-xs bg-background border-input rounded"
-            />
-          </div>
-
+        {/* O'ng panel: Yangilash, Chop etish, Hisob */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 shrink-0"
             onClick={fetchDevices}
             disabled={loading || actionLoading}
             title="Ro'yxatni yangilash"
           >
             <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline">Yangilash</span>
+            <span className="hidden sm:inline whitespace-nowrap">Yangilash</span>
           </Button>
 
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 shrink-0"
             onClick={() => window.print()}
             title="Chop etish"
           >
             <Printer className="size-3.5" />
           </Button>
 
-          <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 font-normal">
-            {filtered.length} ta qurilma
+          <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 font-normal shrink-0 whitespace-nowrap">
+            {filtered.length} ta
           </Badge>
         </div>
       </div>

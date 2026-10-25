@@ -25,6 +25,62 @@ export interface ExtractedArtwork {
   detectedWidthMm?: number;
   detectedHeightMm?: number;
   isAutoCropped?: boolean;
+  colorAnalysis?: ArtworkColorAnalysisResult | null;
+}
+
+export interface ArtworkColorAnalysisResult {
+  success: boolean;
+  front: {
+    hasContent: boolean;
+    c: boolean;
+    m: boolean;
+    y: boolean;
+    k: boolean;
+    spotColors: string[];
+    colorCount: number;
+    formula: string;
+  };
+  back?: {
+    hasContent: boolean;
+    c: boolean;
+    m: boolean;
+    y: boolean;
+    k: boolean;
+    spotColors: string[];
+    colorCount: number;
+    formula: string;
+  };
+  hasBackSide: boolean;
+  technicalDielines: string[];
+  commercialSpotColors: string[];
+  detectedFormula: string;
+  pageCount: number;
+  widthMm?: number;
+  heightMm?: number;
+  notes?: string | null;
+}
+
+/**
+ * Requests deep prepress color & separation analysis from doc-service backend.
+ */
+export async function requestArtworkColorAnalysis(payload: {
+  url?: string;
+  dataUrl?: string;
+  backUrl?: string;
+  backDataUrl?: string;
+}): Promise<ArtworkColorAnalysisResult | null> {
+  try {
+    const res = await fetch("/api/docs/analyze-artwork", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as ArtworkColorAnalysisResult;
+  } catch (err) {
+    console.warn("[artworkExtractor] Color analysis request failed:", err);
+    return null;
+  }
 }
 
 /**

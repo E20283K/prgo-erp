@@ -1144,13 +1144,18 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
               <button
                 type="button"
                 onClick={() => calc.setActiveSide("back")}
-                disabled={calc.backColorsCount <= 0 && !calc.isSplitSheetLayout}
+                disabled={calc.backColorsCount <= 0 && !calc.isSplitSheetLayout && !calc.hasAnyBackArtwork}
                 className={cn(
                   "px-2.5 py-0.5 rounded font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed",
                   calc.activeSide === "back"
                     ? "bg-blue-600 text-white shadow-2xs"
                     : "text-muted-foreground hover:text-foreground"
                 )}
+                title={
+                  calc.backColorsCount <= 0 && calc.hasAnyBackArtwork
+                    ? "Orqa maket ko'rinishi (Diqqat: Spetsifikatsiyada orqa rang 0)"
+                    : undefined
+                }
               >
                 Orqa ({calc.backColorsCount} rang)
               </button>

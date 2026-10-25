@@ -225,3 +225,35 @@ class ImpositionPdfRequest(BaseModel):
     s3Key: Optional[str] = None
 
 
+
+
+class SideColorAnalysis(BaseModel):
+    hasContent: bool = False
+    c: bool = False
+    m: bool = False
+    y: bool = False
+    k: bool = False
+    spotColors: List[str] = Field(default_factory=list)
+    colorCount: int = 0
+    formula: str = "0"
+
+
+class ArtworkAnalysisRequest(BaseModel):
+    url: Optional[str] = None
+    dataUrl: Optional[str] = None
+    backUrl: Optional[str] = None
+    backDataUrl: Optional[str] = None
+
+
+class ArtworkAnalysisResponse(BaseModel):
+    success: bool = True
+    front: SideColorAnalysis
+    back: Optional[SideColorAnalysis] = None
+    hasBackSide: bool = False
+    technicalDielines: List[str] = Field(default_factory=list)
+    commercialSpotColors: List[str] = Field(default_factory=list)
+    detectedFormula: str = "1+0"
+    pageCount: int = 1
+    widthMm: Optional[float] = None
+    heightMm: Optional[float] = None
+    notes: Optional[str] = None
