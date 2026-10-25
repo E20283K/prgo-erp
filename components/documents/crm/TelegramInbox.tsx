@@ -167,7 +167,14 @@ interface ClientActiveOrder {
 
 export function TelegramInbox() {
   const t = useTranslations("TelegramInbox");
-  const { openTab, crmCustomers, loadCrmCustomers, addNotification } = useWorkspaceStore();
+  const {
+    openTab,
+    crmCustomers,
+    loadCrmCustomers,
+    addNotification,
+    activeTelegramChatId,
+    setActiveTelegramChatId,
+  } = useWorkspaceStore();
 
   const [chats, setChats] = useState<TelegramChatListItem[]>([]);
   const [activeChat, setActiveChat] = useState<TelegramChatListItem | null>(null);
@@ -439,7 +446,17 @@ export function TelegramInbox() {
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         setChats(json.data);
-        if (json.data.length > 0 && !activeChat) {
+        const preferredChat = activeTelegramChatId
+          ? json.data.find(
+              (c: any) =>
+                c.id === activeTelegramChatId ||
+                c.chatId === activeTelegramChatId ||
+                String(c.chatId) === String(activeTelegramChatId)
+            )
+          : null;
+        if (preferredChat) {
+          selectChat(preferredChat);
+        } else if (json.data.length > 0 && !activeChat) {
           selectChat(json.data[0]);
         }
       }
@@ -589,6 +606,7 @@ export function TelegramInbox() {
 
   const selectChat = (chat: TelegramChatListItem) => {
     setActiveChat(chat);
+    setActiveTelegramChatId(chat.id);
     setSelectedClientId(chat.clientId || "");
     setSelectedManager(chat.assignedUserId || "");
     setGroupChatSettings(
@@ -601,6 +619,28 @@ export function TelegramInbox() {
     );
     fetchMessages(chat.id);
   };
+
+  // Agar tashqaridan (Toaster / Bildirishnoma orqali) ma'lum bir chat tanlansa
+  useEffect(() => {
+    if (activeTelegramChatId && chats.length > 0) {
+      const target = chats.find(
+        (c) =>
+          c.id === activeTelegramChatId ||
+          c.chatId === activeTelegramChatId ||
+          String(c.chatId) === String(activeTelegramChatId)
+      );
+      if (target && target.id !== activeChat?.id) {
+        selectChat(target);
+      }
+    }
+  }, [activeTelegramChatId, chats, activeChat?.id]);
+
+  // Tab yopilganda faol chat holatini tozalash
+  useEffect(() => {
+    return () => {
+      setActiveTelegramChatId(null);
+    };
+  }, [setActiveTelegramChatId]);
 
   // Xabar yuborish
   const handleSendMessage = async (textToSend?: string) => {

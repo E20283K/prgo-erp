@@ -65,6 +65,7 @@ export interface LayoutCalcTabProps {
   defaultQuantity: number;
   docNo?: string;
   orderName?: string;
+  customer?: string;
   defaultProdW?: number;
   defaultProdH?: number;
   defaultBleed?: number;

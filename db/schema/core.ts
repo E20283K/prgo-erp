@@ -47,6 +47,7 @@ export interface NotificationRulesConfig {
   woStatusEnabled?: boolean;
   stockLowEnabled?: boolean;
   financeDocsEnabled?: boolean;
+  telegramMessagesEnabled?: boolean;
 }
 
 export interface CompanySettings {

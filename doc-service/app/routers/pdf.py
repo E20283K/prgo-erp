@@ -33,3 +33,5 @@ def box_labels_endpoint(req: BoxLabelsPdfRequest):
 @router.post("/imposition")
 def imposition_endpoint(req: ImpositionPdfRequest):
     return generate_imposition_pdf(req)
+
+

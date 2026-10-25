@@ -184,7 +184,6 @@ export function useLayoutCalc({
     impositionState?.optimizerGoal || "min_waste"
   );
   const [targetPlateCount, setTargetPlateCount] = useState<number | undefined>(undefined);
-  const [isJobTicketOpen, setIsJobTicketOpen] = useState(false);
 
   // Kashirovka state
   const [kashMode, setKashModeState] = useState<KashirovkaMode>(propKashMode);
@@ -528,6 +527,29 @@ export function useLayoutCalc({
     impositionState ? JSON.stringify(impositionState) : ""
   );
 
+  // Plate distributions with full accounting
+  const plateCalculations = useMemo(() => {
+    return calculatePlateDistribution(
+      effectivePieces,
+      plates,
+      adjustedSizes,
+      adjustedGeneralQuantity,
+      {
+        ctpSideRelation,
+        frontColorsCount,
+        backColorsCount,
+      }
+    );
+  }, [
+    effectivePieces,
+    plates,
+    adjustedSizes,
+    adjustedGeneralQuantity,
+    ctpSideRelation,
+    frontColorsCount,
+    backColorsCount,
+  ]);
+
   useEffect(() => {
     const nextState = {
       sheetW,
@@ -548,6 +570,24 @@ export function useLayoutCalc({
       ctpSideRelation,
       optimizerGoal,
       plates,
+      plateCalculations: plateCalculations.map((p) => ({
+        id: p.id,
+        name: p.name,
+        requiredSheets: p.requiredSheets,
+        unassignedSlots: p.unassignedSlots,
+        totalYield: p.totalYield || 0,
+        totalOverproduction: p.totalOverproduction || 0,
+        assignments: p.assignments.map((a) => ({
+          sizeId: a.sizeId,
+          sizeLabel: a.sizeLabel,
+          model: a.model,
+          sizeCode: a.sizeCode,
+          slots: a.slots,
+          targetQuantity: a.targetQuantity,
+          yieldQuantity: a.yieldQuantity || 0,
+          overproduction: (a.yieldQuantity || 0) - a.targetQuantity,
+        })),
+      })),
     };
     const key = JSON.stringify(nextState);
     if (lastEmittedStateRef.current === key) return;
@@ -572,30 +612,8 @@ export function useLayoutCalc({
     ctpSideRelation,
     optimizerGoal,
     plates,
+    plateCalculations,
     onImpositionStateChange,
-  ]);
-
-  // Plate distributions with full accounting
-  const plateCalculations = useMemo(() => {
-    return calculatePlateDistribution(
-      effectivePieces,
-      plates,
-      adjustedSizes,
-      adjustedGeneralQuantity,
-      {
-        ctpSideRelation,
-        frontColorsCount,
-        backColorsCount,
-      }
-    );
-  }, [
-    effectivePieces,
-    plates,
-    adjustedSizes,
-    adjustedGeneralQuantity,
-    ctpSideRelation,
-    frontColorsCount,
-    backColorsCount,
   ]);
 
   const activePlate = plateCalculations[activePlateIndex] || plateCalculations[0];
@@ -1406,8 +1424,6 @@ export function useLayoutCalc({
     setOptimizerGoal,
     targetPlateCount,
     setTargetPlateCount,
-    isJobTicketOpen,
-    setIsJobTicketOpen,
 
     // Machine & Paper Cutting
     machineConstraints,

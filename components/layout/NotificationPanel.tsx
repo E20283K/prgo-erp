@@ -328,6 +328,21 @@ function RulesSettingsView({ onBack }: RulesSettingsViewProps) {
             </span>
           </div>
         </label>
+
+        <label className="flex items-start gap-2.5 p-2 rounded border border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={notificationRules.telegramMessagesEnabled ?? true}
+            onChange={() => handleToggle("telegramMessagesEnabled")}
+            className="mt-0.5 rounded border-border text-primary focus:ring-primary size-3.5"
+          />
+          <div className="space-y-0.5">
+            <span className="font-medium text-foreground block">Telegram xabarlari</span>
+            <span className="text-[10px] text-muted-foreground block font-mono">
+              CRM Telegram Inbox orqali mijozlardan kelgan yangi xabarlar
+            </span>
+          </div>
+        </label>
       </div>
 
       {/* Audio Notification Settings Shortcut */}
@@ -396,6 +411,7 @@ export function NotificationPanel() {
     openTab,
     setActiveModule,
     setModule,
+    setActiveTelegramChatId,
   } = useWorkspaceStore();
 
   const [activeFilter, setActiveFilter] = useState<"all" | "unread" | "critical">("all");
@@ -433,19 +449,33 @@ export function NotificationPanel() {
       markNotificationRead(notif.id, true);
       setNotifPanelOpen(false);
 
-      // 2. To'g'ridan-to'g'ri Workspace Document Tab ochish
-      if (notif.targetTab) {
-        openTab(notif.targetTab);
-        return;
+      const targetTab = notif.targetTab;
+      const link = notif.link;
+      const targetModule = targetTab?.module || link?.module;
+      const targetSubMod =
+        link?.subModule ||
+        (targetTab?.id?.includes("telegram-inbox") ? "telegram-inbox" : undefined);
+      const chatId =
+        (targetTab as any)?.documentData?.chatId ||
+        (targetTab as any)?.chatId ||
+        notif.entityCode;
+
+      if (targetModule) {
+        setActiveModule(targetModule);
+        if (targetSubMod) {
+          setModule(targetModule, targetSubMod);
+        }
       }
 
-      // 3. Fallback: modul va submodulga o'tish
-      if (notif.link) {
-        setActiveModule(notif.link.module);
-        setModule(notif.link.module, notif.link.subModule);
+      if (chatId && (notif.category === "crm" || notif.eventType === "telegram_message")) {
+        setActiveTelegramChatId(chatId);
+      }
+
+      if (targetTab) {
+        openTab(targetTab);
       }
     },
-    [markNotificationRead, setNotifPanelOpen, openTab, setActiveModule, setModule]
+    [markNotificationRead, setNotifPanelOpen, openTab, setActiveModule, setModule, setActiveTelegramChatId]
   );
 
   const handleToggleRead = useCallback(

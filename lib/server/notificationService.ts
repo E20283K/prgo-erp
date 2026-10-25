@@ -34,6 +34,7 @@ const DEFAULT_RULES: Required<NotificationRulesConfig> = {
   woStatusEnabled: true,
   stockLowEnabled: true,
   financeDocsEnabled: true,
+  telegramMessagesEnabled: true,
 };
 
 /**
@@ -52,6 +53,7 @@ export async function getNotificationRules(companyCode: string = "PRINTGOO"): Pr
       woStatusEnabled: rules?.woStatusEnabled ?? DEFAULT_RULES.woStatusEnabled,
       stockLowEnabled: rules?.stockLowEnabled ?? DEFAULT_RULES.stockLowEnabled,
       financeDocsEnabled: rules?.financeDocsEnabled ?? DEFAULT_RULES.financeDocsEnabled,
+      telegramMessagesEnabled: rules?.telegramMessagesEnabled ?? DEFAULT_RULES.telegramMessagesEnabled,
     };
   } catch (err) {
     console.error("[getNotificationRules] Error:", err);
@@ -107,6 +109,7 @@ export async function emitNotification(
     if (input.eventType.startsWith("wo_status") && !rules.woStatusEnabled) return null;
     if (input.eventType.startsWith("stock_") && !rules.stockLowEnabled) return null;
     if (input.eventType.startsWith("invoice_") && !rules.financeDocsEnabled) return null;
+    if (input.eventType.startsWith("telegram_") && !rules.telegramMessagesEnabled) return null;
 
     if (input.dedupKey) {
       const existing = await db.query.notifications.findFirst({

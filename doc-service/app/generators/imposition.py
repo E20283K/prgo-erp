@@ -109,18 +109,41 @@ def _draw_cell_dieline_spot(
     def y_pt(top_mm: float) -> float:
         return (sheet_h_mm - top_mm) * mm
 
-    x0_pt = px_mm * mm
-    y0_pt = y_pt(py_mm + ph_mm)  # bottom-left in PDF points
-    y1_pt = y_pt(py_mm)          # top-left in PDF points
-    w_pt = pw_mm * mm
-    h_pt = ph_mm * mm
-
     c.saveState()
     c.setStrokeOverprint(True)
     c.setFillOverprint(False)
     c.setStrokeColor(SPOT_CUT_CONTOUR)
     c.setLineWidth(0.5)
     c.setDash([])
+
+    is_rotated = (
+        req.prodW > 0
+        and req.prodH > 0
+        and ((pw_mm > ph_mm and req.prodW < req.prodH) or (pw_mm < ph_mm and req.prodW > req.prodH))
+    )
+
+    if is_rotated:
+        cx_pt = (px_mm + pw_mm / 2.0) * mm
+        cy_pt = y_pt(py_mm + ph_mm / 2.0)
+        c.translate(cx_pt, cy_pt)
+        c.rotate(-90)
+        c.translate(-cx_pt, -cy_pt)
+
+        draw_pw_mm = ph_mm
+        draw_ph_mm = pw_mm
+        draw_px_mm = (px_mm + pw_mm / 2.0) - draw_pw_mm / 2.0
+        draw_py_mm = (py_mm + ph_mm / 2.0) - draw_ph_mm / 2.0
+    else:
+        draw_px_mm = px_mm
+        draw_py_mm = py_mm
+        draw_pw_mm = pw_mm
+        draw_ph_mm = ph_mm
+
+    x0_pt = draw_px_mm * mm
+    y0_pt = y_pt(draw_py_mm + draw_ph_mm)  # bottom-left in PDF points
+    y1_pt = y_pt(draw_py_mm)               # top-left in PDF points
+    w_pt = draw_pw_mm * mm
+    h_pt = draw_ph_mm * mm
 
     shape_type = (req.shapeType or "rectangle").lower()
     custom_shape = (req.customShape or "").lower()
@@ -431,6 +454,11 @@ def generate_imposition_pdf(req: ImpositionPdfRequest):
                 continue
 
             raw_art = resolve_cell_artwork(cell)
+            is_cell_rotated = (
+                req.prodW > 0
+                and req.prodH > 0
+                and ((pw_mm > ph_mm and req.prodW < req.prodH) or (pw_mm < ph_mm and req.prodW > req.prodH))
+            )
 
             if raw_art is not None:
                 if raw_art["kind"] == "pdf":
@@ -447,15 +475,33 @@ def generate_imposition_pdf(req: ImpositionPdfRequest):
                     try:
                         svg_d = svg2rlg(io.BytesIO(raw_art["bytes"]))
                         if svg_d:
-                            sx = (pw_mm * mm) / max(1.0, float(svg_d.width))
-                            sy = (ph_mm * mm) / max(1.0, float(svg_d.height))
+                            base_c.saveState()
+                            if is_cell_rotated:
+                                cx_pt = (px_mm + pw_mm / 2.0) * mm
+                                cy_pt = y_pt(py_mm + ph_mm / 2.0)
+                                base_c.translate(cx_pt, cy_pt)
+                                base_c.rotate(-90)
+                                base_c.translate(-cx_pt, -cy_pt)
+                                draw_pw = ph_mm
+                                draw_ph = pw_mm
+                                draw_px = (px_mm + pw_mm / 2.0) - draw_pw / 2.0
+                                draw_py = (py_mm + ph_mm / 2.0) - draw_ph / 2.0
+                            else:
+                                draw_px = px_mm
+                                draw_py = py_mm
+                                draw_pw = pw_mm
+                                draw_ph = ph_mm
+
+                            sx = (draw_pw * mm) / max(1.0, float(svg_d.width))
+                            sy = (draw_ph * mm) / max(1.0, float(svg_d.height))
                             sc = min(sx, sy)
                             svg_d.scale(sc, sc)
                             rw = float(svg_d.width) * sc
                             rh = float(svg_d.height) * sc
-                            ox = px_mm * mm + (pw_mm * mm - rw) / 2.0
-                            oy = y_pt(py_mm + ph_mm) + (ph_mm * mm - rh) / 2.0
+                            ox = draw_px * mm + (draw_pw * mm - rw) / 2.0
+                            oy = y_pt(draw_py + draw_ph) + (draw_ph * mm - rh) / 2.0
                             renderPDF.draw(svg_d, base_c, ox, oy)
+                            base_c.restoreState()
                     except Exception as e:
                         print(f"[imposition] SVG cell render error: {e}", flush=True)
                 elif raw_art["kind"] == "image":
@@ -464,14 +510,32 @@ def generate_imposition_pdf(req: ImpositionPdfRequest):
                         img_buf = io.BytesIO()
                         pil_img.convert("RGB").save(img_buf, format="JPEG", quality=95)
                         img_buf.seek(0)
+                        base_c.saveState()
+                        if is_cell_rotated:
+                            cx_pt = (px_mm + pw_mm / 2.0) * mm
+                            cy_pt = y_pt(py_mm + ph_mm / 2.0)
+                            base_c.translate(cx_pt, cy_pt)
+                            base_c.rotate(-90)
+                            base_c.translate(-cx_pt, -cy_pt)
+                            draw_pw = ph_mm
+                            draw_ph = pw_mm
+                            draw_px = (px_mm + pw_mm / 2.0) - draw_pw / 2.0
+                            draw_py = (py_mm + ph_mm / 2.0) - draw_ph / 2.0
+                        else:
+                            draw_px = px_mm
+                            draw_py = py_mm
+                            draw_pw = pw_mm
+                            draw_ph = ph_mm
+
                         base_c.drawImage(
                             ImageReader(img_buf),
-                            px_mm * mm,
-                            y_pt(py_mm + ph_mm),
-                            pw_mm * mm,
-                            ph_mm * mm,
+                            draw_px * mm,
+                            y_pt(draw_py + draw_ph),
+                            draw_pw * mm,
+                            draw_ph * mm,
                             preserveAspectRatio=True,
                         )
+                        base_c.restoreState()
                     except Exception as e:
                         print(f"[imposition] Raster cell render error: {e}", flush=True)
             else:
@@ -628,8 +692,16 @@ def generate_imposition_pdf(req: ImpositionPdfRequest):
             tx, ty, tw, th = placement["trim_box_mm"]
             bleed_val = placement["bleed_mm"]
 
+            # Check if cell slot is landscape vs portrait and detect rotation
+            is_slot_landscape = tw > th
+            is_src_landscape = src_w_mm > src_h_mm
+            is_rotated = is_slot_landscape != is_src_landscape
+
+            effective_src_w = src_h_mm if is_rotated else src_w_mm
+            effective_src_h = src_w_mm if is_rotated else src_h_mm
+
             # Auto-detect whether uploaded PDF already includes bleed or matches net trim size
-            if bleed_val > 0 and abs(src_w_mm - bw) < abs(src_w_mm - tw):
+            if bleed_val > 0 and abs(effective_src_w - bw) < abs(effective_src_w - tw):
                 rx, ry, rw, rh = bx, by, bw, bh
             else:
                 rx, ry, rw, rh = tx, ty, tw, th
@@ -640,7 +712,13 @@ def generate_imposition_pdf(req: ImpositionPdfRequest):
                 (rx + rw) * pt_per_mm,
                 (ry + rh) * pt_per_mm,
             )
-            target_page.show_pdf_page(target_rect, src_doc, pno=0, keep_proportion=True)
+
+            # Prepress standard rotation:
+            # Slot is landscape & src is portrait -> rotate=270 (clockwise in PDF coordinates, moves top to right)
+            # Slot is portrait & src is landscape -> rotate=90
+            rot_angle = 270 if (is_slot_landscape and not is_src_landscape) else (90 if (not is_slot_landscape and is_src_landscape) else 0)
+
+            target_page.show_pdf_page(target_rect, src_doc, pno=0, rotate=rot_angle, keep_proportion=True)
 
         # Place the ReportLab Spot Color Dieline & Registration Overlay on the TOP layer
         full_rect = fitz.Rect(0, 0, sheet_w_mm * pt_per_mm, sheet_h_mm * pt_per_mm)

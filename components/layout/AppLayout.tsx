@@ -12,6 +12,7 @@ import { AiChatSheet } from "./AiChatSheet";
 
 import { MODULE_NAV } from "@/lib/modules";
 import { ElementInspectorOverlay } from "@/components/dev/ElementInspectorOverlay";
+import { useTelegramNotificationPoller } from "@/lib/hooks/useTelegramNotificationPoller";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const {
@@ -27,6 +28,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   } = useWorkspaceStore();
 
   const isPOSActive = activeTabId.includes("pos");
+
+  // Real-time Telegram message notification listener with smart rules
+  useTelegramNotificationPoller();
 
   useEffect(() => {
     try {

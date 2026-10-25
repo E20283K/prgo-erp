@@ -16,6 +16,7 @@ import {
 } from "@/db/schema";
 import { eq, desc, asc, and, sql, or, ilike, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
+import { emitNotification } from "./notificationService";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
@@ -966,6 +967,34 @@ export async function processTelegramWebhookUpdate(
       replyToTelegramMessageId: message.reply_to_message?.message_id,
       sentAt: message.date ? new Date(message.date * 1000) : new Date(),
     });
+
+    // Mijozdan yangi xabar kelganda tizim bildirishnomasini hosil qilish
+    if (isClientMessage) {
+      try {
+        await emitNotification(
+          {
+            dedupKey: `tg-msg-${message.message_id}-${chatRecord.id}`,
+            severity: "info",
+            category: "crm",
+            eventType: "telegram_message",
+            entityCode: chatRecord.chatId,
+            title: `Telegram • ${title}`,
+            description: messageSnippet,
+            link: { module: "crm", subModule: "telegram-inbox" },
+            targetTab: {
+              id: "tab-crm-telegram-inbox",
+              title: "Telegram Inbox",
+              type: "registry",
+              module: "crm",
+              chatId: chatRecord.id,
+            },
+          },
+          companyCode
+        );
+      } catch (err) {
+        console.error("[processTelegramWebhookUpdate] emitNotification error:", err);
+      }
+    }
 
     return { success: true, handled: true };
   } catch (error) {

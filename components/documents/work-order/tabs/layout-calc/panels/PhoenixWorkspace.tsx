@@ -707,25 +707,17 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
             </PopoverContent>
           </Popover>
 
-          {/* Unified Export & CTP Tech Card Dropdown */}
+          {/* Unified Export Dropdown: Montaj PDF & Chizma SVG */}
           <DropdownMenu>
             <DropdownMenuTrigger
               type="button"
               className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded border border-border bg-background hover:bg-muted text-xs font-medium text-foreground transition-colors cursor-pointer"
             >
-              <FileText className="w-3.5 h-3.5 text-blue-600" />
-              <span>Eksport / Tex-Karta</span>
+              <FileDown className="w-3.5 h-3.5 text-foreground" />
+              <span>Eksport</span>
               <ChevronDown className="w-3 h-3 text-muted-foreground" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 text-xs">
-              <DropdownMenuItem
-                onClick={() => calc.setIsJobTicketOpen(true)}
-                className="cursor-pointer font-semibold text-blue-600 dark:text-blue-400"
-              >
-                <FileText className="w-3.5 h-3.5 mr-2" />
-                <span>CTP Tex-Karta (Job Ticket)</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+            <DropdownMenuContent align="end" className="w-52 text-xs">
               <DropdownMenuItem
                 onClick={() => calc.handleExportPDF(false)}
                 className="cursor-pointer"
@@ -744,7 +736,7 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
               )}
               <DropdownMenuItem onClick={calc.handleExportSVG} className="cursor-pointer">
                 <Download className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                <span>Vektor SVG chizma</span>
+                <span>Chizma SVG ({calc.activePlate.name})</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

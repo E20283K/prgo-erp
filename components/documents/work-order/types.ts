@@ -710,6 +710,7 @@ export interface PersistedImpositionState {
     assignedSizeIds?: string[];
     customSheetRun?: number;
   }[];
+  plateCalculations?: any[];
 }
 
 export const FLOOR_OPERATORS = [

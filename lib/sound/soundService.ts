@@ -9,6 +9,7 @@ export interface ToastSoundConfig {
   enabled: boolean;
   theme: ToastSoundTheme;
   volume: number; // 0.0 - 1.0
+  telegramToastEnabled?: boolean;
 }
 
 export interface ToastSoundThemeInfo {

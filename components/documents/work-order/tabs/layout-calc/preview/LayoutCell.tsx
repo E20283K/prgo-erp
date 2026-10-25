@@ -45,6 +45,19 @@ export function LayoutCell({
   const pW = itemW - bleed * 2;
   const pH = itemH - bleed * 2;
 
+  // Detect Albom (Landscape) vs Tik (Portrait) rotation mismatch
+  const isRotated =
+    prodW > 0 &&
+    prodH > 0 &&
+    ((pW > pH && prodW < prodH) || (pW < pH && prodW > prodH));
+
+  const cx = pX1 + pW / 2;
+  const cy = pY1 + pH / 2;
+  const baseW = isRotated ? pH : pW;
+  const baseH = isRotated ? pW : pH;
+  const baseX = cx - baseW / 2;
+  const baseY = cy - baseH / 2;
+
   const isEmpty = cellData.sizeId === "empty";
   const primaryText = cellData.sizeCode || cellData.label || "";
   const modelText = cellData.model || "";
@@ -61,10 +74,10 @@ export function LayoutCell({
     if (isEmpty) {
       return (
         <rect
-          x={pX1}
-          y={pY1}
-          width={pW}
-          height={pH}
+          x={baseX}
+          y={baseY}
+          width={baseW}
+          height={baseH}
           fill="none"
           stroke="#d4d4d8"
           strokeWidth={0.4}
@@ -77,13 +90,13 @@ export function LayoutCell({
     if (shapeType === "custom_die" && customShape === "vector_svg" && parsedSvg) {
       const { pathD } = parsedSvg;
       const vb = parsedSvg.computedBox || parsedSvg.viewBox;
-      const scaleX = vb.width > 0 ? pW / vb.width : 1;
-      const scaleY = vb.height > 0 ? pH / vb.height : 1;
+      const scaleX = vb.width > 0 ? baseW / vb.width : 1;
+      const scaleY = vb.height > 0 ? baseH / vb.height : 1;
       const autoScale = Math.min(scaleX, scaleY);
       const renderedW = vb.width * autoScale;
       const renderedH = vb.height * autoScale;
-      const offsetX = pX1 + (pW - renderedW) / 2 - vb.x * autoScale;
-      const offsetY = pY1 + (pH - renderedH) / 2 - vb.y * autoScale;
+      const offsetX = baseX + (baseW - renderedW) / 2 - vb.x * autoScale;
+      const offsetY = baseY + (baseH - renderedH) / 2 - vb.y * autoScale;
 
       return (
         <path
@@ -100,8 +113,8 @@ export function LayoutCell({
 
     // 2. Arch tag shape
     if (shapeType === "custom_die" && customShape === "arch") {
-      const r = pW / 2;
-      const archPath = `M ${pX1} ${pY1 + r} A ${r} ${r} 0 0 1 ${pX1 + pW} ${pY1 + r} L ${pX1 + pW} ${pY1 + pH} L ${pX1} ${pY1 + pH} Z`;
+      const r = baseW / 2;
+      const archPath = `M ${baseX} ${baseY + r} A ${r} ${r} 0 0 1 ${baseX + baseW} ${baseY + r} L ${baseX + baseW} ${baseY + baseH} L ${baseX} ${baseY + baseH} Z`;
       return (
         <path
           d={archPath}
@@ -115,8 +128,8 @@ export function LayoutCell({
 
     // 3. Ticket notch / pillow shape
     if (shapeType === "custom_die" && ((customShape as any) === "ticket" || customShape === "pillow")) {
-      const notchR = Math.min(pW, pH) * 0.12;
-      const ticketPath = `M ${pX1} ${pY1} L ${pX1 + pW} ${pY1} L ${pX1 + pW} ${pY1 + pH / 2 - notchR} A ${notchR} ${notchR} 0 0 0 ${pX1 + pW} ${pY1 + pH / 2 + notchR} L ${pX1 + pW} ${pY1 + pH} L ${pX1} ${pY1 + pH} L ${pX1} ${pY1 + pH / 2 + notchR} A ${notchR} ${notchR} 0 0 0 ${pX1} ${pY1 + pH / 2 - notchR} Z`;
+      const notchR = Math.min(baseW, baseH) * 0.12;
+      const ticketPath = `M ${baseX} ${baseY} L ${baseX + baseW} ${baseY} L ${baseX + baseW} ${baseY + baseH / 2 - notchR} A ${notchR} ${notchR} 0 0 0 ${baseX + baseW} ${baseY + baseH / 2 + notchR} L ${baseX + baseW} ${baseY + baseH} L ${baseX} ${baseY + baseH} L ${baseX} ${baseY + baseH / 2 + notchR} A ${notchR} ${notchR} 0 0 0 ${baseX} ${baseY + baseH / 2 - notchR} Z`;
       return (
         <path
           d={ticketPath}
@@ -130,16 +143,16 @@ export function LayoutCell({
 
     // 4. Star shape
     if (shapeType === "custom_die" && customShape === "star") {
-      const cx = pX1 + pW / 2;
-      const cy = pY1 + pH / 2;
-      const rOut = Math.min(pW, pH) / 2;
+      const starCx = baseX + baseW / 2;
+      const starCy = baseY + baseH / 2;
+      const rOut = Math.min(baseW, baseH) / 2;
       const rIn = rOut * 0.45;
       let starPts = "";
       for (let p = 0; p < 10; p++) {
         const rad = (p * Math.PI) / 5 - Math.PI / 2;
         const dist = p % 2 === 0 ? rOut : rIn;
-        const px = cx + dist * Math.cos(rad);
-        const py = cy + dist * Math.sin(rad);
+        const px = starCx + dist * Math.cos(rad);
+        const py = starCy + dist * Math.sin(rad);
         starPts += `${px},${py} `;
       }
       return (
@@ -157,9 +170,9 @@ export function LayoutCell({
     if (shapeType === "circle") {
       return (
         <circle
-          cx={pX1 + pW / 2}
-          cy={pY1 + pH / 2}
-          r={Math.min(pW, pH) / 2}
+          cx={baseX + baseW / 2}
+          cy={baseY + baseH / 2}
+          r={Math.min(baseW, baseH) / 2}
           fill="rgba(16, 185, 129, 0.1)"
           stroke={dieStrokeColor}
           strokeWidth={0.7}
@@ -172,10 +185,10 @@ export function LayoutCell({
     if (shapeType === "oval") {
       return (
         <ellipse
-          cx={pX1 + pW / 2}
-          cy={pY1 + pH / 2}
-          rx={pW / 2}
-          ry={pH / 2}
+          cx={baseX + baseW / 2}
+          cy={baseY + baseH / 2}
+          rx={baseW / 2}
+          ry={baseH / 2}
           fill="rgba(16, 185, 129, 0.1)"
           stroke={dieStrokeColor}
           strokeWidth={0.7}
@@ -189,10 +202,10 @@ export function LayoutCell({
       const radius = cornerType.includes("R5") ? 5 : 3;
       return (
         <rect
-          x={pX1}
-          y={pY1}
-          width={pW}
-          height={pH}
+          x={baseX}
+          y={baseY}
+          width={baseW}
+          height={baseH}
           rx={radius}
           ry={radius}
           fill="none"
@@ -206,10 +219,10 @@ export function LayoutCell({
     // 8. Standard rectangle
     return (
       <rect
-        x={pX1}
-        y={pY1}
-        width={pW}
-        height={pH}
+        x={baseX}
+        y={baseY}
+        width={baseW}
+        height={baseH}
         fill="none"
         stroke={strokeColor}
         strokeWidth={0.55}
@@ -237,19 +250,21 @@ export function LayoutCell({
         strokeWidth={0.5}
       />
 
-      {/* Product Real Cut Boundary & Artwork */}
-      {hasVisibleArtwork && (
-        <image
-          href={imageSrc}
-          x={pX1}
-          y={pY1}
-          width={pW}
-          height={pH}
-          preserveAspectRatio="xMidYMid slice"
-          opacity={0.94}
-        />
-      )}
-      {renderCutBoundary()}
+      {/* Product Real Cut Boundary & Artwork (Rotated together if Albom mode) */}
+      <g transform={isRotated ? `rotate(90, ${cx}, ${cy})` : undefined}>
+        {hasVisibleArtwork && (
+          <image
+            href={imageSrc}
+            x={baseX}
+            y={baseY}
+            width={baseW}
+            height={baseH}
+            preserveAspectRatio="xMidYMid slice"
+            opacity={0.94}
+          />
+        )}
+        {renderCutBoundary()}
+      </g>
 
       {/* Top-Left Slot Index Badge */}
       {!isEmpty && pW >= 18 && pH >= 18 && (

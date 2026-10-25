@@ -800,6 +800,7 @@ interface WorkspaceState {
     woStatusEnabled: boolean;
     stockLowEnabled: boolean;
     financeDocsEnabled: boolean;
+    telegramMessagesEnabled: boolean;
   };
   setNotifPanelOpen: (open: boolean) => void;
   loadNotifications: (companyCode?: string) => Promise<void>;
@@ -815,11 +816,16 @@ interface WorkspaceState {
     woStatusEnabled: boolean;
     stockLowEnabled: boolean;
     financeDocsEnabled: boolean;
+    telegramMessagesEnabled: boolean;
   }>, companyCode?: string) => Promise<void>;
 
   // ── Toast Sound Configuration ──────────────────────────────────────────────
   toastSoundConfig: ToastSoundConfig;
   setToastSoundConfig: (config: Partial<ToastSoundConfig>) => void;
+
+  // ── Telegram Active Chat State ─────────────────────────────────────────────
+  activeTelegramChatId: string | null;
+  setActiveTelegramChatId: (id: string | null) => void;
 
   // ── AI Copilot Chat ────────────────────────────────────────────────────────
   isAiChatOpen: boolean;
@@ -3244,6 +3250,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     woStatusEnabled: true,
     stockLowEnabled: true,
     financeDocsEnabled: true,
+    telegramMessagesEnabled: true,
   },
   notifications: [
     {
@@ -3349,6 +3356,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     if (isToastOnly || notif.channel === "both") {
       try {
+        const hasAction = Boolean(notif.targetTab || notif.link);
         toast.add({
           title: notif.title,
           description: notif.description,
@@ -3360,6 +3368,40 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               : notif.severity === "success"
               ? "success"
               : "info",
+          actionProps: hasAction
+            ? {
+                children: "Ochish",
+                onClick: () => {
+                  const targetTab = notif.targetTab;
+                  const link = notif.link;
+                  const targetModule = targetTab?.module || link?.module;
+                  const targetSubMod =
+                    link?.subModule ||
+                    (targetTab?.id?.includes("telegram-inbox")
+                      ? "telegram-inbox"
+                      : undefined);
+                  const chatId =
+                    (targetTab as any)?.documentData?.chatId ||
+                    (targetTab as any)?.chatId ||
+                    notif.entityCode;
+
+                  if (targetModule) {
+                    get().setActiveModule(targetModule);
+                    if (targetSubMod) {
+                      get().setModule(targetModule, targetSubMod);
+                    }
+                  }
+
+                  if (chatId && (notif.category === "crm" || notif.eventType === "telegram_message")) {
+                    get().setActiveTelegramChatId(chatId);
+                  }
+
+                  if (targetTab) {
+                    get().openTab(targetTab);
+                  }
+                },
+              }
+            : undefined,
         });
       } catch (e) {}
     }
@@ -3477,6 +3519,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     enabled: true,
     theme: "modern",
     volume: 0.75,
+    telegramToastEnabled: true,
   },
   setToastSoundConfig: (config) => {
     set((state) => {
@@ -3489,6 +3532,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return { toastSoundConfig: next };
     });
   },
+
+  // ── Telegram Active Chat State ─────────────────────────────────────────────
+  activeTelegramChatId: null,
+  setActiveTelegramChatId: (id) => set({ activeTelegramChatId: id }),
   isAiChatOpen: false,
   setAiChatOpen: (open) => set({ isAiChatOpen: open }),
   toggleAiChat: () => set((state) => ({ isAiChatOpen: !state.isAiChatOpen })),
@@ -3559,6 +3606,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         return {
           tabs: [normalizedTab, ...docTabs],
           activeTabId: normalizedTab.id,
+          ...(normalizedTab.module
+            ? { activeModule: normalizedTab.module, currentModule: normalizedTab.module }
+            : {}),
         };
       }
 

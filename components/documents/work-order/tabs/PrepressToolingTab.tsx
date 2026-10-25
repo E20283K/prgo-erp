@@ -86,7 +86,6 @@ import {
 } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
-import { CtpJobTicketModal } from "./layout-calc/panels/CtpJobTicketModal";
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
@@ -266,9 +265,6 @@ export function PrepressToolingTab({
     notes: "",
   });
   const [poSubmitting, setPoSubmitting] = useState(false);
-
-  // Ctp Job ticket modal
-  const [isCtpModalOpen, setIsCtpModalOpen] = useState(false);
 
   // Statistics
   const stats = useMemo(() => {
@@ -987,16 +983,6 @@ export function PrepressToolingTab({
                 </ContextMenuItem>
               )}
 
-              {selectedItem.category === "ctp_plates" && (
-                <ContextMenuItem
-                  onClick={() => setIsCtpModalOpen(true)}
-                  className="gap-2 cursor-pointer text-blue-600"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>CTP Job Ticket chop etish</span>
-                </ContextMenuItem>
-              )}
-
               <ContextMenuSeparator />
 
               <ContextMenuItem
@@ -1366,30 +1352,7 @@ export function PrepressToolingTab({
         </DialogContent>
       </Dialog>
 
-      {/* 5. CTP Job Ticket Modal */}
-      <CtpJobTicketModal
-        isOpen={isCtpModalOpen}
-        onClose={() => setIsCtpModalOpen(false)}
-        docNo={docNo}
-        orderName={`${formData.customer || ""} - ${formData.product || ""}`}
-        pressMachine={formData.pressMachine}
-        paperStock={formData.paperStock}
-        sheetW={formData.pressSheetW || 700}
-        sheetH={formData.pressSheetH || 1000}
-        prodW={formData.width || 100}
-        prodH={formData.height || 150}
-        plates={[]}
-        effectivePieces={1}
-        ctpSideRelation="shared_front_variable_back"
-        frontColorsCount={4}
-        backColorsCount={0}
-        totalCtpPlates={stats.ctpCount || 4}
-        totalSheetsRun={formData.quantity || 1000}
-        totalProducedYield={formData.quantity || 1000}
-        totalOverproduction={0}
-      />
-
-      {/* 6. Catalog Tooling Picker Modal */}
+      {/* 5. Catalog Tooling Picker Modal */}
       <Dialog open={isCatalogPickerOpen} onOpenChange={setIsCatalogPickerOpen}>
         <DialogContent className="sm:max-w-[660px] w-full p-5 text-xs">
           <DialogHeader>

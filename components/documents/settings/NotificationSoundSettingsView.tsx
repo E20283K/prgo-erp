@@ -23,6 +23,7 @@ import {
   Sparkles,
   Sliders,
   Check,
+  Send,
 } from "lucide-react";
 
 export function NotificationSoundSettingsView() {
@@ -187,6 +188,38 @@ export function NotificationSoundSettingsView() {
               }}
               size="default"
               aria-label={t("masterTitle")}
+            />
+          </div>
+        </div>
+
+        {/* ── CARD 1.5: Telegram CRM Inbox Notifications ── */}
+        <div className="p-3.5 rounded-lg border border-border bg-card shadow-2xs flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-1.5">
+              <Send className="size-3.5 text-blue-500" />
+              <span className="text-xs font-semibold text-foreground block">
+                Telegram CRM xabarlari bildirishnomasi
+              </span>
+            </div>
+            <span className="text-xs text-muted-foreground block">
+              Mijozlardan yangi Telegram xabari kelganda ekranda Toast chiqishi va ovoz yangrashi
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs font-medium text-muted-foreground select-none">
+              {(toastSoundConfig.telegramToastEnabled ?? true) ? t("enabled") : t("disabled")}
+            </span>
+            <Switch
+              checked={toastSoundConfig.telegramToastEnabled ?? true}
+              onCheckedChange={(checked) => {
+                setToastSoundConfig({ telegramToastEnabled: checked });
+                if (checked) {
+                  playToastSound("info", { force: true });
+                }
+              }}
+              size="default"
+              aria-label="Telegram CRM xabarlari bildirishnomasi"
             />
           </div>
         </div>
@@ -376,6 +409,33 @@ export function NotificationSoundSettingsView() {
             >
               <Info className="size-3.5 shrink-0 text-blue-500" />
               <span className="truncate">{t("testInfo")}</span>
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                addNotification({
+                  title: "Telegram • Alisher Usmonov",
+                  description: "Salom, yangi katalog maketini yubordik, ko'rib bera olasizmi?",
+                  severity: "info",
+                  category: "crm",
+                  eventType: "telegram_message",
+                  channel: "both",
+                  link: { module: "crm", subModule: "telegram-inbox" },
+                  targetTab: {
+                    id: "tab-crm-telegram-inbox",
+                    title: "Telegram Inbox",
+                    type: "registry",
+                    module: "crm",
+                  },
+                });
+              }}
+              className="h-8 text-xs gap-1.5 cursor-pointer border-blue-500/40 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 justify-start col-span-2 sm:col-span-4"
+            >
+              <Send className="size-3.5 shrink-0 text-blue-500" />
+              <span className="truncate">Telegram Xabari (Namuna sinash)</span>
             </Button>
           </div>
         </div>

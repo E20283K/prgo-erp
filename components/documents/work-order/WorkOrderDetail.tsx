@@ -2197,6 +2197,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     sizes={formData.sizes || []}
                     defaultQuantity={formData.quantity}
                     docNo={data.docNo || tab.id}
+                    customer={formData.customer}
                     orderName={`${formData.customer ? formData.customer + " — " : ""}${formData.product || data.docNo || tab.id}`}
                     defaultProdW={formData.width}
                     defaultProdH={formData.height}

@@ -1456,6 +1456,177 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.setFont(FONT_REGULAR, 7.5)
         c.drawCentredString((9 + full_w_mm / 2.0) * mm, y_mm(sec11_top + sec11_h / 2.0), "SKU o'lchamlari bo'yicha yagona tasdiqlangan master artwork qo'llaniladi (1-sahifaga qarang)")
 
+    # ─── 12. BOSMA FORMALAR VA TIRAJ TAQSIMOTI (PLATES RUN & YIELD) ───────────
+    sec12_top = sec11_top + sec11_h + 2.5
+    avail_sec12_h = max(25.0, 285.0 - sec12_top)
+
+    # 1. Resolve plates data
+    imp_state = od.get("impositionState") or {}
+    plates_data = imp_state.get("plateCalculations") or od.get("plateCalculations") or []
+
+    press_sheet_w = float(imp_state.get("sheetW") or od.get("pressSheetW") or 500)
+    press_sheet_h = float(imp_state.get("sheetH") or od.get("pressSheetH") or 350)
+    prod_w_val = float(od.get("width") or 50)
+    prod_h_val = float(od.get("height") or 80)
+    eff_pieces = int(imp_state.get("effectivePieces") or ((press_sheet_w // (prod_w_val + 4)) * (press_sheet_h // (prod_h_val + 4))) or 1)
+
+    if not plates_data:
+        # Fallback single plate distribution from sizes_raw
+        p_sheets = math.ceil(net_qty / max(1, eff_pieces))
+        p_assignments = []
+        for s_item in sizes_raw:
+            s_q = int(s_item.get("quantity") or 0)
+            s_slots = max(1, round((s_q / max(1, net_qty)) * eff_pieces))
+            p_assignments.append({
+                "sizeCode": str(s_item.get("size") or s_item.get("sizeCode") or "STD"),
+                "model": str(s_item.get("model") or "STD"),
+                "slots": s_slots,
+                "targetQuantity": s_q,
+                "yieldQuantity": s_slots * p_sheets,
+                "overproduction": max(0, (s_slots * p_sheets) - s_q),
+            })
+        plates_data = [{
+            "id": "plate-1",
+            "name": "Forma 1",
+            "requiredSheets": p_sheets,
+            "unassignedSlots": max(0, eff_pieces - sum(a["slots"] for a in p_assignments)),
+            "totalYield": sum(a["yieldQuantity"] for a in p_assignments),
+            "totalOverproduction": sum(a["overproduction"] for a in p_assignments),
+            "assignments": p_assignments,
+        }]
+
+    total_sheets_run = sum(p.get("requiredSheets", 0) for p in plates_data)
+    total_yield = sum(p.get("totalYield", 0) for p in plates_data)
+    total_over = sum(p.get("totalOverproduction", 0) for p in plates_data)
+    total_sku_count = sum(len(p.get("assignments", [])) for p in plates_data)
+
+    # Dynamic height calculation: banner (5.2) + subheader (4.2) + SKU rows (4.4 each) + padding
+    needed_h = 7.0 + len(plates_data) * 9.8 + total_sku_count * 4.4 + 4.0
+    sec12_h = min(avail_sec12_h, max(28.0, needed_h))
+
+    draw_box(9, sec12_top, full_w_mm, sec12_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
+    draw_panel_header(
+        9.8,
+        sec12_top + 0.8,
+        full_w_mm - 1.6,
+        "BOSMA FORMALAR VA TIRAJ TAQSIMOTI (PLATES RUN & YIELD)",
+        f"{len(plates_data)} FORMA · JAMI {total_sheets_run:,} LIST",
+    )
+
+    curr_y = sec12_top + 6.6
+    for p_idx, plate in enumerate(plates_data):
+        if curr_y + 12.0 > sec12_top + sec12_h:
+            break
+
+        p_name = str(plate.get("name") or f"Forma {p_idx+1}")
+        p_sheets = int(plate.get("requiredSheets") or 0)
+        p_yield = int(plate.get("totalYield") or 0)
+        p_over = int(plate.get("totalOverproduction") or 0)
+        assignments = plate.get("assignments") or []
+        used_s = eff_pieces - int(plate.get("unassignedSlots") or 0)
+        used_pct = round((used_s / max(1, eff_pieces)) * 100)
+
+        # 1. Forma Banner Header
+        banner_h = 5.2
+        draw_box(9.8, curr_y, full_w_mm - 1.6, banner_h, fill_hex="#0f172a", stroke_hex=None)
+        c.setFillColor(colors.white)
+        c.setFont(FONT_BOLD, 6.5)
+        c.drawString(12.0 * mm, y_mm(curr_y + 3.6), f"{p_name.upper()}")
+        c.setFillColor(colors.HexColor("#94a3b8"))
+        c.setFont(FONT_REGULAR, 5.5)
+        c.drawString(32.0 * mm, y_mm(curr_y + 3.6), f"({used_s}/{eff_pieces} joy band · {used_pct}% · {len(assignments)} SKU)")
+
+        # Sheet run highlight
+        c.setFillColor(colors.HexColor("#fef08a"))  # Yellow 200
+        c.setFont(FONT_BOLD, 7.0)
+        c.drawString(82.0 * mm, y_mm(curr_y + 3.6), f"BOSMA TIRAJ: {p_sheets:,} LIST")
+
+        c.setFillColor(colors.white)
+        c.setFont(FONT_BOLD, 6.2)
+        c.drawRightString(165.0 * mm, y_mm(curr_y + 3.6), f"Chiqish: {p_yield:,} dona")
+
+        c.setFillColor(colors.HexColor("#4ade80" if p_over >= 0 else "#f87171"))
+        c.setFont(FONT_BOLD, 6.2)
+        c.drawRightString((9.0 + full_w_mm - 2.5) * mm, y_mm(curr_y + 3.6), f"+{p_over:,}" if p_over >= 0 else f"{p_over:,}")
+
+        curr_y += banner_h
+
+        # 2. Sub-table Column Headers
+        col_hdr_h = 4.2
+        draw_box(9.8, curr_y, full_w_mm - 1.6, col_hdr_h, fill_hex="#f1f5f9", stroke_hex="#cbd5e1", lw=0.4)
+        c.setFillColor(colors.HexColor("#334155"))
+        c.setFont(FONT_BOLD, 5.2)
+        c.drawString(12.0 * mm, y_mm(curr_y + 2.9), "#")
+        c.drawString(20.0 * mm, y_mm(curr_y + 2.9), "MODEL / ARTIKUL")
+        c.drawString(60.0 * mm, y_mm(curr_y + 2.9), "O'LCHAM (SIZE)")
+        c.drawCentredString(96.0 * mm, y_mm(curr_y + 2.9), "MAKETDAGI JOY (SLOTS)")
+        c.drawCentredString(124.0 * mm, y_mm(curr_y + 2.9), "ULUSH (%)")
+        c.drawRightString(150.0 * mm, y_mm(curr_y + 2.9), "BUYURTMA")
+        c.drawRightString(172.0 * mm, y_mm(curr_y + 2.9), "REJA CHIQISH")
+        c.drawRightString((9.0 + full_w_mm - 2.5) * mm, y_mm(curr_y + 2.9), "FARQ (+/-)")
+
+        curr_y += col_hdr_h
+
+        # 3. Individual SKU Rows
+        row_h = 4.4
+        for a_idx, a in enumerate(assignments):
+            if curr_y + row_h > sec12_top + sec12_h - 1.0:
+                break
+
+            s_code = str(a.get("sizeCode") or a.get("sizeLabel") or a.get("size") or "STD")
+            s_model = str(a.get("model") or "STD")
+            s_slots = int(a.get("slots") or 1)
+            s_target = int(a.get("targetQuantity") or 0)
+            s_yield = int(a.get("yieldQuantity") or (s_slots * p_sheets))
+            s_diff = int(a.get("overproduction") if a.get("overproduction") is not None else (s_yield - s_target))
+            s_pct = round((s_slots / max(1, eff_pieces)) * 100, 1)
+
+            # Alternating background
+            if a_idx % 2 == 1:
+                draw_box(9.8, curr_y, full_w_mm - 1.6, row_h, fill_hex="#f8fafc", stroke_hex=None)
+
+            # Row text
+            c.setFillColor(colors.HexColor("#64748b"))
+            c.setFont(FONT_REGULAR, 5.2)
+            c.drawString(12.0 * mm, y_mm(curr_y + 3.1), str(a_idx + 1))
+
+            c.setFillColor(colors.HexColor("#1e293b"))
+            c.setFont(FONT_BOLD, 5.8)
+            draw_fitted_text(c, s_model, 20.0, y_mm(curr_y + 3.1), 38.0, font_name=FONT_BOLD, base_font_size=5.8)
+
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(FONT_BOLD, 6.2)
+            draw_fitted_text(c, s_code, 60.0, y_mm(curr_y + 3.1), 24.0, font_name=FONT_BOLD, base_font_size=6.2)
+
+            c.setFillColor(colors.HexColor("#1d4ed8"))
+            c.setFont(FONT_BOLD, 6.0)
+            c.drawCentredString(96.0 * mm, y_mm(curr_y + 3.1), f"{s_slots} ta joy ({s_slots}x)")
+
+            c.setFillColor(colors.HexColor("#64748b"))
+            c.setFont(FONT_REGULAR, 5.5)
+            c.drawCentredString(124.0 * mm, y_mm(curr_y + 3.1), f"{s_pct}%")
+
+            c.setFillColor(colors.HexColor("#475569"))
+            c.setFont(FONT_REGULAR, 5.8)
+            c.drawRightString(150.0 * mm, y_mm(curr_y + 3.1), f"{s_target:,}")
+
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(FONT_BOLD, 6.2)
+            c.drawRightString(172.0 * mm, y_mm(curr_y + 3.1), f"{s_yield:,}")
+
+            c.setFillColor(colors.HexColor("#15803d" if s_diff >= 0 else "#dc2626"))
+            c.setFont(FONT_BOLD, 5.8)
+            c.drawRightString((9.0 + full_w_mm - 2.5) * mm, y_mm(curr_y + 3.1), f"+{s_diff:,}" if s_diff > 0 else "0" if s_diff == 0 else f"{s_diff:,}")
+
+            # Border line under each SKU
+            c.setStrokeColor(colors.HexColor("#e2e8f0"))
+            c.setLineWidth(0.3)
+            c.line(10.0 * mm, y_mm(curr_y + row_h), (9.0 + full_w_mm - 1.0) * mm, y_mm(curr_y + row_h))
+
+            curr_y += row_h
+
+        curr_y += 2.0  # Spacing between plates
+
     # ─── 12. PAGE 2 FOOTER ─────────────────────────────────────────────────────
     c.setStrokeColor(colors.HexColor("#cbd5e1"))
     c.setLineWidth(0.5)

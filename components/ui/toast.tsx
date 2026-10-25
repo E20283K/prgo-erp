@@ -118,7 +118,7 @@ function ToastDescription({
 
 function ToastAction({
   className,
-  render = <Button variant="outline" size="sm" />,
+  render = <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] font-medium cursor-pointer shrink-0" />,
   ...props
 }: ToastPrimitive.Action.Props) {
   return (
@@ -203,21 +203,58 @@ function ToastIcon({ type }: { type: string | undefined }) {
 }
 
 function ToastList() {
-  const { toasts } = ToastPrimitive.useToastManager()
+  const { toasts, close } = ToastPrimitive.useToastManager()
 
-  return toasts.map((toastItem) => (
-    <Toast key={toastItem.id} toast={toastItem}>
-      <ToastContent>
-        <ToastIcon type={toastItem.type} />
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <ToastTitle />
-          <ToastDescription />
-        </div>
-        <ToastAction />
-        <ToastClose />
-      </ToastContent>
-    </Toast>
-  ))
+  return toasts.map((toastItem) => {
+    const hasAction = Boolean(toastItem.actionProps?.onClick)
+
+    const handleAction = (e: React.MouseEvent) => {
+      e.stopPropagation()
+      toastItem.actionProps?.onClick?.(e as any)
+      close(toastItem.id)
+    }
+
+    return (
+      <Toast
+        key={toastItem.id}
+        toast={toastItem}
+        className={cn(
+          hasAction &&
+            "cursor-pointer hover:border-blue-500/50 dark:hover:border-blue-400/50 transition-colors"
+        )}
+        onClick={(e) => {
+          const target = e.target as HTMLElement | null
+          if (target?.closest("[data-slot='toast-close']")) {
+            return
+          }
+          if (target?.closest("[data-slot='toast-action']")) {
+            return
+          }
+          if (hasAction) {
+            handleAction(e)
+          }
+        }}
+      >
+        <ToastContent>
+          <ToastIcon type={toastItem.type} />
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <ToastTitle />
+            <ToastDescription />
+          </div>
+          {hasAction && (
+            <ToastAction
+              onClick={(e) => {
+                handleAction(e)
+              }}
+            >
+              {(toastItem.actionProps?.children as React.ReactNode) || "Ochish"}
+            </ToastAction>
+          )}
+          <ToastClose />
+        </ToastContent>
+      </Toast>
+    )
+  })
 }
 
 function Toaster({
