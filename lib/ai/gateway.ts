@@ -38,6 +38,30 @@ export function getGeminiApiKeys(): string[] {
     if (k) keys.push(k.trim());
   }
 
+  // If no keys found in process.env (e.g. dev server was running before .env edit), read .env from disk
+  if (keys.length === 0 && typeof process !== "undefined" && typeof window === "undefined") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require("fs");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const path = require("path");
+      const envPath = path.resolve(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf8");
+        for (const line of content.split(/\r?\n/)) {
+          const m = line.match(/^\s*(GEMINI_API_KEY(?:S|_\d+)?)\s*=\s*(.*)?\s*$/);
+          if (m && m[2]) {
+            let v = m[2].trim();
+            if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+              v = v.slice(1, -1);
+            }
+            if (v) keys.push(...v.split(/[,;\n]+/).map((k: string) => k.trim()).filter(Boolean));
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   // De-duplicate while preserving order
   return Array.from(new Set(keys.filter((k) => k.length > 5)));
 }
@@ -240,9 +264,13 @@ export async function executeSmartLocalEngine(
     lower.includes("catalog")
   ) {
     const docMatch = query.match(/(wo[ofldge]*-[\w\d-]+)/i)?.[1];
+    const stopWords = ["buyurtmalar", "buyurtma", "qanday", "zakazlar", "zakaz", "bor", "qanaqa", "nimalar", "ko'rsat", "ro'yxati", "reja", "ishlar", "qaysi"];
+    const words = lower.replace(/[^\w\s-]/g, "").split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
+    const orderTerm = docMatch || (words.length > 0 ? words.join(" ") : undefined);
+
     const res = await executeErpTool(
       "queryWorkOrders",
-      { query: docMatch || query },
+      { query: orderTerm },
       companyCode
     );
     return formatToolResponse(res, "smart_local");
@@ -261,11 +289,16 @@ export async function executeSmartLocalEngine(
     lower.includes("yetishmovchilik") ||
     lower.includes("defitsit") ||
     lower.includes("material") ||
+    lower.includes("mahsulot") ||
     lower.includes("остаток")
   ) {
+    const stopWords = ["omborda", "ombor", "qanday", "mahsulotlar", "mahsulot", "bor", "qoldiq", "qoldiqlari", "qancha", "haqida", "ma'lumot", "ber", "nimalar", "ko'rsat", "ro'yxati", "sklad", "ostatki", "chto", "est", "tekshir", "qaysi"];
+    const words = lower.replace(/[^\w\s-]/g, "").split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
+    const materialTerm = words.length > 0 ? words.join(" ") : undefined;
+
     const res = await executeErpTool(
       "checkWarehouseInventory",
-      { query: query, lowStockOnly: lower.includes("yetishmovchilik") || lower.includes("defitsit") },
+      { query: materialTerm, lowStockOnly: lower.includes("yetishmovchilik") || lower.includes("defitsit") },
       companyCode
     );
     return formatToolResponse(res, "smart_local");
@@ -519,9 +552,14 @@ async function executeGeminiGateway(
   apiKey: string,
   companyCode: string
 ): Promise<CopilotResponse> {
-  const rawModel = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-  const modelName = rawModel.trim().toLowerCase().replace(/\s+/g, "-");
-  const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  const configuredModel = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const modelCandidates = Array.from(
+    new Set([
+      configuredModel.trim().toLowerCase().replace(/\s+/g, "-"),
+      "gemini-3.5-flash",
+      "gemini-2.5-flash",
+    ])
+  );
 
   // Map tool declarations to Gemini format
   const functionDeclarations = ERP_TOOL_DEFINITIONS.map((tool) => ({
@@ -543,92 +581,107 @@ async function executeGeminiGateway(
     parts: [{ text: m.content }],
   }));
 
-  const allToolSteps: CopilotToolStep[] = [];
-  let allActions: CopilotClientAction[] = [];
-  let collectedMetrics: CopilotMetric[] = [];
-  let collectedTable: CopilotTable | undefined;
+  let lastModelError: any = null;
 
-  // Multi-step tool loop (max 3 turns)
-  for (let loop = 0; loop < 3; loop++) {
-    const payload = {
-      systemInstruction,
-      contents,
-      tools: [{ functionDeclarations }],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 1024,
-      },
-    };
+  for (const modelName of modelCandidates) {
+    const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const allToolSteps: CopilotToolStep[] = [];
+    const allActions: CopilotClientAction[] = [];
+    const collectedMetrics: CopilotMetric[] = [];
+    let collectedTable: CopilotTable | undefined;
+    const sessionContents = [...contents];
 
-    const res = await fetch(geminiEndpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    try {
+      // Multi-step tool loop (max 3 turns)
+      for (let loop = 0; loop < 3; loop++) {
+        const payload = {
+          systemInstruction,
+          contents: sessionContents,
+          tools: [{ functionDeclarations }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 1024,
+          },
+        };
 
-    if (!res.ok) {
-      throw new Error(`Gemini API error: ${res.status} ${await res.text()}`);
-    }
+        const res = await fetch(geminiEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(6000), // 6 seconds timeout per attempt
+        });
 
-    const data = await res.json();
-    const candidate = data.candidates?.[0];
-    const parts = candidate?.content?.parts || [];
+        if (!res.ok) {
+          throw new Error(`Gemini API error: ${res.status} ${await res.text()}`);
+        }
 
-    const functionCalls = parts.filter((p: any) => p.functionCall);
+        const data = await res.json();
+        const candidate = data.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
 
-    if (functionCalls.length === 0) {
-      // Model returned final text answer
-      const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text).join("\n");
+        const functionCalls = parts.filter((p: any) => p.functionCall);
+
+        if (functionCalls.length === 0) {
+          // Model returned final text answer
+          const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text).join("\n");
+          return {
+            success: true,
+            message: textParts || "Operatsiya bajarildi.",
+            toolSteps: allToolSteps,
+            actions: allActions,
+            metrics: collectedMetrics.length > 0 ? collectedMetrics : undefined,
+            structuredTable: collectedTable,
+            providerMode: "gemini",
+          };
+        }
+
+        // Execute functions
+        sessionContents.push(candidate.content);
+
+        const responseParts: any[] = [];
+        for (const fc of functionCalls) {
+          const { name, args } = fc.functionCall;
+          const toolRes = await executeErpTool(name, args, companyCode);
+
+          if (toolRes.toolSteps) allToolSteps.push(...toolRes.toolSteps);
+          if (toolRes.actions) allActions.push(...toolRes.actions);
+          if (toolRes.metrics) collectedMetrics.push(...toolRes.metrics);
+          if (toolRes.structuredTable) collectedTable = toolRes.structuredTable;
+
+          responseParts.push({
+            functionResponse: {
+              name,
+              response: {
+                output: toolRes.data || toolRes.textResult,
+                summary: toolRes.summary,
+              },
+            },
+          });
+        }
+
+        sessionContents.push({
+          role: "function",
+          parts: responseParts,
+        });
+      }
+
       return {
         success: true,
-        message: textParts,
+        message: "So'rov bo'yicha operatsiyalar bajarildi.",
         toolSteps: allToolSteps,
         actions: allActions,
-        metrics: collectedMetrics.length > 0 ? collectedMetrics : undefined,
+        metrics: collectedMetrics,
         structuredTable: collectedTable,
         providerMode: "gemini",
       };
+    } catch (err: any) {
+      lastModelError = err;
+      const errStr = String(err?.message || err).toLowerCase();
+      console.warn(`[Gemini Model Cascade] Model ${modelName} failed (${errStr}). Trying next candidate...`);
     }
-
-    // Execute functions
-    contents.push(candidate.content);
-
-    const responseParts: any[] = [];
-    for (const fc of functionCalls) {
-      const { name, args } = fc.functionCall;
-      const toolRes = await executeErpTool(name, args, companyCode);
-
-      if (toolRes.toolSteps) allToolSteps.push(...toolRes.toolSteps);
-      if (toolRes.actions) allActions.push(...toolRes.actions);
-      if (toolRes.metrics) collectedMetrics.push(...toolRes.metrics);
-      if (toolRes.structuredTable) collectedTable = toolRes.structuredTable;
-
-      responseParts.push({
-        functionResponse: {
-          name,
-          response: {
-            output: toolRes.data || toolRes.textResult,
-            summary: toolRes.summary,
-          },
-        },
-      });
-    }
-
-    contents.push({
-      role: "function",
-      parts: responseParts,
-    });
   }
 
-  return {
-    success: true,
-    message: "So'rov bo'yicha operatsiyalar bajarildi.",
-    toolSteps: allToolSteps,
-    actions: allActions,
-    metrics: collectedMetrics,
-    structuredTable: collectedTable,
-    providerMode: "gemini",
-  };
+  throw lastModelError || new Error("All Gemini model candidates failed.");
 }
 
 async function executeOpenAiGateway(

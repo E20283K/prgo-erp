@@ -649,17 +649,26 @@ export async function executeCheckWarehouseInventory(
     }),
   };
 
-  let textResult = `**Ombor xomashyo qoldiqlari tahlili:**\n\n`;
+  let textResult = `**Ombor xomashyo va mahsulotlar qoldiqlari (${filtered.length} ta pozitsiya):**\n\n`;
+  if (filtered.length > 0) {
+    filtered.slice(0, 5).forEach((item) => {
+      const stock = Number(item.stockLevel || 0);
+      const res = Number(item.reserved || 0);
+      const free = Math.max(0, stock - res);
+      const statusText = free <= 0 ? "Kritik kam" : (item.status || "Zaxirada");
+      textResult += `• **${item.name}** (${item.sku || "—"}): Jami: ${stock.toLocaleString()} ${item.unit || "dona"}, Erkin: ${free.toLocaleString()} ${item.unit || "dona"} [${statusText}]\n`;
+    });
+    if (filtered.length > 5) {
+      textResult += `\n*... yana ${filtered.length - 5} ta material ro'yxatda mavjud.*\n`;
+    }
+  } else {
+    textResult += "Ko'rsatilgan so'rov bo'yicha omborda xomashyo topilmadi.\n";
+  }
+
   if (criticalItems.length > 0) {
     const crit = criticalItems[0];
     const free = Math.max(0, Number(crit.stockLevel || 0) - Number(crit.reserved || 0));
-    textResult += `• **Yetishmovchilik aniqlandi**: ${crit.name} (${crit.sku})\n`;
-    textResult += `• **Mavjud qoldiq**: ${Number(crit.stockLevel || 0).toLocaleString()} ${crit.unit || "varaq"}\n`;
-    textResult += `• **Buyurtmalarga band**: ${Number(crit.reserved || 0).toLocaleString()} ${crit.unit || "varaq"}\n`;
-    textResult += `• **Erkin qoldiq**: ${free} ${crit.unit || "varaq"} (Minimal chegara: ${crit.reorder || 1000})\n`;
-    textResult += `• **Holat**: Kritik daraja. Yangi kirim orderi (RCV) yoki xarid buyurtmasi talab etiladi.`;
-  } else {
-    textResult += `Tekshirilgan materiallar bo'yicha barcha zaxiralar xavfsizlik chegarasidan yuqori. Erkin qoldiqlar ishlab chiqarish buyurtmalarini uzluksiz bajarish uchun yetarli.`;
+    textResult += `\n⚠️ **Diqqat (Yetishmovchilik)**: ${crit.name} xomashyosidan atigi ${free} ${crit.unit || "varaq"} erkin qolgan (chegara: ${crit.reorder || 1000}). Yangi kirim orderi talab etiladi.`;
   }
 
   return {

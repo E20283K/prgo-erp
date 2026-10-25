@@ -412,6 +412,7 @@ export function AiChatSheet() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestPayload),
+        signal: AbortSignal.timeout(20000),
       });
 
       if (!res.ok) {
