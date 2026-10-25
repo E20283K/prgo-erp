@@ -36,8 +36,8 @@
   "Auth": {
     "title": "Sign in to PrintGoo",
     "description": "Enter your credentials to access your workspace",
-    "emailLabel": "Email",
-    "emailPlaceholder": "name@printgoo.com",
+    "emailLabel": "Username or email",
+    "emailPlaceholder": "Username or email...",
     "passwordLabel": "Password",
     "forgotPassword": "Forgot password?",
     "forgotPasswordTitle": "Password Reset",
@@ -670,6 +670,7 @@
     "viewGrid": "Data Grid",
     "viewBoard": "Kanban Board",
     "viewCalendar": "Calendar View",
+    "viewTimeline": "Timeline",
     "month": "Month",
     "week": "Week",
     "day": "Day",
@@ -1331,5 +1332,22 @@
     "openTab": "Open document",
     "createDraft": "Open draft",
     "copied": "Copied"
+  },
+  "WorkOrderTimeline": {
+    "order": "Order",
+    "customer": "Customer",
+    "product": "Product",
+    "machine": "Machine",
+    "start": "Start",
+    "deadline": "Deadline",
+    "duration": "Duration",
+    "status": "Status",
+    "overdue": "Overdue",
+    "noDeadline": "No deadline",
+    "noStart": "No start date",
+    "empty": "No orders in this period",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomHint": "Ctrl + Scroll"
   }
 }

@@ -36,8 +36,8 @@
   "Auth": {
     "title": "PrintGoo Girişi",
     "description": "Çalışma alanınıza erişmek için bilgilerinizi girin",
-    "emailLabel": "E-posta",
-    "emailPlaceholder": "ad@printgoo.com",
+    "emailLabel": "Kullanıcı adı veya e-posta",
+    "emailPlaceholder": "Kullanıcı adı veya e-posta...",
     "passwordLabel": "Şifre",
     "forgotPassword": "Şifrenizi mi unuttunuz?",
     "forgotPasswordTitle": "Şifre Sıfırlama",
@@ -668,6 +668,7 @@
     "viewGrid": "Tablo",
     "viewBoard": "Kanban Panosu",
     "viewCalendar": "Takvim",
+    "viewTimeline": "Zaman çizelgesi",
     "month": "Ay",
     "week": "Hafta",
     "day": "Gün",
@@ -1329,5 +1330,22 @@
     "openTab": "Belgeyi aç",
     "createDraft": "Taslağı aç",
     "copied": "Kopyalandı"
+  },
+  "WorkOrderTimeline": {
+    "order": "Sipariş",
+    "customer": "Müşteri",
+    "product": "Ürün",
+    "machine": "Makine",
+    "start": "Başlangıç",
+    "deadline": "Termin",
+    "duration": "Süre",
+    "status": "Durum",
+    "overdue": "Gecikmiş",
+    "noDeadline": "Termin yok",
+    "noStart": "Başlangıç tarihi yok",
+    "empty": "Seçilen dönemde sipariş yok",
+    "zoomIn": "Yakınlaştır",
+    "zoomOut": "Uzaklaştır",
+    "zoomHint": "Ctrl + Tekerlek"
   }
 }

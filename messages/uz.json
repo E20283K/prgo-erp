@@ -36,8 +36,8 @@
   "Auth": {
     "title": "PrintGoo tizimiga kirish",
     "description": "Ish maydoniga kirish uchun ma'lumotlaringizni kiriting",
-    "emailLabel": "Elektron pochta",
-    "emailPlaceholder": "name@printgoo.com",
+    "emailLabel": "Login yoki elektron pochta",
+    "emailPlaceholder": "Login yoki email...",
     "passwordLabel": "Parol",
     "forgotPassword": "Parolni unutdingizmi?",
     "forgotPasswordTitle": "Parolni tiklash",
@@ -670,6 +670,7 @@
     "viewGrid": "Jadval",
     "viewBoard": "Kanban doskasi",
     "viewCalendar": "Taqvim",
+    "viewTimeline": "Timeline",
     "month": "Oy",
     "week": "Hafta",
     "day": "Kun",
@@ -1331,5 +1332,22 @@
     "openTab": "Hujjatni ochish",
     "createDraft": "Qoralamani ochish",
     "copied": "Nusxalandi"
+  },
+  "WorkOrderTimeline": {
+    "order": "Buyurtma",
+    "customer": "Mijoz",
+    "product": "Mahsulot",
+    "machine": "Stanok",
+    "start": "Boshlanish",
+    "deadline": "Muddat",
+    "duration": "Davomiylik",
+    "status": "Holat",
+    "overdue": "Muddati o'tgan",
+    "noDeadline": "Muddatsiz",
+    "noStart": "Boshlanish sanasi yo'q",
+    "empty": "Tanlangan davrda buyurtmalar yo'q",
+    "zoomIn": "Kattalashtirish",
+    "zoomOut": "Kichraytirish",
+    "zoomHint": "Ctrl + G'ildirak"
   }
 }

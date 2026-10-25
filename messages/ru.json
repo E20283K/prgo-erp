@@ -36,8 +36,8 @@
   "Auth": {
     "title": "Вход в систему PrintGoo",
     "description": "Введите учетные данные для доступа к рабочему месту",
-    "emailLabel": "Электронная почта",
-    "emailPlaceholder": "name@printgoo.com",
+    "emailLabel": "Логин или эл. почта",
+    "emailPlaceholder": "Логин или email...",
     "passwordLabel": "Пароль",
     "forgotPassword": "Забыли пароль?",
     "forgotPasswordTitle": "Сброс пароля",
@@ -670,6 +670,7 @@
     "viewGrid": "Таблица",
     "viewBoard": "Канбан-доска",
     "viewCalendar": "Календарь",
+    "viewTimeline": "Таймлайн",
     "month": "Месяц",
     "week": "Неделя",
     "day": "День",
@@ -1331,5 +1332,22 @@
     "openTab": "Открыть документ",
     "createDraft": "Открыть черновик",
     "copied": "Скопировано"
+  },
+  "WorkOrderTimeline": {
+    "order": "Заказ",
+    "customer": "Клиент",
+    "product": "Продукция",
+    "machine": "Станок",
+    "start": "Начало",
+    "deadline": "Срок",
+    "duration": "Длительность",
+    "status": "Статус",
+    "overdue": "Просрочен",
+    "noDeadline": "Без срока",
+    "noStart": "Без даты начала",
+    "empty": "Нет заказов за выбранный период",
+    "zoomIn": "Приблизить",
+    "zoomOut": "Отдалить",
+    "zoomHint": "Ctrl + Колесо"
   }
 }

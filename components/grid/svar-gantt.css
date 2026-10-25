@@ -1,0 +1,85 @@
+.wo-timeline .wx-willow-theme,
+.wo-timeline .wx-willow-dark-theme {
+  --wx-font-family: inherit;
+  --wx-font-size: 12px;
+  --wx-font-size-sm: 11px;
+  --wx-line-height: 18px;
+  --wx-line-height-sm: 14px;
+  --wx-background: var(--background);
+  --wx-background-alt: var(--muted);
+  --wx-background-hover: var(--accent);
+  --wx-color-font: var(--foreground);
+  --wx-color-font-alt: var(--muted-foreground);
+  --wx-color-secondary-font: var(--muted-foreground);
+  --wx-border-color: var(--border);
+  --wx-border: 1px solid var(--border);
+  --wx-border-medium: 1px solid var(--border);
+  --wx-gantt-border-color: var(--border);
+  --wx-gantt-border: 1px solid var(--border);
+  --wx-gantt-bar-shadow: none;
+  --wx-gantt-bar-border-radius: 3px;
+  --wx-gantt-bar-font: 500 10px var(--font-sans, inherit);
+  --wx-gantt-holiday-background: color-mix(in oklch, var(--muted) 45%, transparent);
+  --wx-gantt-holiday-color: var(--muted-foreground);
+  --wx-gantt-select-color: color-mix(in oklch, var(--accent) 60%, transparent);
+  --wx-gantt-marker-color: var(--destructive);
+  --wx-grid-header-font: 600 11px var(--font-sans, inherit);
+  --wx-grid-header-font-color: var(--muted-foreground);
+  --wx-grid-header-shadow: none;
+  --wx-grid-body-font: 400 12px var(--font-sans, inherit);
+  --wx-grid-body-font-color: var(--foreground);
+  --wx-grid-body-row-border: 1px solid var(--border);
+  --wx-grid-cell-padding-x: 8px;
+  --wx-timescale-font: 500 11px var(--font-sans, inherit);
+  --wx-timescale-font-color: var(--muted-foreground);
+  --wx-timescale-shadow: none;
+  --wx-timescale-border: 1px solid var(--border);
+  height: 100%;
+  width: 100%;
+}
+
+.wo-timeline .wx-gantt {
+  background: var(--background);
+}
+
+.wo-timeline .wx-bar:not(.wx-milestone) {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.wo-timeline .wx-bar.wx-milestone .wx-content {
+  background: var(--primary) !important;
+  border-radius: 2px;
+}
+
+.wo-timeline .wx-today {
+  background: color-mix(in oklch, var(--primary) 10%, transparent) !important;
+}
+
+.wo-timeline .wx-weekend {
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+}
+
+.wo-timeline .wx-tooltip-area,
+.wo-timeline .wx-gantt-tooltip {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+
+.wo-timeline .wx-chart {
+  cursor: grab;
+}
+
+.wo-timeline .wx-bar {
+  cursor: pointer;
+}
+
+.wo-timeline-panning,
+.wo-timeline-panning .wx-chart,
+.wo-timeline-panning .wx-bar,
+.wo-timeline-panning * {
+  cursor: grabbing !important;
+}

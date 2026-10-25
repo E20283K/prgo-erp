@@ -53,15 +53,22 @@ import {
   FileText,
   Image as ImageIcon,
   CalendarDays,
+  GanttChart,
   Table as TableIcon,
   AlertTriangle,
   Loader2,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useTranslations } from "next-intl";
 import { WorkOrderCalendarView } from "./WorkOrderCalendarView";
 import { WorkOrdersPrintModal } from "./WorkOrdersPrintModal";
+
+const WorkOrderTimelineView = dynamic(
+  () => import("./WorkOrderTimelineView").then((m) => m.WorkOrderTimelineView),
+  { ssr: false }
+);
 import { evaluateOrderReadiness } from "@/components/documents/work-order/utils/readinessEngine";
 
 export const GLIDE_LIGHT_THEME: Partial<Theme> = {
@@ -280,7 +287,7 @@ export function DataGrid() {
       };
     });
   }, [productionQueue, plants]);
-  const [viewMode, setViewMode] = useState<"grid" | "calendar">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "calendar" | "timeline">("grid");
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
   const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
@@ -899,6 +906,17 @@ export function DataGrid() {
                 >
                   <CalendarDays className="size-3.5" />
                 </button>
+                <button
+                  title={tTasks("viewTimeline")}
+                  onClick={() => setViewMode("timeline")}
+                  className={`p-1 rounded transition-colors ${
+                    viewMode === "timeline"
+                      ? "bg-background text-foreground shadow-2xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <GanttChart className="size-3.5" />
+                </button>
               </div>
             </div>
 
@@ -931,8 +949,19 @@ export function DataGrid() {
             </div>
           </div>
 
-          {/* View Container: Table (Glide Grid) or Calendar */}
-          {viewMode === "calendar" ? (
+          {/* View Container: Table (Glide Grid), Calendar, or Timeline */}
+          {viewMode === "timeline" ? (
+            <div className="flex-1 w-full h-full relative overflow-hidden">
+              <WorkOrderTimelineView
+                orders={filteredRows}
+                onCreateNew={handleCreateNew}
+                currentDate={calendarDate}
+                onDateChange={setCalendarDate}
+                mode={calendarSubMode}
+                onModeChange={setCalendarSubMode}
+              />
+            </div>
+          ) : viewMode === "calendar" ? (
             <div className="flex-1 w-full h-full relative overflow-hidden">
               <WorkOrderCalendarView
                 orders={filteredRows}
