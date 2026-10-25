@@ -14,12 +14,18 @@ import { ArrowDownIcon } from "lucide-react"
 
 const MessageScrollerContext = React.createContext<boolean>(false)
 
-function MessageScrollerProvider(
-  props: React.ComponentProps<typeof MessageScrollerPrimitive.Provider>
-) {
+function MessageScrollerProvider({
+  autoScroll = true,
+  defaultScrollPosition = "end",
+  ...props
+}: React.ComponentProps<typeof MessageScrollerPrimitive.Provider>) {
   return (
     <MessageScrollerContext.Provider value={true}>
-      <MessageScrollerPrimitive.Provider {...props} />
+      <MessageScrollerPrimitive.Provider
+        autoScroll={autoScroll}
+        defaultScrollPosition={defaultScrollPosition}
+        {...props}
+      />
     </MessageScrollerContext.Provider>
   )
 }

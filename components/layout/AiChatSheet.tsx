@@ -153,6 +153,15 @@ export function AiChatSheet() {
   }>({ mouseX: 0, mouseY: 0, x: 0, y: 0, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
 
   const windowRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom("smooth");
+  }, [messages.length, isTyping, scrollToBottom]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Persist messages to localStorage
@@ -713,17 +722,20 @@ export function AiChatSheet() {
             })}
           </div>
 
-          {/* Message Scroller Container */}
+          {/* Message Scroller Container with Auto-Scrolling */}
           <div className="flex-1 min-h-0 relative bg-background/50">
-            <MessageScrollerProvider>
+            <MessageScrollerProvider autoScroll defaultScrollPosition="end">
               <MessageScroller className="h-full">
-                <MessageScrollerViewport className="p-3 space-y-3">
-                  <MessageScrollerContent className="gap-3">
-                    <MessageGroup className="gap-3">
-                      {messages.map((msg) => {
-                        const isUser = msg.role === "user";
-                        return (
-                          <MessageScrollerItem key={msg.id}>
+                <MessageScrollerViewport className="p-3">
+                  <MessageScrollerContent aria-busy={isTyping} className="gap-3">
+                    {messages.map((msg) => {
+                      const isUser = msg.role === "user";
+                      return (
+                        <MessageScrollerItem
+                          key={msg.id}
+                          scrollAnchor={isUser}
+                          className="gap-2"
+                        >
                             <Message align={isUser ? "end" : "start"} className="gap-2">
                               <MessageAvatar
                                 className={cn(
@@ -909,7 +921,7 @@ export function AiChatSheet() {
                       })}
 
                       {isTyping && (
-                        <MessageScrollerItem>
+                        <MessageScrollerItem key="typing-indicator" className="gap-2">
                           <Message align="start" className="gap-2">
                             <MessageAvatar className="w-6 h-6 rounded-md bg-muted border border-border flex items-center justify-center">
                               <Bot className="size-3.5 text-primary animate-pulse" />
@@ -926,17 +938,18 @@ export function AiChatSheet() {
                           </Message>
                         </MessageScrollerItem>
                       )}
-                    </MessageGroup>
-                  </MessageScrollerContent>
-                </MessageScrollerViewport>
 
-                <MessageScrollerButton
-                  direction="end"
-                  className="bottom-3 right-4 shadow-md border-border bg-card"
-                />
-              </MessageScroller>
-            </MessageScrollerProvider>
-          </div>
+                      <div ref={messagesEndRef} className="h-px w-full shrink-0" />
+                    </MessageScrollerContent>
+                  </MessageScrollerViewport>
+
+                  <MessageScrollerButton
+                    direction="end"
+                    className="bottom-3 right-4 shadow-md border-border bg-card text-foreground hover:bg-muted"
+                  />
+                </MessageScroller>
+              </MessageScrollerProvider>
+            </div>
 
           {/* Slash Commands Dropdown Menu */}
           {showSlashMenu && (
