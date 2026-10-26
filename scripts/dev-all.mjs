@@ -1,4 +1,5 @@
 import { spawn, execSync } from "node:child_process";
+import fs from "node:fs";
 
 function runStep(title, command) {
   console.log(`\n🚀 [PrintGoo ERP] ${title}...`);
@@ -7,6 +8,17 @@ function runStep(title, command) {
 
 async function main() {
   try {
+    // 0. Zaruriy paketlar (drizzle-kit, tsx) mavjudligini tekshirish, bo'lmasa avtomatik o'rnatish
+    if (
+      !fs.existsSync("node_modules/drizzle-kit") ||
+      !fs.existsSync("node_modules/tsx")
+    ) {
+      runStep(
+        "Kutubxonalar (node_modules) to'liq emas, yetishmayotgan paketlar o'rnatilmoqda (npm install)",
+        "npm install"
+      );
+    }
+
     // 1. Docker konteynerlarni (PostgreSQL 17, Redis 7, MinIO S3, Python Doc-Service) ishga tushirish
     runStep(
       "1/4 Docker konteynerlar (PostgreSQL 17, Redis 7, MinIO S3, Python Doc-Service) yoqilmoqda",
@@ -51,7 +63,8 @@ async function main() {
     process.on("SIGTERM", shutdown);
   } catch (error) {
     console.error(
-      "\n❌ [PrintGoo ERP] Ishga tushirishda xatolik yuz berdi. Docker Desktop ishlayotganini tekshiring."
+      "\n❌ [PrintGoo ERP] Ishga tushirishda xatolik yuz berdi:",
+      error?.message || error
     );
     process.exit(1);
   }
