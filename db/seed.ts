@@ -142,8 +142,15 @@ async function seedDatabase() {
       .onConflictDoNothing();
   }
 
-  // 5. Flexo Stanoklar (Flexo Machines)
-  console.log("🖨️  3. Fleksografik stanoklar yuklanmoqda...");
+  // 5. Flexo Stanoklar va Silindrlar (Faqat SEED_DEMO_EQUIPMENT=true bo'lganda)
+  const shouldSeedDemoEquipment = process.env.SEED_DEMO_EQUIPMENT === "true";
+  let machinesCount = 0;
+  let cylindersCount = 0;
+  let toolingCount = 0;
+  let itemsCount = 0;
+
+  if (shouldSeedDemoEquipment) {
+    console.log("🖨️  3. Demo fleksografik stanoklar yuklanmoqda...");
   const machinesData = [
     {
       companyId: printgooCompany.id,
@@ -507,21 +514,29 @@ async function seedDatabase() {
     },
   ];
 
-  for (const item of itemsData) {
-    await db
-      .insert(items)
-      .values(item)
-      .onConflictDoUpdate({
-        target: [items.companyId, items.code],
-        set: {
-          name: item.name,
-          category: item.category,
-          standardCost: item.standardCost,
-          sellingPrice: item.sellingPrice,
-          properties: item.properties,
-          updatedAt: new Date(),
-        },
-      });
+    for (const item of itemsData) {
+      await db
+        .insert(items)
+        .values(item)
+        .onConflictDoUpdate({
+          target: [items.companyId, items.code],
+          set: {
+            name: item.name,
+            category: item.category,
+            standardCost: item.standardCost,
+            sellingPrice: item.sellingPrice,
+            properties: item.properties,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    machinesCount = machinesData.length;
+    cylindersCount = JR_1521_CYLINDERS.length;
+    toolingCount = toolingData.length;
+    itemsCount = itemsData.length;
+  } else {
+    console.log("ℹ️  Stanoklar, silindrlar va tovarlar yuklanmadi (Baza toza qoldirildi — o'z haqiqiy stanoklaringizni kiritishingiz mumkin).");
   }
 
   // 9. Audit Log
@@ -534,22 +549,22 @@ async function seedDatabase() {
     action: "create",
     newData: {
       unitsCount: rawUnits.length,
-      machinesCount: machinesData.length,
-      cylindersCount: JR_1521_CYLINDERS.length,
-      toolingCount: toolingData.length,
+      machinesCount,
+      cylindersCount,
+      toolingCount,
       pantoneCount: ALL_PANTONE_COLORS.length,
-      itemsCount: itemsData.length,
+      itemsCount,
     },
   });
 
-  console.log("✅ [2-Bosqich Seed] Master ma'lumotlar to'liq va muvaffaqiyatli bazaga yuklandi!");
+  console.log("✅ [Seed] Baza universal klassifikatorlari muvaffaqiyatli yuklandi!");
   console.log({
     units: rawUnits.length,
     pantoneColors: ALL_PANTONE_COLORS.length,
-    machines: machinesData.length,
-    cylinders: JR_1521_CYLINDERS.length,
-    diesTooling: toolingData.length,
-    items: itemsData.length,
+    machines: machinesCount,
+    cylinders: cylindersCount,
+    diesTooling: toolingCount,
+    items: itemsCount,
   });
 }
 

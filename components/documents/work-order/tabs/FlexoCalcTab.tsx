@@ -51,6 +51,7 @@ import { calculateFlexoLayout, findCylinderCandidates } from "@/lib/flexo/calcul
 import { renderFlexoSVG } from "@/lib/flexo/svgRenderer";
 import { renderFlexoCylinder2DSVG } from "@/lib/flexo/cylinder2DRenderer";
 import { exportFlexoPDF } from "@/lib/flexo/pdfExport";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 
 interface Props {
   defaultQuantity: number;
@@ -134,7 +135,26 @@ export function FlexoCalcTab({
   // Optimizer modal
   const [showOptimizer, setShowOptimizer] = useState<boolean>(false);
   const [cylinderComboboxOpen, setCylinderComboboxOpen] = useState<boolean>(false);
+  const [cylinderFilterInStockOnly, setCylinderFilterInStockOnly] = useState<boolean>(false);
   const [webWidthComboboxOpen, setWebWidthComboboxOpen] = useState<boolean>(false);
+
+  const storeMachines = useWorkspaceStore((s) => s.machines);
+  const activeMachineOwnedTeeth = useMemo(() => {
+    const found = storeMachines.find(
+      (m) =>
+        m.id === machineId ||
+        m.code?.toLowerCase() === machineId?.toLowerCase() ||
+        (m.name && m.name.toLowerCase().includes(machineId.toLowerCase()))
+    );
+    const teethSet = new Set<number>();
+    if (found?.flexoSpecs?.ownedCylinderTeeth) {
+      for (const t of found.flexoSpecs.ownedCylinderTeeth) teethSet.add(t);
+    }
+    if (found?.flexoSpecs?.ownedCylinders) {
+      for (const item of found.flexoSpecs.ownedCylinders) teethSet.add(item.teeth);
+    }
+    return teethSet;
+  }, [storeMachines, machineId]);
 
   // Selected Machine & Material
   const selectedMachine = useMemo(
@@ -646,18 +666,45 @@ export function FlexoCalcTab({
                     </span>
                     <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
                   </PopoverTrigger>
-                  <PopoverContent className="w-[310px] p-0 shadow-lg" align="start">
+                  <PopoverContent className="w-[330px] p-0 shadow-lg" align="start">
                     <Command>
-                      <CommandInput placeholder="Search teeth (e.g. 50, 100), repeat, diameter..." className="h-8 text-xs" />
+                      <div className="p-1 border-b border-border flex items-center justify-between gap-1">
+                        <CommandInput placeholder="Search teeth (e.g. 50, 100), repeat, diameter..." className="h-7 text-xs border-0 focus:ring-0" />
+                        {activeMachineOwnedTeeth.size > 0 && (
+                          <div className="flex items-center shrink-0 border border-border rounded bg-muted/30 p-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setCylinderFilterInStockOnly(false)}
+                              className={`h-5 px-1.5 text-[10px] font-mono rounded ${
+                                !cylinderFilterInStockOnly ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground"
+                              }`}
+                            >
+                              Barchasi
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCylinderFilterInStockOnly(true)}
+                              className={`h-5 px-1.5 text-[10px] font-mono rounded ${
+                                cylinderFilterInStockOnly ? "bg-emerald-600 text-white font-bold" : "text-muted-foreground"
+                              }`}
+                            >
+                              Mavjud ({activeMachineOwnedTeeth.size})
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <CommandList className="max-h-60">
                         <CommandEmpty>No cylinder found.</CommandEmpty>
-                        <CommandGroup heading="Available Cylinders (JR-1521 Data)">
-                          {selectedMachine.availableCylinders.map((cyl) => {
+                        <CommandGroup heading={cylinderFilterInStockOnly ? `Mavjud vallar (${activeMachineOwnedTeeth.size} ta)` : "Barcha vallar (JR-1521 40Z–149Z)"}>
+                          {selectedMachine.availableCylinders
+                            .filter((cyl) => !cylinderFilterInStockOnly || activeMachineOwnedTeeth.has(cyl.teeth))
+                            .map((cyl) => {
                             const isSelected = cyl.teeth === cylinderTeeth;
+                            const isOwned = activeMachineOwnedTeeth.has(cyl.teeth);
                             return (
                               <CommandItem
                                 key={cyl.teeth}
-                                value={`${cyl.teeth}T ${cyl.printingLength}mm ${cyl.cylinderDiameter}mm`}
+                                value={`${cyl.teeth}T ${cyl.teeth}Z ${cyl.printingLength}mm ${cyl.cylinderDiameter}mm ${isOwned ? "mavjud bor" : ""}`}
                                 onSelect={() => {
                                   setCylinderTeeth(cyl.teeth);
                                   setCylinderComboboxOpen(false);
@@ -667,14 +714,19 @@ export function FlexoCalcTab({
                                 }}
                                 className="text-xs cursor-pointer flex items-center justify-between py-1.5 px-2"
                               >
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-bold text-foreground w-9">{cyl.teeth}T</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-bold text-foreground w-8">{cyl.teeth}T</span>
                                   <span className="text-muted-foreground text-[11px]">
                                     Repeat: <strong className="text-foreground">{cyl.printingLength}mm</strong> (Ø {cyl.cylinderDiameter}mm)
                                   </span>
+                                  {isOwned && (
+                                    <span className="text-[9px] px-1 py-0.2 rounded font-mono font-medium text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900">
+                                      Bor
+                                    </span>
+                                  )}
                                   {cyl.needsVerification && (
                                     <span className="text-[10px] text-amber-500 font-semibold" title="Human verification recommended">
-                                      ⚠ Check
+                                      ⚠
                                     </span>
                                   )}
                                 </div>

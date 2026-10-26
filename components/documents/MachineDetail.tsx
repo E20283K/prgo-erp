@@ -32,12 +32,14 @@ import {
   PlayCircle,
   ExternalLink,
   Loader2,
+  CircleDot,
 } from "lucide-react";
 import { MachineOverviewTab } from "./machine/tabs/MachineOverviewTab";
 import { MachineEnergyTab } from "./machine/tabs/MachineEnergyTab";
 import { MachineCostingTab } from "./machine/tabs/MachineCostingTab";
 import { MachineQueueTab } from "./machine/tabs/MachineQueueTab";
 import { MachineMaintenanceTab } from "./machine/tabs/MachineMaintenanceTab";
+import { MachineCylindersTab } from "./machine/tabs/MachineCylindersTab";
 
 export { getCleanBlankMachine as getBlankMachine };
 
@@ -200,6 +202,16 @@ export function MachineDetail({ tab }: MachineDetailProps) {
 
   const navItems: DocumentNavItem[] = [
     { id: "overview", label: "Xususiyatlar", icon: Cpu },
+    ...(machineData.category === "flexo"
+      ? [
+          {
+            id: "cylinders",
+            label: "Silindrlar (Vallar)",
+            icon: CircleDot,
+            badge: `${machineData.flexoSpecs?.ownedCylinders?.length || machineData.flexoSpecs?.ownedCylinderTeeth?.length || 0} ta`,
+          },
+        ]
+      : []),
     {
       id: "energy",
       label: "Elektr Sarfi",
@@ -433,6 +445,13 @@ export function MachineDetail({ tab }: MachineDetailProps) {
         <div className="flex-1 min-w-0 flex flex-col overflow-y-auto p-4 bg-background">
           {activeTab === "overview" && (
             <MachineOverviewTab
+              machine={machineData}
+              onUpdate={handleUpdate}
+            />
+          )}
+
+          {activeTab === "cylinders" && (
+            <MachineCylindersTab
               machine={machineData}
               onUpdate={handleUpdate}
             />

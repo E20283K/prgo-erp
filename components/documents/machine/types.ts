@@ -29,6 +29,14 @@ export interface MachineOffsetSpecs {
   alcoholDosingPercent: string;
 }
 
+export interface FlexoMachineCylinderItem {
+  teeth: number;
+  quantity?: number;
+  location?: string;
+  status?: "ready" | "maintenance" | "damaged";
+  notes?: string;
+}
+
 export interface MachineFlexoSpecs {
   maxWebWidthMm: number;
   minWebWidthMm: number;
@@ -50,6 +58,8 @@ export interface MachineFlexoSpecs {
   rotaryDieStations: number;
   coldFoilUnit: boolean;
   delamRelam: boolean;
+  ownedCylinderTeeth?: number[];
+  ownedCylinders?: FlexoMachineCylinderItem[];
 }
 
 export interface MachineDieCuttingSpecs {

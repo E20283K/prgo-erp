@@ -15,6 +15,13 @@ async function runMigrations() {
   try {
     await migrate(db, { migrationsFolder: "./db/migrations" });
     console.log("✅ [DB Migrate] Barcha migratsiyalar muvaffaqiyatli tatbiq qilindi!");
+  } catch (err: unknown) {
+    const pgCode = (err as { cause?: { code?: string }; code?: string })?.cause?.code || (err as { code?: string })?.code;
+    if (pgCode === "42710" || pgCode === "42P07") {
+      console.log("ℹ️ [DB Migrate] Baza jadvallari va turlari allaqachon mavjud.");
+    } else {
+      throw err;
+    }
   } finally {
     await migrationClient.end();
   }

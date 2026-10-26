@@ -18,8 +18,32 @@ export async function getCompanyIdByCode(code: string = "PRINTGOO"): Promise<str
   if (!comp) {
     // Agar topilmasa, birinchi korxonani olish
     const firstComp = await db.query.companies.findFirst();
-    if (!firstComp) throw new Error("Tizimda korxona (Company) topilmadi!");
-    return firstComp.id;
+    if (firstComp) return firstComp.id;
+
+    // Baza yangi bo'lsa asosiy korxonani avtomatik yaratish
+    const [created] = await db
+      .insert(companies)
+      .values({
+        code: "PRINTGOO",
+        name: "PrintGoo Label & Packaging",
+        legalName: "OOO «PRINTGOO INDUSTRIES»",
+        industryType: "printing",
+        inn: "309841205",
+        baseCurrency: "UZS",
+        settings: {
+          timezone: "Asia/Tashkent",
+          defaultTaxPercent: 12,
+          allowNegativeStock: false,
+          workOrderPrefix: "WO-PG",
+        },
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (created) return created.id;
+
+    const retryComp = await db.query.companies.findFirst();
+    if (!retryComp) throw new Error("Tizimda korxona (Company) topilmadi!");
+    return retryComp.id;
   }
   return comp.id;
 }

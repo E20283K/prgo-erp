@@ -43,10 +43,10 @@ ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]
 
-# 4. Background Worker Runner (BullMQ)
+# 4. Background Worker Runner (BullMQ + Auto DB Migration on Startup)
 FROM base AS worker
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-CMD ["npx", "tsx", "workers/index.ts"]
+CMD ["sh", "-c", "npx tsx db/migrate.ts && npx tsx workers/index.ts"]
