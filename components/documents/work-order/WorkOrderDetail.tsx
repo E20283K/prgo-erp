@@ -117,9 +117,24 @@ import { WorkOrderPackagingSummary, WorkOrderToolingItem } from "./types";
 import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
 import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEngine";
 import { WarehouseStockRecord } from "@/store/workspaceStore";
+import { computeTariffEstimate, TariffRecord } from "@/components/documents/tariff/types";
 
 function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string): WorkOrderToolingItem[] {
+  const hasAppliedImposition = Boolean((data as any).plannedSheets && Number((data as any).plannedSheets) > 0);
+
   if (data.toolingItems && data.toolingItems.length > 0) {
+    // Filter out legacy auto-generated placeholder CTP item if imposition has not been applied yet
+    if (!hasAppliedImposition) {
+      return data.toolingItems.filter(
+        (item) =>
+          !(
+            item.category === "ctp_plates" &&
+            item.status === "Draft" &&
+            !item.purchaseOrderNo &&
+            item.specDetails.includes("(CMYK 4 rang)")
+          )
+      );
+    }
     return data.toolingItems;
   }
 
@@ -127,21 +142,10 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
   const dept = data.department || "Offset";
   const isUsd = (data.currency || "UZS").toUpperCase() === "USD";
 
-  // 1. CTP metall formalar
-  if (dept === "Offset") {
-    items.push({
-      id: `TL-CTP-${Date.now()}`,
-      category: "ctp_plates",
-      name: `${docNo || "WO"} CTP Metall Formalar Komplekti`,
-      specDetails: `Format: ${data.pressSheetW || 700}×${data.pressSheetH || 1000} mm (CMYK 4 rang)`,
-      quantity: 4,
-      unit: "dona",
-      estimatedCost: isUsd ? 25 : 300000,
-      currency: data.currency || "UZS",
-      status: "Draft",
-      createdAt: new Date().toISOString(),
-    });
-  } else if (dept === "Flexo") {
+  // 1. CTP / Polimer formalar:
+  // Offset uchun CTP formalar faqat Imposition ("Montaj / Hisob") bo'limida
+  // "Buyurtmaga qo'llash" tugmasi bosilgandan keyin haqiqiy qolip formati va soni bilan shakllanadi.
+  if (dept === "Flexo") {
     items.push({
       id: `TL-FLX-${Date.now()}`,
       category: "flexo_polymer",
@@ -377,6 +381,135 @@ export function syncBomWithSpecs(
   return items;
 }
 
+export function recalculateRouteStepsForOrder(
+  steps: RouteStep[],
+  form: Partial<WorkOrderFormData>,
+  tariffs: TariffRecord[] = []
+): RouteStep[] {
+  const orderQty = Math.max(0, Number(form.quantity) || 0);
+  const plannedSheets = Math.max(0, Number((form as any).plannedSheets) || 0);
+  const ctpItem = (form.toolingItems || []).find(
+    (t) => t.category === "ctp_plates" || t.category === "flexo_polymer"
+  );
+  const ctpCount = ctpItem ? Math.max(1, Number(ctpItem.quantity) || 1) : 4;
+
+  return steps.map((op, idx) => {
+    const isPlateOp =
+      op.calcUnit === "1 plate" || /ctp|qolip|polimer|plate/i.test(op.name || "");
+    const isSheetOp =
+      !isPlateOp &&
+      (op.calcUnit === "1,000 sheets" ||
+        op.calcUnit === "1,000 impressions" ||
+        op.calcUnit === "1,000 strokes" ||
+        op.calcUnit === "1,000 glue passes" ||
+        (plannedSheets > 0 && /bosma|laminat|lak|tigel|kashirovka/i.test(op.name || "")));
+
+    let targetNum = orderQty;
+    let unitSuffix = "";
+    if (isPlateOp) {
+      targetNum = ctpCount;
+      unitSuffix = " dona";
+    } else if (isSheetOp && plannedSheets > 0) {
+      targetNum = plannedSheets;
+      unitSuffix = " list";
+    }
+
+    const doneMatch = (op.qtyCompleted || "").match(/^([\d,\s]+)\s*\//);
+    const donePrefix = doneMatch ? doneMatch[1].trim() : "0";
+    const nextQtyCompleted = `${donePrefix} / ${targetNum.toLocaleString()}${unitSuffix}`;
+
+    const matchedTariff =
+      tariffs.find(
+        (t) =>
+          (op.tariffId && t.id === op.tariffId) ||
+          (op.tariffCode && t.code === op.tariffCode)
+      ) || null;
+
+    if (matchedTariff) {
+      const est = computeTariffEstimate(matchedTariff, targetNum);
+      return {
+        ...op,
+        stepNumber: (idx + 1) * 10,
+        qtyCompleted: nextQtyCompleted,
+        tariffId: matchedTariff.id,
+        tariffCode: matchedTariff.code,
+        calcUnit: matchedTariff.unit,
+        unitDivisor: matchedTariff.unitDivisor,
+        rateUsd: est.effectiveRate,
+        setupFeeUsd: est.effectiveSetup,
+        pieceworkRateUsd: matchedTariff.pieceworkRateUsd,
+        plannedCostUsd: est.netCost,
+        pieceworkTotalUsd: est.pieceworkTotal,
+        duration:
+          est.totalMachineHours > 0
+            ? Number(est.totalMachineHours.toFixed(1))
+            : op.duration || 1,
+      };
+    }
+
+    const divisor = op.unitDivisor && op.unitDivisor > 0 ? op.unitDivisor : 1000;
+    const units = targetNum / divisor;
+    const hasRates = (op.rateUsd && op.rateUsd > 0) || (op.pieceworkRateUsd && op.pieceworkRateUsd > 0);
+
+    return {
+      ...op,
+      stepNumber: (idx + 1) * 10,
+      qtyCompleted: nextQtyCompleted,
+      ...(hasRates
+        ? {
+            plannedCostUsd: Number(((op.setupFeeUsd || 0) + units * (op.rateUsd || 0)).toFixed(2)),
+            pieceworkTotalUsd: Number((units * (op.pieceworkRateUsd || 0)).toFixed(2)),
+          }
+        : {}),
+    };
+  });
+}
+
+export function buildOperationsFromSpec(
+  spec: any,
+  form: Partial<WorkOrderFormData>,
+  tariffs: TariffRecord[] = []
+): RouteStep[] {
+  const specOps = spec && Array.isArray(spec.operations) ? spec.operations : [];
+  if (specOps.length > 0) {
+    const rawSteps: RouteStep[] = specOps.map((op: any, idx: number) => {
+      const rawMachine = op.machineStr || op.machine || "";
+      const resolvedMachine =
+        rawMachine === "PRESS_MACHINE" || (!rawMachine && /bosma|print/i.test(op.name || ""))
+          ? form.pressMachine || ""
+          : rawMachine;
+      return {
+        id: op.id ? `op-spec-${idx + 1}-${op.id}` : `op-spec-${idx + 1}-${Date.now()}`,
+        stepNumber: (idx + 1) * 10,
+        name: op.name || "",
+        department: spec.department || form.department,
+        machine: resolvedMachine,
+        operator: op.operator || "",
+        duration: Number(op.durationHours ?? op.duration ?? 1),
+        qtyCompleted: `0 / ${(Number(form.quantity) || 0).toLocaleString()}`,
+        status: "Queued",
+        tariffId: op.tariffId,
+        tariffCode: op.tariffCode,
+        calcUnit: op.calcUnit,
+        unitDivisor: op.unitDivisor,
+        rateUsd: op.rateUsd !== undefined ? Number(op.rateUsd) : undefined,
+        setupFeeUsd: op.setupFeeUsd !== undefined ? Number(op.setupFeeUsd) : undefined,
+        pieceworkRateUsd:
+          op.pieceworkRateUsd !== undefined ? Number(op.pieceworkRateUsd) : undefined,
+      };
+    });
+    return recalculateRouteStepsForOrder(rawSteps, form, tariffs);
+  }
+
+  const fallback = getInitialOperations(
+    spec?.code || form.recipe || "",
+    form.pressMachine || "",
+    spec?.department || form.department || "Offset",
+    Number(form.quantity) || 0
+  );
+  return recalculateRouteStepsForOrder(fallback, form, tariffs);
+}
+
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
   const tAct = useTranslations("DeliveryAct");
@@ -388,6 +521,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     machines: storeMachines,
     warehouseStock,
     plants,
+    tariffs,
   } = useWorkspaceStore(
     useShallow((s) => ({
       currentUser: s.currentUser,
@@ -396,6 +530,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       machines: s.machines,
       warehouseStock: s.warehouseStock,
       plants: s.plants,
+      tariffs: s.tariffs,
     }))
   );
 
@@ -430,6 +565,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (s.machines.length === 0 && s.loadMachines) {
       s.loadMachines();
     }
+    if (s.employees.length === 0 && s.loadEmployees) {
+      s.loadEmployees();
+    }
     if (s.warehouseStock.length === 0 && s.loadWarehouseStock) {
       s.loadWarehouseStock();
     }
@@ -438,6 +576,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     }
     if (!s.plants || s.plants.length === 0) {
       if (s.fetchPlants) s.fetchPlants();
+    }
+    if (!s.tariffs || s.tariffs.length === 0) {
+      if (s.fetchTariffs) s.fetchTariffs();
     }
   }, []);
   const isDark = theme === "dark";
@@ -638,12 +779,22 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     financials: data.financials || initialQueueItem?.financials,
     parentWorkOrderId: data.parentWorkOrderId || data.linkedWoId || undefined,
     isReorder: data.isReorder ?? Boolean(data.parentWorkOrderId),
-    toolingItems:
-      data.toolingItems ||
-      (data.dimensions as any)?.toolingItems ||
-      initialQueueItem?.toolingItems ||
-      (initialQueueItem?.dimensions as any)?.toolingItems ||
-      getInitialToolingItems(data, docNo || tab.id),
+    toolingItems: getInitialToolingItems(
+      {
+        ...initialQueueItem,
+        ...data,
+        toolingItems:
+          data.toolingItems ||
+          (data.dimensions as any)?.toolingItems ||
+          initialQueueItem?.toolingItems ||
+          (initialQueueItem?.dimensions as any)?.toolingItems,
+        plannedSheets:
+          (data as any).plannedSheets ||
+          (initialQueueItem as any)?.plannedSheets ||
+          (data.dimensions as any)?.plannedSheets,
+      },
+      docNo || tab.id
+    ),
     parentSheetW: data.parentSheetW || (initialQueueItem as any)?.parentSheetW || (data.dimensions as any)?.parentSheetW,
     parentSheetH: data.parentSheetH || (initialQueueItem as any)?.parentSheetH || (data.dimensions as any)?.parentSheetH,
     pressSheetW: data.pressSheetW || (initialQueueItem as any)?.pressSheetW || (data.dimensions as any)?.pressSheetW,
@@ -896,13 +1047,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   );
 
   const prevRecipeRef = React.useRef(formData.recipe);
-  React.useEffect(() => {
-    // Only reset operations if the RECIPE template was changed to a different one
-    if (formData.recipe && prevRecipeRef.current !== formData.recipe) {
-      prevRecipeRef.current = formData.recipe;
-      setOperations(getInitialOperations(formData.recipe, formData.pressMachine, formData.department, formData.quantity));
-    }
-  }, [formData.recipe]);
 
   const [opSelection, setOpSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -1053,6 +1197,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
 
   const handleSelectProductTemplate = (spec: MasterSpecification) => {
+    prevRecipeRef.current = spec.code;
     handleFieldChange("product", spec.name);
     handleFieldChange("recipe", spec.code);
     if (spec.department && spec.department !== formData.department) {
@@ -1065,11 +1210,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       setCurrentBomItems(newItems);
       handleFieldChange("materials", newItems);
     }
-    // Load technological route operations
-    const initialOps = getInitialOperations(spec.code, formData.pressMachine, spec.department || formData.department, formData.quantity);
-    if (initialOps && initialOps.length > 0) {
-      setOperations(initialOps);
-      handleFieldChange("operations", initialOps);
+    // Load technological route operations directly from the specification
+    const specOps = buildOperationsFromSpec(
+      spec,
+      { ...formData, department: spec.department || formData.department },
+      tariffs || []
+    );
+    if (specOps && specOps.length > 0) {
+      setOperations(specOps);
+      handleFieldChange("operations", specOps);
     }
     setTabUnsaved(tab.id, true);
     addNotification({
@@ -1090,7 +1239,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const specId = `SPEC-${specData.department.slice(0, 3).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
     const costEstimate = `$${(specData.materials.length * 450).toLocaleString()}`;
 
-    // 1. Persist new spec in workspace store
+    // 1. Persist new spec in workspace store with full material and operation details
     upsertMasterSpecification({
       id: specId,
       code: specData.code,
@@ -1111,11 +1260,21 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       operations: specData.operations.map((op) => ({
         id: op.id,
         name: op.name,
-        machineStr: op.machine || "Standard Machine",
+        machineStr: op.machine || "",
+        durationHours: op.duration,
+        operator: op.operator,
+        tariffId: op.tariffId,
+        tariffCode: op.tariffCode,
+        rateUsd: op.rateUsd,
+        setupFeeUsd: op.setupFeeUsd,
+        pieceworkRateUsd: op.pieceworkRateUsd,
+        calcUnit: op.calcUnit,
+        unitDivisor: op.unitDivisor,
       })),
     });
 
     // 2. Automatically link current work order to newly created recipe
+    prevRecipeRef.current = specData.code;
     handleFieldChange("recipe", specData.code);
     if (specData.department !== formData.department) {
       handleDepartmentChange(specData.department);
@@ -1156,19 +1315,46 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     [masterSpecifications, dbSpecs, formData.recipe]
   );
 
-  // Auto-populate materials from activeSpec if currentBomItems is empty
+  // Synchronize operations when recipe template is changed (e.g. from BOM Shablon biriktirish)
+  useEffect(() => {
+    if (!formData.recipe) {
+      prevRecipeRef.current = "";
+      return;
+    }
+    if (prevRecipeRef.current !== formData.recipe) {
+      prevRecipeRef.current = formData.recipe;
+      const specOps = buildOperationsFromSpec(activeSpec, formData, tariffs || []);
+      setOperations(specOps);
+      updateTabData(tab.id, { operations: specOps });
+    }
+  }, [formData.recipe, activeSpec]);
+
+  // Auto-populate materials and operations from activeSpec on initial load if empty
   const hasAutoPopulatedSpecRef = React.useRef(false);
   useEffect(() => {
     if (hasAutoPopulatedSpecRef.current) return;
-    if (activeSpec && (activeSpec as any).materials && Array.isArray((activeSpec as any).materials) && (activeSpec as any).materials.length > 0) {
-      if (!currentBomItems || currentBomItems.length === 0) {
-        hasAutoPopulatedSpecRef.current = true;
-        const loaded = (activeSpec as any).materials.map(normalizeBomItem);
+    if (activeSpec) {
+      let didPopulate = false;
+      const specMats = (activeSpec as any).materials;
+      if (Array.isArray(specMats) && specMats.length > 0 && (!currentBomItems || currentBomItems.length === 0)) {
+        didPopulate = true;
+        const loaded = specMats.map(normalizeBomItem);
         setCurrentBomItems(loaded);
         updateTabData(tab.id, { materials: loaded });
       }
+      if (!operations || operations.length === 0) {
+        didPopulate = true;
+        const loadedOps = buildOperationsFromSpec(activeSpec, formData, tariffs || []);
+        if (loadedOps.length > 0) {
+          setOperations(loadedOps);
+          updateTabData(tab.id, { operations: loadedOps });
+        }
+      }
+      if (didPopulate) {
+        hasAutoPopulatedSpecRef.current = true;
+      }
     }
-  }, [activeSpec, currentBomItems, tab.id, updateTabData]);
+  }, [activeSpec, currentBomItems, operations, tab.id, updateTabData, formData, tariffs]);
   const activeSite = useMemo(
     () =>
       (plants && plants.find((p: any) => p.id === formData.site || p.name === formData.site)
@@ -1231,8 +1417,42 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     [allDbMachines, formData.department]
   );
 
-  const currentRecipeMaterials = RECIPE_MATERIALS[formData.recipe] || [];
-  const hasShortage = currentRecipeMaterials.some((m) => m.req > m.stock);
+  const currentRecipeMaterials = useMemo(() => {
+    if (currentBomItems && currentBomItems.length > 0) {
+      return currentBomItems.map((item) => {
+        const req = item.actualQty !== undefined ? Number(item.actualQty) : Number(item.qty || 0);
+        const isClient = item.acquisitionSource === "client" || item.supplier?.toLowerCase().includes("mijoz");
+        const matchedStock = warehouseStock.find(
+          (ws) =>
+            ws.sku.toLowerCase() === (item.id || "").toLowerCase() ||
+            ws.name.toLowerCase() === (item.name || "").toLowerCase()
+        );
+        const stock = isClient
+          ? req
+          : matchedStock
+          ? matchedStock.available
+          : item.warehouseAvailable !== undefined
+          ? Number(item.warehouseAvailable)
+          : item.availability === "On Order"
+          ? 0
+          : req;
+        return {
+          code: item.id,
+          name: item.name,
+          req,
+          stock,
+          unit: item.unit || "dona",
+          costPerUnit: Number(item.unitPrice || 0),
+        };
+      });
+    }
+    return RECIPE_MATERIALS[formData.recipe] || [];
+  }, [currentBomItems, warehouseStock, formData.recipe]);
+
+  const hasShortage = useMemo(
+    () => currentRecipeMaterials.some((m) => m.req > m.stock),
+    [currentRecipeMaterials]
+  );
 
   const deadlineCountdown = useMemo(() => {
     if (!formData.deadline) return null;
@@ -1328,16 +1548,35 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       ].includes(f)
     );
 
+    const shouldSyncOperations =
+      !updates.operations &&
+      Object.keys(updates).some((f) =>
+        ["quantity", "plannedSheets", "toolingItems"].includes(f)
+      );
+
     const nextForm = { ...formData, ...updates };
-    setFormData(nextForm);
+    setFormData((prev) => ({ ...prev, ...updates }));
+
+    let nextOps = operations;
+    if (shouldSyncOperations && operations.length > 0) {
+      nextOps = recalculateRouteStepsForOrder(operations, nextForm, tariffs || []);
+      setOperations(nextOps);
+    }
 
     if (shouldSyncBom) {
       const synced = syncBomWithSpecs(currentBomItems, nextForm, warehouseStock);
       setCurrentBomItems(synced);
-      updateTabData(tab.id, { ...updates, materials: synced });
+      updateTabData(tab.id, {
+        ...updates,
+        materials: synced,
+        ...(shouldSyncOperations ? { operations: nextOps } : {}),
+      });
       syncPaperReadiness(synced);
     } else {
-      updateTabData(tab.id, updates);
+      updateTabData(tab.id, {
+        ...updates,
+        ...(shouldSyncOperations ? { operations: nextOps } : {}),
+      });
     }
 
     setTabUnsaved(tab.id, true);
@@ -1350,14 +1589,21 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       ...(newSizes.length > 0 && total > 0 ? { quantity: total } : {}),
     };
     const updatedForm = { ...formData, ...updates };
-    setFormData(updatedForm);
+    setFormData((prev) => ({ ...prev, ...updates }));
     updateTabData(tab.id, updates);
     setTabUnsaved(tab.id, true);
 
     if (newSizes.length > 0) {
       const synced = syncBomWithSpecs(currentBomItems, updatedForm, warehouseStock);
       setCurrentBomItems(synced);
-      updateTabData(tab.id, { materials: synced });
+      const nextOps =
+        operations.length > 0
+          ? recalculateRouteStepsForOrder(operations, updatedForm, tariffs || [])
+          : operations;
+      if (operations.length > 0) {
+        setOperations(nextOps);
+      }
+      updateTabData(tab.id, { materials: synced, operations: nextOps });
       syncPaperReadiness(synced);
     }
   };
@@ -1633,9 +1879,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setOpDialogForm({
       stepNumber: nextStepNum,
       name: "",
-      machine: formData.pressMachine || "Heidelberg Speedmaster XL 106",
-      operator: "K. Anderson",
-      operators: ["K. Anderson"],
+      machine: formData.pressMachine || "",
+      operator: "",
+      operators: [],
       duration: 1,
       qtyCompleted: `0 / ${(formData.quantity || 5000).toLocaleString()}`,
       status: "Queued",
@@ -1686,22 +1932,25 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleSaveOperationDialog = () => {
+    let nextOps: RouteStep[];
     if (editingOpIndex !== null) {
       const updated = [...operations];
       updated[editingOpIndex] = {
         ...updated[editingOpIndex],
         ...opDialogForm,
       };
-      setOperations(updated);
+      nextOps = updated;
     } else {
-      setOperations([
+      nextOps = [
         ...operations,
         {
           id: String(Date.now()),
           ...opDialogForm,
         },
-      ]);
+      ];
     }
+    setOperations(nextOps);
+    updateTabData(tab.id, { operations: nextOps });
     setTabUnsaved(tab.id, true);
     setIsOpDialogOpen(false);
   };
@@ -1709,8 +1958,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleDeleteSelectedOperation = () => {
     const selectedRows = opSelection.rows.toArray();
     if (selectedRows.length === 0) return;
-    const remaining = operations.filter((_, idx) => !selectedRows.includes(idx));
+    const remaining = operations
+      .filter((_, idx) => !selectedRows.includes(idx))
+      .map((op, idx) => ({
+        ...op,
+        stepNumber: (idx + 1) * 10,
+      }));
     setOperations(remaining);
+
+    // If a recipe template was active and operation(s) are deleted from it, detach the recipe
+    if (formData.recipe) {
+      prevRecipeRef.current = "";
+      setFormData((prev) => ({ ...prev, recipe: "" }));
+      updateTabData(tab.id, { recipe: "", operations: remaining });
+    } else {
+      updateTabData(tab.id, { operations: remaining });
+    }
+
     setOpSelection({
       columns: CompactSelection.empty(),
       rows: CompactSelection.empty(),
@@ -2475,6 +2739,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     pressSheetW={formData.pressSheetW}
                     pressSheetH={formData.pressSheetH}
                     plannedSheets={formData.plannedSheets}
+                    appliedCtpPlates={(formData.toolingItems || []).find((t) => t.category === "ctp_plates")?.quantity}
                     lamination={formData.lamination}
                     embellishment={formData.embellishment}
                     isOperator={isOperator}
@@ -2506,23 +2771,32 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       const currentTools = formData.toolingItems || [];
                       const ctpIdx = currentTools.findIndex((t) => t.category === "ctp_plates");
                       let nextTooling = [...currentTools];
+                      const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
+                      const unitCtpCost = isUsd ? 6 : 75000;
+                      const currentOrderNo = docNo || data.docNo || tab.id;
+
                       if (ctpIdx >= 0) {
-                        nextTooling[ctpIdx] = {
-                          ...nextTooling[ctpIdx],
-                          quantity: payload.totalCtpPlates,
-                          specDetails: payload.ctpSpecDetails,
-                        };
+                        if (payload.totalCtpPlates > 0) {
+                          nextTooling[ctpIdx] = {
+                            ...nextTooling[ctpIdx],
+                            name: `${currentOrderNo} CTP Metall Formalar Komplekti`,
+                            quantity: payload.totalCtpPlates,
+                            specDetails: payload.ctpSpecDetails,
+                            estimatedCost: unitCtpCost * payload.totalCtpPlates,
+                          };
+                        } else {
+                          nextTooling.splice(ctpIdx, 1);
+                        }
                       } else if (payload.totalCtpPlates > 0) {
-                        const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
                         nextTooling = [
                           {
                             id: `TL-CTP-${Date.now()}`,
                             category: "ctp_plates",
-                            name: `${data.docNo || tab.id} CTP Metall Formalar Komplekti`,
+                            name: `${currentOrderNo} CTP Metall Formalar Komplekti`,
                             specDetails: payload.ctpSpecDetails,
                             quantity: payload.totalCtpPlates,
                             unit: "dona",
-                            estimatedCost: (isUsd ? 6 : 75000) * payload.totalCtpPlates,
+                            estimatedCost: unitCtpCost * payload.totalCtpPlates,
                             currency: formData.currency || "UZS",
                             status: "Draft",
                             createdAt: new Date().toISOString(),
@@ -2530,6 +2804,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                           ...nextTooling,
                         ];
                       }
+
+                      const totalCost = nextTooling.reduce(
+                        (sum, it) => sum + (it.actualCost !== undefined ? it.actualCost : it.estimatedCost || 0),
+                        0
+                      );
 
                       handleFieldChange({
                         ...(payload.paperStock ? { paperStock: payload.paperStock } : {}),
@@ -2540,6 +2819,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                         plannedSheets: payload.plannedParentSheets,
                         ...(payload.printMethod ? { printMethod: payload.printMethod } : {}),
                         toolingItems: nextTooling,
+                        toolingProcurementCost: totalCost,
+                        toolingProcurementNeeded: nextTooling.some(
+                          (it) => it.status === "Draft" || it.status === "Ordered"
+                        ),
                       });
                       setTabUnsaved(tab.id, true);
                       addNotification({
@@ -2663,6 +2946,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onOpenTab={openTab}
                 isOperator={isOperator}
                 onItemsChange={(newItems) => {
+                  const hadPrimarySubstrate = currentBomItems.some(
+                    (i) => i.category === "Paper & Board" || i.category === "Roll & Label"
+                  );
                   setCurrentBomItems(newItems);
                   handleFieldChange("materials", newItems);
                   const primarySubstrate = newItems.find(
@@ -2671,6 +2957,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   if (primarySubstrate?.name && primarySubstrate.name !== formData.paperStock) {
                     setFormData((prev) => ({ ...prev, paperStock: primarySubstrate.name }));
                     updateTabData(tab.id, { paperStock: primarySubstrate.name });
+                    setTabUnsaved(tab.id, true);
+                  } else if (hadPrimarySubstrate && !primarySubstrate && formData.paperStock) {
+                    setFormData((prev) => ({ ...prev, paperStock: "" }));
+                    updateTabData(tab.id, { paperStock: "" });
                     setTabUnsaved(tab.id, true);
                   }
                   syncPaperReadiness(newItems);
@@ -2695,6 +2985,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onOpenEditOperation={handleOpenEditOperation}
                 onDeleteSelectedOperation={handleDeleteSelectedOperation}
                 isDark={isDark}
+                isOperator={isOperator}
                 onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
                 onSyncFromPlan={() => handleApplyRouteFromPlan()}
                 onOpenInTimeline={(opId) => {

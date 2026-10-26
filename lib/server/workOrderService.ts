@@ -89,6 +89,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       id: wo.docNo,
       docNo: wo.docNo,
       clientOrderId: wo.clientOrderId || undefined,
+      clientId: wo.clientId || undefined,
       customer: wo.customerName,
       product: wo.productName,
       quantity: Number(wo.quantity) || 0,
@@ -1111,10 +1112,6 @@ export async function createProductionSite(data: any, companyCode: string = "PRI
     existing = await db.query.branches.findFirst({
       where: and(eq(branches.companyId, companyId), eq(branches.id, data.id)),
     });
-  } else if (data.code) {
-    existing = await db.query.branches.findFirst({
-      where: and(eq(branches.companyId, companyId), eq(branches.code, data.code)),
-    });
   }
 
   const resolvedStatus = data.status || (data.isActive === false ? "Inactive" : "Active");
@@ -1163,17 +1160,18 @@ export async function createProductionSite(data: any, companyCode: string = "PRI
     return updated;
   }
 
-  let branchCode = data.code?.trim();
-  if (!branchCode) {
-    const allBranches = await db.query.branches.findMany({
-      where: eq(branches.companyId, companyId),
-      columns: { code: true },
-    });
-    branchCode = generateNextCode(
-      "PLT",
-      allBranches.map((b) => b.code),
-      3
-    );
+  const allBranches = await db.query.branches.findMany({
+    where: eq(branches.companyId, companyId),
+    columns: { code: true },
+  });
+  const existingCodes = allBranches.map((b) => b.code);
+  const existingUpperSet = new Set(
+    existingCodes.filter(Boolean).map((c) => String(c).trim().toUpperCase())
+  );
+
+  let branchCode = data.code?.trim()?.toUpperCase();
+  if (!branchCode || existingUpperSet.has(branchCode)) {
+    branchCode = generateNextCode("BRN", existingCodes, 2);
   }
 
   const [inserted] = await db

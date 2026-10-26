@@ -65,7 +65,9 @@ import {
   ClientSettlementRecord,
   CustomerContactPerson,
   CustomerContractRecord,
+  useWorkspaceStore,
 } from "@/store/workspaceStore";
+import { FieldCombobox } from "@/components/ui/field-combobox";
 
 interface CustomerOverviewTabProps {
   form: CrmCustomerRecord;
@@ -163,6 +165,56 @@ export function CustomerOverviewTab({
   onOpenPaymentModal,
   onCreateClientOrder,
 }: CustomerOverviewTabProps) {
+  const { crmIndustriesList, loadCrmIndustries, addCrmIndustryAsync } = useWorkspaceStore();
+
+  React.useEffect(() => {
+    if (!crmIndustriesList || crmIndustriesList.length === 0) {
+      loadCrmIndustries();
+    }
+  }, [crmIndustriesList, loadCrmIndustries]);
+
+  const industryOptions = React.useMemo(() => {
+    const list = (crmIndustriesList || []).map((ind) => ({
+      value: ind.name,
+      label: ind.name,
+    }));
+    if (form.industry && !list.some((o) => o.value.toLowerCase() === form.industry.toLowerCase())) {
+      list.unshift({ value: form.industry, label: form.industry });
+    }
+    return list;
+  }, [crmIndustriesList, form.industry]);
+
+  const [isNewIndustryDialogOpen, setIsNewIndustryDialogOpen] = useState(false);
+  const [newIndustryInput, setNewIndustryInput] = useState("");
+  const [isSavingIndustry, setIsSavingIndustry] = useState(false);
+
+  const handleAddNewIndustry = async (newVal: string) => {
+    const trimmed = newVal.trim();
+    if (!trimmed) return;
+    setIsSavingIndustry(true);
+    try {
+      onChange("industry", trimmed);
+      const created = await addCrmIndustryAsync(trimmed);
+      if (created?.id) {
+        onChange("industryId" as any, created.id);
+      }
+      setIsNewIndustryDialogOpen(false);
+      setNewIndustryInput("");
+    } finally {
+      setIsSavingIndustry(false);
+    }
+  };
+
+  const handleSelectIndustry = (val: string) => {
+    onChange("industry", val);
+    const matched = crmIndustriesList?.find(
+      (i) => i.name.toLowerCase() === val.toLowerCase()
+    );
+    if (matched?.id) {
+      onChange("industryId" as any, matched.id);
+    }
+  };
+
   const closingBalance = settlement?.closingBalance ?? 0;
   const creditLimit = form.creditLimitUsd || 10000;
   const isOverCreditLimit = closingBalance > creditLimit;
@@ -520,13 +572,40 @@ export function CustomerOverviewTab({
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-[11px] text-muted-foreground">
-              Faoliyat sohasi (Industry)
-            </Label>
-            <Input
-              value={form.industry}
-              onChange={(e) => onChange("industry", e.target.value)}
-              placeholder="Masalan: Qadoqlash va nashriyot"
+            <div className="flex items-center justify-between">
+              <Label className="text-[11px] text-muted-foreground">
+                Faoliyat sohasi
+              </Label>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewIndustryInput("");
+                  setIsNewIndustryDialogOpen(true);
+                }}
+                className="text-[11px] text-primary hover:underline flex items-center gap-1 cursor-pointer font-medium"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Yangi qo&apos;shish</span>
+              </button>
+            </div>
+            <FieldCombobox
+              value={form.industry || ""}
+              onChange={handleSelectIndustry}
+              onAddNew={handleAddNewIndustry}
+              allowCustom={true}
+              actionLabel="Yangi soha qo'shish"
+              onAction={(val) => {
+                if (val && val.trim()) {
+                  handleAddNewIndustry(val.trim());
+                } else {
+                  setIsNewIndustryDialogOpen(true);
+                }
+              }}
+              options={industryOptions}
+              placeholder="Sohani tanlang..."
+              searchPlaceholder="Sohani qidirish yoki yozish..."
+              emptyText="Soha topilmadi"
+              addCustomLabel={(val) => `Yangi soha qo'shish: "${val}"`}
               className="h-8 text-xs bg-background"
             />
           </div>
@@ -1615,6 +1694,53 @@ export function CustomerOverviewTab({
             >
               <Check className="w-3.5 h-3.5" />
               <span>Saqlash</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Yangi faoliyat sohasi qo'shish dialogi */}
+      <Dialog open={isNewIndustryDialogOpen} onOpenChange={setIsNewIndustryDialogOpen}>
+        <DialogContent className="max-w-sm p-4 gap-3 bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold text-foreground">
+              Yangi faoliyat sohasi
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5 py-1">
+            <Label className="text-[11px] text-muted-foreground">Soha nomi</Label>
+            <Input
+              value={newIndustryInput}
+              onChange={(e) => setNewIndustryInput(e.target.value)}
+              placeholder="Masalan: Qandolat mahsulotlari"
+              className="h-8 text-xs bg-background"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newIndustryInput.trim()) {
+                  e.preventDefault();
+                  handleAddNewIndustry(newIndustryInput);
+                }
+              }}
+            />
+          </div>
+          <DialogFooter className="pt-2 border-t border-border flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsNewIndustryDialogOpen(false)}
+              className="h-7 text-xs cursor-pointer"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!newIndustryInput.trim() || isSavingIndustry}
+              onClick={() => handleAddNewIndustry(newIndustryInput)}
+              className="h-7 text-xs bg-primary text-primary-foreground font-medium cursor-pointer"
+            >
+              {isSavingIndustry ? "Qo'shilmoqda..." : "Qo'shish"}
             </Button>
           </DialogFooter>
         </DialogContent>

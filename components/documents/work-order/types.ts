@@ -273,7 +273,7 @@ export function autoGeneratePackagingBoxes(params: {
   sizes?: SizeDistribution[];
   defaultPacker?: string;
 }): PackagingBoxItem[] {
-  const { workOrderNo, targetQuantity, standardCapacity, sizes, defaultPacker = "N. Fedorov (Packaging)" } = params;
+  const { workOrderNo, targetQuantity, standardCapacity, sizes, defaultPacker = "Qadoqlash bo'limi" } = params;
   const capacity = Math.max(1, standardCapacity || 500);
   const now = new Date().toISOString();
   const cleanWo = (workOrderNo || "WOOF-26-0001").replace(/[^a-zA-Z0-9_-]/g, "");
@@ -713,17 +713,7 @@ export interface PersistedImpositionState {
   plateCalculations?: any[];
 }
 
-export const FLOOR_OPERATORS = [
-  "Prepress Dept",
-  "Press Dept",
-  "Finishing Dept",
-  "Warehouse Dept",
-  "K. Anderson (Prepress)",
-  "M. Ivanova (Press)",
-  "A. Becker (Lamination)",
-  "S. Petrov (Die-cut)",
-  "N. Fedorov (Packaging)",
-];
+export const FLOOR_OPERATORS: string[] = [];
 
 export const MOCK_CUSTOMERS: string[] = [];
 
@@ -731,92 +721,56 @@ export const MACHINE_MAP: Record<string, string[]> = {
   Offset: ["Heidelberg XL 106", "Komori Lithrone G40", "Heidelberg SX 74"],
   Flexo: ["Mark Andy Performance", "Nilpeter FA-Line", "Gallus ECS 340"],
   Jacquard: ["Staubli Jacquard Loom", "Muller Martini Loom", "Dornier PTV"],
-  "Post-press": ["Meiguang Sheet Laminator (Кашировка)", "Kolbus BF 513", "Bobst Novacut 106"]
+  "Post-press": ["Meiguang Sheet Laminator", "Kolbus BF 513", "Bobst Novacut 106"]
 };
 
-export const RECIPE_MATERIALS: Record<string, { name: string; req: number; unit: string; stock: number }[]> = {
-  "OFFSET_STD_V1": [
-    { name: "Galerie Art Silk Paper 150g", req: 12500, unit: "Sheets", stock: 45000 },
-    { name: "Hubergroup CMYK Ink", req: 36, unit: "kg", stock: 120 },
-    { name: "Agfa CTP Plates", req: 24, unit: "pcs", stock: 8 },
-  ],
-  "OFFSET_KASHIROVKA_V1": [
-    { name: "Layer 1: Coated Cardboard 300g/m² (Face 4+0)", req: 1100, unit: "Sheets", stock: 18500 },
-    { name: "Layer 2: Coated Cardboard 300g/m² (Back 4+0)", req: 1100, unit: "Sheets", stock: 18500 },
-    { name: "PVA Dispersion Mounting Glue (25g/m²)", req: 19.25, unit: "kg", stock: 240 },
-    { name: "Soft-Touch Matte Lamination Film", req: 1540, unit: "m²", stock: 8000 },
-    { name: "Agfa CTP Plates (Split-Mount Set)", req: 4, unit: "pcs", stock: 64 },
-  ],
-  "OFFSET_PREM_V2": [
-    { name: "LumiForte Premium 250g", req: 5000, unit: "Sheets", stock: 2000 },
-    { name: "Spot UV Varnish", req: 15, unit: "kg", stock: 50 },
-  ],
-  "FLEXO_NYLON_V1": [
-    { name: "Nylon Taffeta Tape 30mm", req: 45, unit: "Rolls", stock: 120 },
-    { name: "Wash-Resistant Ink Black", req: 2, unit: "kg", stock: 1 },
-  ],
-  "FLEXO_SATIN_V2": [
-    { name: "Premium Satin Ribbon 40mm", req: 30, unit: "Rolls", stock: 200 },
-    { name: "Metallic Gold Ink", req: 1.5, unit: "kg", stock: 5 },
-  ],
-  "JACQ_WOVEN_V1": [
-    { name: "Polyester Warp Yarn Black", req: 120, unit: "kg", stock: 500 },
-    { name: "Polyester Weft Yarn White", req: 85, unit: "kg", stock: 400 },
-  ],
-  "JACQ_TAFFETA_V2": [
-    { name: "High-density Taffeta Yarn", req: 200, unit: "kg", stock: 50 },
-  ],
-  "POST_GENERIC_V1": [
-    { name: "Packaging Straps", req: 10, unit: "Rolls", stock: 80 },
-    { name: "Carton Boxes Double-wall", req: 100, unit: "pcs", stock: 500 },
-  ]
-};
+export const RECIPE_MATERIALS: Record<string, { name: string; req: number; unit: string; stock: number }[]> = {};
 
 export const RECIPE_ROUTES: Record<string, { name: string; machineStr: string }[]> = {
   "OFFSET_STD_V1": [
-    { name: "Pre-press & CTP Plate Imaging", machineStr: "Screen PlateRite 8600" },
-    { name: "4-Color Offset Printing", machineStr: "PRESS_MACHINE" },
-    { name: "Die-cutting", machineStr: "Bobst Novacut 106" }
+    { name: "Prepress va CTP qolip tayyorlash", machineStr: "Screen PlateRite 8600" },
+    { name: "4+0 Ofset bosma", machineStr: "PRESS_MACHINE" },
+    { name: "Tigel kesish", machineStr: "Bobst Novacut 106" }
   ],
   "OFFSET_KASHIROVKA_V1": [
-    { name: "Pre-press & Mirror Side-Lay CTP Imaging", machineStr: "Screen PlateRite 8600" },
-    { name: "4+0 Offset Printing (Face & Back 300g Liners)", machineStr: "PRESS_MACHINE" },
-    { name: "1+0 Surface Thermal Lamination", machineStr: "Autobond Mini 76" },
-    { name: "Kashirovka (Sheet-to-Sheet Duplex Mounting)", machineStr: "Meiguang Sheet Laminator" },
-    { name: "Hydraulic Press Curing & Drying (12h Pause)", machineStr: "Hydraulic Pile Press" },
-    { name: "Heavy-Duty Die-Cutting (600g+ Board)", machineStr: "Bobst Novacut 106" }
+    { name: "Prepress va CTP qolip tayyorlash", machineStr: "Screen PlateRite 8600" },
+    { name: "4+0 Ofset bosma (Old va orqa qatlam)", machineStr: "PRESS_MACHINE" },
+    { name: "1+0 Termo-laminatsiya", machineStr: "Autobond Mini 76" },
+    { name: "Kashirovka (Dupleks yelimlash)", machineStr: "Meiguang Sheet Laminator" },
+    { name: "Gidravlik pressda quritish (12 soat)", machineStr: "Gidravlik press" },
+    { name: "Tigel kesish (600g+ karton)", machineStr: "Bobst Novacut 106" }
   ],
   "OFFSET_PREM_V2": [
-    { name: "Pre-press & CTP Plate Imaging", machineStr: "Screen PlateRite 8600" },
-    { name: "4-Color Offset Printing", machineStr: "PRESS_MACHINE" },
-    { name: "Spot UV Varnish Coating", machineStr: "Steinemann Hibis 104" },
-    { name: "Die-cutting", machineStr: "Bobst Novacut 106" },
-    { name: "Folder Gluer", machineStr: "Bobst Visionfold" }
+    { name: "Prepress va CTP qolip tayyorlash", machineStr: "Screen PlateRite 8600" },
+    { name: "4+4 Ofset bosma", machineStr: "PRESS_MACHINE" },
+    { name: "Tanlangan UF-laklash", machineStr: "Steinemann Hibis 104" },
+    { name: "Tigel kesish", machineStr: "Bobst Novacut 106" },
+    { name: "Yelimlash va yig'ish", machineStr: "Bobst Visionfold" }
   ],
   "FLEXO_NYLON_V1": [
-    { name: "Flexo Plate Making", machineStr: "Esko CDI Crystal" },
-    { name: "1-Color Flexo Printing", machineStr: "PRESS_MACHINE" },
-    { name: "Slitting & Rewinding", machineStr: "Rotoflex Slitter" }
+    { name: "Flekso-polimer qolip tayyorlash", machineStr: "Esko CDI Crystal" },
+    { name: "Flekso bosma", machineStr: "PRESS_MACHINE" },
+    { name: "Bo'ylama kesish va o'rash", machineStr: "Rotoflex Slitter" }
   ],
   "FLEXO_SATIN_V2": [
-    { name: "Flexo Plate Making", machineStr: "Esko CDI Crystal" },
-    { name: "Multi-Color Flexo Printing", machineStr: "PRESS_MACHINE" },
-    { name: "Hot Foil Stamping", machineStr: "Pantec Rhino" },
-    { name: "Slitting & Rewinding", machineStr: "Rotoflex Slitter" }
+    { name: "Flekso-polimer qolip tayyorlash", machineStr: "Esko CDI Crystal" },
+    { name: "Ko'p rangli flekso bosma", machineStr: "PRESS_MACHINE" },
+    { name: "Issiq zarhal bosish", machineStr: "Pantec Rhino" },
+    { name: "Bo'ylama kesish va o'rash", machineStr: "Rotoflex Slitter" }
   ],
   "JACQ_WOVEN_V1": [
-    { name: "Warp Preparation", machineStr: "Karl Mayer Warper" },
-    { name: "Jacquard Weaving", machineStr: "PRESS_MACHINE" },
-    { name: "Standard Ultrasonic Cutting", machineStr: "Focus Label Cut/Fold" }
+    { name: "Asos ipini tayyorlash", machineStr: "Karl Mayer Warper" },
+    { name: "Jakkard to'qish", machineStr: "PRESS_MACHINE" },
+    { name: "Ultrasonik kesish va buklash", machineStr: "Focus Label Cut/Fold" }
   ],
   "JACQ_TAFFETA_V2": [
-    { name: "Warp Preparation", machineStr: "Karl Mayer Warper" },
-    { name: "High-density Weaving", machineStr: "PRESS_MACHINE" },
-    { name: "Laser Cutting & End Folding", machineStr: "Focus Label Laser" }
+    { name: "Asos ipini tayyorlash", machineStr: "Karl Mayer Warper" },
+    { name: "Yuqori zichlikdagi to'qish", machineStr: "PRESS_MACHINE" },
+    { name: "Lazerli kesish va buklash", machineStr: "Focus Label Laser" }
   ],
   "POST_GENERIC_V1": [
-    { name: "Folding & Gluing", machineStr: "Bobst Visionfold" },
-    { name: "Packing", machineStr: "Manual Station" }
+    { name: "Buklash va yelimlash", machineStr: "Bobst Visionfold" },
+    { name: "Qadoqlash va OTK", machineStr: "Qadoqlash liniyasi" }
   ]
 };
 
@@ -824,9 +778,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-OFF-01",
     code: "OFFSET_STD_V1",
-    name: "Standard CMYK Folding Carton",
+    name: "Standart CMYK quti va poligrafiya",
     department: "Offset",
-    description: "4-color offset on 150g Art Silk paper with die-cutting",
+    description: "4 rangli ofset bosma va tigel kesish",
     materialsCount: 3,
     estimatedCost: "$5,250",
     unit: "pcs",
@@ -834,9 +788,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-OFF-KASH",
     code: "OFFSET_KASHIROVKA_V1",
-    name: "Duplex/Triplex Kashirovka 600g+ Heavy Card",
+    name: "Dupleks/Tripleks Kashirovka 600g+ qattiq karton",
     department: "Offset",
-    description: "2×300g coated board printed 4+0 separately, mounted (Кашировка) & heavy die-cut",
+    description: "2×300g bo'rlangan karton 4+0 bosma, kashirovka va tigel kesish",
     materialsCount: 5,
     estimatedCost: "$2,480",
     unit: "pcs",
@@ -844,9 +798,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-OFF-02",
     code: "OFFSET_PREM_V2",
-    name: "Premium Spot UV Booklet & Box",
+    name: "Premium UF-lakli buklet va quti",
     department: "Offset",
-    description: "Multi-color offset with soft-touch lamination & Spot UV",
+    description: "Ko'p rangli ofset, Soft-Touch laminatsiya va tanlangan UF-lak",
     materialsCount: 2,
     estimatedCost: "$3,800",
     unit: "pcs",
@@ -854,9 +808,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-FLX-01",
     code: "FLEXO_NYLON_V1",
-    name: "Nylon Taffeta Care Label",
+    name: "Neylon taffeta yorliq",
     department: "Flexo",
-    description: "Wash-resistant thermal flexo tape 30mm, slitted rolls",
+    description: "Yuvishga chidamli neylon lenta 30mm, rulonli kesim",
     materialsCount: 2,
     estimatedCost: "$652",
     unit: "rolls",
@@ -864,9 +818,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-FLX-02",
     code: "FLEXO_SATIN_V2",
-    name: "Premium Satin Luxury Ribbon",
+    name: "Premium satin lenta",
     department: "Flexo",
-    description: "Metallic gold & black flexo printing on satin 40mm",
+    description: "Satin 40mm lentada zarhal va qora flekso bosma",
     materialsCount: 2,
     estimatedCost: "$890",
     unit: "rolls",
@@ -874,9 +828,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-FLX-03",
     code: "FLEXO_TYVEK_V3",
-    name: "Tear-Resistant Tyvek Label",
+    name: "Yirtilmas Tyvek yorliq",
     department: "Flexo",
-    description: "DuPont Tyvek 1073D weather-proof label printing",
+    description: "DuPont Tyvek 1073D namga chidamli yorliq bosma",
     materialsCount: 2,
     estimatedCost: "$1,120",
     unit: "rolls",
@@ -884,9 +838,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-JCQ-01",
     code: "JACQ_WOVEN_V1",
-    name: "Standard Damask Woven Label",
+    name: "Standart Damask to'qima yorliq",
     department: "Jacquard",
-    description: "Black/White polyester damask weave, ultrasonic cut",
+    description: "Qora/oq poliester damask to'qima, ultrasonik kesim",
     materialsCount: 2,
     estimatedCost: "$1,032",
     unit: "pcs",
@@ -894,9 +848,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-JCQ-02",
     code: "JACQ_TAFFETA_V2",
-    name: "High-Density Woven Brand Tag",
+    name: "Yuqori zichlikdagi brend yorliq",
     department: "Jacquard",
-    description: "High-density micro-yarn taffeta with laser cut & fold",
+    description: "Mikro-ip taffeta, lazerli kesim va buklama",
     materialsCount: 1,
     estimatedCost: "$1,450",
     unit: "pcs",
@@ -904,9 +858,9 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
   {
     id: "SPEC-PST-01",
     code: "POST_GENERIC_V1",
-    name: "Standard Die-cutting & Folder Gluer",
+    name: "Standart tigel kesish va yelimlash",
     department: "Offset",
-    description: "Automated Bobst die-cutting and carton assembly boxing",
+    description: "Avtomatik tigel kesish va quti yelimlash liniyasi",
     materialsCount: 2,
     estimatedCost: "$580",
     unit: "sets",
@@ -916,52 +870,52 @@ export const MASTER_SPECIFICATIONS: MasterSpecification[] = [
 export const SITE_OPTIONS: SiteOption[] = [
   {
     id: "Building 1",
-    name: "Building 1 (HQ)",
-    label: "Main Press Plant & HQ",
-    location: "Campus North • 12,000 m²",
-    facilities: "Offset Sheetfed, Post-press, CTP Pre-press",
-    status: "Active (4 presses online)",
+    name: "1-bino (Bosh korpus)",
+    label: "Asosiy bosma sexi",
+    location: "Shimoliy hudud • 12,000 m²",
+    facilities: "Ofset bosma, Post-press, CTP Prepress",
+    status: "Faol",
   },
   {
     id: "Building 2",
-    name: "Building 2 (Annex)",
-    label: "Packaging & Flexo Facility",
-    location: "Campus South • 6,500 m²",
-    facilities: "Narrow Web Flexo, Jacquard Looms, Finishing",
-    status: "Active (6 lines online)",
+    name: "2-bino (Flekso va Jakkard)",
+    label: "Qadoqlash va flekso sexi",
+    location: "Janubiy hudud • 6,500 m²",
+    facilities: "Rulonli flekso, Jakkard dastgohlar, Pardozlash",
+    status: "Faol",
   },
 ];
 
 export const TECHNOLOGY_OPTIONS: TechOption[] = [
   {
     id: "Offset",
-    name: "Offset Sheetfed Printing",
+    name: "Ofset varaqali bosma",
     code: "TECH-OFF",
-    description: "High-speed commercial sheetfed, brochures, catalogs & folding cartons",
+    description: "Yuqori tezlikdagi varaqali ofset, katalog va qutilar",
     badgeClass: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200",
     equipmentCount: 3,
   },
   {
     id: "Flexo",
-    name: "Flexographic Rotary Printing",
+    name: "Fleksografik rulonli bosma",
     code: "TECH-FLX",
-    description: "Roll-to-roll narrow-web printing for self-adhesive labels & packaging tapes",
+    description: "Rulondan-rulonga etiketka va tekstil lentalar bosmasi",
     badgeClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200",
     equipmentCount: 3,
   },
   {
     id: "Jacquard",
-    name: "Jacquard Weaving Looms",
+    name: "Jakkard to'quv dastgohlari",
     code: "TECH-JCQ",
-    description: "High-density micro-yarn damask, satin & taffeta woven brand labels",
+    description: "Yuqori zichlikdagi damask, satin va taffeta to'qima yorliqlar",
     badgeClass: "bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border-purple-200",
     equipmentCount: 3,
   },
   {
     id: "Post-press",
-    name: "Post-press & Assembly Lines",
+    name: "Post-press va yig'uv liniyalari",
     code: "TECH-PST",
-    description: "Automated die-cutting, folding, gluing, foil stamping & case binding",
+    description: "Avtomatik tigel kesish, buklash, yelimlash va zarhal bosish",
     badgeClass: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200",
     equipmentCount: 3,
   },
@@ -973,45 +927,41 @@ export const getInitialOperations = (
   recipeId: string,
   pressMachine: string,
   department: string,
-  quantity: number = 5000
+  quantity: number = 0
 ): RouteStep[] => {
+  const targetQty = Math.max(0, Number(quantity) || 0);
+  const qtyLabel = `0 / ${targetQty.toLocaleString()}`;
   const route = RECIPE_ROUTES[recipeId];
   if (route) {
     return route.map((step, index) => ({
-      id: String(index + 1),
+      id: `op-init-${index + 1}`,
       stepNumber: (index + 1) * 10,
       name: step.name,
-      machine: step.machineStr === "PRESS_MACHINE" ? pressMachine : step.machineStr,
-      operator: ["K. Anderson", "M. Ivanova", "A. Becker", "S. Petrov"][index % 4],
-      duration: [0.5, 2.5, 1.0, 1.2, 0.8][index % 5],
-      qtyCompleted:
-        index === 0
-          ? `${quantity.toLocaleString()} / ${quantity.toLocaleString()}`
-          : index === 1
-          ? `${Math.round(quantity * 0.64).toLocaleString()} / ${quantity.toLocaleString()}`
-          : `0 / ${quantity.toLocaleString()}`,
-      status: index === 0 ? "Finished" : index === 1 ? "In Progress" : "Queued",
+      department,
+      machine: step.machineStr === "PRESS_MACHINE" ? (pressMachine || "") : step.machineStr,
+      operator: "",
+      duration: [0.5, 2.0, 1.0, 1.5, 1.0][index % 5],
+      qtyCompleted: qtyLabel,
+      status: "Queued",
     }));
   }
-  // Fallback if recipe not found
   if (department === "Flexo") {
     return [
-      { id: "1", stepNumber: 10, name: "Flexo Plate Making", machine: "Esko CDI Crystal", operator: "K. Anderson", duration: 0.5, qtyCompleted: "12 / 12 sets", status: "Finished" },
-      { id: "2", stepNumber: 20, name: "Roll-to-Roll Flexo Printing", machine: pressMachine, operator: "M. Ivanova", duration: 3.5, qtyCompleted: "12,000 / 25,000 m", status: "In Progress" },
-      { id: "3", stepNumber: 30, name: "Slitting & Rewinding", machine: "Rotoflex Slitter", operator: "S. Petrov", duration: 1.5, qtyCompleted: "0 / 25,000 m", status: "Queued" }
+      { id: "op-init-1", stepNumber: 10, name: "Flekso-polimer qolip tayyorlash", department: "Flexo", machine: "Esko CDI Crystal", operator: "", duration: 0.5, qtyCompleted: qtyLabel, status: "Queued" },
+      { id: "op-init-2", stepNumber: 20, name: "Rulonli flekso bosma", department: "Flexo", machine: pressMachine || "", operator: "", duration: 2.5, qtyCompleted: qtyLabel, status: "Queued" },
+      { id: "op-init-3", stepNumber: 30, name: "Bo'ylama kesish va o'rash", department: "Flexo", machine: "Rotoflex Slitter", operator: "", duration: 1.0, qtyCompleted: qtyLabel, status: "Queued" },
     ];
   }
   if (department === "Jacquard") {
     return [
-      { id: "1", stepNumber: 10, name: "Woven Label Production", machine: pressMachine, operator: "A. Becker", duration: 4.0, qtyCompleted: "15,000 / 20,000 pcs", status: "In Progress" },
-      { id: "2", stepNumber: 20, name: "Ultrasonic Cutting & Folding", machine: "Focus Label Cut/Fold", operator: "S. Petrov", duration: 2.0, qtyCompleted: "0 / 20,000 pcs", status: "Queued" }
+      { id: "op-init-1", stepNumber: 10, name: "Jakkard to'qish", department: "Jacquard", machine: pressMachine || "", operator: "", duration: 3.0, qtyCompleted: qtyLabel, status: "Queued" },
+      { id: "op-init-2", stepNumber: 20, name: "Ultrasonik kesish va buklash", department: "Jacquard", machine: "Focus Label Cut/Fold", operator: "", duration: 1.5, qtyCompleted: qtyLabel, status: "Queued" },
     ];
   }
   return [
-    { id: "1", stepNumber: 10, name: "Pre-press & CTP Plate Imaging", machine: "Screen PlateRite 8600", operator: "K. Anderson", duration: 0.5, qtyCompleted: "8 / 8 plates", status: "Finished" },
-    { id: "2", stepNumber: 20, name: "4+4 Offset Printing", machine: pressMachine, operator: "M. Ivanova", duration: 2.5, qtyCompleted: "3,200 / 5,000", status: "In Progress" },
-    { id: "3", stepNumber: 30, name: "Thermal Lamination", machine: "Autobond Mini 76", operator: "A. Becker", duration: 1.0, qtyCompleted: "0 / 5,000", status: "Queued" },
-    { id: "4", stepNumber: 40, name: "Die-cutting", machine: "Bobst Novacut 106", operator: "S. Petrov", duration: 1.2, qtyCompleted: "0 / 5,000", status: "Queued" }
+    { id: "op-init-1", stepNumber: 10, name: "Prepress va CTP qolip tayyorlash", department: "Offset", machine: "Screen PlateRite 8600", operator: "", duration: 0.5, qtyCompleted: qtyLabel, status: "Queued" },
+    { id: "op-init-2", stepNumber: 20, name: "Ofset bosma", department: "Offset", machine: pressMachine || "", operator: "", duration: 2.0, qtyCompleted: qtyLabel, status: "Queued" },
+    { id: "op-init-3", stepNumber: 30, name: "Tigel kesish", department: "Offset", machine: "Bobst Novacut 106", operator: "", duration: 1.2, qtyCompleted: qtyLabel, status: "Queued" },
   ];
 };
 

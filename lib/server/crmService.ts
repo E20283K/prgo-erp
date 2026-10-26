@@ -1,6 +1,6 @@
 import { db } from "@/db";
-import { clients, clientContacts, clientContracts, companies } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { clients, clientContacts, clientContracts, companies, crmIndustries } from "@/db/schema";
+import { eq, desc, asc, sql } from "drizzle-orm";
 import { getNextCustomerCode } from "./numberingService";
 import type {
   CrmCustomerRecord,
@@ -41,9 +41,11 @@ export async function getCrmClients(companyCode: string = "PRINTGOO"): Promise<C
 
   return rawClients.map((c) => ({
     id: c.code || c.id,
+    dbId: c.id,
     name: c.name,
     tin: c.tin || "",
-    industry: c.industry || "Boshqa",
+    industry: c.industry || "",
+    industryId: c.industryId || undefined,
     contactPerson: c.contactPerson || "",
     phone: c.phone || "",
     email: c.email || "",
@@ -127,6 +129,18 @@ export async function upsertCrmClient(
 
   let clientId: string;
 
+  let industryId: string | null = data.industryId || null;
+  const industryName = data.industry?.trim() || "";
+
+  if (!industryId && industryName) {
+    const matchedInd = await db.query.crmIndustries.findFirst({
+      where: sql`LOWER(${crmIndustries.name}) = LOWER(${industryName})`,
+    });
+    if (matchedInd) {
+      industryId = matchedInd.id;
+    }
+  }
+
   const clientPayload = {
     companyId,
     code,
@@ -135,7 +149,8 @@ export async function upsertCrmClient(
     tin: data.tin || null,
     vatNumber: data.vatNumber || null,
     vatPayer: data.vatPayer ?? false,
-    industry: data.industry || "General",
+    industryId: industryId,
+    industry: industryName || null,
     phone: data.phone || null,
     email: data.email || null,
     bankName: data.bankName || null,
@@ -222,4 +237,52 @@ export async function upsertCrmClient(
     success: true,
     client: updatedRecord,
   };
+}
+
+/**
+ * CRM Faoliyat sohalari (Industries) ma'lumotnomasini yuklash
+ */
+export async function getCrmIndustries() {
+  return await db.query.crmIndustries.findMany({
+    where: eq(crmIndustries.isActive, true),
+    orderBy: [asc(crmIndustries.sortOrder), asc(crmIndustries.name)],
+  });
+}
+
+/**
+ * Yangi faoliyat sohasini tekshirish yoki bazaga qo'shish (Inline / Creatable)
+ */
+export async function getOrCreateCrmIndustry(name: string, companyCode: string = "PRINTGOO") {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("Faoliyat sohasi nomi bo'sh bo'lishi mumkin emas");
+  }
+
+  // Mavjudligini registrga bog'liq bo'lmagan holda tekshirish
+  const existing = await db.query.crmIndustries.findFirst({
+    where: sql`LOWER(${crmIndustries.name}) = LOWER(${trimmed})`,
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  let companyId: string | null = null;
+  try {
+    companyId = await getCompanyIdByCode(companyCode);
+  } catch {
+    companyId = null;
+  }
+
+  const [created] = await db
+    .insert(crmIndustries)
+    .values({
+      name: trimmed,
+      companyId,
+      sortOrder: 50,
+      isActive: true,
+    })
+    .returning();
+
+  return created;
 }

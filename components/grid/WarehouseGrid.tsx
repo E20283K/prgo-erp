@@ -36,6 +36,7 @@ import {
 
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { ReturnOffcutDialog } from "./ReturnOffcutDialog";
+import { CarrierDialog, type CarrierProfile } from "@/components/documents/WarehouseShipmentDetail";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/documents/MaterialImageModal";
@@ -93,6 +94,9 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     warehouseMovements,
     warehouseReceipts,
     warehousesList,
+    carriersList,
+    loadCarriers,
+    upsertCarrierAsync,
     finishedGoods,
     inventoryCounts,
     crmCustomers,
@@ -129,6 +133,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const [previewMaterial, setPreviewMaterial] = useState<MaterialImagePreviewData | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState<boolean>(false);
   const [uploadTargetRecord, setUploadTargetRecord] = useState<any | null>(null);
+  const [isCarrierDialogOpen, setIsCarrierDialogOpen] = useState(false);
+  const [carrierModalData, setCarrierModalData] = useState<Partial<CarrierProfile> | undefined>(undefined);
 
   const comboboxFields: Record<string, ComboboxOption[]> = useMemo(() => {
     const locOptions: ComboboxOption[] = warehousesList.map((w: any) => ({
@@ -248,6 +254,18 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       });
       return;
     }
+    if (type === "carriers") {
+      setCarrierModalData({
+        name: "PrintGoo Fleet",
+        type: "fleet",
+        vehicleModel: "",
+        vehicleNo: "",
+        driverName: "",
+        driverPhone: "",
+      });
+      setIsCarrierDialogOpen(true);
+      return;
+    }
     if (type === "shipments") {
       const draftId = `draft-shp-${Date.now()}`;
       openTab({
@@ -365,6 +383,11 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         module: "warehouse",
         documentData: record,
       });
+      return;
+    }
+    if (type === "carriers") {
+      setCarrierModalData(record);
+      setIsCarrierDialogOpen(true);
       return;
     }
     if (type === "shipments") {
@@ -566,6 +589,16 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         { id: 'trackingNo', title: 'Tracking No', width: 120, icon: GridColumnIcon.HeaderString },
         { id: 'status', title: 'Status', width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
+    } else if (type === 'carriers') {
+      cols = [
+        { id: 'name', title: 'Tashuvchi / Kompaniya', width: 220, icon: GridColumnIcon.HeaderString },
+        { id: 'type', title: 'Turi', width: 130, icon: GridColumnIcon.HeaderLookup },
+        { id: 'vehicleModel', title: 'Mashina Rusumi', width: 180, icon: GridColumnIcon.HeaderString },
+        { id: 'vehicleNo', title: 'Davlat Raqami', width: 130, icon: GridColumnIcon.HeaderString },
+        { id: 'driverName', title: 'Haydovchi F.I.Sh.', width: 200, icon: GridColumnIcon.HeaderString },
+        { id: 'driverPhone', title: 'Haydovchi Telefoni', width: 160, icon: GridColumnIcon.HeaderPhone },
+        { id: 'notes', title: 'Izoh', width: 200, icon: GridColumnIcon.HeaderTextTemplate },
+      ];
     } else {
       cols = [
         { id: 'id', title: 'Loc ID', width: 90, icon: GridColumnIcon.HeaderReference },
@@ -597,6 +630,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       loadWarehouseReceipts();
     } else if (type === 'inventory') {
       loadInventoryCounts();
+    } else if (type === 'carriers') {
+      loadCarriers();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type]);
@@ -655,6 +690,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       setRowsData(inventoryCounts);
     } else if (type === 'locations') {
       setRowsData(warehousesList);
+    } else if (type === 'carriers') {
+      setRowsData(carriersList);
     }
   }, [
     type,
@@ -666,6 +703,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     warehouseReceipts,
     inventoryCounts,
     warehousesList,
+    carriersList,
   ]);
 
   const [searchFilter, setSearchFilter] = useState("");
@@ -1751,6 +1789,26 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
             );
           } else {
             setFormData((prev) => ({ ...prev, imageUrl: newUrl }));
+          }
+        }}
+      />
+
+      <CarrierDialog
+        open={isCarrierDialogOpen}
+        onOpenChange={setIsCarrierDialogOpen}
+        initialData={carrierModalData}
+        onSave={async (profile) => {
+          if (upsertCarrierAsync) {
+            await upsertCarrierAsync({
+              id: profile.id?.startsWith("carrier-") ? undefined : profile.id,
+              name: profile.name,
+              type: profile.type,
+              vehicleModel: profile.vehicleModel,
+              vehicleNo: profile.vehicleNo,
+              driverName: profile.driverName,
+              driverPhone: profile.driverPhone,
+              isActive: true,
+            });
           }
         }}
       />

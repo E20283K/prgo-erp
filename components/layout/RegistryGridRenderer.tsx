@@ -54,6 +54,7 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("inventory")) return <WarehouseGrid type="inventory" />;
     if (tab.id.includes("receipts")) return <WarehouseGrid type="receipts" />;
     if (tab.id.includes("shipments")) return <WarehouseGrid type="shipments" />;
+    if (tab.id.includes("carriers")) return <WarehouseGrid type="carriers" />;
     return <WarehouseGrid type="stock-balance" />;
   } else if (tab.module === "finance") {
     if (tab.id.includes("delivery-acts")) return <SalesGrid type="delivery-acts" />;

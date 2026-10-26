@@ -6,6 +6,7 @@ import {
   ListBucketsCommand,
   HeadBucketCommand,
   CreateBucketCommand,
+  PutBucketCorsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -44,6 +45,8 @@ export const s3PublicPresignClient = new S3Client({
   },
 });
 
+let bucketsInitialized = false;
+
 /**
  * Katta hajmli Prepress PDF / Maket fayllarini brauzerdan to'g'ridan-to'g'ri MinIO'ga yuklash uchun Presigned PUT URL
  */
@@ -53,6 +56,15 @@ export async function createPresignedUploadUrl(params: {
   contentType: string;
   expiresInSeconds?: number;
 }): Promise<{ uploadUrl: string; bucketName: string; objectKey: string }> {
+  if (!bucketsInitialized) {
+    try {
+      await ensureStorageBuckets();
+      bucketsInitialized = true;
+    } catch {
+      // Xato bo'lsa asosiy yuklash jarayonini to'xtatib qo'ymaydi
+    }
+  }
+
   const bucketName = S3_BUCKETS[params.bucket];
   const command = new PutObjectCommand({
     Bucket: bucketName,
@@ -129,10 +141,14 @@ export async function checkStorageHealth(): Promise<{
 }
 
 /**
- * MinIO S3 bucketlarini (`printgoo-prepress`, `printgoo-docs`, `printgoo-thumbnails`) avtomatik yaratish
+ * MinIO S3 bucketlarini (`printgoo-prepress`, `printgoo-docs`, `printgoo-thumbnails`) avtomatik yaratish va CORS qoidalarini biriktirish
  */
 export async function ensureStorageBuckets(): Promise<string[]> {
   const createdOrVerified: string[] = [];
+  const allowedOrigins = process.env.NEXT_PUBLIC_APP_URL
+    ? [process.env.NEXT_PUBLIC_APP_URL, "*"]
+    : ["*"];
+
   for (const bucketName of Object.values(S3_BUCKETS)) {
     try {
       await s3Client.send(new HeadBucketCommand({ Bucket: bucketName }));
@@ -141,7 +157,29 @@ export async function ensureStorageBuckets(): Promise<string[]> {
       await s3Client.send(new CreateBucketCommand({ Bucket: bucketName }));
       createdOrVerified.push(bucketName);
     }
+
+    try {
+      await s3Client.send(
+        new PutBucketCorsCommand({
+          Bucket: bucketName,
+          CORSConfiguration: {
+            CORSRules: [
+              {
+                AllowedHeaders: ["*"],
+                AllowedMethods: ["GET", "PUT", "POST", "HEAD", "DELETE"],
+                AllowedOrigins: allowedOrigins,
+                ExposeHeaders: ["ETag"],
+                MaxAgeSeconds: 3600,
+              },
+            ],
+          },
+        })
+      );
+    } catch {
+      // Ba'zi S3 implementatsiyalarida CORS API cheklangan bo'lsa asosiy jarayon to'xtamaydi
+    }
   }
+  bucketsInitialized = true;
   return createdOrVerified;
 }
 

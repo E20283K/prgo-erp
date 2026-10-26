@@ -77,7 +77,37 @@ export interface PlantRecord {
   notes?: string;
 }
 
-export function createEmptyPlant(id: string = `PLT-${Date.now().toString().slice(-4)}`, code: string = ""): PlantRecord {
+export function generateNextPlantCode(
+  existingCodes: (string | null | undefined)[]
+): string {
+  let maxNum = 0;
+  const upperSet = new Set<string>();
+
+  for (const raw of existingCodes) {
+    if (!raw) continue;
+    const clean = String(raw).trim().toUpperCase();
+    if (!clean) continue;
+    upperSet.add(clean);
+
+    const match = clean.match(/(?:BRN|PLT|BR)[-_]?(\d+)/i) || clean.match(/(\d+)$/);
+    if (match && match[1]) {
+      const num = parseInt(match[1], 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+  }
+
+  let nextNum = Math.max(maxNum + 1, existingCodes.filter(Boolean).length + 1);
+  let candidate = `BRN-${String(nextNum).padStart(2, "0")}`;
+  while (upperSet.has(candidate)) {
+    nextNum += 1;
+    candidate = `BRN-${String(nextNum).padStart(2, "0")}`;
+  }
+  return candidate;
+}
+
+export function createEmptyPlant(id: string = `PLT-${Date.now().toString().slice(-6)}`, code: string = ""): PlantRecord {
   return {
     id,
     code,

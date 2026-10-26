@@ -61,7 +61,8 @@ export async function seedDefaultUsersIfEmpty(): Promise<void> {
   }
 
   // 1. Asosiy Administrator
-  const adminHash = hashPassword("admin");
+  const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD || "admin";
+  const adminHash = hashPassword(initialAdminPassword);
   const adminRole = ROLE_TEMPLATES.admin;
   await db.insert(users).values({
     code: "USR-001",

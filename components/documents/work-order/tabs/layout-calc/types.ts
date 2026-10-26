@@ -94,6 +94,7 @@ export interface LayoutCalcTabProps {
   pressSheetW?: number;
   pressSheetH?: number;
   plannedSheets?: number;
+  appliedCtpPlates?: number;
   lamination?: string;
   embellishment?: string;
   isOperator?: boolean;

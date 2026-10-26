@@ -201,7 +201,7 @@ export function normalizeBomItem(item: any): BomItem {
     unit: item.unit || "pcs",
     unitPrice,
     totalPrice,
-    supplier: item.supplier || "Warehouse",
+    supplier: item.supplier || "Asosiy Ombor",
     availability: item.availability || "In Stock",
     issueType: item.issueType || "standard",
     faultParty: item.faultParty || "none",
@@ -419,24 +419,46 @@ export function BomMaterialsGrid({
     ]);
   }, [t]);
 
+  // Active columns filtered by RBAC (hide financial columns for floor operators)
+  const visibleColumns = useMemo(() => {
+    if (!isOperator) return columns;
+    return columns.filter((c) => c.id !== "unitPrice" && c.id !== "totalPrice");
+  }, [columns, isOperator]);
+
   // Active items list
   const filteredItems = items;
 
   const selectedRowIndex = selection.rows.toArray()[0];
   const hasSelectedRow = selectedRowIndex !== undefined && items[selectedRowIndex] !== undefined;
 
-  // Synchronize items when initialItems prop is updated from parent or activeSpec is populated
+  const prevSpecCodeRef = React.useRef<string | undefined>(activeSpec?.code || recipe);
+
+  // Synchronize items when initialItems prop is updated from parent
   useEffect(() => {
-    if (initialItems && initialItems.length > 0) {
+    if (initialItems !== undefined) {
       setItems(initialItems.map(normalizeBomItem));
+    }
+  }, [initialItems]);
+
+  // Only auto-populate from activeSpec when the specification code changes or on initial empty mount
+  useEffect(() => {
+    const currentCode = activeSpec?.code || recipe;
+    if (!currentCode) {
+      prevSpecCodeRef.current = undefined;
       return;
     }
-    if ((!items || items.length === 0) && activeSpec && (activeSpec as any).materials && Array.isArray((activeSpec as any).materials) && (activeSpec as any).materials.length > 0) {
-      const specMats = (activeSpec as any).materials.map(normalizeBomItem);
+    const specMatsRaw = activeSpec && (activeSpec as any).materials;
+    if (
+      prevSpecCodeRef.current !== currentCode &&
+      Array.isArray(specMatsRaw) &&
+      specMatsRaw.length > 0
+    ) {
+      prevSpecCodeRef.current = currentCode;
+      const specMats = specMatsRaw.map(normalizeBomItem);
       setItems(specMats);
       if (onItemsChange) onItemsChange(specMats);
     }
-  }, [initialItems, activeSpec, onItemsChange]);
+  }, [activeSpec, recipe, onItemsChange]);
 
   // Compute Shortage Items (items out of stock or requiring procurement)
   const shortageItems = useMemo(() => {
@@ -498,7 +520,7 @@ export function BomMaterialsGrid({
           ...it,
           acquisitionSource: "procurement" as const,
           availability: "On Order" as const,
-          supplier: it.supplier && !it.supplier.includes("Ombor") ? it.supplier : "Approved Supplier",
+          supplier: it.supplier && !it.supplier.includes("Ombor") ? it.supplier : "Ta'minot bo'limi",
         };
       }
       return it;
@@ -507,8 +529,8 @@ export function BomMaterialsGrid({
     if (onItemsChange) onItemsChange(next);
     if (tabId) setTabUnsaved(tabId, true);
     toast.add({
-      title: "Ta'minotga xarid so'rovi (PO) yuborildi",
-      description: `${shortageItems.length} ta material xaridga buyurtma qilindi (On Order).`,
+      title: "Ta'minotga xarid so'rovi yuborildi",
+      description: `${shortageItems.length} ta material xaridga buyurtma qilindi.`,
       type: "info",
     });
   }, [shortageItems, items, onItemsChange, tabId, setTabUnsaved]);
@@ -607,7 +629,7 @@ export function BomMaterialsGrid({
   const getCellContent = useCallback(
     (cell: Item): GridCell => {
       const [col, row] = cell;
-      const column = columns[col];
+      const column = visibleColumns[col];
       const item = filteredItems[row];
 
       if (!item || !column) {
@@ -652,7 +674,7 @@ export function BomMaterialsGrid({
             kind: GridCellKind.Text,
             data: item.id,
             displayData: item.id,
-            allowOverlay: true,
+            allowOverlay: !isOperator,
             themeOverride: {
               textDark: isDark ? "#93c5fd" : "#1d4ed8",
               baseFontStyle: "bold 12px monospace",
@@ -663,7 +685,7 @@ export function BomMaterialsGrid({
             kind: GridCellKind.Text,
             data: item.name,
             displayData: item.name,
-            allowOverlay: true,
+            allowOverlay: !isOperator,
             themeOverride: {
               baseFontStyle: item.issueType === "remake" ? "bold 12px sans-serif" : "500 12px sans-serif",
               textDark: item.issueType === "remake"
@@ -675,7 +697,7 @@ export function BomMaterialsGrid({
           const type = item.issueType || "standard";
           const label =
             type === "remake"
-              ? "Qayta (Remake)"
+              ? "Qayta chiqarish"
               : type === "client_change"
               ? "Mijoz tuzatishi"
               : type === "press_waste"
@@ -708,7 +730,7 @@ export function BomMaterialsGrid({
             kind: GridCellKind.Number,
             data: p,
             displayData: p.toLocaleString("en-US"),
-            allowOverlay: true,
+            allowOverlay: !isOperator,
             contentAlign: "right",
             themeOverride: {
               baseFontStyle: "12px monospace",
@@ -753,7 +775,7 @@ export function BomMaterialsGrid({
             kind: GridCellKind.Text,
             data: item.unit,
             displayData: item.unit,
-            allowOverlay: true,
+            allowOverlay: !isOperator,
             contentAlign: "center",
             themeOverride: {
               textDark: isDark ? "#d4d4d8" : "#3f3f46",
@@ -764,7 +786,7 @@ export function BomMaterialsGrid({
             kind: GridCellKind.Number,
             data: item.unitPrice,
             displayData: `$${item.unitPrice.toFixed(2)}`,
-            allowOverlay: true,
+            allowOverlay: !isOperator,
             contentAlign: "right",
             themeOverride: {
               baseFontStyle: "12px monospace",
@@ -797,7 +819,7 @@ export function BomMaterialsGrid({
               : party === "production"
               ? "Sex / Stanok"
               : party === "client"
-              ? "Mijoz (Pullik)"
+              ? "Mijoz"
               : party === "supplier"
               ? "Ta'minotchi"
               : "—";
@@ -833,7 +855,7 @@ export function BomMaterialsGrid({
             kind: GridCellKind.Text,
             data: item.supplier,
             displayData: item.supplier,
-            allowOverlay: true,
+            allowOverlay: !isOperator,
             themeOverride: {
               textDark: isClient
                 ? (isDark ? "#34d399" : "#059669")
@@ -857,13 +879,23 @@ export function BomMaterialsGrid({
             ? (isDark ? "#fbbf24" : "#d97706")
             : (isDark ? "#f87171" : "#dc2626");
 
-          const displayLabel = isClient ? "Mijozniki" : item.availability;
+          const displayLabel = isClient
+            ? "Mijozniki"
+            : isStock
+            ? "Mavjud"
+            : isReserved
+            ? "Band"
+            : isLow
+            ? "Kam qolgan"
+            : item.availability === "On Order"
+            ? "Buyurtmada"
+            : item.availability;
 
           return {
             kind: GridCellKind.Text,
-            data: displayLabel,
+            data: item.availability,
             displayData: displayLabel,
-            allowOverlay: true,
+            allowOverlay: !isOperator,
             themeOverride: {
               textDark: statusColor,
               baseFontStyle: "600 11px sans-serif",
@@ -879,14 +911,14 @@ export function BomMaterialsGrid({
           };
       }
     },
-    [columns, filteredItems, isDark]
+    [visibleColumns, filteredItems, isDark, isOperator]
   );
 
   // Support cell editing
   const onCellEdited = useCallback(
     (cell: Item, newValue: EditableGridCell) => {
       const [col, row] = cell;
-      const column = columns[col];
+      const column = visibleColumns[col];
       const targetItem = filteredItems[row];
       if (!targetItem || !column) return;
 
@@ -954,7 +986,7 @@ export function BomMaterialsGrid({
         setTabUnsaved(tabId, true);
       }
     },
-    [columns, filteredItems, tabId, setTabUnsaved]
+    [visibleColumns, filteredItems, tabId, setTabUnsaved, onItemsChange]
   );
 
   // Support column resizing
@@ -1079,7 +1111,7 @@ export function BomMaterialsGrid({
         ? "Mijoz xomashyosi (Davalcheskiy)"
         : formState.acquisitionSource === "warehouse"
         ? "Asosiy Ombor"
-        : "Approved Supplier"
+        : "Ta'minot bo'limi"
     );
 
     const itemToSave: BomItem = {
@@ -1161,11 +1193,17 @@ export function BomMaterialsGrid({
       selectedRowIndices.map((idx) => filteredItems[idx]?.id).filter(Boolean)
     );
 
-    setItems((prev) => {
-      const next = prev.filter((m) => !idsToDelete.has(m.id));
-      if (onItemsChange) onItemsChange(next);
-      return next;
-    });
+    const next = items.filter((m) => !idsToDelete.has(m.id));
+    setItems(next);
+
+    // If a recipe/specification was active and material(s) are deleted from it, detach the recipe
+    if ((activeSpec || recipe) && onRecipeChange) {
+      prevSpecCodeRef.current = undefined;
+      onRecipeChange("", "");
+    }
+
+    if (onItemsChange) onItemsChange(next);
+
     setSelection({
       columns: CompactSelection.empty(),
       rows: CompactSelection.empty(),
@@ -1177,7 +1215,7 @@ export function BomMaterialsGrid({
       description: t("toastDeleted", { count: idsToDelete.size }),
       type: "info",
     });
-  }, [selection, filteredItems, tabId, setTabUnsaved, t, onItemsChange]);
+  }, [selection, filteredItems, items, activeSpec, recipe, onRecipeChange, tabId, setTabUnsaved, t, onItemsChange]);
 
   // Duplicate Selected Row
   const handleDuplicateRow = useCallback(() => {
@@ -1189,7 +1227,7 @@ export function BomMaterialsGrid({
     const duplicated: BomItem = {
       ...target,
       id: `${target.id}-DUP`,
-      name: `${target.name} (Copy)`,
+      name: `${target.name} (Nusxa)`,
     };
 
     setItems((prev) => {
@@ -1220,7 +1258,7 @@ export function BomMaterialsGrid({
       navigator.clipboard.writeText(rowsToCopy);
       toast.add({
         title: t("copy"),
-        description: `${selectedRowIndices.length} row(s) copied to clipboard.`,
+        description: `${selectedRowIndices.length} ta qator nusxa olindi.`,
         type: "success",
       });
     }
@@ -1286,8 +1324,8 @@ export function BomMaterialsGrid({
               </span>
               <button
                 type="button"
-                onClick={() => setIsSpecPickerOpen(true)}
-                title="Boshqa shablon tanlash uchun bosing"
+                onClick={() => !isOperator && setIsSpecPickerOpen(true)}
+                title="Shablon"
                 className="flex items-center gap-1.5 min-w-0 text-left cursor-pointer hover:opacity-85"
               >
                 <span className="font-mono text-[11px] font-semibold text-primary shrink-0">
@@ -1300,115 +1338,99 @@ export function BomMaterialsGrid({
                 )}
               </button>
 
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <DropdownMenuTrigger
-                        render={
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            className="h-5 w-5 p-0 ml-1 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
-                          >
-                            <MoreHorizontal className="w-3.5 h-3.5" />
-                          </Button>
-                        }
-                      />
-                    }
-                  />
-                  <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                    Spetsifikatsiya amallari
-                  </TooltipContent>
-                </Tooltip>
+              {!isOperator && (
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="h-5 w-5 p-0 ml-1 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+                            >
+                              <MoreHorizontal className="w-3.5 h-3.5" />
+                            </Button>
+                          }
+                        />
+                      }
+                    />
+                    <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                      Spetsifikatsiya amallari
+                    </TooltipContent>
+                  </Tooltip>
 
-                <DropdownMenuContent align="start" className="w-60 text-xs">
-                  <DropdownMenuItem
-                    onClick={() => setIsSpecPickerOpen(true)}
-                    className="gap-2 cursor-pointer font-medium text-foreground"
-                  >
-                    <Layers className="w-3.5 h-3.5 text-primary" />
-                    <span>Shablonni almashtirish / tanlash</span>
-                  </DropdownMenuItem>
-
-                  {onOpenTab && (
+                  <DropdownMenuContent align="start" className="w-60 text-xs">
                     <DropdownMenuItem
-                      onClick={() => {
-                        const specToOpen = activeSpec || MASTER_SPECIFICATIONS[0];
-                        onOpenTab({
-                          id: specToOpen.id,
-                          title: `${specToOpen.id}: ${specToOpen.name}`,
-                          type: "product-spec",
-                          module: "production",
-                          documentData: {
+                      onClick={() => setIsSpecPickerOpen(true)}
+                      className="gap-2 cursor-pointer font-medium text-foreground"
+                    >
+                      <Layers className="w-3.5 h-3.5 text-primary" />
+                      <span>Shablonni almashtirish</span>
+                    </DropdownMenuItem>
+
+                    {onOpenTab && (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          const specToOpen = activeSpec || MASTER_SPECIFICATIONS[0];
+                          onOpenTab({
                             id: specToOpen.id,
-                            name: specToOpen.name,
-                            code: specToOpen.code,
-                            department: specToOpen.department,
-                            desc: specToOpen.description,
-                            materials: items,
-                          },
-                        });
-                      }}
-                      className="gap-2 cursor-pointer"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Spetsifikatsiya kartasini ochish</span>
-                    </DropdownMenuItem>
-                  )}
+                            title: `${specToOpen.id}: ${specToOpen.name}`,
+                            type: "product-spec",
+                            module: "production",
+                            documentData: {
+                              id: specToOpen.id,
+                              name: specToOpen.name,
+                              code: specToOpen.code,
+                              department: specToOpen.department,
+                              desc: specToOpen.description,
+                              materials: items,
+                            },
+                          });
+                        }}
+                        className="gap-2 cursor-pointer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>Spetsifikatsiya kartasini ochish</span>
+                      </DropdownMenuItem>
+                    )}
 
-                  {onSaveAsSpec && (
-                    <DropdownMenuItem
-                      onClick={() => onSaveAsSpec(items)}
-                      className="gap-2 cursor-pointer font-medium text-violet-700 dark:text-violet-400"
-                    >
-                      <BookmarkPlus className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
-                      <span>Yangi spetsifikatsiya qilib saqlash</span>
-                    </DropdownMenuItem>
-                  )}
+                    {onSaveAsSpec && (
+                      <DropdownMenuItem
+                        onClick={() => onSaveAsSpec(items)}
+                        className="gap-2 cursor-pointer font-medium text-violet-700 dark:text-violet-400"
+                      >
+                        <BookmarkPlus className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+                        <span>Yangi spetsifikatsiya qilib saqlash</span>
+                      </DropdownMenuItem>
+                    )}
 
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => {
-                      if (onRecipeChange) onRecipeChange("", "");
-                      setItems([]);
-                      if (onItemsChange) onItemsChange([]);
-                      if (tabId) setTabUnsaved(tabId, true);
-                      toast.add({
-                        title: "Shablon olib tashlandi",
-                        description: "Buyruq erkin retseptsiz rejimga o'tkazildi",
-                        type: "info",
-                      });
-                    }}
-                    className="gap-2 cursor-pointer text-muted-foreground"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Shablonni olib tashlash (bo'shatish)</span>
-                  </DropdownMenuItem>
-
-                  {recipe && RECIPE_BOM_MAP[recipe] && (
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={() => {
-                        setItems(RECIPE_BOM_MAP[recipe]);
+                        if (onRecipeChange) onRecipeChange("", "");
+                        setItems([]);
+                        if (onItemsChange) onItemsChange([]);
                         if (tabId) setTabUnsaved(tabId, true);
                         toast.add({
-                          title: "Texkarta tiklandi",
-                          description: "Standart me'yorlariga muvaffaqiyatli qaytarildi",
-                          type: "success",
+                          title: "Shablon olib tashlandi",
+                          description: "Buyurtma erkin rejimga o'tkazildi",
+                          type: "info",
                         });
                       }}
                       className="gap-2 cursor-pointer text-muted-foreground"
                     >
-                      <Boxes className="w-3.5 h-3.5" />
-                      <span>Standart me&apos;yorga qaytarish</span>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Shablonni olib tashlash</span>
                     </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               <Separator orientation="vertical" className="h-4 mx-0.5" />
             </div>
-          ) : (
+          ) : !isOperator ? (
             <div className="flex items-center gap-1.5 shrink-0 bg-muted/40 border border-border/80 rounded px-2 py-0.5">
               <span className="text-[11px] font-medium text-muted-foreground hidden xl:inline shrink-0">
                 Retsept:
@@ -1425,7 +1447,7 @@ export function BomMaterialsGrid({
               </Button>
               <Separator orientation="vertical" className="h-4 mx-0.5" />
             </div>
-          )}
+          ) : null}
 
           {/* Add Material Primary Action */}
           <Button
@@ -1459,67 +1481,71 @@ export function BomMaterialsGrid({
                 </TooltipContent>
               </Tooltip>
 
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      onClick={handleMarkSelectedAsClient}
-                      variant="outline"
-                      size="sm"
-                      className={cn(
-                        "h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer shrink-0",
-                        items[selectedRowIndex]?.acquisitionSource === "client" || items[selectedRowIndex]?.supplier?.toLowerCase().includes("mijoz")
-                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/40"
-                          : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      <UserCheck className="w-3 h-3 text-emerald-600" />
-                      <span className="hidden sm:inline">
-                        {items[selectedRowIndex]?.acquisitionSource === "client" || items[selectedRowIndex]?.supplier?.toLowerCase().includes("mijoz") ? "Mijozniki" : "Mijozniki qilish"}
-                      </span>
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                  Mijoz xomashyosi (Davalcheskiy $0) deb belgilash yoki omborga qaytarish
-                </TooltipContent>
-              </Tooltip>
+              {!isOperator && (
+                <>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          onClick={handleMarkSelectedAsClient}
+                          variant="outline"
+                          size="sm"
+                          className={cn(
+                            "h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer shrink-0",
+                            items[selectedRowIndex]?.acquisitionSource === "client" || items[selectedRowIndex]?.supplier?.toLowerCase().includes("mijoz")
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/40"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          <UserCheck className="w-3 h-3 text-emerald-600" />
+                          <span className="hidden sm:inline">
+                            {items[selectedRowIndex]?.acquisitionSource === "client" || items[selectedRowIndex]?.supplier?.toLowerCase().includes("mijoz") ? "Mijozniki" : "Mijozniki qilish"}
+                          </span>
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                      Mijoz xomashyosi deb belgilash yoki omborga qaytarish
+                    </TooltipContent>
+                  </Tooltip>
 
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      onClick={handleDuplicateRow}
-                      variant="outline"
-                      size="icon-sm"
-                      className="h-6.5 w-6.5 p-0 rounded cursor-pointer shrink-0 text-indigo-600 dark:text-indigo-400"
-                    >
-                      <Layers className="w-3 h-3" />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                  {t("duplicate")}
-                </TooltipContent>
-              </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          onClick={handleDuplicateRow}
+                          variant="outline"
+                          size="icon-sm"
+                          className="h-6.5 w-6.5 p-0 rounded cursor-pointer shrink-0 text-indigo-600 dark:text-indigo-400"
+                        >
+                          <Layers className="w-3 h-3" />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                      {t("duplicate")}
+                    </TooltipContent>
+                  </Tooltip>
 
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      onClick={handleDeleteSelected}
-                      variant="ghost"
-                      size="icon-sm"
-                      className="h-6.5 w-6.5 p-0 text-destructive hover:text-destructive hover:bg-destructive/10 rounded cursor-pointer shrink-0"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                  Tanlanganni o&apos;chirish
-                </TooltipContent>
-              </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          onClick={handleDeleteSelected}
+                          variant="ghost"
+                          size="icon-sm"
+                          className="h-6.5 w-6.5 p-0 text-destructive hover:text-destructive hover:bg-destructive/10 rounded cursor-pointer shrink-0"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                      Tanlanganni o&apos;chirish
+                    </TooltipContent>
+                  </Tooltip>
+                </>
+              )}
             </div>
           )}
 
@@ -1538,26 +1564,28 @@ export function BomMaterialsGrid({
               }
             />
             <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-              {t("exportCsv")} (CSV yuklab olish)
+              {t("exportCsv")}
             </TooltipContent>
           </Tooltip>
         </div>
 
-        {/* Right Financial & Variance Summary */}
-        <div className="flex items-center gap-2 text-[11px] font-mono shrink-0 pl-2 ml-auto whitespace-nowrap">
-          <span className="text-muted-foreground">
-            Reja: <strong className="text-foreground">${planTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-          </span>
-          <span className="text-muted-foreground">•</span>
-          <span className="text-muted-foreground">
-            Fakt: <strong className="text-primary font-bold">${actualTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-          </span>
-          {wasteTotalCost > 0 && (
-            <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 h-5 bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 whitespace-nowrap">
-              +{wasteTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({remakeCount} ta)
-            </Badge>
-          )}
-        </div>
+        {/* Right Financial & Variance Summary (Hidden for floor operators) */}
+        {!isOperator && (
+          <div className="flex items-center gap-2 text-[11px] font-mono shrink-0 pl-2 ml-auto whitespace-nowrap">
+            <span className="text-muted-foreground">
+              Reja: <strong className="text-foreground">${planTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+            </span>
+            <span className="text-muted-foreground">•</span>
+            <span className="text-muted-foreground">
+              Fakt: <strong className="text-primary font-bold">${actualTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+            </span>
+            {wasteTotalCost > 0 && (
+              <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 h-5 bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 whitespace-nowrap">
+                +{wasteTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({remakeCount} ta)
+              </Badge>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Shortage & Procurement Alert Strip */}
@@ -1566,7 +1594,7 @@ export function BomMaterialsGrid({
           <div className="flex items-center gap-2 min-w-0">
             <AlertCircle className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
             <span className="font-medium text-amber-950 dark:text-amber-200 truncate">
-              {shortageItems.length} ta material omborda yetarli emas yoki xarid talab qiladi:
+              {shortageItems.length} ta material omborda yetarli emas:
             </span>
             <div className="hidden lg:flex items-center gap-1 overflow-hidden">
               {shortageItems.slice(0, 2).map((si) => (
@@ -1581,27 +1609,29 @@ export function BomMaterialsGrid({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleMarkAllShortageAsClient}
-              className="h-6 px-2 text-[11px] font-medium border-amber-500/35 text-amber-950 dark:text-amber-200 hover:bg-amber-500/20 gap-1 rounded cursor-pointer"
-            >
-              <UserCheck className="size-3 text-emerald-600 dark:text-emerald-400" />
-              <span>Mijoz xomashyosi deb belgilash</span>
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleCreateProcurementPO}
-              className="h-6 px-2 text-[11px] font-medium bg-amber-600 hover:bg-amber-700 text-white gap-1 rounded cursor-pointer shadow-none"
-            >
-              <ShoppingCart className="size-3" />
-              <span>Ta&apos;minotga xarid so&apos;rovi (PO)</span>
-            </Button>
-          </div>
+          {!isOperator && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleMarkAllShortageAsClient}
+                className="h-6 px-2 text-[11px] font-medium border-amber-500/35 text-amber-950 dark:text-amber-200 hover:bg-amber-500/20 gap-1 rounded cursor-pointer"
+              >
+                <UserCheck className="size-3 text-emerald-600 dark:text-emerald-400" />
+                <span>Mijoz xomashyosi</span>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleCreateProcurementPO}
+                className="h-6 px-2 text-[11px] font-medium bg-amber-600 hover:bg-amber-700 text-white gap-1 rounded cursor-pointer shadow-none"
+              >
+                <ShoppingCart className="size-3" />
+                <span>Xarid so&apos;rovi</span>
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1615,7 +1645,7 @@ export function BomMaterialsGrid({
               if (e.key === "Insert") {
                 e.preventDefault();
                 handleOpenAdd();
-              } else if (e.key === "Delete" && hasSelectedRow) {
+              } else if (e.key === "Delete" && hasSelectedRow && !isOperator) {
                 e.preventDefault();
                 handleDeleteSelected();
               } else if (e.key === "Enter" && hasSelectedRow) {
@@ -1626,7 +1656,7 @@ export function BomMaterialsGrid({
           >
             <DataEditor
               getCellContent={getCellContent}
-              columns={columns}
+              columns={visibleColumns}
               rows={filteredItems.length}
               rowMarkers="both"
               freezeColumns={2}
@@ -1645,7 +1675,7 @@ export function BomMaterialsGrid({
               }}
               onCellActivated={(cell) => {
                 const [col, row] = cell;
-                const column = columns[col];
+                const column = visibleColumns[col];
                 const item = filteredItems[row];
                 if (column?.id === "image" && item) {
                   const img =
@@ -1681,7 +1711,6 @@ export function BomMaterialsGrid({
               <div className="absolute inset-0 top-7 flex flex-col items-center justify-center pointer-events-none text-muted-foreground z-10 select-none">
                 <Package className="size-8 text-muted-foreground/30 mb-2" />
                 <span className="text-xs font-medium">BOM ro&apos;yxatida materiallar mavjud emas</span>
-                <span className="text-[11px] text-muted-foreground/70">Material kiritish yoki ombordan tanlash uchun yuqoridagi tugmalardan foydalaning</span>
               </div>
             )}
           </div>
@@ -1697,12 +1726,12 @@ export function BomMaterialsGrid({
           {hasSelectedRow && (
             <ContextMenuItem onClick={() => handleOpenEdit(selectedRowIndex)} className="gap-2 cursor-pointer">
               <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-              <span>Edit Material Details</span>
+              <span>Materialni tahrirlash</span>
               <span className="ml-auto text-[10px] text-muted-foreground font-mono">Enter</span>
             </ContextMenuItem>
           )}
 
-          {hasSelectedRow && (
+          {hasSelectedRow && !isOperator && (
             <ContextMenuItem onClick={handleDuplicateRow} className="gap-2 cursor-pointer">
               <Layers className="w-3.5 h-3.5 text-indigo-500" />
               <span>{t("duplicate")}</span>
@@ -1726,7 +1755,7 @@ export function BomMaterialsGrid({
             <span className="ml-auto text-[10px] text-muted-foreground font-mono">F12</span>
           </ContextMenuItem>
 
-          {hasSelectedRow && (
+          {hasSelectedRow && !isOperator && (
             <>
               <ContextMenuSeparator />
               <ContextMenuItem
@@ -1742,15 +1771,14 @@ export function BomMaterialsGrid({
         </ContextMenuContent>
       </ContextMenu>
 
-      {/* Compact & Elongated (Uzunroq) BOM Material Dialog */}
+      {/* Compact & Elongated BOM Material Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-[490px] min-h-[460px] p-0 overflow-hidden text-xs flex flex-col gap-0 max-h-[90vh]">
-          {/* Header with Title and Mode Switcher in single row, with pr-10 to prevent colliding with close X button */}
           <DialogHeader className="px-4 py-2.5 pr-10 border-b border-border bg-card shrink-0">
             <div className="flex items-center justify-between">
               <DialogTitle className="text-xs font-semibold flex items-center gap-1.5">
                 <Boxes className="size-4 text-primary" />
-                <span>{editingIndex !== null ? "Materialni tahrirlash" : "Material kiritish (BOM)"}</span>
+                <span>{editingIndex !== null ? "Materialni tahrirlash" : "Material kiritish"}</span>
               </DialogTitle>
 
               {/* Segmented Source Switch */}
@@ -1781,7 +1809,7 @@ export function BomMaterialsGrid({
                       ...prev,
                       acquisitionSource: "procurement",
                       availability: "On Order",
-                      supplier: prev.supplier && !prev.supplier.includes("Ombor") ? prev.supplier : "Approved Supplier",
+                      supplier: prev.supplier && !prev.supplier.includes("Ombor") ? prev.supplier : "Ta'minot bo'limi",
                     }));
                   }}
                   className={cn(
@@ -1916,8 +1944,12 @@ export function BomMaterialsGrid({
                       <span>Joy: <b className="text-foreground">{selectedStockItem.location || "Asosiy"}</b></span>
                       <span>•</span>
                       <span>Mavjud: <b className={cn("font-mono", selectedStockItem.available > 0 ? "text-emerald-600" : "text-rose-600")}>{selectedStockItem.available.toLocaleString()} {selectedStockItem.unit}</b></span>
-                      <span>•</span>
-                      <span>Narx: <b className="text-foreground font-mono">${selectedStockItem.unitPriceUsd}</b></span>
+                      {!isOperator && (
+                        <>
+                          <span>•</span>
+                          <span>Narx: <b className="text-foreground font-mono">${selectedStockItem.unitPriceUsd}</b></span>
+                        </>
+                      )}
                     </div>
                     {formState.actualQty > selectedStockItem.available && (
                       <span className="text-[10px] font-mono font-semibold text-rose-600 shrink-0">
@@ -1932,7 +1964,7 @@ export function BomMaterialsGrid({
               <div className="space-y-2.5">
                 <div className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-800 dark:text-emerald-300 text-[11px]">
                   <UserCheck className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                  <span>Mijoz tomonidan keltiriladigan davalcheskiy xomashyo. Tan narxi $0 hisoblanadi va korxona omboridan hisobdan chiqarilmaydi.</span>
+                  <span>Mijoz xomashyosi ($0, korxona omboridan hisobdan chiqarilmaydi).</span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
@@ -1959,12 +1991,12 @@ export function BomMaterialsGrid({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Paper & Board">Paper & Board</SelectItem>
-                        <SelectItem value="Roll & Label">Roll & Label</SelectItem>
-                        <SelectItem value="Inks & Plates">Inks & Plates</SelectItem>
-                        <SelectItem value="Foil & Film">Foil & Film</SelectItem>
-                        <SelectItem value="Adhesives & Binding">Adhesives</SelectItem>
-                        <SelectItem value="Offcuts & Scraps">Delovoy Otxod</SelectItem>
+                        <SelectItem value="Paper & Board">Qog&apos;oz va karton</SelectItem>
+                        <SelectItem value="Roll & Label">Rulon va etiketka</SelectItem>
+                        <SelectItem value="Inks & Plates">Bo&apos;yoq va qoliplar</SelectItem>
+                        <SelectItem value="Foil & Film">Plyonka va folga</SelectItem>
+                        <SelectItem value="Adhesives & Binding">Yelim va biriktiruvchilar</SelectItem>
+                        <SelectItem value="Offcuts & Scraps">Delovoy otxod</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -2015,8 +2047,8 @@ export function BomMaterialsGrid({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Long Grain">Long Grain</SelectItem>
-                          <SelectItem value="Short Grain">Short Grain</SelectItem>
+                          <SelectItem value="Long Grain">Uzunasiga</SelectItem>
+                          <SelectItem value="Short Grain">Ko&apos;ndalang</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2075,12 +2107,12 @@ export function BomMaterialsGrid({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Paper & Board">Paper & Board</SelectItem>
-                        <SelectItem value="Roll & Label">Roll & Label</SelectItem>
-                        <SelectItem value="Inks & Plates">Inks & Plates</SelectItem>
-                        <SelectItem value="Foil & Film">Foil & Film</SelectItem>
-                        <SelectItem value="Adhesives & Binding">Adhesives</SelectItem>
-                        <SelectItem value="Offcuts & Scraps">Delovoy Otxod</SelectItem>
+                        <SelectItem value="Paper & Board">Qog&apos;oz va karton</SelectItem>
+                        <SelectItem value="Roll & Label">Rulon va etiketka</SelectItem>
+                        <SelectItem value="Inks & Plates">Bo&apos;yoq va qoliplar</SelectItem>
+                        <SelectItem value="Foil & Film">Plyonka va folga</SelectItem>
+                        <SelectItem value="Adhesives & Binding">Yelim va biriktiruvchilar</SelectItem>
+                        <SelectItem value="Offcuts & Scraps">Delovoy otxod</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -2131,8 +2163,8 @@ export function BomMaterialsGrid({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Long Grain">Long Grain</SelectItem>
-                          <SelectItem value="Short Grain">Short Grain</SelectItem>
+                          <SelectItem value="Long Grain">Uzunasiga</SelectItem>
+                          <SelectItem value="Short Grain">Ko&apos;ndalang</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2182,7 +2214,7 @@ export function BomMaterialsGrid({
                         value={formState.supplier}
                         onChange={(e) => setFormState((p) => ({ ...p, supplier: e.target.value }))}
                         className="h-7 text-xs"
-                        placeholder="Supplier..."
+                        placeholder="Ta'minotchi..."
                       />
                       <datalist id="supplier-options-list">
                         {supplierOptions.map((s) => (
@@ -2210,7 +2242,7 @@ export function BomMaterialsGrid({
                         value={formState.supplier}
                         onChange={(e) => setFormState((p) => ({ ...p, supplier: e.target.value }))}
                         className="h-7 text-xs"
-                        placeholder="Supplier..."
+                        placeholder="Ta'minotchi..."
                       />
                     </div>
                   </div>
@@ -2218,14 +2250,15 @@ export function BomMaterialsGrid({
               </div>
             )}
 
-            {/* ── 2. QUANTITIES & COSTING (4 compact inputs in 1 row) ── */}
+            {/* ── 2. QUANTITIES & COSTING ── */}
             <div className="space-y-1.5 pt-1 border-t border-border/80">
-              <div className="grid grid-cols-4 gap-2">
+              <div className={cn("grid gap-2", isOperator ? "grid-cols-3" : "grid-cols-4")}>
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-0.5">Reja norma</label>
                   <Input
                     type="number"
                     min={0}
+                    disabled={isOperator}
                     value={formState.planQty}
                     onChange={(e) => {
                       const pVal = parseFloat(e.target.value) || 0;
@@ -2261,66 +2294,77 @@ export function BomMaterialsGrid({
                   <label className="text-[10px] text-muted-foreground block mb-0.5">Birlik</label>
                   <Input
                     value={formState.unit}
+                    disabled={isOperator}
                     onChange={(e) => setFormState((p) => ({ ...p, unit: e.target.value }))}
                     className="h-8 text-xs"
                     placeholder="sheets..."
                   />
                 </div>
-                <div>
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">Narx ($)</label>
-                  <MoneyInput
-                    thousandSeparator=" "
-                    decimalScale={3}
-                    min={0}
-                    value={formState.unitPrice}
-                    onValueChange={(values) => {
-                      const uVal = values.floatValue ?? 0;
-                      setFormState((p) => ({
-                        ...p,
-                        unitPrice: uVal,
-                        totalPrice: Number(((p.actualQty || 0) * uVal).toFixed(2)),
-                      }));
-                    }}
-                    className="h-8 text-xs font-mono"
-                  />
-                </div>
+                {!isOperator && (
+                  <div>
+                    <label className="text-[10px] text-muted-foreground block mb-0.5">Narx ($)</label>
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={3}
+                      min={0}
+                      value={formState.unitPrice}
+                      onValueChange={(values) => {
+                        const uVal = values.floatValue ?? 0;
+                        setFormState((p) => ({
+                          ...p,
+                          unitPrice: uVal,
+                          totalPrice: Number(((p.actualQty || 0) * uVal).toFixed(2)),
+                        }));
+                      }}
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Summary line */}
-              <div className="flex items-center justify-between text-[11px] pt-1 text-muted-foreground">
-                <div className="flex items-center gap-1.5">
-                  <span>Jami summa:</span>
-                  <span className="font-mono font-bold text-foreground">
-                    ${Number((formState.actualQty * formState.unitPrice).toFixed(2)).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {formState.acquisitionSource === "client" ? (
-                    <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
-                      Mijoz hisobidan ($0)
-                    </Badge>
-                  ) : (
-                    <>
-                      {formState.actualQty > formState.planQty && (
-                        <span className="text-[10px] font-mono text-rose-600 font-semibold">
-                          +{formState.actualQty - formState.planQty} brak
-                        </span>
-                      )}
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-[9px] px-1 py-0",
-                          formState.availability === "On Order"
-                            ? "border-amber-400 text-amber-600"
-                            : "text-emerald-700 dark:text-emerald-400 border-emerald-300"
-                        )}
-                      >
-                        {formState.availability}
+              {!isOperator && (
+                <div className="flex items-center justify-between text-[11px] pt-1 text-muted-foreground">
+                  <div className="flex items-center gap-1.5">
+                    <span>Jami summa:</span>
+                    <span className="font-mono font-bold text-foreground">
+                      ${Number((formState.actualQty * formState.unitPrice).toFixed(2)).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {formState.acquisitionSource === "client" ? (
+                      <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                        Mijoz hisobidan ($0)
                       </Badge>
-                    </>
-                  )}
+                    ) : (
+                      <>
+                        {formState.actualQty > formState.planQty && (
+                          <span className="text-[10px] font-mono text-rose-600 font-semibold">
+                            +{formState.actualQty - formState.planQty} brak
+                          </span>
+                        )}
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[9px] px-1 py-0",
+                            formState.availability === "On Order"
+                              ? "border-amber-400 text-amber-600"
+                              : "text-emerald-700 dark:text-emerald-400 border-emerald-300"
+                          )}
+                        >
+                          {formState.availability === "In Stock"
+                            ? "Mavjud"
+                            : formState.availability === "Low Stock"
+                            ? "Kam qolgan"
+                            : formState.availability === "On Order"
+                            ? "Buyurtmada"
+                            : formState.availability}
+                        </Badge>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* ── 3. ISSUE TYPE & NOTES (Compact 2 columns) ── */}
@@ -2341,8 +2385,8 @@ export function BomMaterialsGrid({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="standard">Standart reja (BOM)</SelectItem>
-                    <SelectItem value="remake">Qayta chiqarish (Remake)</SelectItem>
+                    <SelectItem value="standard">Standart reja</SelectItem>
+                    <SelectItem value="remake">Qayta chiqarish</SelectItem>
                     <SelectItem value="client_change">Mijoz tuzatishi</SelectItem>
                     <SelectItem value="press_waste">Bosma chiqindisi</SelectItem>
                   </SelectContent>
@@ -2396,13 +2440,10 @@ export function BomMaterialsGrid({
       <Dialog open={isSpecPickerOpen} onOpenChange={setIsSpecPickerOpen}>
         <DialogContent className="max-w-lg p-0 overflow-hidden bg-card border border-border">
           <DialogHeader className="px-4 py-3 border-b border-border bg-muted/20">
-            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+            <DialogTitle className="text-xs font-semibold flex items-center gap-2">
               <Layers className="size-4 text-primary" />
-              <span>Spetsifikatsiya / Shablon tanlash</span>
+              <span>Shablon tanlash</span>
             </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Buyurtmaga biriktirish uchun texkarta va standart xomashyo normasini tanlang.
-            </DialogDescription>
           </DialogHeader>
 
           <Command className="w-full">
@@ -2442,11 +2483,6 @@ export function BomMaterialsGrid({
                                 {spec.department}
                               </Badge>
                             </div>
-                            {spec.description && (
-                              <p className="text-[11px] text-muted-foreground line-clamp-1">
-                                {spec.description}
-                              </p>
-                            )}
                             <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5 font-mono">
                               <span>{(spec as any).materialsCount || (Array.isArray((spec as any).materials) ? (spec as any).materials.length : 0)} xomashyo</span>
                               {spec.estimatedCost && (

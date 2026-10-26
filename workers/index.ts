@@ -6,8 +6,13 @@ import {
   type PrepressJobPayload,
   type NotificationJobPayload,
 } from "../lib/server/queue";
+import { ensureStorageBuckets } from "../lib/server/storage";
 
 console.log("🚀 [PrintGoo Worker] Fon xizmati (BullMQ) ishga tushmoqda...");
+
+ensureStorageBuckets()
+  .then((buckets) => console.log("📦 [PrintGoo Worker] MinIO S3 bucketlar va CORS tayyor:", buckets))
+  .catch((err) => console.warn("⚠️ [PrintGoo Worker] MinIO bucketlarni tekshirishda xato:", err));
 
 // 1. Prepress PDF / Maket qayta ishlash Worker
 const prepressWorker = new Worker<PrepressJobPayload>(

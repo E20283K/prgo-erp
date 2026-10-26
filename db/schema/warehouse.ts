@@ -498,3 +498,36 @@ export const warehouseFinishedGoodsRelations = relations(warehouseFinishedGoods,
     references: [clients.id],
   }),
 }));
+
+// ─── 8. Carriers & Fleet (Tashuvchilar va Avtopark Katalogi) ───────────────────
+
+export const carriers = pgTable(
+  "carriers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    type: varchar("type", { length: 64 }).default("fleet").notNull(), // fleet, courier, self, other
+    vehicleModel: varchar("vehicle_model", { length: 128 }),
+    vehicleNo: varchar("vehicle_no", { length: 64 }),
+    driverName: varchar("driver_name", { length: 255 }),
+    driverPhone: varchar("driver_phone", { length: 64 }),
+    isActive: boolean("is_active").default(true).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("carriers_company_idx").on(table.companyId),
+    index("carriers_name_idx").on(table.companyId, table.name),
+  ]
+);
+
+export const carriersRelations = relations(carriers, ({ one }) => ({
+  company: one(companies, {
+    fields: [carriers.companyId],
+    references: [companies.id],
+  }),
+}));

@@ -201,13 +201,78 @@ const VENDORS = [
   "Fujifilm CIS",
 ];
 
+// ─── Searchable Shipment Type Combobox ──────────────────────────────────
+export const SHIPMENT_TYPE_OPTIONS: { value: ShipmentType; label: string }[] = [
+  { value: "CustomerDelivery", label: "Mijozga topshirish" },
+  { value: "BranchTransfer", label: "Filialga jo'natish" },
+  { value: "Outsourcing", label: "Subpudratga berish" },
+  { value: "VendorReturn", label: "Yetkazib beruvchiga qaytarish" },
+  { value: "MaterialSale", label: "Xomashyo sotuvi" },
+];
+
+function ShipmentTypeCombobox({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: ShipmentType;
+  onChange: (val: ShipmentType) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = SHIPMENT_TYPE_OPTIONS.find((o) => o.value === value) || SHIPMENT_TYPE_OPTIONS[0];
+
+  return (
+    <Popover open={open && !disabled} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            className="h-7 w-full justify-between px-2 text-xs font-normal bg-background border-input shadow-none truncate"
+          >
+            <span className="truncate font-medium text-foreground">{current.label}</span>
+            <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+          </Button>
+        }
+      />
+      <PopoverContent className="w-[240px] p-0 border border-border shadow-md" align="start">
+        <Command className="w-full">
+          <CommandInput placeholder="Chiquv turini qidirish..." className="h-7 text-xs" />
+          <CommandList className="max-h-52 p-1">
+            <CommandEmpty className="p-2 text-xs text-muted-foreground text-center">
+              Topilmadi
+            </CommandEmpty>
+            <CommandGroup>
+              {SHIPMENT_TYPE_OPTIONS.map((opt) => (
+                <CommandItem
+                  key={opt.value}
+                  value={`${opt.value} ${opt.label}`}
+                  data-checked={opt.value === value}
+                  onSelect={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className="cursor-pointer text-xs py-1.5 px-2"
+                >
+                  <span className="font-medium text-foreground truncate">{opt.label}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ─── Searchable Work Order Picker (Customer-dependent) ────────────────────
 function WorkOrderPicker({
   value,
   onSelect,
   orders,
   customer,
-  onClearCustomer,
   disabled = false,
 }: {
   value: string;
@@ -220,11 +285,9 @@ function WorkOrderPicker({
   const [open, setOpen] = useState(false);
   const selectedWo = orders.find((o) => o.id === value);
 
-  const isCustomerFiltered = Boolean(customer && customer.trim() && !customer.startsWith("—"));
-
-  const { matchingOrders, otherOrders } = useMemo(() => {
-    if (!isCustomerFiltered || !customer) {
-      return { matchingOrders: orders, otherOrders: [] };
+  const sortedOrders = useMemo(() => {
+    if (!customer || !customer.trim() || customer.startsWith("—")) {
+      return orders;
     }
     const target = customer.trim().toLowerCase();
     const matching: ProductionQueueItem[] = [];
@@ -236,8 +299,21 @@ function WorkOrderPicker({
         others.push(o);
       }
     }
-    return { matchingOrders: matching, otherOrders: others };
-  }, [orders, customer, isCustomerFiltered]);
+    return [...matching, ...others];
+  }, [orders, customer]);
+
+  const displayLabel = useMemo(() => {
+    if (selectedWo) {
+      return `${selectedWo.id} — ${selectedWo.product}`;
+    }
+    if (value && value !== "-" && !value.startsWith("—")) {
+      return value;
+    }
+    if (value && value.startsWith("—")) {
+      return "Buyurtmasiz chiqim";
+    }
+    return "Buyurtmani tanlang...";
+  }, [selectedWo, value]);
 
   return (
     <Popover open={open && !disabled} onOpenChange={disabled ? undefined : setOpen}>
@@ -247,154 +323,72 @@ function WorkOrderPicker({
             type="button"
             variant="outline"
             disabled={disabled}
-            className={cn(
-              "h-7 w-full justify-between px-2 text-xs font-normal bg-background border-input shadow-none truncate",
-              isCustomerFiltered && matchingOrders.length > 0 && !selectedWo && "border-blue-500/40 text-blue-700 dark:text-blue-300"
-            )}
+            className="h-7 w-full justify-between px-2 text-xs font-normal bg-background border-input shadow-none truncate"
           >
-            <span className="truncate flex items-center gap-1.5 min-w-0">
+            <span className="truncate min-w-0 text-left font-medium">
               {selectedWo ? (
                 <>
-                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400 shrink-0">
-                    {selectedWo.id}
-                  </span>
-                  <span className="text-muted-foreground truncate text-[11px]">
-                    — {selectedWo.product}
-                  </span>
+                  <span className="font-mono font-bold text-primary mr-1.5">{selectedWo.id}</span>
+                  <span className="text-muted-foreground truncate">{selectedWo.product}</span>
                 </>
-              ) : value && value !== "-" && !value.startsWith("—") ? (
-                <span className="font-mono font-semibold">{value}</span>
-              ) : isCustomerFiltered ? (
-                <span className="text-blue-600 dark:text-blue-400 font-medium truncate">
-                  {matchingOrders.length > 0
-                    ? `${matchingOrders.length} ta buyurtma mavjud...`
-                    : "Buyurtma tanlang..."}
-                </span>
               ) : (
-                <span className="text-muted-foreground">Buyurtmani qidirish...</span>
+                <span className={cn(value ? "text-foreground" : "text-muted-foreground")}>
+                  {displayLabel}
+                </span>
               )}
             </span>
-            <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+            <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
           </Button>
         }
       />
-      <PopoverContent className="w-[380px] p-0 border border-border shadow-xl" align="start">
+      <PopoverContent className="w-[360px] p-0 border border-border shadow-md" align="start">
         <Command className="w-full">
-          {isCustomerFiltered && (
-            <div className="p-2 border-b border-border bg-blue-500/5 flex items-center justify-between text-[11px]">
-              <div className="flex items-center gap-1.5 min-w-0 truncate">
-                <span className="text-muted-foreground shrink-0">Mijoz bo'yicha filtr:</span>
-                <span className="font-semibold text-foreground truncate" title={customer}>
-                  {customer}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                <Badge variant="outline" className="text-[10px] font-mono bg-background">
-                  {matchingOrders.length} ta
-                </Badge>
-                {onClearCustomer && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onClearCustomer();
-                    }}
-                    className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer font-medium"
-                  >
-                    Barchasi
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          <CommandInput placeholder="Buyurtma №, mahsulot yoki mijoz..." className="h-8 text-xs" />
-          <CommandList className="max-h-64 overflow-y-auto p-1">
-            <CommandEmpty className="p-3 text-xs text-muted-foreground text-center">
+          <CommandInput placeholder="Buyurtma №, mahsulot yoki mijoz..." className="h-7 text-xs" />
+          <CommandList className="max-h-60 p-1">
+            <CommandEmpty className="p-2.5 text-xs text-muted-foreground text-center">
               Buyurtma topilmadi
             </CommandEmpty>
-
-            {isCustomerFiltered && (
-              <CommandGroup heading={`${customer} buyurtmalari (${matchingOrders.length})`}>
-                {matchingOrders.length === 0 ? (
-                  <div className="p-2.5 text-center text-xs text-muted-foreground italic">
-                    Ushbu mijoz bo'yicha buyurtmalar topilmadi
-                  </div>
-                ) : (
-                  matchingOrders.map((wo) => (
-                    <CommandItem
-                      key={wo.id}
-                      value={`${wo.id} ${wo.product} ${wo.customer}`}
-                      onSelect={() => {
-                        onSelect(wo.id);
-                        setOpen(false);
-                      }}
-                      className="flex flex-col items-start gap-0.5 p-2 rounded cursor-pointer text-xs bg-blue-500/5 mb-1"
-                    >
-                      <div className="flex items-center justify-between w-full">
-                        <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{wo.id}</span>
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          {wo.quantity?.toLocaleString()} {wo.unit || "dona"}
-                        </span>
-                      </div>
-                      <div className="font-medium text-foreground text-xs truncate w-full">
-                        {wo.product}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground truncate w-full flex items-center justify-between">
-                        <span className="flex items-center gap-1">
-                          <User className="size-3 text-muted-foreground shrink-0" />
-                          <span>{wo.customer}</span>
-                        </span>
-                        {wo.priority === "Urgent" && (
-                          <Badge variant="destructive" className="text-[9px] py-0 px-1">Tezkor</Badge>
-                        )}
-                      </div>
-                    </CommandItem>
-                  ))
-                )}
-              </CommandGroup>
-            )}
-
-            <CommandGroup heading={isCustomerFiltered ? `Boshqa mijozlar buyurtmalari (${otherOrders.length})` : "Ishlab chiqarish buyurtmalari"}>
-              {(isCustomerFiltered ? otherOrders : orders).map((wo) => (
-                <CommandItem
-                  key={wo.id}
-                  value={`${wo.id} ${wo.product} ${wo.customer}`}
-                  onSelect={() => {
-                    onSelect(wo.id);
-                    setOpen(false);
-                  }}
-                  className="flex flex-col items-start gap-0.5 p-2 rounded cursor-pointer text-xs"
-                >
-                  <div className="flex items-center justify-between w-full">
-                    <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{wo.id}</span>
-                    <span className="text-[10px] text-muted-foreground font-mono">
-                      {wo.quantity?.toLocaleString()} {wo.unit || "dona"}
-                    </span>
-                  </div>
-                  <div className="font-medium text-foreground text-xs truncate w-full">
-                    {wo.product}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground truncate w-full flex items-center gap-1">
-                    <User className="size-3 text-muted-foreground shrink-0" />
-                    <span>{wo.customer}</span>
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-
-            <CommandGroup heading="Boshqa variantlar">
+            <CommandGroup>
               <CommandItem
-                value="WO-DIRECT To'g'ridan-to'g'ri chiqim buyurtmasiz"
+                value="DIRECT_SHIPMENT To'g'ridan-to'g'ri chiqim buyurtmasiz"
+                data-checked={Boolean(value && value.startsWith("—"))}
                 onSelect={() => {
                   onSelect("— (To'g'ridan-to'g'ri chiqim)");
                   setOpen(false);
                 }}
-                className="p-2 text-xs text-muted-foreground cursor-pointer font-medium flex items-center gap-1.5"
+                className="cursor-pointer text-xs py-1.5 px-2 text-muted-foreground font-medium"
               >
-                <Plus className="size-3 text-muted-foreground shrink-0" />
-                <span>To&apos;g&apos;ridan-to&apos;g&apos;ri chiqim (buyurtmasiz)</span>
+                <span>— Buyurtmasiz (To&apos;g&apos;ridan-to&apos;g&apos;ri chiqim)</span>
               </CommandItem>
+              {sortedOrders.map((wo) => (
+                <CommandItem
+                  key={wo.id}
+                  value={`${wo.id} ${wo.product} ${wo.customer || ""}`}
+                  data-checked={wo.id === value}
+                  onSelect={() => {
+                    onSelect(wo.id);
+                    setOpen(false);
+                  }}
+                  className="cursor-pointer text-xs py-1.5 px-2 flex items-center justify-between gap-2"
+                >
+                  <div className="flex flex-col min-w-0 truncate">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="font-mono font-bold text-primary shrink-0">{wo.id}</span>
+                      <span className="truncate font-medium text-foreground">{wo.product}</span>
+                    </div>
+                    {wo.customer && (
+                      <span className="text-[10px] text-muted-foreground truncate">
+                        {wo.customer}
+                      </span>
+                    )}
+                  </div>
+                  {wo.quantity ? (
+                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                      {wo.quantity.toLocaleString()} {wo.unit || "dona"}
+                    </span>
+                  ) : null}
+                </CommandItem>
+              ))}
             </CommandGroup>
           </CommandList>
         </Command>
@@ -503,13 +497,13 @@ function RecipientCombobox({
 
   const options = useMemo(() => {
     if (shipmentType === "BranchTransfer") {
-      return branches.map((b) => ({ id: b, name: b, hint: "Filial ombori" }));
+      return branches.map((b) => ({ id: b, name: b, hint: "Filial" }));
     }
     if (shipmentType === "Outsourcing") {
-      return subcontractors.map((s) => ({ id: s, name: s, hint: "Autsorser sexi" }));
+      return subcontractors.map((s) => ({ id: s, name: s, hint: "Subpudrat" }));
     }
     if (shipmentType === "VendorReturn") {
-      return vendors.map((v) => ({ id: v, name: v, hint: "Yetkazib beruvchi" }));
+      return vendors.map((v) => ({ id: v, name: v, hint: "Ta'minotchi" }));
     }
     return customers.map((c) => ({
       id: c.name,
@@ -526,58 +520,104 @@ function RecipientCombobox({
             type="button"
             variant="outline"
             disabled={disabled}
-            className={cn(
-              "h-7 w-full justify-between px-2 text-xs font-normal bg-background border-input shadow-none truncate",
-              isAutoLinked && "border-blue-500/40 bg-blue-500/5 text-blue-900 dark:text-blue-200"
-            )}
+            className="h-7 w-full justify-between px-2 text-xs font-normal bg-background border-input shadow-none truncate"
           >
-            <span className="truncate flex items-center gap-1.5 min-w-0">
-              {isAutoLinked && (
-                <Link2 className="size-3 text-blue-600 dark:text-blue-400 shrink-0" />
-              )}
-              <span className="truncate">{value || "Qabul qiluvchini tanlang..."}</span>
+            <span className="truncate min-w-0 text-left font-medium text-foreground">
+              {value || "Qabul qiluvchini tanlang..."}
             </span>
-            <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+            <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
           </Button>
         }
       />
-      <PopoverContent className="w-[340px] p-0 border border-border shadow-xl" align="start">
+      <PopoverContent className="w-[320px] p-0 border border-border shadow-md" align="start">
         <Command className="w-full">
-          <CommandInput placeholder="Qabul qiluvchini qidirish..." className="h-8 text-xs" />
-          <CommandList className="max-h-60 overflow-y-auto p-1">
-            <CommandEmpty className="p-3 text-xs text-muted-foreground text-center">
+          <CommandInput placeholder="Qabul qiluvchini qidirish..." className="h-7 text-xs" />
+          <CommandList className="max-h-60 p-1">
+            <CommandEmpty className="p-2.5 text-xs text-muted-foreground text-center">
               Topilmadi
             </CommandEmpty>
             <CommandGroup>
-              {value && (
-                <CommandItem
-                  value="CLEAR_RECIPIENT_FILTER Tozalash barcha mijozlar"
-                  onSelect={() => {
-                    onChange("");
-                    setOpen(false);
-                  }}
-                  className="flex items-center gap-1.5 p-2 rounded cursor-pointer text-xs text-blue-600 dark:text-blue-400 font-medium"
-                >
-                  <RotateCcw className="size-3 text-blue-600 dark:text-blue-400" />
-                  <span>Filtrni tozalash</span>
-                </CommandItem>
-              )}
               {options.map((opt) => (
                 <CommandItem
                   key={opt.id}
                   value={`${opt.name} ${opt.hint || ""}`}
+                  data-checked={opt.name === value}
                   onSelect={() => {
                     onChange(opt.name);
                     setOpen(false);
                   }}
-                  className="flex items-center justify-between p-2 rounded cursor-pointer text-xs"
+                  className="cursor-pointer text-xs py-1.5 px-2 flex items-center justify-between gap-2"
                 >
                   <span className="font-medium text-foreground truncate">{opt.name}</span>
                   {opt.hint && (
-                    <span className="text-[10px] text-muted-foreground shrink-0 ml-2 font-mono">
+                    <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
                       {opt.hint}
                     </span>
                   )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── Searchable Warehouse Combobox ─────────────────────────────────────────
+function WarehouseCombobox({
+  value,
+  onChange,
+  warehouses,
+  disabled = false,
+  className,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  warehouses: { id: string; name: string }[];
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open && !disabled} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            className={cn(
+              "h-7 text-xs font-normal bg-background px-2.5 justify-between border-input shadow-none",
+              className || "w-full"
+            )}
+          >
+            <span className="truncate font-medium text-foreground">{value || "Omborni tanlang..."}</span>
+            <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+          </Button>
+        }
+      />
+      <PopoverContent className="w-[300px] p-0 border border-border shadow-md" align="start">
+        <Command className="w-full">
+          <CommandInput placeholder="Omborni qidirish..." className="h-7 text-xs" />
+          <CommandList className="max-h-56 p-1">
+            <CommandEmpty className="p-2 text-xs text-muted-foreground text-center">
+              Ombor topilmadi
+            </CommandEmpty>
+            <CommandGroup>
+              {warehouses.map((wh) => (
+                <CommandItem
+                  key={wh.id}
+                  value={wh.name}
+                  data-checked={wh.name === value}
+                  onSelect={() => {
+                    onChange(wh.name);
+                    setOpen(false);
+                  }}
+                  className="cursor-pointer text-xs py-1.5 px-2"
+                >
+                  <span className="font-medium text-foreground truncate">{wh.name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -597,7 +637,9 @@ export function CarrierCombobox({
   carriers,
   onSelect,
   onAddNew,
+  onOpenCatalog,
   disabled = false,
+  className,
 }: {
   carrier: string;
   vehicleNo?: string;
@@ -605,8 +647,10 @@ export function CarrierCombobox({
   driverPhone?: string;
   carriers: CarrierProfile[];
   onSelect: (profile: CarrierProfile) => void;
-  onAddNew: () => void;
+  onAddNew?: () => void;
+  onOpenCatalog?: () => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -617,23 +661,17 @@ export function CarrierCombobox({
 
   const displayLabel = useMemo(() => {
     if (selectedProfile) {
-      const parts = [];
       if (selectedProfile.vehicleNo && selectedProfile.vehicleNo !== "—") {
-        parts.push(selectedProfile.vehicleNo);
+        return `${selectedProfile.name} • ${selectedProfile.vehicleNo}`;
       }
-      if (selectedProfile.vehicleModel) {
-        parts.push(selectedProfile.vehicleModel);
-      }
-      if (selectedProfile.driverName && selectedProfile.driverName !== "—") {
-        parts.push(selectedProfile.driverName);
-      }
-      return parts.join(" • ") || selectedProfile.name;
+      return selectedProfile.name;
     }
-    const parts = [carrier];
-    if (vehicleNo && vehicleNo !== "—") parts.push(`(${vehicleNo})`);
-    if (driverName && driverName !== "—") parts.push(`• ${driverName}`);
-    return parts.filter(Boolean).join(" ");
-  }, [selectedProfile, carrier, vehicleNo, driverName]);
+    if (carrier) {
+      if (vehicleNo && vehicleNo !== "—") return `${carrier} • ${vehicleNo}`;
+      return carrier;
+    }
+    return "Tashuvchini tanlang...";
+  }, [selectedProfile, carrier, vehicleNo]);
 
   return (
     <Popover open={open && !disabled} onOpenChange={disabled ? undefined : setOpen}>
@@ -643,91 +681,97 @@ export function CarrierCombobox({
             type="button"
             variant="outline"
             disabled={disabled}
-            className="h-6.5 text-xs font-normal bg-background px-2 gap-1.5 max-w-[370px] truncate justify-between border-input shadow-none"
+            className={cn(
+              "h-7 text-xs font-normal bg-background px-2.5 gap-1.5 justify-between border-input shadow-none truncate",
+              className || "w-full"
+            )}
           >
             <span className="truncate flex items-center gap-1.5 min-w-0">
-              <Truck className="size-3 text-blue-600 dark:text-blue-400 shrink-0" />
-              <span className="font-semibold text-foreground truncate">{displayLabel || "Tashuvchini tanlang..."}</span>
-              {driverPhone && driverPhone !== "—" && (
-                <span className="text-[10px] text-muted-foreground font-mono shrink-0 hidden md:inline">
-                  {driverPhone}
-                </span>
-              )}
+              <Truck className="size-3.5 text-muted-foreground shrink-0" />
+              <span className="font-medium text-foreground truncate">{displayLabel}</span>
             </span>
-            <ChevronsUpDown className="size-3 opacity-50 shrink-0 ml-1" />
+            <ChevronsUpDown className="size-3.5 opacity-50 shrink-0 ml-1" />
           </Button>
         }
       />
-      <PopoverContent className="w-[400px] p-0 border border-border shadow-xl" align="start">
+      <PopoverContent className="w-[320px] p-0 border border-border shadow-md" align="start">
         <Command className="w-full">
-          <CommandInput placeholder="Haydovchi ismi, avto raqami yoki rusumi..." className="h-8 text-xs" />
-          <CommandList className="max-h-64 overflow-y-auto p-1">
-            <CommandEmpty className="p-3 text-xs text-muted-foreground text-center">
+          <CommandInput placeholder="Tashuvchi, haydovchi yoki raqam..." className="h-7 text-xs" />
+          <CommandList className="max-h-60 p-1">
+            <CommandEmpty className="p-2.5 text-xs text-muted-foreground text-center">
               Tashuvchi topilmadi
             </CommandEmpty>
-
-            <CommandGroup heading="Mavjud transport va haydovchilar">
+            <CommandGroup>
               {carriers.map((c) => (
                 <CommandItem
                   key={c.id}
-                  value={`${c.name} ${c.vehicleModel} ${c.vehicleNo} ${c.driverName} ${c.driverPhone}`}
+                  value={`${c.name} ${c.vehicleModel} ${c.vehicleNo} ${c.driverName || ""} ${c.driverPhone || ""}`}
+                  data-checked={c.name === carrier || (Boolean(c.vehicleNo && c.vehicleNo === vehicleNo))}
                   onSelect={() => {
                     onSelect(c);
                     setOpen(false);
                   }}
-                  className="flex flex-col items-start gap-0.5 p-2 rounded cursor-pointer text-xs"
+                  className="cursor-pointer text-xs py-1.5 px-2 flex items-center justify-between gap-2"
                 >
-                  <div className="flex items-center justify-between w-full">
-                    <span className="font-semibold text-foreground flex items-center gap-1.5 truncate">
-                      {c.type === "fleet" ? (
-                        <Truck className="size-3 text-blue-600 shrink-0" />
-                      ) : c.type === "courier" ? (
-                        <Package className="size-3 text-amber-600 shrink-0" />
-                      ) : (
-                        <ShoppingBag className="size-3 text-emerald-600 shrink-0" />
-                      )}
-                      <span className="truncate">{c.name}</span>
-                    </span>
-                    {c.vehicleNo && c.vehicleNo !== "—" && (
-                      <Badge variant="outline" className="font-mono text-[10px] shrink-0 font-bold bg-muted/60">
-                        {c.vehicleNo}
-                      </Badge>
+                  <div className="flex items-center gap-2 min-w-0 truncate">
+                    {c.type === "fleet" ? (
+                      <Truck className="size-3.5 text-muted-foreground shrink-0" />
+                    ) : c.type === "courier" ? (
+                      <Package className="size-3.5 text-muted-foreground shrink-0" />
+                    ) : (
+                      <ShoppingBag className="size-3.5 text-muted-foreground shrink-0" />
                     )}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground flex items-center gap-2 truncate w-full mt-0.5">
-                    <span className="truncate font-medium">{c.vehicleModel}</span>
-                    {c.driverName && c.driverName !== "—" && (
-                      <>
-                        <span className="text-muted-foreground/40">•</span>
-                        <span className="truncate">{c.driverName}</span>
-                      </>
-                    )}
-                    {c.driverPhone && c.driverPhone !== "—" && (
-                      <>
-                        <span className="text-muted-foreground/40">•</span>
-                        <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400 flex items-center gap-0.5">
-                          <Phone className="size-2.5 inline" /> {c.driverPhone}
+                    <div className="flex flex-col min-w-0 truncate">
+                      <span className="font-medium text-foreground truncate">{c.name}</span>
+                      {(c.driverName || c.vehicleModel) && (
+                        <span className="text-[10px] text-muted-foreground truncate">
+                          {[c.vehicleModel, c.driverName, c.driverPhone].filter((x) => x && x !== "—").join(" • ")}
                         </span>
-                      </>
-                    )}
+                      )}
+                    </div>
                   </div>
+                  {c.vehicleNo && c.vehicleNo !== "—" && (
+                    <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted/60 text-foreground shrink-0">
+                      {c.vehicleNo}
+                    </span>
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>
-
-            <CommandGroup heading="Boshqa amallar">
-              <CommandItem
-                value="ADD_NEW_CARRIER Yangi tashuvchi haydovchi kiritish mashina raqam tel"
-                onSelect={() => {
-                  setOpen(false);
-                  onAddNew();
-                }}
-                className="flex items-center gap-2 p-2 rounded cursor-pointer text-xs font-semibold text-blue-600 dark:text-blue-400"
-              >
-                <Plus className="size-3.5" />
-                <span>Yangi transport & haydovchi kiritish...</span>
-              </CommandItem>
-            </CommandGroup>
+            {(onAddNew || onOpenCatalog) && (
+              <div className="p-1 border-t border-border mt-1 flex flex-col gap-0.5">
+                {onAddNew && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setOpen(false);
+                      onAddNew();
+                    }}
+                    className="w-full justify-start text-xs font-medium text-primary hover:text-primary hover:bg-primary/10 h-7 gap-1.5 cursor-pointer rounded px-2"
+                  >
+                    <Plus className="size-3.5 shrink-0" />
+                    <span>Yangi tashuvchi qo&apos;shish</span>
+                  </Button>
+                )}
+                {onOpenCatalog && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setOpen(false);
+                      onOpenCatalog();
+                    }}
+                    className="w-full justify-start text-xs font-medium text-muted-foreground hover:text-foreground h-7 gap-1.5 cursor-pointer rounded px-2"
+                  >
+                    <ExternalLink className="size-3.5 shrink-0" />
+                    <span>Transportlar ro&apos;yxati (Spravochnik)</span>
+                  </Button>
+                )}
+              </div>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>
@@ -906,6 +950,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     deliveryActs,
     warehousesList,
     loadWarehouses,
+    carriersList,
+    loadCarriers,
+    upsertCarrierAsync,
     plants,
     fetchPlants,
     suppliers,
@@ -918,7 +965,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
 
   const isDark = theme === "dark";
 
-  // Auto-fetch plants, warehouses and suppliers if not yet in store
+  // Auto-fetch plants, warehouses, carriers and suppliers if not yet in store
   useEffect(() => {
     if (warehousesList.length === 0 && loadWarehouses) {
       loadWarehouses();
@@ -929,7 +976,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     if (suppliers.length === 0 && loadSuppliers) {
       loadSuppliers();
     }
-  }, [warehousesList.length, loadWarehouses, plants.length, fetchPlants, suppliers.length, loadSuppliers]);
+    if (carriersList.length === 0 && loadCarriers) {
+      loadCarriers();
+    }
+  }, [warehousesList.length, loadWarehouses, plants.length, fetchPlants, suppliers.length, loadSuppliers, carriersList.length, loadCarriers]);
 
   // Dynamically resolve all real warehouses from plants and postgres warehouses table
   const availableWarehouses = useMemo(() => {
@@ -1051,7 +1101,22 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   }, [tab.documentData, tab.id, crmCustomers, productionQueue]);
 
   const [doc, setDoc] = useState<WarehouseShipmentRecord>(initialDoc);
-  const [carrierList, setCarrierList] = useState<CarrierProfile[]>(DEFAULT_CARRIERS);
+
+  const resolvedCarriers = useMemo<CarrierProfile[]>(() => {
+    if (carriersList && carriersList.length > 0) {
+      return carriersList.map((c) => ({
+        id: c.id,
+        name: c.name,
+        type: (c.type as any) || "fleet",
+        vehicleModel: c.vehicleModel || "",
+        vehicleNo: c.vehicleNo || "—",
+        driverName: c.driverName || "—",
+        driverPhone: c.driverPhone || "—",
+      }));
+    }
+    return DEFAULT_CARRIERS;
+  }, [carriersList]);
+
   const [isCarrierModalOpen, setIsCarrierModalOpen] = useState(false);
   const [carrierModalData, setCarrierModalData] = useState<Partial<CarrierProfile> | undefined>(undefined);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -1228,17 +1293,28 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  const handleSaveCarrierProfile = (profile: CarrierProfile) => {
+  const handleSaveCarrierProfile = async (profile: CarrierProfile) => {
     if (isLocked) return;
-    setCarrierList((prev) => {
-      const idx = prev.findIndex((c) => c.id === profile.id);
-      if (idx >= 0) {
-        const updated = [...prev];
-        updated[idx] = profile;
-        return updated;
+
+    if (upsertCarrierAsync) {
+      try {
+        const saved = await upsertCarrierAsync({
+          id: profile.id.startsWith("carrier-") ? undefined : profile.id,
+          name: profile.name,
+          type: profile.type,
+          vehicleModel: profile.vehicleModel,
+          vehicleNo: profile.vehicleNo,
+          driverName: profile.driverName,
+          driverPhone: profile.driverPhone,
+          isActive: true,
+        });
+        if (saved?.id) {
+          profile.id = saved.id;
+        }
+      } catch (err) {
+        console.error("Failed to save carrier to database:", err);
       }
-      return [profile, ...prev];
-    });
+    }
 
     setDoc((prev) => ({
       ...prev,
@@ -1657,7 +1733,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       <div className="p-2.5 bg-card border-b border-border grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-12 gap-2.5 shrink-0 text-xs">
         {/* Col 1 (span 3): Chiqim turi */}
         <div className="sm:col-span-1 md:col-span-1 lg:col-span-3 space-y-1">
-          <Label className="text-[11px] text-muted-foreground font-semibold text-blue-700 dark:text-blue-400">
+          <Label className="text-[11px] text-muted-foreground font-medium">
             Chiqim turi
           </Label>
           {isLocked ? (
@@ -1677,23 +1753,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               className="h-7 text-xs bg-muted/40 font-medium w-full"
             />
           ) : (
-            <Select
+            <ShipmentTypeCombobox
               value={doc.shipmentType || "CustomerDelivery"}
-              onValueChange={(val: any) => {
-                if (val) handleShipmentTypeChange(val as ShipmentType);
-              }}
-            >
-              <SelectTrigger className="h-7 text-xs bg-blue-500/10 border-blue-500/30 text-blue-800 dark:text-blue-300 font-medium w-full">
-                <SelectValue placeholder="Chiqim turini tanlang..." />
-              </SelectTrigger>
-              <SelectContent className="text-xs">
-                <SelectItem value="CustomerDelivery">Mijozga topshirish</SelectItem>
-                <SelectItem value="BranchTransfer">Filialga jo&apos;natish</SelectItem>
-                <SelectItem value="Outsourcing">Subpudratga berish</SelectItem>
-                <SelectItem value="VendorReturn">Yetkazib beruvchiga qaytarish</SelectItem>
-                <SelectItem value="MaterialSale">Xomashyo sotuvi</SelectItem>
-              </SelectContent>
-            </Select>
+              onChange={handleShipmentTypeChange}
+              disabled={isLocked}
+            />
           )}
         </div>
 
@@ -1745,7 +1809,6 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               disabled={isLocked}
               orders={productionQueue}
               customer={doc.customer}
-              onClearCustomer={() => handleCustomerChange("")}
               onSelect={handleWorkOrderSelect}
             />
           )}
@@ -1785,44 +1848,34 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       </div>
 
       {/* ─── Contextual Transport Strip (Ixcham va faqat kerakli ma'lumotlar) ─── */}
-      <div className="px-3 py-1.5 bg-muted/20 border-b border-border flex flex-wrap items-center justify-between gap-2.5 text-xs">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="px-3 py-2 bg-muted/20 border-b border-border flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-4 sm:gap-6 flex-wrap">
           {/* Dispatch Warehouse */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2 shrink-0">
             <span className="text-[11px] text-muted-foreground font-medium shrink-0">Chiqaruvchi ombor:</span>
             {isLocked ? (
               <span className="font-medium text-foreground text-xs">{doc.from}</span>
             ) : (
-              <Select
+              <WarehouseCombobox
                 value={doc.from}
-                onValueChange={(val: any) => {
-                  if (val) handleFieldChange("from", val);
-                }}
-              >
-                <SelectTrigger className="h-6 text-xs bg-background max-w-[260px] truncate">
-                  <SelectValue placeholder="Ombor..." />
-                </SelectTrigger>
-                <SelectContent className="text-xs max-h-56">
-                  {availableWarehouses.map((wh) => (
-                    <SelectItem key={wh.id} value={wh.name} className="text-xs">
-                      {wh.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={(val) => handleFieldChange("from", val)}
+                warehouses={availableWarehouses}
+                className="w-[210px] sm:w-[240px] shrink-0"
+                disabled={isLocked}
+              />
             )}
           </div>
 
-          <Separator orientation="vertical" className="h-3.5" />
+          <Separator orientation="vertical" className="h-4 hidden sm:block shrink-0 mx-1" />
 
           {/* Unified Carrier & Driver Combobox */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2 shrink-0">
             <span className="text-[11px] text-muted-foreground font-medium shrink-0">Tashuvchi:</span>
             {isLocked ? (
-              <span className="font-medium text-foreground text-xs flex items-center gap-1">
+              <span className="font-medium text-foreground text-xs flex items-center gap-1.5">
                 <span>{doc.carrier}</span>
                 {doc.vehicleNo && doc.vehicleNo !== "—" && (
-                  <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-muted/60 font-bold">
+                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted/60 font-bold">
                     {doc.vehicleNo}
                   </span>
                 )}
@@ -1831,13 +1884,13 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 )}
               </span>
             ) : (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <CarrierCombobox
                   carrier={doc.carrier}
                   vehicleNo={doc.vehicleNo}
                   driverName={doc.driverName}
                   driverPhone={doc.driverPhone}
-                  carriers={carrierList}
+                  carriers={resolvedCarriers}
                   onSelect={handleSelectCarrierProfile}
                   onAddNew={() => {
                     setCarrierModalData({
@@ -1850,6 +1903,15 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                     });
                     setIsCarrierModalOpen(true);
                   }}
+                  onOpenCatalog={() => {
+                    openTab({
+                      id: "tab-warehouse-carriers",
+                      title: "Carriers",
+                      type: "registry",
+                      module: "warehouse",
+                    });
+                  }}
+                  className="w-[240px] sm:w-[270px] shrink-0"
                   disabled={isLocked}
                 />
 
@@ -1868,7 +1930,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                     });
                     setIsCarrierModalOpen(true);
                   }}
-                  className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground gap-1"
+                  className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1 border border-border/50 bg-background/50 hover:bg-muted shrink-0"
                   title="Tashuvchi, avto raqami, haydovchi va telefonni bitta joyda tahrirlash"
                 >
                   <Pencil className="size-3" />

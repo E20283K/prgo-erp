@@ -33,7 +33,8 @@ import {
 } from "@/components/ui/select";
 import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { RouteStep, ShiftEvent, FLOOR_OPERATORS } from "../types";
+import { RouteStep, ShiftEvent } from "../types";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 import { cn } from "@/lib/utils";
 
 interface PalletReportDialogProps {
@@ -117,10 +118,19 @@ export function PalletReportDialog({
     return 1000;
   }, [previousOpGoodOutput, existingOpEvents, selectedOp.qtyCompleted]);
 
+  const employees = useWorkspaceStore((s) => s.employees);
+
+  useEffect(() => {
+    const s = useWorkspaceStore.getState();
+    if (s.employees.length === 0 && s.loadEmployees) {
+      s.loadEmployees();
+    }
+  }, [isOpen]);
+
   // Form states
   const [shift, setShift] = useState<"1-smena" | "2-smena">("1-smena");
   const [batchLabel, setBatchLabel] = useState<string>(`Palet #${nextPalletNum}`);
-  const [selectedOperator, setSelectedOperator] = useState<string>(selectedOp.operator || FLOOR_OPERATORS[0]);
+  const [selectedOperator, setSelectedOperator] = useState<string>(selectedOp.operator || "");
   const [inputQty, setInputQty] = useState<number>(suggestedInputQty);
   const [makeReadyQty, setMakeReadyQty] = useState<number>(0);
   const [defectQty, setDefectQty] = useState<number>(0);
@@ -140,7 +150,7 @@ export function PalletReportDialog({
         setWasteReason(editingEvent.wasteReason || "");
         setTime(editingEvent.time || defaultTime);
         setCustomGoodQty(editingEvent.goodQty ?? null);
-        setSelectedOperator(editingEvent.operator || selectedOp.operator || FLOOR_OPERATORS[0]);
+        setSelectedOperator(editingEvent.operator || selectedOp.operator || employees[0]?.fullName || "");
       } else {
         setBatchLabel(`Palet #${existingOpEvents.length + 1}`);
         setInputQty(suggestedInputQty);
@@ -148,10 +158,10 @@ export function PalletReportDialog({
         setDefectQty(0);
         setWasteReason("");
         setCustomGoodQty(null);
-        setSelectedOperator(selectedOp.operator || FLOOR_OPERATORS[0]);
+        setSelectedOperator(selectedOp.operator || employees[0]?.fullName || "");
       }
     }
-  }, [isOpen, editingEvent, existingOpEvents.length, suggestedInputQty, selectedOp.operator, defaultTime]);
+  }, [isOpen, editingEvent, existingOpEvents.length, suggestedInputQty, selectedOp.operator, defaultTime, employees]);
 
   // Net good output calculation
   const calculatedGoodQty = useMemo(() => {
@@ -169,19 +179,37 @@ export function PalletReportDialog({
   const totalWaste = makeReadyQty + defectQty;
   const wastePercent = inputQty > 0 ? ((totalWaste / inputQty) * 100).toFixed(1) : "0.0";
 
-  // Operator list for quick selection cards (combining step operators + floor operators)
+  // Operator list combining step operators + active HR employees
   const quickOperators = useMemo(() => {
     const list: string[] = [];
     if (selectedOp.operators && selectedOp.operators.length > 0) {
       selectedOp.operators.forEach((op) => {
-        if (!list.includes(op)) list.push(op);
+        if (op && !list.includes(op)) list.push(op);
       });
     }
-    if (selectedOp.operator && !list.includes(selectedOp.operator)) {
-      list.push(selectedOp.operator);
+    if (selectedOp.operator) {
+      selectedOp.operator
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((op) => {
+          if (!list.includes(op)) list.push(op);
+        });
     }
     return list;
   }, [selectedOp]);
+
+  const allAvailableOperators = useMemo(() => {
+    const list = [...quickOperators];
+    if (Array.isArray(employees)) {
+      employees.forEach((emp) => {
+        if (emp.status !== "terminated" && emp.fullName && !list.includes(emp.fullName)) {
+          list.push(emp.fullName);
+        }
+      });
+    }
+    return list;
+  }, [quickOperators, employees]);
 
   // Helper to extract initials for avatar
   const getInitials = (name: string) => {
@@ -324,7 +352,7 @@ export function PalletReportDialog({
                   <SelectValue>{selectedOperator || "Operator tanlang"}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {quickOperators.map((op) => (
+                  {allAvailableOperators.map((op) => (
                     <SelectItem key={op} value={op} className="text-xs">
                       {op}
                     </SelectItem>

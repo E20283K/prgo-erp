@@ -21,7 +21,15 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { Plus, ExternalLink, PackageCheck, Truck, Layers, Info, RotateCw } from "lucide-react";
+import {
+  Plus,
+  ExternalLink,
+  PackageCheck,
+  Truck,
+  ClipboardList,
+  RotateCw,
+  Loader2,
+} from "lucide-react";
 import {
   useWorkspaceStore,
   CrmCustomerRecord,
@@ -32,6 +40,50 @@ const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
   { ssr: false }
 );
+
+function normalizeCompanyName(name?: string | null): string {
+  if (!name) return "";
+  return name
+    .toLowerCase()
+    .replace(/\b(llc|mchj|ooo|xk|qk|aj|chj|ltd|inc)\b/gi, "")
+    .replace(/["'«».,]/g, "")
+    .trim();
+}
+
+function isSameCustomer(
+  customer: { id?: string; dbId?: string; name?: string; tin?: string },
+  target: {
+    clientId?: string | null;
+    customerId?: string | null;
+    customerName?: string | null;
+    customer?: string | null;
+    customerTin?: string | null;
+  }
+): boolean {
+  const custIds = [customer.id, customer.dbId].filter(
+    (id): id is string =>
+      Boolean(id && !id.startsWith("draft-") && !id.startsWith("new-") && !id.startsWith("CUST-NEW-"))
+  );
+  const targetIds = [target.clientId, target.customerId].filter((id): id is string => Boolean(id));
+  if (custIds.length > 0 && targetIds.some((tid) => custIds.includes(tid))) {
+    return true;
+  }
+
+  const custTin = (customer.tin || "").trim();
+  const targetTin = (target.customerTin || "").trim();
+  if (custTin.length >= 4 && targetTin.length >= 4 && custTin === targetTin) {
+    return true;
+  }
+
+  const cleanCust = normalizeCompanyName(customer.name);
+  const cleanTarget = normalizeCompanyName(target.customerName ?? target.customer);
+  if (!cleanCust || !cleanTarget) return false;
+  if (cleanCust === cleanTarget) return true;
+  if (cleanCust.length >= 3 && cleanTarget.length >= 3) {
+    return cleanCust.includes(cleanTarget) || cleanTarget.includes(cleanCust);
+  }
+  return false;
+}
 
 interface CustomerOrdersTabProps {
   customer: CrmCustomerRecord;
@@ -48,158 +100,190 @@ export function CustomerOrdersTab({
   onReorderWorkOrder,
   onOpenDeliveryAct,
 }: CustomerOrdersTabProps) {
-  const { productionQueue, deliveryActs, finishedGoods, warehouseShipments, openTab, theme } =
-    useWorkspaceStore();
+  const {
+    productionQueue,
+    isProductionQueueLoading,
+    deliveryActs,
+    isFinanceLoading,
+    finishedGoods,
+    isFinishedGoodsLoading,
+    warehouseShipments,
+    openTab,
+    theme,
+  } = useWorkspaceStore();
   const isDark = theme === "dark";
+  const isLoading = Boolean(isProductionQueueLoading || isFinishedGoodsLoading || isFinanceLoading);
 
-  // Match dedicated customer finished goods stock (Ortiqcha yoki saqlanayotgan tayyor mahsulot)
+  // Match dedicated customer finished goods stock (Tayyor mahsulot zaxirasi)
   const customerFinishedGoods = useMemo(() => {
-    const cleanCustomer = customer.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
-    return finishedGoods.filter((fg) => {
-      if (fg.customerId && fg.customerId === customer.id) return true;
-      if (customer.tin && fg.customerTin === customer.tin) return true;
-      const fgCust = fg.customerName.toLowerCase();
-      return (
-        fgCust === cleanCustomer ||
-        fgCust.includes(cleanCustomer) ||
-        cleanCustomer.includes(fgCust)
-      );
-    });
-  }, [customer.name, customer.id, customer.tin, finishedGoods]);
+    return finishedGoods.filter((fg) =>
+      isSameCustomer(customer, {
+        customerId: fg.customerId,
+        clientId: (fg as any).clientId,
+        customerName: fg.customerName,
+        customerTin: fg.customerTin,
+      })
+    );
+  }, [customer, finishedGoods]);
 
   const totalRemainingStock = useMemo(() => {
-    return customerFinishedGoods.reduce((sum, item) => sum + (item.stockQty || 0), 0);
+    return customerFinishedGoods.reduce(
+      (sum, item) => sum + (Number(item.stockQty ?? (item as any).quantity) || 0),
+      0
+    );
   }, [customerFinishedGoods]);
 
   const totalStockValue = useMemo(() => {
-    return customerFinishedGoods.reduce((sum, item) => sum + (item.totalStockValue || 0), 0);
+    return customerFinishedGoods.reduce((sum, item) => sum + (Number(item.totalStockValue) || 0), 0);
   }, [customerFinishedGoods]);
 
   // Match live orders from production queue & delivery acts + finished goods
   const customerOrders = useMemo(() => {
-    const cleanCustomer = customer.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
-
     // 1. Delivery Acts (SF)
     const matchedActs = deliveryActs
-      .filter((a) => {
-        const actName = a.customer.toLowerCase();
-        return (
-          actName === cleanCustomer ||
-          actName.includes(cleanCustomer) ||
-          cleanCustomer.includes(actName) ||
-          (customer.tin && a.customerTin === customer.tin)
-        );
-      })
+      .filter((a) =>
+        isSameCustomer(customer, {
+          customer: a.customer,
+          customerTin: a.customerTin,
+        })
+      )
       .map((a) => {
-        // Find matching finished goods record if any
         const linkedFg = customerFinishedGoods.find(
-          (fg) => fg.workOrderId === a.workOrderId || fg.productName === a.product
+          (fg) =>
+            (a.workOrderId && fg.workOrderId === a.workOrderId) ||
+            (a.product && fg.productName === a.product)
         );
+        const fgStock = linkedFg ? Number(linkedFg.stockQty ?? (linkedFg as any).quantity) || 0 : 0;
         return {
           docId: a.id,
           docType: "Schet-faktura (SF)",
-          date: a.date,
-          pressMachine: "Buxgalteriya / Realizatsiya",
+          date: a.date || "—",
+          pressMachine: "Realizatsiya",
           workOrderRef: a.workOrderId || a.orderId,
           product: a.product,
-          orderedQty: linkedFg ? linkedFg.orderedQty : a.quantity,
-          producedQty: linkedFg ? linkedFg.producedQty : a.quantity,
-          shippedQty: a.quantity,
-          remainingStock: linkedFg ? linkedFg.stockQty : 0,
-          location: linkedFg ? linkedFg.location : "Topshirilgan (Mijozda)",
+          orderedQty: linkedFg ? Number(linkedFg.orderedQty || a.quantity || 0) : Number(a.quantity || 0),
+          producedQty: linkedFg ? Number(linkedFg.producedQty || a.quantity || 0) : Number(a.quantity || 0),
+          shippedQty: Number(a.quantity || 0),
+          remainingStock: fgStock,
+          location: linkedFg
+            ? linkedFg.location || (linkedFg as any).locationName || "Tayyor Mahsulot Ombori"
+            : "Topshirilgan",
           unit: a.unit || "pcs",
-          amountUsd: a.totalAmount,
+          amountUsd: Number(a.totalAmount || 0),
           status: a.status,
         };
       });
 
     // 2. Production Queue Work Orders (WO)
     const matchedQueue = productionQueue
-      .filter((q) => {
-        const qName = q.customer.toLowerCase();
-        return (
-          qName === cleanCustomer ||
-          qName.includes(cleanCustomer) ||
-          cleanCustomer.includes(qName)
-        );
-      })
+      .filter((q) =>
+        isSameCustomer(customer, {
+          clientId: q.clientId,
+          customer: q.customer,
+        })
+      )
       .map((q) => {
         const linkedFg = customerFinishedGoods.find(
-          (fg) => fg.workOrderId === q.id || fg.productName === q.product
+          (fg) => fg.workOrderId === q.id || (q.product && fg.productName === q.product)
         );
-        const ordered = linkedFg ? linkedFg.orderedQty : q.quantity;
-        const produced = linkedFg ? linkedFg.producedQty : q.quantity;
-        const shipped = linkedFg ? linkedFg.shippedQty : 0;
-        const remaining = linkedFg ? linkedFg.stockQty : Math.max(0, produced - shipped);
+        const ordered = Number(linkedFg?.orderedQty || q.quantity || 0);
+
+        const shippedFromActs = deliveryActs
+          .filter((a) => a.workOrderId && a.workOrderId === q.id)
+          .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+        const shippedFromShipments = (warehouseShipments || [])
+          .filter(
+            (s) =>
+              s.workOrder === q.id &&
+              (s.status === "Dispatched" || s.status === "Delivered")
+          )
+          .reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+
+        const shipped = linkedFg
+          ? Number(linkedFg.shippedQty || 0)
+          : Math.max(shippedFromActs, shippedFromShipments, 0);
+
+        const remaining = linkedFg
+          ? Number(linkedFg.stockQty ?? (linkedFg as any).quantity ?? 0)
+          : 0;
+
+        const isCompleted = q.stage === "Completed" || q.status === "Completed";
+        const produced = linkedFg
+          ? Number(linkedFg.producedQty ?? remaining + shipped)
+          : isCompleted
+          ? Math.max(ordered, shipped)
+          : shipped;
+
+        const displayStatus =
+          q.status === "Draft" || q.status === "Cancelled"
+            ? q.status
+            : q.stage || q.status || "Queue";
+
+        const location = linkedFg
+          ? linkedFg.location || (linkedFg as any).locationName || "Tayyor Mahsulot Ombori"
+          : q.status === "Draft"
+          ? "Prepress"
+          : q.pressMachine || q.department || "Navbatda";
+
+        const amountUsd = Number(q.priceTotal || (q as any).financials?.totalPrice || 0);
 
         return {
           docId: q.id,
           docType: "Work Order (WO)",
-          date: q.deadline || "2026-10-20",
-          pressMachine: q.pressMachine || "Heidelberg Speedmaster XL 106",
+          date: q.deadline || q.startDate || "—",
+          pressMachine: q.pressMachine || q.department || "—",
           workOrderRef: q.clientOrderId || q.id,
           product: q.product,
           orderedQty: ordered,
           producedQty: produced,
           shippedQty: shipped,
           remainingStock: remaining,
-          location: linkedFg ? linkedFg.location : "Sex / Chiqarish liniyasi",
+          location,
           unit: q.unit || "pcs",
-          amountUsd: 0,
-          status: q.stage,
+          amountUsd,
+          status: displayStatus,
         };
       });
 
-    // 3. Any customer finished goods not yet in queue or acts
+    // 3. Any customer finished goods not yet linked to queue or acts
     const standaloneFg = customerFinishedGoods
       .filter(
         (fg) =>
           !matchedQueue.some((q) => q.docId === fg.workOrderId) &&
           !matchedActs.some((a) => a.workOrderRef === fg.workOrderId)
       )
-      .map((fg) => ({
-        docId: fg.workOrderId || fg.id,
-        docType: "Zaxira Partiyasi (FG)",
-        date: fg.completionDate,
-        pressMachine: "Tayyor Mahsulot Ombori",
-        workOrderRef: fg.clientOrderId || fg.workOrderId,
-        product: fg.productName,
-        orderedQty: fg.orderedQty,
-        producedQty: fg.producedQty,
-        shippedQty: fg.shippedQty,
-        remainingStock: fg.stockQty,
-        location: fg.location,
-        unit: fg.unit,
-        amountUsd: fg.totalStockValue,
-        status: fg.status,
-      }));
+      .map((fg) => {
+        const stockQty = Number(fg.stockQty ?? (fg as any).quantity ?? 0);
+        const shippedQty = Number(fg.shippedQty ?? (fg as any).reservedQuantity ?? 0);
+        const producedQty = Number(fg.producedQty ?? stockQty + shippedQty);
+        const orderedQty = Number(fg.orderedQty ?? producedQty);
+        return {
+          docId: fg.workOrderId || fg.id,
+          docType: "Zaxira Partiyasi (FG)",
+          date:
+            fg.completionDate ||
+            ((fg as any).producedAt
+              ? new Date((fg as any).producedAt).toISOString().split("T")[0]
+              : "—"),
+          pressMachine: "Tayyor Mahsulot Ombori",
+          workOrderRef: fg.clientOrderId || (fg as any).orderNo || fg.workOrderId,
+          product: fg.productName,
+          orderedQty,
+          producedQty,
+          shippedQty,
+          remainingStock: stockQty,
+          location:
+            fg.location ||
+            [(fg as any).locationName, (fg as any).locationShelf].filter(Boolean).join(" — ") ||
+            "Tayyor Mahsulot Ombori",
+          unit: fg.unit || "pcs",
+          amountUsd: Number(fg.totalStockValue || 0),
+          status: fg.status || "In Stock",
+        };
+      });
 
-    const all = [...matchedActs, ...matchedQueue, ...standaloneFg];
-
-    // Fallback if empty so the customer history isn't completely blank
-    if (all.length === 0) {
-      return [
-        {
-          docId: `WOOF-26-${customer.id.replace("CUST-", "").padStart(4, "0")}`,
-          docType: "Work Order (WO)",
-          date: "2026-10-15",
-          pressMachine: "Heidelberg Speedmaster XL 106-8P",
-          workOrderRef: `CO-00${customer.id.replace("CUST-", "4")}`,
-          product: `${customer.name} — Standart Korporativ Qadoq`,
-          orderedQty: 10000,
-          producedQty: 12500,
-          shippedQty: 10000,
-          remainingStock: 2500,
-          location: "Tayyor Mahsulot Ombori — Rampa 2, Pallet P-04",
-          unit: "pcs",
-          amountUsd: 4850,
-          status: "Ready to Print",
-        },
-      ];
-    }
-
-    return all;
-  }, [customer.name, customer.tin, customer.id, deliveryActs, productionQueue, customerFinishedGoods]);
+    return [...matchedActs, ...matchedQueue, ...standaloneFg];
+  }, [customer, deliveryActs, productionQueue, warehouseShipments, customerFinishedGoods]);
 
   // Resizable columns
   const [columns, setColumns] = useState<GridColumn[]>([
@@ -318,7 +402,11 @@ export function CustomerOrdersTab({
       const item = customerOrders[row];
       if (!item) return;
 
-      if (item.docId.startsWith("SF-")) {
+      if (
+        item.docId.startsWith("SF-") ||
+        item.docId.startsWith("ACT-") ||
+        item.docType === "Schet-faktura (SF)"
+      ) {
         onOpenDeliveryAct(item.docId, item.amountUsd);
       } else {
         onOpenWorkOrder(item);
@@ -329,12 +417,18 @@ export function CustomerOrdersTab({
 
   const handleCreateShipmentFromStock = (selectedItem?: any) => {
     const draftId = `draft-shp-${Date.now()}`;
-    const targetProduct = selectedItem?.product || (customerFinishedGoods[0]?.productName ?? `${customer.name} Mahsuloti`);
-    const targetQty = selectedItem?.remainingStock || (totalRemainingStock > 0 ? totalRemainingStock : 1000);
+    const targetProduct =
+      selectedItem?.product ||
+      customerFinishedGoods[0]?.productName ||
+      customerOrders[0]?.product ||
+      "";
+    const targetQty =
+      selectedItem?.remainingStock ||
+      (totalRemainingStock > 0 ? totalRemainingStock : selectedItem?.orderedQty || 0);
 
     openTab({
       id: draftId,
-      title: `Yangi Chiqim: ${customer.name} (Qoralama)`,
+      title: `Yangi Chiqim: ${customer.name}`,
       type: "warehouse-shipment",
       module: "warehouse",
       isUnsaved: false,
@@ -344,15 +438,15 @@ export function CustomerOrdersTab({
         date: new Date().toISOString().split("T")[0],
         customer: customer.name,
         customerTin: customer.tin,
-        workOrder: selectedItem?.docId || customerFinishedGoods[0]?.workOrderId || "WOOF-26-0351",
+        workOrder: selectedItem?.docId || customerFinishedGoods[0]?.workOrderId || "",
         product: targetProduct,
         quantity: targetQty,
-        unit: "pcs",
-        from: "Main Factory — Tashkent",
-        carrier: "PrintGoo Fleet #1",
+        unit: selectedItem?.unit || customerFinishedGoods[0]?.unit || "pcs",
+        from: "Asosiy ombor",
+        carrier: "",
         status: "Draft",
         shipmentType: "CustomerDelivery",
-        notes: `Tayyor mahsulot zaxirasidan chiqarildi (${targetQty} dona).`,
+        notes: targetQty > 0 ? `Tayyor mahsulot zaxirasidan chiqarildi (${targetQty} dona).` : "",
       },
     });
   };
@@ -360,17 +454,32 @@ export function CustomerOrdersTab({
   return (
     <div className="flex-1 flex flex-col overflow-hidden h-full">
       {/* ── KPI Strip: Total Orders & Customer Dedicated Warehouse Stock ── */}
-      <div className="px-4 py-2.5 bg-card border-b border-border flex flex-wrap items-center justify-between gap-3 shrink-0">
+      <div className="px-4 py-2 bg-card border-b border-border flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
+          {/* Total Orders Counter */}
+          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-md border border-border bg-muted/40">
+            <div className="w-7 h-7 rounded bg-primary/10 flex items-center justify-center shrink-0">
+              <ClipboardList className="w-3.5 h-3.5 text-primary" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[11px] font-medium text-muted-foreground">
+                Jami buyurtmalar
+              </span>
+              <span className="font-mono text-sm font-bold text-foreground">
+                {customerOrders.length.toLocaleString()} ta
+              </span>
+            </div>
+          </div>
+
           {/* Dedicated Customer Stock KPI Box */}
           <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-md border border-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/30">
-            <div className="w-8 h-8 rounded bg-emerald-500/15 flex items-center justify-center shrink-0">
-              <PackageCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <div className="w-7 h-7 rounded bg-emerald-500/15 flex items-center justify-center shrink-0">
+              <PackageCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-medium text-muted-foreground">
-                  Ombordagi Tayyor Mahsulot Zaxirasi:
+                  Tayyor zaxira
                 </span>
                 <Badge
                   variant="outline"
@@ -385,18 +494,11 @@ export function CustomerOrdersTab({
                 </span>
                 {totalStockValue > 0 && (
                   <span className="font-mono text-xs text-muted-foreground">
-                    (${totalStockValue.toLocaleString(undefined, { minimumFractionDigits: 2 })} qiymatda)
+                    (${totalStockValue.toLocaleString(undefined, { minimumFractionDigits: 2 })})
                   </span>
                 )}
               </div>
             </div>
-          </div>
-
-          <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground border-l border-border pl-3">
-            <Info className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <span>
-              Tirajdan ortgan yoki navbatdagi jo&apos;natish uchun omborda saqlanayotgan mahsulotlar.
-            </span>
           </div>
         </div>
 
@@ -410,7 +512,7 @@ export function CustomerOrdersTab({
               className="h-7 px-2.5 text-xs gap-1.5 border-emerald-500/40 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/50 cursor-pointer shadow-xs font-medium"
             >
               <Truck className="w-3.5 h-3.5 text-emerald-600" />
-              <span>+ Zaxiradan Yuk Xati (Chiqim) tuzish</span>
+              <span>Yuk xati tuzish</span>
             </Button>
           )}
 
@@ -437,7 +539,7 @@ export function CustomerOrdersTab({
             className="h-7 px-3 bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 cursor-pointer shadow-xs font-medium"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>+ Yangi Buyurtma (CO / WO)</span>
+            <span>Yangi buyurtma</span>
           </Button>
         </div>
       </div>
@@ -463,6 +565,32 @@ export function CustomerOrdersTab({
             rowHeight={32}
             theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
           />
+          {customerOrders.length === 0 && (
+            <div className="absolute inset-0 top-7 flex flex-col items-center justify-center gap-2 bg-background/60 pointer-events-none">
+              {isLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  <span>Yuklanmoqda...</span>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2 pointer-events-auto">
+                  <ClipboardList className="w-5 h-5 text-muted-foreground" />
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Buyurtmalar va zaxira mavjud emas
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={onCreateClientOrder}
+                    className="h-7 px-2.5 text-xs gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-primary" />
+                    <span>Yangi buyurtma</span>
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </ContextMenuTrigger>
         <ContextMenuContent className="w-64 text-xs">
           <ContextMenuItem

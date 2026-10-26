@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { toast } from "@/components/ui/toast";
 import { MachineRecord } from "@/components/documents/machine/types";
-import { PlantRecord, branchToPlantRecord, createEmptyPlant } from "@/components/documents/plant/types";
+import { PlantRecord, branchToPlantRecord, createEmptyPlant, generateNextPlantCode } from "@/components/documents/plant/types";
 import { TariffRecord, createEmptyTariff } from "@/components/documents/tariff/types";
 import { useLookupStore } from "@/store/lookupStore";
 import {
@@ -99,6 +99,20 @@ export interface ShipmentLineItem {
 }
 
 export type ShipmentType = "CustomerDelivery" | "Outsourcing" | "BranchTransfer" | "VendorReturn" | "MaterialSale";
+
+export interface CarrierRecord {
+  id: string;
+  name: string;
+  type: "fleet" | "courier" | "self" | "other";
+  vehicleModel?: string;
+  vehicleNo?: string;
+  driverName?: string;
+  driverPhone?: string;
+  isActive?: boolean;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 export interface WarehouseShipmentRecord {
   id: string;
@@ -220,9 +234,11 @@ export interface CustomerContractRecord {
 
 export interface CrmCustomerRecord {
   id: string;
+  dbId?: string;
   name: string;
   tin: string;
   industry: string;
+  industryId?: string;
   contactPerson: string;
   phone: string;
   email: string;
@@ -384,6 +400,7 @@ export interface ProductionQueueItem {
   id: string; // e.g. "WOOF-26-0351"
   docNo?: string;
   clientOrderId?: string; // e.g. "CO-00041"
+  clientId?: string;
   customer: string;
   product: string;
   quantity: number;
@@ -591,6 +608,10 @@ interface WorkspaceState {
   isCrmCustomersLoading?: boolean;
   loadCrmCustomers: (companyCode?: string) => Promise<void>;
   upsertCustomerAsync: (customer: CrmCustomerRecord, companyCode?: string) => Promise<any>;
+  crmIndustriesList: { id: string; name: string; code?: string }[];
+  isCrmIndustriesLoading?: boolean;
+  loadCrmIndustries: () => Promise<void>;
+  addCrmIndustryAsync: (name: string, companyCode?: string) => Promise<{ id: string; name: string } | null>;
 
   suppliers: SupplierRecord[];
   isSuppliersLoading: boolean;
@@ -634,6 +655,12 @@ interface WorkspaceState {
   loadWarehouses: (companyCode?: string) => Promise<void>;
   upsertWarehouseAsync: (wh: any, companyCode?: string) => Promise<boolean>;
   deleteWarehouseAsync: (id: string, companyCode?: string) => Promise<boolean>;
+
+  carriersList: CarrierRecord[];
+  isCarriersLoading: boolean;
+  loadCarriers: (companyCode?: string) => Promise<void>;
+  upsertCarrierAsync: (carrier: Partial<CarrierRecord>, companyCode?: string) => Promise<CarrierRecord | null>;
+  deleteCarrierAsync: (id: string, companyCode?: string) => Promise<boolean>;
 
   inventoryCounts: any[];
   isInventoryCountsLoading: boolean;
@@ -746,6 +773,7 @@ interface WorkspaceState {
   setDepartmentsList: (departmentsList: DepartmentRecord[]) => void;
   setPositionsList: (positionsList: PositionRecord[]) => void;
   setEmployees: (employees: EmployeeRecord[]) => void;
+  loadEmployees: (companyCode?: string) => Promise<void>;
   upsertEmployee: (emp: EmployeeRecord) => void;
   upsertAttendance: (att: AttendanceRecord) => void;
   upsertPiecework: (pw: PieceworkRecord) => void;
@@ -924,6 +952,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   clientSettlements: INITIAL_CLIENT_SETTLEMENTS,
   crmCustomers: INITIAL_CRM_CUSTOMERS,
   isCrmCustomersLoading: false,
+  crmIndustriesList: [],
+  isCrmIndustriesLoading: false,
   suppliers: [],
   isSuppliersLoading: false,
   isFinanceLoading: false,
@@ -1028,6 +1058,50 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return null;
     } catch (e) {
       console.error("Failed to persist customer to database:", e);
+      return null;
+    }
+  },
+
+  loadCrmIndustries: async () => {
+    try {
+      set({ isCrmIndustriesLoading: true });
+      const res = await fetch("/api/v1/crm/industries");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ crmIndustriesList: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load CRM industries:", e);
+    } finally {
+      set({ isCrmIndustriesLoading: false });
+    }
+  },
+
+  addCrmIndustryAsync: async (name: string, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/crm/industries?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          set((state) => {
+            const exists = state.crmIndustriesList.some(
+              (i) => i.id === json.data.id || i.name.toLowerCase() === json.data.name.toLowerCase()
+            );
+            if (exists) return state;
+            return { crmIndustriesList: [...state.crmIndustriesList, json.data] };
+          });
+          return json.data;
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to add CRM industry:", e);
       return null;
     }
   },
@@ -1316,6 +1390,66 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return false;
     } catch (e) {
       console.error("Failed to delete warehouse:", e);
+      return false;
+    }
+  },
+
+  carriersList: [],
+  isCarriersLoading: false,
+
+  loadCarriers: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isCarriersLoading: true });
+      const res = await fetch("/api/v1/warehouse/carriers?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ carriersList: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load carriers list:", e);
+    } finally {
+      set({ isCarriersLoading: false });
+    }
+  },
+
+  upsertCarrierAsync: async (carrier: Partial<CarrierRecord>, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/carriers?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(carrier),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          await get().loadCarriers(companyCode);
+          return json.data;
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to save carrier:", e);
+      return null;
+    }
+  },
+
+  deleteCarrierAsync: async (id: string, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/warehouse/carriers?id=${encodeURIComponent(id)}&company=${encodeURIComponent(companyCode)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          await get().loadCarriers(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to delete carrier:", e);
       return false;
     }
   },
@@ -2097,9 +2231,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   openNewPlantTab: () => {
     const plantsList = get().plants || [];
-    const nextNum = plantsList.length + 1;
-    const newId = `PLT-${String(nextNum).padStart(3, "0")}`;
-    const newCode = `BRN-${String(nextNum).padStart(2, "0")}`;
+    const openPlantDraftCodes = (get().tabs || [])
+      .filter((t) => t.type === "plant-detail" && t.documentData?.code)
+      .map((t) => String(t.documentData.code));
+    const allExistingCodes = [
+      ...plantsList.map((p) => p.code),
+      ...openPlantDraftCodes,
+    ];
+    const newCode = generateNextPlantCode(allExistingCodes);
+    const newId = `PLT-${Date.now().toString().slice(-6)}`;
     const newPlant: PlantRecord = createEmptyPlant(newId, newCode);
 
     // NOTE: We do not call upsertPlant here so unsaved drafts never appear as ghost rows in the grid.
@@ -2472,6 +2612,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   setEmployees: (employees) => set({ employees }),
+
+  loadEmployees: async (companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/hr/employees?company=${companyCode}`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        set({ employees: json.data });
+      }
+    } catch (err) {
+      console.error("loadEmployees error:", err);
+    }
+  },
 
   setBiometricDevices: (biometricDevices) => set({ biometricDevices }),
 

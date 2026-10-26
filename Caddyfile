@@ -2,7 +2,7 @@
     auto_https {$CADDY_AUTO_HTTPS:on}
 }
 
-{$APP_DOMAIN:localhost} {
+{$APP_DOMAIN:erp.printg.uz} {
     encode zstd gzip
 
     # Reverse proxy to Next.js Standalone App
@@ -11,7 +11,7 @@
     }
 }
 
-{$S3_PUBLIC_DOMAIN:s3.localhost} {
+{$S3_PUBLIC_DOMAIN:s3.printg.uz} {
     encode zstd gzip
 
     # Reverse proxy for direct browser Presigned URL uploads/downloads to MinIO

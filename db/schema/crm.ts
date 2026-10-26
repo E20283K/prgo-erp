@@ -7,6 +7,7 @@ import {
   boolean,
   numeric,
   timestamp,
+  integer,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -86,6 +87,28 @@ export const contractStatusEnum = pgEnum("contract_status", [
   "suspended",
 ]);
 
+// ─── 0. Industries (Mijozlar Faoliyat Sohalari Klassifikatori) ───────────────
+
+export const crmIndustries = pgTable(
+  "crm_industries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 64 }), // masalan: "fmcg", "pharma"
+    name: varchar("name", { length: 128 }).notNull(), // "Oziq-ovqat va ichimliklar (FMCG)"
+    description: text("description"),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("crm_industries_name_uq").on(table.name),
+    index("crm_industries_company_idx").on(table.companyId),
+    index("crm_industries_is_active_idx").on(table.isActive),
+  ]
+);
+
 // ─── 1. Clients (Mijozlar / Kontragentlar) ────────────────────────────────────
 
 export const clients = pgTable(
@@ -102,7 +125,8 @@ export const clients = pgTable(
     tin: varchar("tin", { length: 32 }), // INN
     vatNumber: varchar("vat_number", { length: 64 }), // QQS to'lovchisi guvohnoma raqami
     vatPayer: boolean("vat_payer").default(false).notNull(),
-    industry: varchar("industry", { length: 128 }), // Soha / Yo'nalish
+    industryId: uuid("industry_id").references(() => crmIndustries.id, { onDelete: "set null" }),
+    industry: varchar("industry", { length: 128 }), // Soha / Yo'nalish nomi (denormalized)
     phone: varchar("phone", { length: 64 }),
     email: varchar("email", { length: 128 }),
     bankName: varchar("bank_name", { length: 255 }),
@@ -191,10 +215,18 @@ export const clientContracts = pgTable(
 
 // ─── Relations ────────────────────────────────────────────────────────────────
 
+export const crmIndustriesRelations = relations(crmIndustries, ({ many }) => ({
+  clients: many(clients),
+}));
+
 export const clientsRelations = relations(clients, ({ one, many }) => ({
   company: one(companies, {
     fields: [clients.companyId],
     references: [companies.id],
+  }),
+  industryRef: one(crmIndustries, {
+    fields: [clients.industryId],
+    references: [crmIndustries.id],
   }),
   contacts: many(clientContacts),
   contracts: many(clientContracts),

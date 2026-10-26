@@ -307,106 +307,174 @@ export function calculatePrintPlanning(inputs: PrintPlanningInput): PrintPlannin
  */
 export function generateRouteStepsFromPlan(
   plan: PrintPlanningResult,
-  pressMachineName: string = "Heidelberg Speedmaster XL 106",
+  pressMachineName: string = "",
   laminationType?: string,
   embellishment?: string,
-  operatorName: string = "M. Ivanova"
+  operatorName: string = ""
 ): RouteStep[] {
   const steps: RouteStep[] = [];
   let stepCounter = 10;
+  const pressMachine = pressMachineName || "Ofset bosma uskunasi";
+  const ctpPlates = Math.max(1, plan.totalCtpPlates || 4);
+  const grossSheets = Math.max(1, plan.grossPressSheets || 1000);
+  const finishedPieces = Math.max(1, plan.netPressSheets * (plan.piecesPerSheet || 1));
 
-  // Step 1: Pre-press & CTP Plates
+  // Step 1: Prepress & CTP Plates
+  const ctpCost = Number((ctpPlates * 12).toFixed(2));
   steps.push({
     id: `route-step-${Date.now()}-1`,
     stepNumber: stepCounter,
-    name: `Pre-press & CTP Plate Imaging (${plan.totalCtpPlates} plates · ${plan.colorNotation})`,
+    name: `Prepress va CTP qolip tayyorlash (${ctpPlates} dona · ${plan.colorNotation})`,
     machine: "Screen PlateRite 8600 CTP",
-    operator: "K. Anderson (Prepress)",
-    duration: Math.max(0.5, Number((plan.totalCtpPlates * 0.15).toFixed(1))),
-    qtyCompleted: `0 / ${plan.totalCtpPlates} plates`,
+    operator: "",
+    duration: Math.max(0.5, Number((ctpPlates * 0.15).toFixed(1))),
+    qtyCompleted: `0 / ${ctpPlates} dona`,
     status: "Queued",
+    calcUnit: "1 plate",
+    unitDivisor: 1,
+    rateUsd: 12,
+    setupFeeUsd: 0,
+    pieceworkRateUsd: 1.5,
+    plannedCostUsd: ctpCost,
+    pieceworkTotalUsd: Number((ctpPlates * 1.5).toFixed(2)),
   });
   stepCounter += 10;
 
   // Step 2: Paper Stock Trimming (Ombor kesimi)
   if (plan.pressSheetsPerParent > 1) {
+    const cutUnits = grossSheets / 1000;
     steps.push({
       id: `route-step-${Date.now()}-2`,
       stepNumber: stepCounter,
-      name: `Guillotine Paper Cut (${plan.requiredParentSheets} raw sheets → ${plan.grossPressSheets} press sheets)`,
-      machine: "Polar 115 High-Speed Cutter",
-      operator: "Warehouse Cut Dept",
+      name: `Gilyotina qog'oz kesish (${plan.requiredParentSheets} xom list → ${grossSheets} bosma list)`,
+      machine: "Polar 115",
+      operator: "",
       duration: Math.max(0.5, Number((plan.requiredParentSheets / 1500).toFixed(1))),
-      qtyCompleted: `0 / ${plan.grossPressSheets} sheets`,
+      qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
       status: "Queued",
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: 4,
+      setupFeeUsd: 5,
+      pieceworkRateUsd: 1.2,
+      plannedCostUsd: Number((5 + cutUnits * 4).toFixed(2)),
+      pieceworkTotalUsd: Number((cutUnits * 1.2).toFixed(2)),
     });
     stepCounter += 10;
   }
 
   // Step 3: Printing Operations
+  const sheetUnits = grossSheets / 1000;
   if (plan.activeMethod === "single_sided") {
-    // 1-sided printing
+    const setupFee = Number((plan.frontTotalColors * 10).toFixed(2));
+    const ratePerK = Number((plan.frontTotalColors * 3.5).toFixed(2));
+    const pwRate = Number((plan.frontTotalColors * 0.8).toFixed(2));
     steps.push({
       id: `route-step-${Date.now()}-3`,
       stepNumber: stepCounter,
-      name: `Offset Printing (${plan.colorNotation} Front · ${plan.grossPressSheets.toLocaleString()} sheets)`,
-      machine: pressMachineName,
+      name: `Ofset bosma (${plan.colorNotation} oldi · ${grossSheets.toLocaleString()} list)`,
+      machine: pressMachine,
       operator: operatorName,
-      duration: plan.totalPressHours,
-      qtyCompleted: `0 / ${plan.grossPressSheets.toLocaleString()} sheets`,
+      duration: Math.max(0.5, plan.totalPressHours),
+      qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
       status: "Queued",
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: ratePerK,
+      setupFeeUsd: setupFee,
+      pieceworkRateUsd: pwRate,
+      plannedCostUsd: Number((setupFee + sheetUnits * ratePerK).toFixed(2)),
+      pieceworkTotalUsd: Number((sheetUnits * pwRate).toFixed(2)),
     });
     stepCounter += 10;
   } else if (plan.activeMethod === "work_and_turn" || plan.activeMethod === "work_and_tumble") {
-    // Work & Turn / Tumble
-    const halfDuration = Number((plan.totalPressHours / 2).toFixed(1));
+    const halfDuration = Math.max(0.5, Number((plan.totalPressHours / 2).toFixed(1)));
+    const setupFee = Number((plan.frontTotalColors * 10).toFixed(2));
+    const ratePerK = Number((plan.frontTotalColors * 3.5).toFixed(2));
+    const pwRate = Number((plan.frontTotalColors * 0.8).toFixed(2));
+
     steps.push({
       id: `route-step-${Date.now()}-3`,
       stepNumber: stepCounter,
-      name: `Offset Print Pass 1 (Face & Back Work & Turn · ${plan.grossPressSheets.toLocaleString()} sheets)`,
-      machine: pressMachineName,
+      name: `Ofset bosma 1-progon (O'ziga aylanma · ${grossSheets.toLocaleString()} list)`,
+      machine: pressMachine,
       operator: operatorName,
       duration: halfDuration,
-      qtyCompleted: `0 / ${plan.grossPressSheets.toLocaleString()} sheets`,
+      qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
       status: "Queued",
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: ratePerK,
+      setupFeeUsd: setupFee,
+      pieceworkRateUsd: pwRate,
+      plannedCostUsd: Number((setupFee + sheetUnits * ratePerK).toFixed(2)),
+      pieceworkTotalUsd: Number((sheetUnits * pwRate).toFixed(2)),
     });
     stepCounter += 10;
 
     steps.push({
       id: `route-step-${Date.now()}-4`,
       stepNumber: stepCounter,
-      name: `Offset Print Pass 2 (Reverse Sheet Turn & Back Print · ${plan.grossPressSheets.toLocaleString()} sheets)`,
-      machine: pressMachineName,
+      name: `Ofset bosma 2-progon (Orqa tomon · ${grossSheets.toLocaleString()} list)`,
+      machine: pressMachine,
       operator: operatorName,
       duration: halfDuration,
-      qtyCompleted: `0 / ${plan.grossPressSheets.toLocaleString()} sheets`,
+      qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
       status: "Queued",
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: ratePerK,
+      setupFeeUsd: 0,
+      pieceworkRateUsd: pwRate,
+      plannedCostUsd: Number((sheetUnits * ratePerK).toFixed(2)),
+      pieceworkTotalUsd: Number((sheetUnits * pwRate).toFixed(2)),
     });
     stepCounter += 10;
   } else {
-    // Sheetwise: 2 distinct passes
-    const halfPassDuration = Number((plan.totalPressHours / 2).toFixed(1));
+    const halfPassDuration = Math.max(0.5, Number((plan.totalPressHours / 2).toFixed(1)));
+    const frontSetup = Number((plan.frontTotalColors * 10).toFixed(2));
+    const frontRate = Number((plan.frontTotalColors * 3.5).toFixed(2));
+    const frontPw = Number((plan.frontTotalColors * 0.8).toFixed(2));
+
     steps.push({
       id: `route-step-${Date.now()}-3`,
       stepNumber: stepCounter,
-      name: `Offset Printing (Pass 1: Front ${plan.frontTotalColors}C · ${plan.grossPressSheets.toLocaleString()} sheets)`,
-      machine: pressMachineName,
+      name: `Ofset bosma 1-progon (Oldi ${plan.frontTotalColors} rang · ${grossSheets.toLocaleString()} list)`,
+      machine: pressMachine,
       operator: operatorName,
       duration: halfPassDuration,
-      qtyCompleted: `0 / ${plan.grossPressSheets.toLocaleString()} sheets`,
+      qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
       status: "Queued",
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: frontRate,
+      setupFeeUsd: frontSetup,
+      pieceworkRateUsd: frontPw,
+      plannedCostUsd: Number((frontSetup + sheetUnits * frontRate).toFixed(2)),
+      pieceworkTotalUsd: Number((sheetUnits * frontPw).toFixed(2)),
     });
     stepCounter += 10;
+
+    const backSetup = Number((plan.backTotalColors * 10).toFixed(2));
+    const backRate = Number((plan.backTotalColors * 3.5).toFixed(2));
+    const backPw = Number((plan.backTotalColors * 0.8).toFixed(2));
 
     steps.push({
       id: `route-step-${Date.now()}-4`,
       stepNumber: stepCounter,
-      name: `Offset Printing (Pass 2: Back ${plan.backTotalColors}C · ${plan.grossPressSheets.toLocaleString()} sheets)`,
-      machine: pressMachineName,
+      name: `Ofset bosma 2-progon (Orqa ${plan.backTotalColors} rang · ${grossSheets.toLocaleString()} list)`,
+      machine: pressMachine,
       operator: operatorName,
       duration: halfPassDuration,
-      qtyCompleted: `0 / ${plan.grossPressSheets.toLocaleString()} sheets`,
+      qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
       status: "Queued",
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: backRate,
+      setupFeeUsd: backSetup,
+      pieceworkRateUsd: backPw,
+      plannedCostUsd: Number((backSetup + sheetUnits * backRate).toFixed(2)),
+      pieceworkTotalUsd: Number((sheetUnits * backPw).toFixed(2)),
     });
     stepCounter += 10;
   }
@@ -417,12 +485,19 @@ export function generateRouteStepsFromPlan(
     steps.push({
       id: `route-step-${Date.now()}-5`,
       stepNumber: stepCounter,
-      name: `Surface Lamination (${laminationType})`,
-      machine: "Autobond Mini 76 Thermal Laminator",
-      operator: "A. Becker (Lamination)",
-      duration: Math.max(1.0, Number((plan.grossPressSheets / 3000).toFixed(1))),
-      qtyCompleted: `0 / ${plan.grossPressSheets.toLocaleString()} sheets`,
+      name: `Termo-laminatsiya (${laminationType})`,
+      machine: "Autobond Mini 76",
+      operator: "",
+      duration: Math.max(1.0, Number((grossSheets / 3000).toFixed(1))),
+      qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
       status: "Queued",
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: 12,
+      setupFeeUsd: 10,
+      pieceworkRateUsd: 2.5,
+      plannedCostUsd: Number((10 + sheetUnits * 12).toFixed(2)),
+      pieceworkTotalUsd: Number((sheetUnits * 2.5).toFixed(2)),
     });
     stepCounter += 10;
   }
@@ -433,12 +508,19 @@ export function generateRouteStepsFromPlan(
     steps.push({
       id: `route-step-${Date.now()}-6`,
       stepNumber: stepCounter,
-      name: `Special Embellishment (${embellishment})`,
-      machine: "MGI JETvarnish 3D",
-      operator: "Finishing Lead",
-      duration: Math.max(0.8, Number((plan.grossPressSheets / 2000).toFixed(1))),
-      qtyCompleted: `0 / ${plan.grossPressSheets.toLocaleString()} sheets`,
+      name: `Maxsus pardozlash (${embellishment})`,
+      machine: "Steinemann Hibis 104",
+      operator: "",
+      duration: Math.max(0.8, Number((grossSheets / 2000).toFixed(1))),
+      qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
       status: "Queued",
+      calcUnit: "1,000 sheets",
+      unitDivisor: 1000,
+      rateUsd: 18,
+      setupFeeUsd: 15,
+      pieceworkRateUsd: 3.5,
+      plannedCostUsd: Number((15 + sheetUnits * 18).toFixed(2)),
+      pieceworkTotalUsd: Number((sheetUnits * 3.5).toFixed(2)),
     });
     stepCounter += 10;
   }
@@ -447,25 +529,40 @@ export function generateRouteStepsFromPlan(
   steps.push({
     id: `route-step-${Date.now()}-7`,
     stepNumber: stepCounter,
-    name: `Die-Cutting & Stripping (${plan.grossPressSheets.toLocaleString()} sheets → ${plan.netPressSheets * (plan.piecesPerSheet || 1)} pieces)`,
-    machine: "Bobst Novacut 106 Flatbed Die-Cutter",
-    operator: "S. Petrov (Die-cut)",
-    duration: Math.max(1.2, Number((plan.grossPressSheets / 4500).toFixed(1))),
-    qtyCompleted: `0 / ${plan.grossPressSheets.toLocaleString()} sheets`,
+    name: `Tigel kesish va tozalash (${grossSheets.toLocaleString()} list → ${finishedPieces.toLocaleString()} dona)`,
+    machine: "Bobst Novacut 106",
+    operator: "",
+    duration: Math.max(1.2, Number((grossSheets / 4500).toFixed(1))),
+    qtyCompleted: `0 / ${grossSheets.toLocaleString()} list`,
     status: "Queued",
+    calcUnit: "1,000 sheets",
+    unitDivisor: 1000,
+    rateUsd: 10,
+    setupFeeUsd: 15,
+    pieceworkRateUsd: 2.2,
+    plannedCostUsd: Number((15 + sheetUnits * 10).toFixed(2)),
+    pieceworkTotalUsd: Number((sheetUnits * 2.2).toFixed(2)),
   });
   stepCounter += 10;
 
   // Step 7: Final Quality Control & Packing
+  const pcsUnits = finishedPieces / 1000;
   steps.push({
     id: `route-step-${Date.now()}-8`,
     stepNumber: stepCounter,
-    name: "Final Quality Inspection, Banding & Box Packing",
-    machine: "Automated Packaging Line",
-    operator: "QC & Dispatch Dept",
+    name: "OTK tekshiruvi va qutilarga qadoqlash",
+    machine: "Qadoqlash liniyasi",
+    operator: "",
     duration: 1.0,
-    qtyCompleted: `0 / ${plan.netPressSheets * (plan.piecesPerSheet || 1)} pcs`,
+    qtyCompleted: `0 / ${finishedPieces.toLocaleString()} dona`,
     status: "Queued",
+    calcUnit: "1,000 pcs",
+    unitDivisor: 1000,
+    rateUsd: 3.5,
+    setupFeeUsd: 0,
+    pieceworkRateUsd: 1.5,
+    plannedCostUsd: Number((pcsUnits * 3.5).toFixed(2)),
+    pieceworkTotalUsd: Number((pcsUnits * 1.5).toFixed(2)),
   });
 
   return steps;

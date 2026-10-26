@@ -107,6 +107,7 @@ export function useLayoutCalc({
   pressSheetW: propPressW,
   pressSheetH: propPressH,
   plannedSheets: propPlannedSheets,
+  appliedCtpPlates,
   lamination,
   embellishment,
   isOperator = false,
@@ -1312,6 +1313,7 @@ export function useLayoutCalc({
     if (!onApplyToOrder) return false;
     return (
       propPlannedSheets !== totalParentSheetsNeeded ||
+      appliedCtpPlates !== totalCtpPlates ||
       propPressW !== sheetW ||
       propPressH !== sheetH ||
       propParentW !== parentSheetW ||
@@ -1322,6 +1324,8 @@ export function useLayoutCalc({
     onApplyToOrder,
     propPlannedSheets,
     totalParentSheetsNeeded,
+    appliedCtpPlates,
+    totalCtpPlates,
     propPressW,
     sheetW,
     propPressH,

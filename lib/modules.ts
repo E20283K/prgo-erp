@@ -207,6 +207,7 @@ export const MODULE_NAV: ModuleDef[] = [
         items: [
           { id: "receipts", label: "Receipts", icon: ArrowDownToLine },
           { id: "shipments", label: "Shipments", icon: Send },
+          { id: "carriers", label: "Carriers", icon: Truck },
         ],
       },
     ],

@@ -10,9 +10,15 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FieldCombobox } from "@/components/ui/field-combobox";
 import {
   Combobox,
@@ -27,7 +33,7 @@ import {
   useComboboxAnchor,
 } from "@/components/ui/combobox";
 import { cn } from "@/lib/utils";
-import { RouteStep, MACHINE_OPTIONS, FLOOR_OPERATORS } from "../types";
+import { RouteStep, MACHINE_MAP } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
 import { computeTariffEstimate, TARIFF_CALC_UNITS } from "@/components/documents/tariff/types";
@@ -88,33 +94,56 @@ export function OperationDialog({
   customerName,
   orderQuantity = 1000,
 }: OperationDialogProps) {
-  const { customerTooling, users, tariffs } = useWorkspaceStore(
+  const { customerTooling, employees, tariffs, machines } = useWorkspaceStore(
     useShallow((s) => ({
       customerTooling: s.customerTooling,
-      users: s.users,
+      employees: s.employees,
       tariffs: s.tariffs,
+      machines: s.machines,
     }))
   );
   const anchor = useComboboxAnchor();
 
   React.useEffect(() => {
     const s = useWorkspaceStore.getState();
-    if (s.users.length === 0 && s.fetchUsers) {
-      s.fetchUsers();
+    if (s.employees.length === 0 && s.loadEmployees) {
+      s.loadEmployees();
     }
     if (s.tariffs.length === 0 && s.fetchTariffs) {
       s.fetchTariffs();
     }
-  }, []);
+    if (s.machines.length === 0 && s.loadMachines) {
+      s.loadMachines();
+    }
+  }, [isOpen]);
 
-  const machineOptions = React.useMemo(
-    () =>
-      MACHINE_OPTIONS.map((m) => ({
-        value: m.name,
-        label: `${m.name} (${m.department})`,
-      })),
-    []
-  );
+  const machineOptions = React.useMemo(() => {
+    const list: { value: string; label: string }[] = [];
+    const seen = new Set<string>();
+
+    if (Array.isArray(machines) && machines.length > 0) {
+      machines.forEach((m) => {
+        if (!m.name || seen.has(m.name)) return;
+        seen.add(m.name);
+        list.push({
+          value: m.name,
+          label: m.department ? `${m.name} (${m.department})` : m.name,
+        });
+      });
+    } else {
+      Object.entries(MACHINE_MAP).forEach(([dept, names]) => {
+        names.forEach((name) => {
+          if (seen.has(name)) return;
+          seen.add(name);
+          list.push({
+            value: name,
+            label: `${name} (${dept})`,
+          });
+        });
+      });
+    }
+    return list;
+  }, [machines]);
 
   const toolingOptions = React.useMemo(() => {
     return customerTooling.map((t) => ({
@@ -194,37 +223,29 @@ export function OperationDialog({
     }));
   };
 
-  // Unified operators map
+  // Operators map sourced directly from real HR Employees
   const operatorMap = React.useMemo(() => {
     const map = new Map<string, OperatorItem>();
 
-    if (Array.isArray(users)) {
-      users.forEach((u) => {
-        const val = u.fullName || u.username;
-        if (!val) return;
+    if (Array.isArray(employees)) {
+      employees.forEach((emp) => {
+        if (emp.status === "terminated") return;
+        const val = emp.fullName;
+        if (!val || map.has(val)) return;
+        const posLabel = emp.positionTitle || emp.position || "";
+        const deptLabel = emp.departmentName || emp.department || "";
+        const badgeLabel = emp.badgeNumber || emp.badgeNo || "";
+        const subtitleParts = [posLabel, deptLabel, badgeLabel ? `#${badgeLabel}` : ""].filter(Boolean);
+
         map.set(val, {
           value: val,
           name: val,
-          department: u.department || u.role || "Operator",
-          avatar: u.avatar,
-          initials: u.initials || getOperatorInitials(val),
+          department: subtitleParts.join(" · ") || "Xodim",
+          avatar: emp.avatarUrl || (emp as any).avatar,
+          initials: getOperatorInitials(val),
         });
       });
     }
-
-    FLOOR_OPERATORS.forEach((op) => {
-      const match = op.match(/^(.*?)(?:\s*\((.*?)\))?$/);
-      const name = match ? match[1].trim() : op;
-      const dept = match && match[2] ? match[2].trim() : undefined;
-      if (!map.has(name)) {
-        map.set(name, {
-          value: name,
-          name,
-          department: dept,
-          initials: getOperatorInitials(name),
-        });
-      }
-    });
 
     const rawList =
       form.operators && form.operators.length > 0
@@ -245,7 +266,7 @@ export function OperationDialog({
     });
 
     return map;
-  }, [users, form.operators, form.operator]);
+  }, [employees, form.operators, form.operator]);
 
   const allOperatorNames = React.useMemo(
     () => Array.from(operatorMap.keys()),
@@ -272,34 +293,31 @@ export function OperationDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[620px] max-h-[92vh] overflow-y-auto text-xs p-5">
+      <DialogContent className="sm:max-w-[600px] max-h-[92vh] overflow-y-auto text-xs p-4">
         <DialogHeader className="pb-2 border-b border-border/60">
-          <DialogTitle className="text-sm font-semibold flex items-center justify-between">
+          <DialogTitle className="text-sm font-semibold flex items-center justify-between pr-6">
             <span className="flex items-center gap-2">
-              <Factory className="w-4 h-4 text-blue-600" />
-              <span>{editingOpIndex !== null ? "Texnologik marshrut bosqichini tahrirlash" : "Work Orderga bosqich qo'shish"}</span>
+              <Factory className="w-4 h-4 text-primary" />
+              <span>{editingOpIndex !== null ? "Bosqichni tahrirlash" : "Bosqich qo'shish"}</span>
             </span>
             {form.tariffCode && (
-              <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">
+              <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-border bg-muted text-foreground">
                 {form.tariffCode}
               </span>
             )}
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground">
-            Standart korxona tariflaridan tanlang yoki moslashtirilgan stavka, uskuna va operatorlar brigadasini belgilang.
-          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="space-y-3 py-1.5">
           {/* Quick Tariff Picker */}
-          <div className="p-2.5 rounded-lg border border-blue-100 dark:border-blue-950/80 bg-blue-50/40 dark:bg-blue-950/20 space-y-2">
+          <div className="p-2.5 rounded-md border border-border bg-muted/30 space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5 text-blue-600" />
-                <span>Standart Korxona Tarifi (Auto-fill)</span>
+                <Tag className="w-3.5 h-3.5 text-primary" />
+                <span>Korxona tarifi</span>
               </label>
-              <span className="text-[11px] text-muted-foreground">
-                Tiraj bo&apos;yicha avtomatik stavka
+              <span className="text-[11px] text-muted-foreground font-mono">
+                Adad: {orderQuantity.toLocaleString()}
               </span>
             </div>
             <FieldCombobox
@@ -316,7 +334,7 @@ export function OperationDialog({
           {/* Row 1: Step # & Operation Description */}
           <div className="grid grid-cols-4 gap-2.5">
             <div>
-              <label className="text-xs font-medium block mb-1">Qadam #</label>
+              <label className="text-xs font-medium block mb-1">Tartib #</label>
               <Input
                 type="number"
                 step="10"
@@ -326,12 +344,12 @@ export function OperationDialog({
               />
             </div>
             <div className="col-span-3">
-              <label className="text-xs font-medium block mb-1">Operatsiya nomi / Tavsif *</label>
+              <label className="text-xs font-medium block mb-1">Operatsiya nomi *</label>
               <Input
                 value={form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                 className="h-8 text-xs font-medium"
-                placeholder="Masalan: 4+4 Ofset Bosma, UF Lak, Tigel qirqish..."
+                placeholder="Masalan: 4+4 Ofset bosma, UF laklash, Tigel kesish..."
               />
             </div>
           </div>
@@ -339,20 +357,36 @@ export function OperationDialog({
           {/* Row 2: Assigned Machine & Planned Duration */}
           <div className="grid grid-cols-3 gap-2.5">
             <div className="col-span-2 space-y-1">
-              <label className="text-xs font-medium block">Biriktirilgan Uskuna / Ish markazi *</label>
+              <label className="text-xs font-medium block">Uskuna / Ish markazi *</label>
               <FieldCombobox
                 value={form.machine}
-                onChange={(val) => setForm((p) => ({ ...p, machine: val }))}
+                onChange={(val) => {
+                  const matchedMachine = machines.find((m) => m.name === val);
+                  const autoOp =
+                    !form.operator && matchedMachine?.leadOperator
+                      ? matchedMachine.leadOperator
+                      : form.operator;
+                  const autoOps =
+                    (!form.operators || form.operators.length === 0) && matchedMachine?.leadOperator
+                      ? [matchedMachine.leadOperator]
+                      : form.operators;
+                  setForm((p) => ({
+                    ...p,
+                    machine: val,
+                    operator: autoOp || "",
+                    operators: autoOps,
+                  }));
+                }}
                 allowCustom
                 options={machineOptions}
-                placeholder="Stanok yoki uskunani tanlang..."
-                searchPlaceholder="Stanoklarni qidirish..."
+                placeholder="Uskunani tanlang..."
+                searchPlaceholder="Uskunalarni qidirish..."
                 className="h-8 text-xs"
                 popoverClassName="w-[360px]"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium block">Rejaviy vaqt (soat)</label>
+              <label className="text-xs font-medium block">Me&apos;yoriy vaqt (soat)</label>
               <Input
                 type="number"
                 step="0.1"
@@ -364,18 +398,18 @@ export function OperationDialog({
           </div>
 
           {/* Row 3: Tariff Rates & Divisors */}
-          <div className="p-3 rounded-lg border border-border bg-muted/20 space-y-3">
+          <div className="p-2.5 rounded-md border border-border bg-muted/20 space-y-2.5">
             <div className="flex items-center justify-between text-xs font-semibold text-foreground">
               <span className="flex items-center gap-1.5">
                 <Calculator className="w-3.5 h-3.5 text-muted-foreground" />
-                <span>Tarif stavkalari va hisoblash birligi</span>
+                <span>Stavka va tannarx</span>
               </span>
               <span className="text-[11px] font-mono text-muted-foreground">
-                Tiraj: {orderQuantity.toLocaleString()} birlik
+                Pripravka + (Adad / Birlik) × Stavka
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="space-y-1">
                 <label className="text-[11px] text-muted-foreground block">Hisob birligi</label>
                 <FieldCombobox
@@ -403,7 +437,7 @@ export function OperationDialog({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground block">Operatsiya stavkasi ($)</label>
+                <label className="text-[11px] text-muted-foreground block">Stavka ($)</label>
                 <MoneyInput
                   thousandSeparator=" "
                   decimalScale={2}
@@ -414,7 +448,7 @@ export function OperationDialog({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground block">Operator sdelkasi ($)</label>
+                <label className="text-[11px] text-muted-foreground block">Sdelka stavkasi ($)</label>
                 <MoneyInput
                   thousandSeparator=" "
                   decimalScale={3}
@@ -429,22 +463,19 @@ export function OperationDialog({
             <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
               <div className="flex items-center gap-3">
                 <span className="text-muted-foreground">
-                  Stanok xarajati:{" "}
+                  Rejaviy tannarx:{" "}
                   <strong className="text-foreground font-mono">
                     ${(form.plannedCostUsd || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </strong>
                 </span>
                 <span className="text-muted-foreground/40">•</span>
                 <span className="text-muted-foreground">
-                  Operator FOT (Sdelka):{" "}
+                  Sdelka FOT:{" "}
                   <strong className="text-emerald-600 dark:text-emerald-400 font-mono">
                     ${(form.pieceworkTotalUsd || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </strong>
                 </span>
               </div>
-              <span className="text-[11px] font-mono text-muted-foreground">
-                Formula: Pripravka + (Tiraj / Birlik) × Stavka
-              </span>
             </div>
           </div>
 
@@ -452,13 +483,13 @@ export function OperationDialog({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                <span>Mas&apos;ul Operatorlar / Smena brigadasi</span>
+                <Users className="w-3.5 h-3.5 text-primary" />
+                <span>Mas&apos;ul operatorlar</span>
               </label>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground font-mono">
                 {selectedOperators.length > 0
-                  ? `${selectedOperators.length} ta operator tanlandi`
-                  : "Bir nechta tanlash mumkin"}
+                  ? `${selectedOperators.length} ta tanlandi`
+                  : "Brigada"}
               </span>
             </div>
 
@@ -560,46 +591,66 @@ export function OperationDialog({
             </Combobox>
           </div>
 
-          {/* Technological Tooling (Shtansforma / Klishe / Fixture) */}
-          <div className="space-y-1 pt-2 border-t border-border/60">
-            <label className="text-xs font-medium flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-foreground">
-                <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                Biriktirilgan Texnologik Jihoz (Shtansforma / Klishe)
-              </span>
-              <span className="text-[11px] text-muted-foreground font-normal">Ixtiyoriy</span>
-            </label>
-            <FieldCombobox
-              value={form.toolingId || ""}
-              onChange={(val) => {
-                const matchedTool = customerTooling.find((t) => t.id === val);
-                setForm((p) => ({
-                  ...p,
-                  toolingId: val,
-                  toolingName: matchedTool ? `${matchedTool.id} - ${matchedTool.name}` : val,
-                }));
-              }}
-              allowCustom
-              options={toolingOptions}
-              placeholder="Shtansforma yoki klishe tanlang..."
-              searchPlaceholder="Shtansformalarni qidirish..."
-              className="h-8 text-xs"
-              popoverClassName="w-[380px]"
-            />
-            {form.toolingId && (
-              <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1">
-                <span>Ombor joylashuvi:</span>
-                <span className="font-mono font-medium text-foreground">
-                  {customerTooling.find((t) => t.id === form.toolingId)?.location || "Belgilanmagan"}
+          {/* Technological Tooling & Step Status */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-border/60">
+            <div className="sm:col-span-2 space-y-1">
+              <label className="text-xs font-medium flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>Texnologik jihoz</span>
                 </span>
-                <span className="text-muted-foreground/60">•</span>
-                <span>Zarbalar:</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                  {customerTooling.find((t) => t.id === form.toolingId)?.impressionsUsed?.toLocaleString() || 0} /{" "}
-                  {customerTooling.find((t) => t.id === form.toolingId)?.maxLife?.toLocaleString() || 150000}
-                </span>
-              </p>
-            )}
+                <span className="text-[11px] text-muted-foreground font-normal">Ixtiyoriy</span>
+              </label>
+              <FieldCombobox
+                value={form.toolingId || ""}
+                onChange={(val) => {
+                  const matchedTool = customerTooling.find((t) => t.id === val);
+                  setForm((p) => ({
+                    ...p,
+                    toolingId: val,
+                    toolingName: matchedTool ? `${matchedTool.id} - ${matchedTool.name}` : val,
+                  }));
+                }}
+                allowCustom
+                options={toolingOptions}
+                placeholder="Shtansforma yoki klishe tanlang..."
+                searchPlaceholder="Jihozlarni qidirish..."
+                className="h-8 text-xs"
+                popoverClassName="w-[380px]"
+              />
+              {form.toolingId && (
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1">
+                  <span>Joylashuv:</span>
+                  <span className="font-mono font-medium text-foreground">
+                    {customerTooling.find((t) => t.id === form.toolingId)?.location || "Belgilanmagan"}
+                  </span>
+                  <span className="text-muted-foreground/60">•</span>
+                  <span>Resurs:</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                    {customerTooling.find((t) => t.id === form.toolingId)?.impressionsUsed?.toLocaleString() || 0} /{" "}
+                    {customerTooling.find((t) => t.id === form.toolingId)?.maxLife?.toLocaleString() || 150000}
+                  </span>
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium block text-foreground">Bosqich holati</label>
+              <Select
+                value={form.status || "Queued"}
+                onValueChange={(val: any) => setForm((p) => ({ ...p, status: val }))}
+              >
+                <SelectTrigger className="h-8 text-xs bg-card">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Queued">Navbatda</SelectItem>
+                  <SelectItem value="In Progress">Jarayonda</SelectItem>
+                  <SelectItem value="Paused">To&apos;xtalish</SelectItem>
+                  <SelectItem value="Finished">Yakunlandi</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 
@@ -607,8 +658,13 @@ export function OperationDialog({
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="h-8 text-xs">
             Bekor qilish
           </Button>
-          <Button size="sm" onClick={onSave} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium">
-            {editingOpIndex !== null ? "Saqlash" : "Bosqichni qo'shish"}
+          <Button
+            size="sm"
+            onClick={onSave}
+            disabled={!form.name?.trim()}
+            className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium"
+          >
+            {editingOpIndex !== null ? "Saqlash" : "Qo'shish"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -9,6 +9,7 @@ import {
   warehouseInventoryCounts,
   warehouseStockBalances,
   warehouseFinishedGoods,
+  carriers,
   companies,
 } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
@@ -535,9 +536,52 @@ export async function upsertInventoryCount(payload: any, companyCode: string = "
 
 export async function getFinishedGoods(companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  return db.query.warehouseFinishedGoods.findMany({
+  const rows = await db.query.warehouseFinishedGoods.findMany({
     where: eq(warehouseFinishedGoods.companyId, companyId),
     orderBy: [desc(warehouseFinishedGoods.producedAt)],
+  });
+
+  return rows.map((fg) => {
+    const qty = Number(fg.quantity) || 0;
+    const reservedQty = Number(fg.reservedQuantity) || 0;
+    const stockQty = Math.max(0, qty - reservedQty);
+    const completionDate = fg.producedAt
+      ? new Date(fg.producedAt).toISOString().split("T")[0]
+      : "";
+    const orderDate = fg.createdAt
+      ? new Date(fg.createdAt).toISOString().split("T")[0]
+      : completionDate;
+    const daysInStock = fg.producedAt
+      ? Math.max(0, Math.floor((Date.now() - new Date(fg.producedAt).getTime()) / 86400000))
+      : 0;
+    const location =
+      [fg.locationName, fg.locationShelf].filter(Boolean).join(" — ") ||
+      "Tayyor Mahsulot Ombori";
+
+    return {
+      ...fg,
+      id: fg.sku || fg.id,
+      dbId: fg.id,
+      workOrderId: fg.workOrderId || "",
+      clientOrderId: fg.orderNo || undefined,
+      customerId: fg.clientId || "",
+      customerName: fg.customerName || "",
+      productName: fg.productName || "",
+      batchNo: fg.batchNo || "",
+      orderDate,
+      completionDate,
+      orderedQty: qty,
+      producedQty: qty,
+      shippedQty: reservedQty,
+      stockQty,
+      unit: fg.unit || "pcs",
+      costPricePerUnit: 0,
+      totalStockValue: 0,
+      location,
+      daysInStock,
+      status: (fg.status as any) || "In Stock",
+      notes: fg.notes || undefined,
+    };
   });
 }
 
@@ -649,4 +693,146 @@ async function applyStockBalanceDelta(params: {
       ],
       set: values,
     });
+}
+
+// ─── 8. Carriers (Tashuvchilar va Avtopark Katalogi) ──────────────────────────
+
+export async function getCarriers(companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const list = await db.query.carriers.findMany({
+    where: eq(carriers.companyId, companyId),
+    orderBy: [desc(carriers.createdAt)],
+  });
+
+  if (list.length === 0) {
+    const initialCarriers = [
+      {
+        companyId,
+        name: "PrintGoo Fleet #1 (ISUZU)",
+        vehicleModel: "ISUZU Furgon 3.5t",
+        vehicleNo: "01 A 772 BB",
+        driverName: "Rustam Ismoilov",
+        driverPhone: "+998 90 123-45-67",
+        type: "fleet",
+        isActive: true,
+      },
+      {
+        companyId,
+        name: "PrintGoo Fleet #2 (Labo)",
+        vehicleModel: "Labo 0.7t (Furgon)",
+        vehicleNo: "01 B 334 CC",
+        driverName: "Anvar Xalilov",
+        driverPhone: "+998 90 987-65-43",
+        type: "fleet",
+        isActive: true,
+      },
+      {
+        companyId,
+        name: "PrintGoo Fleet #3 (Gazelle)",
+        vehicleModel: "Gazelle Next 1.5t",
+        vehicleNo: "01 F 550 AA",
+        driverName: "Jamshid Saidov",
+        driverPhone: "+998 93 456-78-90",
+        type: "fleet",
+        isActive: true,
+      },
+      {
+        companyId,
+        name: "Express Logistics UZ",
+        vehicleModel: "Ford Transit Express",
+        vehicleNo: "01 E 100 EX",
+        driverName: "Navbatchi kuryer",
+        driverPhone: "+998 71 200-11-22",
+        type: "courier",
+        isActive: true,
+      },
+      {
+        companyId,
+        name: "BTS Express Pochta",
+        vehicleModel: "BTS Logistics Van",
+        vehicleNo: "01 B 707 TS",
+        driverName: "BTS Kuryer",
+        driverPhone: "+998 71 123-00-00",
+        type: "courier",
+        isActive: true,
+      },
+      {
+        companyId,
+        name: "Yandex Delivery Cargo",
+        vehicleModel: "Yandex Cargo Furgon",
+        vehicleNo: "Ilovada belgilanadi",
+        driverName: "Ilovadagi haydovchi",
+        driverPhone: "+998 71 200-00-00",
+        type: "courier",
+        isActive: true,
+      },
+      {
+        companyId,
+        name: "Mijoz o'zi olib ketadi (Samovyvoz)",
+        vehicleModel: "Mijoz transporti",
+        vehicleNo: "—",
+        driverName: "Mijoz vakili",
+        driverPhone: "—",
+        type: "self",
+        isActive: true,
+      },
+    ];
+    return db.insert(carriers).values(initialCarriers).returning();
+  }
+
+  return list;
+}
+
+export async function upsertCarrier(payload: any, companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  const values = {
+    companyId,
+    name: payload.name || "Kompaniya transporti",
+    type: payload.type || "fleet",
+    vehicleModel: payload.vehicleModel || null,
+    vehicleNo: payload.vehicleNo || null,
+    driverName: payload.driverName || null,
+    driverPhone: payload.driverPhone || null,
+    isActive: payload.isActive !== undefined ? Boolean(payload.isActive) : true,
+    notes: payload.notes || null,
+    updatedAt: new Date(),
+  };
+
+  let record;
+  if (payload.id && !payload.id.startsWith("carrier-") && !payload.id.startsWith("new-")) {
+    const [updated] = await db
+      .update(carriers)
+      .set(values)
+      .where(and(eq(carriers.id, payload.id), eq(carriers.companyId, companyId)))
+      .returning();
+    record = updated;
+  } else {
+    const [inserted] = await db
+      .insert(carriers)
+      .values({ ...values, createdAt: new Date() })
+      .returning();
+    record = inserted;
+  }
+
+  await writeAuditLog({
+    companyId,
+    userId: "system",
+    userName: "Carrier Manager",
+    entityType: "carrier",
+    entityId: record?.id || "unknown",
+    action: payload.id ? "update" : "create",
+    newData: record,
+  });
+
+  return record;
+}
+
+export async function deleteCarrier(id: string, companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const [deleted] = await db
+    .delete(carriers)
+    .where(and(eq(carriers.id, id), eq(carriers.companyId, companyId)))
+    .returning();
+  return deleted;
 }

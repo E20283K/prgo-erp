@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
-import { PlantRecord, createEmptyPlant } from "./plant/types";
+import { PlantRecord, createEmptyPlant, generateNextPlantCode } from "./plant/types";
 import {
   DocumentHeader,
   DocumentSidebar,
@@ -42,6 +42,7 @@ interface PlantDetailProps {
 export function PlantDetail({ tab }: PlantDetailProps) {
   const {
     plants,
+    fetchPlants,
     upsertPlant,
     savePlantToDb,
     setTabUnsaved,
@@ -53,6 +54,12 @@ export function PlantDetail({ tab }: PlantDetailProps) {
     departmentsList,
     setDepartmentsList,
   } = useWorkspaceStore();
+
+  useEffect(() => {
+    if (plants.length === 0 && fetchPlants) {
+      fetchPlants();
+    }
+  }, [plants.length, fetchPlants]);
 
   useEffect(() => {
     if (machines.length === 0 && loadMachines) {
@@ -83,12 +90,16 @@ export function PlantDetail({ tab }: PlantDetailProps) {
   // Find matching record from store, or fallback to empty plant
   const storePlant = useMemo(() => {
     const list = plants || [];
-    const found = list.find(
-      (p) =>
-        p.id === plantId ||
-        (p.code && p.code.toLowerCase() === plantId.toLowerCase()) ||
-        (p.name && p.name.toLowerCase() === (tab.title || "").toLowerCase())
-    );
+    const isDraftId = plantId.startsWith("PLT-") && plantId.length < 15;
+    const found = !isDraftId
+      ? list.find(
+          (p) =>
+            p.id === plantId ||
+            (p.code && p.code.toLowerCase() === plantId.toLowerCase()) ||
+            (p.name && p.name.toLowerCase() === (tab.title || "").toLowerCase())
+        )
+      : undefined;
+
     if (!tab.isUnsaved && found) return found;
 
     if (tab.documentData && (tab.documentData.id || tab.documentData.name !== undefined)) {
@@ -97,7 +108,8 @@ export function PlantDetail({ tab }: PlantDetailProps) {
 
     if (found) return found;
 
-    return createEmptyPlant(plantId);
+    const autoCode = generateNextPlantCode(list.map((p) => p.code));
+    return createEmptyPlant(plantId, autoCode);
   }, [plants, plantId, tab.documentData, tab.title, tab.isUnsaved]);
 
   const [plantData, setPlantData] = useState<PlantRecord>(storePlant);
@@ -108,6 +120,30 @@ export function PlantDetail({ tab }: PlantDetailProps) {
     setPrevPlantId(plantId);
     setPlantData(storePlant);
   }
+
+  // Ensure new draft always has an automatic unique internal code (never colliding with existing records)
+  useEffect(() => {
+    const isDraft = plantData.id.startsWith("PLT-") && plantData.id.length < 15;
+    if (!isDraft || plants.length === 0) return;
+
+    const currentCode = (plantData.code || "").trim().toUpperCase();
+    const hasCollision = plants.some(
+      (p) =>
+        p.id !== plantData.id &&
+        (p.code || "").trim().toUpperCase() === currentCode
+    );
+
+    if (!currentCode || hasCollision) {
+      const nextCode = generateNextPlantCode(plants.map((p) => p.code));
+      if (nextCode !== plantData.code) {
+        setPlantData((prev) => {
+          const next = { ...prev, code: nextCode };
+          updateTabData(tab.id, next);
+          return next;
+        });
+      }
+    }
+  }, [plants, plantData.id, plantData.code, tab.id, updateTabData]);
 
   const [activeTab, setActiveTab] = useState<string>(
     tab.activeLevel3Tab || "overview"

@@ -47,20 +47,68 @@ function ensureCustomerContacts(customer: Partial<CrmCustomerRecord>): CustomerC
   return customer.contacts || [];
 }
 
+function normalizeCompanyName(name?: string | null): string {
+  if (!name) return "";
+  return name
+    .toLowerCase()
+    .replace(/\b(llc|mchj|ooo|xk|qk|aj|chj|ltd|inc)\b/gi, "")
+    .replace(/["'«».,]/g, "")
+    .trim();
+}
+
+function isSameCustomer(
+  customer: { id?: string; dbId?: string; name?: string; tin?: string },
+  target: {
+    clientId?: string | null;
+    customerId?: string | null;
+    customerName?: string | null;
+    customer?: string | null;
+    customerTin?: string | null;
+  }
+): boolean {
+  const custIds = [customer.id, customer.dbId].filter(
+    (id): id is string =>
+      Boolean(id && !id.startsWith("draft-") && !id.startsWith("new-") && !id.startsWith("CUST-NEW-"))
+  );
+  const targetIds = [target.clientId, target.customerId].filter((id): id is string => Boolean(id));
+  if (custIds.length > 0 && targetIds.some((tid) => custIds.includes(tid))) {
+    return true;
+  }
+
+  const custTin = (customer.tin || "").trim();
+  const targetTin = (target.customerTin || "").trim();
+  if (custTin.length >= 4 && targetTin.length >= 4 && custTin === targetTin) {
+    return true;
+  }
+
+  const cleanCust = normalizeCompanyName(customer.name);
+  const cleanTarget = normalizeCompanyName(target.customerName ?? target.customer);
+  if (!cleanCust || !cleanTarget) return false;
+  if (cleanCust === cleanTarget) return true;
+  if (cleanCust.length >= 3 && cleanTarget.length >= 3) {
+    return cleanCust.includes(cleanTarget) || cleanTarget.includes(cleanCust);
+  }
+  return false;
+}
+
 export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   const {
     crmCustomers,
+    loadCrmCustomers,
     clientSettlements,
     deliveryActs,
+    loadFinanceData,
     productionQueue,
+    loadProductionQueue,
     customerTooling,
     diesTooling,
     loadDiesToolingAsync,
     finishedGoods,
+    loadFinishedGoods,
+    loadWarehouseShipments,
     upsertCustomer,
     upsertCustomerAsync,
     replaceTabId,
-    upsertProductionQueueItem,
     setTabUnsaved,
     setLevel3Tab,
     openTab,
@@ -69,6 +117,19 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   } = useWorkspaceStore();
 
   const activeTab = tab.activeLevel3Tab || "overview";
+
+  // Load real data from server on mount so Orders, Stock, Settlements & Tooling are always live
+  useEffect(() => {
+    if (crmCustomers.length === 0 && loadCrmCustomers) {
+      loadCrmCustomers();
+    }
+    if (loadProductionQueue) loadProductionQueue();
+    if (loadFinishedGoods) loadFinishedGoods();
+    if (loadFinanceData) loadFinanceData();
+    if (loadWarehouseShipments) loadWarehouseShipments();
+    if (loadDiesToolingAsync) loadDiesToolingAsync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Find customer from store by ID or Name
   const storeCustomer = useMemo(() => {
@@ -102,6 +163,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
       name: d.name || d.customer || "",
       tin: d.tin || d.customerTin || "",
       industry: d.industry || "",
+      industryId: d.industryId || (storeCustomer as any)?.industryId || undefined,
       contactPerson: d.contactPerson || "",
       phone: d.phone || "",
       email: d.email || "",
@@ -152,81 +214,71 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
 
   // Match live Client Settlement (Akt Sverka)
   const settlement = useMemo(() => {
-    const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
-    if (!cleanName && !form.tin) return null;
     return (
-      clientSettlements.find(
-        (s) =>
-          (cleanName && s.customer.toLowerCase() === cleanName) ||
-          (cleanName && s.customer.toLowerCase().includes(cleanName)) ||
-          (form.tin && s.customerTin === form.tin)
+      clientSettlements.find((s) =>
+        isSameCustomer(form, {
+          customer: s.customer,
+          customerTin: s.customerTin,
+        })
       ) || null
     );
-  }, [clientSettlements, form.name, form.tin]);
+  }, [clientSettlements, form]);
 
   // Customer Orders count (Work Orders + Delivery Acts)
   const ordersCount = useMemo(() => {
-    const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
-    if (!cleanName) return 0;
-    const acts = deliveryActs.filter(
-      (a) =>
-        a.customer.toLowerCase().includes(cleanName) ||
-        cleanName.includes(a.customer.toLowerCase())
+    const acts = deliveryActs.filter((a) =>
+      isSameCustomer(form, {
+        customer: a.customer,
+        customerTin: a.customerTin,
+      })
     ).length;
-    const queues = productionQueue.filter(
-      (q) =>
-        q.customer.toLowerCase().includes(cleanName) ||
-        cleanName.includes(q.customer.toLowerCase())
+    const queues = productionQueue.filter((q) =>
+      isSameCustomer(form, {
+        clientId: q.clientId,
+        customer: q.customer,
+      })
     ).length;
     return acts + queues;
-  }, [deliveryActs, productionQueue, form.name]);
+  }, [deliveryActs, productionQueue, form]);
 
   // Customer Tooling count
   const toolingCount = useMemo(() => {
-    const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
-    if (!cleanName && !form.id) return 0;
-    const matchedLegacy = customerTooling.filter((t) => {
-      if (t.customerId && t.customerId === form.id) return true;
-      if (!t.customerName || !cleanName) return false;
-      const tName = t.customerName.toLowerCase();
-      return (
-        tName === cleanName ||
-        tName.includes(cleanName) ||
-        cleanName.includes(tName)
-      );
-    });
+    const matchedLegacy = customerTooling.filter((t) =>
+      isSameCustomer(form, {
+        customerId: t.customerId,
+        customerName: t.customerName,
+      })
+    );
 
-    const matchedDies = (diesTooling || []).filter((t) => {
-      if (t.customerId && t.customerId === form.id) return true;
-      if (!t.customerName || !cleanName) return false;
-      const tName = t.customerName.toLowerCase();
-      return (
-        tName === cleanName ||
-        tName.includes(cleanName) ||
-        cleanName.includes(tName)
-      );
-    });
+    const matchedDies = (diesTooling || []).filter((t) =>
+      isSameCustomer(form, {
+        customerId: t.customerId,
+        customerName: t.customerName,
+      })
+    );
 
-    return matchedLegacy.length + matchedDies.length;
-  }, [customerTooling, diesTooling, form.id, form.name]);
+    const uniqueIds = new Set([
+      ...matchedDies.map((d) => d.code || d.id),
+      ...matchedLegacy.map((l) => l.id),
+    ]);
+    return uniqueIds.size;
+  }, [customerTooling, diesTooling, form]);
 
   // Customer Dedicated Finished Goods Stock (Zaxira)
   const customerStockQty = useMemo(() => {
-    const cleanName = form.name.replace(" LLC", "").replace(" MCHJ", "").trim().toLowerCase();
-    if (!cleanName && !form.tin) return 0;
-    const matched = finishedGoods.filter((fg) => {
-      if (fg.customerId && fg.customerId === form.id) return true;
-      if (form.tin && fg.customerTin === form.tin) return true;
-      if (!cleanName) return false;
-      const fgName = fg.customerName.toLowerCase();
-      return (
-        fgName === cleanName ||
-        fgName.includes(cleanName) ||
-        cleanName.includes(fgName)
-      );
-    });
-    return matched.reduce((sum, item) => sum + (item.stockQty || 0), 0);
-  }, [finishedGoods, form.id, form.name, form.tin]);
+    const matched = finishedGoods.filter((fg) =>
+      isSameCustomer(form, {
+        customerId: fg.customerId,
+        clientId: (fg as any).clientId,
+        customerName: fg.customerName,
+        customerTin: fg.customerTin,
+      })
+    );
+    return matched.reduce(
+      (sum, item) => sum + (Number(item.stockQty ?? (item as any).quantity) || 0),
+      0
+    );
+  }, [finishedGoods, form]);
 
   const closingBalance = settlement?.closingBalance ?? 0;
 
@@ -304,20 +356,28 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleOpenWorkOrder = (order: any) => {
+    const existingWo = productionQueue.find(
+      (q) => q.id === order.docId || q.docNo === order.docId
+    );
     openTab({
       id: order.docId,
       title: `${order.docId}: ${order.product}`,
       type: "work-order",
       module: "production",
       activeLevel3Tab: "overview",
-      documentData: {
-        docNo: order.docId,
-        customer: form.name,
-        product: order.product,
-        quantity: order.quantity,
-        linkedWoId: order.workOrderRef,
-        status: order.status,
-      },
+      documentData: existingWo
+        ? {
+            ...existingWo,
+            docNo: existingWo.docNo || existingWo.id,
+          }
+        : {
+            docNo: order.docId,
+            customer: form.name,
+            product: order.product,
+            quantity: order.orderedQty ?? order.quantity ?? 0,
+            linkedWoId: order.workOrderRef,
+            status: order.status,
+          },
     });
   };
 
@@ -325,6 +385,9 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
     const newWoId = `draft-wo-${Date.now()}`;
     const today = new Date().toISOString().split("T")[0];
     const deadlineDate = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+    const existingWo = productionQueue.find(
+      (q) => q.id === order.docId || q.docNo === order.docId
+    );
 
     openTab({
       id: newWoId,
@@ -334,15 +397,18 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
       isUnsaved: false,
       activeLevel3Tab: "overview",
       documentData: {
+        ...(existingWo || {}),
+        id: newWoId,
         docNo: "",
         parentWorkOrderId: order.docId,
         isReorder: true,
         customer: form.name,
         customerTin: form.tin,
         product: order.product,
-        quantity: order.quantity || 5000,
-        unit: order.unit || "pcs",
+        quantity: order.orderedQty ?? order.quantity ?? existingWo?.quantity ?? 5000,
+        unit: order.unit || existingWo?.unit || "pcs",
         status: "Draft",
+        stage: "Queue",
         startDate: today,
         deadline: deadlineDate,
         sampleRequired: false,

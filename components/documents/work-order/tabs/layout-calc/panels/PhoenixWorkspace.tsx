@@ -21,6 +21,8 @@ import {
   Scissors,
   Warehouse,
   Check,
+  Search,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -50,6 +52,7 @@ import { useLayoutCalc, COLOR_PALETTE } from "../useLayoutCalc";
 import { SheetPreview } from "../preview/SheetPreview";
 import { MasterPlanningMatrix } from "./MasterPlanningMatrix";
 import { doesSheetFitMachine, computeTotalCtpPlatesForConfig } from "../engine";
+import { parseGrammageFromStock } from "../../../types";
 
 interface PhoenixWorkspaceProps {
   calc: ReturnType<typeof useLayoutCalc>;
@@ -66,6 +69,12 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
   );
   const [justApplied, setJustApplied] = useState(false);
 
+  // Warehouse Paper Picker state (scalable for 1000+ warehouse items)
+  const [isPaperPopoverOpen, setIsPaperPopoverOpen] = useState(false);
+  const [paperSearch, setPaperSearch] = useState("");
+  const [paperTab, setPaperTab] = useState<"all" | "full" | "offcut">("all");
+  const [onlyAvailableStock, setOnlyAvailableStock] = useState(false);
+
   const handleSelectPlan = (plan: "min_waste" | "min_plates" | "by_model") => {
     setSelectedPlanId(plan);
     if (plan === "min_waste") {
@@ -77,14 +86,29 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
     }
   };
 
-  // Filter warehouse stock for paper & board + offcuts
+  // Strict filter: ONLY sheeted Paper & Board + Offcuts (exclude Inks, Plates, Foil, Glue, Rolls)
   const paperStockItems = useMemo(() => {
     return (calc.warehouseStock || []).filter((item) => {
       const cat = (item.category || "").toLowerCase();
+      if (
+        cat.includes("ink") ||
+        cat.includes("plate") ||
+        cat.includes("foil") ||
+        cat.includes("film") ||
+        cat.includes("adhesive") ||
+        cat.includes("binding") ||
+        cat.includes("roll")
+      ) {
+        return false;
+      }
+      if (item.unit && item.unit !== "sheets" && !item.isOffcut && !item.sheetFormat && !item.cutDimensions) {
+        return false;
+      }
       return (
         cat.includes("paper") ||
         cat.includes("board") ||
         cat.includes("offcut") ||
+        cat.includes("scrap") ||
         cat.includes("qog'oz") ||
         cat.includes("karton") ||
         Boolean(item.sheetFormat || item.cutDimensions || item.isOffcut)
@@ -92,14 +116,64 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
     });
   }, [calc.warehouseStock]);
 
-  const fullSheetStock = useMemo(
-    () => paperStockItems.filter((i) => !i.isOffcut),
+  const fullSheetCount = useMemo(
+    () => paperStockItems.filter((i) => !i.isOffcut).length,
     [paperStockItems]
   );
-  const offcutStock = useMemo(
-    () => paperStockItems.filter((i) => i.isOffcut),
+  const offcutCount = useMemo(
+    () => paperStockItems.filter((i) => i.isOffcut).length,
     [paperStockItems]
   );
+
+  const targetOrderGrammage = useMemo(
+    () => parseGrammageFromStock(props.paperStock || calc.selectedPaperName || "", 0),
+    [props.paperStock, calc.selectedPaperName]
+  );
+
+  const filteredPaperStock = useMemo(() => {
+    const q = paperSearch.trim().toLowerCase();
+    const list = paperStockItems.filter((item) => {
+      if (paperTab === "full" && item.isOffcut) return false;
+      if (paperTab === "offcut" && !item.isOffcut) return false;
+      const avail = item.available ?? item.stockLevel ?? 0;
+      if (onlyAvailableStock && avail <= 0) return false;
+      if (!q) return true;
+      const fmt = (item.cutDimensions || item.sheetFormat || "").toLowerCase();
+      const gsm = item.grammage ? `${item.grammage}g ${item.grammage}gsm` : "";
+      const haystack = `${item.name} ${item.sku || ""} ${fmt} ${gsm} ${item.location || ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
+
+    // Sort: 1) Active selected paper, 2) Matching grammage, 3) Sufficient stock for order, 4) Available qty desc
+    return [...list].sort((a, b) => {
+      const aSelected = calc.selectedPaperName && a.name === calc.selectedPaperName ? 1 : 0;
+      const bSelected = calc.selectedPaperName && b.name === calc.selectedPaperName ? 1 : 0;
+      if (aSelected !== bSelected) return bSelected - aSelected;
+
+      const aGsmMatch =
+        targetOrderGrammage > 0 && a.grammage === targetOrderGrammage ? 1 : 0;
+      const bGsmMatch =
+        targetOrderGrammage > 0 && b.grammage === targetOrderGrammage ? 1 : 0;
+      if (aGsmMatch !== bGsmMatch) return bGsmMatch - aGsmMatch;
+
+      const aAvail = a.available ?? a.stockLevel ?? 0;
+      const bAvail = b.available ?? b.stockLevel ?? 0;
+      const needed = Math.max(1, calc.totalParentSheetsNeeded);
+      const aEnough = aAvail >= needed ? 1 : aAvail > 0 ? 0.5 : 0;
+      const bEnough = bAvail >= needed ? 1 : bAvail > 0 ? 0.5 : 0;
+      if (aEnough !== bEnough) return bEnough - aEnough;
+
+      return bAvail - aAvail;
+    });
+  }, [
+    paperStockItems,
+    paperTab,
+    onlyAvailableStock,
+    paperSearch,
+    calc.selectedPaperName,
+    targetOrderGrammage,
+    calc.totalParentSheetsNeeded,
+  ]);
 
   const parentFitsDirectly = useMemo(
     () =>
@@ -158,15 +232,15 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
       <div className="flex flex-wrap items-center justify-between gap-1.5 px-2.5 py-1.5 bg-card border border-border rounded-md shrink-0">
         {/* Left Group: Paper & Offcut Picker -> Press Cut Selector -> Plan Selector -> CTP Relation */}
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* 1A. Warehouse Paper & Offcut Picker Popover */}
-          <Popover>
+          {/* 1A. Warehouse Paper & Offcut Picker Popover (Scalable for 1000+ SKU) */}
+          <Popover open={isPaperPopoverOpen} onOpenChange={setIsPaperPopoverOpen}>
             <PopoverTrigger
               type="button"
               className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded border border-border bg-background hover:bg-muted text-xs font-medium text-foreground transition-colors cursor-pointer"
               title="Ombordagi to'liq qog'oz yoki kesilgan qoldiq (delovoy otxod) tanlash"
             >
               <Warehouse className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span className="truncate max-w-[145px]">
+              <span className="truncate max-w-[165px]">
                 {calc.selectedPaperName || "Xom qog'oz"}
               </span>
               <Badge variant="outline" className="h-4.5 px-1 text-[10px] font-mono bg-muted/50">
@@ -174,15 +248,25 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
               </Badge>
               <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-80 p-2.5 space-y-2.5 text-xs">
+            <PopoverContent align="start" className="w-[380px] p-2.5 space-y-2 text-xs">
+              {/* Header */}
               <div className="flex items-center justify-between pb-1.5 border-b border-border">
-                <span className="font-semibold text-foreground">
-                  Xom qog&apos;oz va qoldiqlar (Ombor)
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <Warehouse className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span className="font-semibold text-foreground">
+                    Ombor qog&apos;oz va qoldiqlari
+                  </span>
+                  <span className="text-[10px] font-mono text-muted-foreground">
+                    ({paperStockItems.length})
+                  </span>
+                </div>
                 {calc.onSwitchTab && (
                   <button
                     type="button"
-                    onClick={() => calc.onSwitchTab?.("specs")}
+                    onClick={() => {
+                      setIsPaperPopoverOpen(false);
+                      calc.onSwitchTab?.("specs");
+                    }}
                     className="text-[10px] text-blue-600 hover:underline font-medium cursor-pointer"
                   >
                     Spetsifikatsiya
@@ -190,118 +274,221 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
                 )}
               </div>
 
-              {/* Manual Parent Dimensions */}
-              <div className="grid grid-cols-2 gap-1.5 bg-muted/40 p-2 rounded border border-border">
-                <div>
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">
-                    Xom list eni (W mm)
-                  </label>
+              {/* Search Input */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Input
+                  type="text"
+                  value={paperSearch}
+                  onChange={(e) => setPaperSearch(e.target.value)}
+                  placeholder="Nomi, SKU, zichlik (300g) yoki format (700x1000)..."
+                  className="h-7 pl-7 pr-6 text-xs bg-background"
+                />
+                {paperSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPaperSearch("")}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="Tozalash"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Tabs + Only Available Toggle */}
+              <div className="flex items-center justify-between gap-1">
+                <div className="inline-flex bg-muted p-0.5 rounded border border-border text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setPaperTab("all")}
+                    className={cn(
+                      "px-2 py-0.5 rounded font-medium transition-colors cursor-pointer",
+                      paperTab === "all"
+                        ? "bg-background text-foreground shadow-2xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Barchasi ({paperStockItems.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaperTab("full")}
+                    className={cn(
+                      "px-2 py-0.5 rounded font-medium transition-colors cursor-pointer",
+                      paperTab === "full"
+                        ? "bg-background text-foreground shadow-2xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    To&apos;liq ({fullSheetCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaperTab("offcut")}
+                    className={cn(
+                      "px-2 py-0.5 rounded font-medium transition-colors cursor-pointer",
+                      paperTab === "offcut"
+                        ? "bg-background text-amber-700 dark:text-amber-400 shadow-2xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Qoldiq ({offcutCount})
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setOnlyAvailableStock(!onlyAvailableStock)}
+                  className={cn(
+                    "px-2 py-0.5 rounded border text-[10px] font-medium transition-colors cursor-pointer",
+                    onlyAvailableStock
+                      ? "bg-emerald-600 text-white border-emerald-600"
+                      : "bg-background border-border text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Faqat omborda qoldig'i bor qog'ozlarni ko'rsatish"
+                >
+                  Omborda bor
+                </button>
+              </div>
+
+              {/* Table Header */}
+              <div className="border border-border rounded overflow-hidden bg-background">
+                <div className="grid grid-cols-[1fr_76px_74px] items-center px-2 py-1 bg-muted/40 border-b border-border text-[10px] font-semibold text-muted-foreground">
+                  <span>Qog&apos;oz / Karton</span>
+                  <span className="text-center">Format</span>
+                  <span className="text-right">Qoldiq</span>
+                </div>
+
+                {/* High-Density Scrollable Rows */}
+                <div className="max-h-60 overflow-y-auto divide-y divide-border/50">
+                  {filteredPaperStock.length > 0 ? (
+                    filteredPaperStock.map((st, idx) => {
+                      const fmt = st.cutDimensions || st.sheetFormat || "1000×700";
+                      const avail = st.available ?? st.stockLevel ?? 0;
+                      const isSel = calc.selectedPaperName === st.name;
+                      const isEnough = avail >= calc.totalParentSheetsNeeded && avail > 0;
+                      const isGsmMatch =
+                        targetOrderGrammage > 0 && st.grammage === targetOrderGrammage;
+
+                      return (
+                        <button
+                          key={st.sku || `paper-${idx}`}
+                          type="button"
+                          onClick={() => {
+                            calc.handleSelectWarehousePaper(st);
+                            setIsPaperPopoverOpen(false);
+                          }}
+                          className={cn(
+                            "w-full grid grid-cols-[1fr_76px_74px] items-center gap-1.5 px-2 py-1.5 text-left transition-colors cursor-pointer",
+                            isSel
+                              ? "bg-blue-50 dark:bg-blue-950/50 text-foreground"
+                              : "hover:bg-muted/50 text-foreground"
+                          )}
+                        >
+                          {/* Col 1: Name + Badges */}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1 min-w-0">
+                              {isSel && (
+                                <Check className="w-3 h-3 text-blue-600 shrink-0" />
+                              )}
+                              <span
+                                className={cn(
+                                  "text-[11px] truncate",
+                                  isSel ? "font-semibold text-blue-700 dark:text-blue-300" : "font-medium"
+                                )}
+                                title={st.name}
+                              >
+                                {st.name}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
+                              {st.sku && <span>{st.sku}</span>}
+                              {st.grammage && (
+                                <span
+                                  className={cn(
+                                    "px-1 rounded-xs",
+                                    isGsmMatch
+                                      ? "bg-blue-500/15 text-blue-700 dark:text-blue-300 font-semibold"
+                                      : "bg-muted text-muted-foreground"
+                                  )}
+                                >
+                                  {st.grammage}g
+                                </span>
+                              )}
+                              {st.isOffcut && (
+                                <span className="px-1 rounded-xs bg-amber-500/15 text-amber-700 dark:text-amber-300 font-sans font-medium">
+                                  Qoldiq
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Col 2: Sheet Format */}
+                          <div className="text-center font-mono text-[10px] text-foreground">
+                            {fmt}
+                          </div>
+
+                          {/* Col 3: Available Stock */}
+                          <div className="text-right font-mono">
+                            <div
+                              className={cn(
+                                "text-[11px] font-semibold",
+                                isEnough
+                                  ? "text-emerald-700 dark:text-emerald-400"
+                                  : avail > 0
+                                  ? "text-amber-700 dark:text-amber-400"
+                                  : "text-rose-600 dark:text-rose-400"
+                              )}
+                            >
+                              {avail.toLocaleString()}
+                            </div>
+                            <div className="text-[9px] text-muted-foreground">
+                              {st.location || "list"}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="py-6 text-center text-[11px] text-muted-foreground">
+                      Mos qog&apos;oz topilmadi
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Compact Footer: Manual Parent Sheet Size Override + Order Requirement */}
+              <div className="pt-1.5 border-t border-border flex items-center justify-between gap-2">
+                <div className="text-[10px] text-muted-foreground">
+                  Talab:{" "}
+                  <strong className="font-mono text-foreground">
+                    {calc.totalParentSheetsNeeded.toLocaleString()} xom list
+                  </strong>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-muted-foreground">Format:</span>
                   <Input
                     type="number"
                     value={calc.parentSheetW}
                     onChange={(e) =>
                       calc.handleParentSheetDimChange(Number(e.target.value), calc.parentSheetH)
                     }
-                    className="h-7 text-xs font-mono bg-background"
+                    className="h-6 w-14 text-[11px] font-mono text-center bg-background px-1"
+                    title="Xom list eni (W mm)"
                   />
-                </div>
-                <div>
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">
-                    Xom list bo&apos;yi (H mm)
-                  </label>
+                  <span className="text-muted-foreground font-mono">×</span>
                   <Input
                     type="number"
                     value={calc.parentSheetH}
                     onChange={(e) =>
                       calc.handleParentSheetDimChange(calc.parentSheetW, Number(e.target.value))
                     }
-                    className="h-7 text-xs font-mono bg-background"
+                    className="h-6 w-14 text-[11px] font-mono text-center bg-background px-1"
+                    title="Xom list bo'yi (H mm)"
                   />
                 </div>
               </div>
-
-              {/* Leftover Offcuts (Delovoy Otxod) */}
-              {offcutStock.length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center justify-between">
-                    <span>Kesilgan qoldiqlar (Delovoy otxod)</span>
-                    <span className="font-mono">{offcutStock.length} tur</span>
-                  </div>
-                  <div className="max-h-28 overflow-y-auto space-y-1 pr-0.5">
-                    {offcutStock.map((st, idx) => {
-                      const fmt = st.cutDimensions || st.sheetFormat || "—";
-                      const isSel = calc.selectedPaperName === st.name;
-                      return (
-                        <button
-                          key={st.sku || `off-${idx}`}
-                          type="button"
-                          onClick={() => calc.handleSelectWarehousePaper(st)}
-                          className={cn(
-                            "w-full flex items-center justify-between gap-2 px-2 py-1 rounded border text-left transition-colors cursor-pointer",
-                            isSel
-                              ? "bg-blue-50 dark:bg-blue-950/50 border-blue-400 text-foreground"
-                              : "bg-background hover:bg-muted border-border"
-                          )}
-                        >
-                          <div className="min-w-0">
-                            <div className="font-medium text-[11px] truncate">{st.name}</div>
-                            <div className="text-[10px] font-mono text-muted-foreground">
-                              {fmt} mm · {(st.available ?? st.stockLevel ?? 0).toLocaleString()} list
-                            </div>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className="text-[9px] font-mono bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 shrink-0"
-                          >
-                            Qoldiq
-                          </Badge>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Full Format Warehouse Papers */}
-              {fullSheetStock.length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                    <span>To&apos;liq formatli qog&apos;ozlar</span>
-                    <span className="font-mono">{fullSheetStock.length} tur</span>
-                  </div>
-                  <div className="max-h-36 overflow-y-auto space-y-1 pr-0.5">
-                    {fullSheetStock.map((st, idx) => {
-                      const fmt = st.sheetFormat || "1000×700";
-                      const isSel = calc.selectedPaperName === st.name;
-                      return (
-                        <button
-                          key={st.sku || `full-${idx}`}
-                          type="button"
-                          onClick={() => calc.handleSelectWarehousePaper(st)}
-                          className={cn(
-                            "w-full flex items-center justify-between gap-2 px-2 py-1 rounded border text-left transition-colors cursor-pointer",
-                            isSel
-                              ? "bg-blue-50 dark:bg-blue-950/50 border-blue-400 text-foreground"
-                              : "bg-background hover:bg-muted border-border"
-                          )}
-                        >
-                          <div className="min-w-0">
-                            <div className="font-medium text-[11px] truncate">{st.name}</div>
-                            <div className="text-[10px] font-mono text-muted-foreground">
-                              {fmt} mm · {(st.available ?? st.stockLevel ?? 0).toLocaleString()} list
-                            </div>
-                          </div>
-                          {st.grammage && (
-                            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                              {st.grammage}g
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </PopoverContent>
           </Popover>
 
@@ -774,44 +961,51 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          2. COMPACT KPI SUMMARY STRIP (1 ROW, ALL CRITICAL PREPRESS METRICS)
+          2. COMPACT KPI SUMMARY TABLE STRIP (SEGMENTED CELLS)
       ───────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1 bg-muted/40 border border-border rounded-md shrink-0 text-[11px]">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {/* Machine & Plate Format */}
-          <span className="flex items-center gap-1 text-muted-foreground">
-            <Printer className="w-3 h-3 text-blue-600 shrink-0" />
-            <strong className="text-foreground font-medium">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-[1.35fr_1fr_0.75fr_1.25fr_0.85fr_0.75fr_auto] divide-x divide-y lg:divide-y-0 divide-border border border-border rounded-md bg-card overflow-hidden shrink-0">
+        {/* Cell 1: Machine & Plate Format */}
+        <div className="px-2.5 py-1 flex flex-col justify-center min-w-0">
+          <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground leading-none mb-0.5 flex items-center gap-1">
+            <Printer className="w-2.5 h-2.5 text-blue-600 shrink-0" />
+            <span>Stanok va qolip</span>
+          </span>
+          <div className="flex items-baseline gap-1.5 truncate text-[11px] leading-tight">
+            <strong className="text-foreground font-semibold truncate">
               {calc.machineConstraints.machineName.replace("Heidelberg Speedmaster ", "Heidelberg ")}
             </strong>
-            <span className="font-mono text-[10px]">
-              (Qolip: {calc.machineConstraints.plateW}×{calc.machineConstraints.plateH}mm)
+            <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+              {calc.machineConstraints.plateW}×{calc.machineConstraints.plateH}
             </span>
+          </div>
+        </div>
+
+        {/* Cell 2: Grid & Effective Slots */}
+        <div className="px-2.5 py-1 flex flex-col justify-center min-w-0">
+          <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground leading-none mb-0.5">
+            Joylashuv
           </span>
-
-          <span className="text-border">|</span>
-
-          {/* Grid & Effective Slots */}
-          <span className="text-muted-foreground">
-            Joylashuv:{" "}
-            <strong className="font-mono text-foreground">
+          <div className="flex items-baseline gap-1 truncate text-[11px] leading-tight">
+            <strong className="font-mono text-foreground font-semibold">
               {calc.layout.cols}×{calc.layout.rows} = {calc.effectivePieces} joy
             </strong>
             {calc.isSplitSheetLayout && (
-              <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 ml-1">
+              <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400">
                 (2×{calc.effectivePieces})
               </span>
             )}
+          </div>
+        </div>
+
+        {/* Cell 3: Sheet Utilization */}
+        <div className="px-2.5 py-1 flex flex-col justify-center min-w-0">
+          <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground leading-none mb-0.5">
+            Foydalanish
           </span>
-
-          <span className="text-border">|</span>
-
-          {/* Sheet Utilization */}
-          <span className="text-muted-foreground">
-            Foydalanish:{" "}
+          <div className="text-[11px] leading-tight">
             <strong
               className={cn(
-                "font-mono",
+                "font-mono font-semibold",
                 calc.layout.utilization >= 70
                   ? "text-emerald-700 dark:text-emerald-400"
                   : calc.layout.utilization >= 50
@@ -821,71 +1015,77 @@ export function PhoenixWorkspace({ calc, props }: PhoenixWorkspaceProps) {
             >
               {calc.layout.utilization.toFixed(1)}%
             </strong>
-          </span>
-
-          <span className="text-border">|</span>
-
-          {/* Press Sheets & Parent Sheets */}
-          <span className="text-muted-foreground">
-            Tiraj:{" "}
-            <strong className="font-mono text-foreground">
-              {calc.totalSheetsRun.toLocaleString()} bosma list
-            </strong>
-            {calc.cutDivisor > 1 && (
-              <span className="font-mono text-blue-700 dark:text-blue-300 ml-1">
-                ({calc.totalParentSheetsNeeded.toLocaleString()} xom list · 1/{calc.cutDivisor})
-              </span>
-            )}
-          </span>
-
-          <span className="text-border">|</span>
-
-          {/* Total CTP Plates */}
-          <span className="text-muted-foreground">
-            CTP:{" "}
-            <strong className="font-mono text-blue-700 dark:text-blue-300">
-              {calc.totalCtpPlates} dona
-            </strong>{" "}
-            <span className="font-mono text-[10px]">
-              ({calc.frontColorsCount}+{calc.backColorsCount})
-            </span>
-          </span>
-
-          <span className="text-border">|</span>
-
-          {/* Direct Cost Pill (Links to Financials tab) */}
-          <button
-            type="button"
-            onClick={() => calc.onSwitchTab?.("financials")}
-            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title="Moliya va tannarx bo'limiga o'tish"
-          >
-            <span>Bosma:</span>
-            <strong className="font-mono text-foreground underline decoration-dotted">
-              ${calc.printPlan.totalDirectProductionCost.toLocaleString()}
-            </strong>
-          </button>
+          </div>
         </div>
 
-        {/* Right: Collapsible Matrix Drawer Toggle */}
+        {/* Cell 4: Press Sheets & Parent Sheets */}
+        <div className="px-2.5 py-1 flex flex-col justify-center min-w-0">
+          <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground leading-none mb-0.5">
+            Tiraj (List)
+          </span>
+          <div className="flex items-baseline gap-1 truncate text-[11px] leading-tight">
+            <strong className="font-mono text-foreground font-semibold">
+              {calc.totalSheetsRun.toLocaleString()} bosma
+            </strong>
+            {calc.cutDivisor > 1 && (
+              <span className="font-mono text-[10px] text-blue-700 dark:text-blue-300 truncate">
+                ({calc.totalParentSheetsNeeded.toLocaleString()} xom · 1/{calc.cutDivisor})
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Cell 5: Total CTP Plates */}
+        <div className="px-2.5 py-1 flex flex-col justify-center min-w-0">
+          <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground leading-none mb-0.5">
+            CTP forma
+          </span>
+          <div className="flex items-baseline gap-1 text-[11px] leading-tight">
+            <strong className="font-mono text-blue-700 dark:text-blue-300 font-semibold">
+              {calc.totalCtpPlates} dona
+            </strong>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              ({calc.frontColorsCount}+{calc.backColorsCount})
+            </span>
+          </div>
+        </div>
+
+        {/* Cell 6: Direct Production Cost */}
         <button
           type="button"
-          onClick={() => calc.setIsMatrixOpen(!calc.isMatrixOpen)}
-          className={cn(
-            "inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] font-medium transition-colors cursor-pointer",
-            calc.isMatrixOpen
-              ? "bg-blue-600 text-white border-blue-600"
-              : "bg-background hover:bg-muted text-foreground border-border"
-          )}
+          onClick={() => calc.onSwitchTab?.("financials")}
+          className="px-2.5 py-1 flex flex-col justify-center text-left hover:bg-muted/50 transition-colors cursor-pointer min-w-0"
+          title="Moliya va tannarx bo'limiga o'tish"
         >
-          <TableIcon className="w-3 h-3" />
-          <span>Matritsa jadvali ({calc.plates.length} forma)</span>
-          {calc.isMatrixOpen ? (
-            <ChevronUp className="w-3 h-3" />
-          ) : (
-            <ChevronDown className="w-3 h-3" />
-          )}
+          <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground leading-none mb-0.5">
+            Bosma narxi
+          </span>
+          <strong className="font-mono text-[11px] leading-tight text-foreground font-semibold underline decoration-dotted">
+            ${calc.printPlan.totalDirectProductionCost.toLocaleString()}
+          </strong>
         </button>
+
+        {/* Cell 7: Collapsible Matrix Drawer Toggle */}
+        <div className="px-2 py-1 flex items-center justify-center bg-muted/20">
+          <button
+            type="button"
+            onClick={() => calc.setIsMatrixOpen(!calc.isMatrixOpen)}
+            className={cn(
+              "inline-flex items-center gap-1.5 h-6 px-2.5 rounded border text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap",
+              calc.isMatrixOpen
+                ? "bg-blue-600 text-white border-blue-600"
+                : "bg-background hover:bg-muted text-foreground border-border"
+            )}
+          >
+            <TableIcon className="w-3 h-3" />
+            <span>Matritsa ({calc.plates.length} forma)</span>
+            {calc.isMatrixOpen ? (
+              <ChevronUp className="w-3 h-3" />
+            ) : (
+              <ChevronDown className="w-3 h-3" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Machine Format Warning Banner (only if manual sheet size violates press constraints) */}

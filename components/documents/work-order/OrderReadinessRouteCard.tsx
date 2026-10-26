@@ -107,15 +107,15 @@ export function OrderReadinessRouteCard({
     if (!currentItem && workOrderId) {
       upsertProductionQueueItem({
         id: workOrderId,
-        customer: fallbackCustomer || "Customer",
-        product: fallbackProduct || "Production Job",
-        pressMachine: fallbackMachine || "Heidelberg Speedmaster XL 106-8P",
-        quantity: fallbackQuantity || 5000,
+        customer: fallbackCustomer || "—",
+        product: fallbackProduct || "Buyurtma",
+        pressMachine: fallbackMachine || "",
+        quantity: fallbackQuantity || 0,
         deadline: fallbackDeadline || new Date().toISOString().split("T")[0],
         department: fallbackDept || "Offset",
         stage: "Queue",
         checks: {
-          designReady: true,
+          designReady: false,
           paperReady: false,
           platesReady: false,
           toolingReady: false,
@@ -145,7 +145,7 @@ export function OrderReadinessRouteCard({
     checks.audit || ({} as any);
 
   const currentStage: ProductionQueueStage = currentItem?.stage || "Queue";
-  const machineName = currentItem?.pressMachine || fallbackData?.machine || "Heidelberg Speedmaster XL 106-8P";
+  const machineName = currentItem?.pressMachine || fallbackData?.machine || "Tanlanmagan";
 
   // Blocker modal dialog state
   const [blockerModalKey, setBlockerModalKey] = React.useState<ReadinessCheckKey | null>(null);
