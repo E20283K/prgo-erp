@@ -12,7 +12,7 @@ import {
   Locale,
 } from "date-fns";
 import { enUS, ru, uz, tr } from "date-fns/locale";
-import { ZoomIn, ZoomOut, Plus } from "lucide-react";
+import { ZoomIn, ZoomOut, Plus, Image as ImageIcon } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { Button } from "@/components/ui/button";
@@ -115,7 +115,6 @@ export function WorkOrderTimelineView({
 
   const [api, setApi] = useState<IApi | undefined>(undefined);
   const [activeZoomIdx, setActiveZoomIdx] = useState<number>(2);
-  const [isPanning, setIsPanning] = useState(false);
 
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   const suppressSelectRef = useRef(false);
@@ -150,7 +149,7 @@ export function WorkOrderTimelineView({
       if (!st.moved && Math.hypot(dx, dy) > 4) {
         st.moved = true;
         suppressSelectRef.current = true;
-        setIsPanning(true);
+        canvasWrapRef.current?.classList.add("wo-timeline-panning");
       }
 
       if (st.moved) {
@@ -172,7 +171,7 @@ export function WorkOrderTimelineView({
       st.moved = false;
       st.chartEl = null;
       st.ganttEl = null;
-      setIsPanning(false);
+      canvasWrapRef.current?.classList.remove("wo-timeline-panning");
 
       if (wasMoved) {
         window.setTimeout(() => {
@@ -422,6 +421,12 @@ export function WorkOrderTimelineView({
           ? Math.max(1, differenceInCalendarDays(task.end, task.start))
           : 1;
 
+      const photoUrl =
+        o.preview?.[0] ||
+        o.allPhotos?.[0] ||
+        (Array.isArray(o.rawOrder?.photoUrls) ? o.rawOrder.photoUrls[0] : undefined) ||
+        o.rawOrder?.photoUrl;
+
       const statusLabel =
         o.status === "Active"
           ? tCommon("statusActive")
@@ -432,17 +437,45 @@ export function WorkOrderTimelineView({
           : tCommon("statusDraft");
 
       return (
-        <div className="bg-popover text-popover-foreground border border-border rounded-md p-2 text-xs shadow-xs min-w-[220px] max-w-[280px] space-y-1">
+        <div className="bg-popover text-popover-foreground border border-border rounded-md p-2 text-xs shadow-xs min-w-[240px] max-w-[300px] space-y-1.5">
           <div className="flex items-center justify-between gap-2 border-b border-border pb-1">
             <span className="font-mono font-semibold">{o.id}</span>
             <span className="text-[10px] font-medium text-muted-foreground">{statusLabel}</span>
           </div>
-          <div className="font-medium text-foreground truncate">{o.product}</div>
-          <div className="text-[11px] text-muted-foreground space-y-0.5 pt-0.5">
-            <div>
-              <span className="text-foreground/80">{t("customer")}:</span> {o.customer}
+
+          <div className="flex items-start gap-2 pt-0.5">
+            {photoUrl ? (
+              <div className="relative shrink-0 size-12 rounded border border-border bg-muted/40 overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={photoUrl}
+                  alt={o.product}
+                  className="size-full object-cover"
+                />
+                {o.preview && o.preview.length > 1 && (
+                  <span className="absolute bottom-0 right-0 bg-background/90 text-foreground font-mono text-[9px] px-1 rounded-tl border-t border-l border-border">
+                    +{o.preview.length - 1}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="shrink-0 size-12 rounded border border-border bg-muted/30 flex items-center justify-center text-muted-foreground/50">
+                <ImageIcon className="size-4" />
+              </div>
+            )}
+
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="font-medium text-foreground leading-tight line-clamp-2">
+                {o.product}
+              </div>
+              <div className="text-[11px] text-muted-foreground truncate">
+                <span className="text-foreground/80">{t("customer")}:</span> {o.customer}
+              </div>
             </div>
-            <div>
+          </div>
+
+          <div className="text-[11px] text-muted-foreground space-y-0.5 pt-1 border-t border-border/60">
+            <div className="truncate">
               <span className="text-foreground/80">{t("machine")}:</span> {o.machine}
             </div>
             <div>
@@ -561,9 +594,7 @@ export function WorkOrderTimelineView({
         <div
           ref={canvasWrapRef}
           onMouseDown={handleCanvasMouseDown}
-          className={`flex-1 min-h-0 w-full overflow-hidden ${
-            isPanning ? "wo-timeline-panning" : ""
-          }`}
+          className="flex-1 min-h-0 w-full overflow-hidden"
         >
           <Willow fonts={false}>
             <Tooltip api={api} content={TooltipContent}>
