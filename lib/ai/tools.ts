@@ -148,6 +148,49 @@ export const ERP_TOOL_DEFINITIONS: CopilotToolDefinition[] = [
       required: ["type"],
     },
   },
+  {
+    name: "runAnalyticalQuery",
+    description: "Execute high-level cross-module statistical analysis across work orders, stock inventory, machine loads, or client debts. Supports grouping, filtering, sums, counts, and anomaly detection.",
+    parameters: {
+      type: "object",
+      properties: {
+        dimension: {
+          type: "string",
+          description: "Target dataset dimension",
+          enum: ["work_orders", "stock", "machines", "finance", "clients"],
+        },
+        groupBy: {
+          type: "string",
+          description: "Field to group data by (e.g. status, priority, department, stage, machine, category)",
+        },
+        metric: {
+          type: "string",
+          description: "Aggregation metric",
+          enum: ["count", "sum_amount", "sum_quantity", "average"],
+        },
+        filterField: { type: "string", description: "Field to filter by (e.g. status, priority, department)" },
+        filterValue: { type: "string", description: "Value to match for filtering" },
+      },
+      required: ["dimension"],
+    },
+  },
+  {
+    name: "checkOrderFeasibility",
+    description: "Comprehensive end-to-end feasibility simulator for a new printing order. Checks technological calculations, raw paper/plate stock availability, and machine queue availability before dispatching.",
+    parameters: {
+      type: "object",
+      properties: {
+        technology: { type: "string", description: "Printing technology: offset or flexo", enum: ["offset", "flexo"] },
+        quantity: { type: "number", description: "Order print quantity (dona)" },
+        product: { type: "string", description: "Product description" },
+        paperStock: { type: "string", description: "Paper or substrate name (e.g. Galerie Art Silk, MetsäBoard, Fasson)" },
+        paperGsm: { type: "number", description: "Paper grammage (gsm)" },
+        machine: { type: "string", description: "Target press machine name" },
+        deadline: { type: "string", description: "Target delivery deadline (YYYY-MM-DD)" },
+      },
+      required: ["technology", "quantity"],
+    },
+  },
 ];
 
 // ─── FALLBACK MOCK DATA (When DB is empty or during local testing) ────────────
@@ -1258,6 +1301,328 @@ export async function executePrepareDraftDocument(
 }
 
 /**
+ * Analytical Cross-Module Aggregator
+ */
+async function executeRunAnalyticalQuery(
+  params: {
+    dimension?: "work_orders" | "stock" | "machines" | "finance" | "clients";
+    groupBy?: string;
+    metric?: "count" | "sum_amount" | "sum_quantity" | "average";
+    filterField?: string;
+    filterValue?: string;
+  },
+  companyCode: string = "PRINTGOO"
+): Promise<ToolExecutionResult> {
+  const startTime = Date.now();
+  const dimension = params.dimension || "work_orders";
+  const groupBy = params.groupBy || (dimension === "work_orders" ? "status" : dimension === "stock" ? "category" : "status");
+
+  let items: any[] = [];
+  if (dimension === "work_orders") {
+    try {
+      items = await getWorkOrders(companyCode);
+    } catch (_) {}
+    if (!items || items.length === 0) items = FALLBACK_WORK_ORDERS;
+  } else if (dimension === "stock") {
+    try {
+      items = await getStockBalances(companyCode);
+    } catch (_) {}
+    if (!items || items.length === 0) items = FALLBACK_STOCK;
+  } else if (dimension === "machines") {
+    try {
+      items = await getProductionMachines(companyCode);
+    } catch (_) {}
+    if (!items || items.length === 0) items = FALLBACK_MACHINES;
+  } else if (dimension === "finance") {
+    try {
+      items = await getClientSettlements(companyCode);
+    } catch (_) {}
+    if (!items || items.length === 0) items = FALLBACK_SETTLEMENTS;
+  }
+
+  // Filter if specified
+  if (params.filterField && params.filterValue) {
+    const fField = params.filterField;
+    const fVal = String(params.filterValue).toLowerCase();
+    items = items.filter((item) => String(item[fField] || "").toLowerCase().includes(fVal));
+  }
+
+  // Grouping
+  const groups: Record<string, { count: number; sumAmount: number; sumQuantity: number; items: any[] }> = {};
+  for (const item of items) {
+    const rawKey = item[groupBy] || "Boshqa";
+    const groupKey = String(rawKey);
+    if (!groups[groupKey]) {
+      groups[groupKey] = { count: 0, sumAmount: 0, sumQuantity: 0, items: [] };
+    }
+    groups[groupKey].count += 1;
+    groups[groupKey].sumAmount += Number(item.priceTotal || item.closingBalance || item.totalValue || 0);
+    groups[groupKey].sumQuantity += Number(item.quantity || item.totalStock || 0);
+    groups[groupKey].items.push(item);
+  }
+
+  const groupEntries = Object.entries(groups).sort((a, b) => b[1].count - a[1].count);
+  const totalCount = items.length;
+  const totalAmount = groupEntries.reduce((acc, [, v]) => acc + v.sumAmount, 0);
+
+  const tableRows: (string | number)[][] = groupEntries.map(([name, data]) => {
+    const share = totalCount > 0 ? Math.round((data.count / totalCount) * 100) : 0;
+    return [
+      name,
+      data.count,
+      data.sumAmount > 0 ? `$${Math.round(data.sumAmount).toLocaleString()}` : data.sumQuantity.toLocaleString(),
+      `${share}%`,
+    ];
+  });
+
+  const structuredTable: CopilotTable = {
+    headers: [
+      groupBy.toUpperCase(),
+      "Soni",
+      params.metric === "sum_amount" || totalAmount > 0 ? "Summasi (USD)" : "Hajmi",
+      "Ulushi",
+    ],
+    rows: tableRows,
+  };
+
+  const topGroup = groupEntries[0];
+  const metrics: CopilotMetric[] = [
+    { label: "Jami obyektlar", value: totalCount, sublabel: dimension },
+    { label: `Asosiy guruh (${groupBy})`, value: topGroup ? topGroup[0] : "—", sublabel: `${topGroup ? topGroup[1].count : 0} ta` },
+    ...(totalAmount > 0 ? [{ label: "Jami aylanma", value: `$${Math.round(totalAmount).toLocaleString()}` }] : []),
+  ];
+
+  let textResult = `**Tahliliy hisobot (${dimension.toUpperCase()} / ${groupBy.toUpperCase()} bo'yicha):**\n\n`;
+  textResult += `Jami tahlil qilingan yozuvlar: **${totalCount}** ta.\n`;
+  if (totalAmount > 0) {
+    textResult += `Umumiy hisoblangan qiymat: **$${Math.round(totalAmount).toLocaleString()} USD**.\n`;
+  }
+  textResult += `\nGuruhlar taqsimoti:\n`;
+  for (const [gName, gData] of groupEntries.slice(0, 5)) {
+    const share = totalCount > 0 ? Math.round((gData.count / totalCount) * 100) : 0;
+    textResult += `• **${gName}**: ${gData.count} ta (${share}%)${gData.sumAmount > 0 ? ` — $${Math.round(gData.sumAmount).toLocaleString()}` : ""}\n`;
+  }
+
+  const actions: CopilotClientAction[] = [];
+  if (dimension === "work_orders") {
+    actions.push({
+      id: "act-filter-top-group",
+      type: "apply_grid_filter",
+      label: `${topGroup ? topGroup[0] : "Faol"} buyurtmalarini ko'rish`,
+      iconName: "Filter",
+      payload: {
+        filterField: groupBy,
+        filterQuery: topGroup ? topGroup[0] : "",
+        module: "production",
+      },
+    });
+  }
+
+  return {
+    toolName: "runAnalyticalQuery",
+    success: true,
+    summary: `${dimension} bo'yicha ${groupEntries.length} ta guruh tahlil qilindi`,
+    textResult,
+    toolSteps: [
+      {
+        id: `step-${Date.now()}`,
+        toolName: "runAnalyticalQuery",
+        label: "Kross-modul statistik tahlil",
+        status: "done",
+        summary: `${dimension} / ${groupBy} tahlil qilindi`,
+        durationMs: Date.now() - startTime,
+      },
+    ],
+    metrics,
+    structuredTable,
+    actions,
+  };
+}
+
+/**
+ * End-to-End Order Feasibility Checker & Simulator
+ */
+async function executeCheckOrderFeasibility(
+  params: {
+    technology: "offset" | "flexo";
+    quantity: number;
+    product?: string;
+    paperStock?: string;
+    paperGsm?: number;
+    machine?: string;
+    deadline?: string;
+  },
+  companyCode: string = "PRINTGOO"
+): Promise<ToolExecutionResult> {
+  const startTime = Date.now();
+  const {
+    technology = "offset",
+    quantity = 5000,
+    product = "Yangi buyurtma",
+    paperStock = "Galerie Art Silk",
+    paperGsm = 150,
+    machine,
+    deadline,
+  } = params;
+
+  // 1. Calculate technological requirements
+  const calc = calculatePrintingTechnology({
+    technology,
+    quantity,
+    paperGsm,
+  });
+
+  // 2. Check warehouse stock for paper/substrate
+  let stockItems: any[] = [];
+  try {
+    stockItems = await getStockBalances(companyCode);
+  } catch (_) {}
+  if (!stockItems || stockItems.length === 0) stockItems = FALLBACK_STOCK;
+
+  const paperQuery = (paperStock || "Silk").toLowerCase();
+  const matchedMaterial = stockItems.find(
+    (item) => (item.materialName || item.sku || "").toLowerCase().includes(paperQuery)
+  ) || stockItems[0];
+
+  const neededUnits = calc.totalGrossUnits;
+  const availableStock = matchedMaterial ? (matchedMaterial.freeStock ?? (matchedMaterial.totalStock - (matchedMaterial.reservedStock || 0))) : 0;
+  const isMaterialSufficient = availableStock >= neededUnits;
+  const materialDeficit = Math.max(0, neededUnits - availableStock);
+
+  // 3. Check machine telemetry & queue
+  let machines: any[] = [];
+  try {
+    machines = await getProductionMachines(companyCode);
+  } catch (_) {}
+  if (!machines || machines.length === 0) machines = FALLBACK_MACHINES;
+
+  const targetMachine = machine
+    ? machines.find((m) => (m.name || m.code || "").toLowerCase().includes(machine.toLowerCase()))
+    : machines.find((m) => (technology === "flexo" ? m.type === "Flexo" : m.type === "Offset")) || machines[0];
+
+  const isMachineFree = targetMachine ? targetMachine.status === "Idle" || targetMachine.status === "Running" : true;
+  const activeQueueCount = targetMachine?.activeJobsCount || (targetMachine?.status === "Running" ? 2 : 1);
+
+  // Feasibility status determination
+  const isFeasible = isMaterialSufficient && isMachineFree;
+
+  const metrics: CopilotMetric[] = [
+    {
+      label: "Xomashyo holati",
+      value: isMaterialSufficient ? "Yetarli" : `Defitsit (-${materialDeficit})`,
+      trend: isMaterialSufficient ? "up" : "down",
+      sublabel: `${matchedMaterial?.materialName || paperStock}`,
+    },
+    {
+      label: "Brutto talab",
+      value: `${neededUnits.toLocaleString()} ${calc.unitType}`,
+      sublabel: `Omborda erkin: ${availableStock.toLocaleString()}`,
+    },
+    {
+      label: "Dastgoh yuklamasi",
+      value: `${targetMachine?.name?.slice(0, 18) || "Dastgoh"}`,
+      sublabel: `Navbat: ${activeQueueCount} ta buyurtma`,
+      trend: "neutral",
+    },
+    {
+      label: "Taxminiy tannarx",
+      value: `$${calc.costBreakdown.totalEstimatedUsd.toLocaleString()}`,
+      sublabel: `Donasi: $${calc.costBreakdown.unitCostUsd}`,
+    },
+  ];
+
+  let textResult = `**Buyurtma ishlab chiqarishga yaroqliligi tahlili (Feasibility Check):**\n\n`;
+  textResult += `• **Mahsulot**: ${product} (${quantity.toLocaleString()} dona, ${technology.toUpperCase()})\n`;
+  textResult += `• **Hisoblangan xomashyo**: ${neededUnits.toLocaleString()} ${calc.unitType} (Priladka: ${calc.makeReadyWaste} ${calc.unitType}, CTP: ${calc.platesCount} ta)\n`;
+  textResult += `• **Ombor tekshiruvi**: ${matchedMaterial?.materialName || paperStock} — Omborda erkin qoldiq: **${availableStock.toLocaleString()}**, kerak: **${neededUnits.toLocaleString()}**.\n`;
+
+  if (!isMaterialSufficient) {
+    textResult += `  > DIQQAT: Xomashyo yetishmovchiligi mavjud! Kamida **${materialDeficit.toLocaleString()} ${calc.unitType}** xarid qilinishi lozim.\n`;
+  } else {
+    textResult += `  > Xomashyo zaxirasi to'liq yetarli (rezervatsiya qilish mumkin).\n`;
+  }
+
+  textResult += `• **Dastgoh tekshiruvi**: ${targetMachine?.name || "Asosiy dastgoh"} (Holati: ${targetMachine?.status || "Ishlamoqda"}, navbatda: ${activeQueueCount} ta ish).\n`;
+
+  if (deadline) {
+    textResult += `• **Belgilangan dedlayn**: ${deadline}.\n`;
+  }
+
+  textResult += `\n**XULOSA:** ${
+    isFeasible
+      ? "Buyurtmani ishlab chiqarishga qabul qilish tavsiya etiladi. Barcha texnologik va moddiy resurslar mavjud."
+      : "Xomashyo defitsiti tufayli buyurtmani zudlik bilan ishga tushirib bo'lmaydi. Avval omborga kirim orderi shakllantirilishi lozim."
+  }`;
+
+  const actions: CopilotClientAction[] = [];
+  if (isFeasible) {
+    actions.push({
+      id: "act-create-feasible-draft",
+      type: "create_draft_tab",
+      label: "Buyurtma qoralama kartochkasini ochish",
+      iconName: "Plus",
+      payload: {
+        tabType: "work-order",
+        title: `${product} (${quantity})`,
+        initialData: {
+          product,
+          quantity,
+          department: technology === "flexo" ? "Flexo" : "Offset",
+          pressMachine: targetMachine?.name,
+          paperStock: matchedMaterial?.materialName || paperStock,
+          priceTotal: calc.costBreakdown.totalEstimatedUsd,
+          deadline,
+        },
+      },
+    });
+  } else {
+    actions.push({
+      id: "act-nav-warehouse-receipt",
+      type: "navigate_module",
+      label: "Ombor zaxirasiga o'tish",
+      iconName: "Boxes",
+      payload: {
+        module: "warehouse",
+        subModule: "receipts",
+      },
+    });
+  }
+
+  return {
+    toolName: "checkOrderFeasibility",
+    success: true,
+    summary: isFeasible ? "Buyurtma ishlab chiqarishga tayyor" : "Xomashyo defitsiti aniqlandi",
+    textResult,
+    toolSteps: [
+      {
+        id: `step-calc-${Date.now()}`,
+        toolName: "checkOrderFeasibility",
+        label: "Texnologik me'yorlarni hisoblash",
+        status: "done",
+        summary: `${neededUnits} ${calc.unitType} talab etiladi`,
+      },
+      {
+        id: `step-stock-${Date.now()}`,
+        toolName: "checkWarehouseInventory",
+        label: "Ombor zaxirasini tekshirish",
+        status: isMaterialSufficient ? "done" : "error",
+        summary: isMaterialSufficient ? "Qoldiq yetarli" : `Defitsit: ${materialDeficit}`,
+      },
+      {
+        id: `step-mach-${Date.now()}`,
+        toolName: "getMachineQueueAndTelemetry",
+        label: "Dastgoh navbatini tekshirish",
+        status: "done",
+        summary: `${targetMachine?.name || "Dastgoh"} navbatida ${activeQueueCount} ta ish`,
+        durationMs: Date.now() - startTime,
+      },
+    ],
+    metrics,
+    actions,
+  };
+}
+
+/**
  * Universal Tool Dispatcher
  */
 export async function executeErpTool(
@@ -1282,6 +1647,10 @@ export async function executeErpTool(
       return executeCalculatePrintingEstimate(args);
     case "prepareDraftDocument":
       return executePrepareDraftDocument(args);
+    case "runAnalyticalQuery":
+      return executeRunAnalyticalQuery(args, companyCode);
+    case "checkOrderFeasibility":
+      return executeCheckOrderFeasibility(args, companyCode);
     default:
       return {
         toolName,

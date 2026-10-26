@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { MachineRecord } from "../types";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -306,10 +307,11 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
               <div className="grid grid-cols-3 gap-2 text-[11px]">
                 <div>
                   <Label className="text-[10px] text-muted-foreground">Investitsiya ($):</Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={2}
                     value={investment || ""}
-                    onChange={(e) => setInvestment(Number(e.target.value) || 0)}
+                    onValueChange={(values) => setInvestment(values.floatValue ?? 0)}
                     placeholder="0"
                     className="h-7 text-xs font-mono"
                   />
@@ -389,22 +391,22 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
               <div className="grid grid-cols-2 gap-2 text-[11px]">
                 <div>
                   <Label className="text-[10px] text-muted-foreground">Bosh operator stavkasi ($/soat):</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={2}
                     value={operatorWage || ""}
-                    onChange={(e) => setOperatorWage(Number(e.target.value) || 0)}
+                    onValueChange={(values) => setOperatorWage(values.floatValue ?? 0)}
                     placeholder="0"
                     className="h-7 text-xs font-mono"
                   />
                 </div>
                 <div>
                   <Label className="text-[10px] text-muted-foreground">Yordamchi stavkasi ($/soat):</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={2}
                     value={assistantWage || ""}
-                    onChange={(e) => setAssistantWage(Number(e.target.value) || 0)}
+                    onValueChange={(values) => setAssistantWage(values.floatValue ?? 0)}
                     placeholder="0"
                     className="h-7 text-xs font-mono"
                   />
@@ -416,22 +418,22 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="rounded border border-border/70 p-2.5 space-y-1 bg-muted/10">
                 <Label className="text-[10px] font-medium text-muted-foreground">Sex / Zavod Umumiy Xarajati ($/h):</Label>
-                <Input
-                  type="number"
-                  step="0.5"
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={2}
                   value={factoryOverhead || ""}
-                  onChange={(e) => setFactoryOverhead(Number(e.target.value) || 0)}
+                  onValueChange={(values) => setFactoryOverhead(values.floatValue ?? 0)}
                   placeholder="0"
                   className="h-7 text-xs font-mono"
                 />
               </div>
               <div className="rounded border border-primary/40 bg-primary/5 p-2.5 space-y-1">
                 <Label className="text-[10px] font-semibold text-primary">Tijoriy Sotish Stavkasi ($/h):</Label>
-                <Input
-                  type="number"
-                  step="1"
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={2}
                   value={billingRate || ""}
-                  onChange={(e) => setBillingRate(Number(e.target.value) || 0)}
+                  onValueChange={(values) => setBillingRate(values.floatValue ?? 0)}
                   placeholder="0"
                   className="h-7 text-xs font-mono font-bold text-primary"
                 />

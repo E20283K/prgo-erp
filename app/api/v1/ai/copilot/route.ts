@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
       userName: context?.userName || "User",
       locale: context?.locale || "uz",
       clientDataSnapshot: context?.clientDataSnapshot,
+      screenSnapshot: context?.screenSnapshot,
       includeActiveTabContext: context?.includeActiveTabContext !== false,
     };
 

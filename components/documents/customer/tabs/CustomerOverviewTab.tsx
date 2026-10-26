@@ -32,6 +32,7 @@ import {
   Plus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -1503,11 +1504,10 @@ export function CustomerOverviewTab({
                   <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
                     <Clock className="w-3 h-3 text-muted-foreground" /> Boshlanish sanasi *
                   </Label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={editingContract.startDate}
-                    onChange={(e) =>
-                      setEditingContract({ ...editingContract, startDate: e.target.value })
+                    onChange={(val) =>
+                      setEditingContract({ ...editingContract, startDate: val })
                     }
                     className="h-8 text-xs font-mono bg-background"
                   />
@@ -1516,11 +1516,10 @@ export function CustomerOverviewTab({
                   <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
                     <Clock className="w-3 h-3 text-muted-foreground" /> Tugash sanasi *
                   </Label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={editingContract.endDate}
-                    onChange={(e) =>
-                      setEditingContract({ ...editingContract, endDate: e.target.value })
+                    onChange={(val) =>
+                      setEditingContract({ ...editingContract, endDate: val })
                     }
                     className="h-8 text-xs font-mono bg-background"
                   />

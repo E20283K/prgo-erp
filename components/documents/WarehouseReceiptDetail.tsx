@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
 import {
@@ -22,6 +22,8 @@ import {
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -106,8 +108,12 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
   const {
     warehouseStock,
     warehousesList,
+    loadWarehouses,
+    plants,
+    fetchPlants,
     employees,
-    crmCustomers,
+    suppliers,
+    loadSuppliers,
     warehouseReceipts,
     productionQueue,
     upsertWarehouseStock,
@@ -159,11 +165,24 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
     );
   }, [productionQueue, woSearch]);
 
+  // Fetch suppliers, warehouses and plants if not loaded yet
+  useEffect(() => {
+    if (suppliers.length === 0 && loadSuppliers) {
+      loadSuppliers();
+    }
+    if (warehousesList.length === 0 && loadWarehouses) {
+      loadWarehouses();
+    }
+    if (plants.length === 0 && fetchPlants) {
+      fetchPlants();
+    }
+  }, [suppliers.length, loadSuppliers, warehousesList.length, loadWarehouses, plants.length, fetchPlants]);
+
   // Collect known suppliers for combobox
   const supplierOptions = useMemo<ComboboxOption[]>(() => {
     const list = new Set<string>();
-    crmCustomers.forEach((c) => {
-      if (c.name) list.add(c.name);
+    suppliers.forEach((s) => {
+      if (s.name) list.add(s.name);
     });
     warehouseReceipts.forEach((r) => {
       if (r.supplier) list.add(r.supplier);
@@ -178,7 +197,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
       list.add("Avery Dennison Central Asia");
     }
     return Array.from(list).map((name) => ({ value: name, label: name }));
-  }, [crmCustomers, warehouseReceipts, warehouseStock]);
+  }, [suppliers, warehouseReceipts, warehouseStock]);
 
   // Employee options for ReceivedBy
   const employeeOptions = useMemo<ComboboxOption[]>(() => {
@@ -195,21 +214,45 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
     ];
   }, [employees]);
 
-  // Warehouse location options
+  // Warehouse location options from plants and postgres warehouses table
   const warehouseOptions = useMemo(() => {
-    if (warehousesList && warehousesList.length > 0) {
-      return warehousesList.map((w: any) => ({
-        id: w.id || w.name,
-        name: w.name,
-      }));
+    const list: { id: string; name: string }[] = [];
+
+    // 1. From plant records (each branch/plant has its own warehouses)
+    plants.forEach((p) => {
+      if (Array.isArray(p.warehouses) && p.warehouses.length > 0) {
+        p.warehouses.forEach((w) => {
+          const displayName = plants.length > 1 ? `${p.name} — ${w.name}` : w.name;
+          list.push({
+            id: w.id || `${p.id}-${w.name}`,
+            name: displayName,
+          });
+        });
+      }
+    });
+
+    // 2. From postgres warehouses catalog
+    (warehousesList || []).forEach((wh: any) => {
+      const exists = list.some(
+        (item) => item.name.toLowerCase() === wh.name.toLowerCase() || item.id === wh.id
+      );
+      if (!exists) {
+        list.push({
+          id: wh.id || wh.name,
+          name: wh.name,
+        });
+      }
+    });
+
+    if (list.length === 0) {
+      return [
+        { id: "wh-1", name: "Asosiy xomashyo ombori" },
+        { id: "wh-2", name: "Yordamchi materiallar ombori" },
+        { id: "wh-3", name: "Tayyor mahsulotlar ombori" },
+      ];
     }
-    return [
-      { id: "wh-1", name: "Asosiy xomashyo ombori" },
-      { id: "wh-2", name: "Yordamchi materiallar ombori" },
-      { id: "wh-3", name: "Tayyor mahsulotlar ombori" },
-      { id: "wh-4", name: "Chiqindi va otxodlar ombori" },
-    ];
-  }, [warehousesList]);
+    return list;
+  }, [plants, warehousesList]);
 
   const totalAmountUsd = useMemo(
     () =>
@@ -253,16 +296,16 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
 
   const columns = useMemo<GridColumn[]>(
     () => [
-      { id: "workOrderId", title: "Buyurtma № (WO)", width: 130, icon: GridColumnIcon.HeaderReference },
+      { id: "workOrderId", title: "Buyurtma №", width: 110, icon: GridColumnIcon.HeaderReference },
       { id: "sku", title: "SKU / Kod", width: 110, icon: GridColumnIcon.HeaderReference },
-      { id: "name", title: "Material / Xomashyo Nomi", width: 290, icon: GridColumnIcon.HeaderString },
+      { id: "name", title: "Xomashyo nomi", width: 290, icon: GridColumnIcon.HeaderString },
       { id: "category", title: "Toifa", width: 130, icon: GridColumnIcon.HeaderSingleValue },
       { id: "sheetFormat", title: "Format", width: 95, icon: GridColumnIcon.HeaderString },
       { id: "grammage", title: "Zichlik", width: 85, icon: GridColumnIcon.HeaderNumber },
-      { id: "quantity", title: "Kirim Miqdori", width: 120, icon: GridColumnIcon.HeaderNumber },
+      { id: "quantity", title: "Miqdori", width: 120, icon: GridColumnIcon.HeaderNumber },
       { id: "unit", title: "Birlik", width: 75, icon: GridColumnIcon.HeaderString },
-      { id: "unitPriceUsd", title: "Birlik Narxi ($)", width: 115, icon: GridColumnIcon.HeaderNumber },
-      { id: "lineTotal", title: "Jami Summa ($)", width: 130, icon: GridColumnIcon.HeaderNumber },
+      { id: "unitPriceUsd", title: "Narxi ($)", width: 115, icon: GridColumnIcon.HeaderNumber },
+      { id: "lineTotal", title: "Summasi ($)", width: 130, icon: GridColumnIcon.HeaderNumber },
     ],
     []
   );
@@ -656,20 +699,20 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
         <div className="flex items-center gap-2 min-w-0">
           <ArrowDownToLine className="w-4 h-4 text-primary shrink-0" />
           <span className="font-semibold text-xs truncate flex items-center gap-1.5">
-            <span>Ombor Kirim Hujjati (Приходная накладная):</span>
+            <span>Ombor kirim hujjati:</span>
             <span className={cn(isDraft && "font-mono text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded")}>
-              {isDraft ? "Yangi (Avtomatik)" : doc.id}
+              {isDraft ? "Yangi" : doc.id}
             </span>
           </span>
           <Separator orientation="vertical" className="h-4 mx-1" />
           {isPosted ? (
             <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300 text-[11px] gap-1">
               <Lock className="w-3 h-3" />
-              <span>Tasdiqlangan (Оприходовано)</span>
+              <span>Tasdiqlangan</span>
             </Badge>
           ) : (
             <Badge variant="secondary" className="text-[11px]">
-              Qoralama (Draft)
+              Qoralama
             </Badge>
           )}
         </div>
@@ -701,7 +744,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
                 className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 font-medium shadow-none cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>Omborga kirim qilish (Провести)</span>
+                <span>Kirim qilish</span>
               </Button>
             </>
           )}
@@ -721,18 +764,17 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
       {/* Document Header Requisites: Bound to Directories */}
       <div className="p-3 bg-card border-b border-border grid grid-cols-1 md:grid-cols-5 gap-3 shrink-0">
         <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">Hujjat № va Sana</Label>
+          <Label className="text-[11px] text-muted-foreground">Hujjat № va sana</Label>
           <div className="flex items-center gap-1.5">
             <Input
-              value={doc.id}
+              value={isDraft ? "Yangi" : doc.id}
               readOnly
-              className="h-7 text-xs font-mono bg-muted/50 w-28"
+              className="h-7 text-xs font-mono bg-muted/50 w-28 text-muted-foreground font-medium"
             />
-            <Input
-              type="date"
+            <DatePicker
               value={doc.date}
-              readOnly={isPosted}
-              onChange={(e) => handleFieldChange("date", e.target.value)}
+              disabled={isPosted}
+              onChange={(val) => handleFieldChange("date", val)}
               className="h-7 text-xs font-mono bg-background flex-1"
             />
           </div>
@@ -740,20 +782,20 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
 
         {/* Supplier Field with Combobox & Custom Add */}
         <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">Yetkazib beruvchi (Ta&apos;minotchi)</Label>
+          <Label className="text-[11px] text-muted-foreground">Yetkazib beruvchi</Label>
           <FieldCombobox
             value={doc.supplier}
             onChange={(val) => handleFieldChange("supplier", val)}
             allowCustom={true}
             options={supplierOptions}
             disabled={isPosted}
-            placeholder="Ta'minotchi tanlang yoki yozing..."
+            placeholder="Yetkazib beruvchini tanlang yoki yozing..."
             className="h-7 text-xs bg-background"
           />
         </div>
 
         <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">Shartnoma / Invoice № (PO)</Label>
+          <Label className="text-[11px] text-muted-foreground">Shartnoma / Invoice №</Label>
           <Input
             value={doc.poNumber}
             readOnly={isPosted}
@@ -765,7 +807,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
 
         {/* Warehouse Location Selector */}
         <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">Qabul qiluvchi Ombor</Label>
+          <Label className="text-[11px] text-muted-foreground">Qabul qiluvchi ombor</Label>
           <Select
             value={doc.location}
             disabled={isPosted}
@@ -786,7 +828,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
 
         {/* Received By Employee Combobox */}
         <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">Qabul qildi (Ombor mudiri)</Label>
+          <Label className="text-[11px] text-muted-foreground">Qabul qildi</Label>
           <FieldCombobox
             value={doc.receivedBy}
             onChange={(val) => handleFieldChange("receivedBy", val)}
@@ -804,7 +846,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
         <div className="flex items-center gap-2 min-w-0">
           <Boxes className="w-3.5 h-3.5 text-primary shrink-0" />
           <span className="font-semibold text-xs whitespace-nowrap">
-            Kirim qilinayotgan xomashyolar (Табличная часть)
+            Kirim qilinayotgan xomashyolar
           </span>
 
           {!isPosted && (
@@ -831,7 +873,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
                     className="gap-2 cursor-pointer py-1.5"
                   >
                     <ClipboardList className="w-4 h-4 text-blue-600" />
-                    <span>Work Orderdan to&apos;ldirish</span>
+                    <span>Buyurtmadan to&apos;ldirish</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => setIsCatalogDialogOpen(true)}
@@ -1312,7 +1354,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">Toifa (Kategoriya)</Label>
+                  <Label className="text-[11px] text-muted-foreground">Toifa</Label>
                   <Select
                     value={lineFormData.category || "Paper & Board"}
                     onValueChange={(val) =>
@@ -1323,12 +1365,12 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Paper & Board">Paper & Board</SelectItem>
-                      <SelectItem value="Inks">Inks (Bo&apos;yoqlar)</SelectItem>
-                      <SelectItem value="Plates">Plates (Qoliplar)</SelectItem>
-                      <SelectItem value="Foils">Foils (Folga)</SelectItem>
-                      <SelectItem value="Chemicals">Chemicals (Kimyoviy)</SelectItem>
-                      <SelectItem value="Packaging">Packaging (Qadoq)</SelectItem>
+                      <SelectItem value="Paper & Board">Qog&apos;oz va karton</SelectItem>
+                      <SelectItem value="Inks">Bo&apos;yoqlar</SelectItem>
+                      <SelectItem value="Plates">Qoliplar</SelectItem>
+                      <SelectItem value="Foils">Folga</SelectItem>
+                      <SelectItem value="Chemicals">Kimyoviy moddalar</SelectItem>
+                      <SelectItem value="Packaging">Qadoqlash</SelectItem>
                       <SelectItem value="Other">Boshqa xomashyolar</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1373,7 +1415,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
               <div className="grid grid-cols-3 gap-2">
                 <div className="space-y-1">
                   <Label className="text-[11px] font-semibold text-foreground">
-                    Kirim Miqdori *
+                    Miqdori *
                   </Label>
                   <Input
                     type="number"
@@ -1405,30 +1447,29 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="sheets">sheets (list)</SelectItem>
-                      <SelectItem value="kg">kg (kilogramm)</SelectItem>
-                      <SelectItem value="roll">roll (rulon)</SelectItem>
-                      <SelectItem value="pcs">pcs (dona)</SelectItem>
-                      <SelectItem value="pack">pack (pachka)</SelectItem>
-                      <SelectItem value="m2">m² (kv.metr)</SelectItem>
-                      <SelectItem value="liter">liter (litr)</SelectItem>
+                      <SelectItem value="sheets">List</SelectItem>
+                      <SelectItem value="kg">Kilogramm (kg)</SelectItem>
+                      <SelectItem value="roll">Rulon</SelectItem>
+                      <SelectItem value="pcs">Dona</SelectItem>
+                      <SelectItem value="pack">Pachka</SelectItem>
+                      <SelectItem value="m2">m²</SelectItem>
+                      <SelectItem value="liter">Litr</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-1">
                   <Label className="text-[11px] font-semibold text-foreground">
-                    Birlik Narxi ($)
+                    Narxi ($)
                   </Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.001"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={3}
                     value={lineFormData.unitPriceUsd || ""}
-                    onChange={(e) =>
+                    onValueChange={(values) =>
                       setLineFormData((prev) =>
                         prev
-                          ? { ...prev, unitPriceUsd: Math.max(0, parseFloat(e.target.value) || 0) }
+                          ? { ...prev, unitPriceUsd: Math.max(0, values.floatValue ?? 0) }
                           : null
                       )
                     }
@@ -1441,7 +1482,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
               {/* Work Order Link (Optional) */}
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground flex items-center justify-between">
-                  <span>Bog&apos;langan Buyurtma (Work Order №)</span>
+                  <span>Bog&apos;langan buyurtma</span>
                   <span className="text-[10px] text-muted-foreground">(Ixtiyoriy)</span>
                 </Label>
                 <Select

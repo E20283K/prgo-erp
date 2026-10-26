@@ -21,6 +21,8 @@ import {
 } from "./common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -553,31 +555,31 @@ export function TariffDetail({ tab }: TariffDetailProps) {
                 <div className="grid grid-cols-4 gap-3 pt-2 border-t border-border/60">
                   <div>
                     <Label className="text-[11px] text-muted-foreground">Bazaviy stavka ($)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={2}
                       value={tariffData.rateUsd}
-                      onChange={(e) => handleUpdate({ rateUsd: parseFloat(e.target.value) || 0 })}
+                      onValueChange={(values) => handleUpdate({ rateUsd: values.floatValue ?? 0 })}
                       className="h-7 text-xs font-mono font-semibold mt-1"
                     />
                   </div>
                   <div>
                     <Label className="text-[11px] text-muted-foreground">Pripravka / Sozlash ($)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={2}
                       value={tariffData.setupFeeUsd}
-                      onChange={(e) => handleUpdate({ setupFeeUsd: parseFloat(e.target.value) || 0 })}
+                      onValueChange={(values) => handleUpdate({ setupFeeUsd: values.floatValue ?? 0 })}
                       className="h-7 text-xs font-mono font-semibold mt-1"
                     />
                   </div>
                   <div>
                     <Label className="text-[11px] text-muted-foreground">Minimal to&apos;lov ($)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={2}
                       value={tariffData.minChargeUsd || 0}
-                      onChange={(e) => handleUpdate({ minChargeUsd: parseFloat(e.target.value) || 0 })}
+                      onValueChange={(values) => handleUpdate({ minChargeUsd: values.floatValue ?? 0 })}
                       className="h-7 text-xs font-mono mt-1"
                     />
                   </div>
@@ -828,22 +830,22 @@ export function TariffDetail({ tab }: TariffDetailProps) {
                   </div>
                   <div>
                     <Label className="text-[10px] text-muted-foreground">Stavka ($)</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={2}
                       value={newMatrixRate}
-                      onChange={(e) => setNewMatrixRate(e.target.value)}
+                      onValueChange={(values) => setNewMatrixRate(values.value)}
                       className="h-6.5 text-[11px] font-mono mt-0.5"
                       placeholder="22.0"
                     />
                   </div>
                   <div>
                     <Label className="text-[10px] text-muted-foreground">Pripravka ($)</Label>
-                    <Input
-                      type="number"
-                      step="0.5"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={2}
                       value={newMatrixSetup}
-                      onChange={(e) => setNewMatrixSetup(e.target.value)}
+                      onValueChange={(values) => setNewMatrixSetup(values.value)}
                       className="h-6.5 text-[11px] font-mono mt-0.5"
                       placeholder="35.0"
                     />
@@ -985,22 +987,22 @@ export function TariffDetail({ tab }: TariffDetailProps) {
 
                       <div className="col-span-2">
                         <Label className="text-[10px] text-muted-foreground">Stavka ($)</Label>
-                        <Input
-                          type="number"
-                          step="0.1"
+                        <MoneyInput
+                          thousandSeparator=" "
+                          decimalScale={2}
                           value={tier.rateUsd}
-                          onChange={(e) => handleUpdateTier(idx, { rateUsd: parseFloat(e.target.value) || 0 })}
+                          onValueChange={(values) => handleUpdateTier(idx, { rateUsd: values.floatValue ?? 0 })}
                           className="h-6.5 text-[11px] font-mono font-bold mt-0.5"
                         />
                       </div>
 
                       <div className="col-span-2">
                         <Label className="text-[10px] text-muted-foreground">Pripravka ($)</Label>
-                        <Input
-                          type="number"
-                          step="0.5"
+                        <MoneyInput
+                          thousandSeparator=" "
+                          decimalScale={2}
                           value={tier.setupFeeUsd ?? tariffData.setupFeeUsd}
-                          onChange={(e) => handleUpdateTier(idx, { setupFeeUsd: parseFloat(e.target.value) || 0 })}
+                          onValueChange={(values) => handleUpdateTier(idx, { setupFeeUsd: values.floatValue ?? 0 })}
                           className="h-6.5 text-[11px] font-mono mt-0.5"
                         />
                       </div>
@@ -1376,11 +1378,11 @@ export function TariffDetail({ tab }: TariffDetailProps) {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label className="text-[11px] text-muted-foreground">Bosh usta sdelkasi ($)</Label>
-                        <Input
-                          type="number"
-                          step="0.1"
+                        <MoneyInput
+                          thousandSeparator=" "
+                          decimalScale={3}
                           value={tariffData.pieceworkRateUsd}
-                          onChange={(e) => handleUpdate({ pieceworkRateUsd: parseFloat(e.target.value) || 0 })}
+                          onValueChange={(values) => handleUpdate({ pieceworkRateUsd: values.floatValue ?? 0 })}
                           className="h-7 text-xs font-mono font-bold mt-1"
                         />
                         <p className="text-[10px] text-muted-foreground mt-0.5">Har 1,000 birlik uchun stavka</p>
@@ -1388,11 +1390,11 @@ export function TariffDetail({ tab }: TariffDetailProps) {
 
                       <div>
                         <Label className="text-[11px] text-muted-foreground">Yordamchi sdelkasi ($)</Label>
-                        <Input
-                          type="number"
-                          step="0.1"
+                        <MoneyInput
+                          thousandSeparator=" "
+                          decimalScale={3}
                           value={tariffData.helperPieceworkRateUsd}
-                          onChange={(e) => handleUpdate({ helperPieceworkRateUsd: parseFloat(e.target.value) || 0 })}
+                          onValueChange={(values) => handleUpdate({ helperPieceworkRateUsd: values.floatValue ?? 0 })}
                           className="h-7 text-xs font-mono font-bold mt-1"
                         />
                         <p className="text-[10px] text-muted-foreground mt-0.5">Shogird / yordamchi ulushi</p>
@@ -1742,14 +1744,13 @@ export function TariffDetail({ tab }: TariffDetailProps) {
 
                   <div>
                     <Label className="text-[11px] text-muted-foreground">Amal qilish boshlanishi</Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={tariffData.lifecycle?.effectiveFrom || "2026-01-01"}
-                      onChange={(e) =>
+                      onChange={(val) =>
                         handleUpdate({
                           lifecycle: {
                             ...tariffData.lifecycle,
-                            effectiveFrom: e.target.value,
+                            effectiveFrom: val,
                             version: tariffData.lifecycle?.version || "v1.0",
                             effectiveTo: tariffData.lifecycle?.effectiveTo || null,
                             approvedBy: tariffData.lifecycle?.approvedBy || null,

@@ -20,6 +20,7 @@ import {
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -627,10 +628,11 @@ export function FinanceGrid({ type }: FinanceGridProps) {
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <Label className="text-[11px]">{tFin("paymentAmount")}</Label>
-                        <Input
-                          type="number"
+                        <MoneyInput
+                          thousandSeparator=" "
+                          decimalScale={2}
                           value={paymentAmount}
-                          onChange={(e) => setPaymentAmount(e.target.value)}
+                          onValueChange={(values) => setPaymentAmount(values.value)}
                           className="h-7 text-xs font-mono bg-background"
                         />
                       </div>

@@ -18,6 +18,7 @@ import { DocumentHeader } from "@/components/documents/common/DocumentShell";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -28,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SmartCombobox } from "@/components/ui/smart-combobox";
 import {
   PackageCheck,
   Save,
@@ -43,7 +45,7 @@ import {
   Layers,
   ArrowRight,
 } from "lucide-react";
-import { TradingOrderRecord, TradingOrderItem } from "./types";
+import { TradingOrderRecord, TradingOrderItem, TRADING_UNITS } from "./types";
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
@@ -57,73 +59,47 @@ export function TradingOrderDetail({ tab }: { tab: DocumentTab }) {
     addNotification,
     theme,
     openTab,
+    crmCustomers,
+    loadCrmCustomers,
     upsertTradingOrderAsync,
     convertTradingOrderToSaleAsync,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingOrderRecord> = tab.documentData || {};
 
+  // Load CRM customers if not present
+  React.useEffect(() => {
+    if (!crmCustomers || crmCustomers.length === 0) {
+      loadCrmCustomers();
+    }
+  }, [crmCustomers, loadCrmCustomers]);
+
   // Form State
   const [orderNo] = useState<string>(rawData.orderNo || tab.id);
   const [date, setDate] = useState<string>(
     rawData.date || new Date().toISOString().split("T")[0]
   );
-  const [customer, setCustomer] = useState<string>(
-    rawData.customer || "'REAL TEXTILE INVEST' MChJ"
-  );
-  const [contractNo, setContractNo] = useState<string>(
-    rawData.contractNo || "AK-2026/04"
-  );
-  const [deliveryDate, setDeliveryDate] = useState<string>(
-    rawData.deliveryDate || "2026-11-05"
-  );
+  const [customer, setCustomer] = useState<string>(rawData.customer || "");
+  const [contractNo, setContractNo] = useState<string>(rawData.contractNo || "");
+  const [deliveryDate, setDeliveryDate] = useState<string>(rawData.deliveryDate || "");
   const [chinaStatus, setChinaStatus] = useState<
     "Navbatda" | "Guangzhou Zavodida Ishlab Chiqarilmoqda" | "Kargo Avto Yo'lda (CN-2026-OCT-14)" | "Ombordan Zaxiradan Ajratildi" | "Yetkazib Berildi"
-  >(rawData.chinaStatus || "Guangzhou Zavodida Ishlab Chiqarilmoqda");
+  >(rawData.chinaStatus || "Navbatda");
   const [advanceStatus, setAdvanceStatus] = useState<
     "0% Kutilmoqda" | "30% Avans Olingan" | "50% To'langan" | "100% To'langan" | "Shartnoma Bo'yicha"
-  >(rawData.advanceStatus || "30% Avans Olingan");
+  >(rawData.advanceStatus || "0% Kutilmoqda");
   const [shippingMethod, setShippingMethod] = useState<
     "Avto Fura Kargo (12-16 kun)" | "Avia Ekspress (4-6 kun)" | "Temir yo'l Konteyner (20-25 kun)"
   >(rawData.shippingMethod || "Avto Fura Kargo (12-16 kun)");
-  const [trackingNo, setTrackingNo] = useState<string>(
-    rawData.trackingNo || "CN-UZ-994812"
-  );
+  const [trackingNo, setTrackingNo] = useState<string>(rawData.trackingNo || "");
   const [exchangeRate, setExchangeRate] = useState<number>(
     rawData.exchangeRate || 12850
   );
-  const [notes, setNotes] = useState<string>(
-    rawData.notes || "Mijoz maxsus gravyurali metall tugma va rangli zamok buyurtma berdi. Xitoy zavodiga 30% avans o'tkazildi."
-  );
+  const [notes, setNotes] = useState<string>(rawData.notes || "");
 
   // Items
   const [items, setItems] = useState<TradingOrderItem[]>(
-    rawData.items && rawData.items.length > 0
-      ? rawData.items
-      : [
-          {
-            id: "ord-item-1",
-            sku: "BTN-MET-18MM",
-            name: "Metall Gravirovka Tugma 18mm",
-            spec: "Lazer logotip: 'Real Denim', Rang: Antik Bronza, 18mm",
-            unit: "dona",
-            quantity: 50000,
-            unitPriceUSD: 0.032,
-            totalUSD: 1600,
-            chinaFactoryStatus: "Ishlab chiqarilmoqda",
-          },
-          {
-            id: "ord-item-2",
-            sku: "ZIP-NYL-N5-45",
-            name: "Neylon Fermuar N5, 45sm",
-            spec: "Tish rangi: Qora emal, Slider: #5 Avtolok, Uzunlik: 45sm",
-            unit: "dona",
-            quantity: 30000,
-            unitPriceUSD: 0.185,
-            totalUSD: 5550,
-            chinaFactoryStatus: "Ishlab chiqarilmoqda",
-          },
-        ]
+    rawData.items && rawData.items.length > 0 ? rawData.items : []
   );
 
   const grandTotalUSD = useMemo(() => {
@@ -459,25 +435,36 @@ export function TradingOrderDetail({ tab }: { tab: DocumentTab }) {
 
         {/* EDITABLE PARAMETERS: 4 COMPACT COLUMNS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-          {/* Col 1: Customer */}
+          {/* Col 1: Customer with Searchable SmartCombobox */}
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Buyurtmachi Tekstil Fabrikasi:</Label>
-            <Select
-              value={customer}
-              onValueChange={(val) => {
-                setCustomer(val || "");
-                setTabUnsaved(tab.id, true);
-              }}
-            >
-              <SelectTrigger className="h-7 text-xs font-medium mt-0.5">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="text-xs">
-                <SelectItem value="'REAL TEXTILE INVEST' MChJ">&quot;REAL TEXTILE INVEST&quot; MChJ</SelectItem>
-                <SelectItem value="'BUKHARA COTTON WEAVE' XK">&quot;BUKHARA COTTON WEAVE&quot; XK</SelectItem>
-                <SelectItem value="'SAMARKAND APPAREL' MChJ">&quot;SAMARKAND APPAREL&quot; MChJ</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="mt-0.5">
+              <SmartCombobox
+                value={customer}
+                onChange={(val) => {
+                  setCustomer(val);
+                  const found = crmCustomers?.find((c) => c.name.toLowerCase() === val.toLowerCase());
+                  if (found && found.contractNo) {
+                    setContractNo(found.contractNo);
+                  }
+                  setTabUnsaved(tab.id, true);
+                }}
+                onAddNew={(newVal) => {
+                  setCustomer(newVal);
+                  setTabUnsaved(tab.id, true);
+                }}
+                options={(crmCustomers || []).map((c) => ({
+                  value: c.name,
+                  label: c.name,
+                  description: c.tin ? `STIR: ${c.tin}` : c.industry || undefined,
+                  badge: c.status,
+                }))}
+                placeholder="Mijozni tanlang yoki kiriting..."
+                searchPlaceholder="Mijoz nomi yoki STIR..."
+                allowCustom={true}
+                className="h-7 text-xs font-medium"
+              />
+            </div>
           </div>
 
           {/* Col 2: China Status */}
@@ -530,11 +517,10 @@ export function TradingOrderDetail({ tab }: { tab: DocumentTab }) {
           <div className="flex items-center gap-1.5">
             <div className="flex-1">
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Muddati (ETA):</Label>
-              <Input
-                type="date"
+              <DatePicker
                 value={deliveryDate}
-                onChange={(e) => {
-                  setDeliveryDate(e.target.value);
+                onChange={(val) => {
+                  setDeliveryDate(val);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs mt-0.5"

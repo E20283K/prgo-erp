@@ -46,7 +46,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       if (savedWidth) {
         const parsed = parseInt(savedWidth, 10);
         if (!isNaN(parsed) && parsed >= 200 && parsed <= 500) {
-          setSidebarWidth(parsed === 280 ? 300 : parsed);
+          setSidebarWidth(parsed === 280 || parsed === 300 ? 240 : parsed);
         }
       }
 

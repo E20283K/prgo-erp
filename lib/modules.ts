@@ -109,10 +109,10 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Contact,
         defaultOpen: true,
         items: [
-          { id: "telegram-inbox", label: "Telegram Inbox", icon: MessageSquare },
+          { id: "telegram-inbox", label: "Telegram", icon: MessageSquare },
           { id: "customers", label: "Customers", icon: Building2 },
-          { id: "suppliers", label: "Suppliers & Partners", icon: Truck },
-          { id: "leads", label: "Leads & Requests", icon: UserPlus },
+          { id: "suppliers", label: "Suppliers", icon: Truck },
+          { id: "leads", label: "Leads", icon: UserPlus },
         ],
       },
     ],
@@ -166,7 +166,7 @@ export const MODULE_NAV: ModuleDef[] = [
         defaultOpen: true,
         items: [
           { id: "work-orders", label: "Work Orders", icon: ClipboardList },
-          { id: "planning", label: "Production Planning", icon: Calendar },
+          { id: "planning", label: "Planning", icon: Calendar },
         ],
       },
       {
@@ -175,9 +175,9 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Database,
         defaultOpen: true,
         items: [
-          { id: "products", label: "Products & BOMs", icon: Layers },
-          { id: "machines", label: "Machines & Rates", icon: Cpu },
-          { id: "tooling", label: "Dies & Tooling", icon: Stamp },
+          { id: "products", label: "Products", icon: Layers },
+          { id: "machines", label: "Machines", icon: Cpu },
+          { id: "tooling", label: "Tooling", icon: Stamp },
         ],
       },
     ],
@@ -189,14 +189,14 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "stock",
-        label: "Stock & Inventory",
+        label: "Inventory",
         icon: Boxes,
         defaultOpen: true,
         items: [
           { id: "stock-balance", label: "Stock Balance", icon: Layers },
-          { id: "requirements", label: "Ehtiyojlar va Defitsit", icon: AlertTriangle },
-          { id: "finished-goods", label: "Tayyor Mahsulotlar (Zaxira)", icon: PackageCheck },
-          { id: "movements", label: "Movements & Transfers", icon: ArrowLeftRight },
+          { id: "requirements", label: "Requirements", icon: AlertTriangle },
+          { id: "finished-goods", label: "Finished Goods", icon: PackageCheck },
+          { id: "movements", label: "Movements", icon: ArrowLeftRight },
         ],
       },
       {
@@ -218,14 +218,14 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "accounting",
-        label: "Accounting & Settlements",
+        label: "Accounting",
         icon: Calculator,
         defaultOpen: true,
         items: [
-          { id: "delivery-acts", label: "Schet-fakturas (Waybills)", icon: Truck },
-          { id: "settlements", label: "Client Settlements (Akt sverka)", icon: Scale },
-          { id: "payments", label: "Payments & Cashflow", icon: CreditCard },
-          { id: "cost-analysis", label: "Order Cost & Margin", icon: TrendingUp },
+          { id: "delivery-acts", label: "Invoices", icon: Truck },
+          { id: "settlements", label: "Settlements", icon: Scale },
+          { id: "payments", label: "Payments", icon: CreditCard },
+          { id: "cost-analysis", label: "Cost & Margin", icon: TrendingUp },
         ],
       },
     ],
@@ -237,34 +237,34 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "staff",
-        label: "Staff & Personnel",
+        label: "Staff",
         icon: UserCheck,
         defaultOpen: true,
         items: [
-          { id: "employees", label: "Employees Registry", icon: UserCheck },
-          { id: "departments", label: "Departments & Workshops", icon: Building2 },
-          { id: "positions", label: "Positions & Rates", icon: Briefcase },
+          { id: "employees", label: "Employees", icon: UserCheck },
+          { id: "departments", label: "Departments", icon: Building2 },
+          { id: "positions", label: "Positions", icon: Briefcase },
         ],
       },
       {
         id: "attendance-sec",
-        label: "Time & Attendance",
+        label: "Attendance",
         icon: CalendarClock,
         defaultOpen: true,
         items: [
-          { id: "attendance", label: "Timesheet (T-13)", icon: CalendarClock },
-          { id: "shifts", label: "Shift Schedules", icon: Clock },
-          { id: "devices", label: "Biometric Devices", icon: Server },
+          { id: "attendance", label: "Timesheet", icon: CalendarClock },
+          { id: "shifts", label: "Shifts", icon: Clock },
+          { id: "devices", label: "Biometrics", icon: Server },
         ],
       },
       {
         id: "compensation",
-        label: "Compensation & Wages",
+        label: "Compensation",
         icon: Banknote,
         defaultOpen: true,
         items: [
-          { id: "piecework", label: "Piecework Wages (Sdelka)", icon: Award },
-          { id: "payroll", label: "Payroll Ledger", icon: Calculator },
+          { id: "piecework", label: "Piecework", icon: Award },
+          { id: "payroll", label: "Payroll", icon: Calculator },
         ],
       },
     ],
@@ -276,23 +276,23 @@ export const MODULE_NAV: ModuleDef[] = [
     sections: [
       {
         id: "system",
-        label: "Enterprise Configuration",
+        label: "System",
         icon: Sliders,
         defaultOpen: true,
         items: [
-          { id: "plants", label: "Company & Branches", icon: Building },
-          { id: "users", label: "Users & Roles", icon: Shield },
-          { id: "tariffs", label: "Tariffs & Pricing Rules", icon: Coins },
-          { id: "notifications-sound", label: "Notifications & Sound", icon: Volume2 },
+          { id: "plants", label: "Branches", icon: Building },
+          { id: "users", label: "Users", icon: Shield },
+          { id: "tariffs", label: "Tariffs", icon: Coins },
+          { id: "notifications-sound", label: "Notifications", icon: Volume2 },
         ],
       },
       {
         id: "integrations",
-        label: "Integrations & API",
+        label: "Integrations",
         icon: Plug,
         defaultOpen: true,
         items: [
-          { id: "telegram-settings", label: "Telegram Bot & API", icon: Send },
+          { id: "telegram-settings", label: "Telegram", icon: Send },
         ],
       },
     ],

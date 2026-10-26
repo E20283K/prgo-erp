@@ -21,3 +21,36 @@ export function getUserInitials(name?: string | null, fallback = "U"): string {
   }
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
+/**
+ * 1C / ERP uslubidagi ketma-ket (max() + 1) formatdagi unikal kodni generatsiya qiladi.
+ * Masalan:
+ *   generateNextCode("DEP", ["DEP-01", "DEP-02"], 2) -> "DEP-03"
+ *   generateNextCode("EMP", ["EMP-0012", "EMP-0015"], 4) -> "EMP-0016"
+ *   generateNextCode("POS", ["POS-01", "POS-02"], 2) -> "POS-03"
+ *   generateNextCode("PLT", ["PLT-001", "PLT-007"], 3) -> "PLT-008"
+ */
+export function generateNextCode(
+  prefix: string,
+  existingCodes: (string | null | undefined)[],
+  digits = 2
+): string {
+  let maxNum = 0;
+  const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, "");
+  const regex = new RegExp(`^${cleanPrefix}[-_]?(\\d+)`, "i");
+
+  for (const c of existingCodes) {
+    if (!c) continue;
+    const match = String(c).trim().match(regex);
+    if (match && match[1]) {
+      const num = parseInt(match[1], 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+  }
+
+  const nextNum = maxNum + 1;
+  const padded = String(nextNum).padStart(digits, "0");
+  return `${cleanPrefix.toUpperCase()}-${padded}`;
+}

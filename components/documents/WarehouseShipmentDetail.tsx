@@ -86,6 +86,12 @@ import {
   SlidersHorizontal,
   Pencil,
   Phone,
+  Scale,
+  Package,
+  Link2,
+  RotateCcw,
+  User,
+  ShoppingBag,
 } from "lucide-react";
 
 const DataEditor = dynamic(
@@ -335,7 +341,10 @@ function WorkOrderPicker({
                         {wo.product}
                       </div>
                       <div className="text-[11px] text-muted-foreground truncate w-full flex items-center justify-between">
-                        <span>👤 {wo.customer}</span>
+                        <span className="flex items-center gap-1">
+                          <User className="size-3 text-muted-foreground shrink-0" />
+                          <span>{wo.customer}</span>
+                        </span>
                         {wo.priority === "Urgent" && (
                           <Badge variant="destructive" className="text-[9px] py-0 px-1">Tezkor</Badge>
                         )}
@@ -366,8 +375,9 @@ function WorkOrderPicker({
                   <div className="font-medium text-foreground text-xs truncate w-full">
                     {wo.product}
                   </div>
-                  <div className="text-[11px] text-muted-foreground truncate w-full">
-                    👤 {wo.customer}
+                  <div className="text-[11px] text-muted-foreground truncate w-full flex items-center gap-1">
+                    <User className="size-3 text-muted-foreground shrink-0" />
+                    <span>{wo.customer}</span>
                   </div>
                 </CommandItem>
               ))}
@@ -380,9 +390,10 @@ function WorkOrderPicker({
                   onSelect("— (To'g'ridan-to'g'ri chiqim)");
                   setOpen(false);
                 }}
-                className="p-2 text-xs text-muted-foreground cursor-pointer font-medium"
+                className="p-2 text-xs text-muted-foreground cursor-pointer font-medium flex items-center gap-1.5"
               >
-                ➕ To'g'ridan-to'g'ri chiqim (Buyurtmasiz)
+                <Plus className="size-3 text-muted-foreground shrink-0" />
+                <span>To&apos;g&apos;ridan-to&apos;g&apos;ri chiqim (buyurtmasiz)</span>
               </CommandItem>
             </CommandGroup>
           </CommandList>
@@ -522,7 +533,7 @@ function RecipientCombobox({
           >
             <span className="truncate flex items-center gap-1.5 min-w-0">
               {isAutoLinked && (
-                <span className="text-[10px] text-blue-600 dark:text-blue-400 shrink-0 font-medium">🔗</span>
+                <Link2 className="size-3 text-blue-600 dark:text-blue-400 shrink-0" />
               )}
               <span className="truncate">{value || "Qabul qiluvchini tanlang..."}</span>
             </span>
@@ -547,7 +558,8 @@ function RecipientCombobox({
                   }}
                   className="flex items-center gap-1.5 p-2 rounded cursor-pointer text-xs text-blue-600 dark:text-blue-400 font-medium"
                 >
-                  <span>🔄 Filtrni tozalash (Barcha mijozlar)</span>
+                  <RotateCcw className="size-3 text-blue-600 dark:text-blue-400" />
+                  <span>Filtrni tozalash</span>
                 </CommandItem>
               )}
               {options.map((opt) => (
@@ -667,7 +679,13 @@ export function CarrierCombobox({
                 >
                   <div className="flex items-center justify-between w-full">
                     <span className="font-semibold text-foreground flex items-center gap-1.5 truncate">
-                      {c.type === "fleet" ? "🚛" : c.type === "courier" ? "📦" : "🛍️"}
+                      {c.type === "fleet" ? (
+                        <Truck className="size-3 text-blue-600 shrink-0" />
+                      ) : c.type === "courier" ? (
+                        <Package className="size-3 text-amber-600 shrink-0" />
+                      ) : (
+                        <ShoppingBag className="size-3 text-emerald-600 shrink-0" />
+                      )}
                       <span className="truncate">{c.name}</span>
                     </span>
                     {c.vehicleNo && c.vehicleNo !== "—" && (
@@ -886,6 +904,12 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     crmCustomers,
     warehouseStock,
     deliveryActs,
+    warehousesList,
+    loadWarehouses,
+    plants,
+    fetchPlants,
+    suppliers,
+    loadSuppliers,
     openTab,
     closeTab,
     setTabUnsaved,
@@ -893,6 +917,84 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   } = useWorkspaceStore();
 
   const isDark = theme === "dark";
+
+  // Auto-fetch plants, warehouses and suppliers if not yet in store
+  useEffect(() => {
+    if (warehousesList.length === 0 && loadWarehouses) {
+      loadWarehouses();
+    }
+    if (plants.length === 0 && fetchPlants) {
+      fetchPlants();
+    }
+    if (suppliers.length === 0 && loadSuppliers) {
+      loadSuppliers();
+    }
+  }, [warehousesList.length, loadWarehouses, plants.length, fetchPlants, suppliers.length, loadSuppliers]);
+
+  // Dynamically resolve all real warehouses from plants and postgres warehouses table
+  const availableWarehouses = useMemo(() => {
+    const list: { id: string; name: string; branch?: string }[] = [];
+
+    // 1. From plant records (each branch/plant has its own warehouses list)
+    plants.forEach((p) => {
+      if (Array.isArray(p.warehouses) && p.warehouses.length > 0) {
+        p.warehouses.forEach((w) => {
+          const displayName = plants.length > 1 ? `${p.name} — ${w.name}` : w.name;
+          list.push({
+            id: w.id || `${p.id}-${w.name}`,
+            name: displayName,
+            branch: p.name,
+          });
+        });
+      }
+    });
+
+    // 2. From postgres warehouses catalog
+    (warehousesList || []).forEach((wh: any) => {
+      const exists = list.some(
+        (item) => item.name.toLowerCase() === wh.name.toLowerCase() || item.id === wh.id
+      );
+      if (!exists) {
+        list.push({
+          id: wh.id || wh.name,
+          name: wh.name,
+        });
+      }
+    });
+
+    if (list.length === 0) {
+      return [
+        { id: "wh-1", name: "Asosiy tayyor mahsulot ombori" },
+        { id: "wh-2", name: "Xomashyo ombori" },
+      ];
+    }
+    return list;
+  }, [plants, warehousesList]);
+
+  // Dynamic recipient branch options from real plants
+  const branchList = useMemo(() => {
+    if (plants && plants.length > 0) {
+      return plants.map((p) => p.name);
+    }
+    return [
+      "Samarqand filiali",
+      "Buxoro filiali",
+      "Andijon tarqatish markazi",
+    ];
+  }, [plants]);
+
+  // Dynamic vendor options from real suppliers table
+  const vendorList = useMemo(() => {
+    if (suppliers && suppliers.length > 0) {
+      return suppliers.map((s) => s.name);
+    }
+    return [
+      "Antalis Central Asia",
+      "Toyo Ink Uzbekistan",
+      "Igepa Group GmbH",
+      "Fujifilm CIS",
+    ];
+  }, [suppliers]);
 
   // Initialize or read existing document
   const initialDoc = useMemo<WarehouseShipmentRecord>(() => {
@@ -915,7 +1017,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             shippedQty: defaultQty,
             unit: defaultUnit,
             packageCount: Math.ceil(defaultQty / 500) || 10,
-            packageType: "Gofroquti (Karton)",
+            packageType: "Gofroquti",
             palletNo: "Pallet P-01",
             notes: "To'liq adad qadoqlandi",
           },
@@ -930,7 +1032,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       product: defaultProduct,
       quantity: defaultQty,
       unit: defaultUnit,
-      from: d.from || WAREHOUSE_LOCATIONS[0],
+      from: d.from || availableWarehouses[0]?.name || "Asosiy ombor",
       carrier: d.carrier || DEFAULT_CARRIERS[0].name,
       trackingNo: d.trackingNo || `TRK${Math.floor(900000 + Math.random() * 99999)}`,
       driverName: d.driverName || DEFAULT_CARRIERS[0].driverName,
@@ -1028,7 +1130,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         shippedQty: orderQty,
         unit: wo.unit || "pcs",
         packageCount: Math.ceil(orderQty / 500) || 5,
-        packageType: "Gofroquti (Karton)",
+        packageType: "Gofroquti",
         palletNo: "Pallet P-01",
         notes: `${wo.id} buyurtmasi bo'yicha`,
       },
@@ -1091,7 +1193,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 shippedQty: orderQty,
                 unit: autoWo.unit || "pcs",
                 packageCount: Math.ceil(orderQty / 500) || 5,
-                packageType: "Gofroquti (Karton)",
+                packageType: "Gofroquti",
                 palletNo: "Pallet P-01",
                 notes: `${autoWo.id} buyurtmasi bo'yicha`,
               },
@@ -1315,7 +1417,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       shippedQty: 500,
       unit: "pcs",
       packageCount: 1,
-      packageType: "Gofroquti (Karton)",
+      packageType: "Gofroquti",
       palletNo: "Pallet P-01",
       notes: "",
     };
@@ -1393,11 +1495,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-xs tracking-tight truncate">
             <span className={cn(isDraft && "font-mono text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded")}>
-              {isDraft ? "Yangi (Avtomatik)" : doc.id}
+              {isDraft ? "Yangi" : doc.id}
             </span>
             <span className="text-muted-foreground">—</span>
             <span className="truncate text-foreground">
-              {doc.customer ? `${doc.customer} (${doc.product})` : (isDraft ? "Yangi Ombor Chiqimi (Qoralama)" : "Ombor Chiqimi")}
+              {doc.customer ? `${doc.customer} (${doc.product})` : (isDraft ? "Yangi chiqim hujjati" : "Ombor chiqimi")}
             </span>
           </div>
 
@@ -1414,7 +1516,15 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             }`}
           >
             {isLocked && <Lock className="size-2.5" />}
-            <span>{doc.status}</span>
+            <span>
+              {doc.status === "Delivered"
+                ? "Yetkazildi"
+                : doc.status === "Dispatched" || doc.status === "In Transit"
+                ? "Yuborilgan"
+                : doc.status === "Packed"
+                ? "Qadoqlangan"
+                : "Qoralama"}
+            </span>
           </Badge>
 
           {/* Shipment Type Indicator Badge */}
@@ -1423,14 +1533,14 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             className="text-[10px] px-1.5 py-0 h-4 font-mono font-medium hidden sm:inline-flex bg-muted/60 text-muted-foreground"
           >
             {doc.shipmentType === "BranchTransfer"
-              ? "🚛 Filialga jo'natish"
+              ? "Filialga jo'natish"
               : doc.shipmentType === "Outsourcing"
-              ? "🔄 Subpudrat (Autsorsing)"
+              ? "Subpudratga berish"
               : doc.shipmentType === "VendorReturn"
-              ? "↩️ Qaytarish"
+              ? "Qaytarish"
               : doc.shipmentType === "MaterialSale"
-              ? "📦 Xomashyo sotuvi"
-              : "🛍️ Mijozga topshirish"}
+              ? "Xomashyo sotuvi"
+              : "Mijozga topshirish"}
           </Badge>
 
           {tab.isUnsaved && (
@@ -1493,7 +1603,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             className="h-7 px-2.5 text-xs gap-1.5 border-border"
           >
             <Printer className="size-3.5" />
-            <span>Chop etish (TTN)</span>
+            <span>Chop etish</span>
           </Button>
 
           {/* Save Draft */}
@@ -1517,7 +1627,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               className="h-7 px-3 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-none"
             >
               <Send className="size-3.5" />
-              <span>Ombordan chiqarish (Провести отгрузку)</span>
+              <span>Ombordan chiqarish</span>
             </Button>
           )}
 
@@ -1528,7 +1638,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               className="h-7 px-3 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-none"
             >
               <Check className="size-3.5" />
-              <span>Yetkazildi deb belgilash (Delivered)</span>
+              <span>Yetkazildi deb belgilash</span>
             </Button>
           )}
 
@@ -1545,23 +1655,23 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
 
       {/* ─── Document Requisites (Non-overlapping spacious columns) ─── */}
       <div className="p-2.5 bg-card border-b border-border grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-12 gap-2.5 shrink-0 text-xs">
-        {/* Col 1 (span 3): Chiqim turi (Shipment Type) */}
+        {/* Col 1 (span 3): Chiqim turi */}
         <div className="sm:col-span-1 md:col-span-1 lg:col-span-3 space-y-1">
           <Label className="text-[11px] text-muted-foreground font-semibold text-blue-700 dark:text-blue-400">
-            Chiqim turi (Shipment Type)
+            Chiqim turi
           </Label>
           {isLocked ? (
             <Input
               value={
                 doc.shipmentType === "BranchTransfer"
-                  ? "🚛 Filialga jo'natish"
+                  ? "Filialga jo'natish"
                   : doc.shipmentType === "Outsourcing"
-                  ? "🔄 Subpudratga berish"
+                  ? "Subpudratga berish"
                   : doc.shipmentType === "VendorReturn"
-                  ? "↩️ Qaytarish"
+                  ? "Yetkazib beruvchiga qaytarish"
                   : doc.shipmentType === "MaterialSale"
-                  ? "📦 Xomashyo sotuvi"
-                  : "🛍️ Mijozga topshirish"
+                  ? "Xomashyo sotuvi"
+                  : "Mijozga topshirish"
               }
               readOnly
               className="h-7 text-xs bg-muted/40 font-medium w-full"
@@ -1577,11 +1687,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 <SelectValue placeholder="Chiqim turini tanlang..." />
               </SelectTrigger>
               <SelectContent className="text-xs">
-                <SelectItem value="CustomerDelivery">Mijozga topshirish (Buyurtma)</SelectItem>
-                <SelectItem value="BranchTransfer">Filialga jo&apos;natish (Inter-branch)</SelectItem>
-                <SelectItem value="Outsourcing">Subpudratga berish (Autsorsing)</SelectItem>
+                <SelectItem value="CustomerDelivery">Mijozga topshirish</SelectItem>
+                <SelectItem value="BranchTransfer">Filialga jo&apos;natish</SelectItem>
+                <SelectItem value="Outsourcing">Subpudratga berish</SelectItem>
                 <SelectItem value="VendorReturn">Yetkazib beruvchiga qaytarish</SelectItem>
-                <SelectItem value="MaterialSale">Xomashyo / Otxod sotuvi</SelectItem>
+                <SelectItem value="MaterialSale">Xomashyo sotuvi</SelectItem>
               </SelectContent>
             </Select>
           )}
@@ -1591,9 +1701,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
           <Label className="text-[11px] text-muted-foreground font-medium">Hujjat raqami</Label>
           <Input
-            value={doc.id}
+            value={isDraft ? "Yangi" : doc.id}
             readOnly
-            className="h-7 text-xs font-mono bg-muted/40 font-bold w-full"
+            className="h-7 text-xs font-mono bg-muted/40 font-bold w-full text-muted-foreground"
           />
         </div>
 
@@ -1609,11 +1719,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           />
         </div>
 
-        {/* Col 4 (span 2): Asos / Buyurtma (Work Order) */}
+        {/* Col 4 (span 2): Asos / Buyurtma */}
         <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
           <div className="flex items-center justify-between">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              {doc.shipmentType === "BranchTransfer" ? "Ichki talabnoma / Asos" : "Buyurtma (Work Order)"}
+              {doc.shipmentType === "BranchTransfer" ? "Ichki talabnoma / Asos" : "Buyurtma"}
             </Label>
             {doc.workOrder && !doc.workOrder.startsWith("—") && (
               <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono font-medium">
@@ -1641,21 +1751,22 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           )}
         </div>
 
-        {/* Col 5 (span 3): Qabul qiluvchi (Recipient) */}
+        {/* Col 5 (span 3): Qabul qiluvchi */}
         <div className="sm:col-span-2 md:col-span-2 lg:col-span-3 space-y-1">
           <div className="flex items-center justify-between">
             <Label className="text-[11px] text-muted-foreground font-medium truncate">
               {doc.shipmentType === "BranchTransfer"
                 ? "Qabul qiluvchi filial"
                 : doc.shipmentType === "Outsourcing"
-                ? "Subpudrat sexi (Autsorser)"
+                ? "Subpudrat sexi"
                 : doc.shipmentType === "VendorReturn"
-                ? "Yetkazib beruvchi (Postavshik)"
-                : "Mijoz (Qabul qiluvchi)"}
+                ? "Yetkazib beruvchi"
+                : "Qabul qiluvchi"}
             </Label>
             {doc.shipmentType === "CustomerDelivery" && doc.workOrder && !doc.workOrder.startsWith("—") && (
-              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-0.5">
-                🔗 {doc.workOrder} ga bog'langan
+              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1">
+                <Link2 className="size-3" />
+                <span>{doc.workOrder} ga bog&apos;langan</span>
               </span>
             )}
           </div>
@@ -1664,9 +1775,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             onChange={handleCustomerChange}
             shipmentType={doc.shipmentType || "CustomerDelivery"}
             customers={crmCustomers}
-            branches={BRANCH_RECIPIENTS}
+            branches={branchList}
             subcontractors={SUBCONTRACTORS}
-            vendors={VENDORS}
+            vendors={vendorList}
             disabled={isLocked}
             isAutoLinked={Boolean(doc.shipmentType === "CustomerDelivery" && doc.workOrder && !doc.workOrder.startsWith("—"))}
           />
@@ -1688,13 +1799,13 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                   if (val) handleFieldChange("from", val);
                 }}
               >
-                <SelectTrigger className="h-6 text-xs bg-background max-w-[210px] truncate">
+                <SelectTrigger className="h-6 text-xs bg-background max-w-[260px] truncate">
                   <SelectValue placeholder="Ombor..." />
                 </SelectTrigger>
-                <SelectContent className="text-xs">
-                  {WAREHOUSE_LOCATIONS.map((loc) => (
-                    <SelectItem key={loc} value={loc} className="text-xs">
-                      {loc}
+                <SelectContent className="text-xs max-h-56">
+                  {availableWarehouses.map((wh) => (
+                    <SelectItem key={wh.id} value={wh.name} className="text-xs">
+                      {wh.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1850,9 +1961,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         {/* Right side live summary badge */}
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-[11px] font-normal gap-1.5 bg-background text-foreground h-6 px-2.5 border-border shadow-xs">
-            <span>📦 <b className="font-mono">{totalPackages}</b> quti</span>
+            <Package className="size-3 text-muted-foreground" />
+            <span><b className="font-mono">{totalPackages}</b> quti</span>
             <span className="text-muted-foreground">•</span>
-            <span>⚖️ <b className="font-mono">{doc.grossWeightKg || Math.round(totalShippedQty * 0.045)}</b> kg</span>
+            <Scale className="size-3 text-muted-foreground" />
+            <span><b className="font-mono">{doc.grossWeightKg || Math.round(totalShippedQty * 0.045)}</b> kg</span>
           </Badge>
         </div>
       </div>
@@ -1862,7 +1975,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
             <Boxes className="size-3.5 text-muted-foreground" />
-            Jo'natilayotgan tovarlar va materiallar ro'yxati
+            Jo&apos;natilayotgan tovarlar va materiallar
           </span>
           <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-background font-mono">
             {(doc.items || []).length} pozitsiya
@@ -1873,12 +1986,12 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
           <span className="hidden sm:inline-flex items-center gap-1">
             <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] shadow-2xs font-semibold text-foreground">Ins</kbd>
-            <span>qo'shish</span>
+            <span>qo&apos;shish</span>
           </span>
           <span className="hidden sm:inline text-muted-foreground/40">•</span>
           <span className="hidden sm:inline-flex items-center gap-1">
             <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] shadow-2xs font-semibold text-foreground">Del</kbd>
-            <span>o'chirish</span>
+            <span>o&apos;chirish</span>
           </span>
           <span className="hidden md:inline text-muted-foreground/40">•</span>
           <span className="hidden md:inline-flex items-center gap-1">
@@ -1886,7 +1999,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             <span>ombor</span>
           </span>
           <span className="hidden lg:inline text-muted-foreground/40">•</span>
-          <span className="text-[10px] text-muted-foreground/80 font-medium">O'ng tugma (Kontekst menyu)</span>
+          <span className="text-[10px] text-muted-foreground/80 font-medium">O&apos;ng tugma: menyu</span>
         </div>
       </div>
 
@@ -1992,7 +2105,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         </div>
       </div>
 
-      {/* ─── Printable Waybill Dialog (Товарно-транспортная накладная / TTN) ─── */}
+      {/* ─── Printable Waybill Dialog (Tovar-transport yuk xati) ─── */}
       <Dialog open={isPrintModalOpen} onOpenChange={setIsPrintModalOpen}>
         <DialogContent className="sm:max-w-[700px] p-0 overflow-hidden border border-border shadow-2xl">
           <DialogHeader className="p-4 bg-muted/40 border-b border-border flex flex-row items-center justify-between">
@@ -2001,10 +2114,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 <Truck className="size-4 text-blue-600" />
                 <span>
                   {doc.shipmentType === "BranchTransfer"
-                    ? "FILIALLARARO YUK TASHISH YUK XATI (ICHKI LOGISTIKA)"
+                    ? "FILIALLARARO YUK XATI"
                     : doc.shipmentType === "Outsourcing"
-                    ? "SUBPUDRATGA BERISH YUK XATI (AUTSORSING)"
-                    : "CHIQIM YUK XATI (ТОВАРНО-ТРАНСПОРТНАЯ НАКЛАДНАЯ)"}
+                    ? "SUBPUDRAT YUK XATI"
+                    : "TOVAR-TRANSPORT YUK XATI"}
                 </span>
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground mt-0.5">

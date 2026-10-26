@@ -8,7 +8,7 @@ import {
   CopilotTable,
   CopilotProviderMode,
 } from "./types";
-import { PRINTGOO_SYSTEM_PROMPT } from "./domain-knowledge";
+import { PRINTGOO_SYSTEM_PROMPT, buildDynamicSystemPrompt } from "./domain-knowledge";
 import {
   ERP_TOOL_DEFINITIONS,
   executeErpTool,
@@ -279,7 +279,82 @@ export async function executeSmartLocalEngine(
     }
   }
 
-  // 3. INTENT DETECTION VIA DOMAIN KEYWORDS
+  // 3. FEASIBILITY SIMULATION INTENT ("yetadimi", "mumkinmi", "yetarlimi", "ishlab chiqara olamizmi")
+  if (
+    lower.includes("yetadimi") ||
+    lower.includes("yetarlimi") ||
+    lower.includes("mumkinmi") ||
+    lower.includes("feasib") ||
+    lower.includes("bormi qog'oz") ||
+    lower.includes("qabul qilsa bo'ladimi") ||
+    lower.includes("ulguramizmi")
+  ) {
+    const rawQty = query.match(/\d[\d\s,.]*/)?.[0]?.replace(/[^\d]/g, "");
+    const qty = rawQty ? parseInt(rawQty, 10) : 5000;
+    const isFlexo = lower.includes("flexo") || lower.includes("etiketka") || lower.includes("plyonka");
+    const paperMatch = query.match(/(silk|art|galerie|stora|fbb|kraft|fasson|bo'rli|karton)/i)?.[0];
+
+    const res = await executeErpTool(
+      "checkOrderFeasibility",
+      {
+        technology: isFlexo ? "flexo" : "offset",
+        quantity: qty,
+        product: query,
+        paperStock: paperMatch || "Galerie Art Silk",
+      },
+      companyCode
+    );
+    return formatToolResponse(res, "smart_local");
+  }
+
+  // 4. STATISTICAL & ANALYTICAL AGGREGATION INTENT ("tahlil", "statistika", "hisobot", "grafik", "taqsimot", "ulushi")
+  if (
+    lower.includes("tahlil") ||
+    lower.includes("statistika") ||
+    lower.includes("hisobot") ||
+    lower.includes("taqsimot") ||
+    lower.includes("diagramma") ||
+    lower.includes("ulushi") ||
+    lower.includes("umumiy aylanma") ||
+    (lower.includes("qancha") && (lower.includes("jami") || lower.includes("barcha")))
+  ) {
+    let dimension: "work_orders" | "stock" | "machines" | "finance" | "clients" = "work_orders";
+    let groupBy = "status";
+
+    if (lower.includes("ombor") || lower.includes("material") || lower.includes("qoldiq")) {
+      dimension = "stock";
+      groupBy = "category";
+    } else if (lower.includes("stanok") || lower.includes("dastgoh") || lower.includes("mashina")) {
+      dimension = "machines";
+      groupBy = "status";
+    } else if (lower.includes("qarz") || lower.includes("moliya") || lower.includes("balans")) {
+      dimension = "finance";
+      groupBy = "client";
+    } else if (lower.includes("mijoz") || lower.includes("klient")) {
+      dimension = "clients";
+      groupBy = "type";
+    }
+
+    if (lower.includes("ustuvorlik") || lower.includes("priority")) {
+      groupBy = "priority";
+    } else if (lower.includes("bosqich") || lower.includes("stage")) {
+      groupBy = "stage";
+    } else if (lower.includes("bo'lim") || lower.includes("department")) {
+      groupBy = "department";
+    }
+
+    const res = await executeErpTool(
+      "runAnalyticalQuery",
+      {
+        dimension,
+        groupBy,
+      },
+      companyCode
+    );
+    return formatToolResponse(res, "smart_local");
+  }
+
+  // 5. INTENT DETECTION VIA DOMAIN KEYWORDS
   // Work Orders / Production
   if (
     lower.includes("woof-") ||
@@ -577,12 +652,15 @@ async function executeGeminiGateway(
   apiKey: string,
   companyCode: string
 ): Promise<CopilotResponse> {
-  const configuredModel = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const configuredModel = process.env.GEMINI_MODEL;
   const modelCandidates = Array.from(
     new Set([
-      configuredModel.trim().toLowerCase().replace(/\s+/g, "-"),
+      ...(configuredModel ? [configuredModel.trim().toLowerCase().replace(/\s+/g, "-")] : []),
+      "gemini-3-flash-preview",
+      "gemini-flash-latest",
+      "gemini-3.8-flash",
       "gemini-3.5-flash",
-      "gemini-2.5-flash",
+      "gemini-3.1-flash-lite",
     ])
   );
 
@@ -593,10 +671,16 @@ async function executeGeminiGateway(
     parameters: tool.parameters,
   }));
 
+  const dynamicPrompt = buildDynamicSystemPrompt({
+    activeModule: context.activeModule,
+    activeTabType: context.activeTabType,
+    screenSnapshot: context.screenSnapshot,
+  });
+
   const systemInstruction = {
     parts: [
       {
-        text: `${PRINTGOO_SYSTEM_PROMPT}\n\nJORIY ISH MAYDONI KONTEKSTI:\n- Faol modul: ${context.activeModule}\n- Faol hujjat: ${context.activeTabId || "Yo'q"} (${context.activeTabTitle || "—"})\n- Foydalanuvchi roli: ${context.userRole || "Operator"}\n- Til: ${context.locale || "uz"}\n- Hujjat tafsilotlari: ${JSON.stringify(context.activeDocumentSummary || {})}`,
+        text: `${dynamicPrompt}\n\nJORIY ISH MAYDONI KONTEKSTI:\n- Faol modul: ${context.activeModule}\n- Faol hujjat: ${context.activeTabId || "Yo'q"} (${context.activeTabTitle || "—"})\n- Foydalanuvchi roli: ${context.userRole || "Operator"}\n- Til: ${context.locale || "uz"}\n- Ekran holati (Screen Snapshot): ${JSON.stringify(context.screenSnapshot || {})}\n- Hujjat tafsilotlari: ${JSON.stringify(context.activeDocumentSummary || {})}`,
       },
     ],
   };
@@ -633,7 +717,7 @@ async function executeGeminiGateway(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(6000), // 6 seconds timeout per attempt
+          signal: AbortSignal.timeout(25000), // 25 seconds timeout per attempt
         });
 
         if (!res.ok) {
@@ -726,9 +810,15 @@ async function executeOpenAiGateway(
     },
   }));
 
+  const dynamicPrompt = buildDynamicSystemPrompt({
+    activeModule: context.activeModule,
+    activeTabType: context.activeTabType,
+    screenSnapshot: context.screenSnapshot,
+  });
+
   const systemMessage = {
     role: "system",
-    content: `${PRINTGOO_SYSTEM_PROMPT}\n\nJORIY ISH MAYDONI KONTEKSTI:\n- Faol modul: ${context.activeModule}\n- Faol hujjat: ${context.activeTabId || "Yo'q"}\n- Til: ${context.locale || "uz"}`,
+    content: `${dynamicPrompt}\n\nJORIY ISH MAYDONI KONTEKSTI:\n- Faol modul: ${context.activeModule}\n- Faol hujjat: ${context.activeTabId || "Yo'q"} (${context.activeTabTitle || "—"})\n- Til: ${context.locale || "uz"}\n- Ekran holati: ${JSON.stringify(context.screenSnapshot || {})}`,
   };
 
   const openAiMessages: any[] = [systemMessage, ...messages];

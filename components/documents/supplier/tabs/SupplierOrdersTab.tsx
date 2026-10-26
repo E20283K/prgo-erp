@@ -14,6 +14,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -69,12 +70,12 @@ interface SupplierOrdersTabProps {
 }
 
 const ORDER_TYPE_LABELS: Record<string, string> = {
-  die_tooling: "✂️ Shtamp & Pichoq Qolipi",
-  ctp_plates: "⚙️ CTP Metall Forma (4 rang)",
-  cliche: "✨ Folga / Klishe",
-  raw_materials: "📄 Qog'oz / Karton / Bo'yoq",
-  outsourcing: "🔄 Autsorsing xizmati",
-  service: "🔧 Texnik servis",
+  die_tooling: "Shtamp & Pichoq Qolipi",
+  ctp_plates: "CTP Metall Forma (4 rang)",
+  cliche: "Folga / Klishe",
+  raw_materials: "Qog'oz / Karton / Bo'yoq",
+  outsourcing: "Autsorsing xizmati",
+  service: "Texnik servis",
 };
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
@@ -146,6 +147,14 @@ export function SupplierOrdersTab({
 
   const handleCreateOrder = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!supplier.id || supplier.id.startsWith("draft-") || supplier.id.startsWith("new-")) {
+      alert("Iltimos, buyurtma berishdan oldin ta'minotchi rekvizitlarini saqlang!");
+      return;
+    }
+    if (supplier.status === "Blocked") {
+      alert("Diqqat: Ushbu ta'minotchi BLOKLANGAN (Stop-List)! Yangi buyurtma berish to'xtatilgan.");
+      return;
+    }
     if (!newOrder.title?.trim()) {
       alert("Iltimos, buyurtma nomini kiriting!");
       return;
@@ -610,12 +619,14 @@ export function SupplierOrdersTab({
                 <Label className="text-[11px] text-muted-foreground font-medium">
                   Taxminiy summasi ({supplier.currency || "UZS"})
                 </Label>
-                <Input
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={(supplier.currency || "UZS") === "UZS" ? 0 : 2}
                   value={newOrder.amount || 0}
-                  onChange={(e) =>
+                  onValueChange={(values) =>
                     setNewOrder({
                       ...newOrder,
-                      amount: Number(e.target.value.replace(/[^0-9.]/g, "")) || 0,
+                      amount: values.floatValue ?? 0,
                     })
                   }
                   className="h-8 text-xs font-mono bg-background"

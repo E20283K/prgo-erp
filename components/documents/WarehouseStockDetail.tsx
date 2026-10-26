@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -1014,11 +1015,11 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
                     <Label className="text-[11px] text-muted-foreground font-semibold">Standart Birlik Narxi (USD $)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={3}
                       value={doc.unitPriceUsd || ""}
-                      onChange={(e) => handleFieldChange("unitPriceUsd", Number(e.target.value) || 0)}
+                      onValueChange={(values) => handleFieldChange("unitPriceUsd", values.floatValue ?? 0)}
                       placeholder="0.00"
                       className="h-7 text-xs font-mono"
                     />

@@ -1,32 +1,14 @@
 name: printgoo-erp-prod
 
 services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: printgoo-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN:-localhost}
-      S3_PUBLIC_DOMAIN: ${S3_PUBLIC_DOMAIN:-s3.localhost}
-      CADDY_AUTO_HTTPS: ${CADDY_AUTO_HTTPS:-off}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
-      - minio
-
   app:
     build:
       context: .
       target: runner
     container_name: printgoo-app
     restart: unless-stopped
+    expose:
+      - "3000"
     env_file:
       - .env
     environment:
@@ -127,6 +109,9 @@ services:
     container_name: printgoo-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
+    expose:
+      - "9000"
+      - "9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
@@ -178,8 +163,6 @@ services:
       - app
 
 volumes:
-  caddy_data:
-  caddy_config:
   pgdata_prod:
   redisdata_prod:
   miniodata_prod:

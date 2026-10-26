@@ -18,13 +18,7 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid"
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SmartCombobox } from "@/components/ui/smart-combobox";
 import {
   Scale,
   Printer,
@@ -50,13 +44,40 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
     theme,
     tradingSettlements,
     tradingYttEntities,
+    crmCustomers,
+    loadCrmCustomers,
+    loadTradingData,
     recordTradingPaymentAsync,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData = tab.documentData || {};
-  const customerName = rawData.customer || "'REAL TEXTILE INVEST' MChJ";
-  const [selectedEntityId, setSelectedEntityId] = useState<string>("ytt-aliyev");
+
+  React.useEffect(() => {
+    if (!crmCustomers || crmCustomers.length === 0) {
+      loadCrmCustomers();
+    }
+    if (!tradingSettlements || tradingSettlements.length === 0) {
+      loadTradingData("settlements");
+    }
+    if (!tradingYttEntities || tradingYttEntities.length === 0) {
+      loadTradingData("ytt-limits");
+    }
+  }, [crmCustomers, tradingSettlements, tradingYttEntities, loadCrmCustomers, loadTradingData]);
+
+  const [customerName, setCustomerName] = useState<string>(
+    rawData.customer || ""
+  );
+  const [selectedEntityId, setSelectedEntityId] = useState<string>(
+    rawData.sellerEntityId || "ytt-qodirov"
+  );
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  // Set default customer when crmCustomers load if empty
+  React.useEffect(() => {
+    if (!customerName && crmCustomers && crmCustomers.length > 0) {
+      setCustomerName(crmCustomers[0].name);
+    }
+  }, [customerName, crmCustomers]);
 
   const availableEntities = useMemo(() => {
     return tradingYttEntities.length > 0 ? tradingYttEntities : INITIAL_YTT_ENTITIES;
@@ -69,19 +90,23 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
     );
   }, [selectedEntityId, availableEntities]);
 
-  // Filter ledger strictly by selected legal entity
+  const currentClient = useMemo(() => {
+    return crmCustomers?.find((c) => c.name.toLowerCase() === customerName.toLowerCase());
+  }, [crmCustomers, customerName]);
+
+  // Filter ledger strictly by selected legal entity & customer
   const filteredLedger = useMemo(() => {
     const sourceLedger = tradingSettlements.length > 0 ? tradingSettlements : INITIAL_SETTLEMENT_LEDGERS;
-    return sourceLedger.filter(
-      (entry) =>
-        entry.customer === customerName &&
-        (selectedEntityId === "ytt-aliyev"
-          ? entry.sellerEntityName.includes("Aliyev")
-          : selectedEntityId === "ytt-qodirov"
-          ? entry.sellerEntityName.includes("Qodirov")
-          : entry.sellerEntityName.includes("PRINTGOO"))
-    );
-  }, [customerName, selectedEntityId, tradingSettlements]);
+    if (!customerName) return [];
+    return sourceLedger.filter((entry) => {
+      const matchCust = entry.customer.toLowerCase().includes(customerName.toLowerCase());
+      const matchSeller =
+        !selectedEntityId ||
+        entry.sellerEntityId === selectedEntityId ||
+        (selectedEntity && entry.sellerEntityName.toLowerCase().includes(selectedEntity.name.toLowerCase().split(" ")[1] || ""));
+      return matchCust && matchSeller;
+    });
+  }, [customerName, selectedEntityId, selectedEntity, tradingSettlements]);
 
   const { totalDebit, totalCredit, closingBalance, currency } = useMemo(() => {
     let d = 0;
@@ -309,43 +334,53 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
           <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
             <span className="text-[10px] text-muted-foreground uppercase font-semibold">Amaldagi Shartnoma:</span>
             <div className="text-xs font-semibold text-foreground truncate" title={customerName}>
-              {customerName}
+              {customerName || "Mijoz tanlanmagan"}
             </div>
             <span className="text-[10px] text-muted-foreground font-mono truncate block">
-              {selectedEntityId === "ytt-aliyev"
-                ? "№ AK-2025/11 (Aksessuarlar)"
-                : selectedEntityId === "ytt-qodirov"
-                ? "№ AK-2026/04 (Aksessuarlar)"
-                : "№ PRG-2026/18 (Flexo & Jakkard)"}
+              {currentClient?.contractNo ? `№ ${currentClient.contractNo}` : "№ Shartnoma kutilmoqda"}
             </span>
           </div>
         </div>
 
-        {/* CONTROLS ROW: SELLER ENTITY SELECTOR & CROSS-SELL BANNER */}
+        {/* CONTROLS ROW: CUSTOMER SEARCH & SELLER SELECTOR */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2 flex-1 max-w-md">
-            <div className="w-36 shrink-0">
-              <span className="text-[10px] text-muted-foreground uppercase font-semibold block">Sotuvchi Yuridik Shaxs:</span>
+          <div className="flex flex-wrap items-center gap-2 flex-1">
+            <div className="w-56 shrink-0">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold block mb-0.5">Mijoz (Akt-sverka):</span>
+              <SmartCombobox
+                value={customerName}
+                onChange={(val) => setCustomerName(val)}
+                onAddNew={(newVal) => setCustomerName(newVal)}
+                options={(crmCustomers || []).map((c) => ({
+                  value: c.name,
+                  label: c.name,
+                  description: c.tin ? `STIR: ${c.tin}` : undefined,
+                  badge: c.status,
+                }))}
+                placeholder="Mijozni qidirish..."
+                searchPlaceholder="Mijoz nomi..."
+                allowCustom={true}
+                className="h-7 text-xs font-medium"
+              />
             </div>
-            <Select
-              value={selectedEntityId}
-              onValueChange={(val) => setSelectedEntityId(val || "ytt-aliyev")}
-            >
-              <SelectTrigger className="h-7 text-xs font-medium">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="text-xs">
-                <SelectItem value="ytt-aliyev">
-                  YTT Aliyev Jamshid (Aksessuarlar)
-                </SelectItem>
-                <SelectItem value="ytt-qodirov">
-                  YTT Qodirov Baxtiyor (Aksessuarlar)
-                </SelectItem>
-                <SelectItem value="mchj-printgoo">
-                  &quot;PRINTGOO SERVICES&quot; MChJ (Flexo / Jakkard)
-                </SelectItem>
-              </SelectContent>
-            </Select>
+
+            <div className="w-64 shrink-0">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold block mb-0.5">Sotuvchi Yuridik Shaxs:</span>
+              <SmartCombobox
+                value={selectedEntityId}
+                onChange={(val) => setSelectedEntityId(val || "ytt-qodirov")}
+                options={availableEntities.map((ent) => ({
+                  value: ent.id,
+                  label: `${ent.name} (${ent.legalType})`,
+                  description: `${ent.code} • STIR: ${ent.inn || "—"}`,
+                  badge: ent.legalType,
+                }))}
+                placeholder="Sotuvchini tanlang..."
+                searchPlaceholder="Sotuvchini qidirish..."
+                allowCustom={false}
+                className="h-7 text-xs font-medium"
+              />
+            </div>
           </div>
 
           {/* CROSS SELL ALERT BADGE / BUTTON */}

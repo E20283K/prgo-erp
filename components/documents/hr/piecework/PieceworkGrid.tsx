@@ -17,6 +17,7 @@ import { PieceworkRecord } from "../types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -466,10 +467,11 @@ export function PieceworkGrid() {
 
               <div>
                 <Label className="text-xs">Tarif (UZS)</Label>
-                <Input
-                  type="number"
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={0}
                   value={rate}
-                  onChange={(e) => setRate(e.target.value)}
+                  onValueChange={(values) => setRate(values.value)}
                   className="h-8 font-mono"
                 />
               </div>

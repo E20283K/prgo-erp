@@ -88,6 +88,8 @@ import {
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { SmartCombobox } from "@/components/ui/smart-combobox";
 import { formatMoney } from "@/components/documents/common/DocumentShell";
 
 interface ProductionGridProps {
@@ -1784,10 +1786,10 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     <Label className="text-[11px] font-medium text-muted-foreground">
                       Biriktirilgan Mijoz (CRM)
                     </Label>
-                    <Select
+                    <SmartCombobox
                       value={toolFormData.customerId || "none"}
-                      onValueChange={(val) => {
-                        if (val === "none") {
+                      onChange={(val) => {
+                        if (val === "none" || !val) {
                           setToolFormData({
                             ...toolFormData,
                             customerId: "",
@@ -1796,34 +1798,45 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                             isDedicated: false,
                           });
                         } else {
-                          const client = (crmCustomers || []).find((c) => c.id === val);
+                          const client = (crmCustomers || []).find(
+                            (c) => c.id === val || c.name.toLowerCase() === val.toLowerCase()
+                          );
                           setToolFormData({
                             ...toolFormData,
-                            customerId: val,
-                            customerName: client?.name || "",
+                            customerId: client?.id || val,
+                            customerName: client?.name || val,
                             ownership: "customer_owned",
                             isDedicated: true,
                           });
                         }
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-background">
-                        <SelectValue placeholder="Mijozni tanlang yoki Universal" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">
-                          <span className="font-medium text-muted-foreground">
-                            Universal (Barcha mijozlar uchun ochiq)
-                          </span>
-                        </SelectItem>
-                        {(crmCustomers || []).map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            <span className="font-medium">{c.name}</span>
-                            {c.tin && <span className="font-mono text-muted-foreground ml-1.5 text-[10px]">({c.tin})</span>}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      onAddNew={(newVal) => {
+                        setToolFormData({
+                          ...toolFormData,
+                          customerId: newVal,
+                          customerName: newVal,
+                          ownership: "customer_owned",
+                          isDedicated: true,
+                        });
+                      }}
+                      options={[
+                        {
+                          value: "none",
+                          label: "Universal (Barcha mijozlar uchun ochiq)",
+                          badge: "Umumiy",
+                        },
+                        ...(crmCustomers || []).map((c) => ({
+                          value: c.id,
+                          label: c.name,
+                          description: c.tin ? `STIR: ${c.tin}` : c.industry || undefined,
+                          badge: c.status,
+                        })),
+                      ]}
+                      placeholder="Mijozni tanlang yoki Universal..."
+                      searchPlaceholder="Mijoz nomi yoki STIR..."
+                      allowCustom={true}
+                      className="h-8 text-xs bg-background"
+                    />
                   </div>
 
                   <div className="space-y-1">
@@ -1851,15 +1864,18 @@ export function ProductionGrid({ type }: ProductionGridProps) {
 
                 {toolFormData.customerId && (
                   <div className="flex items-center gap-2 pt-1 text-[11px]">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       id="isDedicatedCheck"
                       checked={Boolean(toolFormData.isDedicated)}
-                      onChange={(e) => setToolFormData({ ...toolFormData, isDedicated: e.target.checked })}
-                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                      onCheckedChange={(checked) =>
+                        setToolFormData({ ...toolFormData, isDedicated: Boolean(checked) })
+                      }
                     />
-                    <label htmlFor="isDedicatedCheck" className="text-muted-foreground cursor-pointer select-none">
-                      Faqat shu mijoz buyurtmalari uchun eksklyuziv cheklansin (Boshqa buyurtmalarda ko'rinmaydi)
+                    <label
+                      htmlFor="isDedicatedCheck"
+                      className="text-muted-foreground cursor-pointer select-none font-medium leading-none"
+                    >
+                      Faqat shu mijoz buyurtmalari uchun eksklyuziv cheklansin (Boshqa buyurtmalarda ko&apos;rinmaydi)
                     </label>
                   </div>
                 )}

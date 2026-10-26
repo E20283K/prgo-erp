@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useRef } from "react";
+import React, { useRef, useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +11,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Printer, Download, X } from "lucide-react";
+import { Printer, Calendar } from "lucide-react";
 import type { SupplierRecord, SupplierLedgerEntry } from "@/lib/server/supplierService";
 
 interface SupplierAktSverkaModalProps {
@@ -29,13 +31,44 @@ export function SupplierAktSverkaModal({
   onOpenChange,
   supplier,
   ledger,
-  totalCredit,
-  totalDebit,
-  closingBalance,
-  startDate = "2026-01-01",
-  endDate = new Date().toISOString().split("T")[0],
+  totalCredit: propCredit,
+  totalDebit: propDebit,
+  closingBalance: propClosingBalance,
+  startDate: initialStartDate = `${new Date().getFullYear()}-01-01`,
+  endDate: initialEndDate = new Date().toISOString().split("T")[0],
 }: SupplierAktSverkaModalProps) {
   const printAreaRef = useRef<HTMLDivElement>(null);
+
+  const [dateFrom, setDateFrom] = useState(initialStartDate);
+  const [dateTo, setDateTo] = useState(initialEndDate);
+
+  // Period filtering and running balance calculation
+  const { periodLedger, periodDebit, periodCredit, periodOpening, periodClosing } = useMemo(() => {
+    let priorBalance = Number(supplier.openingBalance) || 0;
+    const filtered: SupplierLedgerEntry[] = [];
+    let pDebit = 0;
+    let pCredit = 0;
+
+    for (const entry of ledger) {
+      if (entry.date < dateFrom) {
+        priorBalance += entry.credit - entry.debit;
+      } else if (entry.date <= dateTo) {
+        filtered.push(entry);
+        pDebit += entry.debit;
+        pCredit += entry.credit;
+      }
+    }
+
+    const pClosing = priorBalance + pCredit - pDebit;
+
+    return {
+      periodLedger: filtered,
+      periodDebit: pDebit,
+      periodCredit: pCredit,
+      periodOpening: priorBalance,
+      periodClosing: pClosing,
+    };
+  }, [ledger, dateFrom, dateTo, supplier.openingBalance]);
 
   const handlePrint = () => {
     if (typeof window === "undefined") return;
@@ -86,18 +119,36 @@ export function SupplierAktSverkaModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
-        <DialogHeader className="p-4 border-b bg-muted/30 flex flex-row items-center justify-between">
+      <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden">
+        <DialogHeader className="p-4 border-b bg-muted/30 flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
             <DialogTitle className="text-base font-semibold">
-              O'zaro hisob-kitoblarni solishtirish dalolatnomasi (Akt-sverka)
+              O&apos;zaro hisob-kitoblarni solishtirish dalolatnomasi (Akt-sverka)
             </DialogTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Ta'minotchi: {supplier.name} | Davr: {startDate} — {endDate}
+              Ta&apos;minotchi: {supplier.name}
             </p>
           </div>
+
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={handlePrint} className="gap-1.5 h-8">
+            <div className="flex items-center gap-1.5 bg-background border border-border px-2 py-1 rounded text-xs">
+              <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="h-6 w-28 text-xs p-1 font-mono border-0 shadow-none focus-visible:ring-0"
+              />
+              <span className="text-muted-foreground">—</span>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="h-6 w-28 text-xs p-1 font-mono border-0 shadow-none focus-visible:ring-0"
+              />
+            </div>
+
+            <Button size="sm" onClick={handlePrint} className="gap-1.5 h-8 cursor-pointer">
               <Printer className="w-3.5 h-3.5" />
               <span>Chop etish (A4)</span>
             </Button>
@@ -111,18 +162,25 @@ export function SupplierAktSverkaModal({
             className="max-w-[760px] mx-auto bg-white text-zinc-900 p-8 shadow-sm border border-zinc-200 rounded-sm font-sans"
           >
             <h1 className="text-center font-bold text-base uppercase tracking-tight mb-1">
-              O'ZARO HISOB-KITOBLARNI SOLISHTIRISH DALOLATNOMASI
+              O&apos;ZARO HISOB-KITOBLARNI SOLISHTIRISH DALOLATNOMASI
             </h1>
             <p className="text-center text-xs text-zinc-600 mb-6">
-              davr: {startDate} yildan {endDate} yilgacha
+              davr: {dateFrom} yildan {dateTo} yilgacha
             </p>
 
             <p className="text-xs leading-relaxed mb-4 text-justify">
               Biz, quyida imzo chekuvchilar, bir tomondan <strong>«PRINTGOO» MChJ</strong> (Buyurtmachi),
-              ikkinchi tomondan <strong>{supplier.legalName || supplier.name}</strong> (Ta'minotchi / Pudratchi),
-              ushbu dalolatnomani tuzdik, shu haqdakim, yuqorida ko'rsatilgan davr uchun tomonlar
-              o'rtasidagi hisob-kitoblar holati quyidagicha:
+              ikkinchi tomondan <strong>{supplier.legalName || supplier.name}</strong> (Ta&apos;minotchi / Pudratchi),
+              ushbu dalolatnomani tuzdik, shu haqdakim, yuqorida ko&apos;rsatilgan davr uchun tomonlar
+              o&apos;rtasidagi hisob-kitoblar holati quyidagicha:
             </p>
+
+            <div className="flex items-center justify-between text-xs font-semibold bg-zinc-100 p-2 border border-zinc-400 mb-2">
+              <span>Davr boshiga qoldiq saldo ({dateFrom}):</span>
+              <span className="font-mono">
+                {periodOpening.toLocaleString("uz-UZ")} {curr} ({periodOpening > 0 ? "Qarzimiz" : periodOpening < 0 ? "Avansimiz" : "Nol"})
+              </span>
+            </div>
 
             <table className="w-full text-xs border-collapse mb-4 border border-zinc-400">
               <thead>
@@ -132,7 +190,7 @@ export function SupplierAktSverkaModal({
                   <th className="border border-zinc-400 p-1.5 text-center w-28">Hujjat №</th>
                   <th className="border border-zinc-400 p-1.5 text-left">Operatsiya / Mazmuni</th>
                   <th className="border border-zinc-400 p-1.5 text-right w-28">
-                    Biz to'ladik (-Debet)
+                    Biz to&apos;ladik (-Debet)
                   </th>
                   <th className="border border-zinc-400 p-1.5 text-right w-28">
                     Yetkazildi (+Kredit)
@@ -143,67 +201,63 @@ export function SupplierAktSverkaModal({
                 </tr>
               </thead>
               <tbody>
-                {ledger.length === 0 ? (
+                {periodLedger.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="border border-zinc-400 p-4 text-center text-zinc-500 italic">
                       Ushbu davrda hisob-kitob operatsiyalari mavjud emas.
                     </td>
                   </tr>
                 ) : (
-                  ledger.map((entry, idx) => (
-                    <tr key={entry.id} className="hover:bg-zinc-50">
-                      <td className="border border-zinc-400 p-1.5 text-center font-mono text-[11px]">
+                  periodLedger.map((row, idx) => (
+                    <tr key={row.id || idx} className="hover:bg-zinc-50">
+                      <td className="border border-zinc-400 p-1.5 text-center text-zinc-600 font-mono">
                         {idx + 1}
                       </td>
-                      <td className="border border-zinc-400 p-1.5 text-center font-mono text-[11px]">
-                        {entry.date}
+                      <td className="border border-zinc-400 p-1.5 text-center font-mono">
+                        {row.date}
                       </td>
-                      <td className="border border-zinc-400 p-1.5 text-center font-mono text-[11px] font-semibold">
-                        {entry.docNo}
+                      <td className="border border-zinc-400 p-1.5 text-center font-mono font-medium">
+                        {row.docNo}
                       </td>
-                      <td className="border border-zinc-400 p-1.5 text-left text-[11px]">
-                        {entry.description}
+                      <td className="border border-zinc-400 p-1.5 text-left">
+                        {row.description}
                       </td>
-                      <td className="border border-zinc-400 p-1.5 text-right font-mono text-[11px]">
-                        {entry.debit > 0
-                          ? `${entry.debit.toLocaleString("uz-UZ")} ${curr}`
-                          : "-"}
+                      <td className="border border-zinc-400 p-1.5 text-right font-mono text-emerald-700">
+                        {row.debit > 0 ? `${row.debit.toLocaleString("uz-UZ")} ${curr}` : "—"}
                       </td>
-                      <td className="border border-zinc-400 p-1.5 text-right font-mono text-[11px]">
-                        {entry.credit > 0
-                          ? `${entry.credit.toLocaleString("uz-UZ")} ${curr}`
-                          : "-"}
+                      <td className="border border-zinc-400 p-1.5 text-right font-mono text-zinc-900">
+                        {row.credit > 0 ? `${row.credit.toLocaleString("uz-UZ")} ${curr}` : "—"}
                       </td>
-                      <td className="border border-zinc-400 p-1.5 text-right font-mono text-[11px] font-bold">
-                        {entry.balance.toLocaleString("uz-UZ")} {curr}
+                      <td className="border border-zinc-400 p-1.5 text-right font-mono font-semibold">
+                        {row.balance.toLocaleString("uz-UZ")} {curr}
                       </td>
                     </tr>
                   ))
                 )}
                 <tr className="bg-zinc-100 font-bold border-t-2 border-zinc-500">
                   <td colSpan={4} className="border border-zinc-400 p-1.5 text-right">
-                    Jami aylanma:
+                    Davr bo&apos;yicha jami aylanma:
+                  </td>
+                  <td className="border border-zinc-400 p-1.5 text-right font-mono text-emerald-700">
+                    {periodDebit.toLocaleString("uz-UZ")} {curr}
                   </td>
                   <td className="border border-zinc-400 p-1.5 text-right font-mono">
-                    {totalDebit.toLocaleString("uz-UZ")} {curr}
-                  </td>
-                  <td className="border border-zinc-400 p-1.5 text-right font-mono">
-                    {totalCredit.toLocaleString("uz-UZ")} {curr}
+                    {periodCredit.toLocaleString("uz-UZ")} {curr}
                   </td>
                   <td className="border border-zinc-400 p-1.5 text-right font-mono text-zinc-900 font-extrabold">
-                    {closingBalance.toLocaleString("uz-UZ")} {curr}
+                    {periodClosing.toLocaleString("uz-UZ")} {curr}
                   </td>
                 </tr>
               </tbody>
             </table>
 
             <div className="bg-zinc-50 border border-zinc-300 p-3 rounded text-xs mb-8">
-              <strong>Xulosa:</strong> {endDate} holatiga ko'ra «PRINTGOO» MChJ ning{" "}
+              <strong>Xulosa:</strong> {dateTo} holatiga ko&apos;ra «PRINTGOO» MChJ ning{" "}
               <strong>{supplier.name}</strong> oldidagi qarzdorligi:{" "}
               <span className="font-bold underline text-sm">
-                {closingBalance.toLocaleString("uz-UZ")} {curr}
+                {periodClosing.toLocaleString("uz-UZ")} {curr}
               </span>{" "}
-              ni tashkil etadi.
+              ({periodClosing > 0 ? "Korxona qarzdor" : periodClosing < 0 ? "Korxona avansi mavjud" : "To'liq yopilgan"}).
             </div>
 
             <table className="w-full text-xs mt-8">

@@ -1,3 +1,4 @@
+// PrintGoo AI Copilot Sheet - High Density Minimalist Industrial View
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
@@ -32,23 +33,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import {
-  Message,
-  MessageGroup,
-  MessageAvatar,
-  MessageContent,
-  MessageHeader,
-  MessageFooter,
-} from "@/components/ui/message";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
-import {
-  MessageScroller,
-  MessageScrollerContent,
-  MessageScrollerItem,
-  MessageScrollerViewport,
-  MessageScrollerButton,
-  MessageScrollerProvider,
-} from "@/components/ui/message-scroller";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWorkspaceStore, DocumentTab } from "@/store/workspaceStore";
 import { useTranslations, useLocale } from "next-intl";
@@ -155,48 +139,30 @@ export function AiChatSheet() {
 
   const windowRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const latestMessageRef = useRef<HTMLDivElement>(null);
-  const latestUserMsgRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingRef = useRef<HTMLDivElement>(null);
 
-  // ChatGPT-style Smart Reading Alignment:
-  // 1. When user sends a query -> keep user query and typing indicator in comfortable view
-  // 2. When assistant reply lands -> if it's compact, keep turn in view; if it's long, anchor to the START of the assistant reply so user reads line 1 without scrolling up!
-  useEffect(() => {
-    if (isTyping) {
-      const timer = setTimeout(() => {
-        if (typingRef.current) {
-          typingRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        } else if (latestUserMsgRef.current) {
-          latestUserMsgRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-      }, 50);
-      return () => clearTimeout(timer);
+  // Smooth, robust auto-scrolling to the bottom on every message or typing state change
+  const scrollToBottom = useCallback((smooth: boolean = true) => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({
+        behavior: smooth ? "smooth" : "auto",
+        block: "end",
+      });
+    } else if (viewportRef.current) {
+      viewportRef.current.scrollTo({
+        top: viewportRef.current.scrollHeight,
+        behavior: smooth ? "smooth" : "auto",
+      });
     }
+  }, []);
 
-    const lastMsg = messages[messages.length - 1];
-    if (!lastMsg) return;
-
+  useEffect(() => {
     const timer = setTimeout(() => {
-      if (lastMsg.role === "assistant") {
-        if (latestMessageRef.current && viewportRef.current) {
-          const msgHeight = latestMessageRef.current.offsetHeight;
-          const vpHeight = viewportRef.current.clientHeight;
-
-          // If the message is long (> 65% of viewport), anchor to the START so reading starts at line 1!
-          if (msgHeight > vpHeight * 0.65) {
-            latestMessageRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-          } else {
-            latestMessageRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          }
-        }
-      } else if (lastMsg.role === "user") {
-        latestUserMsgRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    }, 60);
-
+      scrollToBottom(true);
+    }, 40);
     return () => clearTimeout(timer);
-  }, [messages, isTyping]);
+  }, [messages, isTyping, scrollToBottom]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Persist messages to localStorage
@@ -410,6 +376,17 @@ export function AiChatSheet() {
         activeLevel3Tab: "overview",
       };
       openTab(newTab);
+      return;
+    }
+
+    if (action.type === "apply_grid_filter") {
+      if (action.payload.module) {
+        setActiveModule(action.payload.module);
+      }
+      if (action.payload.subModule) {
+        setModule(action.payload.module || activeModule, action.payload.subModule);
+      }
+      return;
     }
   };
 
@@ -475,6 +452,13 @@ export function AiChatSheet() {
     setIsTyping(true);
 
     try {
+      const screenSnapshot = {
+        selectedRowId: activeTab?.documentData?.docNo || activeTab?.id,
+        selectedEntityTitle: activeTab?.title,
+        visibleFilterSummary: `${activeModule}${currentSubModule ? ` / ${currentSubModule}` : ""}`,
+        activeDocumentFields: activeTab?.documentData || undefined,
+      };
+
       const requestPayload = {
         messages: [...messages, userMessage].map((m) => ({
           role: m.role === "assistant" ? "assistant" : "user",
@@ -490,6 +474,7 @@ export function AiChatSheet() {
           userRole: currentUser?.role || "Operator",
           userName: currentUser?.name || "User",
           locale,
+          screenSnapshot,
           includeActiveTabContext,
         },
         companyCode: "PRINTGOO",
@@ -499,7 +484,7 @@ export function AiChatSheet() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestPayload),
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(45000),
       });
 
       if (!res.ok) {
@@ -563,29 +548,6 @@ export function AiChatSheet() {
   const contextLabel = activeTab
     ? `${activeModule.toUpperCase()} › ${activeTab.id}`
     : `${activeModule.toUpperCase()}${currentSubModule ? ` › ${currentSubModule.toUpperCase()}` : ""}`;
-
-  // Dynamic Suggestion Chips based on activeModule
-  const dynamicSuggestions = (() => {
-    if (activeModule === "warehouse") {
-      return [
-        { label: tAi("suggestPaperStock"), prompt: tAi("suggestPaperStockPrompt"), icon: Boxes },
-        { label: "Qog'oz qoldig'i", prompt: "/stock Silk", icon: Boxes },
-        { label: "Kritik defitsit", prompt: "/stock", icon: AlertCircle },
-      ];
-    }
-    if (activeModule === "finance") {
-      return [
-        { label: tAi("suggestDebt"), prompt: tAi("suggestDebtPrompt"), icon: DollarSign },
-        { label: "Akt sverki", prompt: "/debt Alpha", icon: DollarSign },
-        { label: "Schet-fakturalar", prompt: "/debt", icon: FileText },
-      ];
-    }
-    return [
-      { label: tAi("suggestWo351"), prompt: tAi("suggestWo351Prompt"), icon: FileText },
-      { label: tAi("suggestShiftLead"), prompt: tAi("suggestShiftLeadPrompt"), icon: Printer },
-      { label: tAi("suggestCalc"), prompt: tAi("suggestCalcPrompt"), icon: Calculator },
-    ];
-  })();
 
   return (
     <div
@@ -781,272 +743,190 @@ export function AiChatSheet() {
             </Tooltip>
           </div>
 
-          {/* Quick Suggestion Chips */}
-          <div className="px-2.5 py-1.5 border-b border-border bg-muted/10 shrink-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-            {dynamicSuggestions.map((sug, idx) => {
-              const Icon = sug.icon;
+          {/* Messages Container with Minimalist Auto-Scrolling */}
+          <div
+            ref={viewportRef}
+            className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 bg-background/50 select-text"
+          >
+            {messages.map((msg) => {
+              const isUser = msg.role === "user";
+
+              if (isUser) {
+                return (
+                  <div key={msg.id} className="flex justify-end w-full">
+                    <div className="max-w-[85%] rounded-lg px-3 py-2 text-xs bg-primary text-primary-foreground font-medium whitespace-pre-line leading-relaxed shadow-xs">
+                      {msg.content}
+                    </div>
+                  </div>
+                );
+              }
+
               return (
-                <Button
-                  key={idx}
-                  variant="outline"
-                  size="xs"
-                  onClick={() => handleSend(sug.prompt)}
-                  className="h-6 px-2 text-[10px] font-medium gap-1 shrink-0 bg-background border-border text-foreground hover:border-primary/40"
-                >
-                  <Icon className="size-3 text-primary" />
-                  <span>{sug.label}</span>
-                </Button>
+                <div key={msg.id} className="flex flex-col w-full text-xs">
+                  {/* Tool Steps Trace (If Assistant executed ERP functions) */}
+                  {msg.toolSteps && msg.toolSteps.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-1.5">
+                      {msg.toolSteps.map((step) => (
+                        <Badge
+                          key={step.id}
+                          variant="outline"
+                          className={cn(
+                            "h-5 px-1.5 text-[10px] font-mono gap-1 border-border bg-card",
+                            step.status === "done" && "text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+                            step.status === "error" && "text-rose-700 dark:text-rose-300 border-rose-500/20"
+                          )}
+                        >
+                          {step.status === "done" ? (
+                            <CheckCircle2 className="size-2.5 text-emerald-600" />
+                          ) : (
+                            <AlertCircle className="size-2.5 text-rose-600" />
+                          )}
+                          <span>{step.label}</span>
+                          {step.durationMs !== undefined && (
+                            <span className="text-muted-foreground text-[9px]">
+                              {step.durationMs}ms
+                            </span>
+                          )}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="w-full rounded-lg p-2.5 bg-muted/30 border border-border/50 text-foreground leading-relaxed">
+                    <CopilotMessageRenderer
+                      content={msg.content}
+                      role={msg.role}
+                      onOpenDocument={handleOpenDocumentFromCard}
+                    />
+
+                    {/* Structured Metrics Strip */}
+                    {msg.metrics && msg.metrics.length > 0 && (
+                      <div className="grid grid-cols-2 gap-1.5 mt-2">
+                        {msg.metrics.map((m, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-card border border-border rounded p-1.5 flex flex-col"
+                          >
+                            <span className="text-[10px] text-muted-foreground truncate">
+                              {m.label}
+                            </span>
+                            <div className="flex items-baseline gap-1 mt-0.5">
+                              <span className="text-xs font-mono font-semibold text-foreground">
+                                {m.value}
+                              </span>
+                              {m.sublabel && (
+                                <span className="text-[9px] text-muted-foreground">
+                                  {m.sublabel}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Structured Mini Data Table */}
+                    {msg.structuredTable && (
+                      <div className="mt-2 overflow-x-auto rounded border border-border bg-card">
+                        <table className="w-full text-[10px] font-mono text-left">
+                          <thead className="bg-muted/50 border-b border-border">
+                            <tr>
+                              {msg.structuredTable.headers.map((h, i) => (
+                                <th key={i} className="p-1 px-1.5 font-semibold text-foreground whitespace-nowrap">
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border">
+                            {msg.structuredTable.rows.map((row, rIdx) => (
+                              <tr key={rIdx} className="hover:bg-muted/20">
+                                {row.map((cell, cIdx) => (
+                                  <td key={cIdx} className="p-1 px-1.5 whitespace-nowrap text-muted-foreground">
+                                    {cell}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Interactive Smart Action Cards */}
+                    {msg.actions && msg.actions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-2">
+                        {msg.actions.map((act) => {
+                          const Icon =
+                            act.iconName === "Boxes"
+                              ? Boxes
+                              : act.iconName === "Printer"
+                              ? Printer
+                              : act.iconName === "DollarSign"
+                              ? DollarSign
+                              : act.iconName === "Plus"
+                              ? Plus
+                              : act.iconName === "User"
+                              ? User
+                              : act.iconName === "Calculator"
+                              ? Calculator
+                              : act.type === "open_tab"
+                              ? FileText
+                              : ArrowRight;
+
+                          return (
+                            <Button
+                              key={act.id}
+                              variant="outline"
+                              size="xs"
+                              onClick={() => handleClientAction(act)}
+                              className="gap-1.5 text-[11px] font-medium border-primary/30 text-primary hover:bg-primary/10 h-7"
+                            >
+                              <Icon className="size-3 text-primary" />
+                              <span>{act.label}</span>
+                              <ArrowRight className="size-2.5 ml-0.5 opacity-60" />
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end pt-1">
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => handleCopy(msg.id, msg.content)}
+                        className="h-5 px-1.5 gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                      >
+                        {copiedId === msg.id ? (
+                          <>
+                            <Check className="size-2.5 text-emerald-500" />
+                            <span className="text-emerald-500">Nusxalandi</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="size-2.5" />
+                            <span>{tCommon("copy")}</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               );
             })}
+
+            {isTyping && (
+              <div ref={typingRef} className="flex items-center gap-1.5 py-1">
+                <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/40">
+                  <span className="size-1.5 rounded-full bg-primary/70 animate-bounce [animation-delay:-0.3s]" />
+                  <span className="size-1.5 rounded-full bg-primary/70 animate-bounce [animation-delay:-0.15s]" />
+                  <span className="size-1.5 rounded-full bg-primary/70 animate-bounce" />
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} className="h-1 w-full shrink-0" />
           </div>
-
-          {/* Message Scroller Container with Auto-Scrolling */}
-          <div className="flex-1 min-h-0 relative bg-background/50">
-            <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-              <MessageScroller className="h-full">
-                <MessageScrollerViewport ref={viewportRef} className="p-3">
-                  <MessageScrollerContent aria-busy={isTyping} className="gap-3">
-                    {messages.map((msg, idx) => {
-                      const isUser = msg.role === "user";
-                      const isLastMessage = idx === messages.length - 1;
-                      const isLastUser = isUser && (isLastMessage || idx === messages.length - 2);
-
-                      return (
-                        <MessageScrollerItem
-                          key={msg.id}
-                          ref={isLastMessage ? latestMessageRef : isLastUser ? latestUserMsgRef : undefined}
-                          scrollAnchor={isUser}
-                          className="gap-2"
-                        >
-                            <Message align={isUser ? "end" : "start"} className="gap-2">
-                              <MessageAvatar
-                                className={cn(
-                                  "w-6 h-6 text-xs font-semibold rounded-md border shrink-0",
-                                  isUser
-                                    ? "bg-primary text-primary-foreground border-primary"
-                                    : "bg-muted text-foreground border-border"
-                                )}
-                              >
-                                {isUser ? (
-                                  <User className="size-3.5" />
-                                ) : (
-                                  <Bot className="size-3.5 text-primary" />
-                                )}
-                              </MessageAvatar>
-
-                              <MessageContent className={cn(isUser ? "max-w-[88%]" : "max-w-full w-full flex-1")}>
-                                <MessageHeader className="gap-2 text-[10px] py-0 px-1">
-                                  <span className="font-semibold text-foreground">
-                                    {isUser ? (currentUser?.name || "User") : "PrintGoo AI"}
-                                  </span>
-                                  <span className="text-muted-foreground/70 font-mono">
-                                    {msg.timestamp}
-                                  </span>
-                                </MessageHeader>
-
-                                {/* Tool Steps Trace (If Assistant executed ERP functions) */}
-                                {msg.toolSteps && msg.toolSteps.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 mb-1.5 px-0.5">
-                                    {msg.toolSteps.map((step) => (
-                                      <Badge
-                                        key={step.id}
-                                        variant="outline"
-                                        className={cn(
-                                          "h-5 px-1.5 text-[10px] font-mono gap-1 border-border bg-card",
-                                          step.status === "done" && "text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
-                                          step.status === "error" && "text-rose-700 dark:text-rose-300 border-rose-500/20"
-                                        )}
-                                      >
-                                        {step.status === "done" ? (
-                                          <CheckCircle2 className="size-2.5 text-emerald-600" />
-                                        ) : (
-                                          <AlertCircle className="size-2.5 text-rose-600" />
-                                        )}
-                                        <span>{step.label}</span>
-                                        {step.durationMs !== undefined && (
-                                          <span className="text-muted-foreground text-[9px]">
-                                            {step.durationMs}ms
-                                          </span>
-                                        )}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                )}
-
-                                {isUser ? (
-                                  <Bubble variant="default" align="end">
-                                    <BubbleContent className="text-xs p-2.5 rounded-lg whitespace-pre-line leading-relaxed select-text text-primary-foreground font-medium">
-                                      {msg.content}
-                                    </BubbleContent>
-                                  </Bubble>
-                                ) : (
-                                  <Bubble
-                                    variant="secondary"
-                                    align="start"
-                                    className="w-full max-w-full"
-                                  >
-                                    <BubbleContent className="text-xs p-2.5 rounded-lg w-full max-w-full leading-relaxed select-text bg-secondary/70 border border-border/40 text-foreground">
-                                      <CopilotMessageRenderer
-                                        content={msg.content}
-                                        role={msg.role}
-                                        onOpenDocument={handleOpenDocumentFromCard}
-                                      />
-                                    </BubbleContent>
-                                  </Bubble>
-                                )}
-
-                                {/* Structured Metrics Strip */}
-                                {msg.metrics && msg.metrics.length > 0 && (
-                                  <div className="grid grid-cols-2 gap-1.5 my-1.5">
-                                    {msg.metrics.map((m, idx) => (
-                                      <div
-                                        key={idx}
-                                        className="bg-card border border-border rounded p-1.5 flex flex-col"
-                                      >
-                                        <span className="text-[10px] text-muted-foreground truncate">
-                                          {m.label}
-                                        </span>
-                                        <div className="flex items-baseline gap-1 mt-0.5">
-                                          <span className="text-xs font-mono font-semibold text-foreground">
-                                            {m.value}
-                                          </span>
-                                          {m.sublabel && (
-                                            <span className="text-[9px] text-muted-foreground">
-                                              {m.sublabel}
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-
-                                {/* Structured Mini Data Table */}
-                                {msg.structuredTable && (
-                                  <div className="my-1.5 overflow-x-auto rounded border border-border bg-card">
-                                    <table className="w-full text-[10px] font-mono text-left">
-                                      <thead className="bg-muted/50 border-b border-border">
-                                        <tr>
-                                          {msg.structuredTable.headers.map((h, i) => (
-                                            <th key={i} className="p-1 px-1.5 font-semibold text-foreground whitespace-nowrap">
-                                              {h}
-                                            </th>
-                                          ))}
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-border">
-                                        {msg.structuredTable.rows.map((row, rIdx) => (
-                                          <tr key={rIdx} className="hover:bg-muted/20">
-                                            {row.map((cell, cIdx) => (
-                                              <td key={cIdx} className="p-1 px-1.5 whitespace-nowrap text-muted-foreground">
-                                                {cell}
-                                              </td>
-                                            ))}
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-
-                                {/* Interactive Smart Action Cards */}
-                                {msg.actions && msg.actions.length > 0 && (
-                                  <div className="flex flex-wrap gap-1.5 pt-1 px-0.5">
-                                    {msg.actions.map((act) => {
-                                      const Icon =
-                                        act.iconName === "Boxes"
-                                          ? Boxes
-                                          : act.iconName === "Printer"
-                                          ? Printer
-                                          : act.iconName === "DollarSign"
-                                          ? DollarSign
-                                          : act.iconName === "Plus"
-                                          ? Plus
-                                          : act.iconName === "User"
-                                          ? User
-                                          : act.iconName === "Calculator"
-                                          ? Calculator
-                                          : act.type === "open_tab"
-                                          ? FileText
-                                          : ArrowRight;
-
-                                      return (
-                                        <Button
-                                          key={act.id}
-                                          variant="outline"
-                                          size="xs"
-                                          onClick={() => handleClientAction(act)}
-                                          className="gap-1.5 text-[11px] font-medium border-primary/30 text-primary hover:bg-primary/10 h-7"
-                                        >
-                                          <Icon className="size-3 text-primary" />
-                                          <span>{act.label}</span>
-                                          <ArrowRight className="size-2.5 ml-0.5 opacity-60" />
-                                        </Button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-
-                                {!isUser && (
-                                  <MessageFooter className="gap-1 py-0 px-1 mt-1">
-                                    <Button
-                                      variant="ghost"
-                                      size="xs"
-                                      onClick={() => handleCopy(msg.id, msg.content)}
-                                      className="h-5 px-1.5 gap-1 text-[10px] text-muted-foreground hover:text-foreground"
-                                    >
-                                      {copiedId === msg.id ? (
-                                        <>
-                                          <Check className="size-2.5 text-emerald-500" />
-                                          <span className="text-emerald-500">Copied</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Copy className="size-2.5" />
-                                          <span>{tCommon("copy")}</span>
-                                        </>
-                                      )}
-                                    </Button>
-                                  </MessageFooter>
-                                )}
-                              </MessageContent>
-                            </Message>
-                          </MessageScrollerItem>
-                        );
-                      })}
-
-                      {isTyping && (
-                        <MessageScrollerItem
-                          key="typing-indicator"
-                          ref={typingRef}
-                          className="gap-2"
-                        >
-                          <Message align="start" className="gap-2">
-                            <MessageAvatar className="w-6 h-6 rounded-md bg-muted border border-border flex items-center justify-center">
-                              <Bot className="size-3.5 text-primary animate-pulse" />
-                            </MessageAvatar>
-                            <MessageContent>
-                              <Bubble variant="secondary" align="start">
-                                <BubbleContent className="text-xs p-2 px-3 rounded-lg text-muted-foreground flex items-center gap-1.5">
-                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
-                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
-                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
-                                </BubbleContent>
-                              </Bubble>
-                            </MessageContent>
-                          </Message>
-                        </MessageScrollerItem>
-                      )}
-                    </MessageScrollerContent>
-                  </MessageScrollerViewport>
-
-                  <MessageScrollerButton
-                    direction="end"
-                    className="bottom-3 right-4 shadow-md border-border bg-card text-foreground hover:bg-muted"
-                  />
-                </MessageScroller>
-              </MessageScrollerProvider>
-            </div>
 
           {/* Slash Commands Dropdown Menu */}
           {showSlashMenu && (

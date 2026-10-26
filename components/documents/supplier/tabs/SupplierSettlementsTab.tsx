@@ -14,6 +14,8 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -188,6 +190,14 @@ export function SupplierSettlementsTab({
   }, [isPaymentOpen, fetchBankAccounts, closingBalance, supplier.name, paymentForm.amount]);
 
   const handleSavePayment = async () => {
+    if (!supplier.id || supplier.id.startsWith("draft-") || supplier.id.startsWith("new-")) {
+      alert("Iltimos, to'lov qilishdan oldin ta'minotchi rekvizitlarini saqlang!");
+      return;
+    }
+    if (supplier.status === "Blocked") {
+      alert("Diqqat: Ushbu ta'minotchi BLOKLANGAN (Stop-List)! Chiqim to'lovi to'xtatilgan.");
+      return;
+    }
     const numAmount = parseFloat(paymentForm.amount);
     if (!numAmount || numAmount <= 0) {
       alert("Iltimos, to'g'ri to'lov summasini kiriting!");
@@ -469,15 +479,17 @@ export function SupplierSettlementsTab({
         <div className="px-4 py-2.5 bg-muted/80 border-b border-border flex flex-wrap items-end gap-3 shrink-0">
           <div className="space-y-1 w-36">
             <Label className="text-[11px] font-semibold">To&apos;lov summasi ({curr})</Label>
-            <Input
+            <MoneyInput
+              thousandSeparator=" "
+              decimalScale={curr === "UZS" ? 0 : 2}
               value={paymentForm.amount}
-              onChange={(e) =>
+              onValueChange={(values) =>
                 setPaymentForm((prev) => ({
                   ...prev,
-                  amount: e.target.value.replace(/[^0-9.]/g, ""),
+                  amount: values.value,
                 }))
               }
-              placeholder="5000000"
+              placeholder="5 000 000"
               className="h-7 text-xs font-mono bg-background"
             />
           </div>
@@ -521,12 +533,11 @@ export function SupplierSettlementsTab({
             </div>
           )}
 
-          <div className="space-y-1 w-32">
+          <div className="space-y-1 w-36">
             <Label className="text-[11px] font-semibold">Sana</Label>
-            <Input
-              type="date"
+            <DatePicker
               value={paymentForm.date}
-              onChange={(e) => setPaymentForm((prev) => ({ ...prev, date: e.target.value }))}
+              onChange={(val) => setPaymentForm((prev) => ({ ...prev, date: val }))}
               className="h-7 text-xs bg-background"
             />
           </div>

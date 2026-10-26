@@ -61,6 +61,7 @@ import { useWorkspaceStore, type CrmCustomerRecord } from "@/store/workspaceStor
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { TabsContent } from "@/components/ui/tabs";
@@ -223,11 +224,16 @@ const WASH_RESISTANCE_LABELS: Record<string, string> = {
 };
 
 const UNIT_OPTIONS: ComboboxOption[] = [
-  { value: "pcs", label: "pcs (Pieces)" },
-  { value: "sets", label: "sets (Sets)" },
-  { value: "rolls", label: "rolls (Rolls)" },
-  { value: "m", label: "m (Meters)" },
-  { value: "kg", label: "kg (Kilograms)" },
+  { value: "dona", label: "dona" },
+  { value: "to'plam", label: "to'plam" },
+  { value: "rulon", label: "rulon" },
+  { value: "m", label: "m" },
+  { value: "kg", label: "kg" },
+  { value: "bobo", label: "bobo" },
+  { value: "pachka", label: "pachka" },
+  { value: "pcs", label: "dona" },
+  { value: "sets", label: "to'plam" },
+  { value: "rolls", label: "rulon" },
 ];
 
 const CURRENCY_OPTIONS: ComboboxOption[] = [
@@ -1399,12 +1405,12 @@ export function OverviewTab({
                     Buyurtma umumiy summasi ({getCurrencySymbol(formData.currency)})
                   </label>
                   <div className="relative">
-                    <Input
-                      type="number"
-                      min={0}
-                      step={formData.currency === "UZS" ? "1" : "0.01"}
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={formData.currency === "UZS" ? 0 : 2}
+                      allowNegative={false}
                       value={formData.priceTotal || ""}
-                      onChange={(e) => handleFieldChange("priceTotal", Number(e.target.value))}
+                      onValueChange={(values) => handleFieldChange("priceTotal", values.floatValue ?? 0)}
                       className="h-8 text-xs bg-muted/30 font-mono font-semibold pr-14"
                       placeholder="0"
                     />

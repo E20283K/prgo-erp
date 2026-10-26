@@ -1315,32 +1315,31 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleFieldChange = (field: string | Record<string, any>, val?: any) => {
     const updates: Record<string, any> = typeof field === "string" ? { [field]: val } : field;
 
-    setFormData((prev) => {
-      const updated = { ...prev, ...updates };
+    const shouldSyncBom = Object.keys(updates).some((f) =>
+      [
+        "paperStock",
+        "lamination",
+        "laminationSides",
+        "laminationMicron",
+        "quantity",
+        "plannedSheets",
+        "parentSheetW",
+        "parentSheetH",
+      ].includes(f)
+    );
 
-      const shouldSyncBom = Object.keys(updates).some((f) =>
-        [
-          "paperStock",
-          "lamination",
-          "laminationSides",
-          "laminationMicron",
-          "quantity",
-          "plannedSheets",
-          "parentSheetW",
-          "parentSheetH",
-        ].includes(f)
-      );
+    const nextForm = { ...formData, ...updates };
+    setFormData(nextForm);
 
-      if (shouldSyncBom) {
-        const synced = syncBomWithSpecs(currentBomItems, updated, warehouseStock);
-        setCurrentBomItems(synced);
-        updateTabData(tab.id, { materials: synced });
-        syncPaperReadiness(synced);
-      }
-      return updated;
-    });
+    if (shouldSyncBom) {
+      const synced = syncBomWithSpecs(currentBomItems, nextForm, warehouseStock);
+      setCurrentBomItems(synced);
+      updateTabData(tab.id, { ...updates, materials: synced });
+      syncPaperReadiness(synced);
+    } else {
+      updateTabData(tab.id, updates);
+    }
 
-    updateTabData(tab.id, updates);
     setTabUnsaved(tab.id, true);
   };
 

@@ -14,6 +14,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -31,6 +32,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SmartCombobox } from "@/components/ui/smart-combobox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import {
   Plus,
   Download,
@@ -53,8 +57,11 @@ import {
   PackageCheck,
   CreditCard,
   Trash2,
+  Activity,
+  ChevronDown,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import {
   ContextMenu,
@@ -69,16 +76,20 @@ interface TradingGridProps {
 }
 
 export function TradingGrid({ type }: TradingGridProps) {
+  const tCommon = useTranslations("Common");
   const {
     theme,
     openTab,
     addNotification,
+    updateGridStats,
     tradingSales,
     tradingOrders,
     tradingYttEntities,
     tradingImports,
     tradingCatalog,
     tradingSettlements,
+    crmCustomers,
+    loadCrmCustomers,
     isTradingLoading,
     loadTradingData,
     convertTradingOrderToSaleAsync,
@@ -107,7 +118,42 @@ export function TradingGrid({ type }: TradingGridProps) {
   // Load real data from PostgreSQL on mount and when type changes
   useEffect(() => {
     loadTradingData(type);
-  }, [type, loadTradingData]);
+    if (!crmCustomers || crmCustomers.length === 0) {
+      loadCrmCustomers();
+    }
+    if (!tradingYttEntities || tradingYttEntities.length === 0) {
+      loadTradingData("ytt-limits");
+    }
+  }, [type, loadTradingData, crmCustomers, loadCrmCustomers, tradingYttEntities]);
+
+  // YTT Limit Status Filter state
+  const [yttStatusFilter, setYttStatusFilter] = useState<"all" | "Safe" | "Warning" | "Critical">("all");
+
+  // YTT Limits summary calculation
+  const yttSummary = useMemo(() => {
+    const list = tradingYttEntities || [];
+    const yttOnly = list.filter((e) => e.legalType === "YTT");
+    const totalLimit = yttOnly.reduce((sum, e) => sum + e.annualLimit, 0);
+    const totalTurnover = yttOnly.reduce((sum, e) => sum + e.currentTurnover, 0);
+    const totalRemaining = Math.max(0, totalLimit - totalTurnover);
+    const overallPercent = totalLimit > 0 ? (totalTurnover / totalLimit) * 100 : 0;
+    const safeCount = yttOnly.filter((e) => e.status === "Safe").length;
+    const warningCount = yttOnly.filter((e) => e.status === "Warning").length;
+    const criticalCount = yttOnly.filter((e) => e.status === "Critical").length;
+    const recommended = yttOnly.find((e) => e.isRecommended) || yttOnly[0];
+
+    return {
+      totalEntities: list.length,
+      totalLimitM: (totalLimit / 1_000_000).toFixed(0),
+      totalTurnoverM: (totalTurnover / 1_000_000).toFixed(1),
+      totalRemainingM: (totalRemaining / 1_000_000).toFixed(1),
+      overallPercent: overallPercent.toFixed(1),
+      safeCount,
+      warningCount,
+      criticalCount,
+      recommended,
+    };
+  }, [tradingYttEntities]);
 
   // Columns & Rows configuration based on registry type
   const { columns, rows } = useMemo(() => {
@@ -237,6 +283,11 @@ export function TradingGrid({ type }: TradingGridProps) {
       }));
     }
 
+    // Filter by YTT status
+    if (type === "ytt-limits" && yttStatusFilter !== "all") {
+      rawRows = rawRows.filter((r) => r.status === yttStatusFilter);
+    }
+
     // Filter by search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -249,6 +300,7 @@ export function TradingGrid({ type }: TradingGridProps) {
   }, [
     type,
     searchQuery,
+    yttStatusFilter,
     tradingSales,
     tradingOrders,
     tradingYttEntities,
@@ -256,6 +308,18 @@ export function TradingGrid({ type }: TradingGridProps) {
     tradingImports,
     tradingCatalog,
   ]);
+
+  // Keep Workspace Status Bar in sync
+  useEffect(() => {
+    const selectedRowsCount = gridSelection.rows.length;
+    let coords = "R1:C1";
+    if (gridSelection.current?.cell) {
+      const [col, row] = gridSelection.current.cell;
+      const colTitle = columns[col]?.title;
+      coords = colTitle ? `R${row + 1}:C${col + 1} (${colTitle})` : `R${row + 1}:C${col + 1}`;
+    }
+    updateGridStats(selectedRowsCount, rows.length, coords);
+  }, [gridSelection, rows.length, columns, updateGridStats]);
 
   // Glide Data Editor cell provider
   const getCellContent = useCallback(
@@ -426,7 +490,7 @@ export function TradingGrid({ type }: TradingGridProps) {
     }
   };
 
-  const handleCreateNew = () => {
+  const handleCreateNew = useCallback(() => {
     if (type === "orders") {
       const newId = `ORD-2026-${String(Math.floor(100 + Math.random() * 900))}`;
       openTab({
@@ -439,10 +503,10 @@ export function TradingGrid({ type }: TradingGridProps) {
           id: newId,
           orderNo: newId,
           date: new Date().toISOString().split("T")[0],
-          customer: "'REAL TEXTILE INVEST' MChJ",
-          contractNo: "AK-2026/04",
-          category: "Aksessuarlar",
-          deliveryDate: "2026-11-15",
+          customer: "",
+          contractNo: "",
+          category: "Furnitura",
+          deliveryDate: "",
           chinaStatus: "Navbatda",
           advanceStatus: "0% Kutilmoqda",
           advancePercent: 0,
@@ -450,7 +514,8 @@ export function TradingGrid({ type }: TradingGridProps) {
           totalUSD: 0,
           exchangeRate: 12850,
           shippingMethod: "Avto Fura Kargo (12-16 kun)",
-          trackingNo: "CN-NEW",
+          trackingNo: "",
+          notes: "",
           items: [],
         },
       });
@@ -470,7 +535,7 @@ export function TradingGrid({ type }: TradingGridProps) {
           batchNo: newId,
           date: new Date().toISOString().split("T")[0],
           origin: "Guangzhou, Xitoy",
-          supplier: "Zhejiang Accessories Factory",
+          supplier: "",
           fobAmountUSD: 0,
           internationalCargoUSD: 0,
           grossWeightKg: 0,
@@ -480,6 +545,7 @@ export function TradingGrid({ type }: TradingGridProps) {
           landedCostMarkupPercent: 0,
           status: "In Transit",
           containerNo: "",
+          notes: "",
           items: [],
         },
       });
@@ -497,21 +563,27 @@ export function TradingGrid({ type }: TradingGridProps) {
         documentData: {
           id: newSku,
           sku: newSku,
-          name: "Yangi Furnitura Turi",
+          name: "",
           category: "Tugmalar",
           unit: "dona",
-          priceUZS: 1500,
-          priceUSD: 0.116,
-          wholesalePriceUZS: 1300,
-          retailPriceUZS: 1700,
+          priceUZS: 0,
+          priceUSD: 0,
+          wholesalePriceUZS: 0,
+          retailPriceUZS: 0,
           stockQty: 0,
-          minStockLevel: 500,
-          origin: "Xitoy",
+          minStockLevel: 0,
+          origin: "Guangzhou, Xitoy",
+          material: "",
+          colorCode: "",
+          dimensions: "",
+          supplier: "",
+          notes: "",
         },
       });
       return;
     }
 
+    const bestYtt = (tradingYttEntities || []).find((y) => y.isRecommended) || (tradingYttEntities && tradingYttEntities[0]);
     const newId = `TRD-2026-${String(Math.floor(1000 + Math.random() * 9000))}`;
     openTab({
       id: newId,
@@ -523,12 +595,12 @@ export function TradingGrid({ type }: TradingGridProps) {
         id: newId,
         docNo: newId,
         date: new Date().toISOString().split("T")[0],
-        sellerEntityId: "ytt-qodirov",
-        sellerEntityName: "YTT Qodirov Baxtiyor Shavkatovich",
-        sellerEntityInn: "498213002",
-        customer: "'REAL TEXTILE INVEST' MChJ",
-        customerTin: "304891234",
-        contractNo: "AK-2026/04",
+        sellerEntityId: bestYtt?.id || "ytt-qodirov",
+        sellerEntityName: bestYtt?.name || "",
+        sellerEntityInn: bestYtt?.inn || "",
+        customer: "",
+        customerTin: "",
+        contractNo: "",
         currency: "UZS",
         exchangeRate: 12850,
         totalAmount: 0,
@@ -536,24 +608,40 @@ export function TradingGrid({ type }: TradingGridProps) {
         totalUZS: 0,
         paymentMethod: "Bank Wire (Hisob-raqam)",
         status: "Draft",
+        notes: "",
         items: [],
       },
     });
-  };
+  }, [type, openTab, tradingYttEntities]);
+
+  // Keyboard shortcut: Ins to Create New
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "Insert" &&
+        !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)
+      ) {
+        e.preventDefault();
+        handleCreateNew();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleCreateNew]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
       {/* 1C INDUSTRIAL HIGH-DENSITY TOOLBAR */}
-      <div className="flex items-center justify-between px-3 h-10 border-b border-border bg-card shrink-0 gap-2">
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+      <div className="h-8 border-b border-border bg-card px-2.5 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0 shrink overflow-x-auto no-scrollbar">
           {type === "sales" && (
             <Button
               size="sm"
               onClick={handleCreateNew}
-              className="h-7 px-2.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1 shadow-xs cursor-pointer"
+              className="h-6.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded shrink-0 whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Yangi Sotuv Hujjati</span>
+              <span>{tCommon("create")}</span>
             </Button>
           )}
 
@@ -562,10 +650,10 @@ export function TradingGrid({ type }: TradingGridProps) {
               <Button
                 size="sm"
                 onClick={handleCreateNew}
-                className="h-7 px-2.5 text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 flex items-center gap-1 shadow-xs cursor-pointer"
+                className="h-6.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded shrink-0 whitespace-nowrap cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Yangi Buyurtma (Pre-order)</span>
+                <span>{tCommon("create")}</span>
               </Button>
               {selectedRow && (
                 <Button
@@ -573,10 +661,10 @@ export function TradingGrid({ type }: TradingGridProps) {
                   variant="outline"
                   onClick={handleConvertSelectedOrder}
                   disabled={isActionLoading}
-                  className="h-7 px-2 text-xs font-medium text-sky-600 border-sky-300 hover:bg-sky-50 flex items-center gap-1 cursor-pointer"
+                  className="h-6.5 px-2 text-xs font-medium text-primary border-border hover:bg-muted flex items-center gap-1 cursor-pointer shrink-0"
                 >
                   <ArrowRight className="w-3 h-3" />
-                  <span>Sotuvga aylantirish</span>
+                  <span>Sotuvga o'tkazish</span>
                 </Button>
               )}
             </>
@@ -587,10 +675,10 @@ export function TradingGrid({ type }: TradingGridProps) {
               <Button
                 size="sm"
                 onClick={handleCreateNew}
-                className="h-7 px-2.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 shadow-xs cursor-pointer"
+                className="h-6.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded shrink-0 whitespace-nowrap cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Yangi Import Partiyasi</span>
+                <span>{tCommon("create")}</span>
               </Button>
               {selectedRow && selectedRow.status !== "Allocated to Stock" && (
                 <Button
@@ -598,10 +686,10 @@ export function TradingGrid({ type }: TradingGridProps) {
                   variant="outline"
                   onClick={handleAllocateSelectedImport}
                   disabled={isActionLoading}
-                  className="h-7 px-2 text-xs font-medium text-emerald-600 border-emerald-300 hover:bg-emerald-50 flex items-center gap-1 cursor-pointer"
+                  className="h-6.5 px-2 text-xs font-medium text-emerald-600 border-border hover:bg-muted flex items-center gap-1 cursor-pointer shrink-0"
                 >
                   <PackageCheck className="w-3 h-3" />
-                  <span>Omborga kirim qilish</span>
+                  <span>Omborga kirim</span>
                 </Button>
               )}
             </>
@@ -611,10 +699,10 @@ export function TradingGrid({ type }: TradingGridProps) {
             <Button
               size="sm"
               onClick={handleCreateNew}
-              className="h-7 px-2.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 shadow-xs cursor-pointer"
+              className="h-6.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded shrink-0 whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Yangi Tovar (Katalog)</span>
+              <span>{tCommon("create")}</span>
             </Button>
           )}
 
@@ -625,71 +713,195 @@ export function TradingGrid({ type }: TradingGridProps) {
                 setPaymentCustomer(selectedRow?.customer || "'REAL TEXTILE INVEST' MChJ");
                 setIsPaymentModalOpen(true);
               }}
-              className="h-7 px-2.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1 shadow-xs cursor-pointer"
+              className="h-6.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded shrink-0 whitespace-nowrap cursor-pointer"
             >
               <CreditCard className="w-3.5 h-3.5" />
-              <span>To'lov qabul qilish</span>
+              <span>To'lov qabul</span>
             </Button>
           )}
 
           {type === "ytt-limits" && (
-            <div className="flex items-center gap-2">
-              {(tradingYttEntities || []).slice(0, 3).map((ytt) => {
-                const isSafe = ytt.status === "Safe";
-                const isCrit = ytt.status === "Critical";
-                return (
-                  <Badge
-                    key={ytt.id}
-                    variant="outline"
-                    className={`h-6 font-mono text-[11px] gap-1 ${
-                      isSafe
-                        ? "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300"
-                        : isCrit
-                        ? "bg-red-50 text-red-800 border-red-300 dark:bg-red-950/40 dark:text-red-300"
-                        : "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300"
-                    }`}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* 1. Status Filter Segment */}
+              <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
+                {[
+                  { id: "all", label: "Barchasi", count: (tradingYttEntities || []).length },
+                  { id: "Safe", label: "Xavfsiz", count: yttSummary.safeCount, badgeClass: "text-emerald-700 dark:text-emerald-400" },
+                  { id: "Warning", label: "Diqqat", count: yttSummary.warningCount, badgeClass: "text-amber-700 dark:text-amber-400" },
+                  { id: "Critical", label: "Xavf", count: yttSummary.criticalCount, badgeClass: "text-red-700 dark:text-red-400 font-bold" },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setYttStatusFilter(f.id as any)}
+                    className={cn(
+                      "px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0",
+                      yttStatusFilter === f.id
+                        ? "bg-background text-foreground shadow-xs font-semibold"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
                   >
-                    <span>
-                      {ytt.code}: {ytt.turnoverPercent.toFixed(1)}% (
-                      {(Math.max(0, ytt.annualLimit - ytt.currentTurnover) / 1_000_000).toFixed(0)}M bo'sh)
+                    <span>{f.label}</span>
+                    <span className={cn("text-[10px] font-mono ml-0.5", f.badgeClass)}>
+                      ({f.count})
                     </span>
-                  </Badge>
-                );
-              })}
+                  </button>
+                ))}
+              </div>
+
+              {/* 2. Compact Summary Popover */}
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6.5 px-2 text-xs gap-1.5 font-normal border-border bg-background shadow-none shrink-0 cursor-pointer"
+                    />
+                  }
+                >
+                  <Activity className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="font-mono text-xs">
+                    {yttSummary.totalRemainingM}M zaxira
+                  </span>
+                  {yttSummary.criticalCount > 0 ? (
+                    <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
+                  ) : (
+                    <span className="size-1.5 rounded-full bg-emerald-500" />
+                  )}
+                  <ChevronDown className="w-3 h-3 opacity-50" />
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-3 shadow-lg border border-border bg-popover z-50" align="start">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-border pb-2">
+                      <span className="font-semibold text-xs text-foreground">YTT Aylanma Limiti Xulosasi</span>
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {yttSummary.totalEntities} ta subyekt
+                      </Badge>
+                    </div>
+
+                    {/* Overall capacity progress */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground">Umumiy bandlik</span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {yttSummary.overallPercent}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full transition-all",
+                            Number(yttSummary.overallPercent) > 90
+                              ? "bg-red-500"
+                              : Number(yttSummary.overallPercent) > 75
+                              ? "bg-amber-500"
+                              : "bg-emerald-500"
+                          )}
+                          style={{ width: `${Math.min(100, Number(yttSummary.overallPercent))}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono pt-0.5">
+                        <span>Ishlatildi: {yttSummary.totalTurnoverM}M</span>
+                        <span>Bo&apos;sh: {yttSummary.totalRemainingM}M</span>
+                      </div>
+                    </div>
+
+                    {/* Entities breakdown list */}
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[10px] font-semibold text-muted-foreground uppercase">
+                        Subyektlar taqsimoti
+                      </span>
+                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                        {(tradingYttEntities || []).map((ent) => {
+                          const isMchj = ent.legalType === "MChJ";
+                          const remainingM = (Math.max(0, ent.annualLimit - ent.currentTurnover) / 1_000_000).toFixed(0);
+                          return (
+                            <div
+                              key={ent.id}
+                              onClick={() => {
+                                setSearchQuery(ent.code);
+                              }}
+                              className="p-1.5 rounded hover:bg-muted/60 transition-colors cursor-pointer border border-border/40 text-xs flex items-center justify-between gap-2"
+                              title="Jadvalda qidirish uchun bosing"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-semibold text-[11px] text-foreground">
+                                    {ent.code}
+                                  </span>
+                                  <span className="text-[11px] truncate text-muted-foreground">
+                                    {ent.name}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground font-mono">
+                                  {isMchj ? "Cheksiz (MChJ)" : `${remainingM}M bo'sh • ${ent.turnoverPercent.toFixed(1)}%`}
+                                </div>
+                              </div>
+                              <span
+                                className={cn(
+                                  "text-[10px] font-medium px-1.5 py-0.5 rounded border shrink-0",
+                                  ent.status === "Safe"
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                    : ent.status === "Warning"
+                                    ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300"
+                                    : ent.status === "Critical"
+                                    ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300"
+                                    : "bg-muted text-muted-foreground border-border"
+                                )}
+                              >
+                                {ent.status === "Safe" ? "Xavfsiz" : ent.status === "Warning" ? "Diqqat" : ent.status === "Critical" ? "Xavf" : "Cheksiz"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* System Recommendation footer */}
+                    {yttSummary.recommended && (
+                      <div className="pt-2 border-t border-border flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground">Tavsiya:</span>
+                        <span className="font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 className="size-3 shrink-0" />
+                          <span className="truncate max-w-[170px]">{yttSummary.recommended.code} ({yttSummary.recommended.name})</span>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           )}
+        </div>
 
-          <div className="relative max-w-xs flex-1">
-            <Search className="w-3.5 h-3.5 absolute left-2 top-2 text-muted-foreground" />
+        {/* Right side: Search, Refresh, Export, Print */}
+        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+          <div className="relative w-36 sm:w-44">
+            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Qidirish (Nomer, INN, Mijoz)..."
-              className="h-7 pl-7 text-xs bg-muted/40 font-mono"
+              placeholder={`${tCommon("search")}...`}
+              className="pl-7 h-6.5 text-xs bg-background border-input rounded"
             />
           </div>
 
-          <Separator orientation="vertical" className="h-4 bg-border" />
-          <span className="text-[11px] text-muted-foreground font-mono">
-            {rows.length} ta yozuv
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => loadTradingData(type)}
             disabled={isTradingLoading}
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
+            className="h-6.5 w-6.5 p-0 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+            title={tCommon("refresh")}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isTradingLoading ? "animate-spin" : ""}`} />
-            <span>Yangilash</span>
           </Button>
+
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+            className="h-6.5 px-2 text-xs text-muted-foreground hover:text-foreground whitespace-nowrap cursor-pointer"
             onClick={() => {
               addNotification({
                 title: "Excel eksport",
@@ -698,13 +910,15 @@ export function TradingGrid({ type }: TradingGridProps) {
               });
             }}
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Excel</span>
+            <Download className="w-3.5 h-3.5 mr-1" />
+            <span className="hidden sm:inline">{tCommon("export")}</span>
           </Button>
+
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
+            className="h-6.5 w-6.5 p-0 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+            title={tCommon("print")}
             onClick={() => {
               addNotification({
                 title: "Chop etish",
@@ -714,7 +928,6 @@ export function TradingGrid({ type }: TradingGridProps) {
             }}
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>Chop etish</span>
           </Button>
         </div>
       </div>
@@ -780,9 +993,19 @@ export function TradingGrid({ type }: TradingGridProps) {
           <div className="space-y-3 py-2">
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">Mijoz (Tekstil Korxonasi)</Label>
-              <Input
+              <SmartCombobox
                 value={paymentCustomer}
-                onChange={(e) => setPaymentCustomer(e.target.value)}
+                onChange={(val) => setPaymentCustomer(val)}
+                onAddNew={(newVal) => setPaymentCustomer(newVal)}
+                options={(crmCustomers || []).map((c) => ({
+                  value: c.name,
+                  label: c.name,
+                  description: c.tin ? `STIR: ${c.tin}` : undefined,
+                  badge: c.status,
+                }))}
+                placeholder="Mijozni tanlang yoki kiriting..."
+                searchPlaceholder="Mijoz nomi..."
+                allowCustom={true}
                 className="h-8 text-xs font-mono"
               />
             </div>
@@ -790,28 +1013,31 @@ export function TradingGrid({ type }: TradingGridProps) {
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">To'lov Summasi (UZS)</Label>
-                <Input
-                  type="number"
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={0}
                   value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(Number(e.target.value))}
+                  onValueChange={(values) => setPaymentAmount(values.floatValue ?? 0)}
                   className="h-8 text-xs font-mono"
                 />
               </div>
 
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">Qabul qiluvchi YTT/MChJ</Label>
-                <Select value={paymentSeller} onValueChange={(val) => setPaymentSeller(val || "ytt-qodirov")}>
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="text-xs">
-                    {(tradingYttEntities || []).map((ytt) => (
-                      <SelectItem key={ytt.id} value={ytt.id}>
-                        {ytt.code}: {ytt.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SmartCombobox
+                  value={paymentSeller}
+                  onChange={(val) => setPaymentSeller(val || "ytt-qodirov")}
+                  options={(tradingYttEntities || []).map((ytt) => ({
+                    value: ytt.id,
+                    label: `${ytt.code}: ${ytt.name}`,
+                    description: `STIR: ${ytt.inn || "—"}`,
+                    badge: ytt.legalType,
+                  }))}
+                  placeholder="Sotuvchini tanlang..."
+                  searchPlaceholder="Sotuvchini qidirish..."
+                  allowCustom={false}
+                  className="h-8 text-xs"
+                />
               </div>
             </div>
 

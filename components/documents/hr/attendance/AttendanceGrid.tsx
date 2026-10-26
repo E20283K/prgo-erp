@@ -17,6 +17,7 @@ import { AttendanceRecord } from "../types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -325,11 +326,10 @@ export function AttendanceGrid() {
             ))}
           </div>
 
-          <Input
-            type="date"
+          <DatePicker
             value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-            className="h-7 text-xs w-32 font-mono bg-background border-input rounded"
+            onChange={(val) => setDateFilter(val)}
+            className="h-7 text-xs w-36 font-mono bg-background border-input rounded"
           />
         </div>
 

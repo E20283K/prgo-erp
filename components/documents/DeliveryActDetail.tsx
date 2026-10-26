@@ -24,6 +24,7 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid"
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -701,11 +702,10 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-[11px] text-muted-foreground">{t("date")}</Label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={form.date}
-                    readOnly={isPosted}
-                    onChange={(e) => handleFieldChange("date", e.target.value)}
+                    disabled={isPosted}
+                    onChange={(val) => handleFieldChange("date", val)}
                     className="h-7 text-xs font-mono"
                   />
                 </div>

@@ -17,6 +17,7 @@ import { DocumentHeader } from "@/components/documents/common/DocumentShell";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -27,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SmartCombobox } from "@/components/ui/smart-combobox";
 import {
   Ship,
   Save,
@@ -35,8 +37,10 @@ import {
   Truck,
   Calculator,
   Download,
+  Plus,
+  Trash2,
 } from "lucide-react";
-import { TradingImportBatchRecord, ImportBatchItem } from "./types";
+import { TradingImportBatchRecord, ImportBatchItem, TRADING_UNITS } from "./types";
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
@@ -61,116 +65,56 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
   const [date, setDate] = useState<string>(
     rawData.date || new Date().toISOString().split("T")[0]
   );
-  const [origin, setOrigin] = useState<"Guangzhou, Xitoy" | "Yiwu, Xitoy" | "Shanghai, Xitoy">(
+  const [origin, setOrigin] = useState<string>(
     rawData.origin || "Guangzhou, Xitoy"
   );
   const [supplier, setSupplier] = useState<string>(
-    rawData.supplier || "Yiwu Accessories Industrial Group Ltd"
+    rawData.supplier || ""
   );
   const [containerNo, setContainerNo] = useState<string>(
-    rawData.containerNo || "TGHU-992140"
+    rawData.containerNo || ""
   );
   const [status, setStatus] = useState<
     "In Transit" | "Customs Clearance" | "Arrived & Calculated" | "Allocated to Stock"
-  >(rawData.status || "Arrived & Calculated");
+  >(rawData.status || "In Transit");
   const [exchangeRate, setExchangeRate] = useState<number>(
     rawData.exchangeRate || 12850
   );
 
   // Financial components for Landed Cost
-  const [fobAmountUSD, setFobAmountUSD] = useState<number>(rawData.fobAmountUSD || 14500);
+  const [fobAmountUSD, setFobAmountUSD] = useState<number>(rawData.fobAmountUSD || 0);
   const [internationalCargoUSD, setInternationalCargoUSD] = useState<number>(
-    rawData.internationalCargoUSD || 2850
+    rawData.internationalCargoUSD || 0
   );
   const [customsDutyUZS, setCustomsDutyUZS] = useState<number>(
-    rawData.customsDutyUZS || 21400000
+    rawData.customsDutyUZS || 0
   );
   const [grossWeightKg, setGrossWeightKg] = useState<number>(
-    rawData.grossWeightKg || 1840
+    rawData.grossWeightKg || 0
   );
-  const [notes, setNotes] = useState<string>(
-    rawData.notes || "Qishki mavsum uchun 1-katta partiya. Bojxona to'liq rasmiylashtirildi."
-  );
+  const [notes, setNotes] = useState<string>(rawData.notes || "");
 
   // High volume items
-  const [items] = useState<ImportBatchItem[]>(
-    rawData.items && rawData.items.length > 0
-      ? rawData.items
-      : [
-          {
-            id: "imp-item-1",
-            sku: "BTN-MET-18MM",
-            name: "Metall Gravirovka Tugma 18mm",
-            category: "Tugmalar",
-            unit: "dona",
-            quantity: 100000,
-            fobPriceUSD: 0.025,
-            fobTotalUSD: 2500,
-            landedCostUZS: 405,
-            suggestedSalePriceUZS: 480,
-          },
-          {
-            id: "imp-item-2",
-            sku: "ZIP-NYL-N5-45",
-            name: "Neylon Fermuar (Molniya) N5, 45sm, Qora",
-            category: "Fermuarlar",
-            unit: "dona",
-            quantity: 30000,
-            fobPriceUSD: 0.18,
-            fobTotalUSD: 5400,
-            landedCostUZS: 2750,
-            suggestedSalePriceUZS: 3200,
-          },
-          {
-            id: "imp-item-3",
-            sku: "THRD-POLY-40-2",
-            name: "Tikuvchilik Ipi 40/2 (Oq/Qora/Rangli)",
-            category: "Iplar",
-            unit: "bobo",
-            quantity: 1500,
-            fobPriceUSD: 2.10,
-            fobTotalUSD: 3150,
-            landedCostUZS: 31200,
-            suggestedSalePriceUZS: 37000,
-          },
-          {
-            id: "imp-item-4",
-            sku: "ZIP-MET-N4-20",
-            name: "Metall Fermuar N4 Jinsi uchun 20sm",
-            category: "Fermuarlar",
-            unit: "dona",
-            quantity: 40000,
-            fobPriceUSD: 0.22,
-            fobTotalUSD: 8800,
-            landedCostUZS: 3450,
-            suggestedSalePriceUZS: 4100,
-          },
-          {
-            id: "imp-item-5",
-            sku: "BTN-SNAP-15MM",
-            name: "Knopka (Qadama) Tugma 15mm Nikel",
-            category: "Tugmalar",
-            unit: "dona",
-            quantity: 80000,
-            fobPriceUSD: 0.018,
-            fobTotalUSD: 1440,
-            landedCostUZS: 295,
-            suggestedSalePriceUZS: 360,
-          },
-          {
-            id: "imp-item-6",
-            sku: "ELAST-WVN-40MM",
-            name: "Keng elastik tasma (Rezinka) 40mm Qora",
-            category: "Furnitura",
-            unit: "metr",
-            quantity: 15000,
-            fobPriceUSD: 0.12,
-            fobTotalUSD: 1800,
-            landedCostUZS: 1850,
-            suggestedSalePriceUZS: 2300,
-          },
-        ]
+  const [items, setItems] = useState<ImportBatchItem[]>(
+    rawData.items && rawData.items.length > 0 ? rawData.items : []
   );
+
+  const handleQuickAddItem = () => {
+    const newItem: ImportBatchItem = {
+      id: `imp-item-${Date.now()}`,
+      sku: "IMP-ACC-01",
+      name: "Yangi import furniturasi",
+      category: "Furnitura",
+      unit: "dona",
+      quantity: 10000,
+      fobPriceUSD: 0.1,
+      fobTotalUSD: 1000,
+      landedCostUZS: 1500,
+      suggestedSalePriceUZS: 1800,
+    };
+    setItems((prev) => [...prev, newItem]);
+    setTabUnsaved(tab.id, true);
+  };
 
   // Calculations
   const { totalFobUZS, totalCargoUZS, grandLandedCostUZS, landedMarkupPercent } = useMemo(() => {
@@ -463,14 +407,30 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div>
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Xitoy Yetkazib Beruvchi:</Label>
-              <Input
-                value={supplier}
-                onChange={(e) => {
-                  setSupplier(e.target.value);
-                  setTabUnsaved(tab.id, true);
-                }}
-                className="h-7 text-xs mt-0.5"
-              />
+              <div className="mt-0.5">
+                <SmartCombobox
+                  value={supplier}
+                  onChange={(val) => {
+                    setSupplier(val);
+                    setTabUnsaved(tab.id, true);
+                  }}
+                  onAddNew={(newVal) => {
+                    setSupplier(newVal);
+                    setTabUnsaved(tab.id, true);
+                  }}
+                  options={[
+                    "Yiwu Accessories Industrial Group Ltd",
+                    "Zhejiang Zipper & Button Factory",
+                    "Guangzhou Hardware & Accessories Ltd",
+                    "Shanghai Sewing Thread Co.",
+                    "Ningbo Textile Trimmings Co.",
+                  ]}
+                  placeholder="Yetkazib beruvchini tanlang..."
+                  searchPlaceholder="Kompaniya nomi..."
+                  allowCustom={true}
+                  className="h-7 text-xs font-medium"
+                />
+              </div>
             </div>
 
             <div>
@@ -487,31 +447,42 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
 
             <div>
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Jo&apos;natilgan Shahar / Port:</Label>
-              <Select
-                value={origin}
-                onValueChange={(val: any) => {
-                  setOrigin(val);
-                  setTabUnsaved(tab.id, true);
-                }}
-              >
-                <SelectTrigger className="h-7 text-xs mt-0.5">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="text-xs">
-                  <SelectItem value="Guangzhou, Xitoy">Guangzhou, Xitoy</SelectItem>
-                  <SelectItem value="Yiwu, Xitoy">Yiwu, Xitoy</SelectItem>
-                  <SelectItem value="Shanghai, Xitoy">Shanghai, Xitoy</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="mt-0.5">
+                <SmartCombobox
+                  value={origin}
+                  onChange={(val) => {
+                    setOrigin(val);
+                    setTabUnsaved(tab.id, true);
+                  }}
+                  onAddNew={(newVal) => {
+                    setOrigin(newVal);
+                    setTabUnsaved(tab.id, true);
+                  }}
+                  options={[
+                    "Guangzhou, Xitoy",
+                    "Yiwu, Xitoy",
+                    "Shanghai, Xitoy",
+                    "Ningbo, Xitoy",
+                    "Shenzhen, Xitoy",
+                    "Urumqi, Xitoy",
+                    "Istanbul, Turkiya",
+                  ]}
+                  placeholder="Shahar / Port..."
+                  searchPlaceholder="Shahar qidiruvi..."
+                  allowCustom={true}
+                  className="h-7 text-xs font-medium"
+                />
+              </div>
             </div>
 
             <div>
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">MB Valyuta Kursi ($1):</Label>
-              <Input
-                type="number"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={0}
                 value={exchangeRate}
-                onChange={(e) => {
-                  setExchangeRate(Number(e.target.value) || 12850);
+                onValueChange={(values) => {
+                  setExchangeRate(values.floatValue ?? 12850);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs font-mono text-right mt-0.5"
@@ -523,11 +494,12 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div>
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">FOB Qiymati ($):</Label>
-              <Input
-                type="number"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={2}
                 value={fobAmountUSD}
-                onChange={(e) => {
-                  setFobAmountUSD(Number(e.target.value) || 0);
+                onValueChange={(values) => {
+                  setFobAmountUSD(values.floatValue ?? 0);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs font-mono mt-0.5"
@@ -536,11 +508,12 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
 
             <div>
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Kargo / Transport ($):</Label>
-              <Input
-                type="number"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={2}
                 value={internationalCargoUSD}
-                onChange={(e) => {
-                  setInternationalCargoUSD(Number(e.target.value) || 0);
+                onValueChange={(values) => {
+                  setInternationalCargoUSD(values.floatValue ?? 0);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs font-mono mt-0.5"
@@ -549,11 +522,12 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
 
             <div>
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Bojxona To&apos;lovi (UZS):</Label>
-              <Input
-                type="number"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={0}
                 value={customsDutyUZS}
-                onChange={(e) => {
-                  setCustomsDutyUZS(Number(e.target.value) || 0);
+                onValueChange={(values) => {
+                  setCustomsDutyUZS(values.floatValue ?? 0);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs font-mono mt-0.5"
@@ -587,6 +561,15 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
               <Badge variant="secondary" className="font-mono text-[10px] h-4.5 px-1.5">
                 {items.length} ta yozuv
               </Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleQuickAddItem}
+                className="h-6 px-2 text-[11px] gap-1 cursor-pointer ml-2"
+              >
+                <Plus className="w-3 h-3 text-primary" />
+                <span>Qator qo&apos;shish</span>
+              </Button>
             </div>
             <div className="text-[11px] text-muted-foreground font-mono">
               Ikkita marta bosing (F12) — Katalog kartochkasini ochish

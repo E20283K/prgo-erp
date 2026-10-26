@@ -17,6 +17,7 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -2267,13 +2268,13 @@ export function BomMaterialsGrid({
                 </div>
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-0.5">Narx ($)</label>
-                  <Input
-                    type="number"
-                    step="0.01"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={3}
                     min={0}
                     value={formState.unitPrice}
-                    onChange={(e) => {
-                      const uVal = parseFloat(e.target.value) || 0;
+                    onValueChange={(values) => {
+                      const uVal = values.floatValue ?? 0;
                       setFormState((p) => ({
                         ...p,
                         unitPrice: uVal,

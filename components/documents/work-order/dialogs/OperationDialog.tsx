@@ -4,6 +4,7 @@ import React from "react";
 import { Stamp, Factory, Users, Tag, Calculator, DollarSign, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import {
   Dialog,
   DialogContent,
@@ -392,33 +393,33 @@ export function OperationDialog({
 
               <div className="space-y-1">
                 <label className="text-[11px] text-muted-foreground block">Pripravka ($)</label>
-                <Input
-                  type="number"
-                  step="0.01"
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={2}
                   value={form.setupFeeUsd ?? 0}
-                  onChange={(e) => handleRecalculateCosts({ setupFeeUsd: parseFloat(e.target.value) || 0 })}
+                  onValueChange={(values) => handleRecalculateCosts({ setupFeeUsd: values.floatValue ?? 0 })}
                   className="h-7 text-xs font-mono"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-[11px] text-muted-foreground block">Operatsiya stavkasi ($)</label>
-                <Input
-                  type="number"
-                  step="0.01"
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={2}
                   value={form.rateUsd ?? 0}
-                  onChange={(e) => handleRecalculateCosts({ rateUsd: parseFloat(e.target.value) || 0 })}
+                  onValueChange={(values) => handleRecalculateCosts({ rateUsd: values.floatValue ?? 0 })}
                   className="h-7 text-xs font-mono"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-[11px] text-muted-foreground block">Operator sdelkasi ($)</label>
-                <Input
-                  type="number"
-                  step="0.001"
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={3}
                   value={form.pieceworkRateUsd ?? 0}
-                  onChange={(e) => handleRecalculateCosts({ pieceworkRateUsd: parseFloat(e.target.value) || 0 })}
+                  onValueChange={(values) => handleRecalculateCosts({ pieceworkRateUsd: values.floatValue ?? 0 })}
                   className="h-7 text-xs font-mono"
                 />
               </div>

@@ -1,17 +1,17 @@
 "use client";
 
 import React, { useState } from "react";
-import { Sun, Moon, ArrowRight, AlertCircle } from "lucide-react";
+import { Sun, Moon, ArrowRight, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { 
   Card, 
+  CardHeader,
   CardContent, 
   CardFooter 
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { useWorkspaceStore, UserProfile } from "@/store/workspaceStore";
@@ -23,15 +23,17 @@ export function LoginScreen() {
   const t = useTranslations("Auth");
   const tTop = useTranslations("Topbar");
 
-  const [email, setEmail] = useState("admin");
-  const [password, setPassword] = useState("admin");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const performLogin = async (identifier: string, pass: string) => {
+  const performLogin = async (idValue: string, passValue: string) => {
     if (isLoading) return;
 
-    if (!identifier.trim() || !pass) {
+    const trimmedId = idValue.trim();
+    if (!trimmedId || !passValue) {
       const emptyMsg = t("emptyCredentials");
       setError(emptyMsg);
       toast.add({
@@ -50,8 +52,8 @@ export function LoginScreen() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          usernameOrEmail: identifier.trim(),
-          password: pass,
+          usernameOrEmail: trimmedId,
+          password: passValue,
         }),
       });
 
@@ -120,24 +122,7 @@ export function LoginScreen() {
 
   const handleSubmit = (e: React.FormEvent) => {
     if (e) e.preventDefault();
-    performLogin(email, password);
-  };
-
-  const handleQuickDemo = (roleKey: "operator" | "sales" | "admin") => {
-    setError(null);
-    if (roleKey === "admin") {
-      setEmail("admin");
-      setPassword("admin");
-      performLogin("admin", "admin");
-    } else if (roleKey === "sales") {
-      setEmail("manager");
-      setPassword("manager");
-      performLogin("manager", "manager");
-    } else {
-      setEmail("operator");
-      setPassword("operator");
-      performLogin("operator", "operator");
-    }
+    performLogin(identifier, password);
   };
 
   return (
@@ -151,6 +136,7 @@ export function LoginScreen() {
           onClick={toggleTheme}
           className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
           title={tTop("toggleTheme")}
+          aria-label={tTop("toggleTheme")}
         >
           {theme === "dark" ? (
             <Sun className="size-4 text-amber-500" />
@@ -160,8 +146,16 @@ export function LoginScreen() {
         </Button>
       </div>
 
-      {/* Simple Centered Card */}
-      <Card className="w-full max-w-sm sm:max-w-md shadow-lg border-border bg-card pt-2">
+      {/* Centered Card */}
+      <Card className="w-full max-w-sm border-border bg-card shadow-sm">
+        <CardHeader className="text-center pb-3 pt-7 flex flex-col items-center">
+          <img
+            src="/printgoo_logo.svg"
+            alt="PrintGoo"
+            className="h-14 sm:h-16 w-auto object-contain select-none"
+          />
+        </CardHeader>
+
         <CardContent className="space-y-4 pt-2">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
@@ -179,21 +173,28 @@ export function LoginScreen() {
 
             {/* Username / Email Field */}
             <div className="space-y-1.5 text-left">
-              <Label htmlFor="email" className="text-xs font-medium">
-                {t("emailLabel")} / Login
+              <Label htmlFor="identifier" className="text-xs font-medium">
+                {t("emailLabel")}
               </Label>
               <Input
-                id="email"
+                id="identifier"
+                name="username"
                 type="text"
                 placeholder={t("emailPlaceholder")}
-                value={email}
+                value={identifier}
                 onChange={(e) => {
-                  setEmail(e.target.value);
+                  setIdentifier(e.target.value);
                   if (error) setError(null);
                 }}
                 required
+                autoFocus
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-invalid={!!error}
                 className={cn(
-                  "h-9 text-xs transition-colors",
+                  "h-8 text-xs transition-colors",
                   error && "border-destructive/60 focus-visible:ring-destructive/30"
                 )}
               />
@@ -205,47 +206,64 @@ export function LoginScreen() {
                 <Label htmlFor="password" className="text-xs font-medium">
                   {t("passwordLabel")}
                 </Label>
-                <a
-                  href="#forgot"
-                  onClick={(e) => {
-                    e.preventDefault();
+                <button
+                  type="button"
+                  onClick={() => {
                     toast.add({
                       title: t("forgotPasswordTitle"),
-                      description: "Parolingizni unutgan bo'lsangiz, administratorga murojaat qiling.",
+                      description: t("forgotPasswordDesc"),
                       type: "info",
                     });
                   }}
-                  className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                  className="text-[11px] text-muted-foreground hover:text-foreground hover:underline cursor-pointer"
                 >
                   {t("forgotPassword")}
-                </a>
+                </button>
               </div>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  if (error) setError(null);
-                }}
-                required
-                className={cn(
-                  "h-9 text-xs transition-colors",
-                  error && "border-destructive/60 focus-visible:ring-destructive/30"
-                )}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  required
+                  autoComplete="current-password"
+                  aria-invalid={!!error}
+                  className={cn(
+                    "h-8 text-xs pr-8 transition-colors",
+                    error && "border-destructive/60 focus-visible:ring-destructive/30"
+                  )}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus:outline-none p-0.5 cursor-pointer"
+                  tabIndex={-1}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-3.5" />
+                  ) : (
+                    <Eye className="size-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Sign In Button */}
             <Button
               type="submit"
               disabled={isLoading}
-              className="w-full h-9 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium cursor-pointer"
+              className="w-full h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium cursor-pointer"
             >
               {isLoading ? (
                 <>
-                  <Spinner className="size-3.5 text-white mr-2" />
+                  <Spinner className="size-3.5 text-white mr-1.5" />
                   <span>{t("signingIn")}</span>
                 </>
               ) : (
@@ -256,69 +274,23 @@ export function LoginScreen() {
               )}
             </Button>
           </form>
-
-          {/* Separator */}
-          <div className="relative flex items-center justify-center my-3">
-            <Separator className="w-full" />
-            <span className="absolute bg-card px-2 text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
-              {t("orDemoProfiles")}
-            </span>
-          </div>
-
-          {/* Fast 1-Click Demo Profiles */}
-          <div className="grid grid-cols-3 gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isLoading}
-              onClick={() => handleQuickDemo("operator")}
-              className="text-[11px] h-8 px-2 truncate cursor-pointer"
-              title="Operator: operator / operator"
-            >
-              {t("demoProduction")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isLoading}
-              onClick={() => handleQuickDemo("sales")}
-              className="text-[11px] h-8 px-2 truncate cursor-pointer"
-              title="Manager: manager / manager"
-            >
-              {t("demoSales")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isLoading}
-              onClick={() => handleQuickDemo("admin")}
-              className="text-[11px] h-8 px-2 truncate cursor-pointer"
-              title="Admin: admin / admin"
-            >
-              {t("demoAdmin")}
-            </Button>
-          </div>
         </CardContent>
 
         <CardFooter className="justify-center border-t border-border/50 py-3 bg-muted/20 text-xs text-muted-foreground">
           <span>{t("needAccess")}</span>
-          <a
-            href="#support"
-            onClick={(e) => {
-              e.preventDefault();
+          <button
+            type="button"
+            onClick={() => {
               toast.add({
                 title: t("contactSupportTitle"),
                 description: t("contactSupportDesc"),
                 type: "info",
               });
             }}
-            className="text-primary hover:underline ml-1 font-medium"
+            className="text-primary hover:underline ml-1 font-medium cursor-pointer"
           >
             {t("contactAdmin")}
-          </a>
+          </button>
         </CardFooter>
       </Card>
     </div>

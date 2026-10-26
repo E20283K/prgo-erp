@@ -86,6 +86,7 @@ export function SupplierDetail({ tab }: { tab: DocumentTab }) {
       bankName: d.bankName || "",
       bankAccount: d.bankAccount || "",
       mfo: d.mfo || "",
+      openingBalance: Number(d.openingBalance) || 0,
       currentBalance: Number(d.currentBalance) || 0,
       currency: d.currency || "UZS",
       paymentTerms: d.paymentTerms || "",
@@ -264,9 +265,18 @@ export function SupplierDetail({ tab }: { tab: DocumentTab }) {
                 variant="outline"
                 size="sm"
                 onClick={() => {
+                  if (isDraft) {
+                    alert("Buyurtma berish uchun avval ta'minotchi rekvizitlarini saqlang!");
+                    return;
+                  }
+                  if (form.status === "Blocked") {
+                    alert("Ushbu ta'minotchi bloklangan (Stop-list). Yangi buyurtma berish taqiqlangan!");
+                    return;
+                  }
                   setLevel3Tab(tab.id, "orders");
                   setIsOrderModalOpen(true);
                 }}
+                disabled={form.status === "Blocked"}
                 className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5 text-primary" />
@@ -276,7 +286,13 @@ export function SupplierDetail({ tab }: { tab: DocumentTab }) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setIsPrintModalOpen(true)}
+                onClick={() => {
+                  if (isDraft) {
+                    alert("Akt-sverkani chop etish uchun avval ta'minotchini saqlang!");
+                    return;
+                  }
+                  setIsPrintModalOpen(true);
+                }}
                 className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
                 title="Akt Sverka chop etish"
               >
@@ -390,7 +406,7 @@ export function SupplierDetail({ tab }: { tab: DocumentTab }) {
                 supplier={form}
                 onChange={handleFieldChange}
                 financials={{
-                  openingBalance: 0,
+                  openingBalance: form.openingBalance || 0,
                   totalCredit,
                   totalDebit,
                   closingBalance,

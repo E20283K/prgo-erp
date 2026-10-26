@@ -59,7 +59,7 @@ export function SupplierOverviewTab({
   const curr = supplier.currency || "UZS";
   const fmtMoney = (val: number) => new Intl.NumberFormat("uz-UZ").format(val);
 
-  const openingBalance = financials?.openingBalance ?? 0;
+  const openingBalance = financials?.openingBalance ?? (supplier.openingBalance || 0);
   const totalCredit = financials?.totalCredit ?? 0;
   const totalDebit = financials?.totalDebit ?? 0;
   const closingBalance = financials?.closingBalance ?? (supplier.currentBalance || 0);
@@ -350,6 +350,19 @@ export function SupplierOverviewTab({
                 </SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-[11px] text-muted-foreground font-medium">
+              Boshlang&apos;ich qoldiq (Opening Saldo)
+            </Label>
+            <Input
+              type="number"
+              value={supplier.openingBalance ?? 0}
+              onChange={(e) => onChange({ openingBalance: parseFloat(e.target.value) || 0 })}
+              className="h-8 text-xs font-mono bg-background"
+              placeholder="0"
+            />
           </div>
 
           <div className="space-y-1.5">

@@ -17,6 +17,7 @@ import { DocumentHeader } from "@/components/documents/common/DocumentShell";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -33,7 +34,7 @@ import {
   Warehouse,
   History,
 } from "lucide-react";
-import { TradingCatalogItemRecord } from "./types";
+import { TradingCatalogItemRecord, TRADING_UNITS } from "./types";
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
@@ -58,103 +59,111 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
     addNotification,
     openTab,
     theme,
+    tradingSales,
+    tradingImports,
+    loadTradingData,
     upsertTradingCatalogItemAsync,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingCatalogItemRecord> = tab.documentData || {};
 
+  React.useEffect(() => {
+    if (!tradingSales || tradingSales.length === 0) {
+      loadTradingData("sales");
+    }
+    if (!tradingImports || tradingImports.length === 0) {
+      loadTradingData("imports");
+    }
+  }, [tradingSales, tradingImports, loadTradingData]);
+
   // Form State
-  const [sku] = useState<string>(rawData.sku || "ACC-SKU-01");
-  const [name, setName] = useState<string>(rawData.name || "Aksessuar Mahsuloti");
+  const [sku] = useState<string>(rawData.sku || "");
+  const [name, setName] = useState<string>(rawData.name || "");
   const [category, setCategory] = useState<
     "Tugmalar" | "Fermuarlar" | "Jakkard" | "Iplar" | "Yorliqlar" | "Furnitura"
   >(rawData.category || "Tugmalar");
   const [unit, setUnit] = useState<string>(rawData.unit || "dona");
 
   // Pricing
-  const [priceUZS, setPriceUZS] = useState<number>(rawData.priceUZS || 480);
+  const [priceUZS, setPriceUZS] = useState<number>(rawData.priceUZS || 0);
   const [wholesalePriceUZS, setWholesalePriceUZS] = useState<number>(
-    rawData.wholesalePriceUZS || 440
+    rawData.wholesalePriceUZS || 0
   );
   const [retailPriceUZS, setRetailPriceUZS] = useState<number>(
-    rawData.retailPriceUZS || 520
+    rawData.retailPriceUZS || 0
   );
   const [exchangeRate, setExchangeRate] = useState<number>(12850);
 
   // Stock
-  const [stockQty, setStockQty] = useState<number>(rawData.stockQty || 142000);
-  const [minStockLevel, setMinStockLevel] = useState<number>(rawData.minStockLevel || 20000);
-  const [origin, setOrigin] = useState<string>(rawData.origin || "Guangzhou, Xitoy (Import)");
+  const [stockQty, setStockQty] = useState<number>(rawData.stockQty || 0);
+  const [minStockLevel, setMinStockLevel] = useState<number>(rawData.minStockLevel || 0);
+  const [origin, setOrigin] = useState<string>(rawData.origin || "Guangzhou, Xitoy");
 
   // Technical Specs
-  const [material, setMaterial] = useState<string>(rawData.material || "Zamak metall qotishmasi");
-  const [colorCode, setColorCode] = useState<string>(rawData.colorCode || "Antik bronza / Kumush");
-  const [dimensions, setDimensions] = useState<string>(rawData.dimensions || "18mm diametr");
-  const [supplier, setSupplier] = useState<string>(
-    rawData.supplier || "Yiwu Accessories Industrial Group Ltd"
-  );
-  const [notes, setNotes] = useState<string>(
-    rawData.notes || "Kurtka va qalin kiyimlar uchun maxsus gravirovkali tugma."
-  );
+  const [material, setMaterial] = useState<string>(rawData.material || "");
+  const [colorCode, setColorCode] = useState<string>(rawData.colorCode || "");
+  const [dimensions, setDimensions] = useState<string>(rawData.dimensions || "");
+  const [supplier, setSupplier] = useState<string>(rawData.supplier || "");
+  const [notes, setNotes] = useState<string>(rawData.notes || "");
 
-  const priceUSD = priceUZS / exchangeRate;
+  const priceUSD = exchangeRate > 0 ? priceUZS / exchangeRate : 0;
 
-  // Real-world warehouse stock movements for Glide Data Grid
-  const stockMovements: StockMovementRow[] = useMemo(
-    () => [
-      {
-        id: "mov-1",
-        date: "2026-10-18",
-        type: "Chiqim (Sotuv)",
-        docNo: "TRD-2026-0842",
-        partner: "'REAL TEXTILE INVEST' MChJ",
-        qty: -25000,
-        balanceAfter: 142000,
-        priceFormatted: "480 UZS",
-      },
-      {
-        id: "mov-2",
-        date: "2026-10-14",
-        type: "Kirim (Import)",
-        docNo: "CN-2026-OCT-14",
-        partner: "Yiwu Accessories Industrial Group",
-        qty: 100000,
-        balanceAfter: 167000,
-        priceFormatted: "$0.025 FOB",
-      },
-      {
-        id: "mov-3",
-        date: "2026-10-10",
-        type: "Chiqim (Sotuv)",
-        docNo: "TRD-2026-0820",
-        partner: "'BUKHARA COTTON WEAVE' XK",
-        qty: -15000,
-        balanceAfter: 67000,
-        priceFormatted: "480 UZS",
-      },
-      {
-        id: "mov-4",
-        date: "2026-10-05",
-        type: "Chiqim (Sotuv)",
-        docNo: "TRD-2026-0795",
-        partner: "'SAMARKAND APPAREL' MChJ",
-        qty: -20000,
-        balanceAfter: 82000,
-        priceFormatted: "$0.037",
-      },
-      {
-        id: "mov-5",
-        date: "2026-09-28",
-        type: "Kirim (Import)",
-        docNo: "CN-2026-SEP-28",
-        partner: "Zhejiang Zipper & Button Factory",
-        qty: 50000,
-        balanceAfter: 102000,
-        priceFormatted: "$0.024 FOB",
-      },
-    ],
-    []
-  );
+  // Real-world warehouse stock movements derived from actual Sales & Imports
+  const stockMovements: StockMovementRow[] = useMemo(() => {
+    if (!sku) return [];
+    const list: StockMovementRow[] = [];
+
+    // 1. Gather all sales with this sku
+    (tradingSales || []).forEach((sale) => {
+      (sale.items || []).forEach((it) => {
+        if (it.sku && it.sku.toLowerCase() === sku.toLowerCase()) {
+          list.push({
+            id: `mov-sale-${sale.id}-${it.id}`,
+            date: sale.date,
+            type: "Chiqim (Sotuv)",
+            docNo: sale.docNo,
+            partner: sale.customer,
+            qty: -Number(it.quantity),
+            balanceAfter: 0,
+            priceFormatted:
+              sale.currency === "UZS"
+                ? `${(it.unitPriceUZS || it.unitPrice || 0).toLocaleString()} UZS`
+                : `$${(it.unitPriceUSD || 0).toFixed(3)}`,
+          });
+        }
+      });
+    });
+
+    // 2. Gather all imports with this sku
+    (tradingImports || []).forEach((imp) => {
+      (imp.items || []).forEach((it) => {
+        if (it.sku && it.sku.toLowerCase() === sku.toLowerCase()) {
+          list.push({
+            id: `mov-imp-${imp.id}-${it.id}`,
+            date: imp.date,
+            type: "Kirim (Import)",
+            docNo: imp.batchNo,
+            partner: imp.supplier,
+            qty: Number(it.quantity),
+            balanceAfter: 0,
+            priceFormatted: `$${(it.fobPriceUSD || 0).toFixed(3)} FOB`,
+          });
+        }
+      });
+    });
+
+    // Sort by date descending
+    list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    // Calculate balanceAfter backwards or forwards based on current stockQty
+    let runningBal = Number(stockQty) || 0;
+    for (let i = 0; i < list.length; i++) {
+      list[i].balanceAfter = runningBal;
+      runningBal = Math.max(0, runningBal - list[i].qty);
+    }
+
+    return list;
+  }, [tradingSales, tradingImports, sku, stockQty]);
 
   const [gridSelection, setGridSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -270,9 +279,18 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
     [stockMovements, openTab]
   );
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
+    if (!sku.trim() || !name.trim()) {
+      addNotification({
+        title: "Xatolik",
+        description: "Artikul (SKU) va tovar nomini kiritish majburiy.",
+        severity: "error",
+      });
+      return false;
+    }
+
     const payload: Partial<TradingCatalogItemRecord> = {
-      id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+      id: rawData.id && !rawData.id.startsWith("draft-") && !rawData.id.startsWith("TRD-ACC-") ? rawData.id : undefined,
       sku,
       name,
       category,
@@ -290,7 +308,16 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
       supplier,
       notes,
     };
-    await upsertTradingCatalogItemAsync(payload);
+    const saved = await upsertTradingCatalogItemAsync(payload);
+    if (!saved) {
+      addNotification({
+        title: "Xatolik yuz berdi",
+        description: "Mahsulotni bazaga saqlashda xatolik yuz berdi.",
+        severity: "error",
+      });
+      return false;
+    }
+
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Mahsulot saqlandi",
@@ -298,6 +325,7 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
       severity: "success",
       link: { module: "trading", subModule: "trading-catalog" },
     });
+    return true;
   };
 
   const handleCreateSale = () => {
@@ -362,9 +390,9 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
 
             <Button
               size="sm"
-              onClick={() => {
-                handleSave();
-                closeTab(tab.id);
+              onClick={async () => {
+                const ok = await handleSave();
+                if (ok) closeTab(tab.id);
               }}
               className="h-7 px-3 bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 font-medium shadow-none cursor-pointer"
             >
@@ -420,36 +448,60 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
               />
             </div>
 
-            <div>
-              <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Kategoriya:</Label>
-              <Select
-                value={category}
-                onValueChange={(val: any) => {
-                  setCategory(val);
-                  setTabUnsaved(tab.id, true);
-                }}
-              >
-                <SelectTrigger className="h-7 text-xs mt-0.5">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="text-xs">
-                  <SelectItem value="Tugmalar">Tugmalar</SelectItem>
-                  <SelectItem value="Fermuarlar">Fermuarlar</SelectItem>
-                  <SelectItem value="Jakkard">Jakkard</SelectItem>
-                  <SelectItem value="Iplar">Iplar</SelectItem>
-                  <SelectItem value="Yorliqlar">Yorliqlar</SelectItem>
-                  <SelectItem value="Furnitura">Furnitura</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="flex gap-1.5">
+              <div className="flex-1">
+                <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Kategoriya:</Label>
+                <Select
+                  value={category}
+                  onValueChange={(val: any) => {
+                    setCategory(val);
+                    setTabUnsaved(tab.id, true);
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-xs mt-0.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="text-xs">
+                    <SelectItem value="Tugmalar">Tugmalar</SelectItem>
+                    <SelectItem value="Fermuarlar">Fermuarlar</SelectItem>
+                    <SelectItem value="Jakkard">Jakkard</SelectItem>
+                    <SelectItem value="Iplar">Iplar</SelectItem>
+                    <SelectItem value="Yorliqlar">Yorliqlar</SelectItem>
+                    <SelectItem value="Furnitura">Furnitura</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-24">
+                <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Birlik:</Label>
+                <Select
+                  value={unit}
+                  onValueChange={(val) => {
+                    setUnit(val || "dona");
+                    setTabUnsaved(tab.id, true);
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-xs mt-0.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="text-xs">
+                    {TRADING_UNITS.map((u) => (
+                      <SelectItem key={u.value} value={u.value}>
+                        {u.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div>
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">B2B Standart Narx (UZS):</Label>
-              <Input
-                type="number"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={0}
                 value={priceUZS}
-                onChange={(e) => {
-                  setPriceUZS(Number(e.target.value) || 0);
+                onValueChange={(values) => {
+                  setPriceUZS(values.floatValue ?? 0);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs font-mono text-right mt-0.5"
@@ -458,11 +510,12 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
 
             <div>
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Ulgurji Narx (UZS):</Label>
-              <Input
-                type="number"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={0}
                 value={wholesalePriceUZS}
-                onChange={(e) => {
-                  setWholesalePriceUZS(Number(e.target.value) || 0);
+                onValueChange={(values) => {
+                  setWholesalePriceUZS(values.floatValue ?? 0);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs font-mono text-right mt-0.5"

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
 import { PlantRecord, createEmptyPlant } from "./plant/types";
 import {
@@ -48,7 +48,30 @@ export function PlantDetail({ tab }: PlantDetailProps) {
     updateTabData,
     closeTab,
     addNotification,
+    machines,
+    loadMachines,
+    departmentsList,
+    setDepartmentsList,
   } = useWorkspaceStore();
+
+  useEffect(() => {
+    if (machines.length === 0 && loadMachines) {
+      loadMachines();
+    }
+  }, [machines.length, loadMachines]);
+
+  useEffect(() => {
+    if (departmentsList.length === 0) {
+      fetch("/api/v1/hr/departments")
+        .then((r) => r.json())
+        .then((j) => {
+          if (j.success && Array.isArray(j.data)) {
+            setDepartmentsList(j.data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [departmentsList.length, setDepartmentsList]);
 
   // Resolve plant ID from tab data or tab id
   const plantId = useMemo(() => {
@@ -163,6 +186,38 @@ export function PlantDetail({ tab }: PlantDetailProps) {
     window.print();
   };
 
+  const plantDeptsCount = useMemo(() => {
+    const pId = (plantData.id || "").toLowerCase();
+    const pName = (plantData.name || "").toLowerCase();
+    const pShort = (plantData.shortName || "").toLowerCase();
+    const pCode = (plantData.code || "").toLowerCase();
+    const isMain = Boolean(plantData.isMain || plantData.id === "PLT-001" || pName.includes("bosh"));
+
+    return departmentsList.filter((d) => {
+      if (d.branchId && (d.branchId === plantData.id || d.branchId.toLowerCase() === pId)) return true;
+      if (d.plant) {
+        const dp = d.plant.toLowerCase();
+        if ((pName && dp.includes(pName)) || (pName && pName.includes(dp)) || (pShort && dp.includes(pShort)) || (pCode && dp.includes(pCode))) return true;
+      }
+      if (isMain && (!d.branchId || !d.plant || d.plant.toLowerCase().includes("bosh") || d.plant.toLowerCase().includes("tashkent"))) return true;
+      return false;
+    }).length;
+  }, [departmentsList, plantData]);
+
+  const plantMachinesCount = useMemo(() => {
+    const pName = (plantData.name || "").toLowerCase();
+    const pShort = (plantData.shortName || "").toLowerCase();
+    const pCode = (plantData.code || "").toLowerCase();
+    const isMain = Boolean(plantData.isMain || plantData.id === "PLT-001" || pName.includes("bosh"));
+
+    return machines.filter((m) => {
+      const loc = (m.location || "").toLowerCase();
+      if (loc && ((pName && loc.includes(pName)) || (pName && pName.includes(loc)) || (pShort && loc.includes(pShort)) || (pCode && loc.includes(pCode)))) return true;
+      if (isMain && (!m.location || loc.includes("tashkent") || loc.includes("main") || loc.includes("bosh"))) return true;
+      return false;
+    }).length;
+  }, [machines, plantData]);
+
   const navItems: DocumentNavItem[] = [
     {
       id: "overview",
@@ -179,7 +234,7 @@ export function PlantDetail({ tab }: PlantDetailProps) {
       id: "departments",
       label: "Sexlar & Mashinalar",
       icon: Layers,
-      badge: `${plantData.departments?.length || 0}`,
+      badge: `${plantDeptsCount + plantMachinesCount}`,
     },
     {
       id: "warehouses",
@@ -306,8 +361,11 @@ export function PlantDetail({ tab }: PlantDetailProps) {
               <InfoRow label="Smena">
                 {plantData.shiftRegime || "—"}
               </InfoRow>
+              <InfoRow label="Sexlar">
+                {`${plantDeptsCount} ta`}
+              </InfoRow>
               <InfoRow label="Stanoklar">
-                {`${plantData.departments?.reduce((acc, d) => acc + d.machinesCount, 0) || plantData.machinesCount} ta`}
+                {`${plantMachinesCount} ta`}
               </InfoRow>
               <InfoRow label="Omborlar">
                 {`${plantData.warehouses?.length || 0} ta`}

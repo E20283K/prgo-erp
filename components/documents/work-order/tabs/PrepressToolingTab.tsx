@@ -14,6 +14,8 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -1111,10 +1113,9 @@ export function PrepressToolingTab({
                 <Label className="text-[11px] text-muted-foreground font-medium">
                   Yetkazish muddati (Deadline)
                 </Label>
-                <Input
-                  type="date"
+                <DatePicker
                   value={poForm.deliveryDeadline}
-                  onChange={(e) => setPoForm((prev) => ({ ...prev, deliveryDeadline: e.target.value }))}
+                  onChange={(val) => setPoForm((prev) => ({ ...prev, deliveryDeadline: val }))}
                   className="h-8 text-xs bg-background"
                 />
               </div>
@@ -1255,15 +1256,16 @@ export function PrepressToolingTab({
                   <Label className="text-[11px] text-muted-foreground font-medium truncate" title="1 birlik narxi">
                     Dona narxi
                   </Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={2}
                     value={
                       editingItem.quantity && editingItem.quantity > 0
                         ? Math.round(((editingItem.estimatedCost || 0) / editingItem.quantity) * 100) / 100
                         : 0
                     }
-                    onChange={(e) => {
-                      const uPrice = parseFloat(e.target.value) || 0;
+                    onValueChange={(values) => {
+                      const uPrice = values.floatValue ?? 0;
                       const qty = editingItem.quantity || 1;
                       setEditingItem((prev) => ({
                         ...prev,
@@ -1281,13 +1283,14 @@ export function PrepressToolingTab({
                   >
                     Jami summa ({editingItem.currency || formData.currency || "UZS"})
                   </Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={2}
                     value={editingItem.estimatedCost || 0}
-                    onChange={(e) =>
+                    onValueChange={(values) =>
                       setEditingItem((prev) => ({
                         ...prev,
-                        estimatedCost: parseFloat(e.target.value) || 0,
+                        estimatedCost: values.floatValue ?? 0,
                       }))
                     }
                     className="h-8 text-xs font-mono bg-background font-semibold"

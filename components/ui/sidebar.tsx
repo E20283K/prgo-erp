@@ -28,7 +28,7 @@ import { useWorkspaceStore } from "@/store/workspaceStore"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "16rem"
+const SIDEBAR_WIDTH = "15rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
@@ -323,9 +323,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   }
 
   const handleDoubleClick = () => {
-    setSidebarWidth(300)
+    setSidebarWidth(240)
     try {
-      localStorage.setItem("printgoo_sidebar_width", "300")
+      localStorage.setItem("printgoo_sidebar_width", "240")
     } catch (err) {}
   }
 
@@ -350,7 +350,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       title={
         state === "collapsed"
           ? "Click to expand sidebar"
-          : "Drag to resize sidebar (Double-click to reset 300px)"
+          : "Drag to resize sidebar (Double-click to reset 240px)"
       }
       className={cn(
         "absolute inset-y-0 z-20 hidden w-3 transition-all ease-linear group-data-[side=left]:-right-1.5 group-data-[side=right]:left-0 sm:flex items-center justify-center cursor-col-resize select-none",

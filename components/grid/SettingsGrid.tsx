@@ -21,6 +21,7 @@ import { createEmptyUser } from "@/components/documents/user/data";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -515,11 +516,11 @@ export function SettingsGrid({ type }: SettingsGridProps) {
                           <Label className="text-xs font-medium">
                             Unit Rate ($ USD)
                           </Label>
-                          <Input
-                            type="number"
-                            step="0.1"
+                          <MoneyInput
+                            thousandSeparator=" "
+                            decimalScale={2}
                             value={editRateUsd}
-                            onChange={(e) => setEditRateUsd(e.target.value)}
+                            onValueChange={(values) => setEditRateUsd(values.value)}
                             className="h-8 text-xs font-mono"
                           />
                         </div>
@@ -527,11 +528,11 @@ export function SettingsGrid({ type }: SettingsGridProps) {
                           <Label className="text-xs font-medium">
                             Setup / Make-Ready ($ USD)
                           </Label>
-                          <Input
-                            type="number"
-                            step="1"
+                          <MoneyInput
+                            thousandSeparator=" "
+                            decimalScale={2}
                             value={editSetupUsd}
-                            onChange={(e) => setEditSetupUsd(e.target.value)}
+                            onValueChange={(values) => setEditSetupUsd(values.value)}
                             className="h-8 text-xs font-mono"
                           />
                         </div>

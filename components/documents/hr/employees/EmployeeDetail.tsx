@@ -60,6 +60,8 @@ import {
 } from "../../common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -67,6 +69,7 @@ import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
+import { generateNextCode } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -149,6 +152,8 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     positionsList,
     setDepartmentsList,
     setPositionsList,
+    plants,
+    fetchPlants,
     openTab,
     theme,
   } = useWorkspaceStore();
@@ -188,10 +193,11 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     if (found) {
       return parseFIO(found);
     }
+    const nextBadge = generateNextCode("EMP", employees.map((e) => e.badgeNumber || e.badgeNo), 4);
     return {
       id: empId,
-      badgeNumber: "EMP-0001",
-      badgeNo: "EMP-0001",
+      badgeNumber: nextBadge,
+      badgeNo: nextBadge,
       firstName: "",
       lastName: "",
       middleName: "",
@@ -271,7 +277,11 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         }
       })
       .catch(() => {});
-  }, [setDepartmentsList, setPositionsList]);
+    // Load plants if empty
+    if (plants.length === 0 && fetchPlants) {
+      fetchPlants();
+    }
+  }, [setDepartmentsList, setPositionsList, plants.length, fetchPlants]);
 
   // API load for employee's piecework and attendance
   const [apiPieceworks, setApiPieceworks] = useState<PieceworkRecord[] | null>(null);
@@ -727,15 +737,6 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
   const departmentOptions = useMemo<ComboboxOption[]>(() => {
     const list = departmentsList || [];
-    const defaults = [
-      "Flekso bosma sexi",
-      "Tikuvchilik va lenta sexi",
-      "Kesish va qadoqlash sexi",
-      "Prepress va dizayn",
-      "Sifat nazorati (OTK)",
-      "Ombor va logistika",
-      "Boshqaruv va ma'muriyat",
-    ];
     const seen = new Set<string>();
     const result: ComboboxOption[] = [];
 
@@ -745,15 +746,8 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         result.push({
           value: d.name,
           label: d.name,
-          description: d.code ? `Kodi: ${d.code}` : undefined,
+          description: d.code ? `Kodi: ${d.code}${d.plant ? ` • ${d.plant}` : ""}` : (d.plant ? `Filial: ${d.plant}` : undefined),
         });
-      }
-    });
-
-    defaults.forEach((def) => {
-      if (!seen.has(def)) {
-        seen.add(def);
-        result.push({ value: def, label: def });
       }
     });
 
@@ -767,18 +761,6 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
   const positionOptions = useMemo<ComboboxOption[]>(() => {
     const list = positionsList || [];
-    const defaults = [
-      "Pechatnik",
-      "Bosh mutaxassis",
-      "Operator",
-      "Yordamchi ishchi",
-      "Bosh texnolog",
-      "Sex boshlig'i",
-      "Dizayner",
-      "Sifat nazoratchisi",
-      "Ombor mudiri",
-      "Mexanik-sozlovchi",
-    ];
     const seen = new Set<string>();
     const result: ComboboxOption[] = [];
 
@@ -793,13 +775,6 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       }
     });
 
-    defaults.forEach((def) => {
-      if (!seen.has(def)) {
-        seen.add(def);
-        result.push({ value: def, label: def });
-      }
-    });
-
     const current = formData.positionTitle || formData.position;
     if (current && !seen.has(current)) {
       result.push({ value: current, label: current });
@@ -809,12 +784,28 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
   }, [positionsList, formData.positionTitle, formData.position]);
 
   const plantOptions = useMemo<ComboboxOption[]>(() => {
-    return [
-      { value: "PrintGoo Bosh Zavod", label: "PrintGoo Bosh Zavod", description: "Bosh ishlab chiqarish majmuasi" },
-      { value: "PrintGoo Chilonzor Filiali", label: "PrintGoo Chilonzor Filiali", description: "Kesish va qadoqlash" },
-      { value: "PrintGoo Yangiyo'l Markazi", label: "PrintGoo Yangiyo'l Markazi", description: "Ombor va logistika" },
-    ];
-  }, []);
+    const list = plants || [];
+    const seen = new Set<string>();
+    const result: ComboboxOption[] = [];
+
+    list.forEach((p) => {
+      if (p.name && !seen.has(p.name)) {
+        seen.add(p.name);
+        result.push({
+          value: p.name,
+          label: p.name,
+          description: p.code ? `Kodi: ${p.code}${p.branchType ? ` • ${p.branchType}` : ""}` : (p.branchType || undefined),
+        });
+      }
+    });
+
+    const current = formData.plant;
+    if (current && !seen.has(current)) {
+      result.push({ value: current, label: current });
+    }
+
+    return result;
+  }, [plants, formData.plant]);
 
   const handleSave = async (shouldClose = false) => {
     const lName = formData.lastName?.trim() || "";
@@ -1317,7 +1308,16 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                           items={departmentOptions}
                           value={formData.departmentName || formData.department || ""}
                           onValueChange={(val) => {
-                            if (val) handleUpdate({ departmentName: val, department: val });
+                            if (val) {
+                              const matched = departmentsList.find((d) => d.name === val || d.id === val);
+                              handleUpdate({
+                                departmentName: val,
+                                department: val,
+                                departmentId: matched?.id || formData.departmentId,
+                                departmentCode: matched?.code || formData.departmentCode,
+                                plant: matched?.plant || formData.plant,
+                              });
+                            }
                           }}
                           allowCustom
                           placeholder="Bo'limni tanlang..."
@@ -1360,7 +1360,15 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                           items={positionOptions}
                           value={formData.positionTitle || formData.position || ""}
                           onValueChange={(val) => {
-                            if (val) handleUpdate({ positionTitle: val, position: val });
+                            if (val) {
+                              const matched = positionsList.find((p) => p.title === val || p.id === val);
+                              handleUpdate({
+                                positionTitle: val,
+                                position: val,
+                                positionId: matched?.id || formData.positionId,
+                                wageType: (matched?.defaultWageType as any) || formData.wageType,
+                              });
+                            }
                           }}
                           allowCustom
                           placeholder="Lavozimni tanlang..."
@@ -1446,10 +1454,9 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             </span>
                           )}
                         </div>
-                        <Input
-                          type="date"
+                        <DatePicker
                           value={formData.hireDate}
-                          onChange={(e) => handleUpdate({ hireDate: e.target.value })}
+                          onChange={(val) => handleUpdate({ hireDate: val })}
                           className={`h-8 font-mono ${errors.hireDate ? "border-destructive focus-visible:ring-destructive" : ""}`}
                         />
                       </div>
@@ -1569,10 +1576,11 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
                   <div>
                     <Label className="text-xs">Asosiy oklad (UZS) *</Label>
-                    <Input
-                      type="number"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={0}
                       value={formData.baseSalary}
-                      onChange={(e) => handleUpdate({ baseSalary: Number(e.target.value) || 0 })}
+                      onValueChange={(values) => handleUpdate({ baseSalary: values.floatValue ?? 0 })}
                       className="h-8 font-mono font-semibold"
                     />
                   </div>
@@ -1595,10 +1603,11 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
                   <div>
                     <Label className="text-xs">Soatbay stavka (UZS/soat)</Label>
-                    <Input
-                      type="number"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={0}
                       value={formData.hourlyRate}
-                      onChange={(e) => handleUpdate({ hourlyRate: Number(e.target.value) || 0 })}
+                      onValueChange={(values) => handleUpdate({ hourlyRate: values.floatValue ?? 0 })}
                       className="h-8 font-mono"
                     />
                   </div>

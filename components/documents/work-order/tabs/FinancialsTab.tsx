@@ -24,6 +24,7 @@ import { TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "cn";
 import {
@@ -773,11 +774,11 @@ export function FinancialsTab({
               Sotuv narxi:
             </span>
             <div className="relative w-32">
-              <Input
-                type="number"
-                step="0.01"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={currency === "UZS" ? 0 : 2}
                 value={customPriceInput}
-                onChange={(e) => handleCustomPriceChange(e.target.value)}
+                onValueChange={(values) => handleCustomPriceChange(values.value)}
                 className="h-6.5 text-xs font-mono font-bold pl-5.5 pr-1.5 bg-background"
               />
               <DollarSign className="size-3 text-muted-foreground absolute left-1.5 top-2 pointer-events-none" />

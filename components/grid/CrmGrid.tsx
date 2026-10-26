@@ -382,6 +382,7 @@ export function CrmGrid({ type }: CrmGridProps) {
         tin: "",
         contactPerson: "",
         phone: "",
+        openingBalance: 0,
         currentBalance: 0,
         currency: "UZS",
         paymentTerms: "100% Shartnoma bo'yicha",

@@ -14,6 +14,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -349,10 +350,12 @@ export function CustomerSettlementsTab({
         <div className="px-4 py-2.5 bg-muted/80 border-b border-border flex flex-wrap items-end gap-3 shrink-0">
           <div className="space-y-1 w-36">
             <Label className="text-[11px] font-semibold">To&apos;lov summasi ($)</Label>
-            <Input
+            <MoneyInput
+              thousandSeparator=" "
+              decimalScale={2}
               value={paymentAmount}
-              onChange={(e) => setPaymentAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-              placeholder="5000"
+              onValueChange={(values) => setPaymentAmount(values.value)}
+              placeholder="5 000"
               className="h-7 text-xs font-mono bg-background"
             />
           </div>

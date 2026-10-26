@@ -3,6 +3,7 @@ import {
   suppliers,
   supplierOrders,
   supplierPayments,
+  supplierContracts,
   bankAccounts,
   warehouseReceipts,
 } from "@/db/schema";
@@ -33,12 +34,33 @@ export interface SupplierRecord {
   bankName?: string;
   bankAccount?: string;
   mfo?: string;
+  openingBalance: number;
   currentBalance: number;
   currency: string;
   paymentTerms?: string;
   address?: string;
   notes?: string;
   status: "Active" | "Blocked" | "Archived";
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SupplierContractRecord {
+  id: string;
+  companyId?: string;
+  supplierId: string;
+  contractNo: string;
+  title: string;
+  type: "annual" | "one_time" | "framework";
+  startDate: string;
+  endDate?: string;
+  status: "active" | "expired" | "suspended";
+  paymentTerms?: string;
+  currency: string;
+  attachmentName?: string;
+  attachmentUrl?: string;
+  attachmentSize?: string;
+  notes?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -114,6 +136,7 @@ export async function getSuppliers(companyCode: string = "PRINTGOO"): Promise<Su
     bankName: s.bankName || undefined,
     bankAccount: s.bankAccount || undefined,
     mfo: s.mfo || undefined,
+    openingBalance: Number(s.openingBalance) || 0,
     currentBalance: Number(s.currentBalance) || 0,
     currency: s.currency || "UZS",
     paymentTerms: s.paymentTerms || "",
@@ -150,6 +173,7 @@ export async function getSupplierById(idOrCode: string, companyCode: string = "P
     bankName: s.bankName || undefined,
     bankAccount: s.bankAccount || undefined,
     mfo: s.mfo || undefined,
+    openingBalance: Number(s.openingBalance) || 0,
     currentBalance: Number(s.currentBalance) || 0,
     currency: s.currency || "UZS",
     paymentTerms: s.paymentTerms || "",
@@ -200,6 +224,7 @@ export async function upsertSupplier(
         bankName: data.bankName !== undefined ? data.bankName : existing.bankName,
         bankAccount: data.bankAccount !== undefined ? data.bankAccount : existing.bankAccount,
         mfo: data.mfo !== undefined ? data.mfo : existing.mfo,
+        openingBalance: data.openingBalance !== undefined ? data.openingBalance.toString() : existing.openingBalance,
         currentBalance: data.currentBalance !== undefined ? data.currentBalance.toString() : existing.currentBalance,
         currency: data.currency || existing.currency,
         paymentTerms: data.paymentTerms !== undefined ? data.paymentTerms : existing.paymentTerms,
@@ -228,6 +253,7 @@ export async function upsertSupplier(
         bankName: data.bankName || null,
         bankAccount: data.bankAccount || null,
         mfo: data.mfo || null,
+        openingBalance: (data.openingBalance || 0).toString(),
         currentBalance: (data.currentBalance || 0).toString(),
         currency: data.currency || "UZS",
         paymentTerms: data.paymentTerms || null,
@@ -488,6 +514,7 @@ export async function recordSupplierPayment(
 export async function getSupplierSettlementLedger(supplierIdOrCode: string, companyCode: string = "PRINTGOO"): Promise<{
   supplier: SupplierRecord;
   ledger: SupplierLedgerEntry[];
+  openingBalance: number;
   totalCredit: number; // Jami olingan tovar/xizmat
   totalDebit: number;  // Jami to'langan pul
   closingBalance: number; // Qoldiq qarzimiz
@@ -506,6 +533,9 @@ export async function getSupplierSettlementLedger(supplierIdOrCode: string, comp
     ),
     orderBy: [supplierOrders.orderDate],
   });
+
+  // Track order numbers so we don't duplicate warehouse receipts that correspond to these orders
+  const orderNoSet = new Set(orders.map((o) => (o.orderNo || "").toLowerCase().trim()));
 
   // 2. Ombor kirimlari (agar supplierName bo'yicha bog'langan bo'lsa)
   const receipts = await db.query.warehouseReceipts.findMany({
@@ -554,13 +584,19 @@ export async function getSupplierSettlementLedger(supplierIdOrCode: string, comp
     });
   }
 
-  // Ombor kirimlari (agar orders da bo'lmagan mustaqil kirim bo'lsa)
+  // Ombor kirimlari: agar buyurtmada allaqachon hisoblanmagan bo'lsa
   for (const r of receipts) {
+    const poNum = (r.poNumber || "").toLowerCase().trim();
+    if (poNum && orderNoSet.has(poNum)) {
+      // Alla qachon buyurtmalar qismida hisobga olingan, dublikat qilinmaydi!
+      continue;
+    }
+
     rawEntries.push({
       date: r.receiptDate.toISOString().split("T")[0],
       docNo: r.receiptNumber,
       docType: "Kirim / Xizmat",
-      description: `Ombor kirimi (PO: ${r.poNumber || "-"})`,
+      description: `Ombor kirimi${r.poNumber ? ` (PO: ${r.poNumber})` : ""}`,
       debit: 0,
       credit: Number(r.totalAmount) || 0,
       createdAt: r.createdAt,
@@ -586,7 +622,8 @@ export async function getSupplierSettlementLedger(supplierIdOrCode: string, comp
     return a.createdAt.getTime() - b.createdAt.getTime();
   });
 
-  let runningBalance = 0;
+  const openingBalance = Number(supp.openingBalance) || 0;
+  let runningBalance = openingBalance;
   let totalCredit = 0;
   let totalDebit = 0;
 
@@ -611,6 +648,7 @@ export async function getSupplierSettlementLedger(supplierIdOrCode: string, comp
   return {
     supplier: supp,
     ledger,
+    openingBalance,
     totalCredit,
     totalDebit,
     closingBalance: runningBalance,
@@ -620,6 +658,11 @@ export async function getSupplierSettlementLedger(supplierIdOrCode: string, comp
 // ─── 5. Sync Supplier Balance ─────────────────────────────────────────────────
 
 export async function syncSupplierBalance(companyId: string, supplierId: string) {
+  const supp = await db.query.suppliers.findFirst({
+    where: and(eq(suppliers.companyId, companyId), eq(suppliers.id, supplierId)),
+  });
+  if (!supp) return;
+
   // Barcha buyurtmalar summasi (Credit)
   const orders = await db.query.supplierOrders.findMany({
     where: and(
@@ -629,6 +672,26 @@ export async function syncSupplierBalance(companyId: string, supplierId: string)
     ),
   });
 
+  const orderNoSet = new Set(orders.map((o) => (o.orderNo || "").toLowerCase().trim()));
+
+  const receipts = await db.query.warehouseReceipts.findMany({
+    where: and(
+      eq(warehouseReceipts.companyId, companyId),
+      or(
+        eq(warehouseReceipts.supplierName, supp.name),
+        eq(warehouseReceipts.supplierName, supp.legalName || "")
+      )
+    ),
+  });
+
+  let totalCredit = orders.reduce((sum, o) => sum + Number(o.amount), 0);
+  for (const r of receipts) {
+    const poNum = (r.poNumber || "").toLowerCase().trim();
+    if (!poNum || !orderNoSet.has(poNum)) {
+      totalCredit += Number(r.totalAmount) || 0;
+    }
+  }
+
   // Barcha to'lovlar summasi (Debit)
   const payments = await db.query.supplierPayments.findMany({
     where: and(
@@ -637,9 +700,9 @@ export async function syncSupplierBalance(companyId: string, supplierId: string)
     ),
   });
 
-  const totalCredit = orders.reduce((sum, o) => sum + Number(o.amount), 0);
   const totalDebit = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const closingBalance = totalCredit - totalDebit;
+  const openingBalance = Number(supp.openingBalance) || 0;
+  const closingBalance = openingBalance + totalCredit - totalDebit;
 
   await db
     .update(suppliers)
@@ -648,4 +711,131 @@ export async function syncSupplierBalance(companyId: string, supplierId: string)
       updatedAt: new Date(),
     })
     .where(eq(suppliers.id, supplierId));
+}
+
+// ─── 6. Supplier Contracts (Haqiqiy Shartnomalar) ─────────────────────────────
+
+export async function getSupplierContracts(
+  supplierIdOrCode: string,
+  companyCode: string = "PRINTGOO"
+): Promise<SupplierContractRecord[]> {
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  const supp = await db.query.suppliers.findFirst({
+    where: and(
+      eq(suppliers.companyId, companyId),
+      or(eq(suppliers.id, supplierIdOrCode), eq(suppliers.code, supplierIdOrCode))
+    ),
+  });
+
+  if (!supp) return [];
+
+  const raw = await db.query.supplierContracts.findMany({
+    where: and(
+      eq(supplierContracts.companyId, companyId),
+      eq(supplierContracts.supplierId, supp.id)
+    ),
+    orderBy: [desc(supplierContracts.createdAt)],
+  });
+
+  return raw.map((c) => ({
+    id: c.id,
+    companyId: c.companyId,
+    supplierId: c.supplierId,
+    contractNo: c.contractNo,
+    title: c.title,
+    type: c.type as any,
+    startDate: c.startDate,
+    endDate: c.endDate || undefined,
+    status: c.status as any,
+    paymentTerms: c.paymentTerms || undefined,
+    currency: c.currency,
+    attachmentName: c.attachmentName || undefined,
+    attachmentUrl: c.attachmentUrl || undefined,
+    attachmentSize: c.attachmentSize || undefined,
+    notes: c.notes || undefined,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
+  }));
+}
+
+export async function upsertSupplierContract(
+  data: Partial<SupplierContractRecord>,
+  companyCode: string = "PRINTGOO"
+) {
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  let existing = null;
+  if (data.id && !data.id.startsWith("cont-") && !data.id.startsWith("draft-")) {
+    existing = await db.query.supplierContracts.findFirst({
+      where: and(
+        eq(supplierContracts.companyId, companyId),
+        eq(supplierContracts.id, data.id)
+      ),
+    });
+  }
+
+  if (existing) {
+    const [updated] = await db
+      .update(supplierContracts)
+      .set({
+        contractNo: data.contractNo || existing.contractNo,
+        title: data.title || existing.title,
+        type: data.type || existing.type,
+        startDate: data.startDate || existing.startDate,
+        endDate: data.endDate !== undefined ? data.endDate : existing.endDate,
+        status: data.status || existing.status,
+        paymentTerms: data.paymentTerms !== undefined ? data.paymentTerms : existing.paymentTerms,
+        currency: data.currency || existing.currency,
+        attachmentName: data.attachmentName !== undefined ? data.attachmentName : existing.attachmentName,
+        attachmentUrl: data.attachmentUrl !== undefined ? data.attachmentUrl : existing.attachmentUrl,
+        attachmentSize: data.attachmentSize !== undefined ? data.attachmentSize : existing.attachmentSize,
+        notes: data.notes !== undefined ? data.notes : existing.notes,
+        updatedAt: new Date(),
+      })
+      .where(eq(supplierContracts.id, existing.id))
+      .returning();
+
+    return { success: true, contract: updated };
+  } else {
+    const [created] = await db
+      .insert(supplierContracts)
+      .values({
+        companyId,
+        supplierId: data.supplierId!,
+        contractNo: data.contractNo || `SH-${Date.now().toString().slice(-6)}`,
+        title: data.title || "Yetkazib berish shartnomasi",
+        type: data.type || "annual",
+        startDate: data.startDate || new Date().toISOString().split("T")[0],
+        endDate: data.endDate || null,
+        status: data.status || "active",
+        paymentTerms: data.paymentTerms || null,
+        currency: data.currency || "UZS",
+        attachmentName: data.attachmentName || null,
+        attachmentUrl: data.attachmentUrl || null,
+        attachmentSize: data.attachmentSize || null,
+        notes: data.notes || null,
+      })
+      .returning();
+
+    return { success: true, contract: created };
+  }
+}
+
+export async function deleteSupplierContract(
+  contractId: string,
+  companyCode: string = "PRINTGOO"
+) {
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  await db
+    .delete(supplierContracts)
+    .where(
+      and(
+        eq(supplierContracts.companyId, companyId),
+        eq(supplierContracts.id, contractId)
+      )
+    );
+
+  return { success: true };
 }

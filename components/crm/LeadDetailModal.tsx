@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -384,19 +385,20 @@ export function LeadDetailModal({
                 <div className="space-y-1">
                   <Label className="text-xs">{t("estimatedValue")}</Label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-muted-foreground">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-muted-foreground z-10">
                       <DollarSign className="size-3.5" />
                     </div>
-                    <Input
-                      type="number"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={2}
                       value={formState.estimatedOrderUsd || ""}
-                      onChange={(e) =>
+                      onValueChange={(values) =>
                         setFormState({
                           ...formState,
-                          estimatedOrderUsd: Number(e.target.value) || 0,
+                          estimatedOrderUsd: values.floatValue ?? 0,
                         })
                       }
-                      className="h-8 text-xs font-mono font-semibold pl-8 bg-background [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      className="h-8 text-xs font-mono font-semibold pl-8 bg-background"
                     />
                   </div>
                 </div>

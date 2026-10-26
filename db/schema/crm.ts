@@ -287,6 +287,7 @@ export const suppliers = pgTable(
     bankName: varchar("bank_name", { length: 255 }),
     bankAccount: varchar("bank_account", { length: 64 }),
     mfo: varchar("mfo", { length: 16 }),
+    openingBalance: numeric("opening_balance", { precision: 18, scale: 2 }).default("0.00").notNull(),
     currentBalance: numeric("current_balance", { precision: 18, scale: 2 }).default("0.00").notNull(),
     currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
     paymentTerms: varchar("payment_terms", { length: 128 }),
@@ -311,6 +312,7 @@ export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
     references: [companies.id],
   }),
   orders: many(supplierOrders),
+  contracts: many(supplierContracts),
 }));
 
 // ─── 6. Supplier Orders (Purchase Orders / CTP, Shtamp, Xomashyo Buyurtmalari) ──
@@ -367,5 +369,52 @@ export const supplierOrdersRelations = relations(supplierOrders, ({ one }) => ({
     references: [workOrders.id],
   }),
 }));
+
+// ─── 7. Supplier Contracts (Ta'minotchi Shartnomalari) ────────────────────────
+
+export const supplierContracts = pgTable(
+  "supplier_contracts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    contractNo: varchar("contract_no", { length: 64 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    type: contractTypeEnum("type").default("annual").notNull(),
+    startDate: varchar("start_date", { length: 32 }).notNull(),
+    endDate: varchar("end_date", { length: 32 }),
+    status: contractStatusEnum("status").default("active").notNull(),
+    paymentTerms: varchar("payment_terms", { length: 128 }),
+    currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
+    attachmentName: varchar("attachment_name", { length: 255 }),
+    attachmentUrl: text("attachment_url"),
+    attachmentSize: varchar("attachment_size", { length: 64 }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("supplier_contracts_supplier_no_uq").on(table.supplierId, table.contractNo),
+    index("supplier_contracts_supplier_idx").on(table.supplierId),
+    index("supplier_contracts_company_idx").on(table.companyId),
+    index("supplier_contracts_status_idx").on(table.status),
+  ]
+);
+
+export const supplierContractsRelations = relations(supplierContracts, ({ one }) => ({
+  company: one(companies, {
+    fields: [supplierContracts.companyId],
+    references: [companies.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [supplierContracts.supplierId],
+    references: [suppliers.id],
+  }),
+}));
+
 
 

@@ -15,11 +15,22 @@ export interface TradingSaleItem {
 
 export type TradingCurrency = "UZS" | "USD";
 
+export const TRADING_UNITS = [
+  { value: "dona", label: "dona" },
+  { value: "to'plam", label: "to'plam" },
+  { value: "rulon", label: "rulon" },
+  { value: "m", label: "m" },
+  { value: "kg", label: "kg" },
+  { value: "bobo", label: "bobo" },
+  { value: "pachka", label: "pachka" },
+  { value: "juft", label: "juft" },
+] as const;
+
 export interface TradingSaleRecord {
   id: string;
   docNo: string;
   date: string;
-  sellerEntityId: "ytt-qodirov" | "ytt-aliyev" | "ytt-toshmatov" | "mchj-printgoo";
+  sellerEntityId: string;
   sellerEntityName: string;
   sellerEntityInn: string;
   customer: string;
@@ -73,7 +84,7 @@ export interface TradingImportBatchRecord {
   id: string;
   batchNo: string;
   date: string;
-  origin: "Guangzhou, Xitoy" | "Yiwu, Xitoy" | "Shanghai, Xitoy";
+  origin: string;
   supplier: string;
   fobAmountUSD: number;
   internationalCargoUSD: number;
@@ -114,6 +125,7 @@ export interface TradingSettlementLedgerEntry {
   date: string;
   docNo: string;
   docType: "Sotuv Hujjati" | "Bank To'lovi" | "Boshlang'ich Saldo";
+  sellerEntityId?: string;
   sellerEntityName: string;
   customer: string;
   debit: number;

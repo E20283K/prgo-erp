@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
 import { PositionRecord } from "../types";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../../common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -22,6 +23,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
+import { generateNextCode } from "@/lib/utils";
 import { Briefcase, Users, CreditCard, Save, Printer, CheckCircle2 } from "lucide-react";
 
 interface PositionDetailProps {
@@ -29,8 +32,31 @@ interface PositionDetailProps {
 }
 
 export function PositionDetail({ tab }: PositionDetailProps) {
-  const { positionsList, upsertPosition, employees, openTab, setTabUnsaved, updateTabData, closeTab, addNotification } =
-    useWorkspaceStore();
+  const {
+    positionsList,
+    upsertPosition,
+    employees,
+    openTab,
+    setTabUnsaved,
+    updateTabData,
+    closeTab,
+    addNotification,
+    departmentsList,
+    setDepartmentsList,
+  } = useWorkspaceStore();
+
+  useEffect(() => {
+    if (departmentsList.length === 0) {
+      fetch("/api/v1/hr/departments")
+        .then((r) => r.json())
+        .then((j) => {
+          if (j.success && Array.isArray(j.data)) {
+            setDepartmentsList(j.data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [departmentsList.length, setDepartmentsList]);
 
   const posId = useMemo(() => {
     if (tab.documentData?.id) return tab.documentData.id;
@@ -43,10 +69,11 @@ export function PositionDetail({ tab }: PositionDetailProps) {
       return tab.documentData;
     }
     const found = positionsList.find((p) => p.id === posId || p.code === posId);
+    const nextCode = generateNextCode("POS", positionsList.map((p) => p.code), 2);
     return (
       found || {
         id: posId,
-        code: "POS-NEW",
+        code: nextCode,
         title: tab.title || "Yangi lavozim",
         departmentName: "",
         defaultWageType: "piecework",
@@ -61,6 +88,14 @@ export function PositionDetail({ tab }: PositionDetailProps) {
   const [formData, setFormData] = useState<PositionRecord>(initialPos);
   const [activeTab, setActiveTab] = useState<string>("overview");
   const [isSaved, setIsSaved] = useState(false);
+
+  const departmentOptions = useMemo<ComboboxOption[]>(() => {
+    return departmentsList.map((d) => ({
+      value: d.name,
+      label: d.name,
+      description: d.code ? `Kodi: ${d.code}` : undefined,
+    }));
+  }, [departmentsList]);
 
   // Position employees
   const positionEmployees = useMemo(() => {
@@ -197,12 +232,41 @@ export function PositionDetail({ tab }: PositionDetailProps) {
                     />
                   </div>
 
-                  <div>
-                    <Label className="text-xs">Biriktirilgan sex / bo'lim</Label>
-                    <Input
+                  <div className="min-w-0">
+                    <Label className="text-xs">Biriktirilgan sex / bo&apos;lim</Label>
+                    <ComboboxSelect
+                      items={departmentOptions}
                       value={formData.departmentName || ""}
-                      onChange={(e) => handleUpdate({ departmentName: e.target.value })}
-                      className="h-8"
+                      onValueChange={(val) => {
+                        const dept = departmentsList.find((d) => d.name === val || d.id === val);
+                        handleUpdate({
+                          departmentName: val,
+                          departmentId: dept?.id || formData.departmentId,
+                        });
+                      }}
+                      placeholder="Bo'limni tanlang..."
+                      className="h-8 text-xs w-full font-medium"
+                      contentClassName="w-[300px]"
+                      actionLabel="Yangi bo'lim yaratish..."
+                      onAction={(query) => {
+                        openTab({
+                          id: `dept-new-${Date.now()}`,
+                          title: query?.trim() || "Yangi bo'lim",
+                          type: "department-detail",
+                          module: "hr",
+                          documentData: { name: query?.trim() || "", isNew: true },
+                        });
+                      }}
+                      renderItem={(dept) => (
+                        <div className="flex items-center justify-between w-full min-w-0 pr-1 py-0.5">
+                          <span className="text-xs font-medium text-foreground truncate">{dept.label}</span>
+                          {dept.description && (
+                            <span className="text-[10px] text-muted-foreground font-mono ml-2 shrink-0">
+                              {dept.description}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     />
                   </div>
 
@@ -228,10 +292,11 @@ export function PositionDetail({ tab }: PositionDetailProps) {
 
                   <div>
                     <Label className="text-xs">Standart tarif / stavka (UZS)</Label>
-                    <Input
-                      type="number"
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={0}
                       value={formData.standardRate}
-                      onChange={(e) => handleUpdate({ standardRate: Number(e.target.value) || 0 })}
+                      onValueChange={(values) => handleUpdate({ standardRate: values.floatValue ?? 0 })}
                       className="h-8 font-mono font-medium"
                     />
                   </div>

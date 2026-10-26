@@ -34,6 +34,11 @@ import {
 
 // ─── Company Resolver ──────────────────────────────────────────────────────────
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isValidUuid(id?: string | null): boolean {
+  return typeof id === "string" && UUID_REGEX.test(id);
+}
+
 async function resolveCompanyId(companyCode = "PRINTGOO"): Promise<string> {
   const existing = await db
     .select({ id: companies.id })
@@ -128,11 +133,11 @@ export async function upsertYttEntity(
     updatedAt: new Date(),
   };
 
-  if (payload.id && !payload.id.startsWith("draft-") && !payload.id.startsWith("temp-")) {
+  if (isValidUuid(payload.id)) {
     const [updated] = await db
       .update(tradingYttEntities)
       .set(values)
-      .where(and(eq(tradingYttEntities.id, payload.id), eq(tradingYttEntities.companyId, companyId)))
+      .where(and(eq(tradingYttEntities.id, payload.id!), eq(tradingYttEntities.companyId, companyId)))
       .returning();
     if (updated) {
       return {
@@ -144,7 +149,7 @@ export async function upsertYttEntity(
 
   const [inserted] = await db
     .insert(tradingYttEntities)
-    .values({ ...values, id: payload.id && !payload.id.startsWith("draft-") ? payload.id : undefined })
+    .values({ ...values, id: isValidUuid(payload.id) ? payload.id : undefined })
     .returning();
 
   return {
@@ -217,11 +222,11 @@ export async function upsertTradingCatalogItem(
     updatedAt: new Date(),
   };
 
-  if (payload.id && !payload.id.startsWith("draft-") && !payload.id.startsWith("temp-")) {
+  if (isValidUuid(payload.id)) {
     const [updated] = await db
       .update(tradingCatalog)
       .set(values)
-      .where(and(eq(tradingCatalog.id, payload.id), eq(tradingCatalog.companyId, companyId)))
+      .where(and(eq(tradingCatalog.id, payload.id!), eq(tradingCatalog.companyId, companyId)))
       .returning();
     if (updated) {
       return {
@@ -233,7 +238,7 @@ export async function upsertTradingCatalogItem(
 
   const [inserted] = await db
     .insert(tradingCatalog)
-    .values({ ...values, id: payload.id && !payload.id.startsWith("draft-") ? payload.id : undefined })
+    .values({ ...values, id: isValidUuid(payload.id) ? payload.id : undefined })
     .returning();
 
   return {
@@ -385,11 +390,11 @@ export async function upsertTradingSale(
   let savedSaleId = payload.id;
   let isExisting = false;
 
-  if (payload.id && !payload.id.startsWith("draft-") && !payload.id.startsWith("temp-")) {
+  if (isValidUuid(payload.id)) {
     const [updated] = await db
       .update(tradingSales)
       .set(saleValues)
-      .where(and(eq(tradingSales.id, payload.id), eq(tradingSales.companyId, companyId)))
+      .where(and(eq(tradingSales.id, payload.id!), eq(tradingSales.companyId, companyId)))
       .returning();
     if (updated) {
       savedSaleId = updated.id;
@@ -400,7 +405,7 @@ export async function upsertTradingSale(
   if (!isExisting) {
     const [inserted] = await db
       .insert(tradingSales)
-      .values({ ...saleValues, id: payload.id && !payload.id.startsWith("draft-") ? payload.id : undefined })
+      .values({ ...saleValues, id: isValidUuid(payload.id) ? payload.id : undefined })
       .returning();
     savedSaleId = inserted.id;
   }
@@ -619,11 +624,11 @@ export async function upsertTradingOrder(
   let savedOrderId = payload.id;
   let isExisting = false;
 
-  if (payload.id && !payload.id.startsWith("draft-") && !payload.id.startsWith("temp-")) {
+  if (isValidUuid(payload.id)) {
     const [updated] = await db
       .update(tradingOrders)
       .set(orderValues)
-      .where(and(eq(tradingOrders.id, payload.id), eq(tradingOrders.companyId, companyId)))
+      .where(and(eq(tradingOrders.id, payload.id!), eq(tradingOrders.companyId, companyId)))
       .returning();
     if (updated) {
       savedOrderId = updated.id;
@@ -634,7 +639,7 @@ export async function upsertTradingOrder(
   if (!isExisting) {
     const [inserted] = await db
       .insert(tradingOrders)
-      .values({ ...orderValues, id: payload.id && !payload.id.startsWith("draft-") ? payload.id : undefined })
+      .values({ ...orderValues, id: isValidUuid(payload.id) ? payload.id : undefined })
       .returning();
     savedOrderId = inserted.id;
   }
@@ -861,11 +866,11 @@ export async function upsertTradingImport(
   let savedBatchId = payload.id;
   let isExisting = false;
 
-  if (payload.id && !payload.id.startsWith("draft-") && !payload.id.startsWith("temp-")) {
+  if (isValidUuid(payload.id)) {
     const [updated] = await db
       .update(tradingImportBatches)
       .set(batchValues)
-      .where(and(eq(tradingImportBatches.id, payload.id), eq(tradingImportBatches.companyId, companyId)))
+      .where(and(eq(tradingImportBatches.id, payload.id!), eq(tradingImportBatches.companyId, companyId)))
       .returning();
     if (updated) {
       savedBatchId = updated.id;
@@ -876,7 +881,7 @@ export async function upsertTradingImport(
   if (!isExisting) {
     const [inserted] = await db
       .insert(tradingImportBatches)
-      .values({ ...batchValues, id: payload.id && !payload.id.startsWith("draft-") ? payload.id : undefined })
+      .values({ ...batchValues, id: isValidUuid(payload.id) ? payload.id : undefined })
       .returning();
     savedBatchId = inserted.id;
   }

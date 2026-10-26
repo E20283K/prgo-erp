@@ -12,6 +12,7 @@ import {
 } from "../../common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -200,40 +201,44 @@ export function PayrollDetail({ tab }: PayrollDetailProps) {
               <CardContent className="p-4 space-y-3">
                 <div>
                   <Label className="text-xs">Asosiy oklad (Sobit stavka)</Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={0}
                     value={formData.baseSalary}
-                    onChange={(e) => handleUpdate({ baseSalary: Number(e.target.value) || 0 })}
+                    onValueChange={(values) => handleUpdate({ baseSalary: values.floatValue ?? 0 })}
                     className="h-8 font-mono"
                   />
                 </div>
 
                 <div>
                   <Label className="text-xs">Ishbay bajarilgan naryadlar (Sdelka)</Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={0}
                     value={formData.pieceworkAmount}
-                    onChange={(e) => handleUpdate({ pieceworkAmount: Number(e.target.value) || 0 })}
+                    onValueChange={(values) => handleUpdate({ pieceworkAmount: values.floatValue ?? 0 })}
                     className="h-8 font-mono"
                   />
                 </div>
 
                 <div>
                   <Label className="text-xs">Qo'shimcha ish vaqti (Overtime 1.5x)</Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={0}
                     value={formData.overtimeAmount}
-                    onChange={(e) => handleUpdate({ overtimeAmount: Number(e.target.value) || 0 })}
+                    onValueChange={(values) => handleUpdate({ overtimeAmount: values.floatValue ?? 0 })}
                     className="h-8 font-mono"
                   />
                 </div>
 
                 <div>
                   <Label className="text-xs">Bonuslar va mukofotlar</Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={0}
                     value={formData.bonusAmount}
-                    onChange={(e) => handleUpdate({ bonusAmount: Number(e.target.value) || 0 })}
+                    onValueChange={(values) => handleUpdate({ bonusAmount: values.floatValue ?? 0 })}
                     className="h-8 font-mono"
                   />
                 </div>
@@ -256,30 +261,33 @@ export function PayrollDetail({ tab }: PayrollDetailProps) {
               <CardContent className="p-4 space-y-3">
                 <div>
                   <Label className="text-xs">Berilgan avans qaytarilishi</Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={0}
                     value={formData.advanceDeduction}
-                    onChange={(e) => handleUpdate({ advanceDeduction: Number(e.target.value) || 0 })}
+                    onValueChange={(values) => handleUpdate({ advanceDeduction: values.floatValue ?? 0 })}
                     className="h-8 font-mono"
                   />
                 </div>
 
                 <div>
                   <Label className="text-xs">JShODS Solig'i (12%)</Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={0}
                     value={formData.taxDeduction}
-                    onChange={(e) => handleUpdate({ taxDeduction: Number(e.target.value) || 0 })}
+                    onValueChange={(values) => handleUpdate({ taxDeduction: values.floatValue ?? 0 })}
                     className="h-8 font-mono"
                   />
                 </div>
 
                 <div>
                   <Label className="text-xs">Jarimalar yoki brak ushlanmasi</Label>
-                  <Input
-                    type="number"
+                  <MoneyInput
+                    thousandSeparator=" "
+                    decimalScale={0}
                     value={formData.penaltyDeduction}
-                    onChange={(e) => handleUpdate({ penaltyDeduction: Number(e.target.value) || 0 })}
+                    onValueChange={(values) => handleUpdate({ penaltyDeduction: values.floatValue ?? 0 })}
                     className="h-8 font-mono"
                   />
                 </div>

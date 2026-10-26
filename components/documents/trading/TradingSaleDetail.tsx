@@ -18,6 +18,8 @@ import { DocumentHeader } from "@/components/documents/common/DocumentShell";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -28,13 +30,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SmartCombobox } from "@/components/ui/smart-combobox";
 import {
   Printer,
   Save,
@@ -56,6 +52,7 @@ import {
   TradingSaleItem,
   TradingCurrency,
   TradingCatalogItemRecord,
+  TRADING_UNITS,
 } from "./types";
 import { INITIAL_YTT_ENTITIES, INITIAL_TRADING_CATALOG } from "./data";
 import { AktSverkaPrintModal } from "../customer/components/AktSverkaPrintModal";
@@ -75,28 +72,38 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     openTab,
     tradingCatalog,
     tradingYttEntities,
+    crmCustomers,
+    loadCrmCustomers,
+    loadTradingData,
     upsertTradingSaleAsync,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingSaleRecord> = tab.documentData || {};
+
+  // Load master data on mount if needed
+  React.useEffect(() => {
+    if (!crmCustomers || crmCustomers.length === 0) {
+      loadCrmCustomers();
+    }
+    if (!tradingYttEntities || tradingYttEntities.length === 0) {
+      loadTradingData("ytt-limits");
+    }
+    if (!tradingCatalog || tradingCatalog.length === 0) {
+      loadTradingData("catalog");
+    }
+  }, [crmCustomers, tradingYttEntities, tradingCatalog, loadCrmCustomers, loadTradingData]);
 
   // Form State
   const [docNo] = useState<string>(rawData.docNo || tab.id);
   const [date, setDate] = useState<string>(
     rawData.date || new Date().toISOString().split("T")[0]
   );
-  const [sellerEntityId, setSellerEntityId] = useState<
-    "ytt-qodirov" | "ytt-aliyev" | "ytt-toshmatov" | "mchj-printgoo"
-  >(rawData.sellerEntityId || "ytt-qodirov");
-  const [customer, setCustomer] = useState<string>(
-    rawData.customer || "'REAL TEXTILE INVEST' MChJ"
+  const [sellerEntityId, setSellerEntityId] = useState<string>(
+    rawData.sellerEntityId || "ytt-qodirov"
   );
-  const [customerTin, setCustomerTin] = useState<string>(
-    rawData.customerTin || "304891234"
-  );
-  const [contractNo, setContractNo] = useState<string>(
-    rawData.contractNo || "AK-2026/04"
-  );
+  const [customer, setCustomer] = useState<string>(rawData.customer || "");
+  const [customerTin, setCustomerTin] = useState<string>(rawData.customerTin || "");
+  const [contractNo, setContractNo] = useState<string>(rawData.contractNo || "");
   const [paymentMethod, setPaymentMethod] = useState<
     "Bank Wire (Hisob-raqam)" | "Corporate Card" | "Cash / Cash Register"
   >(rawData.paymentMethod || "Bank Wire (Hisob-raqam)");
@@ -109,9 +116,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   const [status, setStatus] = useState<"Draft" | "Posted" | "Cancelled">(
     rawData.status || "Draft"
   );
-  const [notes, setNotes] = useState<string>(
-    rawData.notes || "Tekstil fabrikasiga 1-partiya aksessuar va furnituralar."
-  );
+  const [notes, setNotes] = useState<string>(rawData.notes || "");
 
   const availableEntities = useMemo(() => {
     return tradingYttEntities.length > 0 ? tradingYttEntities : INITIAL_YTT_ENTITIES;
@@ -122,50 +127,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   }, [tradingCatalog]);
 
   const [items, setItems] = useState<TradingSaleItem[]>(
-    rawData.items && rawData.items.length > 0
-      ? rawData.items
-      : [
-          {
-            id: "item-1",
-            sku: "BTN-MET-18MM",
-            name: "Metall Gravirovka Tugma 18mm",
-            category: "Tugmalar",
-            unit: "dona",
-            quantity: 25000,
-            unitPrice: 480,
-            unitPriceUZS: 480,
-            unitPriceUSD: 0.0374,
-            totalAmount: 12_000_000,
-            totalUSD: 933.85,
-          },
-          {
-            id: "item-2",
-            sku: "ZIP-NYL-N5-45",
-            name: "Neylon Fermuar (Molniya) N5, 45sm, Qora",
-            category: "Fermuarlar",
-            unit: "dona",
-            quantity: 10000,
-            unitPrice: 3200,
-            unitPriceUZS: 3200,
-            unitPriceUSD: 0.249,
-            totalAmount: 32_000_000,
-            totalUSD: 2490.27,
-          },
-          {
-            id: "item-3",
-            sku: "LBL-JACQ-50X25",
-            name: "Jakkard To'qima Yorliq 'Real Denim' 50x25mm",
-            category: "Jakkard",
-            unit: "dona",
-            quantity: 15000,
-            unitPrice: 220,
-            unitPriceUZS: 220,
-            unitPriceUSD: 0.0171,
-            totalAmount: 3_300_000,
-            totalUSD: 256.81,
-            isSelfProduced: true,
-          },
-        ]
+    rawData.items && rawData.items.length > 0 ? rawData.items : []
   );
 
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -559,7 +521,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
               className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
             >
               <Save className="w-3.5 h-3.5 text-muted-foreground" />
-              <span>Saqlash (Записать)</span>
+              <span>Saqlash</span>
             </Button>
 
             <Button
@@ -638,7 +600,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
               >
                 {status === "Posted" ? "✓ O'tkazilgan" : "Qoralama"}
               </Badge>
-              <span className="font-mono text-xs text-foreground font-semibold truncate">{contractNo}</span>
+              <span className="font-mono text-xs text-foreground font-semibold truncate">{contractNo || "—"}</span>
             </div>
             <span className="text-[10px] text-muted-foreground truncate block" title={paymentMethod}>
               {paymentMethod}
@@ -648,50 +610,61 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
 
         {/* EDITABLE PARAMETERS: 4 COMPACT COLUMNS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-          {/* Col 1: Seller Selector */}
+          {/* Col 1: Seller Selector with Searchable Combobox */}
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Sotuvchi YTT / MChJ:</Label>
-            <Select
-              value={sellerEntityId}
-              onValueChange={(val: any) => {
-                setSellerEntityId(val);
-                setTabUnsaved(tab.id, true);
-              }}
-            >
-              <SelectTrigger className="h-7 text-xs font-medium mt-0.5">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="text-xs">
-                <SelectItem value="ytt-qodirov">YTT Qodirov Baxtiyor (58% band) ★</SelectItem>
-                <SelectItem value="ytt-aliyev">YTT Aliyev Jamshid (85% band)</SelectItem>
-                <SelectItem value="ytt-toshmatov">YTT Toshmatov O. (98% band - XAVF)</SelectItem>
-                <SelectItem value="mchj-printgoo">&quot;PRINTGOO SERVICES&quot; MChJ (QQS)</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="mt-0.5">
+              <SmartCombobox
+                value={sellerEntityId}
+                onChange={(val) => {
+                  setSellerEntityId(val);
+                  setTabUnsaved(tab.id, true);
+                }}
+                options={availableEntities.map((ent) => ({
+                  value: ent.id,
+                  label: `${ent.name} (${ent.legalType === "MChJ" ? "MChJ" : `${ent.turnoverPercent.toFixed(1)}% band`})`,
+                  description: `${ent.code} • ${ent.legalType} • STIR: ${ent.inn || "—"}`,
+                  badge: ent.legalType === "MChJ" ? "MChJ" : `${ent.turnoverPercent.toFixed(0)}%`,
+                }))}
+                placeholder="Sotuvchini tanlang..."
+                searchPlaceholder="Sotuvchini qidirish..."
+                allowCustom={false}
+                className="h-7 text-xs font-medium"
+              />
+            </div>
           </div>
 
-          {/* Col 2: Customer */}
+          {/* Col 2: Customer with Searchable SmartCombobox */}
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Xaridor (Tekstil Fabrikasi):</Label>
-            <Select
-              value={customer}
-              onValueChange={(val) => {
-                setCustomer(val || "");
-                if (val === "'REAL TEXTILE INVEST' MChJ") setCustomerTin("304891234");
-                else if (val === "'BUKHARA COTTON WEAVE' XK") setCustomerTin("201889412");
-                else if (val === "'SAMARKAND APPAREL' MChJ") setCustomerTin("308112445");
-                setTabUnsaved(tab.id, true);
-              }}
-            >
-              <SelectTrigger className="h-7 text-xs font-medium mt-0.5">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="text-xs">
-                <SelectItem value="'REAL TEXTILE INVEST' MChJ">&quot;REAL TEXTILE INVEST&quot; MChJ</SelectItem>
-                <SelectItem value="'BUKHARA COTTON WEAVE' XK">&quot;BUKHARA COTTON WEAVE&quot; XK</SelectItem>
-                <SelectItem value="'SAMARKAND APPAREL' MChJ">&quot;SAMARKAND APPAREL&quot; MChJ</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="mt-0.5">
+              <SmartCombobox
+                value={customer}
+                onChange={(val) => {
+                  setCustomer(val);
+                  const found = crmCustomers?.find((c) => c.name.toLowerCase() === val.toLowerCase());
+                  if (found) {
+                    if (found.tin) setCustomerTin(found.tin);
+                    if (found.contractNo) setContractNo(found.contractNo);
+                  }
+                  setTabUnsaved(tab.id, true);
+                }}
+                onAddNew={(newVal) => {
+                  setCustomer(newVal);
+                  setTabUnsaved(tab.id, true);
+                }}
+                options={(crmCustomers || []).map((c) => ({
+                  value: c.name,
+                  label: c.name,
+                  description: c.tin ? `STIR: ${c.tin}` : c.industry || undefined,
+                  badge: c.status,
+                }))}
+                placeholder="Mijozni tanlang yoki kiriting..."
+                searchPlaceholder="Mijoz nomi yoki STIR..."
+                allowCustom={true}
+                className="h-7 text-xs font-medium"
+              />
+            </div>
           </div>
 
           {/* Col 3: Currency & Rate */}
@@ -727,11 +700,12 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
             </div>
             <div className="w-24">
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">MB Kursi:</Label>
-              <Input
-                type="number"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={0}
                 value={exchangeRate}
-                onChange={(e) => {
-                  setExchangeRate(Number(e.target.value) || 12850);
+                onValueChange={(values) => {
+                  setExchangeRate(values.floatValue ?? 12850);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs font-mono text-right mt-0.5"
@@ -752,13 +726,12 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
                 className="h-7 text-xs font-mono mt-0.5"
               />
             </div>
-            <div className="w-28">
+            <div className="w-36">
               <Label className="text-[10px] text-muted-foreground uppercase font-semibold">Sana:</Label>
-              <Input
-                type="date"
+              <DatePicker
                 value={date}
-                onChange={(e) => {
-                  setDate(e.target.value);
+                onChange={(val) => {
+                  setDate(val);
                   setTabUnsaved(tab.id, true);
                 }}
                 className="h-7 text-xs mt-0.5"

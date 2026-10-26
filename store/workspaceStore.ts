@@ -913,7 +913,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   activeCellCoords: "R1:C1",
   theme: "dark",
   isCommandOpen: false,
-  sidebarWidth: 300,
+  sidebarWidth: 240,
   showStatusBar: true,
   isInspectorActive: false,
   lastInspectedElement: null,

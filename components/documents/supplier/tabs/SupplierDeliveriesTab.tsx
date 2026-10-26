@@ -27,6 +27,7 @@ import {
   Copy,
   Layers,
   Info,
+  Plus,
 } from "lucide-react";
 import type { SupplierRecord } from "@/lib/server/supplierService";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -48,17 +49,21 @@ export function SupplierDeliveriesTab({ supplier }: SupplierDeliveriesTabProps) 
   // Filter matched warehouse receipts
   const matchedReceipts = useMemo(() => {
     return (warehouseReceipts || []).filter((r: any) => {
-      const suppName = (r.supplierName || "").toLowerCase();
-      const sName = (supplier.name || "").toLowerCase();
-      const sLegal = (supplier.legalName || "").toLowerCase();
+      const suppName = (r.supplierName || "").toLowerCase().trim();
+      const sName = (supplier.name || "").toLowerCase().trim();
+      const sLegal = (supplier.legalName || "").toLowerCase().trim();
+      const sCode = (supplier.code || "").toLowerCase().trim();
       return (
         suppName &&
-        (suppName.includes(sName) ||
-          (sLegal && suppName.includes(sLegal)) ||
-          sName.includes(suppName))
+        (suppName === sName ||
+          suppName === sLegal ||
+          (sName.length > 2 && suppName.includes(sName)) ||
+          (sLegal.length > 2 && suppName.includes(sLegal)) ||
+          (sCode && suppName.includes(sCode)) ||
+          (r.supplierId && r.supplierId === supplier.id))
       );
     });
-  }, [warehouseReceipts, supplier.name, supplier.legalName]);
+  }, [warehouseReceipts, supplier.name, supplier.legalName, supplier.code, supplier.id]);
 
   const curr = supplier.currency || "UZS";
 
@@ -265,6 +270,31 @@ export function SupplierDeliveriesTab({ supplier }: SupplierDeliveriesTabProps) 
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => {
+              const draftId = `draft-rcv-${Date.now()}`;
+              openTab({
+                id: draftId,
+                title: `Kirim (${supplier.name})`,
+                type: "warehouse-receipt",
+                module: "warehouse",
+                documentData: {
+                  id: draftId,
+                  supplierName: supplier.name,
+                  supplierLegalName: supplier.legalName,
+                  supplierId: supplier.id,
+                  currency: supplier.currency || "UZS",
+                  receiptDate: new Date().toISOString(),
+                },
+              });
+            }}
+            className="h-7 px-2.5 text-xs gap-1.5 cursor-pointer font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ Yangi kirim</span>
+          </Button>
+
           {selectedReceipt && (
             <Button
               size="sm"

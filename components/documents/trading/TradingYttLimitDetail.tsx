@@ -76,167 +76,79 @@ export function TradingYttLimitDetail({ tab }: { tab: DocumentTab }) {
     theme,
     openTab,
     tradingSales,
+    loadTradingData,
     upsertYttEntityAsync,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<YttTurnoverLimitRecord> = tab.documentData || {};
 
+  React.useEffect(() => {
+    if (!tradingSales || tradingSales.length === 0) {
+      loadTradingData("sales");
+    }
+  }, [tradingSales, loadTradingData]);
+
   // Form State
   const [code] = useState<string>(rawData.code || "YTT-01");
   const [name, setName] = useState<string>(
-    rawData.name || "YTT Qodirov Baxtiyor Shavkatovich"
+    rawData.name || ""
   );
   const [legalType, setLegalType] = useState<"YTT" | "MChJ">(
     rawData.legalType || "YTT"
   );
-  const [inn, setInn] = useState<string>(rawData.inn || "498213002");
+  const [inn, setInn] = useState<string>(rawData.inn || "");
   const [bankName, setBankName] = useState<string>(
-    rawData.bankName || "AT 'Xalq Banki' Shayxontohur filiali"
+    rawData.bankName || ""
   );
   const [bankAccount, setBankAccount] = useState<string>(
-    rawData.bankAccount || "20218000500123456001"
+    rawData.bankAccount || ""
   );
   const [annualLimit] = useState<number>(rawData.annualLimit || 1_000_000_000);
-  const [notes, setNotes] = useState<string>(
-    rawData.notes || "Soliq qonunchiligi bo'yicha 1 mlrd UZS aylanmagacha soddalashtirilgan 4% aylanmadan soliq to'laydi."
-  );
+  const [notes, setNotes] = useState<string>(rawData.notes || "");
 
-  // Invoices issued by this entity
+  // Real Invoices issued by this entity derived from tradingSales
   const invoiceHistory = useMemo<YttInvoiceHistoryRow[]>(() => {
-    // Filter sales issued by this entity
-    const matchingSales = INITIAL_TRADING_SALES.filter(
+    const matchingSales = (tradingSales || []).filter(
       (s) =>
-        s.sellerEntityInn === inn ||
-        s.sellerEntityName.toLowerCase().includes(name.toLowerCase().split(" ")[1] || "qodirov") ||
-        s.sellerEntityId === tab.id
+        (inn && s.sellerEntityInn === inn) ||
+        (tab.id && s.sellerEntityId === tab.id) ||
+        (name && s.sellerEntityName.toLowerCase().includes(name.toLowerCase().split(" ")[1] || name.toLowerCase()))
     );
 
-    // If few, generate realistic historical distribution for the annual turnover
-    let totalAccum = 0;
-    const baseList: YttInvoiceHistoryRow[] = [
-      {
-        id: "TRD-2026-0842",
-        docNo: "TRD-2026-0842",
-        date: "2026-10-18",
-        customer: "'REAL TEXTILE INVEST' MChJ",
-        contractNo: "AK-2026/04",
-        amountUZS: 47_300_000,
-        amountUSD: 3680.93,
-        currency: "UZS",
-        paymentMethod: "Bank Wire (Hisob-raqam)",
-        status: "Posted",
-        itemsCount: 3,
-        cumulativeTurnoverUZS: 0,
-        limitPercentAfterDoc: 0,
-      },
-      {
-        id: "TRD-2026-0841",
-        docNo: "TRD-2026-0841",
-        date: "2026-10-17",
-        customer: "'BUKHARA COTTON WEAVE' XK",
-        contractNo: "AK-2026/02",
-        amountUZS: 18_500_000,
-        amountUSD: 1439.69,
-        currency: "UZS",
-        paymentMethod: "Bank Wire (Hisob-raqam)",
-        status: "Posted",
-        itemsCount: 2,
-        cumulativeTurnoverUZS: 0,
-        limitPercentAfterDoc: 0,
-      },
-      {
-        id: "TRD-2026-0810",
-        docNo: "TRD-2026-0810",
-        date: "2026-10-09",
-        customer: "'SAMARKAND APPAREL' MChJ",
-        contractNo: "AK-2026/01",
-        amountUZS: 64_000_000,
-        amountUSD: 4980.54,
-        currency: "UZS",
-        paymentMethod: "Bank Wire (Hisob-raqam)",
-        status: "Posted",
-        itemsCount: 4,
-        cumulativeTurnoverUZS: 0,
-        limitPercentAfterDoc: 0,
-      },
-      {
-        id: "TRD-2026-0775",
-        docNo: "TRD-2026-0775",
-        date: "2026-09-28",
-        customer: "'OSIYO TEKSTIL' MChJ",
-        contractNo: "AK-2025/99",
-        amountUZS: 82_400_000,
-        amountUSD: 6412.45,
-        currency: "UZS",
-        paymentMethod: "Bank Wire (Hisob-raqam)",
-        status: "Posted",
-        itemsCount: 5,
-        cumulativeTurnoverUZS: 0,
-        limitPercentAfterDoc: 0,
-      },
-      {
-        id: "TRD-2026-0712",
-        docNo: "TRD-2026-0712",
-        date: "2026-09-14",
-        customer: "'ANDIJON IP-KALAVA' MChJ",
-        contractNo: "AK-2026/18",
-        amountUZS: 95_000_000,
-        amountUSD: 7392.99,
-        currency: "UZS",
-        paymentMethod: "Corporate Card",
-        status: "Posted",
-        itemsCount: 2,
-        cumulativeTurnoverUZS: 0,
-        limitPercentAfterDoc: 0,
-      },
-      {
-        id: "TRD-2026-0640",
-        docNo: "TRD-2026-0640",
-        date: "2026-08-20",
-        customer: "'GLOBAL APPAREL INVEST' MChJ",
-        contractNo: "AK-2026/09",
-        amountUZS: 120_000_000,
-        amountUSD: 9338.52,
-        currency: "UZS",
-        paymentMethod: "Bank Wire (Hisob-raqam)",
-        status: "Posted",
-        itemsCount: 6,
-        cumulativeTurnoverUZS: 0,
-        limitPercentAfterDoc: 0,
-      },
-      {
-        id: "TRD-2026-0520",
-        docNo: "TRD-2026-0520",
-        date: "2026-07-15",
-        customer: "'CHIRCHIQ MEGA TEKSTIL' XK",
-        contractNo: "AK-2026/05",
-        amountUZS: 160_300_000,
-        amountUSD: 12474.7,
-        currency: "UZS",
-        paymentMethod: "Bank Wire (Hisob-raqam)",
-        status: "Posted",
-        itemsCount: 7,
-        cumulativeTurnoverUZS: 0,
-        limitPercentAfterDoc: 0,
-      },
-    ];
+    let accum = 0;
+    const sorted = [...matchingSales].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
 
-    // Compute running turnover backwards or forwards
-    const current = rawData.currentTurnover || 587_500_000;
-    let running = current;
-    return baseList.map((row, idx) => {
-      const snap = running;
-      running = Math.max(0, running - row.amountUZS);
-      return {
-        ...row,
-        cumulativeTurnoverUZS: snap,
-        limitPercentAfterDoc: annualLimit > 0 ? (snap / annualLimit) * 100 : 0,
-      };
-    });
-  }, [inn, name, tab.id, rawData.currentTurnover, annualLimit]);
+    return sorted
+      .map((s) => {
+        const amtUZS = Number(s.totalUZS) || Number(s.totalAmount) || 0;
+        accum += amtUZS;
+        const pct = annualLimit > 0 ? Number(((accum / annualLimit) * 100).toFixed(2)) : 0;
+        return {
+          id: s.id,
+          docNo: s.docNo,
+          date: s.date,
+          customer: s.customer,
+          contractNo: s.contractNo || "—",
+          amountUZS: amtUZS,
+          amountUSD: Number(s.totalUSD) || 0,
+          currency: s.currency,
+          paymentMethod: s.paymentMethod,
+          status: s.status,
+          itemsCount: (s.items || []).length,
+          cumulativeTurnoverUZS: accum,
+          limitPercentAfterDoc: pct,
+        };
+      })
+      .reverse();
+  }, [tradingSales, inn, name, tab.id, annualLimit]);
 
   // Current calculations
-  const currentTurnover = rawData.currentTurnover || 587_500_000;
+  const currentTurnover =
+    invoiceHistory.length > 0
+      ? invoiceHistory[0].cumulativeTurnoverUZS
+      : rawData.currentTurnover || 0;
   const remainingQuota = Math.max(0, annualLimit - currentTurnover);
   const percentUsed = annualLimit > 0 && legalType === "YTT" ? (currentTurnover / annualLimit) * 100 : 0;
 

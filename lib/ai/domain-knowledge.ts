@@ -5,6 +5,58 @@
  * logic, technological calculation formulas (Offset & Flexo), and multilingual terminology.
  */
 
+import * as fs from "fs";
+import * as path from "path";
+
+// In-memory cache for markdown knowledge files
+const knowledgeCache: Record<string, string> = {};
+
+/**
+ * Reads and caches markdown knowledge documents from docs/ai directory
+ */
+export function getDomainKnowledgeSection(section: "schema" | "playbook" | "business_rules" | "all"): string {
+  if (typeof process === "undefined" || !process.cwd) return "";
+  try {
+    const docsDir = path.resolve(process.cwd(), "docs/ai");
+    const fileMap: Record<string, string> = {
+      schema: "erp_database_schema.md",
+      playbook: "printing_manufacturing_playbook.md",
+      business_rules: "business_rules.md",
+    };
+
+    if (section !== "all") {
+      const fileName = fileMap[section];
+      if (!fileName) return "";
+      if (knowledgeCache[section]) return knowledgeCache[section];
+      const filePath = path.join(docsDir, fileName);
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, "utf-8");
+        knowledgeCache[section] = content;
+        return content;
+      }
+      return "";
+    }
+
+    // section === "all"
+    const parts: string[] = [];
+    for (const [key, fileName] of Object.entries(fileMap)) {
+      if (!knowledgeCache[key]) {
+        const filePath = path.join(docsDir, fileName);
+        if (fs.existsSync(filePath)) {
+          knowledgeCache[key] = fs.readFileSync(filePath, "utf-8");
+        }
+      }
+      if (knowledgeCache[key]) {
+        parts.push(knowledgeCache[key]);
+      }
+    }
+    return parts.join("\n\n---\n\n");
+  } catch (err) {
+    console.warn("Failed to load AI knowledge base files:", err);
+    return "";
+  }
+}
+
 export interface PrintingCalculationInput {
   technology: "offset" | "flexo" | "digital";
   quantity: number;
@@ -226,3 +278,40 @@ QAT'IY ANTI-SLOP VA DISPIRATSIYA STANDARTLARI:
    • **Biriktirilgan fayllar**: [fayllar soni va turi]
    Ushbu format UI tomonidan avtomatik ravishda chiroyli, interaktiv sanoat kartochkasiga (Industrial Card) aylantiriladi.
 `;
+
+/**
+ * Builds dynamically tailored system prompt based on active module and user context
+ */
+export function buildDynamicSystemPrompt(context?: {
+  activeModule?: string;
+  activeTabType?: string;
+  screenSnapshot?: any;
+}): string {
+  let prompt = PRINTGOO_SYSTEM_PROMPT.trim();
+
+  // Append relevant knowledge depending on module
+  if (context?.activeModule === "production" || context?.activeTabType === "work-order") {
+    const playbook = getDomainKnowledgeSection("playbook");
+    const schema = getDomainKnowledgeSection("schema");
+    prompt += `\n\n=== MATBAA ISHLAB CHIQARISH REGLAMENTI VA FORMULALARI ===\n${playbook}\n\n=== RELATSIYA SXEMASI VA 1C REGISTRLAR ===\n${schema}`;
+  } else if (context?.activeModule === "warehouse" || context?.activeTabType?.startsWith("warehouse")) {
+    const schema = getDomainKnowledgeSection("schema");
+    const businessRules = getDomainKnowledgeSection("business_rules");
+    prompt += `\n\n=== OMBOR REGISTRLARI VA ZAXIRA TALABLARI ===\n${schema}\n\n=== BIZNES QOIDALARI ===\n${businessRules}`;
+  } else if (context?.activeModule === "finance" || context?.activeTabType === "delivery-act") {
+    const businessRules = getDomainKnowledgeSection("business_rules");
+    const schema = getDomainKnowledgeSection("schema");
+    prompt += `\n\n=== MOLIYA VA KREDIT CHEKLOVLARI ===\n${businessRules}\n\n=== 1C DEBIT/KREDIT SALDO REGISTRLARI ===\n${schema}`;
+  } else {
+    // General context - include core schema summary and business rules
+    const schema = getDomainKnowledgeSection("schema");
+    const businessRules = getDomainKnowledgeSection("business_rules");
+    prompt += `\n\n=== TIZIM ARXITEKTURASI VA ASOSIY QOIDALAR ===\n${schema.slice(0, 3000)}\n\n${businessRules.slice(0, 2000)}`;
+  }
+
+  if (context?.screenSnapshot) {
+    prompt += `\n\n=== FOYDALANUVCHINING JORIY EKRAN HOLATI (LIVE SCREEN SNAPSHOT) ===\n${JSON.stringify(context.screenSnapshot, null, 2)}`;
+  }
+
+  return prompt;
+}

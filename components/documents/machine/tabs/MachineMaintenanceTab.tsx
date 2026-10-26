@@ -5,6 +5,7 @@ import { MachineRecord, MachineMaintenanceRecord } from "../types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -207,11 +208,11 @@ export function MachineMaintenanceTab({ machine, onUpdate }: MachineMaintenanceT
 
               <div className="space-y-1">
                 <Label className="text-xs">Xarajat ($):</Label>
-                <Input
-                  type="number"
-                  step="10"
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={2}
                   value={cost || ""}
-                  onChange={(e) => setCost(Number(e.target.value) || 0)}
+                  onValueChange={(values) => setCost(values.floatValue ?? 0)}
                   className="h-8 text-xs font-mono"
                 />
               </div>

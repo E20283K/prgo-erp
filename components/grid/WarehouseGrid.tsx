@@ -233,7 +233,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       const draftId = `draft-rcv-${Date.now()}`;
       openTab({
         id: draftId,
-        title: "Yangi Kirim Hujjati (Qoralama)",
+        title: "Yangi kirim hujjati",
         type: "warehouse-receipt",
         module: "warehouse",
         isUnsaved: false,
@@ -252,7 +252,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       const draftId = `draft-shp-${Date.now()}`;
       openTab({
         id: draftId,
-        title: "Yangi Ombor Chiqimi (Qoralama)",
+        title: "Yangi ombor chiqimi",
         type: "warehouse-shipment",
         module: "warehouse",
         isUnsaved: false,

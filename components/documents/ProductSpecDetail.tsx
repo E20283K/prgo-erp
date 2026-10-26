@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
@@ -1149,12 +1150,11 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                       Bazaviy Sotish Narxi ({getCurrencySymbol(formData.currency)})
                     </label>
                     <div className="relative">
-                      <Input 
-                        type="number"
-                        min={0}
-                        step={formData.currency === "UZS" ? "1" : "0.01"}
+                      <MoneyInput
+                        thousandSeparator=" "
+                        decimalScale={formData.currency === "UZS" ? 0 : 2}
                         value={formData.basePrice} 
-                        onChange={(e) => handleFieldChange("basePrice", parseFloat(e.target.value) || 0)} 
+                        onValueChange={(values) => handleFieldChange("basePrice", values.floatValue ?? 0)} 
                         className="h-8 text-xs font-mono font-semibold pr-10" 
                       />
                       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-muted-foreground pointer-events-none">

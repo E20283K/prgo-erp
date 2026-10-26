@@ -1,5 +1,13 @@
 export type CopilotRole = "system" | "user" | "assistant";
 
+export interface CopilotScreenSnapshot {
+  selectedRowId?: string;
+  selectedEntityTitle?: string;
+  visibleFilterSummary?: string;
+  visibleRowsCount?: number;
+  activeDocumentFields?: Record<string, any>;
+}
+
 export interface CopilotUiContext {
   activeModule: string;
   activeSubModule?: string;
@@ -16,6 +24,7 @@ export interface CopilotUiContext {
     activeMachinesCount?: number;
     debtTotalUsd?: number;
   };
+  screenSnapshot?: CopilotScreenSnapshot;
   includeActiveTabContext: boolean;
 }
 
@@ -33,7 +42,9 @@ export interface CopilotToolStep {
 export type CopilotClientActionType =
   | "open_tab"
   | "navigate_module"
-  | "create_draft_tab";
+  | "create_draft_tab"
+  | "apply_grid_filter"
+  | "highlight_anomalies";
 
 export interface CopilotClientAction {
   id: string;
@@ -48,7 +59,9 @@ export interface CopilotClientAction {
     | "Plus"
     | "User"
     | "Truck"
-    | "Calculator";
+    | "Calculator"
+    | "Filter"
+    | "AlertTriangle";
   payload: {
     tab?: any;
     module?: string;
@@ -56,6 +69,9 @@ export interface CopilotClientAction {
     tabType?: string;
     initialData?: any;
     title?: string;
+    filterQuery?: string;
+    filterField?: string;
+    targetIds?: string[];
     [key: string]: any;
   };
 }

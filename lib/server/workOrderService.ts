@@ -36,6 +36,7 @@ import { eq, desc, and, or, ilike } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode } from "./crmService";
+import { generateNextCode } from "@/lib/utils";
 import { getNextSpecNumber } from "./numberingService";
 import { emitNotification } from "./notificationService";
 import {
@@ -1162,11 +1163,24 @@ export async function createProductionSite(data: any, companyCode: string = "PRI
     return updated;
   }
 
+  let branchCode = data.code?.trim();
+  if (!branchCode) {
+    const allBranches = await db.query.branches.findMany({
+      where: eq(branches.companyId, companyId),
+      columns: { code: true },
+    });
+    branchCode = generateNextCode(
+      "PLT",
+      allBranches.map((b) => b.code),
+      3
+    );
+  }
+
   const [inserted] = await db
     .insert(branches)
     .values({
       companyId,
-      code: data.code || `BR-${Date.now().toString().slice(-4)}`,
+      code: branchCode,
       name: data.name,
       shortName: data.shortName || null,
       legalEntityName: data.legalEntityName || null,

@@ -17,6 +17,7 @@ import { PositionRecord } from "../types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -34,11 +35,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
+import { generateNextCode } from "@/lib/utils";
 import { Briefcase, Plus, Search, RefreshCw, CheckCircle2, Printer } from "lucide-react";
 
 export function PositionsGrid() {
-  const { theme, openTab, positionsList, upsertPosition, updateGridStats, addNotification } =
-    useWorkspaceStore();
+  const {
+    theme,
+    openTab,
+    positionsList,
+    upsertPosition,
+    updateGridStats,
+    addNotification,
+    departmentsList,
+    setDepartmentsList,
+  } = useWorkspaceStore();
 
   const isDark = theme === "dark";
   const [data, setData] = useState<PositionRecord[]>([]);
@@ -54,9 +65,38 @@ export function PositionsGrid() {
   // Form states
   const [newCode, setNewCode] = useState("");
   const [newTitle, setNewTitle] = useState("");
-  const [newDepartment, setNewDepartment] = useState("Flekso bosma sexi");
+  const [newDepartmentId, setNewDepartmentId] = useState("");
+  const [newDepartment, setNewDepartment] = useState("");
   const [newWageType, setNewWageType] = useState<any>("piecework");
   const [newRate, setNewRate] = useState("4500000");
+
+  useEffect(() => {
+    if (departmentsList.length === 0) {
+      fetch("/api/v1/hr/departments")
+        .then((r) => r.json())
+        .then((json) => {
+          if (json.success && Array.isArray(json.data)) {
+            setDepartmentsList(json.data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [departmentsList.length, setDepartmentsList]);
+
+  useEffect(() => {
+    if (!newDepartment && departmentsList.length > 0) {
+      setNewDepartmentId(departmentsList[0].id);
+      setNewDepartment(departmentsList[0].name);
+    }
+  }, [departmentsList, newDepartment]);
+
+  const departmentOptions = useMemo<ComboboxOption[]>(() => {
+    return departmentsList.map((d) => ({
+      value: d.name,
+      label: d.name,
+      description: d.code ? `Kodi: ${d.code}` : undefined,
+    }));
+  }, [departmentsList]);
 
   const fetchPositions = useCallback(async () => {
     setLoading(true);
@@ -192,7 +232,8 @@ export function PositionsGrid() {
     const payload: Partial<PositionRecord> = {
       code: newCode.trim() || `POS-${Date.now().toString().slice(-4)}`,
       title: newTitle.trim(),
-      departmentName: newDepartment,
+      departmentId: newDepartmentId || undefined,
+      departmentName: newDepartment || undefined,
       defaultWageType: newWageType,
       standardRate: Number(newRate) || 0,
       currency: "UZS",
@@ -235,7 +276,12 @@ export function PositionsGrid() {
           <Button
             size="sm"
             className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
-            onClick={() => setIsAddOpen(true)}
+            onClick={() => {
+              const nextCode = generateNextCode("POS", positionsList.map((p) => p.code), 2);
+              setNewCode(nextCode);
+              setNewTitle("");
+              setIsAddOpen(true);
+            }}
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Yangi lavozim</span>
@@ -337,25 +383,45 @@ export function PositionsGrid() {
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Sex / Bo'lim</Label>
-                <Select value={newDepartment} onValueChange={(val) => { if (val) setNewDepartment(val); }}>
-                  <SelectTrigger className="h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Flekso bosma sexi">Flekso bosma</SelectItem>
-                    <SelectItem value="Tikuvchilik va lenta sexi">Tikuvchilik sexi</SelectItem>
-                    <SelectItem value="Kesish va qadoqlash sexi">Kesish va qadoqlash</SelectItem>
-                    <SelectItem value="Prepress va dizayn">Prepress</SelectItem>
-                    <SelectItem value="Sifat nazorati (OTK)">OTK nazorati</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="min-w-0">
+                <Label className="text-xs">Sex / Bo&apos;lim *</Label>
+                <ComboboxSelect
+                  items={departmentOptions}
+                  value={newDepartment}
+                  onValueChange={(val) => {
+                    const dept = departmentsList.find((d) => d.name === val || d.id === val);
+                    setNewDepartmentId(dept?.id || "");
+                    setNewDepartment(val);
+                  }}
+                  placeholder="Bo'limni tanlang..."
+                  className="h-8 text-xs w-full bg-background font-medium"
+                  contentClassName="w-[300px]"
+                  actionLabel="Yangi bo'lim yaratish..."
+                  onAction={(query) => {
+                    openTab({
+                      id: `dept-new-${Date.now()}`,
+                      title: query?.trim() || "Yangi bo'lim",
+                      type: "department-detail",
+                      module: "hr",
+                      documentData: { name: query?.trim() || "", isNew: true },
+                    });
+                  }}
+                  renderItem={(dept) => (
+                    <div className="flex items-center justify-between w-full min-w-0 pr-1 py-0.5">
+                      <span className="text-xs font-medium text-foreground truncate">{dept.label}</span>
+                      {dept.description && (
+                        <span className="text-[10px] text-muted-foreground font-mono ml-2 shrink-0">
+                          {dept.description}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                />
               </div>
-              <div>
-                <Label className="text-xs">To'lov shakli</Label>
+              <div className="min-w-0">
+                <Label className="text-xs">To&apos;lov shakli</Label>
                 <Select value={newWageType} onValueChange={(val) => { if (val) setNewWageType(val); }}>
-                  <SelectTrigger className="h-8">
+                  <SelectTrigger className="h-8 w-full min-w-0 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -369,10 +435,11 @@ export function PositionsGrid() {
             </div>
             <div>
               <Label className="text-xs">Standart stavka / oklad (UZS)</Label>
-              <Input
-                type="number"
+              <MoneyInput
+                thousandSeparator=" "
+                decimalScale={0}
                 value={newRate}
-                onChange={(e) => setNewRate(e.target.value)}
+                onValueChange={(values) => setNewRate(values.value)}
                 className="h-8 font-mono"
               />
             </div>

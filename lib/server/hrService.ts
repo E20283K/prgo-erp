@@ -28,6 +28,7 @@ import type {
 } from "@/components/documents/hr/types";
 import { getCompanyIdByCode } from "./crmService";
 import { syncEmployeeToAllActiveDevices, removeEmployeeFromAllActiveDevices } from "./hikvisionService";
+import { generateNextCode } from "@/lib/utils";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -312,7 +313,18 @@ export async function upsertEmployeeRecord(
     }
 
     // Insert new employee
-    const badgeNumber = data.badgeNumber || data.badgeNo || `EMP-${Date.now().toString().slice(-4)}`;
+    let badgeNumber = (data.badgeNumber || data.badgeNo)?.trim();
+    if (!badgeNumber) {
+      const allEmps = await db.query.employees.findMany({
+        where: eq(employees.companyId, companyId),
+        columns: { badgeNumber: true },
+      });
+      badgeNumber = generateNextCode(
+        "EMP",
+        allEmps.map((e) => e.badgeNumber),
+        4
+      );
+    }
     const [inserted] = await db
       .insert(employees)
       .values({
@@ -370,6 +382,7 @@ export async function getDepartmentsList(companyCode: string = "PRINTGOO"): Prom
     where: eq(departments.companyId, companyId),
     with: {
       employees: true,
+      branch: true,
     },
     orderBy: [desc(departments.createdAt)],
   });
@@ -382,7 +395,7 @@ export async function getDepartmentsList(companyCode: string = "PRINTGOO"): Prom
     headPerson: "Mavjud emas",
     phone: "+998 71 200-00-00",
     staffCount: d.employees.length,
-    plant: "PrintGoo Bosh Zavod",
+    plant: d.branch?.name || d.branch?.shortName || "PrintGoo Bosh Zavod",
     branchId: d.branchId,
     isActive: d.isActive,
     createdAt: d.createdAt.toISOString(),
@@ -403,6 +416,7 @@ export async function upsertDepartmentRecord(
           name: data.name!,
           code: data.code!,
           description: data.description || null,
+          branchId: data.branchId || null,
           isActive: data.isActive ?? true,
           updatedAt: new Date(),
         })
@@ -410,11 +424,25 @@ export async function upsertDepartmentRecord(
       return { success: true, id: data.id };
     }
 
+    let deptCode = data.code?.trim();
+    if (!deptCode) {
+      const allDepts = await db.query.departments.findMany({
+        where: eq(departments.companyId, companyId),
+        columns: { code: true },
+      });
+      deptCode = generateNextCode(
+        "DEP",
+        allDepts.map((d) => d.code),
+        2
+      );
+    }
+
     const [inserted] = await db
       .insert(departments)
       .values({
         companyId,
-        code: data.code || `DEP-${Date.now().toString().slice(-4)}`,
+        branchId: data.branchId || null,
+        code: deptCode,
         name: data.name || "Yangi bo'lim",
         description: data.description || null,
         isActive: data.isActive ?? true,
@@ -479,11 +507,24 @@ export async function upsertPositionRecord(
       return { success: true, id: data.id };
     }
 
+    let posCode = data.code?.trim();
+    if (!posCode) {
+      const allPos = await db.query.positions.findMany({
+        where: eq(positions.companyId, companyId),
+        columns: { code: true },
+      });
+      posCode = generateNextCode(
+        "POS",
+        allPos.map((p) => p.code),
+        2
+      );
+    }
+
     const [inserted] = await db
       .insert(positions)
       .values({
         companyId,
-        code: data.code || `POS-${Date.now().toString().slice(-4)}`,
+        code: posCode,
         title: data.title || "Yangi lavozim",
         departmentId: data.departmentId || null,
         defaultWageType: (data.defaultWageType as any) || "piecework",
