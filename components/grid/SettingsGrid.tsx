@@ -46,7 +46,7 @@ import {
 } from "lucide-react";
 
 interface SettingsGridProps {
-  type: "plants" | "users" | "tariffs";
+  type: "plants" | "users" | "tariffs" | "companies";
 }
 
 interface SettingsRow {
@@ -93,6 +93,9 @@ export function SettingsGrid({ type }: SettingsGridProps) {
     fetchUsers,
     tariffs,
     fetchTariffs,
+    companiesList,
+    loadCompanies,
+    openNewCompanyTab,
     openNewTariffTab,
     saveTariffToDb,
     upsertTariff,
@@ -106,8 +109,10 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       fetchPlants();
     } else if (type === "tariffs") {
       fetchTariffs();
+    } else if (type === "companies") {
+      loadCompanies();
     }
-  }, [type, fetchUsers, fetchPlants, fetchTariffs]);
+  }, [type, fetchUsers, fetchPlants, fetchTariffs, loadCompanies]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -128,7 +133,19 @@ export function SettingsGrid({ type }: SettingsGridProps) {
     let cols: GridColumn[] = [];
     let dataRows: SettingsRow[] = [];
 
-    if (type === "plants") {
+    if (type === "companies") {
+      cols = [
+        { id: "code", title: "Kodi", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "name", title: "Kompaniya Nomi", width: 230, icon: GridColumnIcon.HeaderString },
+        { id: "legalType", title: "Yuridik Turi", width: 115, icon: GridColumnIcon.HeaderSingleValue },
+        { id: "inn", title: "STIR (INN)", width: 115, icon: GridColumnIcon.HeaderReference },
+        { id: "bankAccount", title: "Hisob-raqam", width: 180, icon: GridColumnIcon.HeaderReference },
+        { id: "branchesCount", title: "Sexlar / Filiallar", width: 125, icon: GridColumnIcon.HeaderNumber },
+        { id: "warehousesCount", title: "Omborlar", width: 100, icon: GridColumnIcon.HeaderNumber },
+        { id: "status", title: "Holati", width: 100, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+      dataRows = (companiesList || []) as unknown as SettingsRow[];
+    } else if (type === "plants") {
       cols = [
         { id: "code", title: "Kodi", width: 95, icon: GridColumnIcon.HeaderReference },
         { id: "name", title: "Tashkilot / Korxona / Sex nomi", width: 280, icon: GridColumnIcon.HeaderString },
@@ -172,7 +189,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
     }
 
     return { columns: cols, rows: dataRows };
-  }, [type, plants, users, tariffs]);
+  }, [type, plants, users, tariffs, companiesList]);
 
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
@@ -284,6 +301,17 @@ export function SettingsGrid({ type }: SettingsGridProps) {
     const row = filteredRows[rowIndex];
     if (!row) return;
 
+    if (type === "companies") {
+      openTab({
+        id: `tab-company-${row.id}`,
+        title: `${row.code || row.name}`,
+        type: "company-detail",
+        module: "settings",
+        documentData: row,
+      });
+      return;
+    }
+
     if (type === "plants") {
       openTab({
         id: `plant-${row.id}`,
@@ -323,6 +351,10 @@ export function SettingsGrid({ type }: SettingsGridProps) {
   };
 
   const handleCreateNew = () => {
+    if (type === "companies") {
+      openNewCompanyTab();
+      return;
+    }
     if (type === "tariffs") {
       openNewTariffTab();
       return;

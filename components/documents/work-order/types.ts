@@ -584,8 +584,10 @@ export interface WorkOrderFormData {
   isReorder?: boolean;
   linkedOrderId?: string;
   pressMachine: string;
+  orderDate?: string;
   startDate: string;
   deadline: string;
+  actualEndDate?: string;
   paperStock: string;
   coating: string;
   lamination?: string;

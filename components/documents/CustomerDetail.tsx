@@ -95,6 +95,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   const {
     crmCustomers,
     loadCrmCustomers,
+    loadCrmIndustries,
     clientSettlements,
     deliveryActs,
     loadFinanceData,
@@ -123,6 +124,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
     if (crmCustomers.length === 0 && loadCrmCustomers) {
       loadCrmCustomers();
     }
+    if (loadCrmIndustries) loadCrmIndustries();
     if (loadProductionQueue) loadProductionQueue();
     if (loadFinishedGoods) loadFinishedGoods();
     if (loadFinanceData) loadFinanceData();

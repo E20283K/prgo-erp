@@ -590,6 +590,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const savedDocNoRef = React.useRef<string>(initialDocNo);
   const isSavingRef = React.useRef<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const isDraft = !docNo || tab.id.startsWith("draft-") || tab.id.startsWith("temp-");
 
   const queueLookupKey = docNo || tab.id;
@@ -730,8 +731,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     status: data.status || initialQueueItem?.stage || "Draft",
     priority: data.priority || initialQueueItem?.priority || "Normal",
     pressMachine: data.pressMachine || initialQueueItem?.pressMachine || "",
+    orderDate: data.orderDate || initialQueueItem?.orderDate || new Date().toISOString().split("T")[0],
     startDate: data.startDate || initialQueueItem?.startDate || "",
     deadline: data.deadline || initialQueueItem?.deadline || "",
+    actualEndDate: data.actualEndDate || initialQueueItem?.actualEndDate || "",
     paperStock: data.paperStock || initialQueueItem?.paperStock || "",
     coating: data.coating || initialQueueItem?.coating || "",
     lamination: data.lamination || initialQueueItem?.lamination || "",
@@ -1369,7 +1372,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         : null) ||
       (dbSites && dbSites.find((s: any) => s.id === formData.site || s.name === formData.site)) ||
       SITE_OPTIONS.find((s) => s.id === formData.site || s.name === formData.site) || {
-        id: formData.site || "site-1",
+        id: formData.site || (plants && plants.length > 0 ? plants[0].id : ""),
         name: (plants && plants.find((p: any) => p.id === formData.site)?.name) || formData.site || "Bosh sex",
         label: (plants && plants.find((p: any) => p.id === formData.site)?.name) || formData.site || "Bosh sex",
         location: "Asosiy bino",
@@ -1535,6 +1538,28 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleFieldChange = (field: string | Record<string, any>, val?: any) => {
     const updates: Record<string, any> = typeof field === "string" ? { [field]: val } : field;
 
+    if ("status" in updates) {
+      const nextStatus = updates.status;
+      if (nextStatus === "Completed" && !updates.actualEndDate && !formData.actualEndDate) {
+        updates.actualEndDate = new Date().toISOString().split("T")[0];
+      } else if (nextStatus !== "Completed" && formData.status === "Completed" && !("actualEndDate" in updates)) {
+        updates.actualEndDate = "";
+      }
+    }
+
+    setFormErrors((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+      const next = { ...prev };
+      let changed = false;
+      Object.keys(updates).forEach((k) => {
+        if (k in next) {
+          delete next[k];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+
     const shouldSyncBom = Object.keys(updates).some((f) =>
       [
         "paperStock",
@@ -1633,7 +1658,59 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+    const customer = (formData.customer || "").trim();
+    const product = (formData.product || "").trim();
+    const quantity = Number(formData.quantity) || 0;
+
+    if (!customer) {
+      newErrors.customer = "Mijozni tanlang yoki kiriting";
+    }
+    if (!product) {
+      newErrors.product = "Mahsulot nomini kiriting";
+    }
+    if (quantity <= 0) {
+      newErrors.quantity = "Buyurtma adadi (tiraji) 0 dan katta bo'lishi kerak";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFormErrors(newErrors);
+      if (activeTab !== "overview") {
+        setLevel3Tab(tab.id, "overview");
+      }
+      setTimeout(() => {
+        if (newErrors.customer) {
+          const el = document.getElementById("wo-input-customer");
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          el?.focus();
+        } else if (newErrors.product) {
+          const el = document.getElementById("wo-input-product");
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          el?.focus();
+        } else if (newErrors.quantity) {
+          const el = document.getElementById("wo-input-quantity");
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          el?.focus();
+        }
+      }, 100);
+
+      addNotification({
+        title: "To'ldirish talab etiladi",
+        description: "Iltimos, barcha majburiy maydonlarni (Mijoz, Mahsulot nomi, Adad) to'ldiring.",
+        severity: "error",
+      });
+      return false;
+    }
+
+    setFormErrors({});
+    return true;
+  };
+
   const persistOrderDetails = async (): Promise<string> => {
+    if (!validateForm()) {
+      return "";
+    }
     // If a save operation is already in flight, return existing doc ID to avoid duplicates
     if (isSavingRef.current) {
       return savedDocNoRef.current || docNo || tab.id;
@@ -1664,7 +1741,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           materials: currentBomItems,
         });
 
-        if (savedResult && typeof savedResult === "object" && savedResult.docNo) {
+        if (!savedResult || savedResult.success === false) {
+          addNotification({
+            title: "Saqlashda xatolik",
+            description: savedResult?.error || "Buyurtmani saqlashda xatolik yuz berdi.",
+            severity: "error",
+          });
+          return "";
+        }
+
+        const realDocNo = savedResult.docNo || savedResult.workOrder?.docNo;
+        if (realDocNo) {
           currentDocNo = savedResult.docNo;
           savedDocNoRef.current = currentDocNo;
           setDocNo(currentDocNo);
@@ -1724,7 +1811,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         pressMachine: formData.pressMachine,
         department: formData.department,
         priority: (formData.priority as "Normal" | "High" | "Urgent") || "Normal",
+        orderDate: formData.orderDate,
         deadline: formData.deadline,
+        actualEndDate: formData.actualEndDate,
         orderType: formData.orderType,
         sampleRequired: isSampleNeeded,
         sampleStatus: isSampleNeeded
@@ -1754,6 +1843,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleSave = async () => {
     if (isSavingRef.current) return;
     const savedId = await persistOrderDetails();
+    if (!savedId) return;
     setHistoryRefreshTrigger((prev) => prev + 1);
     addNotification({
       title: "Buyurtma saqlandi",
@@ -1765,6 +1855,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleSaveAndClose = async () => {
     if (isSavingRef.current) return;
     const savedId = await persistOrderDetails();
+    if (!savedId) return;
     closeTab(savedId);
   };
 
@@ -2678,6 +2769,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                 onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
                 isOperator={isOperator}
+                
+                errors={formErrors}
+                setErrors={setFormErrors}
                 tOrder={tOrder}
               />
             )}
@@ -2691,6 +2785,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
                 onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                 isOperator={isOperator}
+                
                 sampleData={sampleData}
                 onSampleChange={handleSampleChange}
                 orderAttachments={orderAttachments}
@@ -2743,6 +2838,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     lamination={formData.lamination}
                     embellishment={formData.embellishment}
                     isOperator={isOperator}
+                
                     onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                     kashirovkaMode={formData.kashirovkaMode}
                     kashirovkaStrategy={formData.kashirovkaStrategy}
@@ -2875,6 +2971,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   formData={formData}
                   docNo={data.docNo || tab.id}
                   isOperator={isOperator}
+                
                   onUpdateTooling={(newItems) => {
                     handleFieldChange("toolingItems", newItems);
                     const totalCost = newItems.reduce(
@@ -2945,6 +3042,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 }}
                 onOpenTab={openTab}
                 isOperator={isOperator}
+                
                 onItemsChange={(newItems) => {
                   const hadPrimarySubstrate = currentBomItems.some(
                     (i) => i.category === "Paper & Board" || i.category === "Roll & Label"
@@ -2986,6 +3084,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onDeleteSelectedOperation={handleDeleteSelectedOperation}
                 isDark={isDark}
                 isOperator={isOperator}
+                
                 onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
                 onSyncFromPlan={() => handleApplyRouteFromPlan()}
                 onOpenInTimeline={(opId) => {

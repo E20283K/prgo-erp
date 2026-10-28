@@ -70,6 +70,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import { generateNextCode } from "@/lib/utils";
+import { OrgUnitSelect } from "@/components/common/OrgUnitSelect";
 import {
   Select,
   SelectContent,
@@ -281,7 +282,8 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     if (plants.length === 0 && fetchPlants) {
       fetchPlants();
     }
-  }, [setDepartmentsList, setPositionsList, plants.length, fetchPlants]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // API load for employee's piecework and attendance
   const [apiPieceworks, setApiPieceworks] = useState<PieceworkRecord[] | null>(null);
@@ -1073,7 +1075,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
               subtitle={formData.positionTitle || formData.position || "Lavozim biriktirilmagan"}
             >
               <InfoRow label="Sex/Bo'lim">{formData.departmentName || formData.department || "—"}</InfoRow>
-              <InfoRow label="Filial">{formData.plant || "PrintGoo Bosh Zavod"}</InfoRow>
+              <InfoRow label="Tashkilot / Filial">{formData.plant || "PrintGoo Bosh Zavod"}</InfoRow>
               <InfoRow label="To'lov turi">{formData.wageType}</InfoRow>
               <InfoRow label="Oklad">
                 <span className="font-mono font-medium">
@@ -1316,6 +1318,8 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                                 departmentId: matched?.id || formData.departmentId,
                                 departmentCode: matched?.code || formData.departmentCode,
                                 plant: matched?.plant || formData.plant,
+                                branchId: matched?.branchId || formData.branchId,
+                                companyId: matched?.companyId || formData.companyId,
                               });
                             }
                           }}
@@ -1517,15 +1521,19 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                   </div>
 
                   <div>
-                    <Label className="text-xs mb-1 block">Korxona / filial</Label>
-                    <ComboboxSelect
-                      items={plantOptions}
-                      value={formData.plant || "PrintGoo Bosh Zavod"}
-                      onValueChange={(val) => handleUpdate({ plant: val })}
-                      allowCustom
-                      placeholder="Filialni tanlang..."
-                      className="h-8 text-xs bg-muted/20 w-full"
-                      contentClassName="w-[320px]"
+                    <Label className="text-xs mb-1 block">Tashkilot / Filial</Label>
+                    <OrgUnitSelect
+                      branchId={formData.branchId}
+                      companyId={formData.companyId}
+                      value={formData.plant}
+                      onValueChange={(val) => {
+                        handleUpdate({
+                          branchId: val.branchId,
+                          companyId: val.companyId,
+                          plant: val.label,
+                        });
+                      }}
+                      placeholder="Tashkilot yoki filialni tanlang..."
                     />
                   </div>
 

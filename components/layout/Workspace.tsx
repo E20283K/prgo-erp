@@ -45,10 +45,12 @@ import { CustomerDetail } from "@/components/documents/CustomerDetail";
 import { SupplierDetail } from "@/components/documents/SupplierDetail";
 import { WarehouseReceiptDetail } from "@/components/documents/WarehouseReceiptDetail";
 import { WarehouseShipmentDetail } from "@/components/documents/WarehouseShipmentDetail";
+import { WarehouseMovementDetail } from "@/components/documents/WarehouseMovementDetail";
 import { PlanningSlotDetail } from "@/components/documents/PlanningSlotDetail";
 import { MachineDetail } from "@/components/documents/MachineDetail";
 import { WarehouseStockDetail } from "@/components/documents/WarehouseStockDetail";
 import { PlantDetail } from "@/components/documents/PlantDetail";
+import { CompanyDetail } from "@/components/documents/company/CompanyDetail";
 import { TariffDetail } from "@/components/documents/TariffDetail";
 import { UserDetail } from "@/components/documents/UserDetail";
 import { EmployeeDetail } from "@/components/documents/hr/employees/EmployeeDetail";
@@ -180,9 +182,11 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     if (tab.type === "supplier") return <SupplierDetail tab={tab} />;
     if (tab.type === "warehouse-receipt") return <WarehouseReceiptDetail tab={tab} />;
     if (tab.type === "warehouse-shipment") return <WarehouseShipmentDetail tab={tab} />;
+    if (tab.type === "warehouse-movement") return <WarehouseMovementDetail tab={tab} />;
     if (tab.type === "warehouse-stock") return <WarehouseStockDetail tab={tab} />;
     if (tab.type === "planning-slot") return <PlanningSlotDetail tab={tab} />;
     if (tab.type === "machine-detail") return <MachineDetail tab={tab} />;
+    if (tab.type === "company-detail") return <CompanyDetail tab={tab} />;
     if (tab.type === "plant-detail") return <PlantDetail tab={tab} />;
     if (tab.type === "tariff-detail") return <TariffDetail tab={tab} />;
     if (tab.type === "user-detail") return <UserDetail tab={tab} />;
@@ -475,7 +479,6 @@ export function Workspace({ children }: { children: React.ReactNode }) {
               )}
 
               <Separator orientation="vertical" className="h-4 mx-0.5 bg-zinc-300 dark:bg-zinc-800" />
-
               {/* Notification System Popover */}
               <NotificationPanel />
 

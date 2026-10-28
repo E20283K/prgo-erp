@@ -5,6 +5,7 @@ import {
   varchar,
   text,
   integer,
+  numeric,
   boolean,
   timestamp,
   jsonb,
@@ -66,10 +67,19 @@ export const companies = pgTable(
     code: varchar("code", { length: 32 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     legalName: varchar("legal_name", { length: 255 }),
+    legalType: varchar("legal_type", { length: 32 }).default("MChJ").notNull(),
     industryType: industryTypeEnum("industry_type").default("printing").notNull(),
     inn: varchar("inn", { length: 32 }),
+    isVatPayer: boolean("is_vat_payer").default(true).notNull(),
+    vatNumber: varchar("vat_number", { length: 64 }),
+    bankName: varchar("bank_name", { length: 255 }),
+    bankAccount: varchar("bank_account", { length: 64 }),
+    mfo: varchar("mfo", { length: 16 }),
+    annualLimitUzs: numeric("annual_limit_uzs", { precision: 18, scale: 2 }).default("1000000000.00"),
     baseCurrency: varchar("base_currency", { length: 3 }).default("UZS").notNull(),
     isActive: boolean("is_active").default(true).notNull(),
+    status: varchar("status", { length: 32 }).default("Active").notNull(),
+    notes: text("notes"),
     settings: jsonb("settings").$type<CompanySettings>().default({}).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -77,6 +87,7 @@ export const companies = pgTable(
   (table) => [
     uniqueIndex("companies_code_uq").on(table.code),
     index("companies_industry_idx").on(table.industryType),
+    index("companies_legal_type_idx").on(table.legalType),
   ]
 );
 

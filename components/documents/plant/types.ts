@@ -44,10 +44,14 @@ export interface PlantIntegrationSettings {
 
 export interface PlantRecord {
   id: string;
+  companyId?: string;
   code: string;
   name: string;
   shortName: string;
   legalEntityName: string;
+  legalType?: "MChJ" | "YTT" | "XK" | "AJ";
+  annualLimitUzs?: number;
+  currentTurnoverUzs?: number;
   branchType: string;
   tin: string; // STIR / INN
   vatNumber?: string; // QQS kodi
@@ -107,9 +111,10 @@ export function generateNextPlantCode(
   return candidate;
 }
 
-export function createEmptyPlant(id: string = `PLT-${Date.now().toString().slice(-6)}`, code: string = ""): PlantRecord {
+export function createEmptyPlant(id: string = `PLT-${Date.now().toString().slice(-6)}`, code: string = "", companyId?: string): PlantRecord {
   return {
     id,
+    companyId,
     code,
     name: "",
     shortName: "",
@@ -154,6 +159,7 @@ export function branchToPlantRecord(b: any): PlantRecord {
   const rawIntegration = b.integration && typeof b.integration === "object" ? b.integration : {};
   return {
     id: b.id,
+    companyId: b.companyId || b.company_id || undefined,
     code: b.code || "",
     name: b.name || "",
     shortName: b.shortName || "",
@@ -193,5 +199,74 @@ export function branchToPlantRecord(b: any): PlantRecord {
       lastSyncAt: rawIntegration.lastSyncAt || "",
     },
     notes: b.notes || "",
+  };
+}
+
+
+export function companyToPlantRecord(c: any): PlantRecord {
+  if (!c) return createEmptyPlant();
+  if (c.departments && c.bankAccounts && c.integration) {
+    return c as PlantRecord;
+  }
+
+  const settings = c.settings && typeof c.settings === "object" ? c.settings : {};
+  const primaryBank = Array.isArray(settings.bankAccounts) && settings.bankAccounts.length > 0
+    ? settings.bankAccounts.find((b: any) => b.isPrimary) || settings.bankAccounts[0]
+    : null;
+
+  return {
+    id: c.id,
+    companyId: c.id,
+    code: c.code || "",
+    name: c.name || "",
+    shortName: settings.shortName || c.name || "",
+    legalEntityName: c.legalName || settings.legalEntityName || c.name || "",
+    legalType: c.legalType || settings.legalType || "MChJ",
+    annualLimitUzs: Number(c.annualLimitUzs) || 1_000_000_000,
+    currentTurnoverUzs: Number(c.currentTurnoverUzs) || 0,
+    branchType: settings.branchType || "Mustaqil Ishlab Chiqaruvchi Tashkilot",
+    tin: c.inn || settings.tin || "",
+    vatNumber: c.vatNumber || settings.vatNumber || "",
+    oked: settings.oked || "",
+    address: c.address || settings.address || "",
+    legalAddress: settings.legalAddress || c.address || settings.address || "",
+    landmark: settings.landmark || "",
+    phone: c.phone || settings.phone || "",
+    email: c.email || settings.email || "",
+    director: c.director || settings.director || "",
+    directorPhone: settings.directorPhone || "",
+    chiefAccountant: c.accountant || settings.chiefAccountant || "",
+    chiefAccountantPhone: settings.chiefAccountantPhone || "",
+    productionHead: settings.productionHead || "",
+    productionHeadPhone: settings.productionHeadPhone || "",
+    shiftRegime: settings.shiftRegime || "1×8h Standart (08:00–17:00)",
+    workingHours: settings.workingHours || "08:00 – 17:00",
+    daysOfWeek: settings.daysOfWeek || "Dushanba – Shanba",
+    totalFloorAreaM2: Number(settings.totalFloorAreaM2) || 0,
+    machinesCount: Number(c.machinesCount || settings.machinesCount) || 0,
+    status: (c.status as any) || "Active",
+    isMain: Boolean(settings.isMain),
+    departments: Array.isArray(settings.departments) ? settings.departments : [],
+    warehouses: Array.isArray(settings.warehouses) ? settings.warehouses : [],
+    bankAccounts: Array.isArray(settings.bankAccounts) && settings.bankAccounts.length > 0
+      ? settings.bankAccounts
+      : (c.bankAccount || primaryBank)
+      ? [{
+          id: "ACC-1",
+          bankName: c.bankName || primaryBank?.bankName || "",
+          mfo: c.mfo || primaryBank?.mfo || "",
+          accountNumber: c.bankAccount || primaryBank?.accountNumber || "",
+          currency: (c.baseCurrency || primaryBank?.currency || "UZS") as any,
+          isPrimary: true,
+        }]
+      : [],
+    integration: settings.integration || {
+      didoxEnabled: false,
+      didoxContractorCode: "",
+      apiKeySet: false,
+      autoSyncInvoices: false,
+      oneCSyncEnabled: false,
+    },
+    notes: c.notes || settings.notes || "",
   };
 }

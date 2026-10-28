@@ -98,6 +98,9 @@ export function TradingGrid({ type }: TradingGridProps) {
     deleteTradingOrderAsync,
     deleteTradingCatalogItemAsync,
     recordTradingPaymentAsync,
+    companiesList,
+    activeCompanyId,
+    loadCompanies,
   } = useWorkspaceStore();
 
   const isDark = theme === "dark";
@@ -111,23 +114,27 @@ export function TradingGrid({ type }: TradingGridProps) {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentCustomer, setPaymentCustomer] = useState("");
   const [paymentAmount, setPaymentAmount] = useState(10_000_000);
-  const [paymentSeller, setPaymentSeller] = useState("ytt-qodirov");
+  const [paymentSeller, setPaymentSeller] = useState("");
   const [paymentDocNo, setPaymentDocNo] = useState("");
   const [isActionLoading, setIsActionLoading] = useState(false);
 
   // Load real data from PostgreSQL on mount and when type changes
   useEffect(() => {
     loadTradingData(type);
-    if (!crmCustomers || crmCustomers.length === 0) {
-      loadCrmCustomers();
-    }
-    if (!tradingYttEntities || tradingYttEntities.length === 0) {
+    loadCrmCustomers();
+    loadCompanies();
+    if (type !== "ytt-limits") {
       loadTradingData("ytt-limits");
     }
-  }, [type, loadTradingData, crmCustomers, loadCrmCustomers, tradingYttEntities]);
+  }, [type, loadTradingData, loadCrmCustomers, loadCompanies]);
 
   // YTT Limit Status Filter state
   const [yttStatusFilter, setYttStatusFilter] = useState<"all" | "Safe" | "Warning" | "Critical">("all");
+
+  const activeCompany = useMemo(() => {
+    if (activeCompanyId === "ALL") return null;
+    return companiesList.find((c) => c.id === activeCompanyId) || null;
+  }, [activeCompanyId, companiesList]);
 
   // YTT Limits summary calculation
   const yttSummary = useMemo(() => {
@@ -171,7 +178,16 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "paymentMethod", title: "To'lov Shakli", width: 180, icon: GridColumnIcon.HeaderLookup },
         { id: "status", title: "Holat", width: 130, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      rawRows = (tradingSales || []).map((s) => ({
+      const salesSource = activeCompany
+        ? (tradingSales || []).filter(
+            (s) =>
+              (s as any).companyId === activeCompany.id ||
+              s.sellerEntityId === activeCompany.id ||
+              s.sellerEntityName?.toLowerCase().includes(activeCompany.name.toLowerCase()) ||
+              s.sellerEntityName?.toLowerCase().includes(activeCompany.code.toLowerCase())
+          )
+        : (tradingSales || []);
+      rawRows = salesSource.map((s) => ({
         ...s,
         totalAmountFormatted:
           s.currency === "UZS"
@@ -190,7 +206,14 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "deliveryDate", title: "Yetkazish Muddat", width: 120, icon: GridColumnIcon.HeaderDate },
         { id: "trackingNo", title: "Kargo Treking", width: 140, icon: GridColumnIcon.HeaderString },
       ];
-      rawRows = (tradingOrders || []).map((o) => ({
+      const ordersSource = activeCompany
+        ? (tradingOrders || []).filter(
+            (o) =>
+              (o as any).companyId === activeCompany.id ||
+              (o as any).sellerEntityId === activeCompany.id
+          )
+        : (tradingOrders || []);
+      rawRows = ordersSource.map((o) => ({
         ...o,
         totalFormatted: `$${(Number(o.totalUSD) || 0).toLocaleString()}`,
       }));
@@ -206,7 +229,15 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "statusBadge", title: "Limit Holati", width: 140, icon: GridColumnIcon.HeaderSingleValue },
         { id: "recommendation", title: "Tizim Tavsiyasi", width: 160, icon: GridColumnIcon.HeaderLookup },
       ];
-      rawRows = (tradingYttEntities || []).map((e) => {
+      const yttSource = activeCompany
+        ? (tradingYttEntities || []).filter(
+            (e) =>
+              e.id === activeCompany.id ||
+              e.code?.toLowerCase() === activeCompany.code.toLowerCase() ||
+              e.name?.toLowerCase() === activeCompany.name.toLowerCase()
+          )
+        : (tradingYttEntities || []);
+      rawRows = yttSource.map((e) => {
         const remaining = Math.max(0, e.annualLimit - e.currentTurnover);
         return {
           ...e,
@@ -236,7 +267,15 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "balanceFormatted", title: "Qoldiq Qarz (Saldo)", width: 160, icon: GridColumnIcon.HeaderNumber },
         { id: "status", title: "Akt-Sverka Holati", width: 150, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      rawRows = (tradingSettlements || []).map((l) => ({
+      const settlementsSource = activeCompany
+        ? (tradingSettlements || []).filter(
+            (l) =>
+              l.sellerEntityId === activeCompany.id ||
+              l.sellerEntityName?.toLowerCase().includes(activeCompany.name.toLowerCase()) ||
+              l.sellerEntityName?.toLowerCase().includes(activeCompany.code.toLowerCase())
+          )
+        : (tradingSettlements || []);
+      rawRows = settlementsSource.map((l) => ({
         ...l,
         debitFormatted: l.currency === "UZS" ? `${(Number(l.debit) || 0).toLocaleString()} UZS` : `$${(Number(l.debit) || 0).toFixed(2)} USD`,
         creditFormatted: l.currency === "UZS" ? `${(Number(l.credit) || 0).toLocaleString()} UZS` : `$${(Number(l.credit) || 0).toFixed(2)} USD`,
@@ -547,6 +586,36 @@ export function TradingGrid({ type }: TradingGridProps) {
           containerNo: "",
           notes: "",
           items: [],
+        },
+      });
+      return;
+    }
+
+    if (type === "ytt-limits") {
+      const nextNum = (tradingYttEntities?.length || 0) + 1;
+      const newCode = `YTT-${String(nextNum).padStart(2, "0")}`;
+      const newId = `ytt-${Date.now()}`;
+      openTab({
+        id: newId,
+        title: `${newCode} (Yangi YTT)`,
+        type: "trading-ytt-limit",
+        module: "trading",
+        isUnsaved: false,
+        documentData: {
+          id: newId,
+          code: newCode,
+          name: "",
+          legalType: "YTT",
+          inn: "",
+          bankName: "",
+          bankAccount: "",
+          annualLimit: 1_000_000_000,
+          currentTurnover: 0,
+          currency: "UZS",
+          turnoverPercent: 0,
+          status: "Safe",
+          activeContractsCount: 0,
+          notes: "",
         },
       });
       return;

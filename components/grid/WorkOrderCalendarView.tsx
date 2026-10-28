@@ -78,7 +78,7 @@ export function WorkOrderCalendarView({
   const { openTab } = useWorkspaceStore();
 
   // Anchor to October 2026 where all mock orders are scheduled
-  const [internalDate, setInternalDate] = useState<Date>(() => new Date(2026, 9, 6));
+  const [internalDate, setInternalDate] = useState<Date>(() => new Date());
   const [internalMode, setInternalMode] = useState<"month" | "week" | "day">("month");
 
   const currentDate = externalDate ?? internalDate;

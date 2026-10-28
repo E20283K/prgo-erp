@@ -38,10 +38,42 @@ import {
   INITIAL_TRADING_CATALOG,
 } from "@/components/documents/trading/data";
 
+export type CompanyLegalType = "MChJ" | "YTT" | "XK" | "AJ";
+
+export interface CompanyRecord {
+  id: string;
+  code: string;
+  name: string;
+  legalName?: string;
+  legalType: CompanyLegalType;
+  industryType?: "printing" | "textile";
+  inn?: string;
+  isVatPayer: boolean;
+  vatNumber?: string;
+  bankName?: string;
+  bankAccount?: string;
+  mfo?: string;
+  annualLimitUzs: number;
+  currentTurnoverUzs: number;
+  baseCurrency: string;
+  status: "Active" | "Inactive";
+  branchesCount?: number;
+  warehousesCount?: number;
+  director?: string;
+  accountant?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  settings?: any;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface DocumentTab {
   id: string;
   title: string;
-  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "supplier" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "tariff-detail" | "employee-detail" | "department-detail" | "position-detail" | "shift-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog" | "trading-ytt-limit" | "user-detail";
+  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "supplier" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "warehouse-movement" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "company-detail" | "tariff-detail" | "employee-detail" | "department-detail" | "position-detail" | "shift-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog" | "trading-ytt-limit" | "user-detail";
   module: string;
   isUnsaved?: boolean;
   documentData?: any;
@@ -323,6 +355,19 @@ export interface WarehouseStockRecord {
   imageUrl?: string;
 }
 
+export interface MovementLineItem {
+  id: string;
+  sku: string;
+  name: string;
+  category?: string;
+  grammage?: number;
+  sheetFormat?: string;
+  quantity: number;
+  receivedQty: number;
+  unit: string;
+  notes?: string;
+}
+
 export interface WarehouseMovementRecord {
   id: string;
   date: string;
@@ -429,7 +474,9 @@ export interface ProductionQueueItem {
   site?: string;
   priceTotal?: number;
   status?: string;
+  orderDate?: string;
   startDate?: string;
+  actualEndDate?: string;
   recipe?: string;
   dimensions?: any;
   toolingItems?: any[];
@@ -610,7 +657,8 @@ interface WorkspaceState {
   upsertCustomerAsync: (customer: CrmCustomerRecord, companyCode?: string) => Promise<any>;
   crmIndustriesList: { id: string; name: string; code?: string }[];
   isCrmIndustriesLoading?: boolean;
-  loadCrmIndustries: () => Promise<void>;
+  isCrmIndustriesLoaded?: boolean;
+  loadCrmIndustries: (force?: boolean) => Promise<void>;
   addCrmIndustryAsync: (name: string, companyCode?: string) => Promise<{ id: string; name: string } | null>;
 
   suppliers: SupplierRecord[];
@@ -729,6 +777,16 @@ interface WorkspaceState {
   upsertDieToolingAsync: (tool: Partial<DieToolingRecord>, companyCode?: string) => Promise<DieToolingRecord | null>;
   deleteDieToolingAsync: (id: string, companyCode?: string) => Promise<boolean>;
 
+  // ── Enterprise Companies & Multi-tenant Settings ──────────────────────────
+  companiesList: CompanyRecord[];
+  isCompaniesLoading: boolean;
+  activeCompanyId: string;
+  setActiveCompanyId: (id: string) => void;
+  loadCompanies: () => Promise<void>;
+  upsertCompanyAsync: (company: Partial<CompanyRecord>) => Promise<CompanyRecord | null>;
+  deleteCompanyAsync: (id: string) => Promise<boolean>;
+  openNewCompanyTab: () => string;
+
   // ── Enterprise Branches & Plants ──────────────────────────────────────────
   plants: PlantRecord[];
   isPlantsLoading: boolean;
@@ -764,6 +822,8 @@ interface WorkspaceState {
   piecework: PieceworkRecord[];
   payrolls: PayrollRecord[];
   departmentsList: DepartmentRecord[];
+  isDepartmentsLoading?: boolean;
+  loadDepartments: (companyCode?: string) => Promise<void>;
   positionsList: PositionRecord[];
   shiftsList: ShiftRecord[];
   biometricDevices: BiometricDeviceRecord[];
@@ -773,6 +833,7 @@ interface WorkspaceState {
   setDepartmentsList: (departmentsList: DepartmentRecord[]) => void;
   setPositionsList: (positionsList: PositionRecord[]) => void;
   setEmployees: (employees: EmployeeRecord[]) => void;
+  isEmployeesLoading?: boolean;
   loadEmployees: (companyCode?: string) => Promise<void>;
   upsertEmployee: (emp: EmployeeRecord) => void;
   upsertAttendance: (att: AttendanceRecord) => void;
@@ -954,11 +1015,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isCrmCustomersLoading: false,
   crmIndustriesList: [],
   isCrmIndustriesLoading: false,
+  isCrmIndustriesLoaded: false,
   suppliers: [],
   isSuppliersLoading: false,
   isFinanceLoading: false,
 
   loadFinanceData: async (companyCode = "PRINTGOO") => {
+    if (get().isFinanceLoading) return;
     try {
       set({ isFinanceLoading: true });
       const [actsRes, stlRes] = await Promise.all([
@@ -1024,6 +1087,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   loadCrmCustomers: async (companyCode = "PRINTGOO") => {
+    if (get().isCrmCustomersLoading) return;
     try {
       set({ isCrmCustomersLoading: true });
       const res = await fetch("/api/v1/crm/clients?company=" + encodeURIComponent(companyCode));
@@ -1062,14 +1126,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  loadCrmIndustries: async () => {
+  loadCrmIndustries: async (force = false) => {
+    if (!force && (get().isCrmIndustriesLoading || get().isCrmIndustriesLoaded)) {
+      return;
+    }
     try {
       set({ isCrmIndustriesLoading: true });
       const res = await fetch("/api/v1/crm/industries");
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          set({ crmIndustriesList: json.data });
+          set({ crmIndustriesList: json.data, isCrmIndustriesLoaded: true });
         }
       }
     } catch (e) {
@@ -1107,6 +1174,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   loadSuppliers: async (companyCode = "PRINTGOO") => {
+    if (get().isSuppliersLoading) return;
     try {
       set({ isSuppliersLoading: true });
       const res = await fetch("/api/v1/crm/suppliers?company=" + encodeURIComponent(companyCode));
@@ -1163,6 +1231,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isWarehouseStockLoading: false,
 
   loadWarehouseStock: async (companyCode = "PRINTGOO") => {
+    if (get().isWarehouseStockLoading) return;
     try {
       set({ isWarehouseStockLoading: true });
       const res = await fetch("/api/v1/warehouse/stock?company=" + encodeURIComponent(companyCode));
@@ -1205,6 +1274,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isWarehouseMovementsLoading: false,
 
   loadWarehouseMovements: async (companyCode = "PRINTGOO") => {
+    if (get().isWarehouseMovementsLoading) return;
     try {
       set({ isWarehouseMovementsLoading: true });
       const res = await fetch("/api/v1/warehouse/movements?company=" + encodeURIComponent(companyCode));
@@ -1247,6 +1317,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isWarehouseReceiptsLoading: false,
 
   loadWarehouseReceipts: async (companyCode = "PRINTGOO") => {
+    if (get().isWarehouseReceiptsLoading) return;
     try {
       set({ isWarehouseReceiptsLoading: true });
       const res = await fetch("/api/v1/warehouse/receipts?company=" + encodeURIComponent(companyCode));
@@ -1292,6 +1363,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isWarehouseShipmentsLoading: false,
 
   loadWarehouseShipments: async (companyCode = "PRINTGOO") => {
+    if (get().isWarehouseShipmentsLoading) return;
     try {
       set({ isWarehouseShipmentsLoading: true });
       const res = await fetch("/api/v1/warehouse/shipments?company=" + encodeURIComponent(companyCode));
@@ -1338,6 +1410,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isWarehousesLoading: false,
 
   loadWarehouses: async (companyCode = "PRINTGOO") => {
+    if (get().isWarehousesLoading) return;
     try {
       set({ isWarehousesLoading: true });
       const res = await fetch("/api/v1/warehouse/locations?company=" + encodeURIComponent(companyCode));
@@ -1398,6 +1471,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isCarriersLoading: false,
 
   loadCarriers: async (companyCode = "PRINTGOO") => {
+    if (get().isCarriersLoading) return;
     try {
       set({ isCarriersLoading: true });
       const res = await fetch("/api/v1/warehouse/carriers?company=" + encodeURIComponent(companyCode));
@@ -1457,6 +1531,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isFinishedGoodsLoading: false,
 
   loadFinishedGoods: async (companyCode = "PRINTGOO") => {
+    if (get().isFinishedGoodsLoading) return;
     try {
       set({ isFinishedGoodsLoading: true });
       const res = await fetch("/api/v1/warehouse/finished-goods?company=" + encodeURIComponent(companyCode));
@@ -1538,6 +1613,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isProductionQueueLoading: false,
 
   loadProductionQueue: async (companyCode = "PRINTGOO") => {
+    if (get().isProductionQueueLoading) return;
     try {
       set({ isProductionQueueLoading: true });
       const res = await fetch("/api/v1/production/work-orders?company=" + encodeURIComponent(companyCode));
@@ -1570,20 +1646,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bodyPayload),
       });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success) {
-          get().loadProductionQueue(companyCode);
-          return json.workOrder || true;
-        }
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        get().loadProductionQueue(companyCode);
+        const wo = json.workOrder || json.data || {};
+        return {
+          success: true,
+          workOrder: wo,
+          docNo: wo.docNo || payload.docNo,
+        };
       }
-      return false;
-    } catch (e) {
+      return {
+        success: false,
+        error: json?.error || "Buyurtmani saqlashda xatolik yuz berdi",
+      };
+    } catch (e: any) {
       console.error("Failed to persist work order to DB:", e);
-      return false;
+      return {
+        success: false,
+        error: e?.message || "Tarmoq yoki server xatoligi",
+      };
     }
   },
-
   deleteWorkOrderAsync: async (
     docNoOrId: string,
     mode = "auto",
@@ -1702,6 +1786,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   machines: [],
   isMachinesLoading: false,
   loadMachines: async () => {
+    if (get().isMachinesLoading) return;
     set({ isMachinesLoading: true });
     try {
       const res = await fetch("/api/v1/production/machines");
@@ -1767,6 +1852,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   diesTooling: [],
   isDiesToolingLoading: false,
   loadDiesToolingAsync: async (companyCode = "PRINTGOO") => {
+    if (get().isDiesToolingLoading) return;
     set({ isDiesToolingLoading: true });
     try {
       const res = await fetch(`/api/v1/master/printing/dies?company=${companyCode}`);
@@ -1829,6 +1915,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
     return false;
   },
+  companiesList: [],
+  isCompaniesLoading: false,
+  activeCompanyId: "ALL",
+  setActiveCompanyId: (id) => set({ activeCompanyId: id }),
   plants: [],
   isPlantsLoading: false,
   tariffs: [],
@@ -1836,10 +1926,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   users: INITIAL_SYSTEM_USERS,
   isUsersLoading: false,
   employees: [],
+  isEmployeesLoading: false,
   attendance: [],
   piecework: [],
   payrolls: [],
   departmentsList: [],
+  isDepartmentsLoading: false,
   positionsList: [],
   shiftsList: [],
   biometricDevices: [],
@@ -1856,6 +1948,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isTradingLoading: false,
 
   loadTradingData: async (type, companyCode = "PRINTGOO") => {
+    if (get().isTradingLoading) return;
     set({ isTradingLoading: true });
     try {
       if (type === "sales") {
@@ -2093,6 +2186,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isSpecificationsLoading: false,
 
   loadSpecificationsAsync: async () => {
+    if (get().isSpecificationsLoading) return;
     set({ isSpecificationsLoading: true });
     try {
       const res = await fetch("/api/v1/production/specifications");
@@ -2229,6 +2323,95 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       };
     }),
 
+  loadCompanies: async () => {
+    if (get().isCompaniesLoading) return;
+    set({ isCompaniesLoading: true });
+    try {
+      const res = await fetch("/api/v1/settings/companies");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        set({ companiesList: json.data, isCompaniesLoading: false });
+      } else {
+        set({ isCompaniesLoading: false });
+      }
+    } catch (e) {
+      console.error("loadCompanies error:", e);
+      set({ isCompaniesLoading: false });
+    }
+  },
+
+  upsertCompanyAsync: async (payload) => {
+    try {
+      const res = await fetch("/api/v1/settings/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const savedComp: CompanyRecord = json.data;
+          set((state) => ({
+            companiesList: state.companiesList
+              .filter((c) => c.id !== payload.id && c.id !== savedComp.id)
+              .concat(savedComp),
+          }));
+          await get().loadCompanies();
+          return savedComp;
+        }
+      }
+      return null;
+    } catch (err) {
+      console.error("upsertCompanyAsync error:", err);
+      return null;
+    }
+  },
+
+  deleteCompanyAsync: async (id) => {
+    try {
+      const res = await fetch(`/api/v1/settings/companies?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          set((state) => ({
+            companiesList: state.companiesList.filter((c) => c.id !== id),
+          }));
+          return true;
+        }
+      }
+      return false;
+    } catch (err) {
+      console.error("deleteCompanyAsync error:", err);
+      return false;
+    }
+  },
+
+  openNewCompanyTab: () => {
+    const tabId = `tab-company-new-${Date.now()}`;
+    const newComp: Partial<CompanyRecord> = {
+      id: `new-${Date.now()}`,
+      code: `COMP-${Date.now().toString().slice(-4)}`,
+      name: "Yangi Tashkilot",
+      legalType: "MChJ",
+      annualLimitUzs: 1_000_000_000,
+      currentTurnoverUzs: 0,
+      baseCurrency: "UZS",
+      status: "Active",
+      isVatPayer: true,
+    };
+    get().openTab({
+      id: tabId,
+      title: "Yangi Tashkilot *",
+      type: "company-detail",
+      module: "settings",
+      documentData: newComp,
+      isUnsaved: true,
+    });
+    return tabId;
+  },
+
   openNewPlantTab: () => {
     const plantsList = get().plants || [];
     const openPlantDraftCodes = (get().tabs || [])
@@ -2256,6 +2439,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   fetchPlants: async () => {
+    if (get().isPlantsLoading) return;
     set({ isPlantsLoading: true });
     try {
       const res = await fetch("/api/v1/production/sites?companyCode=PRINTGOO");
@@ -2374,6 +2558,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   // ── Tariffs & Pricing Rules (Settings & Production) ───────────────────────
   fetchTariffs: async (companyCode = "PRINTGOO") => {
+    if (get().isTariffsLoading) return;
     set({ isTariffsLoading: true });
     try {
       const res = await fetch(`/api/v1/settings/tariffs?companyCode=${encodeURIComponent(companyCode)}`);
@@ -2614,6 +2799,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setEmployees: (employees) => set({ employees }),
 
   loadEmployees: async (companyCode = "PRINTGOO") => {
+    if (get().isEmployeesLoading) return;
+    set({ isEmployeesLoading: true });
     try {
       const res = await fetch(`/api/v1/hr/employees?company=${companyCode}`);
       const json = await res.json();
@@ -2683,6 +2870,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }),
 
   setDepartmentsList: (departmentsList) => set({ departmentsList }),
+
+  loadDepartments: async (companyCode = "PRINTGOO") => {
+    if (get().isDepartmentsLoading) return;
+    try {
+      set({ isDepartmentsLoading: true });
+      const res = await fetch("/api/v1/hr/departments?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ departmentsList: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load departments:", e);
+    } finally {
+      set({ isDepartmentsLoading: false });
+    }
+  },
   setPositionsList: (positionsList) => set({ positionsList }),
 
   upsertDepartment: (dept) =>
@@ -3401,11 +3606,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         } else if (stage === "In Production" && (!completedSheets || completedSheets === 0) && item.plannedSheets) {
           completedSheets = Math.round(item.plannedSheets * 0.1);
         }
+        const actualEndDate =
+          stage === "Completed"
+            ? item.actualEndDate || new Date().toISOString().split("T")[0]
+            : item.stage === "Completed"
+            ? undefined
+            : item.actualEndDate;
 
         return {
           ...item,
           stage,
           completedSheets,
+          actualEndDate,
         };
       });
 
@@ -3504,7 +3716,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         stage: item.stage || "Queue",
         queueOrder: state.productionQueue.filter((i) => i.pressMachine === item.pressMachine).length + 1,
         checks: item.checks || { designReady: false, paperReady: false, platesReady: false, toolingReady: false },
+        orderDate: item.orderDate || new Date().toISOString().split("T")[0],
+        startDate: item.startDate || "",
         deadline: item.deadline || new Date().toISOString().split("T")[0],
+        actualEndDate: item.actualEndDate || "",
         plannedSheets: item.plannedSheets || item.quantity || 1000,
         completedSheets: item.completedSheets || 0,
         operator: item.operator,

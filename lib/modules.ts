@@ -281,7 +281,7 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Sliders,
         defaultOpen: true,
         items: [
-          { id: "plants", label: "Branches", icon: Building },
+          { id: "companies", label: "Companies", icon: Building2 },
           { id: "users", label: "Users", icon: Shield },
           { id: "tariffs", label: "Tariffs", icon: Coins },
           { id: "notifications-sound", label: "Notifications", icon: Volume2 },

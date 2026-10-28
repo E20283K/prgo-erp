@@ -4,7 +4,7 @@ import { getProductionSites, createProductionSite, deleteProductionSite } from "
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const companyCode = searchParams.get("companyCode") || "PRINTGOO";
+    const companyCode = searchParams.get("companyCode") || searchParams.get("companyId") || "all";
     const sites = await getProductionSites(companyCode);
     return NextResponse.json({ success: true, data: sites });
   } catch (error) {

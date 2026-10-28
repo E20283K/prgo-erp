@@ -72,7 +72,8 @@ export function TradingOrderDetail({ tab }: { tab: DocumentTab }) {
     if (!crmCustomers || crmCustomers.length === 0) {
       loadCrmCustomers();
     }
-  }, [crmCustomers, loadCrmCustomers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Form State
   const [orderNo] = useState<string>(rawData.orderNo || tab.id);

@@ -335,8 +335,10 @@ export const workOrders = pgTable(
     stage: workOrderStageEnum("stage").default("Queue").notNull(),
     orderType: workOrderTypeEnum("order_type").default("Production").notNull(),
 
+    orderDate: varchar("order_date", { length: 32 }),
     startDate: varchar("start_date", { length: 32 }),
     deadline: varchar("deadline", { length: 32 }),
+    actualEndDate: varchar("actual_end_date", { length: 32 }),
 
     paperStock: varchar("paper_stock", { length: 255 }),
     coating: varchar("coating", { length: 255 }),
@@ -399,6 +401,7 @@ export const workOrders = pgTable(
     index("work_orders_stage_idx").on(table.stage),
     index("work_orders_status_idx").on(table.status),
     index("work_orders_priority_idx").on(table.priority),
+    index("work_orders_order_date_idx").on(table.orderDate),
   ]
 );
 

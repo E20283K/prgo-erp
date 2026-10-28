@@ -78,6 +78,8 @@ export interface EmployeeRecord {
   positionTitle?: string;
   position: string;
   plant: string;
+  companyId?: string | null;
+  branchId?: string | null;
   avatarUrl?: string | null;
   // details / passport / legal
   passportSeries?: string;
@@ -106,6 +108,7 @@ export interface DepartmentRecord {
   staffCount: number;
   plant: string;
   branchId?: string | null;
+  companyId?: string | null;
   status?: "Active" | "Maintenance" | "active" | "maintenance";
   isActive?: boolean;
   createdAt?: string;

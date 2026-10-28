@@ -54,6 +54,60 @@ const isUuid = (val: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 /**
+ * Matnli yoki formatlangan miqdorlardan sof sonni ajratib olish (PostgreSQL numeric uchun)
+ * Masalan: "0 / 4 dona" -> "0", "1,200 / 5,000 dona" -> "1200", 500 -> "500"
+ */
+function parseSafeNumeric(val: unknown, fallback: number = 0): string {
+  if (val === null || val === undefined || val === "") return String(fallback);
+  if (typeof val === "number") return isNaN(val) ? String(fallback) : String(val);
+
+  const str = String(val).trim();
+  // Agar "bajarildi / reja birlik" formatida bo'lsa (masalan: "0 / 4 dona", "150 / 500 dona")
+  const slashMatch = str.match(/^([\d\s,.]+)\s*\//);
+  if (slashMatch) {
+    const cleaned = slashMatch[1].replace(/[\s,]/g, "");
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? String(fallback) : String(parsed);
+  }
+
+  // Boshidagi raqamni ajratib olish (masalan: "500 dona", "1,250")
+  const numMatch = str.match(/^([\d\s,.]+)/);
+  if (numMatch) {
+    const cleaned = numMatch[1].replace(/[\s,]/g, "");
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? String(fallback) : String(parsed);
+  }
+
+  return String(fallback);
+}
+
+/**
+ * Rejali miqdorni ajratib olish
+ * Masalan: "0 / 4 dona" -> "4", "0 / 1 list" -> "1", yoki to'g'ridan-to'g'ri son
+ */
+function parseSafePlannedQty(op: any, defaultQty: number = 0): string {
+  if (op.plannedQty !== undefined && op.plannedQty !== null && op.plannedQty !== "") {
+    if (typeof op.plannedQty === "number") {
+      return isNaN(op.plannedQty) ? String(defaultQty) : String(op.plannedQty);
+    }
+    const cleaned = String(op.plannedQty).replace(/[\s,]/g, "");
+    const parsed = parseFloat(cleaned);
+    if (!isNaN(parsed) && parsed > 0) return String(parsed);
+  }
+
+  // Agar qtyCompleted da "/ reja birlik" ko'rinishida bo'lsa
+  const text = String(op.qtyCompleted || "").trim();
+  const targetMatch = text.match(/\/\s*([\d\s,.]+)/);
+  if (targetMatch) {
+    const cleaned = targetMatch[1].replace(/[\s,]/g, "");
+    const parsed = parseFloat(cleaned);
+    if (!isNaN(parsed) && parsed > 0) return String(parsed);
+  }
+
+  return String(defaultQty);
+}
+
+/**
  * Bazadan barcha real ishlab chiqarish buyruqlarini (Work Orders) yuklash
  */
 export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<ProductionQueueItem[]> {
@@ -107,8 +161,10 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
         toolingReady: !!checks.toolingReady,
         audit: checks.audit || {},
       },
+      orderDate: wo.orderDate || (wo.createdAt ? wo.createdAt.toISOString().split("T")[0] : ""),
       startDate: wo.startDate || "",
       deadline: wo.deadline || "",
+      actualEndDate: wo.actualEndDate || "",
       plannedSheets: Number(wo.quantity) || 0,
       completedSheets: 0,
       operator: wo.operator || undefined,
@@ -230,28 +286,38 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
         url: normalizePermanentMediaUrl(a.url) || a.url,
       })) : [],
       events: wo.events || [],
-      operations: (wo.operations || []).map((op: any, idx: number) => ({
-        id: op.id || `op-${idx + 1}`,
-        stepNumber: op.sequence || idx + 1,
-        name: op.name || `Bosqich ${idx + 1}`,
-        department: op.department || "Offset",
-        machine: op.machineStr || "",
-        operator: op.operator || "",
-        duration: Number(op.durationHours || 1),
-        toolingId: op.toolingId || undefined,
-        toolingName: op.toolingName || undefined,
-        tariffId: op.tariffId || undefined,
-        tariffCode: op.tariffCode || undefined,
-        calcUnit: op.calcUnit || undefined,
-        unitDivisor: op.unitDivisor || 1000,
-        rateUsd: Number(op.rateUsd || 0),
-        setupFeeUsd: Number(op.setupFeeUsd || 0),
-        pieceworkRateUsd: Number(op.pieceworkRateUsd || 0),
-        plannedCostUsd: Number(op.plannedCostUsd || 0),
-        pieceworkTotalUsd: Number(op.pieceworkTotalUsd || 0),
-        qtyCompleted: String(op.completedQty || 0),
-        status: op.status || "Queued",
-      })),
+      operations: (wo.operations || []).map((op: any, idx: number) => {
+        const completedNum = Number(op.completedQty || 0);
+        const plannedNum = Number(op.plannedQty || wo.quantity || 0);
+        const qtyLabel = plannedNum > 0
+          ? `${completedNum.toLocaleString()} / ${plannedNum.toLocaleString()}`
+          : String(completedNum);
+        return {
+          id: op.id || `op-${idx + 1}`,
+          stepNumber: op.sequence || (idx + 1) * 10,
+          name: op.name || `Bosqich ${idx + 1}`,
+          department: op.department || "Offset",
+          machine: op.machineStr || "",
+          operator: op.operator || "",
+          duration: Number(op.durationHours || 1),
+          toolingId: op.toolingId || undefined,
+          toolingName: op.toolingName || undefined,
+          tariffId: op.tariffId || undefined,
+          tariffCode: op.tariffCode || undefined,
+          calcUnit: op.calcUnit || undefined,
+          unitDivisor: op.unitDivisor || 1000,
+          rateUsd: Number(op.rateUsd || 0),
+          setupFeeUsd: Number(op.setupFeeUsd || 0),
+          pieceworkRateUsd: Number(op.pieceworkRateUsd || 0),
+          plannedCostUsd: Number(op.plannedCostUsd || 0),
+          pieceworkTotalUsd: Number(op.pieceworkTotalUsd || 0),
+          plannedQty: plannedNum,
+          completedQty: completedNum,
+          qtyCompleted: qtyLabel,
+          status: op.status || "Queued",
+          notes: op.notes || "",
+        };
+      }),
     } as any;
   });
 }
@@ -319,8 +385,13 @@ export async function upsertWorkOrder(
   if (!customerName) {
     throw new Error("Mijoz nomi kiritilishi shart!");
   }
-  if (!data.product) {
+  const productName = (data.product || "").trim();
+  if (!productName) {
     throw new Error("Mahsulot nomi kiritilishi shart!");
+  }
+  const quantity = Number(data.quantity) || 0;
+  if (quantity <= 0) {
+    throw new Error("Buyurtma miqdori (adad) 0 dan katta bo'lishi shart!");
   }
 
   // 1. Mijozni tekshirish yoki topish (agar mavjud bo'lsa)
@@ -355,8 +426,13 @@ export async function upsertWorkOrder(
     priority: (data.priority as any) || "Normal",
     stage: (data as any).stage || "Queue",
     orderType: (data.orderType as any) || "Production",
+    orderDate: data.orderDate || new Date().toISOString().split("T")[0],
     startDate: data.startDate || null,
     deadline: data.deadline || null,
+    actualEndDate:
+      data.status === "Completed" || (data as any).stage === "Completed"
+        ? data.actualEndDate || new Date().toISOString().split("T")[0]
+        : data.actualEndDate || null,
     paperStock: data.paperStock || null,
     coating: data.coating || null,
     lamination: data.lamination || null,
@@ -505,30 +581,43 @@ export async function upsertWorkOrder(
     await db.delete(workOrderOperations).where(eq(workOrderOperations.workOrderId, targetId));
     if (data.operations.length > 0) {
       await db.insert(workOrderOperations).values(
-        data.operations.map((op: any, idx: number) => ({
-          workOrderId: targetId,
-          tariffId: op.tariffId && op.tariffId.length > 20 ? op.tariffId : null,
-          tariffCode: op.tariffCode || null,
-          name: op.name || `Bosqich ${idx + 1}`,
-          department: op.department || data.department || "Offset",
-          machineStr: op.machine || op.machineStr || null,
-          operator: op.operator || (Array.isArray(op.operators) ? op.operators.join(", ") : null),
-          durationHours: (op.duration !== undefined ? op.duration : 1.0).toString(),
-          toolingId: op.toolingId || null,
-          toolingName: op.toolingName || null,
-          calcUnit: op.calcUnit || null,
-          unitDivisor: op.unitDivisor || 1000,
-          rateUsd: (op.rateUsd || 0).toString(),
-          setupFeeUsd: (op.setupFeeUsd || 0).toString(),
-          pieceworkRateUsd: (op.pieceworkRateUsd || 0).toString(),
-          plannedCostUsd: (op.plannedCostUsd || 0).toString(),
-          pieceworkTotalUsd: (op.pieceworkTotalUsd || 0).toString(),
-          sequence: op.stepNumber || idx + 1,
-          status: op.status || "Queued",
-          plannedQty: String(op.plannedQty || data.quantity || 0),
-          completedQty: String(op.completedQty || op.qtyCompleted || 0),
-          notes: op.notes || null,
-        }))
+        data.operations.map((op: any, idx: number) => {
+          const rawDuration = op.durationHours ?? op.duration ?? 1.0;
+          const durationNum = parseFloat(String(rawDuration).replace(/[^\d.]/g, "")) || 1.0;
+
+          const rateNum = parseFloat(String(op.rateUsd || 0).replace(/[^\d.]/g, "")) || 0;
+          const setupNum = parseFloat(String(op.setupFeeUsd || 0).replace(/[^\d.]/g, "")) || 0;
+          const pwRateNum = parseFloat(String(op.pieceworkRateUsd || 0).replace(/[^\d.]/g, "")) || 0;
+          const plannedCostNum = parseFloat(String(op.plannedCostUsd || 0).replace(/[^\d.]/g, "")) || 0;
+          const pwTotalNum = parseFloat(String(op.pieceworkTotalUsd || 0).replace(/[^\d.]/g, "")) || 0;
+          const divisorNum = parseInt(String(op.unitDivisor || 1000), 10) || 1000;
+          const seqNum = parseInt(String(op.stepNumber ?? op.sequence ?? (idx + 1)), 10) || (idx + 1);
+
+          return {
+            workOrderId: targetId,
+            tariffId: op.tariffId && op.tariffId.length > 20 ? op.tariffId : null,
+            tariffCode: op.tariffCode || null,
+            name: op.name || `Bosqich ${idx + 1}`,
+            department: op.department || data.department || "Offset",
+            machineStr: op.machine || op.machineStr || null,
+            operator: op.operator || (Array.isArray(op.operators) ? op.operators.join(", ") : null),
+            durationHours: durationNum.toFixed(2),
+            toolingId: op.toolingId || null,
+            toolingName: op.toolingName || null,
+            calcUnit: op.calcUnit || null,
+            unitDivisor: divisorNum,
+            rateUsd: rateNum.toFixed(4),
+            setupFeeUsd: setupNum.toFixed(2),
+            pieceworkRateUsd: pwRateNum.toFixed(4),
+            plannedCostUsd: plannedCostNum.toFixed(2),
+            pieceworkTotalUsd: pwTotalNum.toFixed(2),
+            sequence: seqNum,
+            status: op.status || "Queued",
+            plannedQty: parseSafePlannedQty(op, Number(data.quantity) || 0),
+            completedQty: parseSafeNumeric(op.completedQty ?? op.qtyCompleted, 0),
+            notes: op.notes || null,
+          };
+        })
       );
     }
   }
@@ -545,10 +634,10 @@ export async function upsertWorkOrder(
           type: ev.type || "Run",
           note: ev.note || "",
           operator: ev.operator || null,
-          wasteQty: ev.wasteQty || 0,
+          wasteQty: parseInt(String(ev.wasteQty || 0), 10) || 0,
           wasteReason: ev.wasteReason || null,
-          grossInput: ev.grossInput || null,
-          goodOutput: ev.goodOutput || null,
+          grossInput: ev.grossInput !== undefined && ev.grossInput !== null ? parseInt(String(ev.grossInput), 10) || null : null,
+          goodOutput: ev.goodOutput !== undefined && ev.goodOutput !== null ? parseInt(String(ev.goodOutput), 10) || null : null,
         }))
       );
     }
@@ -818,10 +907,43 @@ function formatMachineDbToRecord(m: any): any {
 
 export async function getProductionMachines(companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  const rows = await db.query.productionMachines.findMany({
+  let rows = await db.query.productionMachines.findMany({
     where: eq(productionMachines.companyId, companyId),
     orderBy: [desc(productionMachines.createdAt)],
   });
+
+  if (rows.length === 0) {
+    const defaultMachines = [
+      { code: "M-001", name: "Heidelberg Speedmaster XL 106", department: "Offset", status: "Running", hourlyRateUsd: "45.00", maxSpeedPerHour: 15000, currentOperator: "Alisher Ergashev" },
+      { code: "M-002", name: "Mark Andy P5 Series", department: "Flexo", status: "Running", hourlyRateUsd: "35.00", maxSpeedPerHour: 12000, currentOperator: "Bobur Karimov" },
+      { code: "M-003", name: "Gallus ECS 340", department: "Flexo", status: "Idle", hourlyRateUsd: "30.00", maxSpeedPerHour: 10000, currentOperator: "Jamshid Qodirov" },
+      { code: "M-004", name: "Bobst Novacut 106", department: "Post-press", status: "Running", hourlyRateUsd: "25.00", maxSpeedPerHour: 8000, currentOperator: "Dilshod Saidov" },
+      { code: "M-005", name: "Muller Martini Presto II", department: "Post-press", status: "Maintenance", hourlyRateUsd: "20.00", maxSpeedPerHour: 6000, currentOperator: "Otabek Umarov" },
+    ];
+
+    try {
+      await db.insert(productionMachines).values(
+        defaultMachines.map((m) => ({
+          code: m.code,
+          name: m.name,
+          department: m.department,
+          status: m.status,
+          hourlyRateUsd: m.hourlyRateUsd,
+          maxSpeedPerHour: m.maxSpeedPerHour,
+          currentOperator: m.currentOperator,
+          companyId,
+          isActive: true,
+        }))
+      ).onConflictDoNothing();
+
+      rows = await db.query.productionMachines.findMany({
+        where: eq(productionMachines.companyId, companyId),
+        orderBy: [desc(productionMachines.createdAt)],
+      });
+    } catch (e) {
+      console.error("Error auto-seeding machines:", e);
+    }
+  }
 
   return rows.map(formatMachineDbToRecord);
 }
@@ -1095,8 +1217,15 @@ export async function deleteProductionSpecification(idOrCode: string, companyCod
 
 // ─── Production Sites (Branches) ────────────────────────────────────────────
 
-export async function getProductionSites(companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+export async function getProductionSites(companyCode: string = "all") {
+  if (companyCode === "all" || !companyCode) {
+    return db.query.branches.findMany({
+      orderBy: [desc(branches.createdAt)],
+    });
+  }
+  const companyId = isUuid(companyCode)
+    ? companyCode
+    : await getCompanyIdByCode(companyCode);
   return db.query.branches.findMany({
     where: eq(branches.companyId, companyId),
     orderBy: [desc(branches.createdAt)],
@@ -1104,13 +1233,15 @@ export async function getProductionSites(companyCode: string = "PRINTGOO") {
 }
 
 export async function createProductionSite(data: any, companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+  const companyId = (data.companyId && isUuid(String(data.companyId)))
+    ? data.companyId
+    : await getCompanyIdByCode(companyCode);
   const hasValidUuid = data.id && isUuid(String(data.id));
 
   let existing = null;
   if (hasValidUuid) {
     existing = await db.query.branches.findFirst({
-      where: and(eq(branches.companyId, companyId), eq(branches.id, data.id)),
+      where: eq(branches.id, data.id),
     });
   }
 
@@ -1121,6 +1252,7 @@ export async function createProductionSite(data: any, companyCode: string = "PRI
     const [updated] = await db
       .update(branches)
       .set({
+        companyId: (data.companyId && isUuid(String(data.companyId))) ? data.companyId : existing.companyId,
         name: data.name ?? existing.name,
         code: data.code ?? existing.code,
         shortName: data.shortName !== undefined ? data.shortName : existing.shortName,

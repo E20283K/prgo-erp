@@ -30,15 +30,11 @@ export function PlantDepartmentsTab({ plant }: PlantDepartmentsTabProps) {
 
   const [isLoadingHr, setIsLoadingHr] = useState(false);
 
-  // 1. Ensure machines are loaded from DB
+  // 1. Ensure machines and HR departments are loaded from DB on mount
   useEffect(() => {
     if (machines.length === 0 && loadMachines) {
       loadMachines();
     }
-  }, [machines.length, loadMachines]);
-
-  // 2. Ensure HR departments are loaded from DB
-  useEffect(() => {
     if (departmentsList.length === 0) {
       setIsLoadingHr(true);
       fetch("/api/v1/hr/departments")
@@ -51,7 +47,8 @@ export function PlantDepartmentsTab({ plant }: PlantDepartmentsTabProps) {
         .catch((err) => console.error("Error fetching HR departments:", err))
         .finally(() => setIsLoadingHr(false));
     }
-  }, [departmentsList.length, setDepartmentsList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 3. Filter real HR departments assigned to this plant
   const assignedDepartments = useMemo(() => {

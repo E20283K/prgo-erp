@@ -46,6 +46,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { generateNextCode } from "@/lib/utils";
+import { OrgUnitSelect } from "@/components/common/OrgUnitSelect";
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
@@ -112,15 +113,11 @@ export function DepartmentDetail({ tab }: DepartmentDetailProps) {
     rows: CompactSelection.empty(),
   });
 
-  // Load plants if empty
+  // Load plants and employees on mount if empty
   useEffect(() => {
     if (plants.length === 0 && fetchPlants) {
       fetchPlants();
     }
-  }, [plants.length, fetchPlants]);
-
-  // Load employees if empty
-  useEffect(() => {
     if (employees.length === 0) {
       fetch("/api/v1/hr/employees")
         .then((r) => r.json())
@@ -131,7 +128,8 @@ export function DepartmentDetail({ tab }: DepartmentDetailProps) {
         })
         .catch(() => {});
     }
-  }, [employees.length, setEmployees]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Department employees
   const deptEmployees = useMemo(() => {
@@ -377,7 +375,7 @@ export function DepartmentDetail({ tab }: DepartmentDetailProps) {
                 {formData.headPerson || "Biriktirilmagan"}
               </InfoRow>
               <InfoRow label="Telefon">{formData.phone || "—"}</InfoRow>
-              <InfoRow label="Filial">{formData.plant || "Bosh Zavod"}</InfoRow>
+              <InfoRow label="Tashkilot / Filial">{formData.plant || "PrintGoo Bosh Zavod"}</InfoRow>
               <InfoRow label="Xodimlar shtati">
                 <span className="font-mono font-medium">
                   {deptEmployees.length} kishi
@@ -425,28 +423,20 @@ export function DepartmentDetail({ tab }: DepartmentDetailProps) {
                   </div>
 
                   <div>
-                    <Label className="text-xs">Biriktirilgan filial / Zavod</Label>
-                    <Select
-                      value={formData.branchId || ""}
+                    <Label className="text-xs mb-1 block">Tashkilot / Filial *</Label>
+                    <OrgUnitSelect
+                      branchId={formData.branchId}
+                      companyId={formData.companyId}
+                      value={formData.plant}
                       onValueChange={(val) => {
-                        const matched = plants.find((p) => p.id === val);
                         handleUpdate({
-                          branchId: val,
-                          plant: matched?.name || matched?.shortName || formData.plant,
+                          branchId: val.branchId,
+                          companyId: val.companyId,
+                          plant: val.label,
                         });
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder={formData.plant || "Filialni tanlang"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {plants.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name} ({p.code || p.id})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      placeholder="Tashkilot yoki filialni tanlang..."
+                    />
                   </div>
 
                   <div>

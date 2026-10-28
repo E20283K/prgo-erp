@@ -22,7 +22,7 @@
   --wx-gantt-holiday-background: color-mix(in oklch, var(--muted) 45%, transparent);
   --wx-gantt-holiday-color: var(--muted-foreground);
   --wx-gantt-select-color: color-mix(in oklch, var(--accent) 60%, transparent);
-  --wx-gantt-marker-color: var(--destructive);
+  --wx-gantt-marker-color: var(--primary);
   --wx-grid-header-font: 600 11px var(--font-sans, inherit);
   --wx-grid-header-font-color: var(--muted-foreground);
   --wx-grid-header-shadow: none;
@@ -46,6 +46,11 @@
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
+  overflow: visible !important;
+}
+
+.wo-timeline .wx-bar .wx-content {
+  overflow: visible !important;
 }
 
 .wo-timeline .wx-bar.wx-milestone .wx-content {
@@ -54,7 +59,7 @@
 }
 
 .wo-timeline .wx-today {
-  background: color-mix(in oklch, var(--primary) 10%, transparent) !important;
+  background: color-mix(in oklch, var(--primary) 8%, transparent) !important;
 }
 
 .wo-timeline .wx-weekend {
@@ -82,4 +87,14 @@
 .wo-timeline-panning .wx-bar,
 .wo-timeline-panning * {
   cursor: grabbing !important;
+}
+
+.wo-segment-overdue {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.16) 0px,
+    rgba(255, 255, 255, 0.16) 4px,
+    transparent 4px,
+    transparent 8px
+  );
 }

@@ -86,7 +86,8 @@ export function TradingYttLimitDetail({ tab }: { tab: DocumentTab }) {
     if (!tradingSales || tradingSales.length === 0) {
       loadTradingData("sales");
     }
-  }, [tradingSales, loadTradingData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Form State
   const [code] = useState<string>(rawData.code || "YTT-01");

@@ -239,7 +239,7 @@ interface TaskStoreState {
 }
 
 export const useTaskStore = create<TaskStoreState>((set, get) => ({
-  tasks: INITIAL_TASKS,
+  tasks: [],
   filter: {
     searchQuery: "",
     roleCategory: "all",

@@ -328,6 +328,23 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       });
       return;
     }
+    if (type === "movements") {
+      const draftId = `draft-mov-${Date.now()}`;
+      openTab({
+        id: draftId,
+        title: "Yangi ichki ko'chirish",
+        type: "warehouse-movement",
+        module: "warehouse",
+        isUnsaved: false,
+        documentData: {
+          id: draftId,
+          date: new Date().toISOString().split("T")[0],
+          status: "Pending",
+          items: [],
+        },
+      });
+      return;
+    }
     const template = blankTemplates[type] ?? {};
     setFormData(template);
     setSelectedRecord(null);
@@ -388,6 +405,16 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     if (type === "carriers") {
       setCarrierModalData(record);
       setIsCarrierDialogOpen(true);
+      return;
+    }
+    if (type === "movements") {
+      openTab({
+        id: record.id,
+        title: `${record.id}: ${record.from || "Ombor"} → ${record.to || "Ombor"}`,
+        type: "warehouse-movement",
+        module: "warehouse",
+        documentData: record,
+      });
       return;
     }
     if (type === "shipments") {
@@ -897,11 +924,11 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     if (column.id === "shipmentType") {
       const sType = rowData.shipmentType || "CustomerDelivery";
       const configs: Record<string, { label: string; dark: string; light: string }> = {
-        CustomerDelivery: { label: "🛍️ Mijozga", dark: "#60a5fa", light: "#1d4ed8" },
-        BranchTransfer: { label: "🚛 Filialga", dark: "#38bdf8", light: "#0284c7" },
-        Outsourcing: { label: "🔄 Subpudrat", dark: "#c084fc", light: "#7e22ce" },
-        VendorReturn: { label: "↩️ Qaytarish", dark: "#f87171", light: "#dc2626" },
-        MaterialSale: { label: "📦 Sotuv", dark: "#fbbf24", light: "#d97706" },
+        CustomerDelivery: { label: "Mijozga", dark: "#60a5fa", light: "#1d4ed8" },
+        BranchTransfer: { label: "Filialga", dark: "#38bdf8", light: "#0284c7" },
+        Outsourcing: { label: "Subpudrat", dark: "#c084fc", light: "#7e22ce" },
+        VendorReturn: { label: "Qaytarish", dark: "#f87171", light: "#dc2626" },
+        MaterialSale: { label: "Sotuv", dark: "#fbbf24", light: "#d97706" },
       };
       const info = configs[sType] || { label: String(sType), dark: "#94a3b8", light: "#475569" };
       return {
@@ -919,19 +946,19 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     // Movement Type column
     if (column.id === "movementType") {
       const mType = rowData.movementType;
-      let label = "🔄 Tokchalararo";
+      let label = "Tokchalararo";
       let dark = "#a78bfa";
       let light = "#6d28d9";
       if (mType === "CuttingReturn" || rowData.isOffcut) {
-        label = "✂️ Delovoy Otxod";
+        label = "Delovoy Otxod";
         dark = "#fbbf24";
         light = "#b45309";
       } else if (mType === "ProductionIssue") {
-        label = "🏭 Sexga sarf";
+        label = "Sexga sarf";
         dark = "#38bdf8";
         light = "#0369a1";
       } else if (mType === "WriteOff") {
-        label = "⚠️ Spisaniye (Brak)";
+        label = "Spisaniye (Brak)";
         dark = "#f87171";
         light = "#dc2626";
       }
@@ -949,7 +976,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
     // Material Name column - highlight offcuts
     if (column.id === "name" && rowData.isOffcut) {
-      const offcutLabel = `✂️ ${val}`;
+      const offcutLabel = `${val}`;
       return {
         kind: GridCellKind.Text,
         data: String(val),
@@ -1293,7 +1320,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                     onClick={() => setCategoryFilter("CustomerDelivery")}
                     className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "CustomerDelivery" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    <span>🛍️ Mijozlarga</span>
+                    <span>Mijozlarga</span>
                     <span className="ml-0.5 px-1 rounded-full text-[9px] bg-muted-foreground/15">
                       {warehouseShipments.filter((s) => !s.shipmentType || s.shipmentType === "CustomerDelivery").length}
                     </span>
@@ -1302,7 +1329,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                     onClick={() => setCategoryFilter("BranchTransfer")}
                     className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "BranchTransfer" ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 font-semibold shadow-xs border border-sky-500/30" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    <span>🚛 Filiallarga</span>
+                    <span>Filiallarga</span>
                     <span className="ml-0.5 px-1 rounded-full text-[9px] bg-sky-500/20 text-sky-800 dark:text-sky-200">
                       {warehouseShipments.filter((s) => s.shipmentType === "BranchTransfer").length}
                     </span>
@@ -1311,7 +1338,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                     onClick={() => setCategoryFilter("Outsourcing")}
                     className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "Outsourcing" ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 font-semibold shadow-xs border border-purple-500/30" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    <span>🔄 Subpudrat</span>
+                    <span>Subpudrat</span>
                     <span className="ml-0.5 px-1 rounded-full text-[9px] bg-purple-500/20 text-purple-800 dark:text-purple-200">
                       {warehouseShipments.filter((s) => s.shipmentType === "Outsourcing").length}
                     </span>
@@ -1320,7 +1347,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                     onClick={() => setCategoryFilter("VendorReturn")}
                     className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "VendorReturn" ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 font-semibold shadow-xs border border-rose-500/30" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    <span>↩️ Qaytarish</span>
+                    <span>Qaytarish</span>
                     <span className="ml-0.5 px-1 rounded-full text-[9px] bg-rose-500/20 text-rose-800 dark:text-rose-200">
                       {warehouseShipments.filter((s) => s.shipmentType === "VendorReturn").length}
                     </span>

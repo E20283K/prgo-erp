@@ -62,7 +62,8 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
     if (!tradingYttEntities || tradingYttEntities.length === 0) {
       loadTradingData("ytt-limits");
     }
-  }, [crmCustomers, tradingSettlements, tradingYttEntities, loadCrmCustomers, loadTradingData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [customerName, setCustomerName] = useState<string>(
     rawData.customer || ""
@@ -80,7 +81,7 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
   }, [customerName, crmCustomers]);
 
   const availableEntities = useMemo(() => {
-    return tradingYttEntities.length > 0 ? tradingYttEntities : INITIAL_YTT_ENTITIES;
+    return tradingYttEntities;
   }, [tradingYttEntities]);
 
   const selectedEntity = useMemo(() => {
@@ -96,7 +97,7 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
 
   // Filter ledger strictly by selected legal entity & customer
   const filteredLedger = useMemo(() => {
-    const sourceLedger = tradingSettlements.length > 0 ? tradingSettlements : INITIAL_SETTLEMENT_LEDGERS;
+    const sourceLedger = tradingSettlements;
     if (!customerName) return [];
     return sourceLedger.filter((entry) => {
       const matchCust = entry.customer.toLowerCase().includes(customerName.toLowerCase());
@@ -368,7 +369,7 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
               <span className="text-[10px] text-muted-foreground uppercase font-semibold block mb-0.5">Sotuvchi Yuridik Shaxs:</span>
               <SmartCombobox
                 value={selectedEntityId}
-                onChange={(val) => setSelectedEntityId(val || "ytt-qodirov")}
+                onChange={(val) => setSelectedEntityId(val || "")}
                 options={availableEntities.map((ent) => ({
                   value: ent.id,
                   label: `${ent.name} (${ent.legalType})`,

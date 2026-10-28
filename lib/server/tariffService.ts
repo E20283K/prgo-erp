@@ -328,39 +328,6 @@ export async function getTariffs(companyCode: string = "PRINTGOO"): Promise<Tari
     orderBy: [asc(tariffs.code)],
   });
 
-  // Seed default industry tariffs if table is empty
-  if (rows.length === 0) {
-    const seedValues = INITIAL_INDUSTRY_TARIFFS.map((t) => ({
-      companyId,
-      code: t.code,
-      category: t.category,
-      operationName: t.operationName,
-      department: t.department,
-      machineOrDept: t.machineOrDept || null,
-      unit: t.unit,
-      unitDivisor: t.unitDivisor || 1000,
-      currency: t.currency || "USD",
-      rateUsd: t.rateUsd.toString(),
-      setupFeeUsd: t.setupFeeUsd.toString(),
-      minChargeUsd: t.minChargeUsd.toString(),
-      vatRate: t.vatRate.toString(),
-      pieceworkRateUsd: t.pieceworkRateUsd.toString(),
-      helperPieceworkRateUsd: t.helperPieceworkRateUsd.toString(),
-      normOutputPerShift: t.normOutputPerShift,
-      volumeTiers: t.volumeTiers,
-      pricingRules: t.pricingRules,
-      status: t.status,
-      notes: t.notes || null,
-    }));
-
-    await db.insert(tariffs).values(seedValues).onConflictDoNothing();
-
-    rows = await db.query.tariffs.findMany({
-      where: eq(tariffs.companyId, companyId),
-      orderBy: [asc(tariffs.code)],
-    });
-  }
-
   return rows.map((r) => ({
     id: r.id,
     code: r.code,

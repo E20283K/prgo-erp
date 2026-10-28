@@ -66,9 +66,10 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
   } else if (tab.module === "settings") {
     if (tab.id.includes("notifications-sound") || tab.id.includes("sound")) return <NotificationSoundSettingsView />;
     if (tab.id.includes("telegram-settings")) return <TelegramSettingsView />;
+    if (tab.id.includes("companies")) return <SettingsGrid type="companies" />;
     if (tab.id.includes("users")) return <SettingsGrid type="users" />;
     if (tab.id.includes("tariffs")) return <SettingsGrid type="tariffs" />;
-    return <SettingsGrid type="plants" />;
+    return <SettingsGrid type="companies" />;
   } else if (tab.module === "hr") {
     if (tab.id.includes("departments")) return <DepartmentsGrid />;
     if (tab.id.includes("positions")) return <PositionsGrid />;

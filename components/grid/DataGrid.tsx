@@ -38,6 +38,12 @@ import {
   ContextMenuSubTrigger,
   ContextMenuSubContent
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { 
   Plus, 
   Download, 
@@ -57,6 +63,8 @@ import {
   Table as TableIcon,
   AlertTriangle,
   Loader2,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 
@@ -138,8 +146,10 @@ export interface OrderRow {
   priceTotal: number;
   status: "Draft" | "Active" | "Completed" | "Cancelled";
   priority: "Normal" | "Urgent" | "High";
+  orderDate: string;
   startDate: string;
   deadline: string;
+  actualEndDate: string;
   responsible: string;
 }
 
@@ -155,7 +165,9 @@ const INITIAL_COLUMNS: GridColumn[] = [
   { id: "readiness", title: "Tayyorgarlik", width: 85, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
   { id: "status", title: "1C Status", width: 110, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
   { id: "priority", title: "Priority", width: 95, icon: GridColumnIcon.HeaderIfThenElse, hasMenu: true },
-  { id: "deadline", title: "Deadline", width: 115, icon: GridColumnIcon.HeaderDate, hasMenu: true },
+  { id: "orderDate", title: "Qabul sanasi", width: 110, icon: GridColumnIcon.HeaderDate, hasMenu: true },
+  { id: "deadline", title: "Deadline", width: 110, icon: GridColumnIcon.HeaderDate, hasMenu: true },
+  { id: "actualEndDate", title: "Faktik tugash", width: 110, icon: GridColumnIcon.HeaderDate, hasMenu: true },
 ];
 
 export function DataGrid() {
@@ -190,7 +202,8 @@ export function DataGrid() {
     if (!plants || plants.length === 0) {
       fetchPlants();
     }
-  }, [loadProductionQueue, loadWarehouseStock, warehouseStock, fetchPlants, plants]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const localizedColumns = React.useMemo(() => {
     const colMap: Record<string, string> = {
@@ -280,8 +293,10 @@ export function DataGrid() {
         priceTotal: wo.priceTotal || 0,
         status: wo.status || "Draft",
         priority: (wo.priority as any) || "Normal",
+        orderDate: wo.orderDate || (wo.createdAt ? String(wo.createdAt).split("T")[0] : ""),
         startDate: wo.startDate || "",
         deadline: wo.deadline || "",
+        actualEndDate: wo.actualEndDate || "",
         responsible: wo.operator || "Prepress Dept",
         rawOrder: wo,
       };
@@ -293,11 +308,33 @@ export function DataGrid() {
   const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [techFilter, setTechFilter] = useState<string>("ALL");
   const [sortConfig, setSortConfig] = useState<{ colId: string; asc: boolean } | null>(null);
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   });
+
+  const otherStatuses = useMemo(
+    () => [
+      { key: "Completed", label: tCommon("statusCompleted") },
+      { key: "Cancelled", label: tCommon("statusCancelled") },
+    ],
+    [tCommon]
+  );
+  const isOtherStatusSelected = otherStatuses.some((s) => s.key === statusFilter);
+  const activeOtherStatus = otherStatuses.find((s) => s.key === statusFilter);
+
+  const TECH_ROUTES = useMemo(
+    () => [
+      { key: "ALL", label: "ALL" },
+      { key: "Offset", label: "Ofset" },
+      { key: "Flexo", label: "Flexo" },
+      { key: "Jacquard", label: "Jakard" },
+      { key: "Post-press", label: "Post-press" },
+    ],
+    []
+  );
 
   const filteredRows = React.useMemo(() => {
     let result = rows.filter((r) => {
@@ -310,7 +347,13 @@ export function DataGrid() {
         r.sampleStatusLabel.toLowerCase().includes(searchFilter.toLowerCase());
 
       const matchesStatus = statusFilter === "ALL" || r.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesTech =
+        techFilter === "ALL" ||
+        (r.department &&
+          r.department.toLowerCase().replace(/[^a-z]/g, "") ===
+            techFilter.toLowerCase().replace(/[^a-z]/g, ""));
+
+      return matchesSearch && matchesStatus && matchesTech;
     });
 
     if (sortConfig) {
@@ -337,7 +380,7 @@ export function DataGrid() {
     }
 
     return result;
-  }, [rows, searchFilter, statusFilter, sortConfig]);
+  }, [rows, searchFilter, statusFilter, techFilter, sortConfig]);
 
   const handleHeaderClicked = useCallback((colIndex: number) => {
     const column = columns[colIndex];
@@ -692,6 +735,13 @@ export function DataGrid() {
             baseFontStyle: "600 12px sans-serif",
           },
         };
+      case "orderDate":
+        return {
+          kind: GridCellKind.Text,
+          data: rowData.orderDate || "—",
+          displayData: rowData.orderDate || "—",
+          allowOverlay: true,
+        };
       case "startDate":
         return {
           kind: GridCellKind.Text,
@@ -704,6 +754,13 @@ export function DataGrid() {
           kind: GridCellKind.Text,
           data: rowData.deadline,
           displayData: rowData.deadline,
+          allowOverlay: true,
+        };
+      case "actualEndDate":
+        return {
+          kind: GridCellKind.Text,
+          data: rowData.actualEndDate || "—",
+          displayData: rowData.actualEndDate || "—",
           allowOverlay: true,
         };
       case "responsible":
@@ -828,6 +885,34 @@ export function DataGrid() {
     });
   }, [openTab]);
 
+  const handleExportCsv = useCallback(() => {
+    if (!filteredRows.length) return;
+    const headers = ["Doc No", "Mijoz", "Mahsulot", "Sex", "Stanok", "Miqdor", "Birlik", "Holat", "Muddati"];
+    const csvRows = [
+      headers.join(","),
+      ...filteredRows.map((r) =>
+        [
+          `"${r.id}"`,
+          `"${(r.customer || "").replace(/"/g, '""')}"`,
+          `"${(r.product || "").replace(/"/g, '""')}"`,
+          `"${r.department || ""}"`,
+          `"${r.machine || ""}"`,
+          r.qty || 0,
+          `"${r.unit || ""}"`,
+          `"${r.status || ""}"`,
+          `"${r.deadline || ""}"`,
+        ].join(",")
+      ),
+    ];
+    const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `work_orders_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [filteredRows]);
+
   // 1C Industrial UX: Insert key triggers new document creation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -865,14 +950,61 @@ export function DataGrid() {
                   { key: "ALL", label: "ALL" },
                   { key: "Active", label: tCommon("statusActive") },
                   { key: "Draft", label: tCommon("statusDraft") },
-                  { key: "Completed", label: tCommon("statusCompleted") },
-                  { key: "Cancelled", label: tCommon("statusCancelled") },
                 ].map(({ key, label }) => (
                   <button
                     key={key}
                     onClick={() => setStatusFilter(key)}
                     className={`px-2 py-0.5 rounded transition-colors ${
                       statusFilter === key
+                        ? "bg-background text-foreground font-semibold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className={`px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                      isOtherStatusSelected
+                        ? "bg-background text-foreground font-semibold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    title="Boshqa holatlar"
+                  >
+                    <span>
+                      {isOtherStatusSelected ? activeOtherStatus?.label : "Boshqa"}
+                    </span>
+                    <ChevronDown className="size-3 opacity-60" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="min-w-[120px] p-1 text-xs">
+                    {otherStatuses.map(({ key, label }) => (
+                      <DropdownMenuItem
+                        key={key}
+                        onClick={() => setStatusFilter(key)}
+                        className={`flex items-center justify-between px-2 py-1 cursor-pointer text-xs rounded ${
+                          statusFilter === key ? "bg-accent font-semibold text-accent-foreground" : ""
+                        }`}
+                      >
+                        <span>{label}</span>
+                        {statusFilter === key && <Check className="size-3.5 text-primary ml-1.5" />}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              <Separator orientation="vertical" className="h-4 mx-1" />
+
+              {/* Technology Route Filter Pills */}
+              <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium" title="Texnologik marshrut">
+                {TECH_ROUTES.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setTechFilter(key)}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      techFilter === key
                         ? "bg-background text-foreground font-semibold shadow-xs"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
@@ -921,7 +1053,7 @@ export function DataGrid() {
             </div>
 
             {/* Right Search & Export Controls */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <div className="relative w-52">
                 <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
@@ -932,9 +1064,14 @@ export function DataGrid() {
                 />
               </div>
 
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground" title={tGrid("exportCsv")}>
-                <Download className="w-3.5 h-3.5 mr-1" />
-                <span>{tCommon("export")}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleExportCsv}
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                title={tGrid("exportCsv")}
+              >
+                <Download className="w-3.5 h-3.5" />
               </Button>
 
               <Button

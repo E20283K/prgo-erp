@@ -74,7 +74,8 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
     if (!tradingImports || tradingImports.length === 0) {
       loadTradingData("imports");
     }
-  }, [tradingSales, tradingImports, loadTradingData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Form State
   const [sku] = useState<string>(rawData.sku || "");

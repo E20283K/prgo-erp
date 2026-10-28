@@ -267,80 +267,17 @@ export async function syncBusinessAlerts(companyCode: string = "PRINTGOO") {
       } catch (e) {}
     }
 
-    // 3. Agar bildirishnomalar jadvali bo'sh bo'lsa (yangi bazada), rasmiy namunaviy biznes hodisalarni yaratish
-    const countRes = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(notifications)
-      .where(eq(notifications.companyId, companyId));
-
-    if (Number(countRes[0]?.count || 0) === 0) {
-      // Seed high-value operational alerts
-      await emitNotification(
-        {
-          dedupKey: "seed:wo-351",
-          severity: "warning",
-          category: "production",
-          eventType: "wo_deadline",
-          entityCode: "WOOF-26-0351",
-          title: "WOOF-26-0351 dedlayn yaqinlashmoqda",
-          description: "Hardcover Catalog buyurtmasi uchun 6 kun qoldi. Prepress: Tasdiqlangan.",
-          i18nKey: "seed_woDeadline_title",
-          i18nParams: { docNo: "WOOF-26-0351", days: 6, product: "Hardcover Catalog" },
-          link: { module: "production", subModule: "work-orders" },
-          targetTab: {
-            id: "wo-WOOF-26-0351",
-            title: "WOOF-26-0351 (Buyurtma)",
-            type: "work-order",
-            module: "production",
-          },
-        },
-        companyCode
-      );
-
-      await emitNotification(
-        {
-          dedupKey: "seed:stock-gas-150",
-          severity: "error",
-          category: "warehouse",
-          eventType: "stock_low",
-          entityCode: "PAP-GAS-150",
-          title: "Ombor ogohlantirishi: Galerie Art Silk 150g",
-          description: "Ombor qoldig'i reorder darajasidan past (42 varaq qoldi).",
-          i18nKey: "seed_stockLow_title",
-          i18nParams: { sku: "PAP-GAS-150", name: "Galerie Art Silk 150g", qty: 42, unit: "varaq" },
-          link: { module: "warehouse", subModule: "stock-balance" },
-          targetTab: {
-            id: "stock-PAP-GAS-150",
-            title: "PAP-GAS-150 (Qoldiq)",
-            type: "warehouse-stock",
-            module: "warehouse",
-          },
-        },
-        companyCode
-      );
-
-      await emitNotification(
-        {
-          dedupKey: "seed:inv-sf-8001",
-          severity: "success",
-          category: "finance",
-          eventType: "invoice_posted",
-          entityCode: "SF-8001",
-          title: "Schet-faktura SF-8001 rasmiylashtirildi",
-          description: "Alpha Media Group LLC - $14,850.00 (Ombor yuk xati: SHP-6000).",
-          i18nKey: "seed_invoicePosted_title",
-          i18nParams: { docNo: "SF-8001", amount: "$14,850.00", customer: "Alpha Media Group LLC" },
-          link: { module: "finance", subModule: "delivery-acts" },
-          targetTab: {
-            id: "doc-delivery-act-SF-8001",
-            title: "SF-8001 (Schet-faktura)",
-            type: "delivery-act",
-            module: "finance",
-          },
-        },
-        companyCode
-      );
-    }
+    // 3. Tozalash: Eski namunaviy seed bildirishnomalar bo'lsa, ularni tozalash
+    try {
+      await db
+        .delete(notifications)
+        .where(
+          and(
+            eq(notifications.companyId, companyId),
+            sql`${notifications.dedupKey} LIKE 'seed:%'`
+          )
+        );
+    } catch (e) {}
   } catch (err) {
     console.error("[syncBusinessAlerts] Error:", err);
   }

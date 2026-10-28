@@ -165,13 +165,19 @@ export function CustomerOverviewTab({
   onOpenPaymentModal,
   onCreateClientOrder,
 }: CustomerOverviewTabProps) {
-  const { crmIndustriesList, loadCrmIndustries, addCrmIndustryAsync } = useWorkspaceStore();
+  const {
+    crmIndustriesList,
+    isCrmIndustriesLoaded,
+    isCrmIndustriesLoading,
+    loadCrmIndustries,
+    addCrmIndustryAsync,
+  } = useWorkspaceStore();
 
   React.useEffect(() => {
-    if (!crmIndustriesList || crmIndustriesList.length === 0) {
+    if (!isCrmIndustriesLoaded && !isCrmIndustriesLoading) {
       loadCrmIndustries();
     }
-  }, [crmIndustriesList, loadCrmIndustries]);
+  }, [isCrmIndustriesLoaded, isCrmIndustriesLoading, loadCrmIndustries]);
 
   const industryOptions = React.useMemo(() => {
     const list = (crmIndustriesList || []).map((ind) => ({

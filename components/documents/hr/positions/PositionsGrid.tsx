@@ -81,7 +81,8 @@ export function PositionsGrid() {
         })
         .catch(() => {});
     }
-  }, [departmentsList.length, setDepartmentsList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!newDepartment && departmentsList.length > 0) {

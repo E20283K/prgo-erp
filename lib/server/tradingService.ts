@@ -1,3 +1,4 @@
+import { upsertCompany } from "./companyService";
 import { db } from "@/db";
 import {
   tradingYttEntities,
@@ -12,7 +13,7 @@ import {
   companies,
   clients,
 } from "@/db/schema";
-import { eq, and, desc, asc, sql } from "drizzle-orm";
+import { eq, and, or, desc, asc, sql } from "drizzle-orm";
 import type {
   TradingSaleRecord,
   TradingSaleItem,
@@ -24,13 +25,6 @@ import type {
   TradingOrderRecord,
   TradingOrderItem,
 } from "@/components/documents/trading/types";
-import {
-  INITIAL_YTT_ENTITIES,
-  INITIAL_TRADING_SALES,
-  INITIAL_IMPORT_BATCHES,
-  INITIAL_SETTLEMENT_LEDGERS,
-  INITIAL_TRADING_CATALOG,
-} from "@/components/documents/trading/data";
 
 // ─── Company Resolver ──────────────────────────────────────────────────────────
 
@@ -63,38 +57,41 @@ async function resolveCompanyId(companyCode = "PRINTGOO"): Promise<string> {
 // ─── 1. YTT & Legal Entities (YTT Limit Registri) ─────────────────────────────
 
 export async function getYttEntities(companyCode = "PRINTGOO"): Promise<YttTurnoverLimitRecord[]> {
-  const companyId = await resolveCompanyId(companyCode);
-
-  const rows = await db
+  const compRows = await db
     .select()
-    .from(tradingYttEntities)
-    .where(eq(tradingYttEntities.companyId, companyId))
-    .orderBy(asc(tradingYttEntities.code));
+    .from(companies)
+    .where(eq(companies.legalType, "YTT"))
+    .orderBy(asc(companies.code));
 
-  if (rows.length === 0) {
-    await seedYttEntities(companyId);
-    return getYttEntities(companyCode);
-  }
+  const result: YttTurnoverLimitRecord[] = [];
 
-  return rows.map((r) => {
+  for (const r of compRows) {
     const limit = Number(r.annualLimitUzs) || 1_000_000_000;
-    const current = Number(r.currentTurnoverUzs) || 0;
+    
+    // Dynamic calculation from actual trading_sales
+    let current = 0;
+    try {
+      const salesRes = await db
+        .select({ total: sql<string>`coalesce(sum(total_uzs), 0)` })
+        .from(tradingSales)
+        .where(or(eq(tradingSales.companyId, r.id), eq(tradingSales.sellerEntityId, r.id)));
+      current = Number(salesRes[0]?.total || 0);
+    } catch (e) {}
+
     const pct = limit > 0 ? Number(((current / limit) * 100).toFixed(2)) : 0;
     let status: "Safe" | "Warning" | "Critical" | "Unlimited" = "Safe";
-    if (r.legalType === "MChJ" || limit > 10_000_000_000) {
-      status = "Unlimited";
-    } else if (pct >= 95) {
+    if (pct >= 95) {
       status = "Critical";
     } else if (pct >= 80) {
       status = "Warning";
     }
 
-    return {
+    result.push({
       id: r.id,
       code: r.code,
       name: r.name,
-      legalType: r.legalType as "YTT" | "MChJ",
-      inn: r.inn,
+      legalType: "YTT",
+      inn: r.inn || "",
       bankName: r.bankName || "",
       bankAccount: r.bankAccount || "",
       annualLimit: limit,
@@ -102,158 +99,48 @@ export async function getYttEntities(companyCode = "PRINTGOO"): Promise<YttTurno
       currency: "UZS",
       turnoverPercent: pct,
       status,
-      isRecommended: r.isRecommended,
-      activeContractsCount: r.activeContractsCount || 0,
+      isRecommended: pct < 70,
+      activeContractsCount: 0,
       notes: r.notes || "",
-    };
-  });
+    });
+  }
+
+  return result;
 }
 
 export async function upsertYttEntity(
   payload: Partial<YttTurnoverLimitRecord>,
   companyCode = "PRINTGOO"
 ): Promise<YttTurnoverLimitRecord> {
-  const companyId = await resolveCompanyId(companyCode);
+  const comp = await upsertCompany({
+    id: payload.id,
+    code: payload.code,
+    name: payload.name,
+    legalType: "YTT",
+    inn: payload.inn,
+    bankName: payload.bankName,
+    bankAccount: payload.bankAccount,
+    annualLimitUzs: payload.annualLimit || 1_000_000_000,
+    notes: payload.notes,
+  });
 
-  const values = {
-    companyId,
-    code: payload.code || `YTT-${Date.now().toString().slice(-4)}`,
-    name: payload.name || "Noma'lum YTT",
-    legalType: (payload.legalType || "YTT") as "YTT" | "MChJ",
-    inn: payload.inn || "",
-    bankName: payload.bankName || "",
-    bankAccount: payload.bankAccount || "",
-    annualLimitUzs: String(payload.annualLimit || 1_000_000_000),
-    currentTurnoverUzs: String(payload.currentTurnover || 0),
+  return {
+    id: comp.id,
+    code: comp.code,
+    name: comp.name,
+    legalType: "YTT",
+    inn: comp.inn || "",
+    bankName: comp.bankName || "",
+    bankAccount: comp.bankAccount || "",
+    annualLimit: comp.annualLimitUzs,
+    currentTurnover: comp.currentTurnoverUzs,
     currency: "UZS",
-    status: (payload.status || "Safe") as any,
-    isRecommended: Boolean(payload.isRecommended),
-    activeContractsCount: payload.activeContractsCount || 0,
-    notes: payload.notes || "",
-    updatedAt: new Date(),
+    turnoverPercent: 0,
+    status: "Safe",
+    isRecommended: true,
+    activeContractsCount: 0,
+    notes: comp.notes || "",
   };
-
-  if (isValidUuid(payload.id)) {
-    const [updated] = await db
-      .update(tradingYttEntities)
-      .set(values)
-      .where(and(eq(tradingYttEntities.id, payload.id!), eq(tradingYttEntities.companyId, companyId)))
-      .returning();
-    if (updated) {
-      return {
-        ...payload,
-        id: updated.id,
-      } as YttTurnoverLimitRecord;
-    }
-  }
-
-  const [inserted] = await db
-    .insert(tradingYttEntities)
-    .values({ ...values, id: isValidUuid(payload.id) ? payload.id : undefined })
-    .returning();
-
-  return {
-    ...payload,
-    id: inserted.id,
-  } as YttTurnoverLimitRecord;
-}
-
-// ─── 2. Trading Catalog (Aksessuarlar Zaxirasi) ───────────────────────────────
-
-export async function getTradingCatalog(companyCode = "PRINTGOO"): Promise<TradingCatalogItemRecord[]> {
-  const companyId = await resolveCompanyId(companyCode);
-
-  const rows = await db
-    .select()
-    .from(tradingCatalog)
-    .where(eq(tradingCatalog.companyId, companyId))
-    .orderBy(asc(tradingCatalog.sku));
-
-  if (rows.length === 0) {
-    await seedCatalog(companyId);
-    return getTradingCatalog(companyCode);
-  }
-
-  return rows.map((r) => ({
-    id: r.id,
-    sku: r.sku,
-    name: r.name,
-    category: r.category as any,
-    unit: r.unit,
-    priceUZS: Number(r.priceUzs) || 0,
-    priceUSD: Number(r.priceUsd) || 0,
-    wholesalePriceUZS: Number(r.wholesalePriceUzs) || 0,
-    retailPriceUZS: Number(r.retailPriceUzs) || 0,
-    stockQty: Number(r.stockQty) || 0,
-    minStockLevel: Number(r.minStockLevel) || 0,
-    origin: r.origin || "",
-    material: r.material || "",
-    colorCode: r.colorCode || "",
-    dimensions: r.dimensions || "",
-    supplier: r.supplier || "",
-    notes: r.notes || "",
-  }));
-}
-
-export async function upsertTradingCatalogItem(
-  payload: Partial<TradingCatalogItemRecord>,
-  companyCode = "PRINTGOO"
-): Promise<TradingCatalogItemRecord> {
-  const companyId = await resolveCompanyId(companyCode);
-
-  const values = {
-    companyId,
-    sku: payload.sku || `SKU-${Date.now().toString().slice(-6)}`,
-    name: payload.name || "Yangi Furnitura",
-    category: (payload.category || "Tugmalar") as any,
-    unit: payload.unit || "dona",
-    priceUzs: String(payload.priceUZS || 0),
-    priceUsd: String(payload.priceUSD || 0),
-    wholesalePriceUzs: String(payload.wholesalePriceUZS || 0),
-    retailPriceUzs: String(payload.retailPriceUZS || 0),
-    stockQty: String(payload.stockQty || 0),
-    minStockLevel: String(payload.minStockLevel || 0),
-    origin: payload.origin || "Xitoy",
-    material: payload.material || "",
-    colorCode: payload.colorCode || "",
-    dimensions: payload.dimensions || "",
-    supplier: payload.supplier || "",
-    notes: payload.notes || "",
-    updatedAt: new Date(),
-  };
-
-  if (isValidUuid(payload.id)) {
-    const [updated] = await db
-      .update(tradingCatalog)
-      .set(values)
-      .where(and(eq(tradingCatalog.id, payload.id!), eq(tradingCatalog.companyId, companyId)))
-      .returning();
-    if (updated) {
-      return {
-        ...payload,
-        id: updated.id,
-      } as TradingCatalogItemRecord;
-    }
-  }
-
-  const [inserted] = await db
-    .insert(tradingCatalog)
-    .values({ ...values, id: isValidUuid(payload.id) ? payload.id : undefined })
-    .returning();
-
-  return {
-    ...payload,
-    id: inserted.id,
-  } as TradingCatalogItemRecord;
-}
-
-export async function deleteTradingCatalogItem(id: string, companyCode = "PRINTGOO"): Promise<boolean> {
-  const companyId = await resolveCompanyId(companyCode);
-  const res = await db
-    .delete(tradingCatalog)
-    .where(and(eq(tradingCatalog.id, id), eq(tradingCatalog.companyId, companyId)))
-    .returning({ id: tradingCatalog.id });
-  return res.length > 0;
 }
 
 // ─── 3. Trading Sales (Sotuv Hujjatlari) ───────────────────────────────────────
@@ -266,11 +153,7 @@ export async function getTradingSales(companyCode = "PRINTGOO"): Promise<Trading
     .from(tradingSales)
     .where(eq(tradingSales.companyId, companyId))
     .orderBy(desc(tradingSales.date), desc(tradingSales.createdAt));
-
-  if (sales.length === 0) {
-    await seedSales(companyId);
-    return getTradingSales(companyCode);
-  }
+  if (sales.length === 0) return [];
 
   const saleIds = sales.map((s) => s.id);
   const items = await db
@@ -524,11 +407,7 @@ export async function getTradingOrders(companyCode = "PRINTGOO"): Promise<Tradin
     .from(tradingOrders)
     .where(eq(tradingOrders.companyId, companyId))
     .orderBy(desc(tradingOrders.date), desc(tradingOrders.createdAt));
-
-  if (orders.length === 0) {
-    await seedOrders(companyId);
-    return getTradingOrders(companyCode);
-  }
+  if (orders.length === 0) return [];
 
   const orderIds = orders.map((o) => o.id);
   const items = await db
@@ -766,11 +645,7 @@ export async function getTradingImports(companyCode = "PRINTGOO"): Promise<Tradi
     .from(tradingImportBatches)
     .where(eq(tradingImportBatches.companyId, companyId))
     .orderBy(desc(tradingImportBatches.date), desc(tradingImportBatches.createdAt));
-
-  if (batches.length === 0) {
-    await seedImports(companyId);
-    return getTradingImports(companyCode);
-  }
+  if (batches.length === 0) return [];
 
   const batchIds = batches.map((b) => b.id);
   const items = await db
@@ -1032,11 +907,6 @@ export async function getTradingSettlements(
 
   const rows = await query;
 
-  if (rows.length === 0) {
-    await seedSettlements(companyId);
-    return getTradingSettlements(companyCode, sellerEntityId, customerName);
-  }
-
   let filtered = rows;
   if (sellerEntityId && sellerEntityId !== "all") {
     filtered = filtered.filter((r) => r.sellerEntityId === sellerEntityId || r.sellerEntityName?.toLowerCase().includes(sellerEntityId.toLowerCase()));
@@ -1127,280 +997,127 @@ function orEq(col1: any, val1: any, col2: any, val2: any) {
   return sql`(${col1} = ${val1} OR ${col2} = ${val2})`;
 }
 
-async function seedYttEntities(companyId: string) {
-  for (const ytt of INITIAL_YTT_ENTITIES) {
-    await db.insert(tradingYttEntities).values({
-      companyId,
-      code: ytt.code,
-      name: ytt.name,
-      legalType: ytt.legalType,
-      inn: ytt.inn,
-      bankName: ytt.bankName,
-      bankAccount: ytt.bankAccount,
-      annualLimitUzs: String(ytt.annualLimit),
-      currentTurnoverUzs: String(ytt.currentTurnover),
-      currency: "UZS",
-      status: ytt.status as any,
-      isRecommended: Boolean(ytt.isRecommended),
-      activeContractsCount: ytt.activeContractsCount,
-      notes: ytt.notes,
-    });
+// ─── 7. Trading Catalog (Katalog va Qoldiqlar) ──────────────────────────────
+
+export async function getTradingCatalog(companyCode = "PRINTGOO"): Promise<TradingCatalogItemRecord[]> {
+  let query;
+  if (companyCode === "ALL") {
+    query = db.select().from(tradingCatalog).orderBy(tradingCatalog.sku);
+  } else {
+    const companyId = await resolveCompanyId(companyCode);
+    query = db.select().from(tradingCatalog).where(eq(tradingCatalog.companyId, companyId)).orderBy(tradingCatalog.sku);
   }
+
+  const rows = await query;
+  return rows.map((r) => ({
+    id: r.id,
+    sku: r.sku,
+    name: r.name,
+    category: r.category as any,
+    unit: r.unit,
+    priceUZS: Number(r.priceUzs || 0),
+    priceUSD: Number(r.priceUsd || 0),
+    wholesalePriceUZS: Number(r.wholesalePriceUzs || 0),
+    retailPriceUZS: Number(r.retailPriceUzs || 0),
+    stockQty: Number(r.stockQty || 0),
+    minStockLevel: Number(r.minStockLevel || 0),
+    origin: r.origin || "",
+    material: r.material || undefined,
+    colorCode: r.colorCode || undefined,
+    dimensions: r.dimensions || undefined,
+    supplier: r.supplier || undefined,
+    notes: r.notes || undefined,
+  }));
 }
 
-async function seedCatalog(companyId: string) {
-  for (const cat of INITIAL_TRADING_CATALOG) {
-    await db.insert(tradingCatalog).values({
-      companyId,
-      sku: cat.sku,
-      name: cat.name,
-      category: cat.category as any,
-      unit: cat.unit,
-      priceUzs: String(cat.priceUZS),
-      priceUsd: String(cat.priceUSD),
-      wholesalePriceUzs: String(cat.wholesalePriceUZS),
-      retailPriceUzs: String(cat.retailPriceUZS),
-      stockQty: String(cat.stockQty),
-      minStockLevel: String(cat.minStockLevel),
-      origin: cat.origin,
-      material: cat.material || "",
-      colorCode: cat.colorCode || "",
-      dimensions: cat.dimensions || "",
-      supplier: cat.supplier || "",
-      notes: cat.notes || "",
-    });
-  }
-}
+export async function upsertTradingCatalogItem(
+  payload: Partial<TradingCatalogItemRecord>,
+  companyCode = "PRINTGOO"
+): Promise<TradingCatalogItemRecord> {
+  const companyId = await resolveCompanyId(companyCode);
 
-async function seedSales(companyId: string) {
-  for (const s of INITIAL_TRADING_SALES) {
-    const [inserted] = await db
-      .insert(tradingSales)
-      .values({
-        companyId,
-        docNo: s.docNo,
-        date: s.date,
-        sellerEntityName: s.sellerEntityName,
-        sellerEntityInn: s.sellerEntityInn,
-        customer: s.customer,
-        customerTin: s.customerTin,
-        contractNo: s.contractNo,
-        currency: s.currency,
-        exchangeRate: String(s.exchangeRate),
-        totalAmount: String(s.totalAmount),
-        totalUsd: String(s.totalUSD),
-        totalUzs: String(s.totalUZS),
-        paymentMethod: s.paymentMethod === "Bank Wire (Hisob-raqam)" ? "bank_wire" : "cash",
-        status: s.status as any,
-        notes: s.notes,
-      })
+  const values: any = {
+    companyId,
+    sku: payload.sku || `SKU-${Date.now().toString().slice(-6)}`,
+    name: payload.name || "Nomsiz Mahsulot",
+    category: (payload.category || "Furnitura") as any,
+    unit: payload.unit || "dona",
+    priceUzs: String(payload.priceUZS ?? 0),
+    priceUsd: String(payload.priceUSD ?? 0),
+    wholesalePriceUzs: String(payload.wholesalePriceUZS ?? 0),
+    retailPriceUzs: String(payload.retailPriceUZS ?? 0),
+    stockQty: String(payload.stockQty ?? 0),
+    minStockLevel: String(payload.minStockLevel ?? 0),
+    origin: payload.origin || "",
+    material: payload.material || null,
+    colorCode: payload.colorCode || null,
+    dimensions: payload.dimensions || null,
+    supplier: payload.supplier || null,
+    notes: payload.notes || null,
+    updatedAt: new Date(),
+  };
+
+  if (payload.id) {
+    const [updated] = await db
+      .update(tradingCatalog)
+      .set(values)
+      .where(and(eq(tradingCatalog.id, payload.id), eq(tradingCatalog.companyId, companyId)))
       .returning();
 
-    if (s.items && s.items.length > 0) {
-      await db.insert(tradingSaleItems).values(
-        s.items.map((it, idx) => ({
-          saleId: inserted.id,
-          sku: it.sku,
-          name: it.name,
-          category: it.category as any,
-          unit: it.unit,
-          quantity: String(it.quantity),
-          unitPrice: String(it.unitPrice),
-          unitPriceUzs: String(it.unitPriceUZS),
-          unitPriceUsd: String(it.unitPriceUSD),
-          totalAmount: String(it.totalAmount),
-          totalUsd: String(it.totalUSD),
-          isSelfProduced: Boolean(it.isSelfProduced),
-          sortOrder: idx,
-        }))
-      );
+    if (updated) {
+      return {
+        id: updated.id,
+        sku: updated.sku,
+        name: updated.name,
+        category: updated.category as any,
+        unit: updated.unit,
+        priceUZS: Number(updated.priceUzs || 0),
+        priceUSD: Number(updated.priceUsd || 0),
+        wholesalePriceUZS: Number(updated.wholesalePriceUzs || 0),
+        retailPriceUZS: Number(updated.retailPriceUzs || 0),
+        stockQty: Number(updated.stockQty || 0),
+        minStockLevel: Number(updated.minStockLevel || 0),
+        origin: updated.origin || "",
+        material: updated.material || undefined,
+        colorCode: updated.colorCode || undefined,
+        dimensions: updated.dimensions || undefined,
+        supplier: updated.supplier || undefined,
+        notes: updated.notes || undefined,
+      };
     }
   }
+
+  // Insert new
+  const [inserted] = await db.insert(tradingCatalog).values(values).returning();
+  return {
+    id: inserted.id,
+    sku: inserted.sku,
+    name: inserted.name,
+    category: inserted.category as any,
+    unit: inserted.unit,
+    priceUZS: Number(inserted.priceUzs || 0),
+    priceUSD: Number(inserted.priceUsd || 0),
+    wholesalePriceUZS: Number(inserted.wholesalePriceUzs || 0),
+    retailPriceUZS: Number(inserted.retailPriceUzs || 0),
+    stockQty: Number(inserted.stockQty || 0),
+    minStockLevel: Number(inserted.minStockLevel || 0),
+    origin: inserted.origin || "",
+    material: inserted.material || undefined,
+    colorCode: inserted.colorCode || undefined,
+    dimensions: inserted.dimensions || undefined,
+    supplier: inserted.supplier || undefined,
+    notes: inserted.notes || undefined,
+  };
 }
 
-async function seedOrders(companyId: string) {
-  const seedList: Omit<TradingOrderRecord, "id">[] = [
-    {
-      orderNo: "ORD-2026-OCT-101",
-      date: "2026-10-20",
-      customer: "'OSIYO TEKSTIL SANOAT' MChJ",
-      customerTin: "305112233",
-      contractNo: "PO-ACC-2026/18",
-      category: "Maxsus Jakkard va Tugmalar",
-      deliveryDate: "2026-11-05",
-      chinaStatus: "Guangzhou Zavodida Ishlab Chiqarilmoqda",
-      advanceStatus: "30% Avans Olingan",
-      advancePercent: 30,
-      advanceAmountUSD: 2400,
-      totalUSD: 8000,
-      exchangeRate: 12850,
-      shippingMethod: "Avto Fura Kargo (12-16 kun)",
-      trackingNo: "CN-TASH-99812",
-      notes: "Mijoz logotipi tushirilgan metall gravirovkali tugmalar.",
-      items: [
-        {
-          id: "item-ord-1",
-          sku: "TRD-BTN-001",
-          name: "Metall jinsi tugmasi (Gravirovka: Osiyo)",
-          spec: "Diametr: 18mm, Bronza qoplamali",
-          unit: "dona",
-          quantity: 50000,
-          unitPriceUSD: 0.12,
-          totalUSD: 6000,
-          chinaFactoryStatus: "Ishlab chiqarilmoqda",
-        },
-        {
-          id: "item-ord-2",
-          sku: "TRD-LBL-001",
-          name: "Jakkard to'qilgan yoqa yorlig'i (Woven label)",
-          spec: "O'lcham: 25x60mm, 5 rangli to'qima",
-          unit: "dona",
-          quantity: 20000,
-          unitPriceUSD: 0.1,
-          totalUSD: 2000,
-          chinaFactoryStatus: "Sifat nazoratida",
-        },
-      ],
-    },
-    {
-      orderNo: "ORD-2026-OCT-102",
-      date: "2026-10-22",
-      customer: "'SAMARKAND APPAREL' QK MChJ",
-      customerTin: "302889900",
-      contractNo: "SA-2026/89",
-      category: "YKK Tipi Fermuarlar",
-      deliveryDate: "2026-11-10",
-      chinaStatus: "Kargo Avto Yo'lda (CN-2026-OCT-14)",
-      advanceStatus: "50% To'langan",
-      advancePercent: 50,
-      advanceAmountUSD: 4500,
-      totalUSD: 9000,
-      exchangeRate: 12850,
-      shippingMethod: "Avto Fura Kargo (12-16 kun)",
-      trackingNo: "CN-KRG-44102",
-      notes: "Yevropa eksporti uchun bolalar kiyimlari fermuari.",
-      items: [
-        {
-          id: "item-ord-3",
-          sku: "TRD-ZIP-001",
-          name: "Yashirin fermuar (Invisible zipper, 20cm)",
-          spec: "Rang: Pantone 19-4052, Neylon #3",
-          unit: "dona",
-          quantity: 30000,
-          unitPriceUSD: 0.3,
-          totalUSD: 9000,
-          chinaFactoryStatus: "Kargoga topshirildi",
-        },
-      ],
-    },
-  ];
-
-  for (const o of seedList) {
-    const [inserted] = await db
-      .insert(tradingOrders)
-      .values({
-        companyId,
-        orderNo: o.orderNo,
-        date: o.date,
-        customer: o.customer,
-        customerTin: o.customerTin,
-        contractNo: o.contractNo,
-        category: o.category,
-        deliveryDate: o.deliveryDate,
-        chinaStatus: o.chinaStatus,
-        advanceStatus: o.advanceStatus,
-        advancePercent: String(o.advancePercent),
-        advanceAmountUsd: String(o.advanceAmountUSD),
-        totalUsd: String(o.totalUSD),
-        totalUzs: String(o.totalUSD * o.exchangeRate),
-        exchangeRate: String(o.exchangeRate),
-        shippingMethod: o.shippingMethod,
-        trackingNo: o.trackingNo,
-        notes: o.notes,
-      })
-      .returning();
-
-    if (o.items && o.items.length > 0) {
-      await db.insert(tradingOrderItems).values(
-        o.items.map((it, idx) => ({
-          orderId: inserted.id,
-          sku: it.sku,
-          name: it.name,
-          spec: it.spec,
-          unit: it.unit,
-          quantity: String(it.quantity),
-          unitPriceUsd: String(it.unitPriceUSD),
-          totalUsd: String(it.totalUSD),
-          chinaFactoryStatus: it.chinaFactoryStatus,
-          sortOrder: idx,
-        }))
-      );
-    }
-  }
-}
-
-async function seedImports(companyId: string) {
-  for (const b of INITIAL_IMPORT_BATCHES) {
-    let statusDb = "in_transit";
-    if (b.status === "Customs Clearance") statusDb = "customs_clearance";
-    else if (b.status === "Arrived & Calculated") statusDb = "arrived_calculated";
-    else if (b.status === "Allocated to Stock") statusDb = "allocated_to_stock";
-
-    const [inserted] = await db
-      .insert(tradingImportBatches)
-      .values({
-        companyId,
-        batchNo: b.batchNo,
-        date: b.date,
-        origin: b.origin,
-        supplier: b.supplier,
-        containerNo: b.containerNo,
-        fobAmountUsd: String(b.fobAmountUSD),
-        internationalCargoUsd: String(b.internationalCargoUSD),
-        grossWeightKg: String(b.grossWeightKg),
-        customsDutyUzs: String(b.customsDutyUZS),
-        exchangeRate: String(b.exchangeRate),
-        totalLandedCostUzs: String(b.totalLandedCostUZS),
-        landedCostMarkupPercent: String(b.landedCostMarkupPercent),
-        status: statusDb as any,
-        notes: b.notes,
-      })
-      .returning();
-
-    if (b.items && b.items.length > 0) {
-      await db.insert(tradingImportItems).values(
-        b.items.map((it, idx) => ({
-          batchId: inserted.id,
-          sku: it.sku,
-          name: it.name,
-          category: it.category,
-          unit: it.unit,
-          quantity: String(it.quantity),
-          fobPriceUsd: String(it.fobPriceUSD),
-          fobTotalUsd: String(it.fobTotalUSD),
-          landedCostUzs: String(it.landedCostUZS),
-          suggestedSalePriceUzs: String(it.suggestedSalePriceUZS),
-          sortOrder: idx,
-        }))
-      );
-    }
-  }
-}
-
-async function seedSettlements(companyId: string) {
-  for (const stl of INITIAL_SETTLEMENT_LEDGERS) {
-    await db.insert(tradingSettlements).values({
-      companyId,
-      docNo: stl.docNo,
-      date: stl.date,
-      docType: stl.docType,
-      sellerEntityName: stl.sellerEntityName,
-      customer: stl.customer,
-      debit: String(stl.debit),
-      credit: String(stl.credit),
-      currency: stl.currency,
-      balance: String(stl.balance),
-      notes: "Dastlabki hisob-kitob qoldig'i",
-    });
-  }
+export async function deleteTradingCatalogItem(
+  id: string,
+  companyCode = "PRINTGOO"
+): Promise<boolean> {
+  const companyId = await resolveCompanyId(companyCode);
+  const result = await db
+    .delete(tradingCatalog)
+    .where(and(eq(tradingCatalog.id, id), eq(tradingCatalog.companyId, companyId)))
+    .returning();
+  return result.length > 0;
 }

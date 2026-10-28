@@ -8,7 +8,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "PRINTGOO";
 
-    const data = await getWarehouses(companyCode);
+    const all = searchParams.get("all") === "true";
+    const data = await getWarehouses(companyCode, all);
     return NextResponse.json({
       success: true,
       data,

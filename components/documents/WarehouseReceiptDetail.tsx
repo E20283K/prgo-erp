@@ -58,6 +58,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FieldCombobox, type ComboboxOption } from "@/components/ui/field-combobox";
+import { WarehouseSelect } from "@/components/common/WarehouseSelect";
 import {
   ArrowDownToLine,
   Plus,
@@ -176,7 +177,8 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
     if (plants.length === 0 && fetchPlants) {
       fetchPlants();
     }
-  }, [suppliers.length, loadSuppliers, warehousesList.length, loadWarehouses, plants.length, fetchPlants]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Collect known suppliers for combobox
   const supplierOptions = useMemo<ComboboxOption[]>(() => {
@@ -807,23 +809,16 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
 
         {/* Warehouse Location Selector */}
         <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">Qabul qiluvchi ombor</Label>
-          <Select
+          <Label className="text-[11px] text-muted-foreground">Qabul qiluvchi ombor *</Label>
+          <WarehouseSelect
             value={doc.location}
             disabled={isPosted}
-            onValueChange={(val) => handleFieldChange("location", val)}
-          >
-            <SelectTrigger className="h-7 text-xs bg-background">
-              <SelectValue placeholder="Omborni tanlang" />
-            </SelectTrigger>
-            <SelectContent>
-              {warehouseOptions.map((wh) => (
-                <SelectItem key={wh.id} value={wh.name}>
-                  {wh.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onValueChange={(val) => {
+              handleFieldChange("location", val.warehouseName);
+            }}
+            placeholder="Omborni tanlang..."
+            className="h-7 text-xs bg-background"
+          />
         </div>
 
         {/* Received By Employee Combobox */}

@@ -4,6 +4,7 @@ import React, { useState, useRef } from "react";
 import { SystemUserRecord } from "../types";
 import { ROLE_TEMPLATES } from "../data";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { OrgUnitSelect } from "@/components/common/OrgUnitSelect";
 import { Input } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
@@ -491,23 +492,14 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
               <span>Asosiy Filial / Korxona</span>
               <span className="text-red-500">*</span>
             </Label>
-            <Select
+            <OrgUnitSelect
               value={data.plant || (plants[0]?.name ?? "")}
               onValueChange={(val) => {
-                if (val) onChange({ plant: val });
+                onChange({ plant: val.label, branchId: val.branchId, companyId: val.companyId });
               }}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Filialni tanlang" />
-              </SelectTrigger>
-              <SelectContent>
-                {plants.map((plt) => (
-                  <SelectItem key={plt.id} value={plt.name} className="text-xs">
-                    {plt.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Filial yoki korxonani tanlang..."
+              className="h-8 text-xs"
+            />
           </div>
 
           {/* Department */}

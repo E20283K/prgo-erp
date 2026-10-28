@@ -269,7 +269,8 @@ export function BomMaterialsGrid({
     if (warehouseStock.length === 0 && loadWarehouseStock) loadWarehouseStock();
     if (suppliers.length === 0 && loadSuppliers) loadSuppliers();
     if (masterSpecifications.length === 0 && loadSpecificationsAsync) loadSpecificationsAsync();
-  }, [warehouseStock.length, loadWarehouseStock, suppliers.length, loadSuppliers, masterSpecifications.length, loadSpecificationsAsync]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const supplierOptions = useMemo(() => {
     const set = new Set<string>();

@@ -12,6 +12,7 @@ import {
   payrollRecords,
   employeeHistory,
   companies,
+  branches,
 } from "@/db/schema";
 import { eq, desc, and, sql, between, gte, lte } from "drizzle-orm";
 import type {
@@ -45,6 +46,8 @@ export async function getEmployeesList(
     with: {
       department: true,
       position: true,
+      branch: true,
+      company: true,
     },
     orderBy: [desc(employees.createdAt)],
   });
@@ -77,7 +80,9 @@ export async function getEmployeesList(
       positionId: e.positionId,
       positionTitle: e.position?.title || details.positionTitle || details.position || "",
       position: e.position?.title || details.positionTitle || details.position || "",
-      plant: "PrintGoo Bosh Zavod",
+      plant: e.branch?.name || (e.company?.legalType === "YTT" ? e.company?.name : "PrintGoo Bosh Zavod"),
+      branchId: e.branchId,
+      companyId: e.companyId,
       avatarUrl: e.avatarUrl,
       passportSeries: details.passportSeries || "",
       passportNumber: details.passportNumber || "",
@@ -178,7 +183,18 @@ export async function upsertEmployeeRecord(
   changedBy: string = "Admin"
 ): Promise<{ success: boolean; employeeId: string; error?: string }> {
   try {
-    const companyId = await getCompanyIdByCode(companyCode);
+    let targetCompanyId = data.companyId && UUID_REGEX.test(data.companyId) ? data.companyId : null;
+    let resolvedBranchId = data.branchId && UUID_REGEX.test(data.branchId) ? data.branchId : null;
+    if (!targetCompanyId && resolvedBranchId) {
+      const bRow = await db.query.branches.findFirst({
+        where: eq(branches.id, resolvedBranchId),
+      });
+      if (bRow) targetCompanyId = bRow.companyId;
+    }
+    if (!targetCompanyId) {
+      targetCompanyId = await getCompanyIdByCode(companyCode);
+    }
+    const companyId = targetCompanyId;
 
     const fName = data.firstName || data.fullName?.split(" ")[0] || "Xodim";
     const lName = data.lastName || data.fullName?.split(" ")[1] || "Kadr";
@@ -284,6 +300,7 @@ export async function upsertEmployeeRecord(
             currentShift: data.currentShift || existing.currentShift,
             departmentId: resolvedDeptId || existing.departmentId,
             positionId: resolvedPosId || existing.positionId,
+            branchId: resolvedBranchId !== undefined ? resolvedBranchId : existing.branchId,
             hireDate: data.hireDate || existing.hireDate,
             terminationDate: data.terminationDate || null,
             avatarUrl: data.avatarUrl !== undefined ? (data.avatarUrl || null) : existing.avatarUrl,
@@ -328,7 +345,8 @@ export async function upsertEmployeeRecord(
     const [inserted] = await db
       .insert(employees)
       .values({
-        companyId,
+        companyId: targetCompanyId,
+        branchId: resolvedBranchId,
         badgeNumber,
         firstName: fName,
         lastName: lName,
@@ -378,7 +396,7 @@ export async function upsertEmployeeRecord(
 export async function getDepartmentsList(companyCode: string = "PRINTGOO"): Promise<DepartmentRecord[]> {
   const companyId = await getCompanyIdByCode(companyCode);
 
-  const rawDepts = await db.query.departments.findMany({
+  let rawDepts = await db.query.departments.findMany({
     where: eq(departments.companyId, companyId),
     with: {
       employees: true,
@@ -386,6 +404,43 @@ export async function getDepartmentsList(companyCode: string = "PRINTGOO"): Prom
     },
     orderBy: [desc(departments.createdAt)],
   });
+
+  if (rawDepts.length === 0) {
+    const defaultDepts = [
+      { code: "DEPT-OFF", name: "Offset bosma sexi", description: "Varaqli va rulonli ofset bosma ishlab chiqarish" },
+      { code: "DEPT-FLX", name: "Fleksografiya sexi", description: "Samokleyka va etiketka mahsulotlari sexi" },
+      { code: "DEPT-JAC", name: "Jakkar to'quv sexi", description: "To'qilgan etiketka va lentalar ishlab chiqarish" },
+      { code: "DEPT-PST", name: "Post-press va qayta ishlash", description: "Qirqish, shtamplash, lak va folgalash" },
+      { code: "DEPT-WHS", name: "Ombor va logistika", description: "Xomashyo va tayyor mahsulotlar boshqaruvi" },
+      { code: "DEPT-FIN", name: "Buxgalteriya va moliya", description: "Moliyaviy hisob-kitob va shartnomalar" },
+      { code: "DEPT-SLS", name: "Savdo va mijozlar xizmati", description: "Mijozlar buyurtmalari va CRM boshqaruvi" },
+      { code: "DEPT-QAC", name: "Sifat nazorati (OTK)", description: "Texnologik nazorat va sifat standarti" },
+      { code: "DEPT-ITM", name: "IT va avtomatlashtirish", description: "Tizim va avtomatika boshqaruvi" },
+    ];
+
+    try {
+      await db.insert(departments).values(
+        defaultDepts.map((d) => ({
+          code: d.code,
+          name: d.name,
+          description: d.description,
+          companyId,
+          isActive: true,
+        }))
+      ).onConflictDoNothing();
+
+      rawDepts = await db.query.departments.findMany({
+        where: eq(departments.companyId, companyId),
+        with: {
+          employees: true,
+          branch: true,
+        },
+        orderBy: [desc(departments.createdAt)],
+      });
+    } catch (e) {
+      console.error("Error auto-seeding departments:", e);
+    }
+  }
 
   return rawDepts.map((d) => ({
     id: d.id,
@@ -397,6 +452,7 @@ export async function getDepartmentsList(companyCode: string = "PRINTGOO"): Prom
     staffCount: d.employees.length,
     plant: d.branch?.name || d.branch?.shortName || "PrintGoo Bosh Zavod",
     branchId: d.branchId,
+    companyId: d.companyId,
     isActive: d.isActive,
     createdAt: d.createdAt.toISOString(),
   }));
@@ -407,7 +463,16 @@ export async function upsertDepartmentRecord(
   companyCode: string = "PRINTGOO"
 ): Promise<{ success: boolean; id: string; error?: string }> {
   try {
-    const companyId = await getCompanyIdByCode(companyCode);
+    let targetCompanyId = data.companyId && UUID_REGEX.test(data.companyId) ? data.companyId : null;
+    if (!targetCompanyId && data.branchId && UUID_REGEX.test(data.branchId)) {
+      const bRow = await db.query.branches.findFirst({
+        where: eq(branches.id, data.branchId),
+      });
+      if (bRow) targetCompanyId = bRow.companyId;
+    }
+    if (!targetCompanyId) {
+      targetCompanyId = await getCompanyIdByCode(companyCode);
+    }
 
     if (data.id && data.id.length > 10 && !data.id.startsWith("dep-")) {
       await db
@@ -416,6 +481,7 @@ export async function upsertDepartmentRecord(
           name: data.name!,
           code: data.code!,
           description: data.description || null,
+          companyId: targetCompanyId,
           branchId: data.branchId || null,
           isActive: data.isActive ?? true,
           updatedAt: new Date(),
@@ -427,7 +493,7 @@ export async function upsertDepartmentRecord(
     let deptCode = data.code?.trim();
     if (!deptCode) {
       const allDepts = await db.query.departments.findMany({
-        where: eq(departments.companyId, companyId),
+        where: eq(departments.companyId, targetCompanyId),
         columns: { code: true },
       });
       deptCode = generateNextCode(
@@ -440,7 +506,7 @@ export async function upsertDepartmentRecord(
     const [inserted] = await db
       .insert(departments)
       .values({
-        companyId,
+        companyId: targetCompanyId,
         branchId: data.branchId || null,
         code: deptCode,
         name: data.name || "Yangi bo'lim",

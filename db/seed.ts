@@ -72,29 +72,8 @@ async function seedDatabase() {
     })
     .returning();
 
-  // 2. Filiallar (Branches)
-  const [flexoBranch] = await db
-    .insert(branches)
-    .values([
-      {
-        companyId: printgooCompany.id,
-        code: "HQ-FLEXO",
-        name: "Bosh Bosmaxona (Flexo & Prepress Sexi)",
-        address: "Toshkent sh., Sanoat zonasi",
-        isMain: true,
-      },
-      {
-        companyId: textileCompany.id,
-        code: "HQ-SEWING",
-        name: "Bosh Tikuvchilik Fabrikasi",
-        address: "Toshkent sh.",
-        isMain: true,
-      },
-    ])
-    .onConflictDoNothing()
-    .returning();
-
-  const branchId = flexoBranch?.id;
+  // 2. Filiallar (Branches) - yangi tizimda toza boshlanadi
+  const branchId = undefined;
 
   // 3. O'lchov birliklari (Units of Measure - 1C Klassifikator)
   console.log("📏 1. O'lchov birliklari yuklanmoqda...");

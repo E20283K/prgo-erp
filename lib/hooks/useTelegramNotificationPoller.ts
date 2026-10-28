@@ -25,6 +25,13 @@ export function useTelegramNotificationPoller() {
   const isInitialized = useRef(false);
   const knownChatsMap = useRef<Map<string, ChatState>>(new Map());
 
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+  const activeTelegramChatIdRef = useRef(activeTelegramChatId);
+  activeTelegramChatIdRef.current = activeTelegramChatId;
+  const addNotificationRef = useRef(addNotification);
+  addNotificationRef.current = addNotification;
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -76,14 +83,14 @@ export function useTelegramNotificationPoller() {
           if (hasNewIncomingMessage) {
             // Smart Rule: If user is actively inside TelegramInbox and has this chat open, don't toast
             const isActivelyViewingThisChat =
-              activeTabId.includes("telegram-inbox") &&
-              activeTelegramChatId === chat.id;
+              activeTabIdRef.current.includes("telegram-inbox") &&
+              activeTelegramChatIdRef.current === chat.id;
 
             if (!isActivelyViewingThisChat) {
               const senderTitle = chat.clientName || chat.title || "Telegram Mijoz";
               const snippet = chat.lastMessageSnippet || "Yangi xabar keldi";
 
-              addNotification({
+              addNotificationRef.current({
                 title: `Telegram • ${senderTitle}`,
                 description: snippet,
                 severity: "info",
@@ -120,18 +127,15 @@ export function useTelegramNotificationPoller() {
     // Initial check
     checkNewMessages();
 
-    // Poll every 4 seconds
-    const interval = setInterval(checkNewMessages, 4000);
+    // Poll every 15 seconds to avoid flooding network & server
+    const interval = setInterval(checkNewMessages, 15000);
 
     return () => {
       isCancelled = true;
       clearInterval(interval);
     };
   }, [
-    activeTabId,
-    activeTelegramChatId,
     toastSoundConfig?.telegramToastEnabled,
     notificationRules?.telegramMessagesEnabled,
-    addNotification,
   ]);
 }

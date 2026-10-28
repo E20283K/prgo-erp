@@ -58,6 +58,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore, type CrmCustomerRecord } from "@/store/workspaceStore";
+import { OrgUnitSelect } from "@/components/common/OrgUnitSelect";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -173,6 +174,8 @@ interface OverviewTabProps {
   onSwitchTab: (tabKey: string) => void;
   onMarkUnsaved: () => void;
   isOperator?: boolean;
+  errors?: Record<string, string>;
+  setErrors?: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   tOrder: (key: string) => string;
 }
 
@@ -271,6 +274,8 @@ export function OverviewTab({
   onSwitchTab,
   onMarkUnsaved,
   isOperator = false,
+  errors = {},
+  setErrors,
   tOrder,
 }: OverviewTabProps) {
   const {
@@ -308,7 +313,8 @@ export function OverviewTab({
     if (!s.plants || s.plants.length === 0) {
       if (s.fetchPlants) s.fetchPlants();
     }
-  }, [syncWithServer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Real customer options from CRM database (PostgreSQL)
   const customerOptions = useMemo(() => {
@@ -1098,14 +1104,30 @@ export function OverviewTab({
 
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("customerLabel")}</label>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">
+                {tOrder("customerLabel")} <span className="text-destructive font-bold">*</span>
+              </label>
               <div className="flex items-center gap-1.5">
-                <div className="flex-1 min-w-0">
+                <div
+                  id="wo-input-customer"
+                  tabIndex={-1}
+                  className={cn(
+                    "flex-1 min-w-0 rounded-md transition-colors",
+                    errors?.customer && "ring-1 ring-destructive border border-destructive"
+                  )}
+                >
                   <ComboboxSelect
                     items={customerOptions}
                     value={formData.customer}
                     onValueChange={(val) => {
                       handleFieldChange("customer", val);
+                      if (errors?.customer && setErrors) {
+                        setErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.customer;
+                          return next;
+                        });
+                      }
                       onMarkUnsaved();
                     }}
                     disabled={isOperator}
@@ -1131,11 +1153,16 @@ export function OverviewTab({
                   </Button>
                 )}
               </div>
+              {errors?.customer && (
+                <p className="text-[11px] text-destructive mt-1 font-medium">{errors.customer}</p>
+              )}
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-muted-foreground">{tOrder("productLabel")}</label>
+                <label className="text-xs font-medium text-muted-foreground">
+                  {tOrder("productLabel")} <span className="text-destructive font-bold">*</span>
+                </label>
                 {!isOperator && (
                   <Popover open={isNamingPopoverOpen} onOpenChange={setIsNamingPopoverOpen}>
                     <PopoverTrigger
@@ -1210,9 +1237,22 @@ export function OverviewTab({
                 <div className="relative flex-1 min-w-0">
                   <Input 
                     value={formData.product} 
-                    onChange={(e) => handleFieldChange("product", e.target.value)}
+                    id="wo-input-product"
+                    onChange={(e) => {
+                      handleFieldChange("product", e.target.value);
+                      if (errors?.product && setErrors) {
+                        setErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.product;
+                          return next;
+                        });
+                      }
+                    }}
                     disabled={isOperator}
-                    className="h-8 text-xs bg-muted/30 font-medium disabled:opacity-85 pr-8" 
+                    className={cn(
+                      "h-8 text-xs bg-muted/30 font-medium disabled:opacity-85 pr-8",
+                      errors?.product && "border-destructive focus-visible:ring-destructive ring-1 ring-destructive"
+                    )} 
                     placeholder="Mahsulot nomi yoki texkartani tanlang"
                   />
                   {!isOperator && (
@@ -1305,6 +1345,10 @@ export function OverviewTab({
                 )}
               </div>
 
+              {errors?.product && (
+                <p className="text-[11px] text-destructive mt-1 font-medium">{errors.product}</p>
+              )}
+
               {/* Recommendation pill if current product name is empty or differs from standard suggestion */}
               {!isOperator && suggestedProductName && suggestedProductName !== formData.product && (
                 <div className="flex items-center justify-between gap-2 mt-1.5 p-1.5 px-2 rounded-md bg-amber-500/10 border border-amber-500/25 text-[11px]">
@@ -1328,20 +1372,38 @@ export function OverviewTab({
 
             <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("quantityLabel")}</label>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">
+                  {tOrder("quantityLabel")} <span className="text-destructive font-bold">*</span>
+                </label>
                 <Input 
                   type="number"
                   min={0}
                   value={hasSizes && totalSizesQty > 0 ? totalSizesQty : formData.quantity} 
-                  onChange={(e) => handleFieldChange("quantity", Number(e.target.value))}
+                  id="wo-input-quantity"
+                  onChange={(e) => {
+                    handleFieldChange("quantity", Number(e.target.value));
+                    if (errors?.quantity && setErrors) {
+                      setErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.quantity;
+                        return next;
+                      });
+                    }
+                  }}
                   disabled={isOperator || (hasSizes && totalSizesQty > 0)}
                   title={
                     hasSizes && totalSizesQty > 0
                       ? "Miqdor o'lchamlar matritsasi orqali avtomatik hisoblanadi"
                       : undefined
                   }
-                  className="h-8 text-xs bg-muted/30 font-mono font-semibold disabled:opacity-85" 
+                  className={cn(
+                    "h-8 text-xs bg-muted/30 font-mono font-semibold disabled:opacity-85",
+                    errors?.quantity && "border-destructive focus-visible:ring-destructive ring-1 ring-destructive"
+                  )}
                 />
+                {errors?.quantity && (
+                  <p className="text-[11px] text-destructive mt-1 font-medium">{errors.quantity}</p>
+                )}
               </div>
 
               <div>
@@ -1871,31 +1933,18 @@ export function OverviewTab({
                 {/* Production Site Combobox */}
                 <div>
                   <label className="text-muted-foreground font-medium text-xs block mb-1">
-                    Production Site
+                    Ishlab chiqarish maydoni (Filial)
                   </label>
-                  <ComboboxSelect
-                    items={siteOptions}
-                    value={formData.site || activeSite.id || activeSite.name}
+                  <OrgUnitSelect
+                    branchId={formData.site}
+                    value={formData.site}
                     onValueChange={(val) => {
-                      handleFieldChange("site", val);
+                      handleFieldChange("site", val.branchId || val.companyId);
                       onMarkUnsaved();
                     }}
                     disabled={isOperator}
                     placeholder="Filialni tanlang..."
                     className="h-8 text-xs bg-muted/30"
-                    contentClassName="w-[320px]"
-                    actionLabel={!isOperator ? "Yangi filial / sex qo'shish..." : undefined}
-                    onAction={!isOperator ? () => openNewPlantTab() : undefined}
-                    renderItem={(site) => (
-                      <div className="flex-1 min-w-0 space-y-0.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-foreground">{site.label}</span>
-                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">● Online</span>
-                        </div>
-                        {site.description && <p className="text-[11px] text-muted-foreground">{site.description}</p>}
-                        {site.location && <p className="text-[10px] text-muted-foreground">{site.location}</p>}
-                      </div>
-                    )}
                   />
                 </div>
 
@@ -2008,7 +2057,17 @@ export function OverviewTab({
                     </div>
                   )}
                 />
-              </div><div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
+              </div>
+              <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("orderDateLabel")}</label>
+                  <DatePicker 
+                    value={formData.orderDate} 
+                    disabled={isOperator}
+                    onChange={(val) => handleFieldChange("orderDate", val)}
+                    className="h-8 text-xs bg-muted/30 disabled:opacity-85" 
+                  />
+                </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("shiftStartLabel")}</label>
                   <DatePicker 
@@ -2024,6 +2083,16 @@ export function OverviewTab({
                     value={formData.deadline} 
                     disabled={isOperator}
                     onChange={(val) => handleFieldChange("deadline", val)}
+                    className="h-8 text-xs bg-muted/30 disabled:opacity-85" 
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("actualEndDateLabel")}</label>
+                  <DatePicker 
+                    value={formData.actualEndDate} 
+                    disabled={isOperator}
+                    onChange={(val) => handleFieldChange("actualEndDate", val)}
+                    placeholder="—"
                     className="h-8 text-xs bg-muted/30 disabled:opacity-85" 
                   />
                 </div>

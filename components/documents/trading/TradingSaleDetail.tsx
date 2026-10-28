@@ -91,7 +91,8 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     if (!tradingCatalog || tradingCatalog.length === 0) {
       loadTradingData("catalog");
     }
-  }, [crmCustomers, tradingYttEntities, tradingCatalog, loadCrmCustomers, loadTradingData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Form State
   const [docNo] = useState<string>(rawData.docNo || tab.id);
@@ -119,11 +120,11 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   const [notes, setNotes] = useState<string>(rawData.notes || "");
 
   const availableEntities = useMemo(() => {
-    return tradingYttEntities.length > 0 ? tradingYttEntities : INITIAL_YTT_ENTITIES;
+    return tradingYttEntities;
   }, [tradingYttEntities]);
 
   const availableCatalog = useMemo(() => {
-    return tradingCatalog.length > 0 ? tradingCatalog : INITIAL_TRADING_CATALOG;
+    return tradingCatalog;
   }, [tradingCatalog]);
 
   const [items, setItems] = useState<TradingSaleItem[]>(

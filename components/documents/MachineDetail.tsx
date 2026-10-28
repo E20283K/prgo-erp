@@ -65,7 +65,8 @@ export function MachineDetail({ tab }: MachineDetailProps) {
     if (machines.length === 0 && loadMachines) {
       loadMachines();
     }
-  }, [machines.length, loadMachines]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Resolve machine ID from tab id or tab data
   const machineId = useMemo(() => {

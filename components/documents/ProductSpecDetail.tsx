@@ -198,7 +198,8 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     if ((!tariffs || tariffs.length === 0) && fetchTariffs) {
       fetchTariffs();
     }
-  }, [tariffs, fetchTariffs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const tariffOptions = useMemo(() => {
     return (tariffs || []).map((t) => ({

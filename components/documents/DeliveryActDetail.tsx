@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
+import { WarehouseSelect } from "@/components/common/WarehouseSelect";
 import {
   GridCell,
   GridCellKind,
@@ -789,22 +790,13 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
               <div className="grid grid-cols-1 gap-2">
                 <div className="space-y-1">
                   <Label className="text-[11px] text-muted-foreground">{t("warehouse")}</Label>
-                  <Select
+                  <WarehouseSelect
                     value={form.warehouse}
                     disabled={isPosted}
-                    onValueChange={(val) => handleFieldChange("warehouse", val)}
-                  >
-                    <SelectTrigger className="h-7 text-xs bg-background">
-                      <SelectValue placeholder="Chiqim omborini tanlang..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {WAREHOUSE_LOCATIONS.map((loc) => (
-                        <SelectItem key={loc} value={loc} className="text-xs">
-                          {loc}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(val) => handleFieldChange("warehouse", val.warehouseName)}
+                    placeholder="Chiqim omborini tanlang..."
+                    className="h-7 text-xs bg-background"
+                  />
                 </div>
 
                 <div className="space-y-1">

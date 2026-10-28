@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/select";
 import {
   Building,
+  Building2,
+  ChevronRight,
   User,
   MapPin,
   Clock,
@@ -33,7 +35,9 @@ import {
 
 interface PlantOverviewTabProps {
   plant: PlantRecord;
+  branches?: PlantRecord[];
   onUpdate: (updated: Partial<PlantRecord>) => void;
+  onNavigateToBranches?: () => void;
 }
 
 interface ShiftInterval {
@@ -161,7 +165,12 @@ function formatActiveDays(days: number[]): string {
   return sorted.map((id) => WEEK_DAYS[id]?.short).filter(Boolean).join(", ");
 }
 
-export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
+export function PlantOverviewTab({
+  plant,
+  branches,
+  onUpdate,
+  onNavigateToBranches,
+}: PlantOverviewTabProps) {
   const shifts = useMemo(
     () => parseShiftIntervals(plant.workingHours),
     [plant.workingHours]
@@ -272,8 +281,8 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
-          <div className="space-y-1">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 text-xs">
+          <div className="space-y-1 md:col-span-2">
             <Label className="text-[11px] font-medium text-muted-foreground">
               Korxona to&apos;liq nomi *
             </Label>
@@ -281,20 +290,28 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
               value={plant.name}
               onChange={(e) => onUpdate({ name: e.target.value })}
               className="h-8 text-xs font-medium"
-              placeholder="ProMaxZangiota"
+              placeholder="Masalan: PrintGoo Packaging MChJ"
             />
           </div>
 
           <div className="space-y-1">
             <Label className="text-[11px] font-medium text-muted-foreground">
-              Qisqa nomi
+              Kompaniya Turi (Yuridik Shakli) *
             </Label>
-            <Input
-              value={plant.shortName}
-              onChange={(e) => onUpdate({ shortName: e.target.value })}
-              className="h-8 text-xs"
-              placeholder="ProMax Zangiota"
-            />
+            <Select
+              value={plant.legalType || "MChJ"}
+              onValueChange={(val: any) => onUpdate({ legalType: val })}
+            >
+              <SelectTrigger className="h-8 text-xs font-semibold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="MChJ">MChJ (Mas&apos;uliyati cheklangan)</SelectItem>
+                <SelectItem value="YTT">YTT (Yakka tadbirkor)</SelectItem>
+                <SelectItem value="XK">XK (Xususiy korxona)</SelectItem>
+                <SelectItem value="AJ">AJ (Aksiyadorlik jamiyati)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-1">
@@ -311,6 +328,18 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
               readOnly
               className="h-8 text-xs font-mono bg-muted/40 text-muted-foreground cursor-default"
               placeholder="Avtomatik"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-[11px] font-medium text-muted-foreground">
+              Qisqa nomi (Brend)
+            </Label>
+            <Input
+              value={plant.shortName}
+              onChange={(e) => onUpdate({ shortName: e.target.value })}
+              className="h-8 text-xs"
+              placeholder="Masalan: PrintGoo"
             />
           </div>
 
@@ -408,6 +437,68 @@ export function PlantOverviewTab({ plant, onUpdate }: PlantOverviewTabProps) {
           </div>
         </div>
       </div>
+
+      {/* 1.1 Branches Preview */}
+      {branches && (
+        <div className="rounded-lg border border-border bg-card p-3.5 space-y-2.5">
+          <div className="flex items-center justify-between border-b border-border pb-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+              <Building2 className="size-3.5 text-primary" />
+              <span>Filiallar & Ishlab chiqarish maydonlari</span>
+              <Badge variant="outline" className="text-[10px] font-mono h-4.5 px-1.5">
+                {branches.length}
+              </Badge>
+            </div>
+            {onNavigateToBranches && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onNavigateToBranches}
+                className="h-6 text-[11px] gap-1 text-primary hover:text-primary/80"
+              >
+                <span>Barcha filiallarni boshqarish</span>
+                <ChevronRight className="size-3" />
+              </Button>
+            )}
+          </div>
+
+          {branches.length === 0 ? (
+            <div className="py-2 text-xs text-muted-foreground text-center">
+              Ushbu korxonaga biriktirilgan filiallar mavjud emas.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+              {branches.map((b) => (
+                <div
+                  key={b.id}
+                  className="p-2.5 rounded-md border border-border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center justify-between text-xs"
+                >
+                  <div className="space-y-0.5 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-[10px] font-semibold text-muted-foreground">
+                        {b.code}
+                      </span>
+                      <span className="font-semibold text-foreground truncate">
+                        {b.name}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-muted-foreground block truncate">
+                      {b.branchType || b.address || "Ishlab chiqarish sexi"}
+                    </span>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="text-[9px] h-4 px-1 shrink-0 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                  >
+                    {b.status || "Faol"}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 2. Shift & Working Schedule (Interactive & Ergonomic) */}
       <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">

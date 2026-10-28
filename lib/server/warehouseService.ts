@@ -11,6 +11,7 @@ import {
   warehouseFinishedGoods,
   carriers,
   companies,
+  branches,
 } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { getNextReceiptNumber, getNextShipmentNumber } from "./numberingService";
@@ -31,21 +32,99 @@ export async function getCompanyIdByCode(code: string = "PRINTGOO"): Promise<str
   return comp.id;
 }
 
-// ─── 1. Warehouses (Omborlar Katalogi) ────────────────────────────────────────
+// ─── 1. Warehouses (Omborlar Katalogi & Ierarxiya) ────────────────────────────
 
-export async function getWarehouses(companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+/**
+ * Filiallar va YTT lar uchun standart omborlar (Xomashyo va Tayyor mahsulot)
+ * mavjudligini tekshiradi va agar yo'q bo'lsa avtomatik yaratadi.
+ */
+export async function ensureDefaultWarehouses() {
+  const allBranches = await db.query.branches.findMany();
+  const allCompanies = await db.query.companies.findMany();
+  const existingWarehouses = await db.query.warehouses.findMany();
+
+  for (const branch of allBranches) {
+    const branchWhs = existingWarehouses.filter((w) => w.branchId === branch.id);
+    if (branchWhs.length === 0) {
+      await db.insert(warehouses).values({
+        companyId: branch.companyId,
+        branchId: branch.id,
+        code: `WH-RAW-${branch.code || Date.now().toString().slice(-4)}`,
+        name: "Xomashyo ombori",
+        type: "raw_materials",
+        capacity: "5000 m2",
+        zones: 3,
+        isActive: true,
+      });
+
+      await db.insert(warehouses).values({
+        companyId: branch.companyId,
+        branchId: branch.id,
+        code: `WH-FG-${branch.code || Date.now().toString().slice(-4)}`,
+        name: "Tayyor mahsulotlar ombori",
+        type: "finished_goods",
+        capacity: "3000 m2",
+        zones: 2,
+        isActive: true,
+      });
+    }
+  }
+
+  for (const comp of allCompanies) {
+    if (comp.legalType === "YTT") {
+      const compWhs = existingWarehouses.filter((w) => w.companyId === comp.id);
+      if (compWhs.length === 0) {
+        await db.insert(warehouses).values({
+          companyId: comp.id,
+          branchId: null,
+          code: `WH-STORE-${comp.code || Date.now().toString().slice(-4)}`,
+          name: "Savdo ombori",
+          type: "general",
+          capacity: "1000 m2",
+          zones: 1,
+          isActive: true,
+        });
+      }
+    }
+  }
+}
+
+export async function getWarehouses(companyCode: string = "PRINTGOO", all: boolean = false) {
+  await ensureDefaultWarehouses();
+
+  let whereClause = undefined;
+  if (!all && companyCode) {
+    const companyId = await getCompanyIdByCode(companyCode);
+    whereClause = eq(warehouses.companyId, companyId);
+  }
+
   return db.query.warehouses.findMany({
-    where: eq(warehouses.companyId, companyId),
+    where: whereClause,
+    with: {
+      branch: true,
+      company: true,
+    },
     orderBy: [desc(warehouses.createdAt)],
   });
 }
 
 export async function upsertWarehouse(payload: any, companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+  let targetCompanyId = payload.companyId;
+
+  if (payload.branchId && !targetCompanyId) {
+    const br = await db.query.branches.findFirst({
+      where: eq(branches.id, payload.branchId),
+    });
+    if (br) targetCompanyId = br.companyId;
+  }
+
+  if (!targetCompanyId) {
+    targetCompanyId = await getCompanyIdByCode(companyCode);
+  }
 
   const values = {
-    companyId,
+    companyId: targetCompanyId,
+    branchId: payload.branchId || null,
     code: payload.code || `WH-${Date.now().toString().slice(-4)}`,
     name: payload.name || "Yangi Ombor",
     type: payload.type || "raw_materials",
@@ -63,7 +142,7 @@ export async function upsertWarehouse(payload: any, companyCode: string = "PRINT
     const [updated] = await db
       .update(warehouses)
       .set(values)
-      .where(and(eq(warehouses.id, payload.id), eq(warehouses.companyId, companyId)))
+      .where(and(eq(warehouses.id, payload.id), eq(warehouses.companyId, targetCompanyId)))
       .returning();
     record = updated;
   } else {
@@ -75,7 +154,7 @@ export async function upsertWarehouse(payload: any, companyCode: string = "PRINT
   }
 
   await writeAuditLog({
-    companyId,
+    companyId: targetCompanyId,
     userId: "system",
     userName: "Warehouse Manager",
     entityType: "warehouse",
@@ -703,82 +782,6 @@ export async function getCarriers(companyCode: string = "PRINTGOO") {
     where: eq(carriers.companyId, companyId),
     orderBy: [desc(carriers.createdAt)],
   });
-
-  if (list.length === 0) {
-    const initialCarriers = [
-      {
-        companyId,
-        name: "PrintGoo Fleet #1 (ISUZU)",
-        vehicleModel: "ISUZU Furgon 3.5t",
-        vehicleNo: "01 A 772 BB",
-        driverName: "Rustam Ismoilov",
-        driverPhone: "+998 90 123-45-67",
-        type: "fleet",
-        isActive: true,
-      },
-      {
-        companyId,
-        name: "PrintGoo Fleet #2 (Labo)",
-        vehicleModel: "Labo 0.7t (Furgon)",
-        vehicleNo: "01 B 334 CC",
-        driverName: "Anvar Xalilov",
-        driverPhone: "+998 90 987-65-43",
-        type: "fleet",
-        isActive: true,
-      },
-      {
-        companyId,
-        name: "PrintGoo Fleet #3 (Gazelle)",
-        vehicleModel: "Gazelle Next 1.5t",
-        vehicleNo: "01 F 550 AA",
-        driverName: "Jamshid Saidov",
-        driverPhone: "+998 93 456-78-90",
-        type: "fleet",
-        isActive: true,
-      },
-      {
-        companyId,
-        name: "Express Logistics UZ",
-        vehicleModel: "Ford Transit Express",
-        vehicleNo: "01 E 100 EX",
-        driverName: "Navbatchi kuryer",
-        driverPhone: "+998 71 200-11-22",
-        type: "courier",
-        isActive: true,
-      },
-      {
-        companyId,
-        name: "BTS Express Pochta",
-        vehicleModel: "BTS Logistics Van",
-        vehicleNo: "01 B 707 TS",
-        driverName: "BTS Kuryer",
-        driverPhone: "+998 71 123-00-00",
-        type: "courier",
-        isActive: true,
-      },
-      {
-        companyId,
-        name: "Yandex Delivery Cargo",
-        vehicleModel: "Yandex Cargo Furgon",
-        vehicleNo: "Ilovada belgilanadi",
-        driverName: "Ilovadagi haydovchi",
-        driverPhone: "+998 71 200-00-00",
-        type: "courier",
-        isActive: true,
-      },
-      {
-        companyId,
-        name: "Mijoz o'zi olib ketadi (Samovyvoz)",
-        vehicleModel: "Mijoz transporti",
-        vehicleNo: "—",
-        driverName: "Mijoz vakili",
-        driverPhone: "—",
-        type: "self",
-        isActive: true,
-      },
-    ];
-    return db.insert(carriers).values(initialCarriers).returning();
-  }
 
   return list;
 }

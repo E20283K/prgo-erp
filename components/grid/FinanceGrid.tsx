@@ -61,6 +61,8 @@ export function FinanceGrid({ type }: FinanceGridProps) {
     loadFinanceData,
     isFinanceLoading,
     deliveryActs,
+    productionQueue,
+    loadProductionQueue,
     openTab,
     setLevel3Tab,
   } = useWorkspaceStore();
@@ -95,8 +97,10 @@ export function FinanceGrid({ type }: FinanceGridProps) {
   useEffect(() => {
     if (type === "payments") {
       fetchPayments();
+    } else if (type === "cost-analysis") {
+      loadProductionQueue();
     }
-  }, [type, fetchPayments]);
+  }, [type, fetchPayments, loadProductionQueue]);
 
   const selectedClient = useMemo<ClientSettlementRecord | null>(() => {
     if (!selectedClientId) return null;
@@ -157,13 +161,13 @@ export function FinanceGrid({ type }: FinanceGridProps) {
         { id: "status", title: "Status", width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
       dataRows = [
-        { id: "4010", code: "4010", name: "Xaridor va buyurtmachilardan olinadigan schyotlar (Debitorlar)", category: "Active (Receivable)", balance: 18546.0, status: "Active" },
-        { id: "9010", code: "9010", name: "Tayyor mahsulot (Schet-faktura) sotishdan daromadlar", category: "Revenue", balance: 142850.0, status: "Active" },
-        { id: "6410", code: "6410", name: "Byudjetga to'lovlar bo'yicha qarz (QQS / NDS 12%)", category: "Liability (Tax)", balance: 15305.0, status: "Active" },
-        { id: "5110", code: "5110", name: "Hisob-kitob schyoti (Milliy valyuta / Bank)", category: "Cash & Bank", balance: 68400.0, status: "Active" },
-        { id: "2810", code: "2810", name: "Ombordagi tayyor mahsulotlar", category: "Inventory", balance: 41200.0, status: "Active" },
-        { id: "1010", code: "1010", name: "Xomashyo va materiallar (Qog'oz, bo'yoq, plyonka)", category: "Inventory", balance: 89500.0, status: "Active" },
-        { id: "2010", code: "2010", name: "Asosiy ishlab chiqarish (Poligrafiya tsexi)", category: "WIP / Production", balance: 23100.0, status: "Active" },
+        { id: "4010", code: "4010", name: "Xaridor va buyurtmachilardan olinadigan schyotlar (Debitorlar)", category: "Active (Receivable)", balance: 0.0, status: "Active" },
+        { id: "9010", code: "9010", name: "Tayyor mahsulot (Schet-faktura) sotishdan daromadlar", category: "Revenue", balance: 0.0, status: "Active" },
+        { id: "6410", code: "6410", name: "Byudjetga to'lovlar bo'yicha qarz (QQS / NDS 12%)", category: "Liability (Tax)", balance: 0.0, status: "Active" },
+        { id: "5110", code: "5110", name: "Hisob-kitob schyoti (Milliy valyuta / Bank)", category: "Cash & Bank", balance: 0.0, status: "Active" },
+        { id: "2810", code: "2810", name: "Ombordagi tayyor mahsulotlar", category: "Inventory", balance: 0.0, status: "Active" },
+        { id: "1010", code: "1010", name: "Xomashyo va materiallar (Qog'oz, bo'yoq, plyonka)", category: "Inventory", balance: 0.0, status: "Active" },
+        { id: "2010", code: "2010", name: "Asosiy ishlab chiqarish (Poligrafiya tsexi)", category: "WIP / Production", balance: 0.0, status: "Active" },
       ];
     } else {
       // cost-analysis (Order Cost & Margin / Buyurtmalar rentabelligi va tannarxi)
@@ -180,73 +184,28 @@ export function FinanceGrid({ type }: FinanceGridProps) {
         { id: "marginPct", title: "Margin (%)", width: 100, icon: GridColumnIcon.HeaderString },
         { id: "status", title: "Status", width: 120, icon: GridColumnIcon.HeaderSingleValue },
       ];
-      dataRows = [
-        {
-          id: "ORD-2026-0193",
-          workOrderId: "WOOF-26-0356",
-          customer: "Vanguard Fashion",
-          product: "Luxury 600g Duplex Hangtag & VIP Business Card (Kashirovka 300g+300g)",
-          materialCost: 618.4,
-          processCost: 446.6,
-          totalCost: 1065.0,
-          revenue: 1680.0,
-          netProfit: 615.0,
-          marginPct: "36.6%",
-          status: "High Margin",
-        },
-        {
-          id: "CO-00041",
-          workOrderId: "WOOF-26-0351",
-          customer: "Alpha Media Group LLC",
-          product: "A4 Hardcover Catalog 96p (Galerie Art Silk 150g + Soft-Touch)",
-          materialCost: 6420.0,
-          processCost: 3180.0,
-          totalCost: 9600.0,
-          revenue: 13258.93,
-          netProfit: 3658.93,
-          marginPct: "27.6%",
-          status: "Completed",
-        },
-        {
-          id: "CO-00042",
-          workOrderId: "WOFL-26-0352",
-          customer: "Nordic Print Co",
-          product: "Woven Satin Labels 30×50mm (Rotary Flexo + Ultrasonic Cut)",
-          materialCost: 1490.0,
-          processCost: 980.0,
-          totalCost: 2470.0,
-          revenue: 4200.0,
-          netProfit: 1730.0,
-          marginPct: "41.2%",
-          status: "High Margin",
-        },
-        {
-          id: "CO-00043",
-          workOrderId: "WO-00353",
-          customer: "Baltic Press LLC",
-          product: "Printed Nylon Taffeta Roll 40mm×200m",
-          materialCost: 3120.0,
-          processCost: 1640.0,
-          totalCost: 4760.0,
-          revenue: 6800.0,
-          netProfit: 2040.0,
-          marginPct: "30.0%",
-          status: "Completed",
-        },
-        {
-          id: "CO-00044",
-          workOrderId: "WO-00354",
-          customer: "Apex Packaging",
-          product: "E-Flute Corrugated Packaging Boxes (4C UV + Die-Cut)",
-          materialCost: 5840.0,
-          processCost: 2610.0,
-          totalCost: 8450.0,
-          revenue: 11500.0,
-          netProfit: 3050.0,
-          marginPct: "26.5%",
-          status: "Active",
-        },
-      ];
+      dataRows = (productionQueue || []).map((item) => {
+        const fin = item.financials || {};
+        const matCost = Number(fin.materialCost) || 0;
+        const procCost = Number(fin.processCost) || 0;
+        const totalCost = Number(fin.totalCost) || (matCost + procCost);
+        const revenue = Number(item.priceTotal || fin.revenue) || 0;
+        const netProfit = Number(fin.netProfit) || (revenue - totalCost);
+        const marginPct = revenue > 0 ? `${((netProfit / revenue) * 100).toFixed(1)}%` : "0.0%";
+        return {
+          id: item.clientOrderId || item.docNo || item.id,
+          workOrderId: item.docNo || item.id,
+          customer: item.customer,
+          product: item.product,
+          materialCost: matCost,
+          processCost: procCost,
+          totalCost: totalCost,
+          revenue: revenue,
+          netProfit: netProfit,
+          marginPct: marginPct,
+          status: item.stage || item.status || "Active",
+        };
+      });
     }
 
     return { columns: cols, rows: dataRows };

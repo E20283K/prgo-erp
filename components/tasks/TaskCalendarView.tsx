@@ -55,7 +55,7 @@ export function TaskCalendarView({ tasks, onSelectDate }: TaskCalendarViewProps)
   const t = useTranslations("Tasks");
   const { selectTask, setCreateModalOpen } = useTaskStore();
 
-  const [currentDate, setCurrentDate] = useState<Date>(() => new Date(2026, 9, 6)); // Default to October 2026 based on mock data
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date()); // Default to October 2026 based on mock data
   const [calendarMode, setCalendarMode] = useState<"month" | "week">("month");
 
   // Navigation handlers

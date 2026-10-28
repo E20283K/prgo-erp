@@ -45,6 +45,7 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/ui/command";
+import { WarehouseSelect, type WarehouseSelectValue } from "@/components/common/WarehouseSelect";
 import {
   Select,
   SelectContent,
@@ -979,7 +980,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     if (carriersList.length === 0 && loadCarriers) {
       loadCarriers();
     }
-  }, [warehousesList.length, loadWarehouses, plants.length, fetchPlants, suppliers.length, loadSuppliers, carriersList.length, loadCarriers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Dynamically resolve all real warehouses from plants and postgres warehouses table
   const availableWarehouses = useMemo(() => {
@@ -1856,11 +1858,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             {isLocked ? (
               <span className="font-medium text-foreground text-xs">{doc.from}</span>
             ) : (
-              <WarehouseCombobox
+              <WarehouseSelect
                 value={doc.from}
-                onChange={(val) => handleFieldChange("from", val)}
-                warehouses={availableWarehouses}
-                className="w-[210px] sm:w-[240px] shrink-0"
+                onValueChange={(val: WarehouseSelectValue) => handleFieldChange("from", val.warehouseName)}
+                className="w-[210px] sm:w-[260px] shrink-0 h-7"
                 disabled={isLocked}
               />
             )}

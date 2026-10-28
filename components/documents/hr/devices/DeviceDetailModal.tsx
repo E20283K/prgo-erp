@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ComboboxSelect } from "@/components/ui/combobox";
+import { OrgUnitSelect, type OrgUnitSelectValue } from "@/components/common/OrgUnitSelect";
 import { BiometricDeviceRecord } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import {
@@ -383,14 +384,13 @@ export function DeviceDetailModal({
                 <Label className="text-xs">Filial / Korxona *</Label>
                 {errors.branchId && <span className="text-[10px] text-destructive">{errors.branchId}</span>}
               </div>
-              <ComboboxSelect
-                items={branchOptions}
-                value={formData.branchId}
-                onValueChange={(val) => {
-                  setFormData((prev) => ({ ...prev, branchId: val }));
+              <OrgUnitSelect
+                branchId={formData.branchId === "all" ? null : formData.branchId}
+                onValueChange={(val: OrgUnitSelectValue) => {
+                  setFormData((prev) => ({ ...prev, branchId: val.branchId || val.companyId }));
                   if (errors.branchId) setErrors((prev) => ({ ...prev, branchId: "" }));
                 }}
-                placeholder="Filialni tanlang..."
+                placeholder="Filial yoki korxonani tanlang..."
                 className={`h-8 text-xs ${errors.branchId ? "border-destructive" : ""}`}
               />
             </div>

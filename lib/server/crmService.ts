@@ -267,10 +267,49 @@ export async function upsertCrmClient(
  * CRM Faoliyat sohalari (Industries) ma'lumotnomasini yuklash
  */
 export async function getCrmIndustries() {
-  return await db.query.crmIndustries.findMany({
+  const existing = await db.query.crmIndustries.findMany({
     where: eq(crmIndustries.isActive, true),
     orderBy: [asc(crmIndustries.sortOrder), asc(crmIndustries.name)],
   });
+
+  if (existing.length === 0) {
+    const defaultList = [
+      "Oziq-ovqat va ichimliklar (FMCG)",
+      "Farmatsevtika va tibbiyot",
+      "To'qimachilik va kiyim-kechak",
+      "Kosmetika va maishiy kimyo",
+      "Logistika va yetkazib berish",
+      "Qurilish mollari",
+      "Elektronika va maishiy texnika",
+      "Qandolatchilik va novvoylik",
+      "Poligrafiya va qadoqlash",
+      "Boshqa",
+    ];
+    let companyId = null;
+    try {
+      companyId = await getCompanyIdByCode("PRINTGOO");
+    } catch {
+      companyId = null;
+    }
+    await db
+      .insert(crmIndustries)
+      .values(
+        defaultList.map((name, index) => ({
+          name,
+          companyId,
+          sortOrder: (index + 1) * 10,
+          isActive: true,
+        }))
+      )
+      .onConflictDoNothing();
+
+    return await db.query.crmIndustries.findMany({
+      where: eq(crmIndustries.isActive, true),
+      orderBy: [asc(crmIndustries.sortOrder), asc(crmIndustries.name)],
+    });
+  }
+
+  return existing;
 }
 
 /**

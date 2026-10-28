@@ -61,6 +61,8 @@ export interface SystemUserRecord {
   role: string;
   department: string;
   plant: string;
+  branchId?: string | null;
+  companyId?: string | null;
   status: UserStatus;
   avatar?: string;
   initials?: string;

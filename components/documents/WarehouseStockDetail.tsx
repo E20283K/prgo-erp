@@ -42,6 +42,7 @@ import {
   DocumentNavItem,
 } from "./common/DocumentShell";
 import { ReturnOffcutDialog } from "@/components/grid/ReturnOffcutDialog";
+import { WarehouseSelect } from "@/components/common/WarehouseSelect";
 import { MaterialImageModal } from "@/components/documents/MaterialImageModal";
 import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
 import {
@@ -1026,12 +1027,12 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                   </div>
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Saqlash Joyi (Ombor / Tokcha)</Label>
-                    <Input
+                    <Label className="text-[11px] text-muted-foreground font-semibold">Saqlash Joyi (Ombor) *</Label>
+                    <WarehouseSelect
                       value={doc.location || ""}
-                      onChange={(e) => handleFieldChange("location", e.target.value)}
-                      placeholder="Masalan: Asosiy ombor (Rack A-01)"
-                      className="h-7 text-xs font-mono"
+                      onValueChange={(val) => handleFieldChange("location", val.warehouseName)}
+                      placeholder="Omborni tanlang..."
+                      className="h-7 text-xs"
                     />
                   </div>
 

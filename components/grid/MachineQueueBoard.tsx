@@ -119,7 +119,8 @@ export function MachineQueueBoard({
     if (productionQueue.length === 0 && loadProductionQueue) {
       loadProductionQueue();
     }
-  }, [machines.length, loadMachines, productionQueue.length, loadProductionQueue]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Combine real machines from database and any active machines from production queue
   const realMachineFleet = useMemo<MachineRecord[]>(() => {

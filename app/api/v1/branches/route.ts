@@ -9,16 +9,29 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const companyCode = searchParams.get("company") ?? "PRINTGOO";
-    const companyId = await getCompanyIdByCode(companyCode);
+    const companyIdParam = searchParams.get("companyId");
+    const companyCode = searchParams.get("company");
+    const all = searchParams.get("all");
+
+    let whereClause = undefined;
+    if (companyIdParam) {
+      whereClause = eq(branches.companyId, companyIdParam);
+    } else if (companyCode) {
+      const companyId = await getCompanyIdByCode(companyCode);
+      whereClause = eq(branches.companyId, companyId);
+    } else if (all !== "true") {
+      const companyId = await getCompanyIdByCode("PRINTGOO");
+      whereClause = eq(branches.companyId, companyId);
+    }
 
     const list = await db.query.branches.findMany({
-      where: eq(branches.companyId, companyId),
+      where: whereClause,
       orderBy: [asc(branches.name)],
     });
 
     const data = list.map((b) => ({
       id: b.id,
+      companyId: b.companyId,
       code: b.code,
       name: b.name,
       shortName: b.shortName,

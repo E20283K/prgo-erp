@@ -56,7 +56,8 @@ export function PositionDetail({ tab }: PositionDetailProps) {
         })
         .catch(() => {});
     }
-  }, [departmentsList.length, setDepartmentsList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const posId = useMemo(() => {
     if (tab.documentData?.id) return tab.documentData.id;

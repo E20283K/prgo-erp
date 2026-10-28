@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { WarehouseSelect } from "@/components/common/WarehouseSelect";
 import { Scissors, Check, PackagePlus, AlertCircle, ArrowRight } from "lucide-react";
 
 interface ReturnOffcutDialogProps {
@@ -49,7 +50,7 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
   );
   const [cutDimensions, setCutDimensions] = useState<string>("470×700");
   const [quantity, setQuantity] = useState<string>("850");
-  const [location, setLocation] = useState<string>("Rack A-01-B (Offcuts / Qoldiqlar zonasi)");
+  const [location, setLocation] = useState<string>("");
   const [operator, setOperator] = useState<string>("D. Karimov (Ombor mudiri)");
 
   const parentMaterial = useMemo(() => {
@@ -232,13 +233,13 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
 
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-foreground">
-                  Ombordagi saqlash joyi:
+                  Ombordagi saqlash joyi *
                 </Label>
-                <Input
+                <WarehouseSelect
                   value={location}
-                  onChange={(e) => setLocation(e.target.value)}
+                  onValueChange={(val) => setLocation(val.warehouseName)}
+                  placeholder="Omborni tanlang..."
                   className="h-8 text-xs"
-                  required
                 />
               </div>
             </div>

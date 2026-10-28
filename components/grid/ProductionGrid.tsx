@@ -481,7 +481,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         { id: "operator", title: "Smena & Operator", width: 165, icon: GridColumnIcon.HeaderString },
         { id: "readiness", title: "Tayyorgarlik", width: 135, icon: GridColumnIcon.HeaderSingleValue },
         { id: "progress", title: "Fakt / Reja (List)", width: 155, icon: GridColumnIcon.HeaderString },
-        { id: "deadline", title: "Muddat", width: 120, icon: GridColumnIcon.HeaderDate },
+        { id: "orderDate", title: "Qabul sanasi", width: 115, icon: GridColumnIcon.HeaderDate },
+        { id: "deadline", title: "Muddat", width: 115, icon: GridColumnIcon.HeaderDate },
+        { id: "actualEndDate", title: "Faktik tugash", width: 115, icon: GridColumnIcon.HeaderDate },
         { id: "priority", title: "Prioritet", width: 100, icon: GridColumnIcon.HeaderSingleValue },
         { id: "status", title: "Status", width: 135, icon: GridColumnIcon.HeaderSingleValue },
       ];
@@ -507,7 +509,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           operator: item.operator || "A. Kovalev (1-smena)",
           readiness: readyCount === 4 ? "✅ 4/4 Tayyor" : `⚠️ ${readyCount}/4 Kutilmoqda`,
           progress: `${completed.toLocaleString()} / ${planned.toLocaleString()} (${pct}%)`,
+          orderDate: item.orderDate || "—",
           deadline: item.deadline,
+          actualEndDate: item.actualEndDate || "—",
           priority: item.priority,
           status: item.stage,
         };
