@@ -181,6 +181,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       laminationSides: dims.laminationSides || "1s",
       laminationMicron: dims.laminationMicron ?? 0,
       embellishment: wo.embellishment || dims.embellishment || "",
+      coatingZone: dims.coatingZone || "",
+      embellishmentZone: dims.embellishmentZone || "",
 
       // Ranglar va Pantone
       colors: colorsCfg?.formula || undefined,
@@ -473,6 +475,8 @@ export async function upsertWorkOrder(
       toolingProcurementCost: data.toolingProcurementCost,
       laminationSides: data.laminationSides,
       laminationMicron: data.laminationMicron,
+      coatingZone: data.coatingZone,
+      embellishmentZone: data.embellishmentZone,
       artworkFront: data.artworkFront,
       artworkBack: data.artworkBack,
       artworkBleedIncluded: data.artworkBleedIncluded,

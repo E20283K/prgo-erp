@@ -741,6 +741,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     laminationSides: data.laminationSides || initialQueueItem?.laminationSides || "1s",
     laminationMicron: data.laminationMicron ?? initialQueueItem?.laminationMicron ?? 0,
     embellishment: data.embellishment || initialQueueItem?.embellishment || "",
+    coatingZone: data.coatingZone || initialQueueItem?.coatingZone || (data.dimensions as any)?.coatingZone || (initialQueueItem?.dimensions as any)?.coatingZone || "",
+    embellishmentZone: data.embellishmentZone || initialQueueItem?.embellishmentZone || (data.dimensions as any)?.embellishmentZone || (initialQueueItem?.dimensions as any)?.embellishmentZone || "",
     priceTotal: data.priceTotal || initialQueueItem?.priceTotal || 0,
     currency: data.currency || initialQueueItem?.currency || "UZS",
     photoUrl: effectivePhotoUrl,

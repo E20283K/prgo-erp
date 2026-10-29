@@ -34,7 +34,7 @@ import {
   DollarSign,
 } from "lucide-react";
 
-import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useWorkspaceStore, generateNextMaterialSku } from "@/store/workspaceStore";
 import { ReturnOffcutDialog } from "./ReturnOffcutDialog";
 import { CarrierDialog, type CarrierProfile } from "@/components/documents/WarehouseShipmentDetail";
 import { useTranslations } from "next-intl";
@@ -302,7 +302,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       return;
     }
     if (type === "stock-balance") {
-      const newSku = `MAT-${Date.now().toString().slice(-4)}`;
+      const newSku = generateNextMaterialSku(warehouseStock);
       openTab({
         id: `stock-${newSku}`,
         title: `${newSku}: Yangi Xomashyo`,

@@ -14,7 +14,7 @@ import {
   branches,
 } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
-import { getNextReceiptNumber, getNextShipmentNumber } from "./numberingService";
+import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku } from "./numberingService";
 import { emitNotification } from "./notificationService";
 
 /**
@@ -211,7 +211,7 @@ export async function upsertStockBalance(payload: any, companyCode: string = "PR
     warehouseId: payload.warehouseId || null,
     locationName: payload.locationName || payload.location || "Asosiy ombor",
     itemId: payload.itemId || null,
-    sku: payload.sku || `SKU-${Date.now().toString().slice(-4)}`,
+    sku: payload.sku && !payload.sku.startsWith("tab-") ? payload.sku : await getNextMaterialSku(companyCode),
     name: payload.name || "Material",
     category: payload.category || "Paper & Board",
     sheetFormat: payload.sheetFormat || null,

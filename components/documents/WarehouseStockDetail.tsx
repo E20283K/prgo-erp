@@ -14,6 +14,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import {
   useWorkspaceStore,
+  generateNextMaterialSku,
   DocumentTab,
   WarehouseStockRecord,
   WarehouseMovementRecord,
@@ -101,7 +102,9 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
   // Match live stock record from store or documentData without any mock defaults
   const stockItem = useMemo<WarehouseStockRecord>(() => {
     const d = tab.documentData || {};
-    const sku = d.sku || tab.id.replace(/^stock-/, "");
+    const rawFromTab = tab.id.startsWith("stock-") ? tab.id.replace(/^stock-/, "") : "";
+    const isGenericTabId = tab.id.startsWith("tab-") || (!d.sku && rawFromTab.startsWith("tab-"));
+    const sku = isGenericTabId ? "" : (d.sku || rawFromTab);
     const found = warehouseStock.find((s) => s.sku === sku);
     if (found) {
       return {
@@ -111,7 +114,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     }
 
     const fallbackRecord: WarehouseStockRecord = {
-      sku: sku || "",
+      sku: sku || generateNextMaterialSku(warehouseStock),
       name: d.name || "",
       category: d.category || "Paper & Board",
       grammage: d.grammage !== undefined && d.grammage !== "" ? Number(d.grammage) : undefined,

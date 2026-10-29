@@ -860,6 +860,7 @@ export function OverviewTab({
         </div>
       </div>
 
+
       <div className="grid grid-cols-1 @7xl:grid-cols-3 gap-4">
         {/* Left Column (2/3 width on xl screens) */}
         <div className="@container @7xl:col-span-2 space-y-4">
@@ -2097,13 +2098,7 @@ export function OverviewTab({
                   />
                 </div>
               </div>
-              {/* Compact Pre-Flight Readiness & Stage Indicator */}
-              <OrderReadinessRouteCard
-                variant="compact"
-                workOrderId={data?.docNo || tabId}
-                onOpenFullRoute={() => onSwitchTab("operations")}
-                fallbackData={readinessFallbackData}
-              />
+
             </div>
           </div>
 
@@ -2384,6 +2379,14 @@ export function OverviewTab({
             </div>
           );
         })()}
+
+          {/* Card: Pre-Flight Readiness & Stage-Gate Route (Vertical List) */}
+          <OrderReadinessRouteCard
+            variant="full"
+            workOrderId={data?.docNo || tabId}
+            onOpenFullRoute={() => onSwitchTab("operations")}
+            fallbackData={readinessFallbackData}
+          />
         </div>
       </div>
     </TabsContent>

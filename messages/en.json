@@ -808,7 +808,7 @@
     "chronology": "Ledger Chronology (Schet-fakturas & Payments)"
   },
   "ProductionRoute": {
-    "cardTitle": "Pre-Flight Readiness & Production Route",
+    "cardTitle": "Pre-Flight Readiness",
     "readyScore": "{ready} of {total} Ready",
     "readyToPrint": "Ready to Print",
     "waitingForPrep": "Waiting for Preparation",

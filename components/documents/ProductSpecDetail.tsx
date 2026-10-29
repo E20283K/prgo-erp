@@ -85,7 +85,7 @@ import {
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
-import { useWorkspaceStore, DocumentTab } from "@/store/workspaceStore";
+import { useWorkspaceStore, DocumentTab, generateNextMaterialSku } from "@/store/workspaceStore";
 import { 
   DocumentHeader, 
   DocumentSidebar, 
@@ -2015,7 +2015,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        const newSku = `MAT-${Date.now().toString().slice(-4)}`;
+                        const newSku = generateNextMaterialSku(warehouseStock);
                         openTab({
                           id: `stock-${newSku}`,
                           title: `Yangi Xomashyo Pasporti: ${newSku}`,

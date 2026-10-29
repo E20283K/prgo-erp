@@ -57,7 +57,7 @@ import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/Panton
 import { searchPantoneColors } from "@/lib/pantone-catalog";
 import { extractSvgDimensions } from "../utils/svgContour";
 import { useLookupStore } from "@/store/lookupStore";
-import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useWorkspaceStore, generateNextMaterialSku } from "@/store/workspaceStore";
 import {
   WorkOrderFormData,
   SizeDistribution,
@@ -147,35 +147,45 @@ const HOLE_POSITION_OPTIONS: ComboboxOption[] = [
 ];
 
 const LAMINATION_OPTIONS: ComboboxOption[] = [
-  { value: "none", label: "Yo'q / Laminatsiyasiz (Uncoated)" },
-  { value: "Soft-Touch Matte", label: "Soft-Touch Matte (Baxmal/Velvet 30µm)" },
-  { value: "Matte Lamination", label: "Matte Lamination (Xira plyonka 25µm)" },
-  { value: "Gloss Lamination", label: "Gloss Lamination (Yaltiroq plyonka 25µm)" },
-  { value: "Anti-Scuff Matte", label: "Anti-Scuff Matte (Tirnalishga chidamli 28µm)" },
-  { value: "Thermal Metallized Silver", label: "Metallized Silver (Kumush folga plyonka)" },
-  { value: "Thermal Metallized Gold", label: "Metallized Gold (Oltin folga plyonka)" },
-  { value: "Holographic Film", label: "Golografik plyonka (Holographic)" },
+  { value: "none", label: "Mavjud emas" },
+  { value: "Soft-Touch Matte", label: "Soft-Touch Matte" },
+  { value: "Matte Lamination", label: "Matte Lamination" },
+  { value: "Gloss Lamination", label: "Gloss Lamination" },
+  { value: "Anti-Scuff Matte", label: "Anti-Scuff Matte" },
+  { value: "Thermal Metallized Silver", label: "Metallized Silver" },
+  { value: "Thermal Metallized Gold", label: "Metallized Gold" },
+  { value: "Holographic Film", label: "Holographic Film" },
 ];
 
 const LAMINATION_SIDES_OPTIONS: ComboboxOption[] = [
-  { value: "1s", label: "1-tomonlama (Front / 1S / 1+0)" },
-  { value: "2s", label: "2-tomonlama (Both sides / 2S / 1+1)" },
+  { value: "1s", label: "1-tomonlama (1+0)" },
+  { value: "2s", label: "2-tomonlama (1+1)" },
 ];
 
 const LAMINATION_MICRON_OPTIONS: ComboboxOption[] = [
-  { value: "24", label: "24 µm (Yengil / Standart BOPP)" },
-  { value: "28", label: "28 µm (Mustahkam / O'rtacha)" },
-  { value: "30", label: "30 µm (Soft-Touch Velvet PET)" },
-  { value: "32", label: "32 µm (Qalin / Qattiq himoya)" },
+  { value: "24", label: "24 µm (BOPP standart)" },
+  { value: "28", label: "28 µm (Mustahkam)" },
+  { value: "30", label: "30 µm (Velvet PET)" },
+  { value: "32", label: "32 µm (Qalin)" },
+];
+
+const COATING_OPTIONS: ComboboxOption[] = [
+  { value: "none", label: "Mavjud emas" },
+  { value: "Spot UV (3D)", label: "Tanlanma 3D UF lak" },
+  { value: "Spot UV (Flat)", label: "Tanlanma tekis UF lak" },
+  { value: "Overall UV", label: "Umumiy UF lak" },
+  { value: "Overall WB Varnish", label: "Suvli dispersion lak" },
+  { value: "Drip-off Varnish", label: "Drip-off gibrid lak" },
 ];
 
 const EMBELLISHMENT_OPTIONS: ComboboxOption[] = [
-  { value: "None", label: "Qo'shimcha pardozsiz (None)" },
-  { value: "Spot UV (3D)", label: "Tanlanma 3D UF lak (Spot UV)" },
-  { value: "Gold Hot Foil", label: "Oltin issiq folga (Gold Foil)" },
-  { value: "Silver Hot Foil", label: "Kumush issiq folga (Silver Foil)" },
-  { value: "Blind Emboss", label: "Relyefli bosish (Blind Emboss)" },
-  { value: "Overall WB Varnish", label: "Umumiy suvli lak (WB Varnish)" },
+  { value: "none", label: "Mavjud emas" },
+  { value: "Screen White", label: "Oq rang (Ipak bosma / Serigrafiya)" },
+  { value: "Gold Hot Foil", label: "Oltin issiq folga" },
+  { value: "Silver Hot Foil", label: "Kumush issiq folga" },
+  { value: "Holographic Foil", label: "Golografik folga" },
+  { value: "Blind Emboss", label: "Relyefli bo'rtma (Kongrev)" },
+  { value: "Deboss", label: "Botiq bosma (Blint)" },
 ];
 
 const LABEL_FOLD_OPTIONS: ComboboxOption[] = [
@@ -280,8 +290,9 @@ export function SpecificationsTab({
   docNo,
 }: SpecificationsTabProps) {
   const tDie = useTranslations("DieLine");
-  const { paperStocks, addPaperStock, coatings, addCoating } = useLookupStore();
+  const { addPaperStock, coatings, addCoating } = useLookupStore();
   const warehouseStock = useWorkspaceStore((s) => s.warehouseStock);
+  const openTab = useWorkspaceStore((s) => s.openTab);
   const { loadWarehouseStock, addNotification } = useWorkspaceStore.getState();
 
   useEffect(() => {
@@ -302,7 +313,7 @@ export function SpecificationsTab({
     const options: ComboboxOption[] = [];
     const seen = new Set<string>();
 
-    // 1. Primary: Real Warehouse Stock items (Paper, Board, Roll)
+    // 1. Only Real Warehouse Stock items (Paper, Board, Roll) from Database
     if (warehouseStock && warehouseStock.length > 0) {
       warehouseStock
         .filter(
@@ -334,32 +345,17 @@ export function SpecificationsTab({
         });
     }
 
-    // 2. Secondary: Fallback shared lookup catalogue
-    paperStocks.forEach((p) => {
-      const val = typeof p === "string" ? p : p.value || p.label;
-      const key = val?.toLowerCase().trim();
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        const desc = typeof p === "string" ? undefined : p.description;
-        options.push({
-          value: val,
-          label: val,
-          description: desc,
-        });
-      }
-    });
-
-    // 3. Current custom value if not present in lists
+    // 2. Current custom value if already assigned in document
     if (formData.paperStock && !seen.has(formData.paperStock.toLowerCase().trim())) {
       options.unshift({
         value: formData.paperStock,
         label: formData.paperStock,
-        description: "Maxsus / Joriy kiritilgan xomashyo",
+        description: "Hujjatdagi xomashyo",
       });
     }
 
     return options;
-  }, [warehouseStock, paperStocks, formData.paperStock]);
+  }, [warehouseStock, formData.paperStock]);
 
   const matchedStockItem = useMemo(() => {
     if (!formData.paperStock) return null;
@@ -451,11 +447,28 @@ export function SpecificationsTab({
   const effectiveHoleOffset = formData.holeOffset ?? 6;
 
   // Lamination active check
-  const currentLamination = formData.lamination || "Soft-Touch Matte";
-  const isLaminationActive = currentLamination !== "none" && currentLamination !== "None / Uncoated";
+  const currentLamination = formData.lamination || "none";
+  const isLaminationActive =
+    Boolean(currentLamination) &&
+    currentLamination !== "none" &&
+    currentLamination !== "None" &&
+    currentLamination !== "None / Uncoated";
   const laminationSides = formData.laminationSides || "1s";
   const laminationMicron = formData.laminationMicron || 0;
-  const embellishment = formData.embellishment || "";
+
+  // Coating (Lak) active check
+  const currentCoating = formData.coating || "none";
+  const isCoatingActive =
+    Boolean(currentCoating) &&
+    currentCoating !== "none" &&
+    currentCoating !== "None";
+
+  // Embellishment (Maxsus pardoz) active check
+  const currentEmbellishment = formData.embellishment || "none";
+  const isEmbellishmentActive =
+    Boolean(currentEmbellishment) &&
+    currentEmbellishment !== "none" &&
+    currentEmbellishment !== "None";
 
   // Color config helpers
   const frontColors = formData.frontColors || { c: false, m: false, y: false, k: false };
@@ -1735,22 +1748,26 @@ export function SpecificationsTab({
             </div>
           </div>
 
-          {/* Card 3: Substrate & Dedicated Lamination / Finishing */}
+          {/* Card 3: Substrate Material */}
           <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
             <div className="flex items-center justify-between pb-1.5 border-b border-border">
               <div className="flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
                 <span className="font-semibold text-xs text-foreground">
-                  Material & lamination
+                  Material
                 </span>
               </div>
-              {isLaminationActive ? (
-                <Badge variant="outline" className="font-mono text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30">
-                  {currentLamination} · {laminationSides.toUpperCase()} ({laminationMicron}µm)
+              {formData.paperDensity ? (
+                <Badge variant="outline" className="font-mono text-[10px]">
+                  {formData.paperDensity} g/m²
+                </Badge>
+              ) : formData.paperStock ? (
+                <Badge variant="outline" className="font-mono text-[10px]">
+                  Tanlangan
                 </Badge>
               ) : (
                 <span className="font-mono text-[11px] text-muted-foreground">
-                  No lamination
+                  Tanlanmagan
                 </span>
               )}
             </div>
@@ -1758,7 +1775,7 @@ export function SpecificationsTab({
             {/* Paper Stock Row */}
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-1">
-                Paper / material
+                Qog&apos;oz yoki xomashyo
               </label>
               <ComboboxSelect
                 items={paperStockOptions}
@@ -1789,6 +1806,25 @@ export function SpecificationsTab({
                   onMarkUnsaved();
                 }}
                 onAddNew={(newStock) => addPaperStock(newStock)}
+                actionLabel="Yangi material qo'shish (Omborxona)"
+                onAction={() => {
+                  const newSku = generateNextMaterialSku(warehouseStock);
+                  openTab({
+                    id: `stock-${newSku}`,
+                    title: `${newSku}: Yangi Xomashyo`,
+                    type: "warehouse-stock",
+                    module: "warehouse",
+                    isUnsaved: true,
+                    documentData: {
+                      sku: newSku,
+                      name: "",
+                      category: "Paper & Board",
+                      unit: "sheets",
+                      minStock: 0,
+                      currentStock: 0,
+                    },
+                  });
+                }}
                 placeholder="Ombordagi qog'oz yoki xomashyoni qidiring..."
                 disabled={isOperator}
                 allowCustom={!isOperator}
@@ -1816,44 +1852,50 @@ export function SpecificationsTab({
                   )}
                 </div>
               )}
+              {!formData.paperStock && warehouseStock.length === 0 && (
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                  <span>Xomashyo omborida qoldiqlar mavjud emas (Ombor modulidan kirim qiling)</span>
+                </div>
+              )}
             </div>
+          </div>
 
-            {/* DEDICATED LAMINATION & FINISHING SECTION */}
-            <div className="p-2.5 rounded-lg border border-border bg-muted/20 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-xs font-semibold text-foreground">
-                    Lamination
+          {/* Card 3b: Dedicated Lamination (Offset only) */}
+          {isOffset && (
+            <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between pb-1.5 border-b border-border">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="font-semibold text-xs text-foreground">
+                    Laminatsiya
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-muted-foreground">Holati:</span>
+                {isLaminationActive ? (
                   <Badge
-                    variant={isLaminationActive ? "default" : "outline"}
-                    className={cn(
-                      "text-[10px] font-mono",
-                      isLaminationActive
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground"
-                    )}
+                    variant="outline"
+                    className="font-mono text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30"
                   >
-                    {isLaminationActive ? "Aktiv" : "Yo'q"}
+                    {currentLamination} · {laminationSides.toUpperCase()} ({laminationMicron}µm)
                   </Badge>
-                </div>
+                ) : (
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    Mavjud emas
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                    Film type
+                    Plyonka turi
                   </label>
                   <ComboboxSelect
                     items={LAMINATION_OPTIONS}
                     value={currentLamination}
                     disabled={isOperator}
                     onValueChange={(val) => {
-                      handleFieldChange({ lamination: val, coating: val });
+                      handleFieldChange("lamination", val === "none" ? "" : val);
                       onMarkUnsaved();
                     }}
                     placeholder="Laminatsiya turini tanlang..."
@@ -1862,7 +1904,7 @@ export function SpecificationsTab({
 
                 <div>
                   <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                    Sides
+                    Tomoni
                   </label>
                   <ComboboxSelect
                     items={LAMINATION_SIDES_OPTIONS}
@@ -1879,43 +1921,165 @@ export function SpecificationsTab({
               </div>
 
               {isLaminationActive && (
-                <div className="grid grid-cols-1 @md:grid-cols-2 gap-3 pt-1 border-t border-border/50">
+                <div className="pt-2 border-t border-border/50">
+                  <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                    Qalinlik (µm)
+                  </label>
+                  <ComboboxSelect
+                    items={LAMINATION_MICRON_OPTIONS}
+                    value={String(laminationMicron)}
+                    disabled={isOperator}
+                    onValueChange={(val) => {
+                      handleFieldChange("laminationMicron", Number(val));
+                      onMarkUnsaved();
+                    }}
+                    placeholder="Qalinlikni tanlang..."
+                    className="font-mono"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Card 3c: Varnish Coating & Special Print (Offset only) */}
+          {isOffset && (
+            <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between pb-1.5 border-b border-border">
+                <div className="flex items-center gap-1.5">
+                  <Palette className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="font-semibold text-xs text-foreground">
+                    Lak va maxsus pardoz
+                  </span>
+                </div>
+                {isCoatingActive || isEmbellishmentActive ? (
+                  <Badge
+                    variant="outline"
+                    className="font-mono text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                  >
+                    {[isCoatingActive ? currentCoating : null, isEmbellishmentActive ? currentEmbellishment : null]
+                      .filter(Boolean)
+                      .join(" + ")}
+                  </Badge>
+                ) : (
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    Mavjud emas
+                  </span>
+                )}
+              </div>
+
+              {/* Sub-section 1: Coating / Varnish */}
+              <div className="p-2.5 rounded-lg border border-border bg-muted/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-foreground">
+                    Lak (Coating / Varnish)
+                  </span>
+                  <Badge
+                    variant={isCoatingActive ? "default" : "outline"}
+                    className={cn(
+                      "text-[10px] font-mono",
+                      isCoatingActive
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground"
+                    )}
+                  >
+                    {isCoatingActive ? "Aktiv" : "Yo'q"}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                      Thickness (µm)
+                      Lak turi
                     </label>
                     <ComboboxSelect
-                      items={LAMINATION_MICRON_OPTIONS}
-                      value={String(laminationMicron)}
+                      items={COATING_OPTIONS}
+                      value={currentCoating}
                       disabled={isOperator}
                       onValueChange={(val) => {
-                        handleFieldChange("laminationMicron", Number(val));
+                        handleFieldChange("coating", val === "none" ? "" : val);
                         onMarkUnsaved();
                       }}
-                      placeholder="Qalinlikni tanlang..."
-                      className="font-mono"
+                      placeholder="Lak turini tanlang..."
                     />
                   </div>
 
+                  {isCoatingActive && (
+                    <div>
+                      <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                        Lak zonasi / Obyekt
+                      </label>
+                      <Input
+                        value={formData.coatingZone || ""}
+                        disabled={isOperator}
+                        placeholder="Masalan: Logotip va asosiy sarlavha ustiga"
+                        onChange={(e) => {
+                          handleFieldChange("coatingZone", e.target.value);
+                          onMarkUnsaved();
+                        }}
+                        className="h-8 text-xs bg-background"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Sub-section 2: Embellishment & Screen Print */}
+              <div className="p-2.5 rounded-lg border border-border bg-muted/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-foreground">
+                    Maxsus pardoz va ipak bosma
+                  </span>
+                  <Badge
+                    variant={isEmbellishmentActive ? "default" : "outline"}
+                    className={cn(
+                      "text-[10px] font-mono",
+                      isEmbellishmentActive
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground"
+                    )}
+                  >
+                    {isEmbellishmentActive ? "Aktiv" : "Yo'q"}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                      Finishing
+                      Pardoz turi
                     </label>
                     <ComboboxSelect
                       items={EMBELLISHMENT_OPTIONS}
-                      value={embellishment}
+                      value={currentEmbellishment}
                       disabled={isOperator}
                       onValueChange={(val) => {
-                        handleFieldChange("embellishment", val);
+                        handleFieldChange("embellishment", val === "none" ? "" : val);
                         onMarkUnsaved();
                       }}
                       placeholder="Pardoz turini tanlang..."
                     />
                   </div>
+
+                  {isEmbellishmentActive && (
+                    <div>
+                      <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                        Pardoz zonasi / Obyekt
+                      </label>
+                      <Input
+                        value={formData.embellishmentZone || ""}
+                        disabled={isOperator}
+                        placeholder="Masalan: Qora qog'oz ustidagi oq yozuvlar / Klishe"
+                        onChange={(e) => {
+                          handleFieldChange("embellishmentZone", e.target.value);
+                          onMarkUnsaved();
+                        }}
+                        className="h-8 text-xs bg-background"
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Card 4: Multi-Layer Substrate & Kashirovka (Duplex / Triplex) */}
           <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">

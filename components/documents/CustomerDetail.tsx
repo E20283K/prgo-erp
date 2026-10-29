@@ -428,7 +428,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   const navItems: DocumentNavItem[] = [
     {
       id: "overview",
-      label: "Rekvizitlar va Shartnoma",
+      label: "Rekvizitlar va shartnomalar",
       icon: Building2,
     },
     {

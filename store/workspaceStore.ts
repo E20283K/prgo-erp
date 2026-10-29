@@ -355,6 +355,28 @@ export interface WarehouseStockRecord {
   imageUrl?: string;
 }
 
+/**
+ * Xomashyo / Material artikuli (SKU) uchun navbatdagi unikal ketma-ket raqam: MAT-0001, MAT-0002...
+ */
+export function generateNextMaterialSku(
+  stock: WarehouseStockRecord[] = [],
+  padLength: number = 4
+): string {
+  let maxNum = 0;
+  for (const item of stock) {
+    if (!item?.sku) continue;
+    const match = item.sku.trim().match(/^MAT-(\d+)$/i);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+  }
+  const nextNum = maxNum + 1;
+  return `MAT-${String(nextNum).padStart(padLength, "0")}`;
+}
+
 export interface MovementLineItem {
   id: string;
   sku: string;
@@ -488,6 +510,10 @@ export interface ProductionQueueItem {
   laminationSides?: "1s" | "2s";
   laminationMicron?: number;
   embellishment?: string;
+  coatingZone?: string;
+  embellishmentZone?: string;
+  paperDensity?: number;
+  grammage?: number;
   currency?: string;
   width?: number;
   height?: number;

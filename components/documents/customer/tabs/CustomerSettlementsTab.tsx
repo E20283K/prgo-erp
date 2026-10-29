@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
   GridCell,
@@ -73,6 +73,21 @@ export function CustomerSettlementsTab({
   const { recordClientPayment, theme, addNotification } = useWorkspaceStore();
   const isDark = theme === "dark";
 
+  const isUsd = (customer.currency || settlement?.currency) === "USD";
+  const currencyLabel = isUsd ? "USD" : "UZS";
+
+  const formatMoney = useCallback(
+    (val: number, showSign: boolean = false) => {
+      const numStr = Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2 });
+      const sign = val < 0 ? "-" : showSign && val > 0 ? "+" : "";
+      if (isUsd) {
+        return `${sign}$${numStr}`;
+      }
+      return `${sign}${numStr} so'm`;
+    },
+    [isUsd]
+  );
+
   // Print modal state
   const [isPrintOpen, setIsPrintOpen] = useState(false);
 
@@ -96,7 +111,7 @@ export function CustomerSettlementsTab({
     recordClientPayment(customerKey, amt, undefined, noteText);
     addNotification({
       title: "Mijoz to'lovi qabul qilindi",
-      description: `${customer.name} hisobiga +$${amt.toLocaleString()} (${paymentMethod}) yozildi va Akt Sverka yangilandi.`,
+      description: `${customer.name} hisobiga +${formatMoney(amt)} (${paymentMethod}) yozildi va Akt Sverka yangilandi.`,
       severity: "success",
       link: { module: "finance", subModule: "settlements" },
     });
@@ -138,16 +153,25 @@ export function CustomerSettlementsTab({
   }, [rawLedgerRows, filterPeriod]);
 
   // Columns definition with resizing support
-  const [columns, setColumns] = useState<GridColumn[]>([
-    { id: "idx", title: "№", width: 45, icon: GridColumnIcon.HeaderNumber },
-    { id: "date", title: "Sana (Date)", width: 110, icon: GridColumnIcon.HeaderDate },
-    { id: "docNo", title: "Hujjat №", width: 120, icon: GridColumnIcon.HeaderReference },
-    { id: "docType", title: "Operatsiya turi", width: 150, icon: GridColumnIcon.HeaderSingleValue },
-    { id: "description", title: "Mazmuni / Asos (Shartnoma, Mahsulot)", width: 380, icon: GridColumnIcon.HeaderString },
-    { id: "debit", title: "Debet / Yuklandi (+Dt $)", width: 165, icon: GridColumnIcon.HeaderNumber },
-    { id: "credit", title: "Kredit / To'landi (-Kt $)", width: 165, icon: GridColumnIcon.HeaderNumber },
-    { id: "runningSaldo", title: "Joriy Saldo ($)", width: 155, icon: GridColumnIcon.HeaderNumber },
-  ]);
+  const getColumns = useCallback(
+    (): GridColumn[] => [
+      { id: "idx", title: "№", width: 45, icon: GridColumnIcon.HeaderNumber },
+      { id: "date", title: "Sana", width: 110, icon: GridColumnIcon.HeaderDate },
+      { id: "docNo", title: "Hujjat №", width: 120, icon: GridColumnIcon.HeaderReference },
+      { id: "docType", title: "Operatsiya turi", width: 150, icon: GridColumnIcon.HeaderSingleValue },
+      { id: "description", title: "Mazmuni / Asos", width: 380, icon: GridColumnIcon.HeaderString },
+      { id: "debit", title: `Debet (+Dt ${currencyLabel})`, width: 165, icon: GridColumnIcon.HeaderNumber },
+      { id: "credit", title: `Kredit (-Kt ${currencyLabel})`, width: 165, icon: GridColumnIcon.HeaderNumber },
+      { id: "runningSaldo", title: `Saldo (${currencyLabel})`, width: 155, icon: GridColumnIcon.HeaderNumber },
+    ],
+    [currencyLabel]
+  );
+
+  const [columns, setColumns] = useState<GridColumn[]>(getColumns());
+
+  useEffect(() => {
+    setColumns(getColumns());
+  }, [getColumns]);
 
   const handleColumnResize = useCallback((column: GridColumn, newSize: number) => {
     setColumns((prev) =>
@@ -349,7 +373,7 @@ export function CustomerSettlementsTab({
       {isPaymentOpen && (
         <div className="px-4 py-2.5 bg-muted/80 border-b border-border flex flex-wrap items-end gap-3 shrink-0">
           <div className="space-y-1 w-36">
-            <Label className="text-[11px] font-semibold">To&apos;lov summasi ($)</Label>
+            <Label className="text-[11px] font-semibold">To&apos;lov summasi ({currencyLabel})</Label>
             <MoneyInput
               thousandSeparator=" "
               decimalScale={2}
@@ -367,7 +391,7 @@ export function CustomerSettlementsTab({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Bank o'tkazmasi (UZS/USD)">Bank o&apos;tkazmasi (UZS/USD)</SelectItem>
+                <SelectItem value="Bank o'tkazmasi">Bank o&apos;tkazmasi</SelectItem>
                 <SelectItem value="Korporativ karta (Payme / Click)">Korporativ karta</SelectItem>
                 <SelectItem value="Naqd kassa (ПКО)">Naqd kassa (ПКО)</SelectItem>
                 <SelectItem value="Akkreditiv / Faktoring">Akkreditiv / Faktoring</SelectItem>

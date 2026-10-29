@@ -16,6 +16,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import {
   useWorkspaceStore,
+  generateNextMaterialSku,
   DocumentTab,
   WarehouseStockRecord,
 } from "@/store/workspaceStore";
@@ -524,7 +525,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
 
   // Open Full Material Passport Tab via WarehouseStockDetail
   const handleOpenFullStockPassport = () => {
-    const newSku = `MAT-${Date.now().toString().slice(-4)}`;
+    const newSku = generateNextMaterialSku(warehouseStock);
     openTab({
       id: `stock-${newSku}`,
       title: `Yangi Xomashyo Pasporti: ${newSku}`,

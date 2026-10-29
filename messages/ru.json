@@ -807,7 +807,7 @@
     "chronology": "Хронология операций (Счета-фактуры и оплаты)"
   },
   "ProductionRoute": {
-    "cardTitle": "Готовность к печати и статус производства",
+    "cardTitle": "Готовность к печати",
     "readyScore": "{ready} из {total} готово",
     "readyToPrint": "Готово к печати",
     "waitingForPrep": "Ожидает подготовки",

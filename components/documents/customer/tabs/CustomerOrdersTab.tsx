@@ -114,6 +114,20 @@ export function CustomerOrdersTab({
   const isDark = theme === "dark";
   const isLoading = Boolean(isProductionQueueLoading || isFinishedGoodsLoading || isFinanceLoading);
 
+  const isUsd = customer.currency === "USD";
+  const currencyLabel = isUsd ? "USD" : "so'm";
+
+  const formatMoney = useCallback(
+    (val: number) => {
+      const numStr = Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2 });
+      if (isUsd) {
+        return `$${numStr}`;
+      }
+      return `${numStr} so'm`;
+    },
+    [isUsd]
+  );
+
   // Match dedicated customer finished goods stock (Tayyor mahsulot zaxirasi)
   const customerFinishedGoods = useMemo(() => {
     return finishedGoods.filter((fg) =>
@@ -296,7 +310,7 @@ export function CustomerOrdersTab({
     { id: "shippedQty", title: "Yuklandi (SF)", width: 105, icon: GridColumnIcon.HeaderNumber },
     { id: "remainingStock", title: "Omborda Qoldiq (Zaxira)", width: 155, icon: GridColumnIcon.HeaderNumber },
     { id: "location", title: "Ombor / Joylashuv", width: 210, icon: GridColumnIcon.HeaderString },
-    { id: "amountUsd", title: "Summa ($)", width: 115, icon: GridColumnIcon.HeaderNumber },
+    { id: "amountUsd", title: `Summa (${customer.currency === "USD" ? "USD" : "so'm"})`, width: 125, icon: GridColumnIcon.HeaderNumber },
     { id: "status", title: "Bosqich / Holati", width: 130, icon: GridColumnIcon.HeaderSingleValue },
   ]);
 
@@ -357,7 +371,7 @@ export function CustomerOrdersTab({
         return {
           kind: GridCellKind.Number,
           data: num,
-          displayData: num > 0 ? `$${num.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—",
+          displayData: num > 0 ? formatMoney(num) : "—",
           allowOverlay: false,
           contentAlign: "right",
           themeOverride: {

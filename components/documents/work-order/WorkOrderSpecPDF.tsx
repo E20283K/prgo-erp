@@ -968,7 +968,13 @@ export const WorkOrderSpecPDF: React.FC<WorkOrderSpecPdfProps> = ({
               <View style={{ borderWidth: 0.5, borderColor: "#e2e8f0", borderRadius: 2, padding: 3, backgroundColor: "#f8fafc" }}>
                 <Text style={{ fontSize: 6, fontWeight: "bold", color: "#0f172a" }}>LAK VA PARDOZLASH (COATING & EMBELLISHMENT)</Text>
                 <Text style={{ fontSize: 6.2, fontWeight: "bold", color: "#0f172a", marginTop: 1 }}>{orderData.coating || "—"}</Text>
-                <Text style={{ fontSize: 5.5, color: "#475569" }}>Maxsus effekt: {orderData.embellishment || "None"}</Text>
+                {orderData.coatingZone ? (
+                  <Text style={{ fontSize: 5.2, color: "#2563eb" }}>Lak zonasi: {orderData.coatingZone}</Text>
+                ) : null}
+                <Text style={{ fontSize: 5.5, color: "#475569", marginTop: 1 }}>Maxsus effekt: {orderData.embellishment || "None"}</Text>
+                {orderData.embellishmentZone ? (
+                  <Text style={{ fontSize: 5.2, color: "#2563eb" }}>Pardoz zonasi: {orderData.embellishmentZone}</Text>
+                ) : null}
               </View>
 
               {/* Inks & CMYK */}

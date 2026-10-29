@@ -589,11 +589,15 @@ export interface WorkOrderFormData {
   deadline: string;
   actualEndDate?: string;
   paperStock: string;
+  paperDensity?: number;
+  grammage?: number;
   coating: string;
   lamination?: string;
   laminationSides?: "1s" | "2s";
   laminationMicron?: number;
   embellishment?: string;
+  coatingZone?: string;
+  embellishmentZone?: string;
   priceTotal: number;
   currency: string;
   photoUrl: string;

@@ -2,6 +2,7 @@ import { db } from "@/db";
 import {
   warehouseShipments,
   warehouseReceipts,
+  warehouseStockBalances,
   productionSpecifications,
   clients,
 } from "@/db/schema";
@@ -157,4 +158,38 @@ export async function getNextCustomerCode(
     );
 
   return calculateNextNumber("CUST", rows.map((r) => r.num), yearSuffix);
+}
+
+/**
+ * Xomashyo / Material artikuli (SKU) uchun navbatdagi unikal ketma-ket raqam: MAT-0001, MAT-0002...
+ */
+export async function getNextMaterialSku(
+  companyCode: string = "PRINTGOO",
+  padLength: number = 4
+): Promise<string> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const rows = await db
+    .select({ sku: warehouseStockBalances.sku })
+    .from(warehouseStockBalances)
+    .where(
+      and(
+        eq(warehouseStockBalances.companyId, companyId),
+        ilike(warehouseStockBalances.sku, "MAT-%")
+      )
+    );
+
+  let maxNum = 0;
+  for (const r of rows) {
+    if (!r.sku) continue;
+    const match = r.sku.trim().match(/^MAT-(\d+)$/i);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+  }
+
+  const nextNum = maxNum + 1;
+  return `MAT-${String(nextNum).padStart(padLength, "0")}`;
 }

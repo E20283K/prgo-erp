@@ -84,6 +84,17 @@ export function AktSverkaPrintModal({
   const totalDebit = settlement?.totalDebit || 0;
   const totalCredit = settlement?.totalCredit || 0;
   const closingBalance = settlement?.closingBalance || 0;
+  const isUsd = (customer.currency || settlement?.currency) === "USD";
+  const currencyLabel = isUsd ? "USD" : "so'm";
+
+  const formatMoney = (val: number, showSign: boolean = false) => {
+    const numStr = Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2 });
+    const sign = val < 0 ? "-" : showSign && val > 0 ? "+" : "";
+    if (isUsd) {
+      return `${sign}$${numStr}`;
+    }
+    return `${sign}${numStr} so'm`;
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -140,7 +151,7 @@ export function AktSverkaPrintModal({
                   <th className="border border-zinc-300 p-1 text-left">Operatsiya mazmuni</th>
                   <th className="border border-zinc-300 p-1 text-right w-24">Debet (Yuklandi)</th>
                   <th className="border border-zinc-300 p-1 text-right w-24">Kredit (To&apos;landi)</th>
-                  <th className="border border-zinc-300 p-1 text-right w-24">Joriy Saldo ($)</th>
+                  <th className="border border-zinc-300 p-1 text-right w-24">Joriy Saldo ({currencyLabel})</th>
                 </tr>
               </thead>
               <tbody>
@@ -149,7 +160,7 @@ export function AktSverkaPrintModal({
                     Boshlang&apos;ich qoldiq (Opening Balance):
                   </td>
                   <td colSpan={3} className="border border-zinc-300 p-1 text-right font-mono">
-                    ${(settlement?.openingBalance || 0).toFixed(2)}
+                    {formatMoney(settlement?.openingBalance || 0)}
                   </td>
                 </tr>
                 {ledgerWithSaldo.map((row) => (
@@ -159,13 +170,13 @@ export function AktSverkaPrintModal({
                     <td className="border border-zinc-300 p-1 text-center font-mono">{row.docNo}</td>
                     <td className="border border-zinc-300 p-1">{row.description}</td>
                     <td className="border border-zinc-300 p-1 text-right font-mono">
-                      {row.debit > 0 ? `$${row.debit.toFixed(2)}` : "—"}
+                      {row.debit > 0 ? formatMoney(row.debit) : "—"}
                     </td>
                     <td className="border border-zinc-300 p-1 text-right font-mono">
-                      {row.credit > 0 ? `$${row.credit.toFixed(2)}` : "—"}
+                      {row.credit > 0 ? formatMoney(row.credit) : "—"}
                     </td>
                     <td className="border border-zinc-300 p-1 text-right font-mono font-medium">
-                      ${row.runningSaldo.toFixed(2)}
+                      {formatMoney(row.runningSaldo)}
                     </td>
                   </tr>
                 ))}
@@ -174,13 +185,13 @@ export function AktSverkaPrintModal({
                     JAMI OBOROT (Total Turnover):
                   </td>
                   <td className="border border-zinc-300 p-1.5 text-right font-mono text-emerald-800">
-                    +${totalDebit.toFixed(2)}
+                    {formatMoney(totalDebit, true)}
                   </td>
                   <td className="border border-zinc-300 p-1.5 text-right font-mono text-blue-800">
-                    -${totalCredit.toFixed(2)}
+                    {formatMoney(-totalCredit, true)}
                   </td>
                   <td className="border border-zinc-300 p-1.5 text-right font-mono text-zinc-900">
-                    ${closingBalance.toFixed(2)}
+                    {formatMoney(closingBalance)}
                   </td>
                 </tr>
               </tbody>
@@ -191,17 +202,17 @@ export function AktSverkaPrintModal({
                 <span>
                   Xulosa: <strong>{endDate}</strong> holatiga <strong>{customer.name}</strong> korxonasining{" "}
                   &ldquo;PRINTGOO&rdquo; MCHJ foydasiga qarzdorligi{" "}
-                  <strong className="underline text-rose-700">${closingBalance.toFixed(2)} USD</strong> ni tashkil etadi.
+                  <strong className="underline text-rose-700">{formatMoney(closingBalance)}</strong> ni tashkil etadi.
                 </span>
               ) : closingBalance < 0 ? (
                 <span>
                   Xulosa: <strong>{endDate}</strong> holatiga <strong>&ldquo;PRINTGOO&rdquo; MCHJ</strong> korxonasining{" "}
                   foydalanilmagan avans summasi{" "}
-                  <strong className="underline text-blue-700">${Math.abs(closingBalance).toFixed(2)} USD</strong> ni tashkil etadi.
+                  <strong className="underline text-blue-700">{formatMoney(Math.abs(closingBalance))}</strong> ni tashkil etadi.
                 </span>
               ) : (
                 <span>
-                  Xulosa: <strong>{endDate}</strong> holatiga tomonlar o&apos;rtasida o&apos;zaro qarzdorlik mavjud emas (0.00 USD).
+                  Xulosa: <strong>{endDate}</strong> holatiga tomonlar o&apos;rtasida o&apos;zaro qarzdorlik mavjud emas (0.00 {currencyLabel}).
                 </span>
               )}
             </div>

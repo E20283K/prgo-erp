@@ -19,6 +19,7 @@ import {
   ChevronDown,
   RotateCcw,
   ShieldCheck,
+  Factory,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
@@ -473,7 +474,7 @@ export function OrderReadinessRouteCard({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
-            <span className="font-semibold text-xs text-foreground truncate">
+            <span className={cn("font-semibold text-foreground truncate", isHorizontal ? "text-xs" : "text-sm")}>
               {t("cardTitle")}
             </span>
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-medium text-muted-foreground shrink-0">
@@ -670,7 +671,7 @@ export function OrderReadinessRouteCard({
 
                     <span
                       className={cn(
-                        "font-semibold text-xs leading-none truncate",
+                        cn("font-semibold text-xs leading-tight", isHorizontal ? "truncate" : "line-clamp-1"),
                         isBlocked
                           ? "text-rose-950 dark:text-rose-200"
                           : isReady
@@ -685,7 +686,7 @@ export function OrderReadinessRouteCard({
                   {/* Dynamic Subtitle: Shows Audit Stamp if verified, Blocker Note if blocked, or Default Desc */}
                   <p
                     className={cn(
-                      "text-[11px] leading-tight pt-0.5 truncate",
+                      cn("text-[11px] leading-tight pt-0.5", isHorizontal ? "truncate" : "line-clamp-2 break-words"),
                       isBlocked
                         ? "text-rose-600 dark:text-rose-400 font-medium"
                         : isReady
@@ -928,6 +929,19 @@ export function OrderReadinessRouteCard({
               </TooltipContent>
             </Tooltip>
           </div>
+
+          {onOpenFullRoute && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onOpenFullRoute}
+              className="w-full mt-2 h-7.5 text-xs gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground"
+            >
+              <Factory className="w-3.5 h-3.5" />
+              <span>Open Technological Route</span>
+            </Button>
+          )}
         </>
       )}
 

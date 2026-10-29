@@ -807,7 +807,7 @@
     "chronology": "Operatsiyalar xronologiyasi (Schet-faktura va To'lovlar)"
   },
   "ProductionRoute": {
-    "cardTitle": "Chop etishga tayyorgarlik va ishlab chiqarish holati",
+    "cardTitle": "Chop etishga tayyorgarlik",
     "readyScore": "{ready} / {total} tayyor",
     "readyToPrint": "Chop etishga tayyor",
     "waitingForPrep": "Tayyorgarlik kutilmoqda",
