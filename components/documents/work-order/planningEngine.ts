@@ -143,9 +143,9 @@ export function calculatePrintPlanning(inputs: PrintPlanningInput): PrintPlannin
     pressSheetW = 500,
     pressSheetH = 700,
     paperGsm = 300,
-    paperPricePerTon = 1100,
-    ctpPlateCost = 12,
-    pressHourRate = 65,
+    paperPricePerTon = 0,
+    ctpPlateCost = 0,
+    pressHourRate = 0,
   } = inputs;
 
   // 1. Calculate color counts

@@ -111,36 +111,6 @@ export function FinancialsTab({
     };
   }, [machines]);
 
-  // ─── 2. REAL FALLBACK ESTIMATORS (Agar BOM yoki Marshrut bo'sh bo'lsa) ───────
-  const paperStockItem = useMemo(() => {
-    if (!formData?.paperStock) return undefined;
-    const clean = formData.paperStock.toLowerCase();
-    return (warehouseStock || []).find(
-      (s) => clean.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(clean)
-    );
-  }, [formData?.paperStock, warehouseStock]);
-
-  const requiredSheets = hasQty ? (printPlan?.requiredParentSheets || Math.ceil((targetQty * 1.1) / (formData?.sizes?.length || 10))) : 0;
-  const paperSheetPrice = paperStockItem?.unitPriceUsd || (printPlan && requiredSheets > 0 ? printPlan.estimatedPaperCost / requiredSheets : 0);
-  const calculatedPaperCost = hasQty ? Number((requiredSheets * paperSheetPrice).toFixed(2)) : 0;
-  const paperWeightKg = hasQty ? (printPlan?.totalPaperWeightKg || Number(((requiredSheets * 0.7 * 150) / 1000).toFixed(1))) : 0;
-
-  const ctpPlatesCount = hasQty ? (printPlan?.totalCtpPlates || 0) : 0;
-  const plateStockItem = (warehouseStock || []).find((s) => s.category === "Inks & Plates" && s.unit === "pcs");
-  const plateUnitPrice = plateStockItem?.unitPriceUsd || (ctpPlatesCount > 0 ? 7.20 : 0);
-  const calculatedPlatesCost = hasQty ? Number((ctpPlatesCount * plateUnitPrice).toFixed(2)) : 0;
-
-  const totalInksCount = hasQty ? (printPlan?.totalUniqueInks || 0) : 0;
-  const inkStockItem = (warehouseStock || []).find((s) => s.category === "Inks & Plates" && s.unit === "kg");
-  const inkUnitPrice = inkStockItem?.unitPriceUsd || (totalInksCount > 0 ? 11.50 : 0);
-  const estimatedInkKg = hasQty && totalInksCount > 0 ? Number((((printPlan?.totalImpressions || targetQty) / 5000) * (totalInksCount * 0.35)).toFixed(2)) : 0;
-  const calculatedInkCost = hasQty ? Number((estimatedInkKg * inkUnitPrice).toFixed(2)) : 0;
-
-  const totalMachineHours = hasQty ? (printPlan?.totalPressHours || 0) : 0;
-  const isLaminated = formData?.lamination && formData.lamination.toLowerCase() !== "none";
-  const laminationCost = (hasQty && isLaminated) ? Number((targetQty * 0.025).toFixed(2)) : 0;
-  const packagingCost = hasQty ? Number((Math.ceil(targetQty / 500) * 2.5).toFixed(2)) : 0;
-
   const toolingItems = formData?.toolingItems || [];
   const wasteEvents = (shiftEvents || []).filter((ev) => ev.type === "Waste" && ev.wasteQty);
   const totalWasteQty = wasteEvents.reduce((sum, ev) => sum + (ev.wasteQty || 0), 0);
@@ -181,59 +151,6 @@ export function FinancialsTab({
           type: "BOM (Fakt)",
         });
       });
-    } else {
-      // Fallback agar BOM kiritilmagan bo'lsa
-      if (calculatedPaperCost > 0) {
-        rows.push({
-          id: "est-paper",
-          category: "Xomashyo (Qog'oz)",
-          name: formData?.paperStock || "Asosiy ofset qog'ozi",
-          quantity: `${requiredSheets.toLocaleString()} varaq (${paperWeightKg} kg)`,
-          unitRate: paperSheetPrice > 0 ? `${formatMoney(paperSheetPrice, currency, 3)}/varaq` : "—",
-          totalCost: calculatedPaperCost,
-          share: 0,
-          type: "Hisobiy (Reja)",
-        });
-      }
-
-      if (calculatedInkCost > 0) {
-        rows.push({
-          id: "est-ink",
-          category: "Kraska & Kimyo",
-          name: `Bosma kraskasi (CMYK${totalInksCount > 0 ? ` + ${totalInksCount} rang` : ""})`,
-          quantity: `~${estimatedInkKg} kg`,
-          unitRate: `${formatMoney(inkUnitPrice, currency)}/kg`,
-          totalCost: calculatedInkCost,
-          share: 0,
-          type: "Hisobiy sarf",
-        });
-      }
-
-      if (laminationCost > 0) {
-        rows.push({
-          id: "est-lamin",
-          category: "Pardoz & Qadoqlash",
-          name: `Laminatsiya plyonkasi (${formData?.lamination})`,
-          quantity: `${targetQty.toLocaleString()} ${formData?.unit || "dona"}`,
-          unitRate: "0.025/dona",
-          totalCost: laminationCost,
-          share: 0,
-          type: "Pardoz sarfi",
-        });
-      }
-
-      if (packagingCost > 0) {
-        rows.push({
-          id: "est-pack",
-          category: "Pardoz & Qadoqlash",
-          name: "Qadoqlash g'iloflari va bog'lov materiallari",
-          quantity: `${Math.ceil(targetQty / 500)} quti`,
-          unitRate: "2.50/quti",
-          totalCost: packagingCost,
-          share: 0,
-          type: "Standart qadoq",
-        });
-      }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -258,20 +175,6 @@ export function FinancialsTab({
       });
     }
 
-    // CTP Qoliplari
-    if (ctpPlatesCount > 0) {
-      rows.push({
-        id: "tool-ctp-plates",
-        category: "Jihozlar (CTP)",
-        name: `CTP Ofset bosma formalari (${printPlan?.colorNotation || "4+0"} rang)`,
-        quantity: `${ctpPlatesCount} dona plastina`,
-        unitRate: `${formatMoney(plateUnitPrice, currency)}/dona`,
-        totalCost: calculatedPlatesCost,
-        share: 0,
-        type: "CTP qoliplari",
-      });
-    }
-
     // ──────────────────────────────────────────────────────────────────────────
     // C. USKUNALAR VA MEHNAT HAQI (OPERATIONSTAB REAL BOSQICHLAR BO'YICHA)
     // ──────────────────────────────────────────────────────────────────────────
@@ -289,7 +192,7 @@ export function FinancialsTab({
 
           const unitRateDisplay = hasTariffCost && op.rateUsd !== undefined
             ? `${formatMoney(op.rateUsd, currency)}/${op.calcUnit || "birlik"}${op.setupFeeUsd ? ` + ${formatMoney(op.setupFeeUsd, currency)} (pripravka)` : ""}`
-            : `${formatMoney(rates.machineRate, currency)}/soat`;
+            : duration > 0 ? `${formatMoney(rates.machineRate, currency)}/soat` : "—";
 
           rows.push({
             id: `op-mach-${op.id || idx}`,
@@ -311,7 +214,7 @@ export function FinancialsTab({
 
         const laborRateDisplay = hasPiecework && op.pieceworkRateUsd !== undefined
           ? `${formatMoney(op.pieceworkRateUsd, currency)}/${op.calcUnit || "birlik"}`
-          : `${formatMoney(rates.operatorRate, currency)}/soat`;
+          : duration > 0 ? `${formatMoney(rates.operatorRate, currency)}/soat` : "—";
 
         rows.push({
           id: `op-lab-${op.id || idx}`,
@@ -324,45 +227,16 @@ export function FinancialsTab({
           type: op.tariffCode ? `Sdelka (${op.tariffCode})` : `Ishchi (#${op.stepNumber})`,
         });
       });
-    } else {
-      // Fallback: Agar marshrut bo'sh bo'lsa, rejalashtirilgan bosma mashinasi
-      if (totalMachineHours > 0) {
-        const pressRates = getMachineHourlyRate(formData?.pressMachine);
-        const pressMachCost = Number((totalMachineHours * pressRates.machineRate).toFixed(2));
-        const pressLabCost = Number((totalMachineHours * pressRates.operatorRate).toFixed(2));
-
-        rows.push({
-          id: "press-machine-fallback",
-          category: "Uskuna & Mashina",
-          name: `Bosma uskunasi (${formData?.pressMachine || "Ofset"})`,
-          quantity: `${totalMachineHours} soat (Run+Setup)`,
-          unitRate: `${formatMoney(pressRates.machineRate, currency)}/soat`,
-          totalCost: pressMachCost,
-          share: 0,
-          type: "Bosma uskunasi",
-        });
-
-        rows.push({
-          id: "press-labor-fallback",
-          category: "Mehnat haqi (FOT)",
-          name: `Bosmachi brigadasi (${(formData as any)?.operator || "Navbatchi operator"})`,
-          quantity: `${totalMachineHours} soat`,
-          unitRate: `${formatMoney(pressRates.operatorRate, currency)}/soat`,
-          totalCost: pressLabCost,
-          share: 0,
-          type: "Bosma mehnati",
-        });
-      }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
     // D. SIFAT NUQSONLARI VA BRAK ZIYONLARI (SMENA JURNALI REAL VOQELIKLARI)
     // ──────────────────────────────────────────────────────────────────────────
     const preWasteSubtotal = rows.reduce((s, r) => s + r.totalCost, 0);
-    const approxUnitCost = hasQty ? preWasteSubtotal / targetQty : 0;
+    const approxUnitCost = (hasQty && preWasteSubtotal > 0) ? preWasteSubtotal / targetQty : 0;
     let computedWasteCost = 0;
 
-    if (wasteEvents && wasteEvents.length > 0) {
+    if (wasteEvents && wasteEvents.length > 0 && approxUnitCost > 0) {
       wasteEvents.forEach((we, idx) => {
         const wasteQty = Number(we.wasteQty || 0);
         const lineWasteCost = Number((wasteQty * approxUnitCost).toFixed(2));
@@ -382,7 +256,7 @@ export function FinancialsTab({
     }
 
     const grandTotal = Number((preWasteSubtotal + computedWasteCost).toFixed(2));
-    const unitCost = Number((grandTotal / Math.max(1, targetQty)).toFixed(4));
+    const unitCost = hasQty && grandTotal > 0 ? Number((grandTotal / targetQty).toFixed(4)) : 0;
 
     // Ulush foizlarini hisoblash
     rows.forEach((r) => {
@@ -398,31 +272,12 @@ export function FinancialsTab({
   }, [
     materials,
     currency,
-    calculatedPaperCost,
-    formData?.paperStock,
-    formData?.lamination,
-    formData?.unit,
-    formData?.pressMachine,
-    (formData as any)?.operator,
-    requiredSheets,
-    paperWeightKg,
-    paperSheetPrice,
-    calculatedInkCost,
-    totalInksCount,
-    estimatedInkKg,
-    inkUnitPrice,
-    laminationCost,
-    targetQty,
-    packagingCost,
     toolingItems,
-    ctpPlatesCount,
-    printPlan?.colorNotation,
-    plateUnitPrice,
-    calculatedPlatesCost,
     operations,
     getMachineHourlyRate,
-    totalMachineHours,
+    formData?.quantity,
     hasQty,
+    targetQty,
     wasteEvents,
   ]);
 
@@ -436,14 +291,15 @@ export function FinancialsTab({
   const [customPriceInput, setCustomPriceInput] = useState<string>(String(currentSellingPrice));
 
   const calculatedSellingPrice = useMemo(() => {
+    if (totalBaseCost <= 0) return 0;
     return Number((totalBaseCost * (1 + markupPercent / 100)).toFixed(2));
   }, [totalBaseCost, markupPercent]);
 
-  const activeSellingPrice = Number(customPriceInput) > 0 ? Number(customPriceInput) : calculatedSellingPrice;
-  const unitSellingPrice = Number((activeSellingPrice / Math.max(1, targetQty)).toFixed(4));
-  const grossProfit = Number((activeSellingPrice - totalBaseCost).toFixed(2));
-  const profitMarginPercent = activeSellingPrice > 0 ? Number(((grossProfit / activeSellingPrice) * 100).toFixed(1)) : 0;
-  const unitGrossProfit = Number((unitSellingPrice - unitBaseCost).toFixed(4));
+  const activeSellingPrice = Number(customPriceInput) > 0 ? Number(customPriceInput) : (totalBaseCost > 0 ? calculatedSellingPrice : 0);
+  const unitSellingPrice = targetQty > 0 && activeSellingPrice > 0 ? Number((activeSellingPrice / targetQty).toFixed(4)) : 0;
+  const grossProfit = (activeSellingPrice > 0 && totalBaseCost > 0) ? Number((activeSellingPrice - totalBaseCost).toFixed(2)) : 0;
+  const profitMarginPercent = (activeSellingPrice > 0 && totalBaseCost > 0) ? Number(((grossProfit / activeSellingPrice) * 100).toFixed(1)) : 0;
+  const unitGrossProfit = (activeSellingPrice > 0 && totalBaseCost > 0 && unitSellingPrice > 0) ? Number((unitSellingPrice - unitBaseCost).toFixed(4)) : 0;
 
   // Handlers
   const handleSelectMarkupPreset = (pct: number) => {
@@ -684,10 +540,10 @@ export function FinancialsTab({
             <Boxes className="size-3 text-muted-foreground" />
           </div>
           <div className="text-sm font-bold font-mono text-foreground tracking-tight">
-            {formatMoney(totalBaseCost, currency)}
+            {totalBaseCost > 0 ? formatMoney(totalBaseCost, currency) : "—"}
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
-            1 dona: <strong className="text-foreground">{formatMoney(unitBaseCost, currency, 3)}</strong>
+            1 dona: <strong className="text-foreground">{unitBaseCost > 0 ? formatMoney(unitBaseCost, currency, 3) : "—"}</strong>
           </div>
         </div>
 
@@ -698,10 +554,10 @@ export function FinancialsTab({
             <Percent className="size-3 text-blue-500" />
           </div>
           <div className="text-sm font-bold font-mono text-blue-600 dark:text-blue-400 tracking-tight">
-            +{markupPercent.toFixed(1)}%
+            {totalBaseCost > 0 ? `+${markupPercent.toFixed(1)}%` : "—"}
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
-            Tannarxdan: <strong className="text-blue-700 dark:text-blue-300">+{formatMoney(grossProfit, currency)}</strong>
+            Tannarxdan: <strong className="text-blue-700 dark:text-blue-300">{grossProfit > 0 ? `+${formatMoney(grossProfit, currency)}` : "—"}</strong>
           </div>
         </div>
 
@@ -712,10 +568,10 @@ export function FinancialsTab({
             <DollarSign className="size-3 text-emerald-500" />
           </div>
           <div className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400 tracking-tight">
-            {formatMoney(activeSellingPrice, currency)}
+            {activeSellingPrice > 0 ? formatMoney(activeSellingPrice, currency) : "—"}
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
-            1 dona: <strong className="text-emerald-700 dark:text-emerald-300">{formatMoney(unitSellingPrice, currency, 3)}</strong>
+            1 dona: <strong className="text-emerald-700 dark:text-emerald-300">{unitSellingPrice > 0 ? formatMoney(unitSellingPrice, currency, 3) : "—"}</strong>
           </div>
         </div>
 
@@ -726,10 +582,10 @@ export function FinancialsTab({
             <TrendingUp className="size-3 text-emerald-500" />
           </div>
           <div className="text-sm font-bold font-mono text-foreground tracking-tight">
-            {profitMarginPercent.toFixed(1)}%
+            {profitMarginPercent > 0 ? `${profitMarginPercent.toFixed(1)}%` : "—"}
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
-            1 donadan: <strong className="text-foreground">+{formatMoney(unitGrossProfit, currency, 3)}</strong>
+            1 donadan: <strong className="text-foreground">{unitGrossProfit > 0 ? `+${formatMoney(unitGrossProfit, currency, 3)}` : "—"}</strong>
           </div>
         </div>
       </div>
@@ -839,6 +695,12 @@ export function FinancialsTab({
               rowHeight={32}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
             />
+            {rawCostRows.length === 0 && (
+              <div className="absolute inset-0 top-7 flex flex-col items-center justify-center bg-background/60 z-10 select-none gap-2">
+                <Layers className="size-8 text-muted-foreground/30" />
+                <span className="text-xs text-muted-foreground">Xarajatlar kiritilmagan (BOM yoki marshrut operatsiyalarini kiriting)</span>
+              </div>
+            )}
           </div>
         </ContextMenuTrigger>
 

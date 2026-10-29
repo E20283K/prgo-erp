@@ -225,11 +225,11 @@ export function syncBomWithSpecs(
 ): BomItem[] {
   let items = [...bomItems];
   const paperName = form.paperStock?.trim();
-  const targetQty = Number(form.quantity) || 1000;
+  const targetQty = Number(form.quantity) || 0;
   const targetSheets = Number((form as any).plannedSheets) || 0;
   const requiredPaperSheets = targetSheets > 0 ? targetSheets : Math.ceil(targetQty * 1.05);
 
-  if (paperName) {
+  if (paperName && targetQty > 0) {
     const ws = stockList.find(
       (s) =>
         s.name.toLowerCase() === paperName.toLowerCase() ||
@@ -253,7 +253,7 @@ export function syncBomWithSpecs(
       ? Number(ws.unitPriceUsd)
       : paperIdx >= 0 && items[paperIdx].unitPrice > 0
       ? items[paperIdx].unitPrice
-      : 0.35;
+      : 0;
 
     if (paperIdx >= 0) {
       const existing = items[paperIdx];
@@ -330,13 +330,24 @@ export function syncBomWithSpecs(
       i.name.toLowerCase().includes("lamination")
   );
 
-  if (isLamActive) {
+  if (isLamActive && targetQty > 0) {
     const lamMeter = Math.ceil(
       requiredPaperSheets * (Number(form.laminationSides === "2s" ? 2 : 1) * 0.72)
     );
     const lamName = `${lam} Film`;
     const lamSpec = `BOPP ${form.laminationMicron || 30}µm, ${form.laminationSides || "1s"}`;
-    const lamPrice = 0.28;
+    const wsLam = stockList.find(
+      (s) =>
+        (s.category === "Foil & Film" ||
+          s.name.toLowerCase().includes("film") ||
+          s.name.toLowerCase().includes("laminat")) &&
+        s.unitPriceUsd
+    );
+    const lamPrice = wsLam?.unitPriceUsd
+      ? Number(wsLam.unitPriceUsd)
+      : lamIdx >= 0 && items[lamIdx].unitPrice > 0
+      ? items[lamIdx].unitPrice
+      : 0;
 
     if (lamIdx >= 0) {
       const ex = items[lamIdx];
@@ -1905,7 +1916,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const activePrintPlan = React.useMemo(
     () =>
       calculatePrintPlanning({
-        targetQuantity: formData.quantity || 5000,
+        targetQuantity: Number(formData.quantity) || 0,
         piecesPerSheet: formData.sizes && formData.sizes.length > 0 ? formData.sizes.length : 10,
         frontColors: formData.frontColors || { c: true, m: true, y: true, k: true },
         backColors: formData.backColors || { c: false, m: false, y: false, k: false },

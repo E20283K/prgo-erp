@@ -2236,24 +2236,33 @@ export function OverviewTab({
             (sum, item) => sum + (Number(item.totalPrice) || 0),
             0
           );
-          const rawMaterialCost = bomMaterialsCost > 0
-            ? bomMaterialsCost
-            : (printPlan ? (printPlan.estimatedPaperCost + printPlan.estimatedPlatesCost) : 0);
+          const rawMaterialCost = bomMaterialsCost;
+
+          // Real Tooling Costs (Pre-press / CTP / Shtans-forma only if entered)
+          const toolingCost = (formData.toolingItems || []).reduce(
+            (sum, t) => sum + (Number(t.actualCost !== undefined ? t.actualCost : t.estimatedCost) || 0),
+            0
+          );
 
           // 2. Real Operations / Machine Cost
           const operationsCost = (operations && operations.length > 0)
-            ? operations.reduce((sum, op) => sum + ((Number(op.duration) || 1) * 20), 0)
-            : (printPlan ? printPlan.estimatedPressCost : 0);
+            ? operations.reduce((sum, op) => {
+                const machine = Number(op.plannedCostUsd || 0);
+                const labor = Number(op.pieceworkTotalUsd || 0);
+                if (machine > 0 || labor > 0) return sum + machine + labor;
+                return sum + ((Number(op.duration) || 0) * 20);
+              }, 0)
+            : 0;
 
           // 3. Direct Production Cost
-          const directCost = Number((rawMaterialCost + operationsCost).toFixed(2));
+          const directCost = Number((rawMaterialCost + toolingCost + operationsCost).toFixed(2));
           const hasCosts = directCost > 0;
           const costPerUnit = qty > 0 && directCost > 0 ? Number((directCost / qty).toFixed(2)) : 0;
 
           // 4. Margin Calculation
           let margin = 0;
           let marginLabel = "0%";
-          let statusText = "Reja kiritilmagan";
+          let statusText = "Xarajatlar kiritilmagan";
           let isProfitable = false;
 
           if (revenue > 0 && hasCosts) {
@@ -2268,7 +2277,7 @@ export function OverviewTab({
             statusText = "BOM materiallari kiritilmagan";
           } else {
             marginLabel = "0%";
-            statusText = "Reja kiritilmagan";
+            statusText = "Xarajatlar kiritilmagan";
           }
 
           return (
@@ -2305,7 +2314,7 @@ export function OverviewTab({
                         : `Qog'oz va Xomashyo:`}
                     </span>
                     <span className="text-foreground font-medium">
-                      {formatMoney(rawMaterialCost, currency)}
+                      {rawMaterialCost > 0 ? formatMoney(rawMaterialCost, currency) : "—"}
                     </span>
                   </div>
 
@@ -2318,7 +2327,7 @@ export function OverviewTab({
                         : "CTP Formalar & Qoliplar:"}
                     </span>
                     <span className="text-foreground font-medium">
-                      {formatMoney(printPlan ? printPlan.estimatedPlatesCost : 0, currency)}
+                      {toolingCost > 0 ? formatMoney(toolingCost, currency) : "—"}
                     </span>
                   </div>
 
@@ -2331,14 +2340,14 @@ export function OverviewTab({
                         : "Stanok Soati va Operatsiyalar:"}
                     </span>
                     <span className="text-foreground font-medium">
-                      {formatMoney(operationsCost, currency)}
+                      {operationsCost > 0 ? formatMoney(operationsCost, currency) : "—"}
                     </span>
                   </div>
 
                   <div className="flex justify-between text-muted-foreground text-[11px] pt-0.5 border-t border-border/50">
                     <span className="font-sans">To&apos;g&apos;ri Ishlab Chiqarish Tannarxi:</span>
                     <span className="font-bold text-foreground font-mono">
-                      {formatMoney(directCost, currency)}
+                      {directCost > 0 ? formatMoney(directCost, currency) : "—"}
                     </span>
                   </div>
 
