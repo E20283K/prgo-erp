@@ -105,7 +105,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
       // Reserve ~195px for sidebar trigger + quick new tab button + overflow dropdown trigger + notification + user avatar
       const availableForTabs = Math.max(200, width - 195);
       const calculated = Math.max(2, Math.floor(availableForTabs / 118));
-      setMaxVisibleTabs(calculated);
+      setMaxVisibleTabs((prev) => (prev !== calculated ? calculated : prev));
     };
 
     computeMaxTabs();
