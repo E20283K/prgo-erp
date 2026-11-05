@@ -88,7 +88,9 @@ export function FinancialsTab({
 
   const targetQty = formData?.quantity || 0;
   const currentSellingPrice = formData?.priceTotal || 0;
-  const currency = formData?.currency || "USD";
+  const currency = formData?.currency || "UZS";
+  const exchangeRate = Number(formData?.exchangeRate) || 12850;
+  const isUsd = currency.toUpperCase() === "USD";
   const hasQty = targetQty > 0;
 
   // ─── 1. REAL MACHINE FLEET LOOKUP & RATES ──────────────────────────────────
@@ -125,8 +127,20 @@ export function FinancialsTab({
     if (materials && materials.length > 0) {
       materials.forEach((mat, idx) => {
         const qty = Number(mat.actualQty !== undefined ? mat.actualQty : (mat.qty !== undefined ? mat.qty : mat.planQty || 0));
-        const unitP = Number(mat.unitPrice || 0);
-        const lineTotal = Number((mat.totalPrice !== undefined && mat.totalPrice > 0 ? mat.totalPrice : (qty * unitP)).toFixed(2));
+        const matCur = ((mat as any).originalCurrency || ((mat as any).currency === "UZS" ? "UZS" : "USD")).toUpperCase();
+        const origPrice = Number((mat as any).originalUnitPrice !== undefined ? (mat as any).originalUnitPrice : mat.unitPrice || 0);
+
+        let unitP = Number(mat.unitPrice || 0);
+        if ((mat as any).originalUnitPrice !== undefined || (mat as any).originalCurrency) {
+          if (matCur === "USD" && currency === "UZS") {
+            unitP = Number((origPrice * exchangeRate).toFixed(2));
+          } else if (matCur === "UZS" && currency === "USD") {
+            unitP = Number((origPrice / exchangeRate).toFixed(4));
+          } else {
+            unitP = origPrice;
+          }
+        }
+        const lineTotal = Number(((mat as any).totalPrice !== undefined && (mat as any).totalPrice > 0 ? (mat as any).totalPrice : (qty * unitP)).toFixed(2));
 
         let catLabel = "Xomashyo";
         const catClean = (mat.category || "").toLowerCase();
@@ -140,12 +154,16 @@ export function FinancialsTab({
           catLabel = "Yordamchi xomashyo";
         }
 
+        const origDisplay = (mat as any).originalUnitPrice !== undefined && matCur !== currency
+          ? ` [${matCur === "UZS" ? `${(mat as any).originalUnitPrice.toLocaleString()} UZS` : `$${(mat as any).originalUnitPrice}`}]`
+          : "";
+
         rows.push({
           id: `bom-${mat.id || idx}`,
           category: catLabel,
-          name: `${mat.name}${mat.spec ? ` (${mat.spec})` : ""}`,
+          name: `${mat.name}${mat.spec ? ` (${mat.spec})` : ""}${origDisplay}`,
           quantity: `${qty.toLocaleString()} ${mat.unit || "birlik"}`,
-          unitRate: unitP > 0 ? `${formatMoney(unitP, currency, 3)}/${mat.unit || "birlik"}` : "—",
+          unitRate: unitP > 0 ? `${formatMoney(unitP, currency, currency === "UZS" ? 0 : 3)}/${mat.unit || "birlik"}` : "—",
           totalCost: lineTotal,
           share: 0,
           type: "BOM (Fakt)",
@@ -158,7 +176,14 @@ export function FinancialsTab({
     // ──────────────────────────────────────────────────────────────────────────
     if (toolingItems && toolingItems.length > 0) {
       toolingItems.forEach((tool, idx) => {
-        const cost = Number(tool.actualCost !== undefined ? tool.actualCost : tool.estimatedCost || 0);
+        const rawCost = Number(tool.actualCost !== undefined ? tool.actualCost : tool.estimatedCost || 0);
+        const toolCur = (tool.currency || (isUsd ? "USD" : "UZS")).toUpperCase();
+        let cost = rawCost;
+        if (toolCur === "USD" && currency === "UZS") {
+          cost = Number((rawCost * exchangeRate).toFixed(2));
+        } else if (toolCur === "UZS" && currency === "USD") {
+          cost = Number((rawCost / exchangeRate).toFixed(2));
+        }
         const qty = Number(tool.quantity || 1);
         const unitP = qty > 0 ? Number((cost / qty).toFixed(2)) : cost;
 
@@ -167,7 +192,7 @@ export function FinancialsTab({
           category: "Jihozlar & Qoliplar",
           name: `${tool.name}${tool.category ? ` [${tool.category}]` : ""}`,
           quantity: `${qty} ${tool.unit || "dona"}`,
-          unitRate: unitP > 0 ? `${formatMoney(unitP, currency)}/${tool.unit || "dona"}` : "—",
+          unitRate: unitP > 0 ? `${formatMoney(unitP, currency, currency === "UZS" ? 0 : 2)}/${tool.unit || "dona"}` : "—",
           totalCost: cost,
           share: 0,
           type: tool.actualCost !== undefined ? "Jihoz (Fakt)" : "Jihoz (Reja)",
@@ -186,13 +211,16 @@ export function FinancialsTab({
         // Stanok / Operatsiya qiymati (Tarif bo'yicha yoki soatlik me'yor)
         if (op.machine && op.machine !== "Manual" && op.machine !== "—") {
           const hasTariffCost = op.plannedCostUsd !== undefined && op.plannedCostUsd > 0;
-          const machineCost = hasTariffCost
+          const rawMachCost = hasTariffCost
             ? Number(op.plannedCostUsd!.toFixed(2))
             : Number((duration * rates.machineRate).toFixed(2));
+          const machineCost = isUsd ? rawMachCost : Number((rawMachCost * exchangeRate).toFixed(2));
 
-          const unitRateDisplay = hasTariffCost && op.rateUsd !== undefined
-            ? `${formatMoney(op.rateUsd, currency)}/${op.calcUnit || "birlik"}${op.setupFeeUsd ? ` + ${formatMoney(op.setupFeeUsd, currency)} (pripravka)` : ""}`
-            : duration > 0 ? `${formatMoney(rates.machineRate, currency)}/soat` : "—";
+          const rawMachRate = hasTariffCost && op.rateUsd !== undefined ? op.rateUsd : rates.machineRate;
+          const machRateConv = isUsd ? rawMachRate : rawMachRate * exchangeRate;
+          const unitRateDisplay = duration > 0 || hasTariffCost
+            ? `${formatMoney(machRateConv, currency, currency === "UZS" ? 0 : 2)}/${hasTariffCost ? (op.calcUnit || "birlik") : "soat"}`
+            : "—";
 
           rows.push({
             id: `op-mach-${op.id || idx}`,
@@ -208,13 +236,16 @@ export function FinancialsTab({
 
         // Ishchilar mehnati / FOT (Sdelka yoki soatbay stavka)
         const hasPiecework = op.pieceworkTotalUsd !== undefined && op.pieceworkTotalUsd > 0;
-        const laborCost = hasPiecework
+        const rawLabCost = hasPiecework
           ? Number(op.pieceworkTotalUsd!.toFixed(2))
           : Number((duration * rates.operatorRate).toFixed(2));
+        const laborCost = isUsd ? rawLabCost : Number((rawLabCost * exchangeRate).toFixed(2));
 
-        const laborRateDisplay = hasPiecework && op.pieceworkRateUsd !== undefined
-          ? `${formatMoney(op.pieceworkRateUsd, currency)}/${op.calcUnit || "birlik"}`
-          : duration > 0 ? `${formatMoney(rates.operatorRate, currency)}/soat` : "—";
+        const rawLabRate = hasPiecework && op.pieceworkRateUsd !== undefined ? op.pieceworkRateUsd : rates.operatorRate;
+        const labRateConv = isUsd ? rawLabRate : rawLabRate * exchangeRate;
+        const laborRateDisplay = duration > 0 || hasPiecework
+          ? `${formatMoney(labRateConv, currency, currency === "UZS" ? 0 : 2)}/${hasPiecework ? (op.calcUnit || "birlik") : "soat"}`
+          : "—";
 
         rows.push({
           id: `op-lab-${op.id || idx}`,
@@ -247,7 +278,7 @@ export function FinancialsTab({
           category: "Nuqson & Brak (COPQ)",
           name: `${we.note || "Brak listlar"} [${we.wasteReason || "Texnologik chiqindi"}]`,
           quantity: `${wasteQty} dona list`,
-          unitRate: `${formatMoney(approxUnitCost, currency, 3)}/list`,
+          unitRate: `${formatMoney(approxUnitCost, currency, currency === "UZS" ? 0 : 3)}/list`,
           totalCost: lineWasteCost,
           share: 0,
           type: `Smena (${we.shift || we.time})`,
@@ -272,6 +303,8 @@ export function FinancialsTab({
   }, [
     materials,
     currency,
+    exchangeRate,
+    isUsd,
     toolingItems,
     operations,
     getMachineHourlyRate,
@@ -536,7 +569,7 @@ export function FinancialsTab({
         {/* Card 1: Base Cost */}
         <div className="rounded border border-border bg-card px-2.5 py-1.5 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-[10px] font-medium tracking-wide uppercase">Baza Tannarx (COGS)</span>
+            <span className="text-[10px] font-medium tracking-wide uppercase">Tannarx</span>
             <Boxes className="size-3 text-muted-foreground" />
           </div>
           <div className="text-sm font-bold font-mono text-foreground tracking-tight">
@@ -544,27 +577,30 @@ export function FinancialsTab({
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
             1 dona: <strong className="text-foreground">{unitBaseCost > 0 ? formatMoney(unitBaseCost, currency, 3) : "—"}</strong>
+            <span className="ml-1 opacity-75">
+              (~{formatMoney(isUsd ? totalBaseCost * exchangeRate : (exchangeRate > 0 ? totalBaseCost / exchangeRate : 0), isUsd ? "UZS" : "USD", 0)})
+            </span>
           </div>
         </div>
 
         {/* Card 2: Markup */}
         <div className="rounded border border-border bg-blue-500/5 px-2.5 py-1.5 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-blue-700 dark:text-blue-300">
-            <span className="text-[10px] font-medium tracking-wide uppercase">Ustama (Markup)</span>
+            <span className="text-[10px] font-medium tracking-wide uppercase">Ustama</span>
             <Percent className="size-3 text-blue-500" />
           </div>
           <div className="text-sm font-bold font-mono text-blue-600 dark:text-blue-400 tracking-tight">
             {totalBaseCost > 0 ? `+${markupPercent.toFixed(1)}%` : "—"}
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
-            Tannarxdan: <strong className="text-blue-700 dark:text-blue-300">{grossProfit > 0 ? `+${formatMoney(grossProfit, currency)}` : "—"}</strong>
+            Foyda: <strong className="text-blue-700 dark:text-blue-300">{grossProfit > 0 ? `+${formatMoney(grossProfit, currency)}` : "—"}</strong>
           </div>
         </div>
 
         {/* Card 3: Selling Price */}
         <div className="rounded border border-border bg-emerald-500/5 px-2.5 py-1.5 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-300">
-            <span className="text-[10px] font-medium tracking-wide uppercase">Sotuv Narxi (Price)</span>
+            <span className="text-[10px] font-medium tracking-wide uppercase">Sotuv narxi</span>
             <DollarSign className="size-3 text-emerald-500" />
           </div>
           <div className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400 tracking-tight">
@@ -572,20 +608,23 @@ export function FinancialsTab({
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
             1 dona: <strong className="text-emerald-700 dark:text-emerald-300">{unitSellingPrice > 0 ? formatMoney(unitSellingPrice, currency, 3) : "—"}</strong>
+            <span className="ml-1 opacity-75">
+              (~{formatMoney(isUsd ? activeSellingPrice * exchangeRate : (exchangeRate > 0 ? activeSellingPrice / exchangeRate : 0), isUsd ? "UZS" : "USD", 0)})
+            </span>
           </div>
         </div>
 
         {/* Card 4: Profit Margin */}
         <div className="rounded border border-border bg-card px-2.5 py-1.5 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-[10px] font-medium tracking-wide uppercase">Sof Marja (Margin)</span>
+            <span className="text-[10px] font-medium tracking-wide uppercase">Sof marja</span>
             <TrendingUp className="size-3 text-emerald-500" />
           </div>
           <div className="text-sm font-bold font-mono text-foreground tracking-tight">
             {profitMarginPercent > 0 ? `${profitMarginPercent.toFixed(1)}%` : "—"}
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
-            1 donadan: <strong className="text-foreground">{unitGrossProfit > 0 ? `+${formatMoney(unitGrossProfit, currency, 3)}` : "—"}</strong>
+            Kurs: <strong className="font-mono text-foreground">1 USD = {exchangeRate.toLocaleString()} UZS</strong>
           </div>
         </div>
       </div>

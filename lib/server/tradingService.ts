@@ -60,48 +60,69 @@ export async function getYttEntities(companyCode = "PRINTGOO"): Promise<YttTurno
   const compRows = await db
     .select()
     .from(companies)
-    .where(eq(companies.legalType, "YTT"))
     .orderBy(asc(companies.code));
 
   const result: YttTurnoverLimitRecord[] = [];
 
   for (const r of compRows) {
-    const limit = Number(r.annualLimitUzs) || 1_000_000_000;
-    
+    const isYtt = r.legalType === "YTT";
+    const rawLimit = Number(r.annualLimitUzs) || 0;
+    const limit = isYtt
+      ? rawLimit > 0
+        ? rawLimit
+        : 1_000_000_000
+      : rawLimit > 10_000_000_000
+      ? rawLimit
+      : 999_999_999_999;
+
     // Dynamic calculation from actual trading_sales
     let current = 0;
     try {
       const salesRes = await db
         .select({ total: sql<string>`coalesce(sum(total_uzs), 0)` })
         .from(tradingSales)
-        .where(or(eq(tradingSales.companyId, r.id), eq(tradingSales.sellerEntityId, r.id)));
+        .where(
+          or(
+            eq(tradingSales.companyId, r.id),
+            eq(tradingSales.sellerEntityId, r.id),
+            eq(tradingSales.sellerEntityName, r.name)
+          )
+        );
       current = Number(salesRes[0]?.total || 0);
     } catch (e) {}
 
-    const pct = limit > 0 ? Number(((current / limit) * 100).toFixed(2)) : 0;
-    let status: "Safe" | "Warning" | "Critical" | "Unlimited" = "Safe";
-    if (pct >= 95) {
-      status = "Critical";
-    } else if (pct >= 80) {
-      status = "Warning";
+    const pct = isYtt && limit > 0 ? Number(((current / limit) * 100).toFixed(2)) : 0;
+    let status: "Safe" | "Warning" | "Critical" | "Unlimited" = isYtt ? "Safe" : "Unlimited";
+    if (isYtt) {
+      if (pct >= 95) {
+        status = "Critical";
+      } else if (pct >= 80) {
+        status = "Warning";
+      }
     }
+
+    const settings = (r.settings as any) || {};
+    const primaryBank =
+      Array.isArray(settings.bankAccounts) && settings.bankAccounts.length > 0
+        ? settings.bankAccounts.find((b: any) => b.isPrimary) || settings.bankAccounts[0]
+        : null;
 
     result.push({
       id: r.id,
       code: r.code,
       name: r.name,
-      legalType: "YTT",
-      inn: r.inn || "",
-      bankName: r.bankName || "",
-      bankAccount: r.bankAccount || "",
+      legalType: (r.legalType === "YTT" ? "YTT" : "MChJ") as "YTT" | "MChJ",
+      inn: r.inn || settings.tin || "",
+      bankName: r.bankName || primaryBank?.bankName || "",
+      bankAccount: r.bankAccount || primaryBank?.accountNumber || "",
       annualLimit: limit,
       currentTurnover: current,
       currency: "UZS",
       turnoverPercent: pct,
       status,
-      isRecommended: pct < 70,
+      isRecommended: isYtt ? pct < 70 : false,
       activeContractsCount: 0,
-      notes: r.notes || "",
+      notes: r.notes || settings.notes || "",
     });
   }
 
@@ -112,15 +133,17 @@ export async function upsertYttEntity(
   payload: Partial<YttTurnoverLimitRecord>,
   companyCode = "PRINTGOO"
 ): Promise<YttTurnoverLimitRecord> {
+  const legalType = payload.legalType || "YTT";
+  const isYtt = legalType === "YTT";
   const comp = await upsertCompany({
     id: payload.id,
     code: payload.code,
     name: payload.name,
-    legalType: "YTT",
+    legalType,
     inn: payload.inn,
     bankName: payload.bankName,
     bankAccount: payload.bankAccount,
-    annualLimitUzs: payload.annualLimit || 1_000_000_000,
+    annualLimitUzs: payload.annualLimit || (isYtt ? 1_000_000_000 : 0),
     notes: payload.notes,
   });
 
@@ -128,16 +151,16 @@ export async function upsertYttEntity(
     id: comp.id,
     code: comp.code,
     name: comp.name,
-    legalType: "YTT",
+    legalType: (comp.legalType === "YTT" ? "YTT" : "MChJ") as "YTT" | "MChJ",
     inn: comp.inn || "",
     bankName: comp.bankName || "",
     bankAccount: comp.bankAccount || "",
-    annualLimit: comp.annualLimitUzs,
+    annualLimit: isYtt ? comp.annualLimitUzs || 1_000_000_000 : 999_999_999_999,
     currentTurnover: comp.currentTurnoverUzs,
     currency: "UZS",
     turnoverPercent: 0,
-    status: "Safe",
-    isRecommended: true,
+    status: isYtt ? "Safe" : "Unlimited",
+    isRecommended: isYtt,
     activeContractsCount: 0,
     notes: comp.notes || "",
   };
@@ -214,15 +237,32 @@ export async function upsertTradingSale(
 
   let targetYttId: string | null = null;
   if (payload.sellerEntityId) {
+    const isSellerUuid = isValidUuid(payload.sellerEntityId);
+    const yttWhere = isSellerUuid
+      ? orEq(tradingYttEntities.id, payload.sellerEntityId, tradingYttEntities.code, payload.sellerEntityId)
+      : eq(tradingYttEntities.code, payload.sellerEntityId);
     const ytt = await db
       .select({ id: tradingYttEntities.id, name: tradingYttEntities.name, inn: tradingYttEntities.inn })
       .from(tradingYttEntities)
-      .where(orEq(tradingYttEntities.id, payload.sellerEntityId, tradingYttEntities.code, payload.sellerEntityId))
+      .where(yttWhere)
       .limit(1);
     if (ytt.length > 0) {
       targetYttId = ytt[0].id;
       if (!payload.sellerEntityName) payload.sellerEntityName = ytt[0].name;
       if (!payload.sellerEntityInn) payload.sellerEntityInn = ytt[0].inn;
+    } else {
+      const compWhere = isSellerUuid
+        ? orEq(companies.id, payload.sellerEntityId, companies.code, payload.sellerEntityId)
+        : eq(companies.code, payload.sellerEntityId);
+      const comp = await db
+        .select({ id: companies.id, name: companies.name, inn: companies.inn })
+        .from(companies)
+        .where(compWhere)
+        .limit(1);
+      if (comp.length > 0) {
+        if (!payload.sellerEntityName) payload.sellerEntityName = comp[0].name;
+        if (!payload.sellerEntityInn) payload.sellerEntityInn = comp[0].inn || "";
+      }
     }
   }
 
@@ -945,17 +985,33 @@ export async function recordTradingPayment(
   const companyId = await resolveCompanyId(companyCode);
 
   let targetYttName = payload.sellerEntityName || "";
-  let targetYttId: string | null = payload.sellerEntityId || null;
+  let targetYttId: string | null = null;
 
   if (payload.sellerEntityId) {
+    const isSellerUuid = isValidUuid(payload.sellerEntityId);
+    const yttWhere = isSellerUuid
+      ? orEq(tradingYttEntities.id, payload.sellerEntityId, tradingYttEntities.code, payload.sellerEntityId)
+      : eq(tradingYttEntities.code, payload.sellerEntityId);
     const ytt = await db
       .select({ id: tradingYttEntities.id, name: tradingYttEntities.name })
       .from(tradingYttEntities)
-      .where(orEq(tradingYttEntities.id, payload.sellerEntityId, tradingYttEntities.code, payload.sellerEntityId))
+      .where(yttWhere)
       .limit(1);
     if (ytt.length > 0) {
       targetYttId = ytt[0].id;
-      targetYttName = ytt[0].name;
+      if (!targetYttName) targetYttName = ytt[0].name;
+    } else {
+      const compWhere = isSellerUuid
+        ? orEq(companies.id, payload.sellerEntityId, companies.code, payload.sellerEntityId)
+        : eq(companies.code, payload.sellerEntityId);
+      const comp = await db
+        .select({ id: companies.id, name: companies.name })
+        .from(companies)
+        .where(compWhere)
+        .limit(1);
+      if (comp.length > 0 && !targetYttName) {
+        targetYttName = comp[0].name;
+      }
     }
   }
 

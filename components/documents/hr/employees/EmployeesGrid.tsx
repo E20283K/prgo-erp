@@ -28,13 +28,6 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Users,
   UserPlus,
   Search,
@@ -51,7 +44,6 @@ export function EmployeesGrid() {
   const [data, setData] = useState<EmployeeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchFilter, setSearchFilter] = useState("");
-  const [departmentFilter, setDepartmentFilter] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
 
   const [selection, setSelection] = useState<GridSelection>({
@@ -132,18 +124,14 @@ export function EmployeesGrid() {
       const matchSearch =
         e.fullName.toLowerCase().includes(s) ||
         (e.badgeNumber || e.badgeNo || "").toLowerCase().includes(s) ||
-        (e.positionTitle || e.position || "").toLowerCase().includes(s);
-
-      const matchDept =
-        departmentFilter === "ALL" ||
-        e.departmentName === departmentFilter ||
-        e.department === departmentFilter;
+        (e.positionTitle || e.position || "").toLowerCase().includes(s) ||
+        (e.departmentName || e.department || "").toLowerCase().includes(s);
 
       const matchStatus = statusFilter === "ALL" || e.status === statusFilter;
 
-      return matchSearch && matchDept && matchStatus;
+      return matchSearch && matchStatus;
     });
-  }, [data, searchFilter, departmentFilter, statusFilter]);
+  }, [data, searchFilter, statusFilter]);
 
   // Update status bar stats
   useEffect(() => {
@@ -436,26 +424,6 @@ export function EmployeesGrid() {
               </button>
             ))}
           </div>
-
-          {/* Department Select Filter */}
-          <Select
-            value={departmentFilter}
-            onValueChange={(val) => {
-              if (val) setDepartmentFilter(val);
-            }}
-          >
-            <SelectTrigger className="h-7 text-xs w-36 bg-background border-input rounded">
-              <SelectValue placeholder="Barcha sexlar" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Barcha sexlar</SelectItem>
-              <SelectItem value="Flekso bosma sexi">Flekso bosma sexi</SelectItem>
-              <SelectItem value="Tikuvchilik va lenta sexi">Tikuvchilik sexi</SelectItem>
-              <SelectItem value="Kesish va qadoqlash sexi">Kesish va qadoqlash</SelectItem>
-              <SelectItem value="Prepress va dizayn">Prepress markazi</SelectItem>
-              <SelectItem value="Sifat nazorati (OTK)">Sifat nazorati (OTK)</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
 
         {/* Right Search & Controls */}

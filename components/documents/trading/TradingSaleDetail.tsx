@@ -72,6 +72,8 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     openTab,
     tradingCatalog,
     tradingYttEntities,
+    companiesList,
+    loadCompanies,
     crmCustomers,
     loadCrmCustomers,
     loadTradingData,
@@ -87,6 +89,9 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     }
     if (!tradingYttEntities || tradingYttEntities.length === 0) {
       loadTradingData("ytt-limits");
+    }
+    if (!companiesList || companiesList.length === 0) {
+      loadCompanies();
     }
     if (!tradingCatalog || tradingCatalog.length === 0) {
       loadTradingData("catalog");
@@ -120,8 +125,43 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   const [notes, setNotes] = useState<string>(rawData.notes || "");
 
   const availableEntities = useMemo(() => {
-    return tradingYttEntities;
-  }, [tradingYttEntities]);
+    if (tradingYttEntities && tradingYttEntities.length > 0) {
+      return tradingYttEntities;
+    }
+    if (companiesList && companiesList.length > 0) {
+      return companiesList.map((c) => {
+        const isYtt = c.legalType === "YTT";
+        const limit = isYtt ? Number(c.annualLimitUzs) || 1_000_000_000 : 999_999_999_999;
+        const current = Number(c.currentTurnoverUzs) || 0;
+        const pct = isYtt && limit > 0 ? Number(((current / limit) * 100).toFixed(2)) : 0;
+        const status: "Safe" | "Warning" | "Critical" | "Unlimited" = isYtt
+          ? pct >= 95
+            ? "Critical"
+            : pct >= 80
+            ? "Warning"
+            : "Safe"
+          : "Unlimited";
+        return {
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          legalType: (isYtt ? "YTT" : "MChJ") as "YTT" | "MChJ",
+          inn: c.inn || "",
+          bankName: c.bankName || "",
+          bankAccount: c.bankAccount || "",
+          annualLimit: limit,
+          currentTurnover: current,
+          currency: "UZS" as const,
+          turnoverPercent: pct,
+          status,
+          isRecommended: isYtt ? pct < 70 : false,
+          activeContractsCount: 0,
+          notes: c.notes || "",
+        };
+      });
+    }
+    return [];
+  }, [tradingYttEntities, companiesList]);
 
   const availableCatalog = useMemo(() => {
     return tradingCatalog;
@@ -137,13 +177,29 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   const [selectedCatalogItem, setSelectedCatalogItem] = useState<TradingCatalogItemRecord | null>(null);
   const [pickerQuantity, setPickerQuantity] = useState<number>(10000);
 
-  // Selected YTT entity calculations
+  // Selected YTT entity calculations (guaranteed non-null fallback)
   const selectedEntity = useMemo(() => {
     return (
       availableEntities.find((e) => e.id === sellerEntityId || e.code === sellerEntityId) ||
-      availableEntities[0]
+      availableEntities[0] || {
+        id: sellerEntityId || "org-default",
+        code: "ORG",
+        name: rawData.sellerEntityName || "Asosiy Tashkilot",
+        legalType: "MChJ" as const,
+        inn: rawData.sellerEntityInn || "",
+        bankName: "",
+        bankAccount: "",
+        annualLimit: 999_999_999_999,
+        currentTurnover: 0,
+        currency: "UZS" as const,
+        turnoverPercent: 0,
+        status: "Unlimited" as const,
+        isRecommended: false,
+        activeContractsCount: 0,
+        notes: "",
+      }
     );
-  }, [sellerEntityId, availableEntities]);
+  }, [sellerEntityId, availableEntities, rawData.sellerEntityName, rawData.sellerEntityInn]);
 
   // Grand totals
   const { totalAmount, totalUZS, totalUSD } = useMemo(() => {

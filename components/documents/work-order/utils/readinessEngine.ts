@@ -23,19 +23,24 @@ export function evaluateOrderReadiness(
   let designReady = Boolean(existingChecks.designReady);
   if (audit.designReady?.status === "blocked") {
     designReady = false;
-  } else if (!designReady) {
-    const hasAttachments = Array.isArray(order.attachments) && order.attachments.length > 0;
-    const hasPhotos = Boolean(order.photoUrl) || (Array.isArray(order.photoUrls) && order.photoUrls.length > 0);
-    const hasArtworks = Boolean(order.artworkFront) || (Array.isArray(order.skuArtworks) && order.skuArtworks.length > 0);
-    if (hasAttachments || hasPhotos || hasArtworks) {
-      designReady = true;
-    }
+  } else if (audit.designReady?.verifiedBy) {
+    // Inson tomonidan qo'lda tasdiqlangan (Manual Override)
+    designReady = audit.designReady.status === "ready";
+  } else if (existingChecks.designReady !== undefined) {
+    designReady = Boolean(existingChecks.designReady);
+  } else {
+    // Faqat rasman Pre-flight tekshirilgan fayl bo'lsa yoki Prepress tasdiqlasa tayyor
+    const isPreflightApproved = Boolean(order.preflightPassed || order.artworkApproved);
+    designReady = isPreflightApproved;
   }
 
   // 2. PAPER / SUBSTRATE READY (Xomashyo va Ombor)
   let paperReady = Boolean(existingChecks.paperReady);
   if (audit.paperReady?.status === "blocked") {
     paperReady = false;
+  } else if (audit.paperReady?.verifiedBy) {
+    // Inson tomonidan qo'lda tasdiqlangan (Manual Override)
+    paperReady = audit.paperReady.status === "ready";
   } else {
     const materials = Array.isArray(order.materials) ? order.materials : [];
     if (materials.length > 0) {
@@ -67,7 +72,12 @@ export function evaluateOrderReadiness(
       );
       if (matched && (matched.available ?? 0) >= (order.quantity || 0)) {
         paperReady = true;
+      } else {
+        paperReady = false;
       }
+    } else {
+      // Qog'oz ham, material ham tanlanmagan bo'lsa - qog'oz tayyor emas
+      paperReady = false;
     }
   }
 
@@ -75,6 +85,11 @@ export function evaluateOrderReadiness(
   let platesReady = Boolean(existingChecks.platesReady);
   if (audit.platesReady?.status === "blocked") {
     platesReady = false;
+  } else if (audit.platesReady?.verifiedBy) {
+    // Inson tomonidan qo'lda tasdiqlangan (Manual Override)
+    platesReady = audit.platesReady.status === "ready";
+  } else if (existingChecks.platesReady !== undefined) {
+    platesReady = Boolean(existingChecks.platesReady);
   } else if (!platesReady) {
     // Raqamli chop etish (Digital) yoki Post-press bo'lsa CTP plitasi kerak emas
     if (order.department === "Digital" || order.department === "Post-press") {
@@ -86,6 +101,11 @@ export function evaluateOrderReadiness(
   let toolingReady = Boolean(existingChecks.toolingReady);
   if (audit.toolingReady?.status === "blocked") {
     toolingReady = false;
+  } else if (audit.toolingReady?.verifiedBy) {
+    // Inson tomonidan qo'lda tasdiqlangan (Manual Override)
+    toolingReady = audit.toolingReady.status === "ready";
+  } else if (existingChecks.toolingReady !== undefined) {
+    toolingReady = Boolean(existingChecks.toolingReady);
   } else if (!toolingReady) {
     const shapeType = order.shapeType || order.dimensions?.shapeType || "rectangle";
     const customShape = order.customShape || order.dimensions?.customShape;

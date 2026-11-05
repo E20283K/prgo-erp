@@ -144,7 +144,7 @@ export interface OrderRow {
   readyCount: number;
   readinessLabel: string;
   priceTotal: number;
-  status: "Draft" | "Active" | "Completed" | "Cancelled";
+  status: "Draft" | "Active" | "In Production" | "Completed" | "Cancelled";
   priority: "Normal" | "Urgent" | "High";
   orderDate: string;
   startDate: string;
@@ -267,12 +267,12 @@ export function DataGrid() {
         }
       }
 
-      const evaluatedChecks = evaluateOrderReadiness(wo, warehouseStock || []);
+      const checks = wo.checks || evaluateOrderReadiness(wo, warehouseStock || []);
       const readyCount =
-        (evaluatedChecks.designReady ? 1 : 0) +
-        (evaluatedChecks.paperReady ? 1 : 0) +
-        (evaluatedChecks.platesReady ? 1 : 0) +
-        (evaluatedChecks.toolingReady ? 1 : 0);
+        (checks.designReady ? 1 : 0) +
+        (checks.paperReady ? 1 : 0) +
+        (checks.platesReady ? 1 : 0) +
+        (checks.toolingReady ? 1 : 0);
       const readinessLabel = `${readyCount}/4`;
 
       return {
@@ -317,6 +317,7 @@ export function DataGrid() {
 
   const otherStatuses = useMemo(
     () => [
+      { key: "In Production", label: "In Production" },
       { key: "Completed", label: tCommon("statusCompleted") },
       { key: "Cancelled", label: tCommon("statusCancelled") },
     ],
@@ -346,7 +347,10 @@ export function DataGrid() {
         r.readinessLabel.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.sampleStatusLabel.toLowerCase().includes(searchFilter.toLowerCase());
 
-      const matchesStatus = statusFilter === "ALL" || r.status === statusFilter;
+      const matchesStatus =
+        statusFilter === "ALL" ||
+        r.status === statusFilter ||
+        (statusFilter === "Active" && r.status === "In Production");
       const matchesTech =
         techFilter === "ALL" ||
         (r.department &&
@@ -697,14 +701,14 @@ export function DataGrid() {
           allowOverlay: true,
           themeOverride: {
             textDark: isDark
-              ? rowData.status === "Active"
+              ? rowData.status === "Active" || rowData.status === "In Production"
                 ? "#4ade80"
                 : rowData.status === "Completed"
                 ? "#38bdf8"
                 : rowData.status === "Cancelled"
                 ? "#f87171"
                 : "#facc15"
-              : rowData.status === "Active"
+              : rowData.status === "Active" || rowData.status === "In Production"
                 ? "#15803d"
                 : rowData.status === "Completed"
                 ? "#0369a1"
@@ -1180,6 +1184,7 @@ export function DataGrid() {
           </ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-40 text-xs">
             <ContextMenuItem onClick={() => setStatusFilter("Active")}>{tCommon("statusActive")}</ContextMenuItem>
+            <ContextMenuItem onClick={() => setStatusFilter("In Production")}>In Production</ContextMenuItem>
             <ContextMenuItem onClick={() => setStatusFilter("Draft")}>{tCommon("statusDraft")}</ContextMenuItem>
             <ContextMenuItem onClick={() => setStatusFilter("Completed")}>{tCommon("statusCompleted")}</ContextMenuItem>
             <ContextMenuItem onClick={() => setStatusFilter("Cancelled")}>{tCommon("statusCancelled")}</ContextMenuItem>
@@ -1207,11 +1212,13 @@ export function DataGrid() {
         </ContextMenuItem>
       </ContextMenuContent>
 
-      <WorkOrdersPrintModal
-        open={isPrintModalOpen}
-        onOpenChange={setIsPrintModalOpen}
-        rows={rows}
-      />
+      {isPrintModalOpen && (
+        <WorkOrdersPrintModal
+          open={isPrintModalOpen}
+          onOpenChange={setIsPrintModalOpen}
+          rows={rows}
+        />
+      )}
 
       {/* ── Delete / Cancel Work Order Modal ── */}
       <Dialog open={isDeleteModalOpen} onOpenChange={(open) => !isDeleting && setIsDeleteModalOpen(open)}>

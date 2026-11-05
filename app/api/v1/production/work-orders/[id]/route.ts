@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { deleteWorkOrder } from "@/lib/server/workOrderService";
+import { deleteWorkOrder, updateWorkOrderReadiness } from "@/lib/server/workOrderService";
 import { validateSession } from "@/lib/server/authService";
 
 export const dynamic = "force-dynamic";
@@ -94,6 +94,63 @@ export async function DELETE(
       {
         success: false,
         error: error instanceof Error ? error.message : "Buyurtmani o'chirishda xatolik yuz berdi",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await context.params;
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: "Buyurtma identifikatori ko'rsatilmadi" },
+        { status: 400 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const companyCode = searchParams.get("company") ?? "PRINTGOO";
+
+    let sessionUser: any = null;
+    try {
+      const cookieStore = await cookies();
+      const token =
+        cookieStore.get("printgoo_session")?.value ||
+        request.headers.get("authorization")?.replace("Bearer ", "");
+      if (token) {
+        sessionUser = await validateSession(token);
+      }
+    } catch (_) {}
+
+    const body = await request.json().catch(() => ({}));
+    const authorPayload =
+      body.author ||
+      (sessionUser
+        ? {
+            id: sessionUser.id,
+            name: sessionUser.fullName || sessionUser.username || sessionUser.name || "Operator",
+            role: sessionUser.role || "Operator",
+          }
+        : undefined);
+
+    const result = await updateWorkOrderReadiness(
+      id,
+      body,
+      companyCode,
+      authorPayload
+    );
+
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Buyurtmani yangilashda xatolik yuz berdi",
       },
       { status: 500 }
     );

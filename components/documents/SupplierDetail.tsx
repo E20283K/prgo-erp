@@ -422,6 +422,7 @@ export function SupplierDetail({ tab }: { tab: DocumentTab }) {
             <TabsContent value="orders" className="m-0 h-full p-0 flex flex-col overflow-hidden">
               <SupplierOrdersTab
                 supplier={form}
+                isActive={activeTab === "orders"}
                 onRefreshOrders={() => {
                   loadSuppliers();
                   fetchLedger();

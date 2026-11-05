@@ -14,7 +14,6 @@ import {
   ShiftRecord,
   BiometricDeviceRecord,
 } from "@/components/documents/hr/types";
-import { getMaterialImage } from "@/lib/materialImages";
 import { getUserInitials } from "@/lib/utils";
 import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
 import type { SystemUserRecord } from "@/components/documents/user/types";
@@ -340,6 +339,9 @@ export interface WarehouseStockRecord {
   available: number;
   reorder: number;
   unitPriceUsd: number;
+  unitPriceUzs?: number;
+  unitPrice?: number;
+  currency?: "USD" | "UZS";
   lastReceived: string;
   status: "In Stock" | "Low Stock" | "Critical";
   isOffcut?: boolean;
@@ -1974,7 +1976,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isTradingLoading: false,
 
   loadTradingData: async (type, companyCode = "PRINTGOO") => {
-    if (get().isTradingLoading) return;
     set({ isTradingLoading: true });
     try {
       if (type === "sales") {
@@ -2183,6 +2184,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const json = await res.json();
       if (json.success && json.data) {
         get().loadTradingData("ytt-limits", companyCode);
+        get().loadCompanies();
         return json.data;
       }
     } catch (err) {
@@ -2383,6 +2385,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               .concat(savedComp),
           }));
           await get().loadCompanies();
+          await get().loadTradingData("ytt-limits");
           return savedComp;
         }
       }
@@ -2404,6 +2407,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           set((state) => ({
             companiesList: state.companiesList.filter((c) => c.id !== id),
           }));
+          get().loadTradingData("ytt-limits");
           return true;
         }
       }
@@ -3006,9 +3010,38 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           : available <= stock.reorder
           ? "Low Stock"
           : "In Stock";
+
+      const cur: "USD" | "UZS" = stock.currency || (stock.unitPriceUzs && !stock.unitPriceUsd ? "UZS" : "USD");
+      const rate = 12850;
+      let pUsd = Number(stock.unitPriceUsd) || 0;
+      let pUzs = Number(stock.unitPriceUzs) || 0;
+      let pBase = Number(stock.unitPrice);
+
+      if (cur === "UZS") {
+        if (!pBase && pUzs) pBase = pUzs;
+        if (!pBase && !pUzs && pUsd) {
+          pBase = Math.round(pUsd * rate);
+          pUzs = pBase;
+        }
+        pUzs = pBase || pUzs;
+        pUsd = pUsd || (pUzs ? Number((pUzs / rate).toFixed(4)) : 0);
+      } else {
+        if (!pBase && pUsd) pBase = pUsd;
+        if (!pBase && !pUsd && pUzs) {
+          pBase = Number((pUzs / rate).toFixed(4));
+          pUsd = pBase;
+        }
+        pUsd = pBase || pUsd;
+        pUzs = pUzs || Math.round(pUsd * rate);
+      }
+
       const normalized: WarehouseStockRecord = {
         ...stock,
-        imageUrl: stock.imageUrl || getMaterialImage(stock),
+        currency: cur,
+        unitPrice: pBase || (cur === "UZS" ? pUzs : pUsd),
+        unitPriceUsd: pUsd,
+        unitPriceUzs: pUzs,
+        imageUrl: stock.imageUrl || undefined,
         available,
         status: computedStatus,
       };
@@ -3366,7 +3399,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           parentMaterialSku: payload.parentSku,
           cutDimensions: payload.cutDimensions,
           sourceWorkOrder: payload.workOrderId,
-          imageUrl: getMaterialImage({ isOffcut: true, name: offcutName, sku: offcutSku }),
+          imageUrl: undefined,
         };
         updatedStockList = [newOffcut, ...state.warehouseStock];
       }
@@ -3487,7 +3520,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
     }),
 
-  toggleReadinessCheck: (idOrWoOrCo, checkKey, auditMeta) =>
+  toggleReadinessCheck: (idOrWoOrCo, checkKey, auditMeta) => {
+    let targetDocNo = "";
+    let nextChecksToPersist: ProductionReadinessChecks | undefined;
+    let nextStageToPersist: ProductionQueueStage | undefined;
+
     set((state) => {
       const matchKey = idOrWoOrCo.trim().toLowerCase();
       let changedItemTitle = "";
@@ -3500,6 +3537,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const updated = state.productionQueue.map((item) => {
         const isMatch =
           item.id.toLowerCase() === matchKey ||
+          (item.docNo && item.docNo.toLowerCase() === matchKey) ||
           (item.clientOrderId && item.clientOrderId.toLowerCase() === matchKey);
         if (!isMatch) return item;
 
@@ -3531,6 +3569,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           nextVal = false;
           nextAuditRecord = {
             status: "pending",
+            verifiedBy: auditMeta.verifiedBy || "Operator",
+            verifiedAt: nowTime,
           };
         } else {
           // Standard toggle
@@ -3552,12 +3592,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
                 }
               : {
                   status: "pending",
+                  verifiedBy: auditMeta?.verifiedBy || "Operator",
+                  verifiedAt: nowTime,
                 };
           }
         }
 
         newCheckVal = nextVal;
         changedItemTitle = item.id;
+        targetDocNo = item.docNo || item.id;
 
         const nextChecks: ProductionReadinessChecks = {
           ...item.checks,
@@ -3582,10 +3625,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           nextStage = "Queue";
         }
 
+        nextChecksToPersist = nextChecks;
+        nextStageToPersist = nextStage;
+
         return {
           ...item,
           checks: nextChecks,
           stage: nextStage,
+        };
+      });
+
+      // Synchronize open tabs documentData for seamless consistency
+      const updatedTabs = state.tabs.map((tab) => {
+        const isTabMatch =
+          tab.id.toLowerCase() === matchKey ||
+          (tab.documentData?.docNo && tab.documentData.docNo.toLowerCase() === matchKey) ||
+          (tab.documentData?.id && tab.documentData.id.toLowerCase() === matchKey);
+        if (!isTabMatch || !nextChecksToPersist) return tab;
+        return {
+          ...tab,
+          documentData: {
+            ...(tab.documentData || {}),
+            checks: nextChecksToPersist,
+            stage: nextStageToPersist,
+          },
         };
       });
 
@@ -3610,11 +3673,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
       return {
         productionQueue: updated,
+        tabs: updatedTabs,
         notifications: notifs,
       };
-    }),
+    });
 
-  setProductionStage: (idOrWoOrCo, stage) =>
+    if (targetDocNo && !targetDocNo.startsWith("draft-") && !targetDocNo.startsWith("temp-")) {
+      fetch(`/api/v1/production/work-orders/${encodeURIComponent(targetDocNo)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checks: nextChecksToPersist,
+          stage: nextStageToPersist,
+        }),
+      }).catch((err) => {
+        console.error("Failed to persist readiness checks:", err);
+      });
+    }
+  },
+
+  setProductionStage: (idOrWoOrCo, stage) => {
+    let targetDocNo = "";
+    let completedSheetsToPersist: number | undefined;
+    let actualEndDateToPersist: string | undefined;
+
     set((state) => {
       const matchKey = idOrWoOrCo.trim().toLowerCase();
       let changedItem: ProductionQueueItem | undefined;
@@ -3622,9 +3704,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const updated = state.productionQueue.map((item) => {
         const isMatch =
           item.id.toLowerCase() === matchKey ||
+          (item.docNo && item.docNo.toLowerCase() === matchKey) ||
           (item.clientOrderId && item.clientOrderId.toLowerCase() === matchKey);
         if (!isMatch) return item;
         changedItem = item;
+        targetDocNo = item.docNo || item.id;
 
         let completedSheets = item.completedSheets;
         if (stage === "Completed" && item.plannedSheets) {
@@ -3639,11 +3723,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             ? undefined
             : item.actualEndDate;
 
+        completedSheetsToPersist = completedSheets;
+        actualEndDateToPersist = actualEndDate;
+
         return {
           ...item,
           stage,
           completedSheets,
           actualEndDate,
+        };
+      });
+
+      // Synchronize open tabs documentData for seamless consistency
+      const updatedTabs = state.tabs.map((tab) => {
+        const isTabMatch =
+          tab.id.toLowerCase() === matchKey ||
+          (tab.documentData?.docNo && tab.documentData.docNo.toLowerCase() === matchKey) ||
+          (tab.documentData?.id && tab.documentData.id.toLowerCase() === matchKey);
+        if (!isTabMatch) return tab;
+        return {
+          ...tab,
+          documentData: {
+            ...(tab.documentData || {}),
+            stage,
+          },
         };
       });
 
@@ -3664,22 +3767,75 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
       return {
         productionQueue: updated,
+        tabs: updatedTabs,
         notifications: notifs,
       };
-    }),
+    });
 
-  updateQueueMachine: (idOrWoOrCo, machine) =>
+    if (targetDocNo && !targetDocNo.startsWith("draft-") && !targetDocNo.startsWith("temp-")) {
+      fetch(`/api/v1/production/work-orders/${encodeURIComponent(targetDocNo)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage,
+          completedSheets: completedSheetsToPersist,
+          actualEndDate: actualEndDateToPersist,
+        }),
+      }).catch((err) => {
+        console.error("Failed to persist production stage:", err);
+      });
+    }
+  },
+
+  updateQueueMachine: (idOrWoOrCo, machine) => {
+    let targetDocNo = "";
     set((state) => {
       const matchKey = idOrWoOrCo.trim().toLowerCase();
+      const updatedQueue = state.productionQueue.map((item) => {
+        const isMatch =
+          item.id.toLowerCase() === matchKey ||
+          (item.docNo && item.docNo.toLowerCase() === matchKey) ||
+          (item.clientOrderId && item.clientOrderId.toLowerCase() === matchKey);
+        if (isMatch) {
+          targetDocNo = item.docNo || item.id;
+          return { ...item, pressMachine: machine };
+        }
+        return item;
+      });
+
+      const updatedTabs = state.tabs.map((tab) => {
+        const isTabMatch =
+          tab.id.toLowerCase() === matchKey ||
+          (tab.documentData?.docNo && tab.documentData.docNo.toLowerCase() === matchKey) ||
+          (tab.documentData?.id && tab.documentData.id.toLowerCase() === matchKey);
+        if (!isTabMatch) return tab;
+        return {
+          ...tab,
+          documentData: {
+            ...(tab.documentData || {}),
+            pressMachine: machine,
+          },
+        };
+      });
+
       return {
-        productionQueue: state.productionQueue.map((item) => {
-          const isMatch =
-            item.id.toLowerCase() === matchKey ||
-            (item.clientOrderId && item.clientOrderId.toLowerCase() === matchKey);
-          return isMatch ? { ...item, pressMachine: machine } : item;
-        }),
+        productionQueue: updatedQueue,
+        tabs: updatedTabs,
       };
-    }),
+    });
+
+    if (targetDocNo && !targetDocNo.startsWith("draft-") && !targetDocNo.startsWith("temp-")) {
+      fetch(`/api/v1/production/work-orders/${encodeURIComponent(targetDocNo)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pressMachine: machine,
+        }),
+      }).catch((err) => {
+        console.error("Failed to persist queue machine:", err);
+      });
+    }
+  },
 
   reorderQueueOrder: (idOrWoOrCo, direction) =>
     set((state) => {
@@ -3721,17 +3877,47 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (!item.id || item.id.startsWith("draft-") || item.id.startsWith("temp-")) {
         return state;
       }
-      const exists = state.productionQueue.some((i) => i.id === item.id);
-      if (exists) {
+      const matchKey = (item.docNo || item.id).trim().toLowerCase();
+      const existsIndex = state.productionQueue.findIndex(
+        (i) =>
+          i.id.toLowerCase() === matchKey ||
+          (i.docNo && i.docNo.toLowerCase() === matchKey) ||
+          (item.id && i.id.toLowerCase() === item.id.toLowerCase()) ||
+          (item.docNo && i.id.toLowerCase() === item.docNo.toLowerCase()) ||
+          (item.clientOrderId && i.clientOrderId && i.clientOrderId.toLowerCase() === item.clientOrderId.toLowerCase())
+      );
+
+      if (existsIndex !== -1) {
+        const existing = state.productionQueue[existsIndex];
+        const mergedChecks: ProductionReadinessChecks = item.checks
+          ? {
+              designReady: item.checks.designReady !== undefined ? !!item.checks.designReady : !!existing.checks?.designReady,
+              paperReady: item.checks.paperReady !== undefined ? !!item.checks.paperReady : !!existing.checks?.paperReady,
+              platesReady: item.checks.platesReady !== undefined ? !!item.checks.platesReady : !!existing.checks?.platesReady,
+              toolingReady: item.checks.toolingReady !== undefined ? !!item.checks.toolingReady : !!existing.checks?.toolingReady,
+              audit: {
+                ...(existing.checks?.audit || {}),
+                ...(item.checks.audit || {}),
+              },
+            }
+          : existing.checks;
+
+        const updatedQueue = [...state.productionQueue];
+        updatedQueue[existsIndex] = {
+          ...existing,
+          ...item,
+          stage: item.stage || existing.stage,
+          checks: mergedChecks,
+        } as ProductionQueueItem;
+
         return {
-          productionQueue: state.productionQueue.map((i) =>
-            i.id === item.id ? ({ ...i, ...item } as ProductionQueueItem) : i
-          ),
+          productionQueue: updatedQueue,
         };
       }
       const newItem: ProductionQueueItem = {
         ...item,
-        id: item.id,
+        id: item.docNo || item.id,
+        docNo: item.docNo || item.id,
         customer: item.customer || "New Customer",
         product: item.product || "Print Job",
         quantity: item.quantity || 1000,
@@ -4181,35 +4367,92 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setTabToConfirmClose: (tab) => set({ tabToConfirmClose: tab }),
 
   requestCloseTab: (id) => {
-    const tab = get().tabs.find((t) => t.id === id);
+    if (!id) return;
+    const matchKey = id.trim().toLowerCase();
+    const tab = get().tabs.find(
+      (t) =>
+        t.id === id ||
+        t.id.toLowerCase() === matchKey ||
+        (t.documentData?.docNo && t.documentData.docNo.toLowerCase() === matchKey) ||
+        (t.documentData?.id && t.documentData.id.toLowerCase() === matchKey)
+    );
     if (!tab) return;
     if (tab.isUnsaved) {
       set({ tabToConfirmClose: tab });
     } else {
-      get().closeTab(id);
+      get().closeTab(tab.id);
     }
   },
 
   closeTab: (id) =>
     set((state) => {
+      if (!id) return state;
+      const matchKey = id.trim().toLowerCase();
+      if (!matchKey) return state;
+
       // Keep at least the primary registry tab open so workspace is never empty
-      if (state.tabs.length === 1 && state.tabs[0].id === id && state.tabs[0].type === "registry") {
+      if (
+        state.tabs.length === 1 &&
+        (state.tabs[0].id.toLowerCase() === matchKey || state.tabs[0].id === id) &&
+        state.tabs[0].type === "registry"
+      ) {
         return state;
       }
-      const newTabs = state.tabs.filter((t) => t.id !== id);
-      let newActiveId = state.activeTabId;
-      if (state.activeTabId === id) {
-        const closedIndex = state.tabs.findIndex((t) => t.id === id);
-        const nextTab = newTabs[closedIndex] || newTabs[closedIndex - 1] || newTabs[0];
-        newActiveId = nextTab ? nextTab.id : "";
+
+      const targetTab = state.tabs.find(
+        (t) =>
+          t.id === id ||
+          t.id.toLowerCase() === matchKey ||
+          (t.documentData?.docNo && t.documentData.docNo.toLowerCase() === matchKey) ||
+          (t.documentData?.id && t.documentData.id.toLowerCase() === matchKey)
+      );
+
+      const targetId = targetTab ? targetTab.id : id;
+      let newTabs = state.tabs.filter(
+        (t) =>
+          t.id !== targetId &&
+          t.id !== id &&
+          t.id.toLowerCase() !== matchKey &&
+          (!t.documentData?.docNo || t.documentData.docNo.toLowerCase() !== matchKey)
+      );
+
+      // If all tabs were closed, always fall back to the main work orders registry
+      if (newTabs.length === 0) {
+        newTabs = [
+          {
+            id: "registry-work-orders",
+            title: "Work Orders (Registry)",
+            type: "registry",
+            module: state.activeModule || "production",
+            isUnsaved: false,
+          },
+        ];
       }
+
+      let newActiveId = state.activeTabId;
+      const activeNeedsSwitch =
+        state.activeTabId === id ||
+        state.activeTabId === targetId ||
+        state.activeTabId.toLowerCase() === matchKey ||
+        !newTabs.some((t) => t.id === state.activeTabId);
+
+      if (activeNeedsSwitch) {
+        const closedIndex = state.tabs.findIndex((t) => t.id === targetId || t.id === id);
+        const nextTab = newTabs[closedIndex] || newTabs[closedIndex - 1] || newTabs[0];
+        newActiveId = nextTab ? nextTab.id : newTabs[0].id;
+      }
+
       return {
         tabs: newTabs,
         activeTabId: newActiveId,
-        productionQueue: id.startsWith("draft-") || id.startsWith("temp-")
-          ? state.productionQueue.filter((q) => q.id !== id)
-          : state.productionQueue,
-        tabToConfirmClose: state.tabToConfirmClose?.id === id ? null : state.tabToConfirmClose,
+        productionQueue:
+          id.startsWith("draft-") || id.startsWith("temp-") || targetId.startsWith("draft-") || targetId.startsWith("temp-")
+            ? state.productionQueue.filter((q) => q.id !== id && q.id !== targetId)
+            : state.productionQueue,
+        tabToConfirmClose:
+          state.tabToConfirmClose?.id === id || state.tabToConfirmClose?.id === targetId
+            ? null
+            : state.tabToConfirmClose,
       };
     }),
 

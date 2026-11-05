@@ -29,6 +29,8 @@ interface MaterialsTabProps {
   onSaveAsSpec?: (items: any[]) => void;
   onItemsChange?: (items: any[]) => void;
   initialItems?: any[];
+  currency?: string;
+  exchangeRate?: number;
 }
 
 export function MaterialsTab({
@@ -42,6 +44,8 @@ export function MaterialsTab({
   onSaveAsSpec,
   onItemsChange,
   initialItems,
+  currency,
+  exchangeRate,
 }: MaterialsTabProps) {
   return (
     <TabsContent value="materials" className="flex-1 overflow-hidden p-0 m-0 h-full flex flex-col data-[state=inactive]:hidden">
@@ -56,6 +60,8 @@ export function MaterialsTab({
         isOperator={isOperator}
         onSaveAsSpec={onSaveAsSpec}
         onItemsChange={onItemsChange}
+        currency={currency}
+        exchangeRate={exchangeRate}
       />
     </TabsContent>
   );

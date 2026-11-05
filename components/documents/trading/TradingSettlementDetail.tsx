@@ -44,6 +44,8 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
     theme,
     tradingSettlements,
     tradingYttEntities,
+    companiesList,
+    loadCompanies,
     crmCustomers,
     loadCrmCustomers,
     loadTradingData,
@@ -61,6 +63,9 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
     }
     if (!tradingYttEntities || tradingYttEntities.length === 0) {
       loadTradingData("ytt-limits");
+    }
+    if (!companiesList || companiesList.length === 0) {
+      loadCompanies();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -81,13 +86,64 @@ export function TradingSettlementDetail({ tab }: { tab: DocumentTab }) {
   }, [customerName, crmCustomers]);
 
   const availableEntities = useMemo(() => {
-    return tradingYttEntities;
-  }, [tradingYttEntities]);
+    if (tradingYttEntities && tradingYttEntities.length > 0) {
+      return tradingYttEntities;
+    }
+    if (companiesList && companiesList.length > 0) {
+      return companiesList.map((c) => {
+        const isYtt = c.legalType === "YTT";
+        const limit = isYtt ? Number(c.annualLimitUzs) || 1_000_000_000 : 999_999_999_999;
+        const current = Number(c.currentTurnoverUzs) || 0;
+        const pct = isYtt && limit > 0 ? Number(((current / limit) * 100).toFixed(2)) : 0;
+        const status: "Safe" | "Warning" | "Critical" | "Unlimited" = isYtt
+          ? pct >= 95
+            ? "Critical"
+            : pct >= 80
+            ? "Warning"
+            : "Safe"
+          : "Unlimited";
+        return {
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          legalType: (isYtt ? "YTT" : "MChJ") as "YTT" | "MChJ",
+          inn: c.inn || "",
+          bankName: c.bankName || "",
+          bankAccount: c.bankAccount || "",
+          annualLimit: limit,
+          currentTurnover: current,
+          currency: "UZS" as const,
+          turnoverPercent: pct,
+          status,
+          isRecommended: isYtt ? pct < 70 : false,
+          activeContractsCount: 0,
+          notes: c.notes || "",
+        };
+      });
+    }
+    return [];
+  }, [tradingYttEntities, companiesList]);
 
   const selectedEntity = useMemo(() => {
     return (
       availableEntities.find((e) => e.id === selectedEntityId || e.code === selectedEntityId) ||
-      availableEntities[0]
+      availableEntities[0] || {
+        id: selectedEntityId || "org-default",
+        code: "ORG",
+        name: "Asosiy Tashkilot",
+        legalType: "MChJ" as const,
+        inn: "",
+        bankName: "",
+        bankAccount: "",
+        annualLimit: 999_999_999_999,
+        currentTurnover: 0,
+        currency: "UZS" as const,
+        turnoverPercent: 0,
+        status: "Unlimited" as const,
+        isRecommended: false,
+        activeContractsCount: 0,
+        notes: "",
+      }
     );
   }, [selectedEntityId, availableEntities]);
 

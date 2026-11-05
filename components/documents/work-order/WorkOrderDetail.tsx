@@ -43,6 +43,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   DropdownMenu,
@@ -146,10 +154,12 @@ function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string)
   // Offset uchun CTP formalar faqat Imposition ("Montaj / Hisob") bo'limida
   // "Buyurtmaga qo'llash" tugmasi bosilgandan keyin haqiqiy qolip formati va soni bilan shakllanadi.
   if (dept === "Flexo") {
+    const isDraftDocNo = !docNo || docNo.startsWith("draft-") || docNo.startsWith("temp-");
+    const cleanDocNo = !isDraftDocNo ? docNo : (data.product || "WO");
     items.push({
       id: `TL-FLX-${Date.now()}`,
       category: "flexo_polymer",
-      name: `${docNo || "WO"} Flexo Polimer Formalar`,
+      name: `${cleanDocNo} Flexo Polimer Formalar`,
       specDetails: `Digital Plate 1.14mm, ${data.flexoColors || 4} rang`,
       quantity: data.flexoColors || 4,
       unit: "dona",
@@ -223,7 +233,14 @@ export function syncBomWithSpecs(
   form: Partial<WorkOrderFormData>,
   stockList: WarehouseStockRecord[] = []
 ): BomItem[] {
-  let items = [...bomItems];
+  // Always sanitize and strip any legacy random mock items (e.g. MAT-LAM-8673, MAT-COAT-7971)
+  let items = bomItems.filter(
+    (i) =>
+      !i.id.match(/^MAT-(LAM|COAT|EMB)-\d{4}$/) ||
+      i.id === form.laminationStockSku ||
+      i.id === form.coatingStockSku ||
+      i.id === form.embellishmentStockSku
+  );
   const paperName = form.paperStock?.trim();
   const targetQty = Number(form.quantity) || 0;
   const targetSheets = Number((form as any).plannedSheets) || 0;
@@ -318,74 +335,269 @@ export function syncBomWithSpecs(
     }
   }
 
-  // Lamination sync
+  // 2. Lamination sync (Only sync to BOM when a real warehouse stock item is selected)
   const lam = form.lamination;
   const isLamActive = Boolean(
     lam && lam !== "none" && lam !== "None / Uncoated" && lam !== "None"
   );
-  const lamIdx = items.findIndex(
-    (i) =>
-      i.category === "Foil & Film" ||
-      i.name.toLowerCase().includes("film") ||
-      i.name.toLowerCase().includes("lamination")
-  );
 
-  if (isLamActive && targetQty > 0) {
-    const lamMeter = Math.ceil(
-      requiredPaperSheets * (Number(form.laminationSides === "2s" ? 2 : 1) * 0.72)
+  if (!isLamActive || !form.laminationStockSku) {
+    items = items.filter(
+      (i) =>
+        !i.id.startsWith("MAT-LAM") &&
+        !(i.category === "Foil & Film" && (i.name.toLowerCase().includes("film") || i.name.toLowerCase().includes("laminat")))
     );
-    const lamName = `${lam} Film`;
-    const lamSpec = `BOPP ${form.laminationMicron || 30}µm, ${form.laminationSides || "1s"}`;
-    const wsLam = stockList.find(
-      (s) =>
-        (s.category === "Foil & Film" ||
-          s.name.toLowerCase().includes("film") ||
-          s.name.toLowerCase().includes("laminat")) &&
-        s.unitPriceUsd
-    );
-    const lamPrice = wsLam?.unitPriceUsd
-      ? Number(wsLam.unitPriceUsd)
-      : lamIdx >= 0 && items[lamIdx].unitPrice > 0
-      ? items[lamIdx].unitPrice
-      : 0;
-
-    if (lamIdx >= 0) {
-      const ex = items[lamIdx];
-      const planQty = lamMeter;
-      const actualQty =
-        ex.actualQty > 0 && ex.actualQty !== ex.planQty ? ex.actualQty : planQty;
-      items[lamIdx] = {
-        ...ex,
-        name: lamName,
-        spec: lamSpec,
-        category: "Foil & Film",
-        planQty,
-        actualQty,
-        qty: actualQty,
-        unit: "m",
-        unitPrice: ex.unitPrice || lamPrice,
-        totalPrice: Number((actualQty * (ex.unitPrice || lamPrice)).toFixed(2)),
-      };
+  } else if (targetQty > 0) {
+    const wsLam = stockList.find((s) => s.sku === form.laminationStockSku);
+    if (!wsLam) {
+      items = items.filter(
+        (i) =>
+          !i.id.startsWith("MAT-LAM") &&
+          !(i.category === "Foil & Film" && (i.name.toLowerCase().includes("film") || i.name.toLowerCase().includes("laminat")))
+      );
     } else {
-      const newLam: BomItem = {
-        id: `MAT-LAM-${Date.now().toString().slice(-4)}`,
-        name: lamName,
-        spec: lamSpec,
-        category: "Foil & Film",
-        planQty: lamMeter,
-        actualQty: lamMeter,
-        wasteQty: 0,
-        qty: lamMeter,
-        unit: "m",
-        unitPrice: lamPrice,
-        totalPrice: Number((lamMeter * lamPrice).toFixed(2)),
-        supplier: "Ombor / Ta'minot",
-        availability: "In Stock",
-        issueType: "standard",
-        faultParty: "none",
-        sourceType: "warehouse",
-      };
-      items.push(newLam);
+      // Remove any legacy mock lamination items
+      items = items.filter((i) => !i.id.startsWith("MAT-LAM") || i.id === wsLam.sku);
+      const lamMeter = Math.ceil(
+        requiredPaperSheets * (Number(form.laminationSides === "2s" ? 2 : 1) * 0.72)
+      );
+      const lamName = wsLam.name || (form.laminationStockName || `${lam} Film`);
+      const lamSpec = wsLam.sheetFormat || `BOPP ${form.laminationMicron || 24}µm, ${form.laminationSides || "1s"}`;
+      const lamPrice = wsLam.unitPriceUsd
+        ? Number(wsLam.unitPriceUsd)
+        : wsLam.unitPriceUzs
+        ? Number((wsLam.unitPriceUzs / 12850).toFixed(4))
+        : 0;
+
+      const lamItemId = wsLam.sku;
+      const lamIdx = items.findIndex((i) => i.id === wsLam.sku);
+
+      if (lamIdx >= 0) {
+        const ex = items[lamIdx];
+        const planQty = lamMeter;
+        const actualQty =
+          ex.actualQty > 0 && ex.actualQty !== ex.planQty ? ex.actualQty : planQty;
+        items[lamIdx] = {
+          ...ex,
+          id: lamItemId,
+          name: lamName,
+          spec: lamSpec,
+          category: "Foil & Film",
+          planQty,
+          actualQty,
+          qty: actualQty,
+          unit: wsLam.unit || "m",
+          unitPrice: ex.unitPrice || lamPrice,
+          totalPrice: Number((actualQty * (ex.unitPrice || lamPrice)).toFixed(2)),
+          supplier: wsLam.supplier || ex.supplier || "Ombor",
+          availability: wsLam.status === "Critical" ? "Low Stock" : (wsLam.status || ex.availability || "In Stock"),
+          warehouseLocation: wsLam.location || ex.warehouseLocation || "SHELF-B1",
+          warehouseStockLevel: wsLam.stockLevel ?? ex.warehouseStockLevel,
+          warehouseAvailable: wsLam.available ?? ex.warehouseAvailable,
+        };
+      } else {
+        const newLam: BomItem = {
+          id: lamItemId,
+          name: lamName,
+          spec: lamSpec,
+          category: "Foil & Film",
+          planQty: lamMeter,
+          actualQty: lamMeter,
+          wasteQty: 0,
+          qty: lamMeter,
+          unit: wsLam.unit || "m",
+          unitPrice: lamPrice,
+          totalPrice: Number((lamMeter * lamPrice).toFixed(2)),
+          supplier: wsLam.supplier || "Ombor",
+          availability: wsLam.status === "Critical" ? "Low Stock" : (wsLam.status || "In Stock"),
+          issueType: "standard",
+          faultParty: "none",
+          warehouseLocation: wsLam.location || "SHELF-B1",
+          warehouseStockLevel: wsLam.stockLevel,
+          warehouseAvailable: wsLam.available,
+          sourceType: "warehouse",
+        };
+        items.push(newLam);
+      }
+    }
+  }
+
+  // 3. Coating (Lak) Sync (Only sync to BOM when a real warehouse stock item is selected)
+  const coat = form.coating;
+  const isCoatActive = Boolean(coat && coat !== "none" && coat !== "None");
+
+  if (!isCoatActive || !form.coatingStockSku) {
+    items = items.filter(
+      (i) =>
+        !i.id.startsWith("MAT-COAT") &&
+        !(i.category === "Inks & Plates" && (i.name.toLowerCase().includes("lak") || i.name.toLowerCase().includes("varnish") || i.name.toLowerCase().includes("uv")))
+    );
+  } else if (targetQty > 0) {
+    const wsCoat = stockList.find((s) => s.sku === form.coatingStockSku);
+    if (!wsCoat) {
+      items = items.filter(
+        (i) =>
+          !i.id.startsWith("MAT-COAT") &&
+          !(i.category === "Inks & Plates" && (i.name.toLowerCase().includes("lak") || i.name.toLowerCase().includes("varnish") || i.name.toLowerCase().includes("uv")))
+      );
+    } else {
+      // Remove any legacy mock coating items
+      items = items.filter((i) => !i.id.startsWith("MAT-COAT") || i.id === wsCoat.sku);
+      const parentW = Number(form.parentSheetW) || 700;
+      const parentH = Number(form.parentSheetH) || 1000;
+      const sheetM2 = (parentW * parentH) / 1000000;
+      const totalM2 = requiredPaperSheets * sheetM2;
+      const isSpot = coat ? (coat.toLowerCase().includes("spot") || coat.toLowerCase().includes("tanlanma")) : false;
+      const gsmRate = isSpot ? 2 : 5;
+      const coatKg = Math.max(0.5, Number(((totalM2 * gsmRate) / 1000).toFixed(2)));
+
+      const coatName = wsCoat.name || (form.coatingStockName || (coat ? `${coat} (Lak)` : "Lak"));
+      const coatSpec = form.coatingZone ? `Zona: ${form.coatingZone}` : ((wsCoat as any)?.spec || wsCoat.category || "Standart lak qoplami");
+      const coatPrice = wsCoat.unitPriceUsd
+        ? Number(wsCoat.unitPriceUsd)
+        : wsCoat.unitPriceUzs
+        ? Number((wsCoat.unitPriceUzs / 12850).toFixed(4))
+        : 0;
+
+      const coatItemId = wsCoat.sku;
+      const coatIdx = items.findIndex((i) => i.id === wsCoat.sku);
+
+      if (coatIdx >= 0) {
+        const ex = items[coatIdx];
+        const planQty = coatKg;
+        const actualQty = ex.actualQty > 0 && ex.actualQty !== ex.planQty ? ex.actualQty : planQty;
+        items[coatIdx] = {
+          ...ex,
+          id: coatItemId,
+          name: coatName,
+          spec: coatSpec,
+          category: "Inks & Plates",
+          planQty,
+          actualQty,
+          qty: actualQty,
+          unit: wsCoat.unit || "kg",
+          unitPrice: ex.unitPrice || coatPrice,
+          totalPrice: Number((actualQty * (ex.unitPrice || coatPrice)).toFixed(2)),
+          supplier: wsCoat.supplier || ex.supplier || "Ombor",
+          availability: wsCoat.status === "Critical" ? "Low Stock" : (wsCoat.status || ex.availability || "In Stock"),
+          warehouseLocation: wsCoat.location || ex.warehouseLocation || "SHELF-C1",
+          warehouseStockLevel: wsCoat.stockLevel ?? ex.warehouseStockLevel,
+          warehouseAvailable: wsCoat.available ?? ex.warehouseAvailable,
+        };
+      } else {
+        const newCoat: BomItem = {
+          id: coatItemId,
+          name: coatName,
+          spec: coatSpec,
+          category: "Inks & Plates",
+          planQty: coatKg,
+          actualQty: coatKg,
+          wasteQty: 0,
+          qty: coatKg,
+          unit: wsCoat.unit || "kg",
+          unitPrice: coatPrice,
+          totalPrice: Number((coatKg * coatPrice).toFixed(2)),
+          supplier: wsCoat.supplier || "Ombor",
+          availability: wsCoat.status === "Critical" ? "Low Stock" : (wsCoat.status || "In Stock"),
+          issueType: "standard",
+          faultParty: "none",
+          warehouseLocation: wsCoat.location || "SHELF-C1",
+          warehouseStockLevel: wsCoat.stockLevel,
+          warehouseAvailable: wsCoat.available,
+          sourceType: "warehouse",
+        };
+        items.push(newCoat);
+      }
+    }
+  }
+
+  // 4. Embellishment (Maxsus pardoz) Sync (Only sync to BOM when a real warehouse stock item is selected)
+  const emb = form.embellishment;
+  const isEmbActive = Boolean(emb && emb !== "none" && emb !== "None");
+  const isFoil = Boolean(emb && (emb.toLowerCase().includes("foil") || emb.toLowerCase().includes("folga")));
+
+  if (!isEmbActive || !form.embellishmentStockSku) {
+    items = items.filter(
+      (i) =>
+        !i.id.startsWith("MAT-EMB") &&
+        !((i.category === "Foil & Film" || i.category === "Inks & Plates") &&
+          (i.name.toLowerCase().includes("folga") || i.name.toLowerCase().includes("foil") || i.name.toLowerCase().includes("serigraf") || i.name.toLowerCase().includes("screen")))
+    );
+  } else if (targetQty > 0) {
+    const wsEmb = stockList.find((s) => s.sku === form.embellishmentStockSku);
+    if (!wsEmb) {
+      items = items.filter(
+        (i) =>
+          !i.id.startsWith("MAT-EMB") &&
+          !((i.category === "Foil & Film" || i.category === "Inks & Plates") &&
+            (i.name.toLowerCase().includes("folga") || i.name.toLowerCase().includes("foil") || i.name.toLowerCase().includes("serigraf") || i.name.toLowerCase().includes("screen")))
+      );
+    } else {
+      // Remove any legacy mock embellishment items
+      items = items.filter((i) => !i.id.startsWith("MAT-EMB") || i.id === wsEmb.sku);
+      const embQty = isFoil
+        ? Math.max(10, Math.ceil(requiredPaperSheets * 0.15))
+        : Math.max(0.5, Number(((requiredPaperSheets * 0.0005)).toFixed(2)));
+
+      const embUnit = wsEmb.unit || (isFoil ? "m" : "kg");
+      const embCategory = wsEmb.category || (isFoil ? "Foil & Film" : "Inks & Plates");
+      const embName = wsEmb.name || (form.embellishmentStockName || (emb || "Maxsus pardoz"));
+      const embSpec = form.embellishmentZone ? `Zona: ${form.embellishmentZone}` : ((wsEmb as any)?.spec || wsEmb.category || "Maxsus pardoz");
+      const embPrice = wsEmb.unitPriceUsd
+        ? Number(wsEmb.unitPriceUsd)
+        : wsEmb.unitPriceUzs
+        ? Number((wsEmb.unitPriceUzs / 12850).toFixed(4))
+        : 0;
+
+      const embItemId = wsEmb.sku;
+      const embIdx = items.findIndex((i) => i.id === wsEmb.sku);
+
+      if (embIdx >= 0) {
+        const ex = items[embIdx];
+        const planQty = embQty;
+        const actualQty = ex.actualQty > 0 && ex.actualQty !== ex.planQty ? ex.actualQty : planQty;
+        items[embIdx] = {
+          ...ex,
+          id: embItemId,
+          name: embName,
+          spec: embSpec,
+          category: embCategory,
+          planQty,
+          actualQty,
+          qty: actualQty,
+          unit: embUnit,
+          unitPrice: ex.unitPrice || embPrice,
+          totalPrice: Number((actualQty * (ex.unitPrice || embPrice)).toFixed(2)),
+          supplier: wsEmb.supplier || ex.supplier || "Ombor",
+          availability: wsEmb.status === "Critical" ? "Low Stock" : (wsEmb.status || ex.availability || "In Stock"),
+          warehouseLocation: wsEmb.location || ex.warehouseLocation || "SHELF-D1",
+          warehouseStockLevel: wsEmb.stockLevel ?? ex.warehouseStockLevel,
+          warehouseAvailable: wsEmb.available ?? ex.warehouseAvailable,
+        };
+      } else {
+        const newEmb: BomItem = {
+          id: embItemId,
+          name: embName,
+          spec: embSpec,
+          category: embCategory,
+          planQty: embQty,
+          actualQty: embQty,
+          wasteQty: 0,
+          qty: embQty,
+          unit: embUnit,
+          unitPrice: embPrice,
+          totalPrice: Number((embQty * embPrice).toFixed(2)),
+          supplier: wsEmb.supplier || "Ombor",
+          availability: wsEmb.status === "Critical" ? "Low Stock" : (wsEmb.status || "In Stock"),
+          issueType: "standard",
+          faultParty: "none",
+          warehouseLocation: wsEmb.location || "SHELF-D1",
+          warehouseStockLevel: wsEmb.stockLevel,
+          warehouseAvailable: wsEmb.available,
+          sourceType: "warehouse",
+        };
+        items.push(newEmb);
+      }
     }
   }
 
@@ -570,6 +782,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   useEffect(() => {
     const s = useWorkspaceStore.getState();
+    if (s.productionQueue.length === 0 && s.loadProductionQueue) {
+      s.loadProductionQueue();
+    }
     if (s.crmCustomers.length === 0 && s.loadCrmCustomers) {
       s.loadCrmCustomers();
     }
@@ -604,10 +819,26 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const isDraft = !docNo || tab.id.startsWith("draft-") || tab.id.startsWith("temp-");
 
-  const queueLookupKey = docNo || tab.id;
-  const initialQueueItem = useWorkspaceStore.getState().productionQueue.find((q) => q.id === queueLookupKey);
+  const queueLookupKey = (docNo || tab.id || "").trim().toLowerCase();
+  const initialQueueItem = useWorkspaceStore.getState().productionQueue.find((q) => {
+    return (
+      q.id?.toLowerCase() === queueLookupKey ||
+      (q.docNo && q.docNo.toLowerCase() === queueLookupKey) ||
+      (q.clientOrderId && q.clientOrderId.toLowerCase() === queueLookupKey)
+    );
+  });
   const queueItem = useWorkspaceStore(
-    useCallback((s) => s.productionQueue.find((q) => q.id === queueLookupKey), [queueLookupKey])
+    useCallback(
+      (s) =>
+        s.productionQueue.find((q) => {
+          return (
+            q.id?.toLowerCase() === queueLookupKey ||
+            (q.docNo && q.docNo.toLowerCase() === queueLookupKey) ||
+            (q.clientOrderId && q.clientOrderId.toLowerCase() === queueLookupKey)
+          );
+        }),
+      [queueLookupKey]
+    )
   );
 
   const effectivePhotoUrl = data.photoUrl || (data.photoUrls && data.photoUrls[0]) || initialQueueItem?.photoUrl || (initialQueueItem?.photoUrls && initialQueueItem?.photoUrls[0]) || "";
@@ -664,8 +895,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleRequestDelete = () => {
     if (!canDelete) {
       addNotification({
-        title: "Huquq yetarli emas",
-        description: "Buyurtmani o'chirish yoki bekor qilish uchun huquqingiz yetarli emas (production.delete talab qilinadi).",
+        title: tOrder("insufficientPermissionTitle"),
+        description: tOrder("insufficientPermissionDesc"),
         severity: "error",
       });
       return;
@@ -675,8 +906,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (currentTargetId.startsWith("draft-") || currentTargetId.startsWith("temp-")) {
       closeTab(tab.id);
       addNotification({
-        title: "Qoralama yopildi",
-        description: "Saqlanmagan qoralama buyurtma bekor qilindi.",
+        title: tOrder("draftClosedTitle"),
+        description: tOrder("draftClosedDesc"),
         severity: "info",
       });
       return;
@@ -698,10 +929,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       const res = await deleteWorkOrderAsync(targetDocNo, deleteMode, deleteReason);
       if (res.success) {
         addNotification({
-          title: res.mode === "deleted" ? "Buyurtma o'chirildi" : "Buyurtma bekor qilindi",
+          title: res.mode === "deleted" ? tOrder("orderDeletedTitle") : tOrder("orderCancelledTitle"),
           description:
             res.message ||
-            `${targetDocNo} muvaffaqiyatli ${res.mode === "deleted" ? "bazadan butunlay tozalab tashlandi" : "bekor qilindi"}.`,
+            `${targetDocNo} ${res.mode === "deleted" ? tOrder("orderDeletedTitle") : tOrder("orderCancelledTitle")}.`,
           severity: "success",
           channel: "toast",
         });
@@ -739,7 +970,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     recipe: data.recipe || initialQueueItem?.recipe || "",
     quantity: data.quantity || initialQueueItem?.quantity || 0,
     unit: data.unit || initialQueueItem?.unit || "pcs",
-    status: data.status || initialQueueItem?.stage || "Draft",
+    status: data.status || (initialQueueItem?.stage === "In Production" ? "In Production" : "Draft"),
+    stage: (data as any).stage || initialQueueItem?.stage || "Queue",
+    checks: data.checks || initialQueueItem?.checks || {
+      designReady: false,
+      paperReady: false,
+      platesReady: false,
+      toolingReady: false,
+    },
     priority: data.priority || initialQueueItem?.priority || "Normal",
     pressMachine: data.pressMachine || initialQueueItem?.pressMachine || "",
     orderDate: data.orderDate || initialQueueItem?.orderDate || new Date().toISOString().split("T")[0],
@@ -748,14 +986,21 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     actualEndDate: data.actualEndDate || initialQueueItem?.actualEndDate || "",
     paperStock: data.paperStock || initialQueueItem?.paperStock || "",
     coating: data.coating || initialQueueItem?.coating || "",
+    coatingStockSku: data.coatingStockSku || (initialQueueItem as any)?.coatingStockSku || "",
+    coatingStockName: data.coatingStockName || (initialQueueItem as any)?.coatingStockName || "",
     lamination: data.lamination || initialQueueItem?.lamination || "",
     laminationSides: data.laminationSides || initialQueueItem?.laminationSides || "1s",
     laminationMicron: data.laminationMicron ?? initialQueueItem?.laminationMicron ?? 0,
+    laminationStockSku: data.laminationStockSku || (initialQueueItem as any)?.laminationStockSku || "",
+    laminationStockName: data.laminationStockName || (initialQueueItem as any)?.laminationStockName || "",
     embellishment: data.embellishment || initialQueueItem?.embellishment || "",
+    embellishmentStockSku: data.embellishmentStockSku || (initialQueueItem as any)?.embellishmentStockSku || "",
+    embellishmentStockName: data.embellishmentStockName || (initialQueueItem as any)?.embellishmentStockName || "",
     coatingZone: data.coatingZone || initialQueueItem?.coatingZone || (data.dimensions as any)?.coatingZone || (initialQueueItem?.dimensions as any)?.coatingZone || "",
     embellishmentZone: data.embellishmentZone || initialQueueItem?.embellishmentZone || (data.dimensions as any)?.embellishmentZone || (initialQueueItem?.dimensions as any)?.embellishmentZone || "",
     priceTotal: data.priceTotal || initialQueueItem?.priceTotal || 0,
     currency: data.currency || initialQueueItem?.currency || "UZS",
+    exchangeRate: data.exchangeRate || (initialQueueItem as any)?.exchangeRate || 12850,
     photoUrl: effectivePhotoUrl,
     photoUrls: effectivePhotoUrls,
     artworkFront: data.artworkFront || initialQueueItem?.artworkFront || "",
@@ -879,6 +1124,50 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       });
     }
 
+    // Also include any pre-existing Tooling images & CAD files in the attachments list
+    const initialTools: WorkOrderToolingItem[] =
+      data.toolingItems ||
+      initialQueueItem?.toolingItems ||
+      (initialQueueItem?.dimensions as any)?.toolingItems ||
+      (data.dimensions as any)?.toolingItems ||
+      [];
+    if (Array.isArray(initialTools)) {
+      initialTools.forEach((tool) => {
+        if (tool.imageUrl && !existingUrls.has(tool.imageUrl)) {
+          list.push({
+            id: `att-tool-img-${tool.id}`,
+            name: `[Jihoz: ${tool.name}] Foto`,
+            size: "Jihoz rasmi",
+            type: "image/jpeg",
+            date: new Date().toISOString().slice(0, 16).replace("T", " "),
+            isImage: true,
+            category: "proofs",
+            url: tool.imageUrl,
+          });
+          existingUrls.add(tool.imageUrl);
+        }
+        if (tool.fileUrl && !existingUrls.has(tool.fileUrl)) {
+          const ext = tool.fileName ? tool.fileName.split(".").pop()?.toLowerCase() : "cad";
+          let cat: "dieline" | "artwork" | "proofs" | "docs" = "dieline";
+          if (["ai", "eps", "cdr"].includes(ext || "")) cat = "artwork";
+          else if (["jpg", "jpeg", "png", "webp"].includes(ext || "")) cat = "proofs";
+          else if (["pdf", "dxf", "cf2", "ard"].includes(ext || "")) cat = "dieline";
+
+          list.push({
+            id: `att-tool-file-${tool.id}`,
+            name: `[Chizma: ${tool.name}] ${tool.fileName || "dieline.pdf"}`,
+            size: "Texnik chizma",
+            type: ext ? ext.toUpperCase() : "CAD",
+            date: new Date().toISOString().slice(0, 16).replace("T", " "),
+            isImage: Boolean(tool.fileUrl.startsWith("data:image/") || tool.fileName?.match(/\.(png|jpe?g|webp|svg)$/i)),
+            category: cat,
+            url: tool.fileUrl,
+          });
+          existingUrls.add(tool.fileUrl);
+        }
+      });
+    }
+
     return list;
   });
 
@@ -891,10 +1180,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       data.materials ||
       initialQueueItem?.materials ||
       (initialQueueItem?.dimensions as any)?.materials;
-    if (raw && Array.isArray(raw) && raw.length > 0) {
-      return raw.map(normalizeBomItem);
-    }
-    const baseItems: BomItem[] = [];
+    const baseItems: BomItem[] =
+      raw && Array.isArray(raw) && raw.length > 0 ? raw.map(normalizeBomItem) : [];
     return syncBomWithSpecs(
       baseItems,
       {
@@ -902,6 +1189,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         lamination: data.lamination || initialQueueItem?.lamination,
         laminationSides: data.laminationSides || initialQueueItem?.laminationSides,
         laminationMicron: data.laminationMicron || initialQueueItem?.laminationMicron,
+        laminationStockSku: data.laminationStockSku || (initialQueueItem as any)?.laminationStockSku,
+        coating: data.coating || initialQueueItem?.coating,
+        coatingStockSku: data.coatingStockSku || (initialQueueItem as any)?.coatingStockSku,
+        coatingZone: data.coatingZone || initialQueueItem?.coatingZone,
+        embellishment: data.embellishment || initialQueueItem?.embellishment,
+        embellishmentStockSku: data.embellishmentStockSku || (initialQueueItem as any)?.embellishmentStockSku,
+        embellishmentZone: data.embellishmentZone || initialQueueItem?.embellishmentZone,
         quantity: data.quantity || initialQueueItem?.quantity,
         parentSheetW: (data as any).parentSheetW || (initialQueueItem as any)?.parentSheetW,
         parentSheetH: (data as any).parentSheetH || (initialQueueItem as any)?.parentSheetH,
@@ -910,8 +1204,33 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     );
   });
 
-  // Keep state synchronized with queueItem if loaded asynchronously
+  // On mount and when warehouseStock loads: cleanse legacy mock materials and sync BOM
   useEffect(() => {
+    setCurrentBomItems((prev) => {
+      const synced = syncBomWithSpecs(prev, formData, warehouseStock);
+      if (JSON.stringify(synced) !== JSON.stringify(prev)) {
+        updateTabData(tab.id, { materials: synced });
+        syncPaperReadiness(synced);
+        return synced;
+      }
+      return prev;
+    });
+  }, [warehouseStock.length]);
+
+  // Keep state synchronized with queueItem if loaded asynchronously or updated via readiness gates
+  useEffect(() => {
+    if (queueItem?.checks) {
+      setFormData((prev) => {
+        if (JSON.stringify(prev.checks) !== JSON.stringify(queueItem.checks)) {
+          return { ...prev, checks: queueItem.checks };
+        }
+        return prev;
+      });
+    }
+    if (queueItem?.stage && queueItem.stage !== formData.stage) {
+      setFormData((prev) => ({ ...prev, stage: queueItem.stage }));
+    }
+
     if (queueItem && !tab.isUnsaved) {
       if (!formData.photoUrl && (queueItem.photoUrl || (queueItem.photoUrls && queueItem.photoUrls.length > 0))) {
         const qUrl = queueItem.photoUrl || queueItem.photoUrls![0];
@@ -933,7 +1252,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         setFormData((prev) => ({ ...prev, toolingItems: queueItem.toolingItems }));
       }
       if (queueItem.materials && queueItem.materials.length > 0 && (!currentBomItems || currentBomItems.length === 0)) {
-        setCurrentBomItems(queueItem.materials.map(normalizeBomItem));
+        const synced = syncBomWithSpecs(
+          queueItem.materials.map(normalizeBomItem),
+          formData,
+          useWorkspaceStore.getState().warehouseStock
+        );
+        setCurrentBomItems(synced);
       }
     }
   }, [queueItem, tab.isUnsaved, formData.photoUrl, orderAttachments.length, skuArtworks.length, formData.toolingItems?.length, currentBomItems.length]);
@@ -986,6 +1310,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
     handleFieldChange("orderType", "Production");
     handleFieldChange("status", "In Production");
+    handleFieldChange("stage", "In Production");
 
     // Scale operations target to full mass quantity
     setOperations((prev) =>
@@ -1205,16 +1530,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     });
 
     addNotification({
-      title: "Qayta buyurtma ochildi",
-      description: `${currentDocNo} asosida yangi takroriy buyurtma qoralamasi ochildi. Barcha texnik parametrlar nusxalandi.`,
+      title: tOrder("reorderOpenedTitle"),
+      description: tOrder("reorderOpenedDesc", { docNo: currentDocNo }),
       severity: "success",
     });
   };
 
 
-  const handleSelectProductTemplate = (spec: MasterSpecification) => {
+  const handleSelectProductTemplate = (spec: any) => {
     prevRecipeRef.current = spec.code;
-    handleFieldChange("product", spec.name);
+    if (!formData.product || formData.product === "Yangi buyruq" || formData.product === "Buyurtma") {
+      handleFieldChange("product", spec.name);
+    }
     handleFieldChange("recipe", spec.code);
     if (spec.department && spec.department !== formData.department) {
       handleDepartmentChange(spec.department);
@@ -1503,6 +1830,33 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   // Synchronize paperReady gate status based on BOM items stock availability
   const syncPaperReadiness = useCallback(
     (bomList: BomItem[]) => {
+      const targetId = data.docNo || tab.id;
+      const currentQueueItem = useWorkspaceStore.getState().productionQueue.find((q) => {
+        const key = (targetId || "").trim().toLowerCase();
+        return q.id?.toLowerCase() === key || (q.docNo && q.docNo.toLowerCase() === key);
+      });
+      const paperAudit = currentQueueItem?.checks?.audit?.paperReady || (formData.checks as any)?.audit?.paperReady;
+      if (paperAudit?.verifiedBy) {
+        // Inson tomonidan qo'lda tasdiqlangan (Manual Override) - ustidan yozmaslik!
+        return;
+      }
+
+      if (!bomList || bomList.length === 0) {
+        const paperReady = false;
+        if (toggleReadinessCheck && !targetId.startsWith("draft-") && !targetId.startsWith("temp-")) {
+          toggleReadinessCheck(targetId, "paperReady", {
+            forceStatus: "pending",
+          });
+        }
+        const currentChecks = (formData as any).checks || {};
+        if (currentChecks.paperReady !== paperReady) {
+          const updatedChecks = { ...currentChecks, paperReady };
+          setFormData((prev) => ({ ...prev, checks: updatedChecks }));
+          updateTabData(tab.id, { checks: updatedChecks });
+        }
+        return;
+      }
+
       const wsStock = useWorkspaceStore.getState().warehouseStock;
       const hasShortage = bomList.some((item) => {
         if (item.acquisitionSource === "client" || item.supplier?.toLowerCase().includes("mijoz")) {
@@ -1524,7 +1878,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       });
 
       const paperReady = !hasShortage;
-      const targetId = data.docNo || tab.id;
       if (toggleReadinessCheck && !targetId.startsWith("draft-") && !targetId.startsWith("temp-")) {
         toggleReadinessCheck(targetId, "paperReady", {
           forceStatus: paperReady ? "ready" : "pending",
@@ -1537,7 +1890,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         updateTabData(tab.id, { checks: updatedChecks });
       }
     },
-    [data.docNo, tab.id, toggleReadinessCheck, formData, updateTabData]
+    [data.docNo, tab.id, toggleReadinessCheck, formData.checks, updateTabData]
   );
 
   // Initial paperReady check on mount
@@ -1579,6 +1932,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         "lamination",
         "laminationSides",
         "laminationMicron",
+        "laminationStockSku",
+        "coating",
+        "coatingStockSku",
+        "coatingZone",
+        "embellishment",
+        "embellishmentStockSku",
+        "embellishmentZone",
         "quantity",
         "plannedSheets",
         "parentSheetW",
@@ -1678,13 +2038,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const quantity = Number(formData.quantity) || 0;
 
     if (!customer) {
-      newErrors.customer = "Mijozni tanlang yoki kiriting";
+      newErrors.customer = tOrder("errorCustomerRequired");
     }
     if (!product) {
-      newErrors.product = "Mahsulot nomini kiriting";
+      newErrors.product = tOrder("errorProductRequired");
     }
     if (quantity <= 0) {
-      newErrors.quantity = "Buyurtma adadi (tiraji) 0 dan katta bo'lishi kerak";
+      newErrors.quantity = tOrder("errorQuantityPositive");
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -1709,8 +2069,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       }, 100);
 
       addNotification({
-        title: "To'ldirish talab etiladi",
-        description: "Iltimos, barcha majburiy maydonlarni (Mijoz, Mahsulot nomi, Adad) to'ldiring.",
+        title: tOrder("fillRequiredTitle"),
+        description: tOrder("fillRequiredDesc"),
         severity: "error",
       });
       return false;
@@ -1743,9 +2103,21 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       );
       const isCurrentlyDraft = !hasRealDocNo;
 
+      const queueItem = useWorkspaceStore.getState().productionQueue.find((i) => {
+        const matchKey = (currentDocNo || tab.id).toLowerCase();
+        return i.id.toLowerCase() === matchKey || (i.docNo && i.docNo.toLowerCase() === matchKey);
+      });
+      const currentChecks = queueItem?.checks || formData.checks;
+      const currentStage =
+        queueItem?.stage ||
+        formData.stage ||
+        (formData.status === "In Production" ? "In Production" : "Queue");
+
       if (upsertWorkOrderAsync) {
         const savedResult = await upsertWorkOrderAsync({
           ...formData,
+          stage: currentStage as any,
+          checks: currentChecks,
           docNo: isCurrentlyDraft ? undefined : currentDocNo,
           operations,
           sampleData,
@@ -1765,10 +2137,33 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
         const realDocNo = savedResult.docNo || savedResult.workOrder?.docNo;
         if (realDocNo) {
-          currentDocNo = savedResult.docNo;
+          currentDocNo = realDocNo;
           savedDocNoRef.current = currentDocNo;
           setDocNo(currentDocNo);
-          if (isCurrentlyDraft) {
+
+          // Clean legacy draft-wo-* prefixes in tooling and BOM items
+          const cleanItemName = (name: string) =>
+            name ? name.replace(/draft-wo-\d+|temp-[\w-]+/g, realDocNo) : name;
+
+          if (formData.toolingItems && formData.toolingItems.length > 0) {
+            const updatedTooling = formData.toolingItems.map((tool) => ({
+              ...tool,
+              name: cleanItemName(tool.name),
+            }));
+            formData.toolingItems = updatedTooling;
+            handleFieldChange("toolingItems", updatedTooling);
+          }
+
+          if (currentBomItems && currentBomItems.length > 0) {
+            const updatedBom = currentBomItems.map((mat) => ({
+              ...mat,
+              name: cleanItemName(mat.name),
+            }));
+            setCurrentBomItems(updatedBom);
+            handleFieldChange("materials", updatedBom);
+          }
+
+          if (isCurrentlyDraft || tab.id.startsWith("draft-") || tab.id.startsWith("temp-") || tab.id !== currentDocNo) {
             replaceTabId(
               tab.id,
               currentDocNo,
@@ -1814,6 +2209,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         ...formData,
         id: effectiveId,
         docNo: effectiveId,
+        checks: currentChecks,
+        stage: currentStage as any,
         customer: formData.customer,
         product: formData.product,
         quantity:
@@ -1859,17 +2256,38 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (!savedId) return;
     setHistoryRefreshTrigger((prev) => prev + 1);
     addNotification({
-      title: "Buyurtma saqlandi",
-      description: `${savedId} — ${formData.product || "Buyurtma"} (${formData.customer || "Mijoz"}) muvaffaqiyatli saqlandi.`,
+      title: tOrder("orderSavedTitle"),
+      description: tOrder("orderSavedDesc", { docNo: savedId, product: formData.product || tShell("untitledOrder") }),
       severity: "success",
     });
   };
 
   const handleSaveAndClose = async () => {
     if (isSavingRef.current) return;
-    const savedId = await persistOrderDetails();
-    if (!savedId) return;
-    closeTab(savedId);
+    try {
+      const savedId = await persistOrderDetails();
+      if (!savedId) return;
+
+      const targetDocId = savedId || savedDocNoRef.current || tab.id;
+
+      setTabUnsaved(tab.id, false);
+      if (targetDocId && targetDocId !== tab.id) {
+        setTabUnsaved(targetDocId, false);
+      }
+
+      addNotification({
+        title: tOrder("orderSavedTitle"),
+        description: tOrder("orderSavedDesc", { docNo: targetDocId, product: formData.product || tShell("untitledOrder") }),
+        severity: "success",
+      });
+
+      closeTab(tab.id);
+      if (targetDocId && targetDocId !== tab.id) {
+        closeTab(targetDocId);
+      }
+    } catch (err) {
+      console.error("handleSaveAndClose error:", err);
+    }
   };
 
   const handleSaveRef = React.useRef(handleSave);
@@ -2380,7 +2798,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     department: formData.department,
     quantity: formData.quantity,
     deadline: formData.deadline,
-  }), [formData.customer, formData.product, formData.pressMachine, formData.department, formData.quantity, formData.deadline]);
+    checks: formData.checks || queueItem?.checks,
+  }), [formData.customer, formData.product, formData.pressMachine, formData.department, formData.quantity, formData.deadline, formData.checks, queueItem?.checks]);
 
   React.useEffect(() => {
     const timer = setTimeout(() => {
@@ -2405,8 +2824,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         {/* 1C Level-3 Document Workspace Header Bar */}
         <DocumentHeader
           icon={Factory}
-          title={formData.product || "Yangi buyruq"}
-          docNo={docNo || "Yangi (Avtomatik)"}
+          title={formData.product || tOrder("newOrder")}
+          docNo={docNo || tOrder("newAutoDocNo")}
           date={formData.startDate || "2026-09-30"}
           status={formData.status}
           priority={formData.priority}
@@ -2414,7 +2833,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             formData.parentWorkOrderId
               ? {
                   docNo: formData.parentWorkOrderId,
-                  label: `Asos: ${formData.parentWorkOrderId} (Takroriy)`,
+                  label: `${tOrder("baseOrder")}: ${formData.parentWorkOrderId} (${tOrder("reorder")})`,
                   onClick: () => handleOpenParentWorkOrder(formData.parentWorkOrderId!),
                 }
               : undefined
@@ -2424,7 +2843,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               {/* 1. Job Ticket / Passport Print (Icon button with tooltip) */}
               <HeaderIconAction
                 icon={Printer}
-                label={`${tOrder("printSpec") || "Ish pasporti"} (Ctrl+P)`}
+                label={`${tOrder("jobTicket")} (Ctrl+P)`}
                 variant="outline"
                 onClick={() => setIsJobTicketOpen(true)}
               />
@@ -2444,7 +2863,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                           ? "text-emerald-700 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20"
                           : ""
                       )}
-                      aria-label="Qadoqlash"
+                      aria-label={tOrder("packaging")}
                     >
                       <Package className="w-3.5 h-3.5" />
                       {formData.packagingData?.totalBoxes ? (
@@ -2457,8 +2876,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 />
                 <TooltipContent side="bottom" sideOffset={6} className="text-xs">
                   {formData.packagingData?.totalBoxes
-                    ? `Qadoqlash (${formData.packagingData.totalBoxes} quti)`
-                    : "Qutilarga qadoqlash"}
+                    ? tOrder("packagingWithCount", { count: formData.packagingData.totalBoxes })
+                    : tOrder("packBoxes")}
                 </TooltipContent>
               </Tooltip>
 
@@ -2470,7 +2889,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       variant="outline"
                       size="icon-sm"
                       className="h-7 w-7 cursor-pointer text-muted-foreground hover:text-foreground"
-                      aria-label="Qo'shimcha amallar"
+                      aria-label={tOrder("moreActions")}
                     >
                       <MoreVertical className="w-3.5 h-3.5" />
                     </Button>
@@ -2482,7 +2901,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     className="gap-2 cursor-pointer font-medium text-blue-700 dark:text-blue-400"
                   >
                     <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Qayta buyurtma (Reorder)</span>
+                    <span>{tOrder("reorderAction")}</span>
                   </DropdownMenuItem>
 
                   {!isOperator && (
@@ -2491,7 +2910,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       className="gap-2 cursor-pointer font-medium text-violet-700 dark:text-violet-400"
                     >
                       <BookmarkPlus className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
-                      <span>Yangi Spetsifikatsiya qilib saqlash</span>
+                      <span>{tOrder("saveAsSpec")}</span>
                     </DropdownMenuItem>
                   )}
 
@@ -2521,7 +2940,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       className="gap-2 cursor-pointer text-emerald-700 dark:text-emerald-400 font-medium"
                     >
                       <Receipt className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                      <span>{tAct("createFromOrder") || "Yetkazib berish akti tuzish"}</span>
+                      <span>{tAct("createFromOrder") || tShell("createDeliveryAct")}</span>
                     </DropdownMenuItem>
                   )}
 
@@ -2529,13 +2948,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
                   <DropdownMenuItem onClick={() => setIsJobTicketOpen(true)} className="gap-2 cursor-pointer">
                     <Printer className="w-3.5 h-3.5" />
-                    <span>Ish pasporti (Job Ticket)</span>
+                    <span>{tOrder("jobTicket")}</span>
                     <DropdownMenuShortcut>Ctrl+P</DropdownMenuShortcut>
                   </DropdownMenuItem>
 
                   <DropdownMenuItem onClick={() => setIsPackagingOpen(true)} className="gap-2 cursor-pointer">
                     <Package className="w-3.5 h-3.5" />
-                    <span>Qutilarga qadoqlash</span>
+                    <span>{tOrder("packBoxes")}</span>
                   </DropdownMenuItem>
 
                   <DropdownMenuSeparator />
@@ -2545,9 +2964,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     className="gap-2 cursor-pointer text-destructive focus:text-destructive"
                   >
                     <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                    <span>Buyurtmani bekor qilish / o&apos;chirish</span>
+                    <span>{tOrder("cancelOrDeleteOrder")}</span>
                     {!canDelete && (
-                      <span className="ml-auto text-[10px] text-muted-foreground font-mono">Ruxsatsiz</span>
+                      <span className="ml-auto text-[10px] text-muted-foreground font-mono">{tOrder("unauthorized")}</span>
                     )}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -2596,14 +3015,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     type="button"
                     onClick={() => handleOpenParentWorkOrder(formData.parentWorkOrderId!)}
                     className="w-full text-left flex items-center justify-between px-2 py-1 bg-blue-500/10 border border-blue-500/30 rounded text-[10px] text-blue-700 dark:text-blue-400 font-semibold mb-1.5 hover:bg-blue-500/20 transition-colors cursor-pointer"
-                    title={`Asosiy buyurtma: ${formData.parentWorkOrderId} (Ko'rish uchun bosing)`}
+                    title={`${tOrder("baseOrder")}: ${formData.parentWorkOrderId} (${tOrder("clickToView")})`}
                   >
                     <span className="flex items-center gap-1 truncate mr-1">
                       <RotateCw className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />
-                      <span className="truncate">Asos: {formData.parentWorkOrderId}</span>
+                      <span className="truncate">{tOrder("baseOrder")}: {formData.parentWorkOrderId}</span>
                     </span>
                     <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 shrink-0">
-                      Takroriy
+                      {tOrder("reorder")}
                     </Badge>
                   </button>
                 )}
@@ -2623,28 +3042,68 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     </span>
                     {formData.orderType === "Sample" && (
                       <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
-                        (Namuna: {sampleData.sampleQty} dona)
+                        ({tOrder("sampleLabel")}: {sampleData.sampleQty} {formData.unit || tOrder("pcsUnit")})
                       </span>
                     )}
                   </div>
                 </InfoRow>
 
                 {/* 1.1 Jami Summa */}
-                <InfoRow label="Jami summa">
-                  <span className="font-mono font-bold text-foreground">
-                    {formatMoney(formData.priceTotal, formData.currency, 0)}
-                  </span>
+                <InfoRow label={tOrder("totalAmount")}>
+                  <div className="flex flex-col items-end text-right">
+                    <span className="font-mono font-bold text-foreground">
+                      {formatMoney(formData.priceTotal, formData.currency, 0)}
+                    </span>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      ~{formatMoney(
+                        (formData.currency || "UZS").toUpperCase() === "USD"
+                          ? formData.priceTotal * (formData.exchangeRate || 12850)
+                          : ((formData.exchangeRate || 12850) > 0 ? formData.priceTotal / (formData.exchangeRate || 12850) : 0),
+                        (formData.currency || "UZS").toUpperCase() === "USD" ? "UZS" : "USD",
+                        0
+                      )}
+                    </span>
+                  </div>
+                </InfoRow>
+
+                {/* Valyuta va Kurs */}
+                <InfoRow label={tOrder("currencyLabel")}>
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={formData.currency || "UZS"}
+                      onValueChange={(val) => {
+                        if (val) handleFieldChange("currency", val);
+                      }}
+                      disabled={isOperator}
+                    >
+                      <SelectTrigger className="h-6 w-16 px-1.5 text-[11px] font-mono border-border bg-card">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="UZS">UZS</SelectItem>
+                        <SelectItem value="USD">USD</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      value={formData.exchangeRate || 12850}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange("exchangeRate", Number(e.target.value) || 12850)}
+                      disabled={isOperator}
+                      className="h-6 w-20 px-1 text-[11px] font-mono text-right"
+                      title={tOrder("exchangeRateTooltip")}
+                    />
+                  </div>
                 </InfoRow>
 
                 {/* 2. Qog'oz / Xomashyo */}
-                <InfoRow label="Qog'oz" title={formData.paperStock}>
+                <InfoRow label={tOrder("paperLabel")} title={formData.paperStock}>
                   <span className="truncate max-w-[125px] font-medium text-foreground" title={formData.paperStock}>
-                    {formData.paperStock || "Belgilanmagan"}
+                    {formData.paperStock || tOrder("notSpecified")}
                   </span>
                 </InfoRow>
 
                 {/* 3. Ranglilik (CMYK / Pantones) */}
-                <InfoRow label="Ranglilik">
+                <InfoRow label={tOrder("colorsLabel")}>
                   <span className="font-mono font-medium text-foreground">
                     {formData.colorsConfig || "—"}
                   </span>
@@ -2667,17 +3126,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                         )}
                       >
                         {deadlineCountdown < 0
-                          ? "Kechikdi"
+                          ? tOrder("overdue")
                           : deadlineCountdown === 0
-                          ? "Bugun"
-                          : `${deadlineCountdown}k`}
+                          ? tOrder("today")
+                          : tOrder("daysRemaining", { count: deadlineCountdown })}
                       </Badge>
                     )}
                   </div>
                 </InfoRow>
 
                 {/* 6. Holat / Bosqich */}
-                <InfoRow label="Bosqich">
+                <InfoRow label={tOrder("stageLabel")}>
                   <Badge
                     variant="outline"
                     className={cn(
@@ -2712,9 +3171,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               ...(isFlexo ? [{ id: "flexo", label: "Flexo Imposition", icon: Disc }] : []),
               {
                 id: "prepress-tooling",
-                label: tOrder("tabPrepressTooling") || "Prepress & Jihozlar",
+                label: tOrder("tabPrepressTooling"),
                 icon: Stamp,
-                badge: (formData.toolingItems || []).length > 0 ? `${(formData.toolingItems || []).length} ta` : null,
+                badge: (formData.toolingItems || []).length > 0 ? tOrder("itemsCount", { count: (formData.toolingItems || []).length }) : null,
                 badgeClassName: (formData.toolingItems || []).some((t) => t.status === "Draft" || t.status === "Ordered")
                   ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold"
                   : undefined,
@@ -2882,13 +3341,16 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       let nextTooling = [...currentTools];
                       const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
                       const unitCtpCost = isUsd ? 6 : 75000;
-                      const currentOrderNo = docNo || data.docNo || tab.id;
+                      const rawOrderNo = docNo || data.docNo || tab.id;
+                      const isDraftOrder = !rawOrderNo || rawOrderNo.startsWith("draft-") || rawOrderNo.startsWith("temp-");
+                      const displayOrderNo = !isDraftOrder ? rawOrderNo : (formData.product ? formData.product : "");
+                      const ctpItemName = displayOrderNo ? `${displayOrderNo} CTP Metall Formalar Komplekti` : "CTP Metall Formalar Komplekti";
 
                       if (ctpIdx >= 0) {
                         if (payload.totalCtpPlates > 0) {
                           nextTooling[ctpIdx] = {
                             ...nextTooling[ctpIdx],
-                            name: `${currentOrderNo} CTP Metall Formalar Komplekti`,
+                            name: ctpItemName,
                             quantity: payload.totalCtpPlates,
                             specDetails: payload.ctpSpecDetails,
                             estimatedCost: unitCtpCost * payload.totalCtpPlates,
@@ -2901,7 +3363,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                           {
                             id: `TL-CTP-${Date.now()}`,
                             category: "ctp_plates",
-                            name: `${currentOrderNo} CTP Metall Formalar Komplekti`,
+                            name: ctpItemName,
                             specDetails: payload.ctpSpecDetails,
                             quantity: payload.totalCtpPlates,
                             unit: "dona",
@@ -2984,7 +3446,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   formData={formData}
                   docNo={data.docNo || tab.id}
                   isOperator={isOperator}
-                
+                  orderAttachments={orderAttachments}
+                  setOrderAttachments={setOrderAttachments}
                   onUpdateTooling={(newItems) => {
                     handleFieldChange("toolingItems", newItems);
                     const totalCost = newItems.reduce(
@@ -3019,19 +3482,30 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                         : true;
 
                     const targetId = data.docNo || tab.id;
+                    const currentQueueItem = useWorkspaceStore.getState().productionQueue.find((q) => {
+                      const key = (targetId || "").trim().toLowerCase();
+                      return q.id?.toLowerCase() === key || (q.docNo && q.docNo.toLowerCase() === key);
+                    });
+                    const platesAudit = currentQueueItem?.checks?.audit?.platesReady || (formData.checks as any)?.audit?.platesReady;
+                    const toolingAudit = currentQueueItem?.checks?.audit?.toolingReady || (formData.checks as any)?.audit?.toolingReady;
+
                     if (toggleReadinessCheck) {
-                      toggleReadinessCheck(targetId, "platesReady", {
-                        forceStatus: platesReady ? "ready" : "pending",
-                      });
-                      toggleReadinessCheck(targetId, "toolingReady", {
-                        forceStatus: toolingReady ? "ready" : "pending",
-                      });
+                      if (!platesAudit?.verifiedBy) {
+                        toggleReadinessCheck(targetId, "platesReady", {
+                          forceStatus: platesReady ? "ready" : "pending",
+                        });
+                      }
+                      if (!toolingAudit?.verifiedBy) {
+                        toggleReadinessCheck(targetId, "toolingReady", {
+                          forceStatus: toolingReady ? "ready" : "pending",
+                        });
+                      }
                     }
 
                     handleFieldChange("checks", {
                       ...((formData as any).checks || {}),
-                      platesReady,
-                      toolingReady,
+                      ...(platesAudit?.verifiedBy ? {} : { platesReady }),
+                      ...(toolingAudit?.verifiedBy ? {} : { toolingReady }),
                     });
                   }}
                   onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
@@ -3047,6 +3521,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 recipe={formData.recipe}
                 activeSpec={activeSpec}
                 initialItems={currentBomItems}
+                currency={formData.currency || "UZS"}
+                exchangeRate={formData.exchangeRate || 12850}
                 onRecipeChange={(code, dept) => {
                   handleFieldChange("recipe", code);
                   if (dept && formData.department !== dept) {
@@ -3099,7 +3575,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 isOperator={isOperator}
                 
                 onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
-                onSyncFromPlan={() => handleApplyRouteFromPlan()}
+                onSelectSpecification={handleSelectProductTemplate}
+                recipe={formData.recipe}
+                activeSpec={activeSpec}
                 onOpenInTimeline={(opId) => {
                   setSelectedTimelineOpId(opId);
                   setLevel3Tab(tab.id, "timeline");
@@ -3107,6 +3585,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onOpenPackaging={() => setIsPackagingOpen(true)}
                 isPacked={formData.packagingData?.isCompleted}
                 packagesCount={formData.packagingData?.totalBoxes}
+                onStageChange={(stage) => handleFieldChange("stage", stage)}
               />
             )}
 
@@ -3377,18 +3856,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 <AlertTriangle className="w-4 h-4 text-destructive" />
               </div>
               <DialogTitle className="text-sm font-semibold text-foreground">
-                Buyurtmani o&apos;chirish yoki bekor qilish
+                {tOrder("deleteModalTitle")}
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
-              Hujjat: <strong className="font-mono text-foreground font-semibold">{savedDocNoRef.current || docNo || tab.id}</strong> — {formData.customer} ({formData.product})
+              {tOrder("documentLabel")}: <strong className="font-mono text-foreground font-semibold">{savedDocNoRef.current || docNo || tab.id}</strong> — {formData.customer} ({formData.product})
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3 py-2 text-xs">
             {formData.status === "Draft" || !formData.status || formData.status === "Active" ? (
               <div className="space-y-2">
-                <label className="font-medium text-foreground block">Amal turini tanlang:</label>
+                <label className="font-medium text-foreground block">{tOrder("selectActionType")}</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -3401,10 +3880,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   >
                     <div className="font-semibold text-xs flex items-center gap-1.5">
                       <Trash2 className="size-3.5" />
-                      <span>Bazadan tozalash</span>
+                      <span>{tOrder("hardDelete")}</span>
                     </div>
                     <div className="text-[10px] opacity-80 leading-tight">
-                      Xato ochilgan qoralama yoki dublni butunlay o&apos;chiradi
+                      {tOrder("hardDeleteDesc")}
                     </div>
                   </button>
 
@@ -3419,30 +3898,30 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   >
                     <div className="font-semibold text-xs flex items-center gap-1.5">
                       <AlertTriangle className="size-3.5" />
-                      <span>Bekor qilish</span>
+                      <span>{tOrder("cancelOrder")}</span>
                     </div>
                     <div className="text-[10px] opacity-80 leading-tight">
-                      Tarixda saqlab, navbat va rejalardan chiqaradi
+                      {tOrder("cancelOrderDesc")}
                     </div>
                   </button>
                 </div>
               </div>
             ) : (
               <div className="p-2.5 rounded bg-muted/40 border border-border text-muted-foreground leading-relaxed">
-                Ushbu buyurtma holati <strong className="font-semibold text-foreground">{formData.status}</strong>. Boshlangan yoki yakunlangan buyurtmalarni faqat bekor qilish mumkin.
+                {tOrder("cancelOnlyNotice", { status: formData.status })}
               </div>
             )}
 
             {deleteMode === "cancel" && (
               <div className="space-y-1.5 pt-1">
                 <label className="font-medium text-foreground text-xs block">
-                  Bekor qilish sababi (Audit jurnali uchun):
+                  {tOrder("cancelReasonLabel")}
                 </label>
                 <input
                   type="text"
                   value={deleteReason}
                   onChange={(e) => setDeleteReason(e.target.value)}
-                  placeholder="Masalan: Mijoz buyurtmani bekor qildi / Xato ochilgan nusxa"
+                  placeholder={tOrder("cancelReasonPlaceholder")}
                   className="w-full h-8 px-2.5 rounded border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
@@ -3458,7 +3937,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               disabled={isDeleting}
               className="text-xs h-7 px-3"
             >
-              Yopish
+              {tOrder("close")}
             </Button>
             <Button
               type="button"
@@ -3469,7 +3948,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               className="text-xs h-7 px-3 gap-1.5"
             >
               {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-              <span>{deleteMode === "hard_delete" ? "Bazadan o'chirish" : "Buyurtmani bekor qilish"}</span>
+              <span>{deleteMode === "hard_delete" ? tOrder("btnHardDelete") : tOrder("btnCancelOrder")}</span>
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -30,6 +30,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -47,6 +53,7 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
+  ChevronDown,
 } from "lucide-react";
 
 export function AttendanceGrid() {
@@ -97,10 +104,14 @@ export function AttendanceGrid() {
       const s = searchFilter.toLowerCase();
       const matchSearch =
         a.employeeName.toLowerCase().includes(s) ||
-        (a.badgeNumber || a.badgeNo || "").toLowerCase().includes(s);
+        (a.badgeNumber || a.badgeNo || "").toLowerCase().includes(s) ||
+        (a.department || "").toLowerCase().includes(s);
 
       const matchDate = !dateFilter || (a.workDate || a.date || "").includes(dateFilter);
-      const matchStatus = statusFilter === "ALL" || a.status === statusFilter;
+      const matchStatus =
+        statusFilter === "ALL" ||
+        a.status === statusFilter ||
+        (statusFilter === "on_leave" && (a.status === "OnLeave" || a.status === "vacation"));
 
       return matchSearch && matchDate && matchStatus;
     });
@@ -108,10 +119,39 @@ export function AttendanceGrid() {
 
   // Statistics
   const presentCount = useMemo(
-    () => filtered.filter((a) => a.status === "present" || a.status === "late").length,
+    () => filtered.filter((a) => a.status === "present" || a.status === "Present" || a.status === "late" || a.status === "Late").length,
     [filtered]
   );
-  const lateCount = useMemo(() => filtered.filter((a) => a.status === "late").length, [filtered]);
+  const lateCount = useMemo(() => filtered.filter((a) => a.status === "late" || a.status === "Late").length, [filtered]);
+
+  const statusCounts = useMemo(() => {
+    let late = 0;
+    let absent = 0;
+    let onLeave = 0;
+
+    for (const a of data) {
+      if (!dateFilter || (a.workDate || a.date || "").includes(dateFilter)) {
+        if (a.status === "late" || a.status === "Late") late++;
+        else if (a.status === "absent" || a.status === "Absent") absent++;
+        else if (a.status === "OnLeave" || a.status === "vacation" || (a.status as string) === "on_leave") onLeave++;
+      }
+    }
+
+    return { late, absent, onLeave };
+  }, [data, dateFilter]);
+
+  const otherStatusFilters = useMemo(
+    () => [
+      { key: "late", label: "Kechikkan", count: statusCounts.late },
+      { key: "absent", label: "Kelmagan", count: statusCounts.absent },
+      { key: "on_leave", label: "Ta'tilda", count: statusCounts.onLeave },
+    ],
+    [statusCounts]
+  );
+
+  const activeOtherStatus = useMemo(() => {
+    return otherStatusFilters.find((item) => item.key === statusFilter);
+  }, [otherStatusFilters, statusFilter]);
 
   useEffect(() => {
     if (updateGridStats) {
@@ -279,8 +319,8 @@ export function AttendanceGrid() {
               setIsFaceIdSimOpen(true);
             }}
           >
-            <ScanFace className="w-3.5 h-3.5" />
-            <span>Face ID Qayd etish</span>
+            <ScanFace className="size-3.5" />
+            <span>Qayd etish</span>
           </Button>
 
           <Button
@@ -295,52 +335,92 @@ export function AttendanceGrid() {
                 module: "hr",
               });
             }}
-            title="Face ID va turniket qurilmalari registri"
+            title="Biometrik qurilmalar registri"
           >
-            <Server className="w-3.5 h-3.5 text-blue-600" />
+            <Server className="size-3.5 text-muted-foreground" />
             <span>Qurilmalar</span>
           </Button>
 
-          <Separator orientation="vertical" className="h-4 mx-1" />
+          <Separator orientation="vertical" className="h-4 mx-0.5" />
 
           {/* Status Segment Filter Pills */}
           <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
-            {[
-              { key: "ALL", label: "Hammasi" },
-              { key: "present", label: "Kelgan" },
-              { key: "late", label: "Kechikkan" },
-              { key: "absent", label: "Kelmagan" },
-              { key: "on_leave", label: "Ta'tilda" },
-            ].map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setStatusFilter(key)}
-                className={`px-2 py-0.5 rounded transition-colors ${
-                  statusFilter === key
+            <button
+              type="button"
+              onClick={() => setStatusFilter("ALL")}
+              className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                statusFilter === "ALL"
+                  ? "bg-background text-foreground font-semibold shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Hammasi
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("present")}
+              className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                statusFilter === "present"
+                  ? "bg-background text-foreground font-semibold shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Kelgan
+            </button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer outline-none ${
+                  activeOtherStatus
                     ? "bg-background text-foreground font-semibold shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
+                title="Boshqa holatlar"
               >
-                {label}
-              </button>
-            ))}
+                <span>{activeOtherStatus ? activeOtherStatus.label : "Boshqa"}</span>
+                {activeOtherStatus && (
+                  <span className="ml-0.5 px-1 rounded-full text-[9px] bg-muted-foreground/15 font-mono">
+                    {activeOtherStatus.count}
+                  </span>
+                )}
+                <ChevronDown className="size-3 opacity-60 ml-0.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-36 p-1 text-xs">
+                {otherStatusFilters.map(({ key, label, count }) => (
+                  <DropdownMenuItem
+                    key={key}
+                    onClick={() => setStatusFilter(statusFilter === key ? "ALL" : key)}
+                    className={`flex items-center justify-between px-2 py-1.5 cursor-pointer text-xs rounded ${
+                      statusFilter === key
+                        ? "bg-accent text-accent-foreground font-semibold"
+                        : ""
+                    }`}
+                  >
+                    <span>{label}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground ml-2 px-1 rounded bg-muted">
+                      {count}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <DatePicker
             value={dateFilter}
             onChange={(val) => setDateFilter(val)}
-            className="h-7 text-xs w-36 font-mono bg-background border-input rounded"
+            className="h-7 text-xs w-32 font-mono bg-background border-input rounded"
           />
         </div>
 
         {/* Right Search & Controls */}
-        <div className="flex items-center gap-2">
-          <div className="relative w-52">
-            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
+        <div className="flex items-center gap-1.5">
+          <div className="relative w-44">
+            <Search className="absolute left-2 top-1.5 size-3.5 text-muted-foreground" />
             <Input
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="F.I.O. yoki tabel №..."
+              placeholder="Qidiruv..."
               className="pl-7 h-7 text-xs bg-background border-input rounded"
             />
           </div>
@@ -360,20 +440,20 @@ export function AttendanceGrid() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
             onClick={() => window.print()}
-            title="Tabelni chop etish"
+            title="Chop etish"
+            aria-label="Chop etish"
           >
             <Printer className="size-3.5" />
-            <span className="hidden sm:inline">Chop etish</span>
           </Button>
 
           <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 font-normal">
-            {presentCount} kelgan
+            {filtered.length}
           </Badge>
           {lateCount > 0 && (
-            <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 text-amber-600 border-amber-300 font-normal">
-              {lateCount} kechikkan
+            <Badge variant="outline" className="font-mono text-[11px] h-6 px-1.5 text-amber-600 border-amber-300 dark:border-amber-800 font-normal">
+              {lateCount} kech
             </Badge>
           )}
         </div>
@@ -407,11 +487,8 @@ export function AttendanceGrid() {
           <DialogHeader>
             <DialogTitle className="text-sm font-semibold flex items-center gap-2">
               <ScanFace className="size-4 text-emerald-600" />
-              Biometrik Turniket / Face ID Webhook Test
+              Biometrik qayd etish
             </DialogTitle>
-            <DialogDescription className="text-xs">
-              Qurilmadan serverga yuboriladigan real check-in va check-out so'rovini tekshirish
-            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3.5 py-3">
@@ -432,14 +509,14 @@ export function AttendanceGrid() {
             </div>
 
             <div>
-              <Label className="text-xs">Harakat turi (Event Type)</Label>
+              <Label className="text-xs">Harakat turi</Label>
               <Select value={simEventType} onValueChange={(v: any) => { if (v) setSimEventType(v); }}>
                 <SelectTrigger className="h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="check_in">Kirish (Check-in - Ertalab)</SelectItem>
-                  <SelectItem value="check_out">Chiqish (Check-out - Kechqurun)</SelectItem>
+                  <SelectItem value="check_in">Kirish</SelectItem>
+                  <SelectItem value="check_out">Chiqish</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -450,7 +527,7 @@ export function AttendanceGrid() {
                 Avtomatik hisob-kitob qoidasi:
               </div>
               <p className="text-[11px] leading-relaxed">
-                Kirishda 08:00 dan kech qayd etilsa kechikish (delay minutes) hisoblanadi. Chiqishda esa check-in va check-out oralig'i ishlangan vaqt (workedHours) sifatida belgilanadi.
+                Kirishda 08:00 dan kech qayd etilsa kechikish hisoblanadi. Chiqishda esa oraliq vaqt ishlangan soat sifatida belgilanadi.
               </p>
             </div>
           </div>
@@ -461,7 +538,7 @@ export function AttendanceGrid() {
             </Button>
             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1" onClick={handleSimulateFaceId}>
               <ScanFace className="size-3.5" />
-              Signaturani jo'natish
+              Qayd etish
             </Button>
           </DialogFooter>
         </DialogContent>

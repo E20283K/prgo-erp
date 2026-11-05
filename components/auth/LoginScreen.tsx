@@ -202,24 +202,9 @@ export function LoginScreen() {
 
             {/* Password Field */}
             <div className="space-y-1.5 text-left">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password" className="text-xs font-medium">
-                  {t("passwordLabel")}
-                </Label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    toast.add({
-                      title: t("forgotPasswordTitle"),
-                      description: t("forgotPasswordDesc"),
-                      type: "info",
-                    });
-                  }}
-                  className="text-[11px] text-muted-foreground hover:text-foreground hover:underline cursor-pointer"
-                >
-                  {t("forgotPassword")}
-                </button>
-              </div>
+              <Label htmlFor="password" className="text-xs font-medium">
+                {t("passwordLabel")}
+              </Label>
               <div className="relative">
                 <Input
                   id="password"
@@ -251,6 +236,21 @@ export function LoginScreen() {
                   ) : (
                     <Eye className="size-3.5" />
                   )}
+                </button>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    toast.add({
+                      title: t("forgotPasswordTitle"),
+                      description: t("forgotPasswordDesc"),
+                      type: "info",
+                    });
+                  }}
+                  className="text-[11px] text-muted-foreground hover:text-foreground hover:underline cursor-pointer"
+                >
+                  {t("forgotPassword")}
                 </button>
               </div>
             </div>

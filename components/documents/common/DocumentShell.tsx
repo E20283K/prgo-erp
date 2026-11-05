@@ -324,14 +324,21 @@ export function getCurrencySymbol(currency: string = "USD"): string {
   }
 }
 
+export function formatNumberWithSpaces(val: number | string | undefined, decimals = 0): string {
+  if (val === undefined || val === null || val === "") return "0";
+  const num = typeof val === "string" ? parseFloat(val) : Number(val);
+  if (isNaN(num)) return "0";
+  const fixed = decimals > 0 ? num.toFixed(decimals) : Math.round(num).toString();
+  const [intPart, decPart] = fixed.split(".");
+  const groupedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return decPart ? `${groupedInt}.${decPart}` : groupedInt;
+}
+
 export function formatMoney(value: number | undefined, currency = "USD", fractionDigits = 2): string {
   const num = Number(value) || 0;
   const curr = (currency || "USD").toUpperCase();
   const decimals = curr === "UZS" ? 0 : fractionDigits;
-  const numStr = num.toLocaleString("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
+  const numStr = formatNumberWithSpaces(num, decimals);
 
   switch (curr) {
     case "UZS":

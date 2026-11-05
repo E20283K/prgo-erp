@@ -10,6 +10,7 @@ export {
   migrateLegacyWorkOrderNo,
 } from "./utils/workOrderNumbering";
 import type { WorkOrderDepartment } from "./utils/workOrderNumbering";
+import type { ProductionQueueStage, ProductionReadinessChecks } from "@/store/workspaceStore";
 
 export type KashirovkaMode = "none" | "duplex" | "triplex";
 export type KashirovkaImpositionStrategy = "split_half_sheet" | "separate_sheets";
@@ -563,6 +564,10 @@ export interface WorkOrderToolingItem {
   remakeReason?: string;
   faultParty?: "none" | "prepress" | "production" | "client" | "supplier";
   jobTicketPrinted?: boolean;
+  location?: string;
+  imageUrl?: string;
+  fileUrl?: string;
+  fileName?: string;
   notes?: string;
   createdAt: string;
 }
@@ -576,6 +581,8 @@ export interface WorkOrderFormData {
   quantity: number;
   unit: string;
   status: string;
+  stage?: ProductionQueueStage | string;
+  checks?: ProductionReadinessChecks;
   priority: string;
   orderType?: string;
   responsible?: string;
@@ -592,14 +599,21 @@ export interface WorkOrderFormData {
   paperDensity?: number;
   grammage?: number;
   coating: string;
+  coatingZone?: string;
+  coatingStockSku?: string;
+  coatingStockName?: string;
   lamination?: string;
   laminationSides?: "1s" | "2s";
   laminationMicron?: number;
+  laminationStockSku?: string;
+  laminationStockName?: string;
   embellishment?: string;
-  coatingZone?: string;
   embellishmentZone?: string;
+  embellishmentStockSku?: string;
+  embellishmentStockName?: string;
   priceTotal: number;
   currency: string;
+  exchangeRate?: number;
   photoUrl: string;
   photoUrls?: string[];
   milestones: ProductionMilestone[];

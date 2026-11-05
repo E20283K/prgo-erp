@@ -16,7 +16,10 @@ import {
   CheckCircle2,
   Play,
   PauseCircle,
+  Layers,
+  Check,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,11 +49,28 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { RouteStep } from "../types";
+import { RouteStep, MasterSpecification } from "../types";
 import { OrderReadinessRouteCard } from "../OrderReadinessRouteCard";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { useWorkspaceStore } from "@/store/workspaceStore";
+import { formatMoney } from "@/components/documents/common/DocumentShell";
 
 interface OperationsTabProps {
   workOrderId?: string;
+  currency?: string;
   fallbackData?: {
     customer?: string;
     product?: string;
@@ -70,10 +90,14 @@ interface OperationsTabProps {
   isOperator?: boolean;
   onMarkUnsaved: () => void;
   onSyncFromPlan?: () => void;
+  onSelectSpecification?: (spec: any) => void;
+  recipe?: string;
+  activeSpec?: any;
   onOpenInTimeline?: (opId: string) => void;
   onOpenPackaging?: () => void;
   isPacked?: boolean;
   packagesCount?: number;
+  onStageChange?: (stage: any) => void;
 }
 
 const STATUS_LABELS: Record<RouteStep["status"], string> = {
@@ -85,6 +109,7 @@ const STATUS_LABELS: Record<RouteStep["status"], string> = {
 
 export function OperationsTab({
   workOrderId,
+  currency = "UZS",
   fallbackData,
   operations,
   setOperations,
@@ -97,12 +122,28 @@ export function OperationsTab({
   isOperator = false,
   onMarkUnsaved,
   onSyncFromPlan,
+  onSelectSpecification,
+  recipe,
+  activeSpec,
   onOpenInTimeline,
   onOpenPackaging,
   packagesCount,
+  onStageChange,
 }: OperationsTabProps) {
   const selectedOpRow = opSelection.rows.first();
   const hasSelectedOp = selectedOpRow !== undefined && operations[selectedOpRow] !== undefined;
+
+  const { masterSpecifications, loadSpecificationsAsync } = useWorkspaceStore();
+  const [isSpecPickerOpen, setIsSpecPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (masterSpecifications.length === 0 && loadSpecificationsAsync) {
+      loadSpecificationsAsync();
+    }
+  }, [masterSpecifications.length, loadSpecificationsAsync]);
+
+  const isUsd = (currency || "UZS").toUpperCase() === "USD";
+  const currencyLabel = isUsd ? "$" : "so'm";
 
   const totalDuration = useMemo(() => {
     return Number(
@@ -137,9 +178,9 @@ export function OperationsTab({
 
     if (!isOperator) {
       cols.push(
-        { id: "rate", title: "Stavka", width: 125, icon: GridColumnIcon.HeaderNumber },
-        { id: "plannedCost", title: "Rejaviy tannarx ($)", width: 135, icon: GridColumnIcon.HeaderMath },
-        { id: "piecework", title: "Sdelka FOT ($)", width: 115, icon: GridColumnIcon.HeaderMath }
+        { id: "rate", title: `Stavka (${currencyLabel})`, width: 135, icon: GridColumnIcon.HeaderNumber },
+        { id: "plannedCost", title: `Rejaviy tannarx (${currencyLabel})`, width: 145, icon: GridColumnIcon.HeaderMath },
+        { id: "piecework", title: `Sdelka FOT (${currencyLabel})`, width: 130, icon: GridColumnIcon.HeaderMath }
       );
     }
 
@@ -385,7 +426,7 @@ export function OperationsTab({
         case "rate": {
           const rateText =
             op.rateUsd !== undefined && op.rateUsd > 0
-              ? `$${op.rateUsd} / ${op.calcUnit || "birlik"}`
+              ? `${formatMoney(op.rateUsd, currency, isUsd ? 2 : 0)} / ${op.calcUnit || "birlik"}`
               : "—";
           return {
             kind: GridCellKind.Text,
@@ -404,7 +445,7 @@ export function OperationsTab({
           return {
             kind: GridCellKind.Number,
             data: val,
-            displayData: val > 0 ? `$${val.toFixed(2)}` : "—",
+            displayData: val > 0 ? formatMoney(val, currency, isUsd ? 2 : 0) : "—",
             allowOverlay: !isOperator,
             contentAlign: "right",
             themeOverride: {
@@ -418,7 +459,7 @@ export function OperationsTab({
           return {
             kind: GridCellKind.Number,
             data: val,
-            displayData: val > 0 ? `$${val.toFixed(2)}` : "—",
+            displayData: val > 0 ? formatMoney(val, currency, isUsd ? 2 : 0) : "—",
             allowOverlay: !isOperator,
             contentAlign: "right",
             themeOverride: {
@@ -480,6 +521,7 @@ export function OperationsTab({
           variant="horizontal"
           workOrderId={workOrderId}
           fallbackData={fallbackData}
+          onStageChange={onStageChange}
         />
       )}
 
@@ -495,6 +537,39 @@ export function OperationsTab({
               <Plus className="w-3.5 h-3.5" />
               <span>Bosqich qo&apos;shish</span>
             </Button>
+          )}
+
+          {!isOperator && (
+            activeSpec || recipe ? (
+              <div className="flex items-center gap-1.5 shrink-0 bg-muted/40 border border-border/80 rounded px-2 py-0.5">
+                <span className="text-[11px] font-medium text-muted-foreground hidden xl:inline shrink-0">
+                  Retsept:
+                </span>
+                <Badge variant="outline" className="text-[10px] h-4.5 px-1 font-mono text-primary font-semibold">
+                  {activeSpec?.code || recipe}
+                </Badge>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsSpecPickerOpen(true)}
+                  className="h-5 px-1 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  Almashtirish
+                </Button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsSpecPickerOpen(true)}
+                className="h-6.5 px-2 text-xs font-normal gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <Layers className="size-3 text-primary" />
+                <span>Shablon biriktirish</span>
+              </Button>
+            )
           )}
 
           {onOpenPackaging && (
@@ -643,7 +718,7 @@ export function OperationsTab({
               <span className="flex items-center gap-1 font-mono">
                 Tannarx:{" "}
                 <strong className="text-blue-600 dark:text-blue-400 font-semibold">
-                  ${totalPlannedCost.toFixed(2)}
+                  {formatMoney(totalPlannedCost, currency, isUsd ? 2 : 0)}
                 </strong>
               </span>
             </>
@@ -654,7 +729,7 @@ export function OperationsTab({
               <span className="flex items-center gap-1 font-mono">
                 Sdelka FOT:{" "}
                 <strong className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                  ${totalPiecework.toFixed(2)}
+                  {formatMoney(totalPiecework, currency, isUsd ? 2 : 0)}
                 </strong>
               </span>
             </>
@@ -739,17 +814,15 @@ export function OperationsTab({
                       <Plus className="size-3.5" />
                       <span>Bosqich qo&apos;shish</span>
                     </Button>
-                    {onSyncFromPlan && (
-                      <Button
-                        onClick={onSyncFromPlan}
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-3 text-xs gap-1.5 text-primary border-primary/30 hover:bg-primary/10 cursor-pointer"
-                      >
-                        <Sparkles className="size-3.5 text-amber-500" />
-                        <span>Rejadan shakllantirish</span>
-                      </Button>
-                    )}
+                    <Button
+                      onClick={() => setIsSpecPickerOpen(true)}
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-3 text-xs gap-1.5 text-primary border-primary/30 hover:bg-primary/10 cursor-pointer"
+                    >
+                      <Layers className="size-3.5 text-primary" />
+                      <span>Shablon biriktirish</span>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -833,6 +906,82 @@ export function OperationsTab({
           )}
         </ContextMenuContent>
       </ContextMenu>
+      {/* Specification / Route Template Picker Dialog */}
+      <Dialog open={isSpecPickerOpen} onOpenChange={setIsSpecPickerOpen}>
+        <DialogContent className="max-w-lg p-0 overflow-hidden bg-card border border-border">
+          <DialogHeader className="px-4 py-3 border-b border-border bg-muted/20">
+            <DialogTitle className="text-xs font-semibold flex items-center gap-2">
+              <Layers className="size-4 text-primary" />
+              <span>Shablon tanlash</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <Command className="w-full">
+            <CommandInput placeholder="Shablon yoki mahsulot nomi bo'yicha qidirish..." className="h-9 text-xs" />
+            <CommandList className="max-h-80 p-2">
+              <CommandEmpty className="py-6 text-center text-xs text-muted-foreground">
+                Mos keluvchi spetsifikatsiya topilmadi.
+              </CommandEmpty>
+
+              {(["Offset", "Flexo", "Jacquard", "Post-press"] as const).map((dept) => {
+                const deptSpecs = (masterSpecifications || []).filter((s) => s.department === dept);
+                if (deptSpecs.length === 0) return null;
+
+                return (
+                  <CommandGroup key={dept} heading={`${dept} bo'limi`} className="mb-2">
+                    {deptSpecs.map((spec) => {
+                      const isSelected = (activeSpec?.code || recipe) === spec.code;
+                      return (
+                        <CommandItem
+                          key={spec.code}
+                          value={`${spec.code} ${spec.name} ${spec.department} ${spec.description || ""}`}
+                          onSelect={() => {
+                            if (onSelectSpecification) {
+                              onSelectSpecification(spec);
+                            }
+                            setIsSpecPickerOpen(false);
+                          }}
+                          className="py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5 rounded hover:bg-muted"
+                        >
+                          <div className="mt-0.5 shrink-0">
+                            <Check className={cn("size-3.5 text-primary", isSelected ? "opacity-100" : "opacity-0")} />
+                          </div>
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-semibold text-[11px] text-primary">
+                                {spec.code}
+                              </span>
+                              <span className="font-medium text-foreground truncate">
+                                {spec.name}
+                              </span>
+                              <Badge variant="outline" className="ml-auto text-[10px] px-1 py-0 shrink-0 font-normal">
+                                {spec.department}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5 font-mono">
+                              <span>
+                                {Array.isArray((spec as any).operations)
+                                  ? `${(spec as any).operations.length} operatsiya`
+                                  : "Standart marshrut"}
+                              </span>
+                              {spec.estimatedCost && (
+                                <>
+                                  <span>•</span>
+                                  <span>{spec.estimatedCost}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                );
+              })}
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
     </TabsContent>
   );
 }

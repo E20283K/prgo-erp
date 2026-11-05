@@ -63,6 +63,7 @@ const DataEditor = dynamic(
 
 interface SupplierOrdersTabProps {
   supplier: SupplierRecord;
+  isActive?: boolean;
   onRefreshOrders?: () => void;
   onOrderCreated?: () => void;
   isCreateOpen?: boolean;
@@ -89,6 +90,7 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
 
 export function SupplierOrdersTab({
   supplier,
+  isActive,
   onRefreshOrders,
   onOrderCreated,
   isCreateOpen,
@@ -142,8 +144,10 @@ export function SupplierOrdersTab({
   }, [supplier.id]);
 
   useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
+    if (isActive !== false) {
+      fetchOrders();
+    }
+  }, [fetchOrders, isActive]);
 
   const handleCreateOrder = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();

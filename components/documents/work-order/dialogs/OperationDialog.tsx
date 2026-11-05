@@ -1,7 +1,14 @@
 "use client";
 
 import React from "react";
-import { Stamp, Factory, Users, Tag, Calculator, DollarSign, Layers } from "lucide-react";
+import {
+  Stamp,
+  Factory,
+  Users,
+  Tag,
+  Calculator,
+  Info,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
@@ -32,11 +39,17 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { RouteStep, MACHINE_MAP } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
 import { computeTariffEstimate, TARIFF_CALC_UNITS } from "@/components/documents/tariff/types";
+import { formatMoney, formatNumberWithSpaces } from "@/components/documents/common/DocumentShell";
 
 interface OperationDialogProps {
   isOpen: boolean;
@@ -47,6 +60,8 @@ interface OperationDialogProps {
   onSave: () => void;
   customerName?: string;
   orderQuantity?: number;
+  currency?: string;
+  exchangeRate?: number;
 }
 
 interface OperatorItem {
@@ -84,6 +99,26 @@ function getOperatorInitials(name: string): string {
   return (clean.slice(0, 2) || "OP").toUpperCase();
 }
 
+function FieldInfoTooltip({ text }: { text: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className="inline-flex items-center justify-center text-muted-foreground/60 hover:text-foreground transition-colors cursor-help p-0.5 ml-1 select-none"
+            title=""
+          >
+            <Info className="size-3" />
+          </span>
+        }
+      />
+      <TooltipContent side="top" className="max-w-[270px] text-xs leading-relaxed p-2 font-normal">
+        {text}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function OperationDialog({
   isOpen,
   onOpenChange,
@@ -91,9 +126,15 @@ export function OperationDialog({
   form,
   setForm,
   onSave,
-  customerName,
   orderQuantity = 1000,
+  currency = "UZS",
+  exchangeRate = 12850,
 }: OperationDialogProps) {
+  const isUsd = (currency || "UZS").toUpperCase() === "USD";
+  const currencyLabel = isUsd ? "$" : "so'm";
+  const moneyDecimals = isUsd ? 2 : 0;
+  const pieceworkDecimals = isUsd ? 3 : 0;
+
   const { customerTooling, employees, tariffs, machines } = useWorkspaceStore(
     useShallow((s) => ({
       customerTooling: s.customerTooling,
@@ -153,16 +194,31 @@ export function OperationDialog({
   }, [customerTooling]);
 
   const tariffOptions = React.useMemo(() => {
-    return tariffs.map((t) => ({
-      value: t.id,
-      label: `${t.code} — ${t.operationName} [${t.machineOrDept || t.category}] ($${t.rateUsd}/${t.unit})`,
-    }));
-  }, [tariffs]);
+    return tariffs.map((t) => {
+      const tCur = (t.currency || "USD").toUpperCase();
+      let displayRate = t.rateUsd || 0;
+      let displayCur = tCur === "USD" ? "$" : "so'm";
+
+      if (tCur === "USD" && !isUsd) {
+        displayRate = Math.round(displayRate * exchangeRate);
+        displayCur = "so'm";
+      } else if (tCur === "UZS" && isUsd) {
+        displayRate = Number((displayRate / exchangeRate).toFixed(2));
+        displayCur = "$";
+      }
+
+      const formattedRate = formatNumberWithSpaces(displayRate, isUsd ? 2 : 0);
+      return {
+        value: t.id,
+        label: `${t.code} — ${t.operationName} [${t.machineOrDept || t.category}] (${formattedRate} ${displayCur}/${t.unit})`,
+      };
+    });
+  }, [tariffs, isUsd, exchangeRate]);
 
   const calcUnitOptions = React.useMemo(() => {
     return TARIFF_CALC_UNITS.map((u) => ({
       value: u.value,
-      label: `${u.label} (÷${u.divisor})`,
+      label: `${u.label} (÷${formatNumberWithSpaces(u.divisor)})`,
     }));
   }, []);
 
@@ -177,9 +233,9 @@ export function OperationDialog({
     const divisor = activeDivisor > 0 ? activeDivisor : 1;
     const chargeableUnits = qty / divisor;
 
-    const runCost = Number((chargeableUnits * activeRate).toFixed(2));
-    const plannedCostUsd = Number((activeSetup + runCost).toFixed(2));
-    const pieceworkTotalUsd = Number((chargeableUnits * activePiecework).toFixed(2));
+    const runCost = isUsd ? Number((chargeableUnits * activeRate).toFixed(2)) : Math.round(chargeableUnits * activeRate);
+    const plannedCostUsd = isUsd ? Number((activeSetup + runCost).toFixed(2)) : Math.round(activeSetup + runCost);
+    const pieceworkTotalUsd = isUsd ? Number((chargeableUnits * activePiecework).toFixed(2)) : Math.round(chargeableUnits * activePiecework);
 
     setForm((p) => ({
       ...p,
@@ -198,6 +254,29 @@ export function OperationDialog({
 
     const estimate = computeTariffEstimate(selected, orderQuantity || 1000);
 
+    const tCur = (selected.currency || "USD").toUpperCase();
+    let effectiveRate = estimate.effectiveRate;
+    let effectiveSetup = estimate.effectiveSetup;
+    let pieceworkRate = selected.pieceworkRateUsd || 0;
+
+    if (tCur === "USD" && !isUsd) {
+      effectiveRate = Math.round(effectiveRate * exchangeRate);
+      effectiveSetup = Math.round(effectiveSetup * exchangeRate);
+      pieceworkRate = Math.round(pieceworkRate * exchangeRate);
+    } else if (tCur === "UZS" && isUsd) {
+      effectiveRate = Number((effectiveRate / exchangeRate).toFixed(2));
+      effectiveSetup = Number((effectiveSetup / exchangeRate).toFixed(2));
+      pieceworkRate = Number((pieceworkRate / exchangeRate).toFixed(3));
+    }
+
+    const qty = Math.max(0, orderQuantity || 1000);
+    const divisor = selected.unitDivisor > 0 ? selected.unitDivisor : 1;
+    const chargeableUnits = qty / divisor;
+
+    const runCost = isUsd ? Number((chargeableUnits * effectiveRate).toFixed(2)) : Math.round(chargeableUnits * effectiveRate);
+    const plannedCostUsd = isUsd ? Number((effectiveSetup + runCost).toFixed(2)) : Math.round(effectiveSetup + runCost);
+    const pieceworkTotalUsd = isUsd ? Number((chargeableUnits * pieceworkRate).toFixed(2)) : Math.round(chargeableUnits * pieceworkRate);
+
     // Calculate estimated duration if norm is available
     let estimatedDuration = form.duration;
     if (selected.normOutputPerShift > 0) {
@@ -214,11 +293,11 @@ export function OperationDialog({
       machine: selected.machineOrDept || p.machine,
       calcUnit: selected.unit,
       unitDivisor: selected.unitDivisor,
-      rateUsd: estimate.effectiveRate,
-      setupFeeUsd: estimate.effectiveSetup,
-      pieceworkRateUsd: selected.pieceworkRateUsd,
-      plannedCostUsd: estimate.netCost,
-      pieceworkTotalUsd: estimate.pieceworkTotal,
+      rateUsd: effectiveRate,
+      setupFeeUsd: effectiveSetup,
+      pieceworkRateUsd: pieceworkRate,
+      plannedCostUsd,
+      pieceworkTotalUsd,
       duration: estimatedDuration,
     }));
   };
@@ -312,12 +391,15 @@ export function OperationDialog({
           {/* Quick Tariff Picker */}
           <div className="p-2.5 rounded-md border border-border bg-muted/30 space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <label className="text-xs font-semibold text-foreground flex items-center gap-1">
                 <Tag className="w-3.5 h-3.5 text-primary" />
                 <span>Korxona tarifi</span>
+                <FieldInfoTooltip text="Korxona bo'yicha tasdiqlangan me'yoriy tariflar spravochnigi. Tanlangan tarifdan operatsiya nomi, uskuna, stavka, pripravka va ish vaqti avtomatik yuklanadi." />
               </label>
-              <span className="text-[11px] text-muted-foreground font-mono">
-                Adad: {orderQuantity.toLocaleString()}
+              <span className="text-[11px] text-muted-foreground font-mono flex items-center gap-1">
+                <span>Adad:</span>
+                <strong className="text-foreground">{formatNumberWithSpaces(orderQuantity)}</strong>
+                <FieldInfoTooltip text="Buyurtmaning umumiy ishlab chiqarish tiraji (adadi). Operatsiya tannarxi va me'yoriy vaqt ushbu adad asosida hisoblanadi." />
               </span>
             </div>
             <FieldCombobox
@@ -334,7 +416,10 @@ export function OperationDialog({
           {/* Row 1: Step # & Operation Description */}
           <div className="grid grid-cols-4 gap-2.5">
             <div>
-              <label className="text-xs font-medium block mb-1">Tartib #</label>
+              <label className="text-xs font-medium flex items-center gap-1 mb-1">
+                <span>Tartib #</span>
+                <FieldInfoTooltip text="Texnologik marshrutdagi bosqich ketma-ketlik raqami (masalan: 10, 20, 30). Ishlarning bajarilish tartibini belgilaydi." />
+              </label>
               <Input
                 type="number"
                 step="10"
@@ -344,7 +429,10 @@ export function OperationDialog({
               />
             </div>
             <div className="col-span-3">
-              <label className="text-xs font-medium block mb-1">Operatsiya nomi *</label>
+              <label className="text-xs font-medium flex items-center gap-1 mb-1">
+                <span>Operatsiya nomi *</span>
+                <FieldInfoTooltip text="Ishlab chiqarishda bajariladigan texnologik operatsiya nomi (masalan: 4+4 Ofset bosma, UF laklash, Tigel kesish)." />
+              </label>
               <Input
                 value={form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
@@ -357,7 +445,10 @@ export function OperationDialog({
           {/* Row 2: Assigned Machine & Planned Duration */}
           <div className="grid grid-cols-3 gap-2.5">
             <div className="col-span-2 space-y-1">
-              <label className="text-xs font-medium block">Uskuna / Ish markazi *</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                <span>Uskuna / Ish markazi *</span>
+                <FieldInfoTooltip text="Operatsiya amalga oshiriladigan stanok yoki ish joyi. Uskunaga biriktirilgan bosh operator avtomatik tarzda mas'ul xodimlarga qo'shiladi." />
+              </label>
               <FieldCombobox
                 value={form.machine}
                 onChange={(val) => {
@@ -386,7 +477,10 @@ export function OperationDialog({
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium block">Me&apos;yoriy vaqt (soat)</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                <span>Me&apos;yoriy vaqt (soat)</span>
+                <FieldInfoTooltip text="Ushbu buyurtma tirajini bajarish uchun rejalashtirilgan mashina vaqti (soatda). Smena jurnali va umumiy ishlab chiqarish muddatiga asos bo'ladi." />
+              </label>
               <Input
                 type="number"
                 step="0.1"
@@ -402,16 +496,20 @@ export function OperationDialog({
             <div className="flex items-center justify-between text-xs font-semibold text-foreground">
               <span className="flex items-center gap-1.5">
                 <Calculator className="w-3.5 h-3.5 text-muted-foreground" />
-                <span>Stavka va tannarx</span>
+                <span>Stavka va tannarx ({currencyLabel})</span>
+                <FieldInfoTooltip text="Operatsiya tannarxi buyurtma valyutasida hisoblanadi. Pripravka + (Adad ÷ Birlik) × Stavka formulasi asosida operatsiya rejaviy tannarxi va sdelka FOT fondi shakllanadi." />
               </span>
               <span className="text-[11px] font-mono text-muted-foreground">
-                Pripravka + (Adad / Birlik) × Stavka
+                Pripravka + (Adad ÷ Birlik) × Stavka
               </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground block">Hisob birligi</label>
+                <label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <span>Hisob birligi</span>
+                  <FieldInfoTooltip text="Tarif va sdelka stavkasi qaysi hajm uchun qo'llanishi (masalan: har 1 000 varaq, 1 000 ottisk, 1 dona yoki 1 soat)." />
+                </label>
                 <FieldCombobox
                   value={form.calcUnit || "1,000 sheets"}
                   onChange={(val) => {
@@ -426,10 +524,13 @@ export function OperationDialog({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground block">Pripravka ($)</label>
+                <label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <span>Pripravka ({currencyLabel})</span>
+                  <FieldInfoTooltip text="Stanokni sozlash, formalarni o'rnatish, bo'yoq tekislash va sinov varaqlarini chiqarish uchun fiksirlangan bir martalik xarajat summasi." />
+                </label>
                 <MoneyInput
                   thousandSeparator=" "
-                  decimalScale={2}
+                  decimalScale={moneyDecimals}
                   value={form.setupFeeUsd ?? 0}
                   onValueChange={(values) => handleRecalculateCosts({ setupFeeUsd: values.floatValue ?? 0 })}
                   className="h-7 text-xs font-mono"
@@ -437,10 +538,13 @@ export function OperationDialog({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground block">Stavka ($)</label>
+                <label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <span>Stavka ({currencyLabel})</span>
+                  <FieldInfoTooltip text="Belgilangan hisob birligi (masalan, har 1 000 varaq) uchun korxona hisob-kitob narxi / tarifi." />
+                </label>
                 <MoneyInput
                   thousandSeparator=" "
-                  decimalScale={2}
+                  decimalScale={moneyDecimals}
                   value={form.rateUsd ?? 0}
                   onValueChange={(values) => handleRecalculateCosts({ rateUsd: values.floatValue ?? 0 })}
                   className="h-7 text-xs font-mono"
@@ -448,10 +552,13 @@ export function OperationDialog({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground block">Sdelka stavkasi ($)</label>
+                <label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <span>Sdelka stavkasi ({currencyLabel})</span>
+                  <FieldInfoTooltip text="Belgilangan hisob birligi uchun operatorlarga hisoblanadigan ishbay ish haqi (FOT) stavkasi." />
+                </label>
                 <MoneyInput
                   thousandSeparator=" "
-                  decimalScale={3}
+                  decimalScale={pieceworkDecimals}
                   value={form.pieceworkRateUsd ?? 0}
                   onValueChange={(values) => handleRecalculateCosts({ pieceworkRateUsd: values.floatValue ?? 0 })}
                   className="h-7 text-xs font-mono"
@@ -462,18 +569,20 @@ export function OperationDialog({
             {/* Live Cost Summary Bar */}
             <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
               <div className="flex items-center gap-3">
-                <span className="text-muted-foreground">
-                  Rejaviy tannarx:{" "}
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <span>Rejaviy tannarx:</span>
                   <strong className="text-foreground font-mono">
-                    ${(form.plannedCostUsd || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatMoney(form.plannedCostUsd || 0, currency, moneyDecimals)}
                   </strong>
+                  <FieldInfoTooltip text="Ushbu operatsiya bo'yicha jami rejaviy tannarx: Pripravka + (Adad ÷ Birlik) × Stavka." />
                 </span>
                 <span className="text-muted-foreground/40">•</span>
-                <span className="text-muted-foreground">
-                  Sdelka FOT:{" "}
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <span>Sdelka FOT:</span>
                   <strong className="text-emerald-600 dark:text-emerald-400 font-mono">
-                    ${(form.pieceworkTotalUsd || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatMoney(form.pieceworkTotalUsd || 0, currency, moneyDecimals)}
                   </strong>
+                  <FieldInfoTooltip text="Operatorlar brigadasiga to'lanadigan jami ishbay ish haqi fondi: (Adad ÷ Birlik) × Sdelka stavkasi." />
                 </span>
               </div>
             </div>
@@ -482,9 +591,10 @@ export function OperationDialog({
           {/* Row 4: Assigned Operators */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+              <label className="text-xs font-medium text-foreground flex items-center gap-1">
                 <Users className="w-3.5 h-3.5 text-primary" />
                 <span>Mas&apos;ul operatorlar</span>
+                <FieldInfoTooltip text="Ushbu bosqichni bajarishga mas'ul bo'lgan bir yoki bir nechta operatorlar / brigada xodimlari." />
               </label>
               <span className="text-[11px] text-muted-foreground font-mono">
                 {selectedOperators.length > 0
@@ -598,6 +708,7 @@ export function OperationDialog({
                 <span className="flex items-center gap-1.5 text-foreground">
                   <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                   <span>Texnologik jihoz</span>
+                  <FieldInfoTooltip text="Operatsiyada ishlatiladigan shtansforma, shtamp, klishe yoki qolip. Uning joylashuvi va ishlatilgan resursi hisobga olinadi." />
                 </span>
                 <span className="text-[11px] text-muted-foreground font-normal">Ixtiyoriy</span>
               </label>
@@ -627,15 +738,18 @@ export function OperationDialog({
                   <span className="text-muted-foreground/60">•</span>
                   <span>Resurs:</span>
                   <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                    {customerTooling.find((t) => t.id === form.toolingId)?.impressionsUsed?.toLocaleString() || 0} /{" "}
-                    {customerTooling.find((t) => t.id === form.toolingId)?.maxLife?.toLocaleString() || 150000}
+                    {customerTooling.find((t) => t.id === form.toolingId)?.impressionsUsed ? formatNumberWithSpaces(customerTooling.find((t) => t.id === form.toolingId)?.impressionsUsed) : 0} /{" "}
+                    {formatNumberWithSpaces(customerTooling.find((t) => t.id === form.toolingId)?.maxLife || 150000)}
                   </span>
                 </p>
               )}
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium block text-foreground">Bosqich holati</label>
+              <label className="text-xs font-medium flex items-center gap-1 text-foreground">
+                <span>Bosqich holati</span>
+                <FieldInfoTooltip text="Operatsiyaning joriy holati: Navbatda (kutmoqda), Jarayonda (ishlanmoqda), To'xtalish (pauza) yoki Yakunlandi (tayyor)." />
+              </label>
               <Select
                 value={form.status || "Queued"}
                 onValueChange={(val: any) => setForm((p) => ({ ...p, status: val }))}

@@ -366,6 +366,196 @@ export function SpecificationsTab({
       ) || null
     );
   }, [formData.paperStock, warehouseStock]);
+
+  // Real Warehouse Stock Options for Lamination (Foil & Film)
+  const laminationStockOptions = useMemo<ComboboxOption[]>(() => {
+    const options: ComboboxOption[] = [];
+    const seen = new Set<string>();
+
+    if (warehouseStock && warehouseStock.length > 0) {
+      warehouseStock
+        .filter(
+          (w) =>
+            w.category === "Foil & Film" ||
+            w.name.toLowerCase().includes("film") ||
+            w.name.toLowerCase().includes("laminat") ||
+            w.name.toLowerCase().includes("bopp")
+        )
+        .forEach((ws) => {
+          const key = ws.sku.toLowerCase().trim();
+          if (!seen.has(key)) {
+            seen.add(key);
+            const formatStr = ws.sheetFormat || (ws.rollWidthMm ? `Eni: ${ws.rollWidthMm}mm` : "");
+            const avail = ws.available ?? ws.stockLevel ?? 0;
+            const stockStr = `Omborda: ${avail.toLocaleString()} ${ws.unit || "m"} (${ws.location || "Ombor"})`;
+            const desc = [ws.sku, formatStr, stockStr].filter(Boolean).join(" • ");
+            options.push({
+              value: ws.sku,
+              label: ws.name,
+              description: desc,
+              code: ws.sku,
+            });
+          }
+        });
+    }
+
+    if (formData.laminationStockSku && !seen.has(formData.laminationStockSku.toLowerCase().trim())) {
+      options.unshift({
+        value: formData.laminationStockSku,
+        label: formData.laminationStockName || formData.laminationStockSku,
+        description: "Hujjatga biriktirilgan plyonka",
+      });
+    }
+
+    return options;
+  }, [warehouseStock, formData.laminationStockSku, formData.laminationStockName]);
+
+  const matchedLaminationStock = useMemo(() => {
+    if (!formData.laminationStockSku && !formData.lamination) return null;
+    const cleanSku = (formData.laminationStockSku || "").toLowerCase().trim();
+    if (cleanSku) {
+      const bySku = warehouseStock.find((w) => w.sku.toLowerCase().trim() === cleanSku);
+      if (bySku) return bySku;
+    }
+    const cleanName = (formData.lamination || "").toLowerCase().trim();
+    return (
+      warehouseStock.find(
+        (w) =>
+          (w.category === "Foil & Film" || w.name.toLowerCase().includes("film") || w.name.toLowerCase().includes("laminat")) &&
+          (cleanName ? w.name.toLowerCase().includes(cleanName) : false)
+      ) || null
+    );
+  }, [formData.laminationStockSku, formData.lamination, warehouseStock]);
+
+  // Real Warehouse Stock Options for Coating / Varnish (Inks & Plates)
+  const coatingStockOptions = useMemo<ComboboxOption[]>(() => {
+    const options: ComboboxOption[] = [];
+    const seen = new Set<string>();
+
+    if (warehouseStock && warehouseStock.length > 0) {
+      warehouseStock
+        .filter(
+          (w) =>
+            w.category === "Inks & Plates" ||
+            w.name.toLowerCase().includes("lak") ||
+            w.name.toLowerCase().includes("varnish") ||
+            w.name.toLowerCase().includes("uv")
+        )
+        .forEach((ws) => {
+          const key = ws.sku.toLowerCase().trim();
+          if (!seen.has(key)) {
+            seen.add(key);
+            const avail = ws.available ?? ws.stockLevel ?? 0;
+            const stockStr = `Omborda: ${avail.toLocaleString()} ${ws.unit || "kg"} (${ws.location || "Ombor"})`;
+            const desc = [ws.sku, (ws as any).spec || ws.category, stockStr].filter(Boolean).join(" • ");
+            options.push({
+              value: ws.sku,
+              label: ws.name,
+              description: desc,
+              code: ws.sku,
+            });
+          }
+        });
+    }
+
+    if (formData.coatingStockSku && !seen.has(formData.coatingStockSku.toLowerCase().trim())) {
+      options.unshift({
+        value: formData.coatingStockSku,
+        label: formData.coatingStockName || formData.coatingStockSku,
+        description: "Hujjatga biriktirilgan lak",
+      });
+    }
+
+    return options;
+  }, [warehouseStock, formData.coatingStockSku, formData.coatingStockName]);
+
+  const matchedCoatingStock = useMemo(() => {
+    if (!formData.coatingStockSku && !formData.coating) return null;
+    const cleanSku = (formData.coatingStockSku || "").toLowerCase().trim();
+    if (cleanSku) {
+      const bySku = warehouseStock.find((w) => w.sku.toLowerCase().trim() === cleanSku);
+      if (bySku) return bySku;
+    }
+    const cleanName = (formData.coating || "").toLowerCase().trim();
+    return (
+      warehouseStock.find(
+        (w) =>
+          w.category === "Inks & Plates" &&
+          (cleanName ? w.name.toLowerCase().includes(cleanName) : false)
+      ) || null
+    );
+  }, [formData.coatingStockSku, formData.coating, warehouseStock]);
+
+  // Real Warehouse Stock Options for Embellishment (Foil & Film / Inks & Plates)
+  const embellishmentStockOptions = useMemo<ComboboxOption[]>(() => {
+    const options: ComboboxOption[] = [];
+    const seen = new Set<string>();
+    const isFoil = Boolean(
+      formData.embellishment &&
+      (formData.embellishment.toLowerCase().includes("foil") || formData.embellishment.toLowerCase().includes("folga"))
+    );
+
+    if (warehouseStock && warehouseStock.length > 0) {
+      warehouseStock
+        .filter((w) => {
+          if (isFoil) {
+            return (
+              w.category === "Foil & Film" ||
+              w.name.toLowerCase().includes("folga") ||
+              w.name.toLowerCase().includes("foil")
+            );
+          }
+          return (
+            w.category === "Inks & Plates" ||
+            w.category === "Foil & Film" ||
+            w.name.toLowerCase().includes("serigraf") ||
+            w.name.toLowerCase().includes("screen")
+          );
+        })
+        .forEach((ws) => {
+          const key = ws.sku.toLowerCase().trim();
+          if (!seen.has(key)) {
+            seen.add(key);
+            const avail = ws.available ?? ws.stockLevel ?? 0;
+            const stockStr = `Omborda: ${avail.toLocaleString()} ${ws.unit || (isFoil ? "m" : "kg")} (${ws.location || "Ombor"})`;
+            const desc = [ws.sku, (ws as any).spec || ws.category, stockStr].filter(Boolean).join(" • ");
+            options.push({
+              value: ws.sku,
+              label: ws.name,
+              description: desc,
+              code: ws.sku,
+            });
+          }
+        });
+    }
+
+    if (formData.embellishmentStockSku && !seen.has(formData.embellishmentStockSku.toLowerCase().trim())) {
+      options.unshift({
+        value: formData.embellishmentStockSku,
+        label: formData.embellishmentStockName || formData.embellishmentStockSku,
+        description: "Hujjatga biriktirilgan pardoz",
+      });
+    }
+
+    return options;
+  }, [warehouseStock, formData.embellishmentStockSku, formData.embellishmentStockName, formData.embellishment]);
+
+  const matchedEmbellishmentStock = useMemo(() => {
+    if (!formData.embellishmentStockSku && !formData.embellishment) return null;
+    const cleanSku = (formData.embellishmentStockSku || "").toLowerCase().trim();
+    if (cleanSku) {
+      const bySku = warehouseStock.find((w) => w.sku.toLowerCase().trim() === cleanSku);
+      if (bySku) return bySku;
+    }
+    const cleanName = (formData.embellishment || "").toLowerCase().trim();
+    return (
+      warehouseStock.find(
+        (w) =>
+          (w.category === "Foil & Film" || w.category === "Inks & Plates") &&
+          (cleanName ? w.name.toLowerCase().includes(cleanName) : false)
+      ) || null
+    );
+  }, [formData.embellishmentStockSku, formData.embellishment, warehouseStock]);
   const [isPantoneModalOpen, setIsPantoneModalOpen] = useState(false);
   const [pantoneTargetSide, setPantoneTargetSide] = useState<"front" | "back" | "both">("front");
   const [frontQuickInput, setFrontQuickInput] = useState("");
@@ -1895,7 +2085,11 @@ export function SpecificationsTab({
                     value={currentLamination}
                     disabled={isOperator}
                     onValueChange={(val) => {
-                      handleFieldChange("lamination", val === "none" ? "" : val);
+                      const nextVal = val === "none" ? "" : val;
+                      handleFieldChange({
+                        lamination: nextVal,
+                        ...(nextVal === "" ? { laminationStockSku: "", laminationStockName: "" } : {}),
+                      });
                       onMarkUnsaved();
                     }}
                     placeholder="Laminatsiya turini tanlang..."
@@ -1921,21 +2115,87 @@ export function SpecificationsTab({
               </div>
 
               {isLaminationActive && (
-                <div className="pt-2 border-t border-border/50">
-                  <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                    Qalinlik (µm)
-                  </label>
-                  <ComboboxSelect
-                    items={LAMINATION_MICRON_OPTIONS}
-                    value={String(laminationMicron)}
-                    disabled={isOperator}
-                    onValueChange={(val) => {
-                      handleFieldChange("laminationMicron", Number(val));
-                      onMarkUnsaved();
-                    }}
-                    placeholder="Qalinlikni tanlang..."
-                    className="font-mono"
-                  />
+                <div className="grid grid-cols-1 @md:grid-cols-2 gap-3 pt-2 border-t border-border/50">
+                  <div>
+                    <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                      Qalinlik (µm)
+                    </label>
+                    <ComboboxSelect
+                      items={LAMINATION_MICRON_OPTIONS}
+                      value={String(laminationMicron)}
+                      disabled={isOperator}
+                      onValueChange={(val) => {
+                        handleFieldChange("laminationMicron", Number(val));
+                        onMarkUnsaved();
+                      }}
+                      placeholder="Qalinlikni tanlang..."
+                      className="font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                      Ombordagi plyonka (Foil & Film)
+                    </label>
+                    <ComboboxSelect
+                      items={laminationStockOptions}
+                      value={formData.laminationStockSku || matchedLaminationStock?.sku || ""}
+                      disabled={isOperator}
+                      onValueChange={(val) => {
+                        const matched = warehouseStock.find((w) => w.sku === val || w.name === val);
+                        handleFieldChange({
+                          laminationStockSku: matched ? matched.sku : val,
+                          laminationStockName: matched ? matched.name : val,
+                        });
+                        onMarkUnsaved();
+                      }}
+                      actionLabel="Yangi plyonka kirim qilish (Ombor)"
+                      onAction={() => {
+                        const newSku = generateNextMaterialSku(warehouseStock);
+                        openTab({
+                          id: `stock-${newSku}`,
+                          title: `${newSku}: Yangi Plyonka`,
+                          type: "warehouse-stock",
+                          module: "warehouse",
+                          isUnsaved: true,
+                          documentData: {
+                            sku: newSku,
+                            name: "",
+                            category: "Foil & Film",
+                            unit: "m",
+                            minStock: 0,
+                            currentStock: 0,
+                          },
+                        });
+                      }}
+                      placeholder="Ombordagi plyonkani tanlang..."
+                      className="font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {isLaminationActive && (
+                <div className="pt-1 flex items-center justify-between text-[11px] font-mono">
+                  {matchedLaminationStock ? (
+                    <span className="text-muted-foreground flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      <span>
+                        Omborda:{" "}
+                        <strong className="text-foreground">
+                          {(matchedLaminationStock.available ?? matchedLaminationStock.stockLevel ?? 0).toLocaleString()}{" "}
+                          {matchedLaminationStock.unit || "m"}
+                        </strong>
+                        {matchedLaminationStock.location ? ` • ${matchedLaminationStock.location}` : ""}
+                        {matchedLaminationStock.sku ? ` [${matchedLaminationStock.sku}]` : ""}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                      <span>Ombordan aniq plyonka biriktirilmagan (Standart me&apos;yor bo&apos;yicha hisoblanadi)</span>
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -1996,7 +2256,11 @@ export function SpecificationsTab({
                       value={currentCoating}
                       disabled={isOperator}
                       onValueChange={(val) => {
-                        handleFieldChange("coating", val === "none" ? "" : val);
+                        const nextVal = val === "none" ? "" : val;
+                        handleFieldChange({
+                          coating: nextVal,
+                          ...(nextVal === "" ? { coatingStockSku: "", coatingStockName: "" } : {}),
+                        });
                         onMarkUnsaved();
                       }}
                       placeholder="Lak turini tanlang..."
@@ -2021,6 +2285,73 @@ export function SpecificationsTab({
                     </div>
                   )}
                 </div>
+
+                {/* Warehouse Stock Selector for Varnish */}
+                {isCoatingActive && (
+                  <div className="pt-2 border-t border-border/50 space-y-1.5">
+                    <div>
+                      <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                        Ombordagi lak (Inks & Plates)
+                      </label>
+                      <ComboboxSelect
+                        items={coatingStockOptions}
+                        value={formData.coatingStockSku || matchedCoatingStock?.sku || ""}
+                        disabled={isOperator}
+                        onValueChange={(val) => {
+                          const matched = warehouseStock.find((w) => w.sku === val || w.name === val);
+                          handleFieldChange({
+                            coatingStockSku: matched ? matched.sku : val,
+                            coatingStockName: matched ? matched.name : val,
+                          });
+                          onMarkUnsaved();
+                        }}
+                        actionLabel="Yangi lak kirim qilish (Ombor)"
+                        onAction={() => {
+                          const newSku = generateNextMaterialSku(warehouseStock);
+                          openTab({
+                            id: `stock-${newSku}`,
+                            title: `${newSku}: Yangi Lak`,
+                            type: "warehouse-stock",
+                            module: "warehouse",
+                            isUnsaved: true,
+                            documentData: {
+                              sku: newSku,
+                              name: "",
+                              category: "Inks & Plates",
+                              unit: "kg",
+                              minStock: 0,
+                              currentStock: 0,
+                            },
+                          });
+                        }}
+                        placeholder="Ombordagi lak xomashyosini tanlang..."
+                        className="font-mono"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] font-mono">
+                      {matchedCoatingStock ? (
+                        <span className="text-muted-foreground flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                          <span>
+                            Omborda:{" "}
+                            <strong className="text-foreground">
+                              {(matchedCoatingStock.available ?? matchedCoatingStock.stockLevel ?? 0).toLocaleString()}{" "}
+                              {matchedCoatingStock.unit || "kg"}
+                            </strong>
+                            {matchedCoatingStock.location ? ` • ${matchedCoatingStock.location}` : ""}
+                            {matchedCoatingStock.sku ? ` [${matchedCoatingStock.sku}]` : ""}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                          <span>Ombordan aniq lak biriktirilmagan (Standart me&apos;yor bo&apos;yicha hisoblanadi)</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Sub-section 2: Embellishment & Screen Print */}
@@ -2052,7 +2383,11 @@ export function SpecificationsTab({
                       value={currentEmbellishment}
                       disabled={isOperator}
                       onValueChange={(val) => {
-                        handleFieldChange("embellishment", val === "none" ? "" : val);
+                        const nextVal = val === "none" ? "" : val;
+                        handleFieldChange({
+                          embellishment: nextVal,
+                          ...(nextVal === "" ? { embellishmentStockSku: "", embellishmentStockName: "" } : {}),
+                        });
                         onMarkUnsaved();
                       }}
                       placeholder="Pardoz turini tanlang..."
@@ -2077,6 +2412,77 @@ export function SpecificationsTab({
                     </div>
                   )}
                 </div>
+
+                {/* Warehouse Stock Selector for Embellishment */}
+                {isEmbellishmentActive && (
+                  <div className="pt-2 border-t border-border/50 space-y-1.5">
+                    <div>
+                      <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                        Ombordagi folga yoki bo&apos;yoq
+                      </label>
+                      <ComboboxSelect
+                        items={embellishmentStockOptions}
+                        value={formData.embellishmentStockSku || matchedEmbellishmentStock?.sku || ""}
+                        disabled={isOperator}
+                        onValueChange={(val) => {
+                          const matched = warehouseStock.find((w) => w.sku === val || w.name === val);
+                          handleFieldChange({
+                            embellishmentStockSku: matched ? matched.sku : val,
+                            embellishmentStockName: matched ? matched.name : val,
+                          });
+                          onMarkUnsaved();
+                        }}
+                        actionLabel="Yangi material kirim qilish (Ombor)"
+                        onAction={() => {
+                          const isFoil = Boolean(
+                            formData.embellishment &&
+                            (formData.embellishment.toLowerCase().includes("foil") || formData.embellishment.toLowerCase().includes("folga"))
+                          );
+                          const newSku = generateNextMaterialSku(warehouseStock);
+                          openTab({
+                            id: `stock-${newSku}`,
+                            title: `${newSku}: Yangi Material`,
+                            type: "warehouse-stock",
+                            module: "warehouse",
+                            isUnsaved: true,
+                            documentData: {
+                              sku: newSku,
+                              name: "",
+                              category: isFoil ? "Foil & Film" : "Inks & Plates",
+                              unit: isFoil ? "m" : "kg",
+                              minStock: 0,
+                              currentStock: 0,
+                            },
+                          });
+                        }}
+                        placeholder="Ombordagi materialni tanlang..."
+                        className="font-mono"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] font-mono">
+                      {matchedEmbellishmentStock ? (
+                        <span className="text-muted-foreground flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                          <span>
+                            Omborda:{" "}
+                            <strong className="text-foreground">
+                              {(matchedEmbellishmentStock.available ?? matchedEmbellishmentStock.stockLevel ?? 0).toLocaleString()}{" "}
+                              {matchedEmbellishmentStock.unit || "m"}
+                            </strong>
+                            {matchedEmbellishmentStock.location ? ` • ${matchedEmbellishmentStock.location}` : ""}
+                            {matchedEmbellishmentStock.sku ? ` [${matchedEmbellishmentStock.sku}]` : ""}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                          <span>Ombordan aniq material biriktirilmagan (Standart me&apos;yor bo&apos;yicha hisoblanadi)</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

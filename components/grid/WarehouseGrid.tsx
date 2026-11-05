@@ -31,7 +31,7 @@ import {
   Truck,
   Boxes,
   Building2,
-  DollarSign,
+  DollarSign, ChevronDown,
 } from "lucide-react";
 
 import { useWorkspaceStore, generateNextMaterialSku } from "@/store/workspaceStore";
@@ -42,6 +42,7 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/documents/MaterialImageModal";
 import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { 
@@ -1126,6 +1127,52 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     return Array.from(statuses);
   }, [rowsData]);
 
+  const movementCounts = useMemo(() => {
+    let offcuts = 0;
+    let productionIssue = 0;
+    let writeOff = 0;
+    let transfers = 0;
+
+    for (const m of warehouseMovements) {
+      if (m.isOffcut || m.movementType === "CuttingReturn") {
+        offcuts++;
+      } else if (m.movementType === "ProductionIssue") {
+        productionIssue++;
+      } else if (m.movementType === "WriteOff") {
+        writeOff++;
+      } else if (m.movementType === "Transfer" || !m.movementType) {
+        transfers++;
+      }
+    }
+
+    return { offcuts, productionIssue, writeOff, transfers };
+  }, [warehouseMovements]);
+
+  const otherMovementFilters = useMemo(
+    () => [
+      {
+        key: "ProductionIssue",
+        label: "Sexga sarf",
+        count: movementCounts.productionIssue,
+      },
+      {
+        key: "WriteOff",
+        label: "Spisaniye",
+        count: movementCounts.writeOff,
+      },
+      {
+        key: "Transfers",
+        label: "Tokchalararo",
+        count: movementCounts.transfers,
+      },
+    ],
+    [movementCounts]
+  );
+
+  const activeOtherMovement = useMemo(() => {
+    return otherMovementFilters.find((item) => item.key === categoryFilter);
+  }, [otherMovementFilters, categoryFilter]);
+
   const typeLabels: Record<string, string> = {
     "finished-goods": "finished goods (mijoz zaxirasi)",
     "stock-balance": "stock",
@@ -1262,48 +1309,69 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               {type === 'movements' && (
                 <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
                   <button
+                    type="button"
                     onClick={() => setCategoryFilter("ALL")}
-                    className={`px-2 py-0.5 rounded transition-colors ${categoryFilter === "ALL" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                    className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                      categoryFilter === "ALL" 
+                        ? "bg-background text-foreground font-semibold shadow-xs" 
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                   >
                     Barchasi
                   </button>
                   <button
+                    type="button"
                     onClick={() => setCategoryFilter("Offcuts")}
-                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "Offcuts" ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold shadow-xs border border-amber-500/30" : "text-muted-foreground hover:text-foreground"}`}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                      categoryFilter === "Offcuts" 
+                        ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold shadow-xs border border-amber-500/30" 
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                   >
                     <Scissors className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                    <span>Delovoy Otxod kirimi</span>
+                    <span>Delovoy Otxod</span>
                     <span className="ml-0.5 px-1 rounded-full text-[9px] bg-amber-500/25 text-amber-800 dark:text-amber-200">
-                      {warehouseMovements.filter((m) => m.isOffcut || m.movementType === 'CuttingReturn').length}
+                      {movementCounts.offcuts}
                     </span>
                   </button>
-                  <button
-                    onClick={() => setCategoryFilter("ProductionIssue")}
-                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "ProductionIssue" ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 font-semibold shadow-xs border border-sky-500/30" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    <span>Sexga sarf</span>
-                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-sky-500/20 text-sky-800 dark:text-sky-200">
-                      {warehouseMovements.filter((m) => m.movementType === 'ProductionIssue').length}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => setCategoryFilter("WriteOff")}
-                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "WriteOff" ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 font-semibold shadow-xs border border-rose-500/30" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    <span>Spisaniye (Brak)</span>
-                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-rose-500/20 text-rose-800 dark:text-rose-200">
-                      {warehouseMovements.filter((m) => m.movementType === 'WriteOff').length}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => setCategoryFilter("Transfers")}
-                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "Transfers" ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 font-semibold shadow-xs border border-purple-500/30" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    <span>Tokchalararo</span>
-                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-purple-500/20 text-purple-800 dark:text-purple-200">
-                      {warehouseMovements.filter((m) => m.movementType === 'Transfer' || (!m.movementType && !m.isOffcut)).length}
-                    </span>
-                  </button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer outline-none ${
+                        activeOtherMovement
+                          ? "bg-background text-foreground font-semibold shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="Boshqa turlar"
+                    >
+                      <span>{activeOtherMovement ? activeOtherMovement.label : "Boshqa"}</span>
+                      {activeOtherMovement && (
+                        <span className="ml-0.5 px-1 rounded-full text-[9px] bg-muted-foreground/15 font-mono">
+                          {activeOtherMovement.count}
+                        </span>
+                      )}
+                      <ChevronDown className="w-3 h-3 opacity-60 ml-0.5" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="min-w-36 p-1 text-xs">
+                      {otherMovementFilters.map(({ key, label, count }) => (
+                        <DropdownMenuItem
+                          key={key}
+                          onClick={() => setCategoryFilter(categoryFilter === key ? "ALL" : key)}
+                          className={`flex items-center justify-between px-2 py-1.5 cursor-pointer text-xs rounded ${
+                            categoryFilter === key ? "bg-accent font-semibold text-accent-foreground" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span>{label}</span>
+                            <span className="px-1 rounded-full text-[9px] bg-muted text-muted-foreground font-mono">
+                              {count}
+                            </span>
+                          </div>
+                          {categoryFilter === key && <Check className="w-3.5 h-3.5 text-primary ml-2" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               )}
 

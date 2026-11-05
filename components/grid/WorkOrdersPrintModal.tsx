@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import {
   Printer,
   X,
@@ -222,6 +222,7 @@ export function WorkOrdersPrintModal({
 }: WorkOrdersPrintModalProps) {
   const tGrid = useTranslations("DataGrid");
   const tCommon = useTranslations("Common");
+  const locale = useLocale();
   const warehouseStock = useWorkspaceStore((s) => s.warehouseStock);
   const openTabs = useWorkspaceStore((s) => s.tabs);
 
@@ -323,7 +324,8 @@ export function WorkOrdersPrintModal({
       priorityHigh: tCommon("priorityHigh"),
       priorityNormal: tCommon("priorityNormal"),
     }),
-    [tGrid, tCommon]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [locale]
   );
 
   const filterSummaryText = useMemo(() => {
@@ -337,7 +339,8 @@ export function WorkOrdersPrintModal({
         : tGrid("statusActiveAndDraft")
     );
     return parts.join(" • ");
-  }, [deptFilter, siteFilter, machineFilter, statusMode, tGrid]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deptFilter, siteFilter, machineFilter, statusMode, locale]);
 
   const generatePdf = useCallback(async () => {
     if (!open) return;
@@ -367,10 +370,12 @@ export function WorkOrdersPrintModal({
             rawOrder: mergedRaw,
           };
 
-          const evaluatedChecks = evaluateOrderReadiness(
-            mergedRaw,
-            warehouseStock || []
-          );
+          const evaluatedChecks =
+            mergedRaw.checks ||
+            evaluateOrderReadiness(
+              mergedRaw,
+              warehouseStock || []
+            );
           let resolvedThumbUrl: string | undefined = undefined;
           let thumbSourceType: "proof" | "artwork" | "sku" | null = null;
           let resolvedSkuThumbs: Record<string, string> | undefined = undefined;
@@ -433,13 +438,23 @@ export function WorkOrdersPrintModal({
   useEffect(() => {
     if (open) {
       generatePdf();
-    } else {
-      setPdfBlobUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
     }
   }, [open, generatePdf]);
+
+  useEffect(() => {
+    if (!open && pdfBlobUrl) {
+      URL.revokeObjectURL(pdfBlobUrl);
+      setPdfBlobUrl(null);
+    }
+  }, [open, pdfBlobUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (pdfBlobUrl) {
+        URL.revokeObjectURL(pdfBlobUrl);
+      }
+    };
+  }, [pdfBlobUrl]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

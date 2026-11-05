@@ -59,9 +59,11 @@ interface OrderReadinessRouteCardProps {
     quantity?: number;
     deadline?: string;
     department?: string;
+    checks?: ProductionReadinessChecks;
   };
   variant?: "full" | "compact" | "horizontal";
   onOpenFullRoute?: () => void;
+  onStageChange?: (stage: ProductionQueueStage) => void;
   className?: string;
 }
 
@@ -70,6 +72,7 @@ export function OrderReadinessRouteCard({
   fallbackData,
   variant = "full",
   onOpenFullRoute,
+  onStageChange,
   className,
 }: OrderReadinessRouteCardProps) {
   const t = useTranslations("ProductionRoute");
@@ -81,15 +84,20 @@ export function OrderReadinessRouteCard({
     setLevel3Tab,
     setModule,
     upsertProductionQueueItem,
+    currentUser,
   } = useWorkspaceStore();
+
+  const currentUserName =
+    currentUser?.fullName || currentUser?.name || currentUser?.username || "Operator";
 
   const normalizedKey = (workOrderId || "").trim().toLowerCase();
 
   const currentItem = React.useMemo(() => {
     return productionQueue.find((item) => {
-      const idMatch = item.id.toLowerCase() === normalizedKey;
+      const idMatch = item.id?.toLowerCase() === normalizedKey;
+      const docMatch = item.docNo?.toLowerCase() === normalizedKey;
       const coMatch = item.clientOrderId && item.clientOrderId.toLowerCase() === normalizedKey;
-      return idMatch || coMatch;
+      return idMatch || docMatch || coMatch;
     });
   }, [productionQueue, normalizedKey]);
 
@@ -105,9 +113,13 @@ export function OrderReadinessRouteCard({
     const isDraft = !workOrderId || workOrderId.startsWith("draft-") || workOrderId.startsWith("temp-");
     if (isDraft) return;
 
+    // Navbat hali yuklanayotgan bo'lsa (bo'sh bo'lsa), soxta bo'sh item yaratmaslik
+    if (productionQueue.length === 0) return;
+
     if (!currentItem && workOrderId) {
       upsertProductionQueueItem({
         id: workOrderId,
+        docNo: workOrderId,
         customer: fallbackCustomer || "—",
         product: fallbackProduct || "Buyurtma",
         pressMachine: fallbackMachine || "",
@@ -115,7 +127,7 @@ export function OrderReadinessRouteCard({
         deadline: fallbackDeadline || new Date().toISOString().split("T")[0],
         department: fallbackDept || "Offset",
         stage: "Queue",
-        checks: {
+        checks: fallbackData?.checks || {
           designReady: false,
           paperReady: false,
           platesReady: false,
@@ -126,21 +138,25 @@ export function OrderReadinessRouteCard({
   }, [
     currentItem,
     workOrderId,
+    productionQueue.length,
     fallbackCustomer,
     fallbackProduct,
     fallbackMachine,
     fallbackQuantity,
     fallbackDeadline,
     fallbackDept,
+    fallbackData?.checks,
     upsertProductionQueueItem,
   ]);
 
-  const checks: ProductionReadinessChecks = currentItem?.checks || {
-    designReady: false,
-    paperReady: false,
-    platesReady: false,
-    toolingReady: false,
-  };
+  const checks: ProductionReadinessChecks =
+    currentItem?.checks ||
+    fallbackData?.checks || {
+      designReady: false,
+      paperReady: false,
+      platesReady: false,
+      toolingReady: false,
+    };
 
   const auditMap: Record<ReadinessCheckKey, GateAuditRecord | undefined> =
     checks.audit || ({} as any);
@@ -167,21 +183,21 @@ export function OrderReadinessRouteCard({
   const isAllReady = readyCount === 4;
 
   const handleToggle = (key: ReadinessCheckKey) => {
-    const targetId = currentItem?.id || workOrderId;
+    const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
-    toggleReadinessCheck(targetId, key);
+    toggleReadinessCheck(targetId, key, { verifiedBy: currentUserName });
   };
 
   const handleSetReady = (key: ReadinessCheckKey) => {
-    const targetId = currentItem?.id || workOrderId;
+    const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
-    toggleReadinessCheck(targetId, key, { forceStatus: "ready" });
+    toggleReadinessCheck(targetId, key, { forceStatus: "ready", verifiedBy: currentUserName });
   };
 
   const handleResetPending = (key: ReadinessCheckKey) => {
-    const targetId = currentItem?.id || workOrderId;
+    const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
-    toggleReadinessCheck(targetId, key, { forceStatus: "pending" });
+    toggleReadinessCheck(targetId, key, { forceStatus: "pending", verifiedBy: currentUserName });
   };
 
   const handleOpenBlocker = (key: ReadinessCheckKey) => {
@@ -191,10 +207,11 @@ export function OrderReadinessRouteCard({
 
   const handleConfirmBlocker = () => {
     if (!blockerModalKey) return;
-    const targetId = currentItem?.id || workOrderId;
+    const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     toggleReadinessCheck(targetId, blockerModalKey, {
       forceStatus: "blocked",
+      verifiedBy: currentUserName,
       note: blockerReason.trim() || undefined,
     });
     setBlockerModalKey(null);
@@ -202,9 +219,10 @@ export function OrderReadinessRouteCard({
   };
 
   const handleStageChange = (stage: ProductionQueueStage) => {
-    const targetId = currentItem?.id || workOrderId;
+    const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     setProductionStage(targetId, stage);
+    onStageChange?.(stage);
   };
 
   const handleOpenPlanning = () => {

@@ -796,7 +796,15 @@ export function OverviewTab({
             <span className="text-xs text-muted-foreground font-medium">{tOrder("status")}:</span>
             <Select 
               value={formData.status} 
-              onValueChange={(val: any) => val && handleFieldChange("status", val)}
+              onValueChange={(val: any) => {
+                if (!val) return;
+                handleFieldChange("status", val);
+                if (val === "In Production") {
+                  handleFieldChange("stage", "In Production");
+                } else if (val === "Completed") {
+                  handleFieldChange("stage", "Completed");
+                }
+              }}
               disabled={isOperator}
             >
               <SelectTrigger
@@ -1147,7 +1155,7 @@ export function OverviewTab({
                     variant="outline"
                     size="icon"
                     onClick={handleOpenCurrentCustomer}
-                    title="Mijoz kartasini ochish"
+                    title={tOrder("openCustomerCard")}
                     className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -1254,7 +1262,7 @@ export function OverviewTab({
                       "h-8 text-xs bg-muted/30 font-medium disabled:opacity-85 pr-8",
                       errors?.product && "border-destructive focus-visible:ring-destructive ring-1 ring-destructive"
                     )} 
-                    placeholder="Mahsulot nomi yoki texkartani tanlang"
+                    placeholder={tOrder("selectProductOrRecipe")}
                   />
                   {!isOperator && (
                     <Button
@@ -1279,16 +1287,16 @@ export function OverviewTab({
                           variant="outline"
                           size="sm"
                           className="h-8 px-2.5 text-xs gap-1.5 bg-card hover:bg-muted font-normal border-border shrink-0 cursor-pointer"
-                          title="Tayyor shablon / texkarta (BOM) tanlash"
+                          title={tOrder("selectRecipeTemplate")}
                         >
                           <Layers className="w-3.5 h-3.5 text-primary" />
-                          <span className="hidden sm:inline font-medium">Shablon / BOM</span>
+                          <span className="hidden sm:inline font-medium">{tOrder("templateBom")}</span>
                         </Button>
                       }
                     />
                     <PopoverContent className="w-[380px] p-0 shadow-xl border border-border bg-popover" align="end">
                       <Command className="w-full">
-                        <CommandInput placeholder="Mahsulot yoki texkarta qidirish..." className="h-8 text-xs" />
+                        <CommandInput placeholder={tOrder("searchProductOrRecipe")} className="h-8 text-xs" />
                         <CommandList className="max-h-72">
                           <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">
                             Mos shablon topilmadi.
@@ -1435,7 +1443,7 @@ export function OverviewTab({
                     ? "bg-primary/10 hover:bg-primary/15 text-primary border border-primary/25"
                     : "border-dashed border-border hover:border-primary/50 hover:bg-muted/50 text-muted-foreground hover:text-foreground"
                 )}
-                title="Spetsifikatsiyalar bo'limidagi O'lchamlar matritsasiga o'tish"
+                title={tOrder("goToSizeMatrix")}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <Tag className="w-3.5 h-3.5 text-primary shrink-0" />
@@ -1454,7 +1462,7 @@ export function OverviewTab({
                       {totalSizesQty.toLocaleString()} {formData.unit}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-muted-foreground">+ Kiritish</span>
+                    <span className="text-[11px] text-muted-foreground">{tOrder("addEntry")}</span>
                   )}
                   <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
                 </div>
@@ -1465,7 +1473,7 @@ export function OverviewTab({
               <div className="grid grid-cols-3 gap-2 pt-1">
                 <div className="col-span-2">
                   <label className="text-xs font-medium text-muted-foreground block mb-1">
-                    Buyurtma umumiy summasi ({getCurrencySymbol(formData.currency)})
+                    {tOrder("totalAmount")} ({getCurrencySymbol(formData.currency)})
                   </label>
                   <div className="relative">
                     <MoneyInput
@@ -1483,7 +1491,7 @@ export function OverviewTab({
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Valyuta</label>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">{tOrder("currencyLabel")}</label>
                   <ComboboxSelect
                     items={CURRENCY_OPTIONS}
                     value={formData.currency || "USD"}
@@ -1574,7 +1582,7 @@ export function OverviewTab({
                   <div className="p-2.5 rounded-md bg-muted/30 border border-border space-y-1 min-w-0">
                     <span className="text-[10px] uppercase font-semibold text-muted-foreground flex items-center gap-1">
                       <ShieldCheck className="w-3 h-3 text-blue-500 shrink-0" />
-                      <span>Yuvish &amp; Kesim</span>
+                      <span>{tOrder("washAndCut")}</span>
                     </span>
                     <p className="font-semibold text-foreground text-xs truncate">
                       {WASH_RESISTANCE_LABELS[formData.labelWashResistance || "60c"] || "60°C Chidamli"}
@@ -1583,7 +1591,7 @@ export function OverviewTab({
                       <Badge variant="secondary" className="h-4 px-1 text-[9px] font-mono">
                         {CUT_TYPE_LABELS[formData.labelCutType || "ultrasonic"] || "Ultrasonik"}
                       </Badge>
-                      <span className="truncate">chet tikuvsiz</span>
+                      <span className="truncate">{tOrder("seamlessEdges")}</span>
                     </div>
                   </div>
 
@@ -1621,7 +1629,7 @@ export function OverviewTab({
                   <div className="flex items-center justify-between gap-1">
                     <div className="flex items-center gap-1 text-muted-foreground">
                       <Scissors className="w-3.5 h-3.5 shrink-0 text-blue-500" />
-                      <span>Tikuv zaxirasi:</span>
+                      <span>{tOrder("seamAllowance")}</span>
                     </div>
                     <span className="font-medium text-foreground">
                       <Badge variant="outline" className="text-[10px] h-4.5 bg-background border-border font-mono">
@@ -1633,7 +1641,7 @@ export function OverviewTab({
                   <div className="flex items-center justify-between gap-1">
                     <div className="flex items-center gap-1 text-muted-foreground">
                       <Tag className="w-3.5 h-3.5 shrink-0" />
-                      <span>SKU Taqsimoti:</span>
+                      <span>{tOrder("skuDistribution")}</span>
                     </div>
                     <span className="font-medium text-foreground truncate">
                       {hasSizes ? (
@@ -1684,7 +1692,7 @@ export function OverviewTab({
                   <div className="p-2.5 rounded-md bg-muted/30 border border-border space-y-1 min-w-0">
                     <span className="text-[10px] uppercase font-semibold text-muted-foreground flex items-center gap-1">
                       <Sparkles className="w-3 h-3 text-purple-500 shrink-0" />
-                      <span>Qirra &amp; Maxsus ip</span>
+                      <span>{tOrder("edgeAndThread")}</span>
                     </span>
                     <p className="font-semibold text-foreground text-xs truncate">
                       {CUT_TYPE_LABELS[formData.labelCutType || "ultrasonic"] || "Ultrasonik yumshoq qirra"}
@@ -1695,7 +1703,7 @@ export function OverviewTab({
                           ✨ Lurex ({formData.lurexColor || "Oltin"})
                         </Badge>
                       ) : (
-                        <span className="text-muted-foreground">Standart to&apos;quv ipi</span>
+                        <span className="text-muted-foreground">{tOrder("standardWeavingThread")}</span>
                       )}
                     </div>
                   </div>
@@ -1735,7 +1743,7 @@ export function OverviewTab({
                   <div className="flex items-center justify-between gap-1">
                     <div className="flex items-center gap-1 text-muted-foreground">
                       <Scissors className="w-3.5 h-3.5 shrink-0 text-purple-500" />
-                      <span>Tikuv zaxirasi:</span>
+                      <span>{tOrder("seamAllowance")}</span>
                     </div>
                     <span className="font-medium text-foreground">
                       <Badge variant="outline" className="text-[10px] h-4.5 bg-background border-border font-mono">
@@ -1747,7 +1755,7 @@ export function OverviewTab({
                   <div className="flex items-center justify-between gap-1">
                     <div className="flex items-center gap-1 text-muted-foreground">
                       <Tag className="w-3.5 h-3.5 shrink-0" />
-                      <span>SKU Taqsimoti:</span>
+                      <span>{tOrder("skuDistribution")}</span>
                     </div>
                     <span className="font-medium text-foreground truncate">
                       {hasSizes ? (
@@ -1781,7 +1789,7 @@ export function OverviewTab({
                           </span>
                         </>
                       ) : (
-                        <span className="text-muted-foreground text-xs font-normal">Kiritilmagan</span>
+                        <span className="text-muted-foreground text-xs font-normal">{tOrder("notSpecified")}</span>
                       )}
                     </p>
                     <p className="text-[10px] text-muted-foreground truncate">
@@ -2015,7 +2023,7 @@ export function OverviewTab({
                     onMarkUnsaved();
                   }}
                   disabled={isOperator}
-                  placeholder="Uskunani tanlang..."
+                  placeholder={tOrder("selectMachine")}
                   className="h-8 text-xs bg-muted/30"
                   contentClassName="w-[460px]"
                   actionLabel={!isOperator ? "Yangi uskuna pasportini yaratish (To'liq texnik karta)..." : undefined}
@@ -2345,7 +2353,7 @@ export function OverviewTab({
                   </div>
 
                   <div className="flex justify-between text-muted-foreground text-[11px] pt-0.5 border-t border-border/50">
-                    <span className="font-sans">To&apos;g&apos;ri Ishlab Chiqarish Tannarxi:</span>
+                    <span className="font-sans">{tOrder("directProductionCost")}</span>
                     <span className="font-bold text-foreground font-mono">
                       {directCost > 0 ? formatMoney(directCost, currency) : "—"}
                     </span>
@@ -2354,7 +2362,7 @@ export function OverviewTab({
                   <Separator className="my-1.5" />
 
                   <div className="flex justify-between items-baseline font-bold">
-                    <span className="text-foreground font-sans">Document Total (Buyurtma):</span>
+                    <span className="text-foreground font-sans">{tOrder("documentTotal")}</span>
                     <span className="text-primary font-semibold text-sm font-mono">
                       {formatMoney(revenue, currency)}
                     </span>
@@ -2395,6 +2403,7 @@ export function OverviewTab({
             workOrderId={data?.docNo || tabId}
             onOpenFullRoute={() => onSwitchTab("operations")}
             fallbackData={readinessFallbackData}
+            onStageChange={(stage) => handleFieldChange("stage", stage)}
           />
         </div>
       </div>

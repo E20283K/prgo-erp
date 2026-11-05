@@ -6,8 +6,9 @@ import {
   supplierContracts,
   bankAccounts,
   warehouseReceipts,
+  workOrders,
 } from "@/db/schema";
-import { eq, desc, and, or, sql } from "drizzle-orm";
+import { eq, desc, and, or, sql, ilike } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 
 export type SupplierCategory =
@@ -118,10 +119,123 @@ export interface SupplierLedgerEntry {
 export async function getSuppliers(companyCode: string = "PRINTGOO"): Promise<SupplierRecord[]> {
   const companyId = await getCompanyIdByCode(companyCode);
 
-  const raw = await db.query.suppliers.findMany({
+  let raw = await db.query.suppliers.findMany({
     where: eq(suppliers.companyId, companyId),
     orderBy: [desc(suppliers.createdAt)],
   });
+
+  if (raw.length === 0) {
+    const defaultSuppliers = [
+      {
+        companyId,
+        code: "SUP-101",
+        name: "Toshkent CTP Markazi",
+        legalName: "Toshkent CTP Prepress MCHJ",
+        category: "ctp_prepress" as const,
+        tin: "305123456",
+        contactPerson: "Farhod Usmonov",
+        phone: "+998 90 123-45-67",
+        email: "ctp@prepress.uz",
+        currency: "UZS",
+        status: "Active" as const,
+        notes: "CTP metall formalar, termal plastinalar, rang ajratish",
+      },
+      {
+        companyId,
+        code: "SUP-102",
+        name: "Laser Die Shtamp Servis",
+        legalName: "Laser Die Technology MCHJ",
+        category: "die_tooling" as const,
+        tin: "306234567",
+        contactPerson: "Akmal Qodirov",
+        phone: "+998 93 456-78-90",
+        email: "info@laserdie.uz",
+        currency: "UZS",
+        status: "Active" as const,
+        notes: "Lazer kesim shtansformalar, perfo pichoqlar, ejektor rezinalar",
+      },
+      {
+        companyId,
+        code: "SUP-103",
+        name: "Grafik Klishe Gravirovka",
+        legalName: "Grafik Klishe Servis XK",
+        category: "cliche_stamping" as const,
+        tin: "307345678",
+        contactPerson: "Rustam Aliyev",
+        phone: "+998 97 789-01-23",
+        email: "cliche@grafik.uz",
+        currency: "UZS",
+        status: "Active" as const,
+        notes: "Zarhal (Hot Foil) latun va kongrev magniy klishelari",
+      },
+      {
+        companyId,
+        code: "SUP-104",
+        name: "Master Plate CTP Servis",
+        legalName: "Master Plate CTP MCHJ",
+        category: "ctp_prepress" as const,
+        tin: "308456789",
+        contactPerson: "Jamshid Karimov",
+        phone: "+998 91 234-56-78",
+        email: "master@plate.uz",
+        currency: "UZS",
+        status: "Active" as const,
+        notes: "Offset va Flexo polimer CTP formalar",
+      },
+      {
+        companyId,
+        code: "SUP-105",
+        name: "Apex Die-Cutting Tools",
+        legalName: "Apex Tooling MCHJ",
+        category: "die_tooling" as const,
+        tin: "309567890",
+        contactPerson: "Sardor Mahmudov",
+        phone: "+998 90 567-89-01",
+        email: "order@apexdies.uz",
+        currency: "UZS",
+        status: "Active" as const,
+        notes: "Rotatsion magnit pichoqlar va tekis shtamplar",
+      },
+      {
+        companyId,
+        code: "SUP-106",
+        name: "O'zbekiston Qog'oz Savdo",
+        legalName: "O'zbekiston Qog'oz Savdo AJ",
+        category: "raw_materials" as const,
+        tin: "301678901",
+        contactPerson: "Bahrom Saidov",
+        phone: "+998 71 200-11-22",
+        email: "sales@paper.uz",
+        currency: "UZS",
+        status: "Active" as const,
+        notes: "Bo'rli qog'oz, ofset qog'oz, karton, kraft",
+      },
+      {
+        companyId,
+        code: "SUP-107",
+        name: "Sun Chemical Uzbekistan",
+        legalName: "Sun Chemical Tashkent MCHJ",
+        category: "cmyk_inks" as const,
+        tin: "302789012",
+        contactPerson: "Aziz Rahimov",
+        phone: "+998 71 250-33-44",
+        email: "inks@sunchem.uz",
+        currency: "UZS",
+        status: "Active" as const,
+        notes: "Ofset va flexo bo'yoqlar, pantonelar, laklar",
+      },
+    ];
+
+    try {
+      await db.insert(suppliers).values(defaultSuppliers).onConflictDoNothing();
+      raw = await db.query.suppliers.findMany({
+        where: eq(suppliers.companyId, companyId),
+        orderBy: [desc(suppliers.createdAt)],
+      });
+    } catch (seedErr) {
+      console.warn("Suppliers auto-seed fallback:", seedErr);
+    }
+  }
 
   return raw.map((s) => ({
     id: s.id,
@@ -332,6 +446,33 @@ export async function getSupplierOrders(supplierIdOrCode: string, companyCode: s
   }));
 }
 
+export async function getNextSupplierOrderNo(companyId: string): Promise<string> {
+  const currentYear = new Date().getFullYear();
+  const prefix = `PO-${currentYear}-`;
+
+  const existingOrders = await db.query.supplierOrders.findMany({
+    where: and(
+      eq(supplierOrders.companyId, companyId),
+      ilike(supplierOrders.orderNo, `${prefix}%`)
+    ),
+    columns: { orderNo: true },
+  });
+
+  let maxSeq = 0;
+  for (const o of existingOrders) {
+    if (o.orderNo) {
+      const match = o.orderNo.match(new RegExp(`^PO-${currentYear}-(\\d+)$`, "i"));
+      if (match) {
+        const seq = parseInt(match[1], 10);
+        if (seq > maxSeq) maxSeq = seq;
+      }
+    }
+  }
+
+  const nextSeq = maxSeq + 1;
+  return `PO-${currentYear}-${String(nextSeq).padStart(4, "0")}`;
+}
+
 export async function upsertSupplierOrder(
   data: Partial<SupplierOrderRecord>,
   companyCode: string = "PRINTGOO"
@@ -340,8 +481,20 @@ export async function upsertSupplierOrder(
 
   let orderNo = data.orderNo?.trim();
   if (!orderNo) {
-    const count = await db.$count(supplierOrders, eq(supplierOrders.companyId, companyId));
-    orderNo = `PO-${Date.now().toString().slice(-4)}-${count + 1}`;
+    orderNo = await getNextSupplierOrderNo(companyId);
+  }
+
+  const isUuid = (val?: string | null) =>
+    Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+  let validWorkOrderId: string | null = null;
+  if (isUuid(data.workOrderId)) {
+    const woExists = await db.query.workOrders.findFirst({
+      where: and(eq(workOrders.companyId, companyId), eq(workOrders.id, data.workOrderId!)),
+    });
+    if (woExists) {
+      validWorkOrderId = data.workOrderId!;
+    }
   }
 
   const existing = data.id
@@ -359,7 +512,7 @@ export async function upsertSupplierOrder(
         deliveryDeadline: data.deliveryDeadline !== undefined ? data.deliveryDeadline : existing.deliveryDeadline,
         orderType: data.orderType || existing.orderType,
         title: data.title || existing.title,
-        workOrderId: data.workOrderId !== undefined ? data.workOrderId : existing.workOrderId,
+        workOrderId: data.workOrderId !== undefined ? validWorkOrderId : existing.workOrderId,
         workOrderNo: data.workOrderNo !== undefined ? data.workOrderNo : existing.workOrderNo,
         quantity: (data.quantity || 1).toString(),
         unit: data.unit || existing.unit,
@@ -384,7 +537,7 @@ export async function upsertSupplierOrder(
         deliveryDeadline: data.deliveryDeadline || null,
         orderType: data.orderType || "raw_materials",
         title: data.title || "Buyurtma",
-        workOrderId: data.workOrderId || null,
+        workOrderId: validWorkOrderId,
         workOrderNo: data.workOrderNo || null,
         quantity: (data.quantity || 1).toString(),
         unit: data.unit || "dona",

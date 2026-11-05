@@ -136,9 +136,48 @@ export function TradingGrid({ type }: TradingGridProps) {
     return companiesList.find((c) => c.id === activeCompanyId) || null;
   }, [activeCompanyId, companiesList]);
 
+  const effectiveYttEntities = useMemo(() => {
+    if (tradingYttEntities && tradingYttEntities.length > 0) {
+      return tradingYttEntities;
+    }
+    if (companiesList && companiesList.length > 0) {
+      return companiesList.map((c) => {
+        const isYtt = c.legalType === "YTT";
+        const limit = isYtt ? Number(c.annualLimitUzs) || 1_000_000_000 : 999_999_999_999;
+        const current = Number(c.currentTurnoverUzs) || 0;
+        const pct = isYtt && limit > 0 ? Number(((current / limit) * 100).toFixed(2)) : 0;
+        const status: "Safe" | "Warning" | "Critical" | "Unlimited" = isYtt
+          ? pct >= 95
+            ? "Critical"
+            : pct >= 80
+            ? "Warning"
+            : "Safe"
+          : "Unlimited";
+        return {
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          legalType: (isYtt ? "YTT" : "MChJ") as "YTT" | "MChJ",
+          inn: c.inn || "",
+          bankName: c.bankName || "",
+          bankAccount: c.bankAccount || "",
+          annualLimit: limit,
+          currentTurnover: current,
+          currency: "UZS" as const,
+          turnoverPercent: pct,
+          status,
+          isRecommended: isYtt ? pct < 70 : false,
+          activeContractsCount: 0,
+          notes: c.notes || "",
+        };
+      });
+    }
+    return [];
+  }, [tradingYttEntities, companiesList]);
+
   // YTT Limits summary calculation
   const yttSummary = useMemo(() => {
-    const list = tradingYttEntities || [];
+    const list = effectiveYttEntities;
     const yttOnly = list.filter((e) => e.legalType === "YTT");
     const totalLimit = yttOnly.reduce((sum, e) => sum + e.annualLimit, 0);
     const totalTurnover = yttOnly.reduce((sum, e) => sum + e.currentTurnover, 0);
@@ -147,7 +186,7 @@ export function TradingGrid({ type }: TradingGridProps) {
     const safeCount = yttOnly.filter((e) => e.status === "Safe").length;
     const warningCount = yttOnly.filter((e) => e.status === "Warning").length;
     const criticalCount = yttOnly.filter((e) => e.status === "Critical").length;
-    const recommended = yttOnly.find((e) => e.isRecommended) || yttOnly[0];
+    const recommended = yttOnly.find((e) => e.isRecommended) || yttOnly[0] || list[0];
 
     return {
       totalEntities: list.length,
@@ -160,7 +199,7 @@ export function TradingGrid({ type }: TradingGridProps) {
       criticalCount,
       recommended,
     };
-  }, [tradingYttEntities]);
+  }, [effectiveYttEntities]);
 
   // Columns & Rows configuration based on registry type
   const { columns, rows } = useMemo(() => {
@@ -230,21 +269,22 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "recommendation", title: "Tizim Tavsiyasi", width: 160, icon: GridColumnIcon.HeaderLookup },
       ];
       const yttSource = activeCompany
-        ? (tradingYttEntities || []).filter(
+        ? effectiveYttEntities.filter(
             (e) =>
               e.id === activeCompany.id ||
               e.code?.toLowerCase() === activeCompany.code.toLowerCase() ||
               e.name?.toLowerCase() === activeCompany.name.toLowerCase()
           )
-        : (tradingYttEntities || []);
+        : effectiveYttEntities;
       rawRows = yttSource.map((e) => {
+        const isUnlimited = e.legalType !== "YTT" || e.annualLimit > 10_000_000_000;
         const remaining = Math.max(0, e.annualLimit - e.currentTurnover);
         return {
           ...e,
-          annualLimitFormatted: e.annualLimit > 10_000_000_000 ? "Cheksiz (MChJ)" : `${(e.annualLimit / 1_000_000).toLocaleString()} mln UZS`,
+          annualLimitFormatted: isUnlimited ? `Cheksiz (${e.legalType || "MChJ"})` : `${(e.annualLimit / 1_000_000).toLocaleString()} mln UZS`,
           currentTurnoverFormatted: `${(e.currentTurnover / 1_000_000).toFixed(1)} mln UZS`,
-          remainingQuotaFormatted: e.annualLimit > 10_000_000_000 ? "Cheksiz" : `${(remaining / 1_000_000).toFixed(1)} mln UZS`,
-          turnoverPercentFormatted: e.annualLimit > 10_000_000_000 ? "—" : `${e.turnoverPercent.toFixed(1)}%`,
+          remainingQuotaFormatted: isUnlimited ? "Cheksiz" : `${(remaining / 1_000_000).toFixed(1)} mln UZS`,
+          turnoverPercentFormatted: isUnlimited ? "—" : `${e.turnoverPercent.toFixed(1)}%`,
           statusBadge:
             e.status === "Safe"
               ? "Xavfsiz"
@@ -253,7 +293,13 @@ export function TradingGrid({ type }: TradingGridProps) {
               : e.status === "Critical"
               ? "LIMIT XAVFI"
               : "Cheksiz (QQS)",
-          recommendation: e.isRecommended ? "Keyingi sotuvga tavsiya" : e.status === "Critical" ? "Bloklangan" : "Zaxirada",
+          recommendation: e.isRecommended
+            ? "Keyingi sotuvga tavsiya"
+            : e.status === "Critical"
+            ? "Bloklangan"
+            : isUnlimited
+            ? "Yirik / QQS savdoga"
+            : "Zaxirada",
         };
       });
     } else if (type === "settlements") {
@@ -340,9 +386,10 @@ export function TradingGrid({ type }: TradingGridProps) {
     type,
     searchQuery,
     yttStatusFilter,
+    activeCompany,
     tradingSales,
     tradingOrders,
-    tradingYttEntities,
+    effectiveYttEntities,
     tradingSettlements,
     tradingImports,
     tradingCatalog,
@@ -652,7 +699,10 @@ export function TradingGrid({ type }: TradingGridProps) {
       return;
     }
 
-    const bestYtt = (tradingYttEntities || []).find((y) => y.isRecommended) || (tradingYttEntities && tradingYttEntities[0]);
+    const bestYtt =
+      (activeCompany && effectiveYttEntities.find((e) => e.id === activeCompany.id || e.code === activeCompany.code)) ||
+      effectiveYttEntities.find((y) => y.isRecommended) ||
+      effectiveYttEntities[0];
     const newId = `TRD-2026-${String(Math.floor(1000 + Math.random() * 9000))}`;
     openTab({
       id: newId,
@@ -664,7 +714,7 @@ export function TradingGrid({ type }: TradingGridProps) {
         id: newId,
         docNo: newId,
         date: new Date().toISOString().split("T")[0],
-        sellerEntityId: bestYtt?.id || "ytt-qodirov",
+        sellerEntityId: bestYtt?.id || "org-default",
         sellerEntityName: bestYtt?.name || "",
         sellerEntityInn: bestYtt?.inn || "",
         customer: "",
@@ -681,7 +731,7 @@ export function TradingGrid({ type }: TradingGridProps) {
         items: [],
       },
     });
-  }, [type, openTab, tradingYttEntities]);
+  }, [type, openTab, effectiveYttEntities, activeCompany]);
 
   // Keyboard shortcut: Ins to Create New
   useEffect(() => {
@@ -791,10 +841,19 @@ export function TradingGrid({ type }: TradingGridProps) {
 
           {type === "ytt-limits" && (
             <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                size="sm"
+                onClick={handleCreateNew}
+                className="h-6.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded shrink-0 whitespace-nowrap cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{tCommon("create")}</span>
+              </Button>
+
               {/* 1. Status Filter Segment */}
               <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
                 {[
-                  { id: "all", label: "Barchasi", count: (tradingYttEntities || []).length },
+                  { id: "all", label: "Barchasi", count: effectiveYttEntities.length },
                   { id: "Safe", label: "Xavfsiz", count: yttSummary.safeCount, badgeClass: "text-emerald-700 dark:text-emerald-400" },
                   { id: "Warning", label: "Diqqat", count: yttSummary.warningCount, badgeClass: "text-amber-700 dark:text-amber-400" },
                   { id: "Critical", label: "Xavf", count: yttSummary.criticalCount, badgeClass: "text-red-700 dark:text-red-400 font-bold" },
@@ -882,7 +941,7 @@ export function TradingGrid({ type }: TradingGridProps) {
                         Subyektlar taqsimoti
                       </span>
                       <div className="space-y-1 max-h-48 overflow-y-auto">
-                        {(tradingYttEntities || []).map((ent) => {
+                        {effectiveYttEntities.map((ent) => {
                           const isMchj = ent.legalType === "MChJ";
                           const remainingM = (Math.max(0, ent.annualLimit - ent.currentTurnover) / 1_000_000).toFixed(0);
                           return (
@@ -1095,8 +1154,8 @@ export function TradingGrid({ type }: TradingGridProps) {
                 <Label className="text-[11px] text-muted-foreground">Qabul qiluvchi YTT/MChJ</Label>
                 <SmartCombobox
                   value={paymentSeller}
-                  onChange={(val) => setPaymentSeller(val || "ytt-qodirov")}
-                  options={(tradingYttEntities || []).map((ytt) => ({
+                  onChange={(val) => setPaymentSeller(val || effectiveYttEntities[0]?.id || "")}
+                  options={effectiveYttEntities.map((ytt) => ({
                     value: ytt.id,
                     label: `${ytt.code}: ${ytt.name}`,
                     description: `STIR: ${ytt.inn || "—"}`,

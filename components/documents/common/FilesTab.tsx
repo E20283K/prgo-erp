@@ -101,13 +101,16 @@ export function FilesTab({
 
       const kind = getFileKind(file);
       if (selectedFilter === "pdf") return kind === "pdf";
-      if (selectedFilter === "image") return file.isImage || kind === "other";
+      if (selectedFilter === "image") return file.isImage || file.category === "proofs" || kind === "other";
       if (selectedFilter === "cad") {
         return (
           file.name.endsWith(".dxf") ||
           file.name.endsWith(".cad") ||
           file.name.endsWith(".ai") ||
           file.name.endsWith(".eps") ||
+          file.name.endsWith(".cf2") ||
+          file.name.endsWith(".ard") ||
+          file.category === "dieline" ||
           file.type.includes("vector")
         );
       }

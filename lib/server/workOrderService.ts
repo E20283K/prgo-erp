@@ -31,8 +31,9 @@ import {
   companies,
   clients,
   deliveryActs,
+  supplierOrders,
 } from "@/db/schema";
-import { eq, desc, and, or, ilike } from "drizzle-orm";
+import { eq, desc, and, or, ilike, isNull } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode } from "./crmService";
@@ -411,6 +412,22 @@ export async function upsertWorkOrder(
     where: (wo, { and, eq }) => and(eq(wo.companyId, companyId), eq(wo.docNo, docNo)),
   });
 
+  const rawStatus = (data.status || "").trim();
+  let statusVal: "Draft" | "Active" | "In Production" | "Completed" | "Cancelled" = "Active";
+  if (rawStatus === "Draft") statusVal = "Draft";
+  else if (rawStatus === "Active") statusVal = "Active";
+  else if (rawStatus === "In Production" || rawStatus === "In_Production") statusVal = "In Production";
+  else if (rawStatus === "Completed") statusVal = "Completed";
+  else if (rawStatus === "Cancelled") statusVal = "Cancelled";
+  else statusVal = "Active";
+
+  let stageVal: any = (data as any).stage || existingOrder?.stage || "Queue";
+  if (statusVal === "In Production" && (!stageVal || stageVal === "Queue")) {
+    stageVal = "In Production";
+  } else if (statusVal === "Completed") {
+    stageVal = "Completed";
+  }
+
   const payload: any = {
     companyId,
     clientId,
@@ -424,15 +441,15 @@ export async function upsertWorkOrder(
     recipeCode: data.recipe || null,
     quantity: String(data.quantity || 0),
     unit: data.unit || "pcs",
-    status: (data.status as any) || "Active",
+    status: statusVal,
     priority: (data.priority as any) || "Normal",
-    stage: (data as any).stage || "Queue",
+    stage: stageVal,
     orderType: (data.orderType as any) || "Production",
     orderDate: data.orderDate || new Date().toISOString().split("T")[0],
     startDate: data.startDate || null,
     deadline: data.deadline || null,
     actualEndDate:
-      data.status === "Completed" || (data as any).stage === "Completed"
+      statusVal === "Completed" || stageVal === "Completed"
         ? data.actualEndDate || new Date().toISOString().split("T")[0]
         : data.actualEndDate || null,
     paperStock: data.paperStock || null,
@@ -514,12 +531,46 @@ export async function upsertWorkOrder(
       spotColors: data.spotColors,
       spotColorItems: data.spotColorItems,
     },
-    checks: (data as any).checks || {
-      designReady: false,
-      paperReady: false,
-      platesReady: false,
-      toolingReady: false,
-    },
+    checks: (() => {
+      const existingChecks = (existingOrder?.checks as any) || {};
+      const inputChecks = (data as any).checks;
+      if (inputChecks !== undefined && inputChecks !== null) {
+        const mergedAudit = {
+          ...(existingChecks.audit || {}),
+          ...(inputChecks.audit || {}),
+        };
+
+        const resolveCheck = (key: "designReady" | "paperReady" | "platesReady" | "toolingReady") => {
+          // Agar inputAudit'da yangi audit ma'lumoti kelsa:
+          if (inputChecks.audit?.[key]?.status) {
+            return inputChecks.audit[key].status === "ready";
+          }
+          // Agar bazadagi mavjud buyurtmada inson tomonidan tasdiqlangan audit bo'lsa:
+          if (existingChecks.audit?.[key]?.verifiedBy) {
+            return existingChecks.audit[key].status === "ready";
+          }
+          // Aks holda inputChecks yoki existingChecks'dan olinadi:
+          if (inputChecks[key] !== undefined) return !!inputChecks[key];
+          return !!existingChecks[key];
+        };
+
+        return {
+          designReady: resolveCheck("designReady"),
+          paperReady: resolveCheck("paperReady"),
+          platesReady: resolveCheck("platesReady"),
+          toolingReady: resolveCheck("toolingReady"),
+          audit: mergedAudit,
+        };
+      }
+      return existingChecks && Object.keys(existingChecks).length > 0
+        ? existingChecks
+        : {
+            designReady: false,
+            paperReady: false,
+            platesReady: false,
+            toolingReady: false,
+          };
+    })(),
     sampleData: data.sampleData || {},
     packagingData: data.packagingData || {},
     notes: (data as any).notes || null,
@@ -694,6 +745,21 @@ export async function upsertWorkOrder(
     );
   } catch (_) {}
 
+  // 6. Draft davrida yaratilgan yetkazib beruvchi buyurtmalarini (PO) ushbu workOrderId ga bog'lash
+  try {
+    await db
+      .update(supplierOrders)
+      .set({ workOrderId: targetId })
+      .where(
+        and(
+          eq(supplierOrders.workOrderNo, docNo),
+          isNull(supplierOrders.workOrderId)
+        )
+      );
+  } catch (poErr) {
+    console.error("[WorkOrder] Supplier orders bog'lashda xatolik:", poErr);
+  }
+
   return {
     success: true,
     workOrder: {
@@ -834,6 +900,131 @@ export async function deleteWorkOrder(
       mode: "deleted",
       docNo: existingOrder.docNo,
       message: `${existingOrder.docNo} buyurtmasi bazadan butunlay o'chirildi.`,
+    };
+  }
+}
+
+/**
+ * Buyurtmaning tayyorlik nazorati (checks), bosqich (stage) yoki dastgohini tezkor yangilash
+ */
+export async function updateWorkOrderReadiness(
+  docNoOrId: string,
+  updates: {
+    stage?: string;
+    checks?: any;
+    pressMachine?: string;
+    status?: string;
+    completedSheets?: number;
+    actualEndDate?: string;
+  },
+  companyCode: string = "PRINTGOO",
+  author?: { id?: string; name?: string; role?: string }
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const companyId = await getCompanyIdByCode(companyCode);
+    const hasValidUuid = isUuid(docNoOrId);
+
+    const existingOrder = await db.query.workOrders.findFirst({
+      where: (wo, { and, eq, or }) =>
+        and(
+          eq(wo.companyId, companyId),
+          hasValidUuid ? or(eq(wo.id, docNoOrId), eq(wo.docNo, docNoOrId)) : eq(wo.docNo, docNoOrId)
+        ),
+    });
+
+    if (!existingOrder) {
+      return { success: false, error: "Buyurtma topilmadi" };
+    }
+
+    const patchPayload: any = {
+      updatedAt: new Date(),
+    };
+
+    if (updates.stage !== undefined) {
+      patchPayload.stage = updates.stage;
+    }
+
+    if (updates.pressMachine !== undefined) {
+      patchPayload.pressMachine = updates.pressMachine;
+    }
+
+    if (updates.status !== undefined) {
+      patchPayload.status = updates.status;
+    }
+
+    if (updates.actualEndDate !== undefined) {
+      patchPayload.actualEndDate = updates.actualEndDate;
+    }
+
+    let mergedChecks = (existingOrder.checks as any) || {
+      designReady: false,
+      paperReady: false,
+      platesReady: false,
+      toolingReady: false,
+    };
+
+    if (updates.checks !== undefined && updates.checks !== null) {
+      mergedChecks = {
+        designReady:
+          updates.checks.designReady !== undefined
+            ? !!updates.checks.designReady
+            : !!mergedChecks.designReady,
+        paperReady:
+          updates.checks.paperReady !== undefined
+            ? !!updates.checks.paperReady
+            : !!mergedChecks.paperReady,
+        platesReady:
+          updates.checks.platesReady !== undefined
+            ? !!updates.checks.platesReady
+            : !!mergedChecks.platesReady,
+        toolingReady:
+          updates.checks.toolingReady !== undefined
+            ? !!updates.checks.toolingReady
+            : !!mergedChecks.toolingReady,
+        audit: {
+          ...(mergedChecks.audit || {}),
+          ...(updates.checks.audit || {}),
+        },
+      };
+      patchPayload.checks = mergedChecks;
+    }
+
+    // Bosqichni avtomatik ko'tarish yoki tushirish (agar stage to'g'ridan-to'g'ri berilmagan bo'lsa)
+    if (updates.stage === undefined && patchPayload.checks) {
+      const allReady =
+        patchPayload.checks.designReady &&
+        patchPayload.checks.paperReady &&
+        patchPayload.checks.platesReady &&
+        patchPayload.checks.toolingReady;
+
+      if (allReady && existingOrder.stage === "Queue") {
+        patchPayload.stage = "Ready to Print";
+      } else if (!allReady && existingOrder.stage === "Ready to Print") {
+        patchPayload.stage = "Queue";
+      }
+    }
+
+    await db
+      .update(workOrders)
+      .set(patchPayload)
+      .where(eq(workOrders.id, existingOrder.id));
+
+    return {
+      success: true,
+      data: {
+        id: existingOrder.docNo,
+        docNo: existingOrder.docNo,
+        stage: patchPayload.stage || existingOrder.stage,
+        checks: patchPayload.checks || existingOrder.checks,
+        pressMachine: patchPayload.pressMachine || existingOrder.pressMachine,
+        status: patchPayload.status || existingOrder.status,
+      },
+    };
+  } catch (error: any) {
+    console.error("updateWorkOrderReadiness error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Yangilashda xatolik yuz berdi",
     };
   }
 }

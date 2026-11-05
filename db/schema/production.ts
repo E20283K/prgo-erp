@@ -21,6 +21,7 @@ import { clients } from "./crm";
 export const workOrderStatusEnum = pgEnum("work_order_status", [
   "Draft",
   "Active",
+  "In Production",
   "Completed",
   "Cancelled",
 ]);

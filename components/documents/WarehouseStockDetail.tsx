@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
   GridCell,
@@ -12,6 +12,7 @@ import {
   GridColumnIcon,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
+import { cn } from "@/lib/utils";
 import {
   useWorkspaceStore,
   generateNextMaterialSku,
@@ -33,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   DocumentHeader,
@@ -44,8 +46,6 @@ import {
 } from "./common/DocumentShell";
 import { ReturnOffcutDialog } from "@/components/grid/ReturnOffcutDialog";
 import { WarehouseSelect } from "@/components/common/WarehouseSelect";
-import { MaterialImageModal } from "@/components/documents/MaterialImageModal";
-import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
 import {
   Boxes,
   FileText,
@@ -68,20 +68,37 @@ import {
   History,
   Tag,
   Factory,
-  Check,
-  Camera,
-  ZoomIn,
-  RotateCcw,
-  Image as ImageIcon,
-  Upload,
-  Trash2,
-  Plus,
 } from "lucide-react";
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
   { ssr: false }
 );
+
+const STOCK_CATEGORY_OPTIONS: ComboboxOption[] = [
+  { value: "Foil & Film", label: "Foil & Film", description: "Laminatsiya plyonkalari va zar folgalar" },
+  { value: "Inks & Plates", label: "Inks & Plates", description: "Bosma bo'yoqlari, laklar va CTP qoliplar" },
+  { value: "Paper & Board", label: "Paper & Board", description: "Ofset qog'ozlari va bo'rlangan kartonlar" },
+  { value: "Roll & Label", label: "Roll & Label", description: "Rulon xomashyolari va samokleykalar" },
+  { value: "Adhesives & Binding", label: "Adhesives & Binding", description: "Kashirovka va termo yelimlar, iplar" },
+  { value: "Offcuts & Scraps", label: "Offcuts & Scraps", description: "Ishlab chiqarishdan qaytgan delovoy otxodlar" },
+];
+
+const STOCK_UNIT_OPTIONS: ComboboxOption[] = [
+  { value: "m", label: "Metr (m)", description: "Chiziqli uzunlik (plyonka va lenta)" },
+  { value: "kg", label: "Kilogramm (kg)", description: "Bo'yoq, lak va yelim xomashyosi" },
+  { value: "sheets", label: "Varaq (sheets)", description: "Listli qog'oz va karton" },
+  { value: "rolls", label: "Rulon (rolls)", description: "Rulonli xomashyolar" },
+  { value: "pcs", label: "Dona (pcs)", description: "Donali buyum va materiallar" },
+  { value: "m²", label: "Kvadrat metr (m²)", description: "Maydon birligi" },
+  { value: "liters", label: "Litr (liters)", description: "Suyuqlik hajmi" },
+  { value: "drums", label: "Bochka (drums)", description: "Yirik hajmli idish" },
+];
+
+const GRAIN_DIRECTION_OPTIONS: ComboboxOption[] = [
+  { value: "Long Grain", label: "Long Grain", description: "Bo'yiga tola yo'nalishi" },
+  { value: "Short Grain", label: "Short Grain", description: "Eniga tola yo'nalishi" },
+];
 
 export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
   const {
@@ -125,7 +142,10 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       reserved: Number(d.reserved) || 0,
       available: Number(d.available) || 0,
       reorder: Number(d.reorder) || 0,
+      currency: d.currency || (d.unitPriceUzs && !d.unitPriceUsd ? "UZS" : "USD"),
+      unitPrice: d.unitPrice !== undefined ? Number(d.unitPrice) : (Number(d.unitPriceUsd) || 0),
       unitPriceUsd: Number(d.unitPriceUsd) || 0,
+      unitPriceUzs: d.unitPriceUzs ? Number(d.unitPriceUzs) : Math.round((Number(d.unitPriceUsd) || 0) * 12850),
       lastReceived: d.lastReceived || new Date().toISOString().split("T")[0],
       status: d.status || "In Stock",
       isOffcut: d.isOffcut,
@@ -147,10 +167,6 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
   // Default to specs (Texnik Pasport) - the logical primary tab
   const [activeTabKey, setActiveTabKey] = useState<string>("specs");
   const [isOffcutDialogOpen, setIsOffcutDialogOpen] = useState<boolean>(false);
-  const [isImageModalOpen, setIsImageModalOpen] = useState<boolean>(false);
-  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState<boolean>(false);
-
-  const directFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setDoc(stockItem);
@@ -162,13 +178,32 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleSave = async () => {
+    const rate = 12850;
+    const cur: "USD" | "UZS" = doc.currency || "USD";
+    let pUsd = Number(doc.unitPriceUsd) || 0;
+    let pUzs = Number(doc.unitPriceUzs) || 0;
+    let pBase = Number(doc.unitPrice);
+
+    if (cur === "UZS") {
+      if (!pBase && pUzs) pBase = pUzs;
+      pUzs = pBase;
+      pUsd = pBase > 0 ? Number((pBase / rate).toFixed(4)) : 0;
+    } else {
+      if (!pBase && pUsd) pBase = pUsd;
+      pUsd = pBase;
+      pUzs = Math.round(pBase * rate);
+    }
+
     const updated: WarehouseStockRecord = {
       ...doc,
+      currency: cur,
+      unitPrice: pBase,
+      unitPriceUsd: pUsd,
+      unitPriceUzs: pUzs,
       stockLevel: Number(doc.stockLevel) || 0,
       reserved: Number(doc.reserved) || 0,
       available: Math.max(0, (Number(doc.stockLevel) || 0) - (Number(doc.reserved) || 0)),
       reorder: Number(doc.reorder) || 0,
-      unitPriceUsd: Number(doc.unitPriceUsd) || 0,
       grammage: doc.grammage ? Number(doc.grammage) : undefined,
     };
     await upsertWarehouseStockAsync(updated);
@@ -250,45 +285,22 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     const parentArea = (parseFloat(parentDims[0]) || 700) * (parseFloat(parentDims[1]) || 1000);
 
     const ratio = Math.round((cutArea / parentArea) * 100);
-    const virginCost = parentMaterial?.unitPriceUsd || 0.20;
-    const offcutCost = doc.unitPriceUsd || 0.11;
+    const virginCost = parentMaterial?.unitPriceUsd || (parentMaterial?.unitPriceUzs ? Number((parentMaterial.unitPriceUzs / 12850).toFixed(4)) : 0.20);
+    const offcutCost = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / 12850).toFixed(4)) : 0.11);
     const savedPerSheet = Math.max(0, virginCost - offcutCost);
     const totalSavedUsd = Math.round(savedPerSheet * doc.stockLevel);
+    const totalSavedUzs = Math.round(totalSavedUsd * 12850);
 
     return {
       ratio,
       cutFormat: doc.cutDimensions || doc.sheetFormat || "470×700",
       parentFormat: parentMaterial?.sheetFormat || "700×1000",
       savedPerSheet: Number(savedPerSheet.toFixed(3)),
+      savedPerSheetUzs: Math.round(savedPerSheet * 12850),
       totalSavedUsd,
+      totalSavedUzs,
     };
   }, [doc, parentMaterial]);
-
-  // Direct file upload handler
-  const handleDirectFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !file.type.startsWith("image/")) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        handleFieldChange("imageUrl", dataUrl);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleSaveImage = useCallback(
-    (newUrl: string) => {
-      handleFieldChange("imageUrl", newUrl);
-    },
-    []
-  );
-
-  const handleResetImage = useCallback(() => {
-    handleFieldChange("imageUrl", undefined);
-  }, []);
 
   // Quick Action: Open New Warehouse Receipt with this item pre-selected
   const handleCreateReceipt = () => {
@@ -674,55 +686,6 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                 title={doc.name || "Xomashyo kartochkasi"}
                 subtitle={doc.sku || "SKU belgilanmagan"}
               >
-                {/* Real photo / upload preview */}
-                <div className="py-2 flex flex-col items-center justify-center">
-                  <div
-                    className="w-full h-28 rounded-md border border-border bg-muted/20 overflow-hidden flex flex-col items-center justify-center relative group cursor-pointer"
-                    onClick={() => setIsUploadDialogOpen(true)}
-                    title={doc.imageUrl ? "Rasmni almashtirish" : "Haqiqiy rasm yuklash"}
-                  >
-                    {doc.imageUrl ? (
-                      <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={doc.imageUrl}
-                          alt={doc.name || "Material"}
-                          className="size-full object-contain p-1 select-none"
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                          <Button
-                            size="icon-xs"
-                            variant="secondary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setIsImageModalOpen(true);
-                            }}
-                            title="Kattalashtirish"
-                          >
-                            <ZoomIn className="size-3" />
-                          </Button>
-                          <Button
-                            size="icon-xs"
-                            variant="secondary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setIsUploadDialogOpen(true);
-                            }}
-                            title="Rasmni almashtirish"
-                          >
-                            <Camera className="size-3" />
-                          </Button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center p-2 text-center gap-1.5 text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                        <Camera className="size-6 text-muted-foreground/40 group-hover:text-blue-600 dark:group-hover:text-blue-400" />
-                        <span className="text-[10px] font-medium">Haqiqiy rasm yuklash</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
                 <InfoRow label="Toifa">
                   <span className="font-semibold text-foreground truncate">{doc.category}</span>
                 </InfoRow>
@@ -739,10 +702,19 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     {doc.available.toLocaleString()} {doc.unit}
                   </span>
                 </InfoRow>
-                <InfoRow label="Narx (USD)">
-                  <span className="font-mono text-foreground font-semibold">
-                    ${doc.unitPriceUsd}
-                  </span>
+                <InfoRow label="Narx">
+                  <div className="flex flex-col items-end text-right">
+                    <span className="font-mono text-foreground font-semibold">
+                      {doc.currency === "UZS"
+                        ? `${(doc.unitPrice || doc.unitPriceUzs || 0).toLocaleString()} UZS`
+                        : `$${doc.unitPriceUsd || doc.unitPrice || 0}`}
+                    </span>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {doc.currency === "UZS"
+                        ? `~$${(doc.unitPriceUsd || 0).toFixed(3)}`
+                        : `~${(doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * 12850)).toLocaleString()} UZS`}
+                    </span>
+                  </div>
                 </InfoRow>
                 {doc.location && (
                   <InfoRow label="Joylashuv">
@@ -768,149 +740,46 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
             {/* ── 1. Tab: Specs (Texnik Pasport va Parametrlar - Logical 1st) ── */}
             <TabsContent value="specs" className="flex-1 w-full h-full m-0 p-4 overflow-y-auto">
               <div className="max-w-4xl space-y-4">
-                {/* Visual Passport & Material Image Card */}
-                <div className="p-4 rounded-xl border border-border bg-card shadow-xs flex flex-col sm:flex-row gap-5 items-start">
-                  <div className="relative group shrink-0 self-center sm:self-start">
-                    <input
-                      type="file"
-                      ref={directFileInputRef}
-                      onChange={handleDirectFileSelect}
-                      accept="image/*"
-                      className="hidden"
-                    />
-
-                    <div
-                      className="w-44 h-44 rounded-lg border border-border bg-muted/20 overflow-hidden flex flex-col items-center justify-center p-2 cursor-pointer shadow-inner relative transition-all group-hover:border-blue-500/50"
-                      onClick={() => {
-                        if (doc.imageUrl) {
-                          setIsImageModalOpen(true);
-                        } else {
-                          directFileInputRef.current?.click();
-                        }
-                      }}
-                      title={doc.imageUrl ? "Rasmni to'liq o'lchamda ko'rish" : "Haqiqiy rasm faylini tanlash"}
-                    >
-                      {doc.imageUrl ? (
-                        <>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={doc.imageUrl}
-                            alt={doc.name || "Material"}
-                            className="size-full object-contain select-none transition-transform duration-200 group-hover:scale-105"
-                          />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
-                            <span className="text-white text-xs font-medium flex items-center gap-1.5 bg-black/60 px-2.5 py-1 rounded backdrop-blur-sm">
-                              <ZoomIn className="size-3.5" />
-                              Kattalashtirish
-                            </span>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center text-center p-3 gap-2">
-                          <div className="size-10 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-                            <Upload className="size-5" />
-                          </div>
-                          <div>
-                            <span className="text-xs font-semibold text-foreground block">
-                              Haqiqiy fotosurat
-                            </span>
-                            <span className="text-[10px] text-muted-foreground block mt-0.5">
-                              Yuklash uchun bosing
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
+                {/* Asosiy identifikatsiya kartochkasi */}
+                <div className="p-4 rounded-xl border border-border bg-card shadow-xs space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="outline" className="text-xs font-mono font-semibold">
+                      {doc.sku || "Yangi SKU"}
+                    </Badge>
+                    <Badge variant="secondary" className="text-xs">
+                      {doc.category}
+                    </Badge>
                     <Badge
                       variant="secondary"
-                      className="mt-2 text-[10px] w-full justify-center font-mono py-0.5 truncate"
+                      className="text-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                     >
-                      {doc.imageUrl
-                        ? doc.imageUrl.startsWith("data:")
-                          ? "Haqiqiy fotosurat (Yuklangan)"
-                          : "Tashqi URL havola"
-                        : "Rasm yuklanmagan"}
+                      {doc.status || "In Stock"}
                     </Badge>
-                  </div>
-
-                  <div className="flex-1 min-w-0 flex flex-col justify-between self-stretch gap-3">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-xs font-mono font-semibold">
-                          {doc.sku || "Yangi SKU"}
-                        </Badge>
-                        <Badge variant="secondary" className="text-xs">
-                          {doc.category}
-                        </Badge>
-                        <Badge
-                          variant="secondary"
-                          className="text-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                        >
-                          {doc.status || "In Stock"}
-                        </Badge>
-                        {doc.isOffcut && (
-                          <Badge
-                            variant="outline"
-                            className="text-xs bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-semibold"
-                          >
-                            Delovoy Otxod
-                          </Badge>
-                        )}
-                      </div>
-
-                      <div className="space-y-1">
-                        <Label className="text-xs font-semibold text-foreground">
-                          Xomashyo / Mahsulot To&apos;liq Nomi *
-                        </Label>
-                        <Input
-                          value={doc.name}
-                          onChange={(e) => handleFieldChange("name", e.target.value)}
-                          placeholder="Masalan: Galerie Art Silk 150g/m² (700×1000)"
-                          className="h-8 text-xs font-medium bg-background"
-                        />
-                      </div>
-
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Ushbu nom va parametrlar barcha ishlab chiqarish (Work Order BOM), ombor hisob-kitob va kirim hujjatlarida avtomatik tarzda aks etadi.
-                      </p>
-                    </div>
-
-                    <div className="pt-2 flex items-center gap-2 flex-wrap border-t border-border/60">
-                      <Button
-                        size="sm"
-                        onClick={() => setIsUploadDialogOpen(true)}
-                        className="h-7 px-2.5 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-none"
+                    {doc.isOffcut && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-semibold"
                       >
-                        <Camera className="size-3.5" />
-                        <span>{doc.imageUrl ? "Rasmni almashtirish" : "Haqiqiy rasm yuklash"}</span>
-                      </Button>
-
-                      {doc.imageUrl && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setIsImageModalOpen(true)}
-                            className="h-7 px-2.5 text-xs gap-1.5"
-                          >
-                            <ZoomIn className="size-3.5 text-muted-foreground" />
-                            <span>To&apos;liq ko&apos;rish</span>
-                          </Button>
-
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={handleResetImage}
-                            className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive gap-1"
-                          >
-                            <Trash2 className="size-3.5" />
-                            <span>O&apos;chirish</span>
-                          </Button>
-                        </>
-                      )}
-                    </div>
+                        Delovoy Otxod
+                      </Badge>
+                    )}
                   </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-foreground">
+                      Xomashyo / Mahsulot To&apos;liq Nomi *
+                    </Label>
+                    <Input
+                      value={doc.name}
+                      onChange={(e) => handleFieldChange("name", e.target.value)}
+                      placeholder="Masalan: Galerie Art Silk 150g/m² (700×1000)"
+                      className="h-8 text-xs font-medium bg-background"
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Ushbu nom va parametrlar barcha ishlab chiqarish (Work Order BOM), ombor hisob-kitob va kirim hujjatlarida avtomatik tarzda aks etadi.
+                  </p>
                 </div>
 
                 <div>
@@ -935,43 +804,24 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
                     <Label className="text-[11px] text-muted-foreground font-semibold">Asosiy Toifa *</Label>
-                    <Select
+                    <ComboboxSelect
+                      items={STOCK_CATEGORY_OPTIONS}
                       value={doc.category}
                       onValueChange={(val) => handleFieldChange("category", val)}
-                    >
-                      <SelectTrigger className="h-7 text-xs">
-                        <SelectValue placeholder="Toifani tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Paper & Board">Paper & Board (Qog&apos;oz & Karton)</SelectItem>
-                        <SelectItem value="Roll & Label">Roll & Label (Rulon & Samokleyka)</SelectItem>
-                        <SelectItem value="Inks & Plates">Inks & Plates (Bo&apos;yoq & CTP Qolip)</SelectItem>
-                        <SelectItem value="Foil & Film">Foil & Film (Zar & Plyonka)</SelectItem>
-                        <SelectItem value="Adhesives & Binding">Adhesives & Binding (Yelim & Ip)</SelectItem>
-                        <SelectItem value="Offcuts & Scraps">Offcuts & Scraps (Delovoy Otxod)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Toifani tanlang..."
+                      className="w-full h-8 text-xs bg-background"
+                    />
                   </div>
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
                     <Label className="text-[11px] text-muted-foreground font-semibold">O&apos;lchov Birligi *</Label>
-                    <Select
+                    <ComboboxSelect
+                      items={STOCK_UNIT_OPTIONS}
                       value={doc.unit}
                       onValueChange={(val) => handleFieldChange("unit", val)}
-                    >
-                      <SelectTrigger className="h-7 text-xs">
-                        <SelectValue placeholder="Birlikni tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="sheets">sheets (varaq)</SelectItem>
-                        <SelectItem value="kg">kg (kilogramm)</SelectItem>
-                        <SelectItem value="pcs">pcs (dona)</SelectItem>
-                        <SelectItem value="rolls">rolls (rulon)</SelectItem>
-                        <SelectItem value="drums">drums (bochka)</SelectItem>
-                        <SelectItem value="liters">liters (litr)</SelectItem>
-                        <SelectItem value="m²">m² (kvadrat metr)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="O'lchov birligini tanlang..."
+                      className="w-full h-8 text-xs bg-background"
+                    />
                   </div>
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
@@ -1018,15 +868,93 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                   </div>
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Standart Birlik Narxi (USD $)</Label>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Birlik narxi</Label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newCur = "USD";
+                            const p = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / 12850).toFixed(4)) : 0);
+                            setDoc((prev) => ({
+                              ...prev,
+                              currency: newCur,
+                              unitPrice: p,
+                              unitPriceUsd: p,
+                              unitPriceUzs: Math.round(p * 12850),
+                            }));
+                            setTabUnsaved(tab.id, true);
+                          }}
+                          className={cn(
+                            "px-1.5 py-0.5 text-[10px] font-mono rounded border transition-colors cursor-pointer",
+                            doc.currency !== "UZS"
+                              ? "border-primary bg-primary text-primary-foreground font-semibold"
+                              : "border-border text-muted-foreground hover:bg-muted"
+                          )}
+                        >
+                          USD ($)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newCur = "UZS";
+                            const p = doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * 12850);
+                            setDoc((prev) => ({
+                              ...prev,
+                              currency: newCur,
+                              unitPrice: p,
+                              unitPriceUzs: p,
+                              unitPriceUsd: p > 0 ? Number((p / 12850).toFixed(4)) : 0,
+                            }));
+                            setTabUnsaved(tab.id, true);
+                          }}
+                          className={cn(
+                            "px-1.5 py-0.5 text-[10px] font-mono rounded border transition-colors cursor-pointer",
+                            doc.currency === "UZS"
+                              ? "border-primary bg-primary text-primary-foreground font-semibold"
+                              : "border-border text-muted-foreground hover:bg-muted"
+                          )}
+                        >
+                          UZS (so&apos;m)
+                        </button>
+                      </div>
+                    </div>
+
                     <MoneyInput
                       thousandSeparator=" "
-                      decimalScale={3}
-                      value={doc.unitPriceUsd || ""}
-                      onValueChange={(values) => handleFieldChange("unitPriceUsd", values.floatValue ?? 0)}
-                      placeholder="0.00"
+                      decimalScale={doc.currency === "UZS" ? 0 : 3}
+                      value={doc.currency === "UZS" ? (doc.unitPriceUzs || doc.unitPrice || "") : (doc.unitPriceUsd || doc.unitPrice || "")}
+                      onValueChange={(values) => {
+                        const val = values.floatValue ?? 0;
+                        if (doc.currency === "UZS") {
+                          setDoc((prev) => ({
+                            ...prev,
+                            unitPrice: val,
+                            unitPriceUzs: val,
+                            unitPriceUsd: val > 0 ? Number((val / 12850).toFixed(4)) : 0,
+                          }));
+                        } else {
+                          setDoc((prev) => ({
+                            ...prev,
+                            unitPrice: val,
+                            unitPriceUsd: val,
+                            unitPriceUzs: Math.round(val * 12850),
+                          }));
+                        }
+                        setTabUnsaved(tab.id, true);
+                      }}
+                      placeholder={doc.currency === "UZS" ? "0" : "0.00"}
                       className="h-7 text-xs font-mono"
                     />
+
+                    <div className="text-[10px] font-mono text-muted-foreground">
+                      Ekvivalent:{" "}
+                      <span className="font-semibold text-foreground">
+                        {doc.currency === "UZS"
+                          ? `$${(doc.unitPriceUsd || 0).toFixed(3)}`
+                          : `${(doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * 12850)).toLocaleString()} UZS`}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
@@ -1051,18 +979,13 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
                     <Label className="text-[11px] text-muted-foreground font-semibold">Tola Yo&apos;nalishi (Grain Direction)</Label>
-                    <Select
+                    <ComboboxSelect
+                      items={GRAIN_DIRECTION_OPTIONS}
                       value={doc.grainDirection || "Long Grain"}
                       onValueChange={(val) => handleFieldChange("grainDirection", val)}
-                    >
-                      <SelectTrigger className="h-7 text-xs">
-                        <SelectValue placeholder="Yo'nalishni tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Long Grain">Long Grain (Bo&apos;yiga tola)</SelectItem>
-                        <SelectItem value="Short Grain">Short Grain (Eniga tola)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      placeholder="Yo'nalishni tanlang..."
+                      className="w-full h-8 text-xs bg-background"
+                    />
                   </div>
 
                   <div className="p-3 rounded border border-border bg-card space-y-1.5">
@@ -1256,17 +1179,20 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     <div>
                       <h3 className="text-sm font-semibold text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
                         <Sparkles className="size-4 text-emerald-600 dark:text-emerald-400" />
-                        Iqtisodiy Samaradorlik va Tejamkorlik Hisoboti
+                        Tejamkorlik hisoboti
                       </h3>
                       <p className="text-xs text-emerald-800/80 dark:text-emerald-300/80 mt-1">
-                        Ushbu delovoy otxod yangi katta qog&apos;oz kesish o&apos;rniga kichik tirajlarga ishlatilganda har bir varaqdan{" "}
-                        <b>${offcutAreaStats.savedPerSheet} USD</b> tejaladi.
+                        Kichik tirajlarda har bir varaqdan{" "}
+                        <b>${offcutAreaStats.savedPerSheet} USD</b> (~{offcutAreaStats.savedPerSheetUzs.toLocaleString()} UZS) tejaladi.
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <span className="text-xs text-muted-foreground block">Mavjud zaxiradan jami tejam:</span>
+                      <span className="text-xs text-muted-foreground block">Jami tejam:</span>
                       <span className="text-lg font-bold font-mono text-emerald-600 dark:text-emerald-400">
                         +${offcutAreaStats.totalSavedUsd.toLocaleString()} USD
+                      </span>
+                      <span className="text-[11px] font-mono text-muted-foreground block">
+                        ~{offcutAreaStats.totalSavedUzs.toLocaleString()} UZS
                       </span>
                     </div>
                   </div>
@@ -1315,34 +1241,6 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       </Tabs>
 
       <ReturnOffcutDialog open={isOffcutDialogOpen} onOpenChange={setIsOffcutDialogOpen} />
-      <MaterialImageModal
-        isOpen={isImageModalOpen && Boolean(doc.imageUrl)}
-        onClose={() => setIsImageModalOpen(false)}
-        data={
-          doc.imageUrl
-            ? {
-                imageUrl: doc.imageUrl,
-                title: doc.name || doc.sku,
-                sku: doc.sku,
-                category: doc.category,
-                spec: doc.sheetFormat ? `${doc.sheetFormat} mm` : doc.cutDimensions,
-                stock: doc.available,
-                unit: doc.unit,
-                location: doc.location,
-                supplier: doc.supplier,
-                status: doc.status,
-              }
-            : null
-        }
-      />
-      <MaterialImageUploadDialog
-        isOpen={isUploadDialogOpen}
-        onClose={() => setIsUploadDialogOpen(false)}
-        materialName={doc.name}
-        materialSku={doc.sku}
-        currentImageUrl={doc.imageUrl}
-        onSave={handleSaveImage}
-      />
     </div>
   );
 }

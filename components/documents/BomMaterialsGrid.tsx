@@ -63,6 +63,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { formatMoney } from "./common/DocumentShell";
 import {
   Plus,
   Trash2,
@@ -127,6 +128,8 @@ export interface BomItem {
   unit: string;
   unitPrice: number;
   totalPrice: number; // actualQty * unitPrice
+  originalCurrency?: "USD" | "UZS";
+  originalUnitPrice?: number;
   supplier: string;
   availability: "In Stock" | "Reserved" | "Low Stock" | "On Order";
   issueType?: MaterialIssueType;
@@ -177,6 +180,8 @@ export function normalizeBomItem(item: any): BomItem {
   const wasteQty = item.wasteQty !== undefined ? Number(item.wasteQty) : Math.max(0, actualQty - planQty);
   const unitPrice = Number(item.unitPrice) || 0;
   const totalPrice = item.totalPrice !== undefined ? Number(item.totalPrice) : Number((actualQty * unitPrice).toFixed(2));
+  const originalCurrency = item.originalCurrency || (item.currency === "UZS" ? "UZS" : "USD");
+  const originalUnitPrice = item.originalUnitPrice !== undefined ? Number(item.originalUnitPrice) : unitPrice;
   return {
     id: item.id || `MAT-${Math.floor(100 + Math.random() * 900)}`,
     name: item.name || "",
@@ -201,6 +206,8 @@ export function normalizeBomItem(item: any): BomItem {
     unit: item.unit || "pcs",
     unitPrice,
     totalPrice,
+    originalCurrency,
+    originalUnitPrice,
     supplier: item.supplier || "Asosiy Ombor",
     availability: item.availability || "In Stock",
     issueType: item.issueType || "standard",
@@ -234,6 +241,8 @@ interface BomMaterialsGridProps {
   isOperator?: boolean;
   onSaveAsSpec?: (items: BomItem[]) => void;
   onItemsChange?: (items: BomItem[]) => void;
+  currency?: string;
+  exchangeRate?: number;
 }
 
 export function BomMaterialsGrid({
@@ -248,6 +257,8 @@ export function BomMaterialsGrid({
   isOperator,
   onSaveAsSpec,
   onItemsChange,
+  currency = "UZS",
+  exchangeRate = 12850,
 }: BomMaterialsGridProps) {
   const t = useTranslations("BOM");
   const {
@@ -284,7 +295,20 @@ export function BomMaterialsGrid({
     return Array.from(set);
   }, [suppliers, warehouseStock]);
 
-  const defaultItems = (initialItems || []).map(normalizeBomItem);
+  const isRealDoc = tabId && !tabId.startsWith("draft-") && !tabId.startsWith("temp-");
+  const cleanItemName = (name: string) => {
+    if (!name) return "";
+    if (isRealDoc && (name.includes("draft-wo-") || name.includes("temp-"))) {
+      return name.replace(/draft-wo-\d+|temp-[\w-]+/g, tabId);
+    }
+    return name;
+  };
+
+  const defaultItems = (initialItems || []).map((it) => {
+    const norm = normalizeBomItem(it);
+    if (norm.name) norm.name = cleanItemName(norm.name);
+    return norm;
+  });
 
   const [items, setItems] = useState<BomItem[]>(defaultItems);
   const [selection, setSelection] = useState<GridSelection>({
@@ -341,7 +365,20 @@ export function BomMaterialsGrid({
 
   const handleSelectWarehouseStock = (stock: WarehouseStockRecord) => {
     setFormState((prev) => {
-      const unitPrice = stock.unitPriceUsd !== undefined ? stock.unitPriceUsd : (prev.unitPrice || 1.0);
+      const orderCur = (currency || "UZS").toUpperCase();
+      const rate = Number(exchangeRate) || 12850;
+      const stockCur: "USD" | "UZS" = stock.currency || (stock.unitPriceUzs && !stock.unitPriceUsd ? "UZS" : "USD");
+      const origPrice = stockCur === "UZS"
+        ? (stock.unitPriceUzs || stock.unitPrice || 0)
+        : (stock.unitPriceUsd || stock.unitPrice || 1.0);
+
+      let convertedPrice = origPrice;
+      if (stockCur === "USD" && orderCur === "UZS") {
+        convertedPrice = Number((origPrice * rate).toFixed(2));
+      } else if (stockCur === "UZS" && orderCur === "USD") {
+        convertedPrice = Number((origPrice / rate).toFixed(4));
+      }
+
       const actualQty = prev.actualQty || 1;
       const spec = stock.sheetFormat
         ? `${stock.sheetFormat} mm${stock.grammage ? `, ${stock.grammage} g/m²` : ""} · ${stock.category}`
@@ -363,8 +400,10 @@ export function BomMaterialsGrid({
         warehouseStockLevel: stock.stockLevel,
         warehouseAvailable: stock.available,
         unit: stock.unit,
-        unitPrice,
-        totalPrice: Number((actualQty * unitPrice).toFixed(2)),
+        originalCurrency: stockCur,
+        originalUnitPrice: origPrice,
+        unitPrice: convertedPrice,
+        totalPrice: Number((actualQty * convertedPrice).toFixed(2)),
         supplier: stock.supplier || `Asosiy Ombor (${stock.location})`,
         availability:
           stock.available > 0
@@ -386,44 +425,51 @@ export function BomMaterialsGrid({
   const [columns, setColumns] = useState<GridColumn[]>([
     { id: "image", title: t("image"), width: 56, icon: GridColumnIcon.HeaderImage },
     { id: "id", title: t("itemCode"), width: 110, icon: GridColumnIcon.HeaderReference },
-    { id: "name", title: t("materialName"), width: 230, icon: GridColumnIcon.HeaderString },
-    { id: "issueType", title: t("issueType"), width: 140, icon: GridColumnIcon.HeaderSingleValue },
-    { id: "planQty", title: t("planQty"), width: 100, icon: GridColumnIcon.HeaderNumber },
-    { id: "actualQty", title: t("actualQty"), width: 100, icon: GridColumnIcon.HeaderNumber },
-    { id: "wasteQty", title: t("wasteQty"), width: 95, icon: GridColumnIcon.HeaderNumber },
-    { id: "unit", title: t("unit"), width: 75, icon: GridColumnIcon.HeaderLookup },
-    { id: "unitPrice", title: t("unitPrice"), width: 95, icon: GridColumnIcon.HeaderMath },
-    { id: "totalPrice", title: t("totalPrice"), width: 115, icon: GridColumnIcon.HeaderMath },
+    { id: "name", title: t("materialName"), width: 220, icon: GridColumnIcon.HeaderString },
+    { id: "issueType", title: t("issueType"), width: 130, icon: GridColumnIcon.HeaderSingleValue },
+    { id: "planQty", title: t("planQty"), width: 95, icon: GridColumnIcon.HeaderNumber },
+    { id: "actualQty", title: t("actualQty"), width: 95, icon: GridColumnIcon.HeaderNumber },
+    { id: "wasteQty", title: t("wasteQty"), width: 90, icon: GridColumnIcon.HeaderNumber },
+    { id: "unit", title: t("unit"), width: 70, icon: GridColumnIcon.HeaderLookup },
+    { id: "originalCurrency", title: "Valyuta", width: 68, icon: GridColumnIcon.HeaderLookup },
+    { id: "originalPrice", title: "Asl narx", width: 90, icon: GridColumnIcon.HeaderMath },
+    { id: "unitPrice", title: `Narx (${currency || "UZS"})`, width: 105, icon: GridColumnIcon.HeaderMath },
+    { id: "totalPrice", title: `Jami (${currency || "UZS"})`, width: 120, icon: GridColumnIcon.HeaderMath },
     { id: "faultParty", title: t("faultParty"), width: 135, icon: GridColumnIcon.HeaderLookup },
-    { id: "notes", title: t("notes"), width: 190, icon: GridColumnIcon.HeaderTextTemplate },
-    { id: "supplier", title: t("supplier"), width: 150, icon: GridColumnIcon.HeaderLookup },
-    { id: "availability", title: t("availability"), width: 115, icon: GridColumnIcon.HeaderSingleValue },
+    { id: "notes", title: t("notes"), width: 180, icon: GridColumnIcon.HeaderTextTemplate },
+    { id: "supplier", title: t("supplier"), width: 140, icon: GridColumnIcon.HeaderLookup },
+    { id: "availability", title: t("availability"), width: 110, icon: GridColumnIcon.HeaderSingleValue },
   ]);
 
-  // Keep column titles aligned with translations
+  // Keep column titles aligned with translations and currency
   useEffect(() => {
-    setColumns((prev) => [
-      { ...prev[0], title: t("image") },
-      { ...prev[1], title: t("itemCode") },
-      { ...prev[2], title: t("materialName") },
-      { ...prev[3], title: t("issueType") },
-      { ...prev[4], title: t("planQty") },
-      { ...prev[5], title: t("actualQty") },
-      { ...prev[6], title: t("wasteQty") },
-      { ...prev[7], title: t("unit") },
-      { ...prev[8], title: t("unitPrice") },
-      { ...prev[9], title: t("totalPrice") },
-      { ...prev[10], title: t("faultParty") },
-      { ...prev[11], title: t("notes") },
-      { ...prev[12], title: t("supplier") },
-      { ...prev[13], title: t("availability") },
-    ]);
-  }, [t]);
+    setColumns((prev) =>
+      prev.map((c) => {
+        if (c.id === "image") return { ...c, title: t("image") };
+        if (c.id === "id") return { ...c, title: t("itemCode") };
+        if (c.id === "name") return { ...c, title: t("materialName") };
+        if (c.id === "issueType") return { ...c, title: t("issueType") };
+        if (c.id === "planQty") return { ...c, title: t("planQty") };
+        if (c.id === "actualQty") return { ...c, title: t("actualQty") };
+        if (c.id === "wasteQty") return { ...c, title: t("wasteQty") };
+        if (c.id === "unit") return { ...c, title: t("unit") };
+        if (c.id === "originalCurrency") return { ...c, title: "Valyuta" };
+        if (c.id === "originalPrice") return { ...c, title: "Asl narx" };
+        if (c.id === "unitPrice") return { ...c, title: `Narx (${currency || "UZS"})` };
+        if (c.id === "totalPrice") return { ...c, title: `Jami (${currency || "UZS"})` };
+        if (c.id === "faultParty") return { ...c, title: t("faultParty") };
+        if (c.id === "notes") return { ...c, title: t("notes") };
+        if (c.id === "supplier") return { ...c, title: t("supplier") };
+        if (c.id === "availability") return { ...c, title: t("availability") };
+        return c;
+      })
+    );
+  }, [t, currency]);
 
   // Active columns filtered by RBAC (hide financial columns for floor operators)
   const visibleColumns = useMemo(() => {
     if (!isOperator) return columns;
-    return columns.filter((c) => c.id !== "unitPrice" && c.id !== "totalPrice");
+    return columns.filter((c) => c.id !== "unitPrice" && c.id !== "totalPrice" && c.id !== "originalPrice" && c.id !== "originalCurrency");
   }, [columns, isOperator]);
 
   // Active items list
@@ -437,9 +483,15 @@ export function BomMaterialsGrid({
   // Synchronize items when initialItems prop is updated from parent
   useEffect(() => {
     if (initialItems !== undefined) {
-      setItems(initialItems.map(normalizeBomItem));
+      setItems(
+        initialItems.map((it) => {
+          const norm = normalizeBomItem(it);
+          if (norm.name) norm.name = cleanItemName(norm.name);
+          return norm;
+        })
+      );
     }
-  }, [initialItems]);
+  }, [initialItems, tabId]);
 
   // Only auto-populate from activeSpec when the specification code changes or on initial empty mount
   useEffect(() => {
@@ -782,11 +834,41 @@ export function BomMaterialsGrid({
               textDark: isDark ? "#d4d4d8" : "#3f3f46",
             },
           };
-        case "unitPrice":
+        case "originalCurrency": {
+          const cur = item.originalCurrency || "USD";
+          return {
+            kind: GridCellKind.Text,
+            data: cur,
+            displayData: cur,
+            allowOverlay: !isOperator,
+            contentAlign: "center",
+            themeOverride: {
+              textDark: isDark ? "#a1a1aa" : "#71717a",
+              baseFontStyle: "600 11px monospace",
+            },
+          };
+        }
+        case "originalPrice": {
+          const origPrice = item.originalUnitPrice !== undefined ? item.originalUnitPrice : item.unitPrice;
+          const origCur = item.originalCurrency || "USD";
+          return {
+            kind: GridCellKind.Number,
+            data: origPrice,
+            displayData: origCur === "UZS" ? `${origPrice.toLocaleString()} UZS` : `$${origPrice.toFixed(3)}`,
+            allowOverlay: !isOperator,
+            contentAlign: "right",
+            themeOverride: {
+              baseFontStyle: "12px monospace",
+              textDark: isDark ? "#9ca3af" : "#64748b",
+            },
+          };
+        }
+        case "unitPrice": {
+          const cur = (currency || "UZS").toUpperCase();
           return {
             kind: GridCellKind.Number,
             data: item.unitPrice,
-            displayData: `$${item.unitPrice.toFixed(2)}`,
+            displayData: formatMoney(item.unitPrice, cur, cur === "UZS" ? 0 : 3),
             allowOverlay: !isOperator,
             contentAlign: "right",
             themeOverride: {
@@ -794,16 +876,15 @@ export function BomMaterialsGrid({
               textDark: isDark ? "#d4d4d8" : "#3f3f46",
             },
           };
+        }
         case "totalPrice": {
+          const cur = (currency || "UZS").toUpperCase();
           const a = item.actualQty !== undefined ? item.actualQty : (item.qty || 0);
-          const total = a * item.unitPrice;
+          const total = item.totalPrice !== undefined ? item.totalPrice : Number((a * item.unitPrice).toFixed(2));
           return {
             kind: GridCellKind.Number,
             data: total,
-            displayData: `$${total.toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}`,
+            displayData: formatMoney(total, cur, cur === "UZS" ? 0 : 2),
             allowOverlay: false,
             contentAlign: "right",
             themeOverride: {
@@ -949,6 +1030,34 @@ export function BomMaterialsGrid({
                   ? newValue.data
                   : parseFloat(String(newValue.data)) || 0;
               updated.wasteQty = Math.max(0, val);
+            } else if (column.id === "originalCurrency") {
+              const newCur = String(newValue.data ?? "USD").toUpperCase() === "UZS" ? "UZS" : "USD";
+              updated.originalCurrency = newCur;
+              const orderCur = (currency || "UZS").toUpperCase();
+              const rate = Number(exchangeRate) || 12850;
+              const origP = updated.originalUnitPrice !== undefined ? updated.originalUnitPrice : updated.unitPrice;
+              if (newCur === "USD" && orderCur === "UZS") {
+                updated.unitPrice = Number((origP * rate).toFixed(2));
+              } else if (newCur === "UZS" && orderCur === "USD") {
+                updated.unitPrice = Number((origP / rate).toFixed(4));
+              } else {
+                updated.unitPrice = origP;
+              }
+              updated.totalPrice = Number((updated.actualQty * updated.unitPrice).toFixed(2));
+            } else if (column.id === "originalPrice") {
+              const val = typeof newValue.data === "number" ? newValue.data : parseFloat(String(newValue.data)) || 0;
+              updated.originalUnitPrice = Math.max(0, val);
+              const origCur = updated.originalCurrency || "USD";
+              const orderCur = (currency || "UZS").toUpperCase();
+              const rate = Number(exchangeRate) || 12850;
+              if (origCur === "USD" && orderCur === "UZS") {
+                updated.unitPrice = Number((val * rate).toFixed(2));
+              } else if (origCur === "UZS" && orderCur === "USD") {
+                updated.unitPrice = Number((val / rate).toFixed(4));
+              } else {
+                updated.unitPrice = val;
+              }
+              updated.totalPrice = Number((updated.actualQty * updated.unitPrice).toFixed(2));
             } else if (column.id === "unitPrice") {
               const val =
                 typeof newValue.data === "number"
@@ -956,6 +1065,16 @@ export function BomMaterialsGrid({
                   : parseFloat(String(newValue.data)) || 0;
               updated.unitPrice = Math.max(0, val);
               updated.totalPrice = Number((updated.actualQty * updated.unitPrice).toFixed(2));
+              const origCur = updated.originalCurrency || "USD";
+              const orderCur = (currency || "UZS").toUpperCase();
+              const rate = Number(exchangeRate) || 12850;
+              if (origCur === "USD" && orderCur === "UZS") {
+                updated.originalUnitPrice = Number((val / rate).toFixed(4));
+              } else if (origCur === "UZS" && orderCur === "USD") {
+                updated.originalUnitPrice = Math.round(val * rate);
+              } else {
+                updated.originalUnitPrice = val;
+              }
             } else if (column.id === "name") {
               updated.name = String(newValue.data ?? "");
             } else if (column.id === "spec") {
@@ -1096,7 +1215,7 @@ export function BomMaterialsGrid({
     }
 
     const planQty = Number(formState.planQty) || 0;
-    const actualQty = Number(formState.actualQty) || 0;
+    const actualQty = editingIndex === null ? planQty : (Number(formState.actualQty) || planQty);
     const wasteQty = formState.wasteQty !== undefined ? Number(formState.wasteQty) : Math.max(0, actualQty - planQty);
 
     const finalSpec = buildMaterialSpec(formState);
@@ -1252,7 +1371,7 @@ export function BomMaterialsGrid({
     const rowsToCopy = selectedRowIndices
       .map((idx) => filteredItems[idx])
       .filter(Boolean)
-      .map((m) => `${m.id}\t${m.name}\t${m.issueType || "standard"}\t${m.planQty}\t${m.actualQty}\t${m.wasteQty}\t${m.unit}\t$${m.unitPrice}\t$${m.totalPrice}\t${m.faultParty || "none"}\t${m.notes || ""}\t${m.supplier}\t${m.availability}`)
+      .map((m) => `${m.id}\t${m.name}\t${m.issueType || "standard"}\t${m.planQty}\t${m.actualQty}\t${m.wasteQty}\t${m.unit}\t${formatMoney(m.unitPrice, currency)}\t${formatMoney(m.totalPrice, currency)}\t${m.faultParty || "none"}\t${m.notes || ""}\t${m.supplier}\t${m.availability}`)
       .join("\n");
 
     if (navigator.clipboard) {
@@ -1574,15 +1693,15 @@ export function BomMaterialsGrid({
         {!isOperator && (
           <div className="flex items-center gap-2 text-[11px] font-mono shrink-0 pl-2 ml-auto whitespace-nowrap">
             <span className="text-muted-foreground">
-              Reja: <strong className="text-foreground">${planTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+              Reja: <strong className="text-foreground">{formatMoney(planTotalCost, currency, currency === "UZS" ? 0 : 2)}</strong>
             </span>
             <span className="text-muted-foreground">•</span>
             <span className="text-muted-foreground">
-              Fakt: <strong className="text-primary font-bold">${actualTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+              Fakt: <strong className="text-primary font-bold">{formatMoney(actualTotalCost, currency, currency === "UZS" ? 0 : 2)}</strong>
             </span>
             {wasteTotalCost > 0 && (
               <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 h-5 bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 whitespace-nowrap">
-                +{wasteTotalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({remakeCount} ta)
+                +{formatMoney(wasteTotalCost, currency, currency === "UZS" ? 0 : 2)} ({remakeCount} ta)
               </Badge>
             )}
           </div>
@@ -1948,7 +2067,14 @@ export function BomMaterialsGrid({
                       {!isOperator && (
                         <>
                           <span>•</span>
-                          <span>Narx: <b className="text-foreground font-mono">${selectedStockItem.unitPriceUsd}</b></span>
+                          <span>
+                            Narx:{" "}
+                            <b className="text-foreground font-mono">
+                              {selectedStockItem.currency === "UZS"
+                                ? `${(selectedStockItem.unitPrice || selectedStockItem.unitPriceUzs || 0).toLocaleString()} UZS`
+                                : `$${selectedStockItem.unitPriceUsd || selectedStockItem.unitPrice || 0}`}
+                            </b>
+                          </span>
                         </>
                       )}
                     </div>
@@ -2253,9 +2379,18 @@ export function BomMaterialsGrid({
 
             {/* ── 2. QUANTITIES & COSTING ── */}
             <div className="space-y-1.5 pt-1 border-t border-border/80">
-              <div className={cn("grid gap-2", isOperator ? "grid-cols-3" : "grid-cols-4")}>
+              <div className={cn(
+                "grid gap-2",
+                isOperator
+                  ? "grid-cols-2"
+                  : editingIndex !== null
+                  ? "grid-cols-4"
+                  : "grid-cols-3"
+              )}>
                 <div>
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">Reja norma</label>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">
+                    {editingIndex !== null ? "Reja norma" : "Rejali miqdor (Norma) *"}
+                  </label>
                   <Input
                     type="number"
                     min={0}
@@ -2263,34 +2398,42 @@ export function BomMaterialsGrid({
                     value={formState.planQty}
                     onChange={(e) => {
                       const pVal = parseFloat(e.target.value) || 0;
-                      setFormState((p) => ({
-                        ...p,
-                        planQty: pVal,
-                        wasteQty: Math.max(0, (p.actualQty || 0) - pVal),
-                      }));
-                    }}
-                    className="h-8 text-xs font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">Faktik sarf *</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={formState.actualQty}
-                    onChange={(e) => {
-                      const aVal = parseFloat(e.target.value) || 0;
-                      setFormState((p) => ({
-                        ...p,
-                        actualQty: aVal,
-                        qty: aVal,
-                        wasteQty: Math.max(0, aVal - (p.planQty || 0)),
-                        totalPrice: Number((aVal * (p.unitPrice || 0)).toFixed(2)),
-                      }));
+                      setFormState((p) => {
+                        const aVal = editingIndex === null ? pVal : p.actualQty;
+                        return {
+                          ...p,
+                          planQty: pVal,
+                          actualQty: aVal,
+                          qty: aVal,
+                          wasteQty: Math.max(0, aVal - pVal),
+                          totalPrice: Number((aVal * (p.unitPrice || 0)).toFixed(2)),
+                        };
+                      });
                     }}
                     className="h-8 text-xs font-mono font-bold"
                   />
                 </div>
+                {editingIndex !== null && (
+                  <div>
+                    <label className="text-[10px] text-muted-foreground block mb-0.5">Faktik sarf</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={formState.actualQty}
+                      onChange={(e) => {
+                        const aVal = parseFloat(e.target.value) || 0;
+                        setFormState((p) => ({
+                          ...p,
+                          actualQty: aVal,
+                          qty: aVal,
+                          wasteQty: Math.max(0, aVal - (p.planQty || 0)),
+                          totalPrice: Number((aVal * (p.unitPrice || 0)).toFixed(2)),
+                        }));
+                      }}
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-0.5">Birlik</label>
                   <Input
@@ -2303,17 +2446,50 @@ export function BomMaterialsGrid({
                 </div>
                 {!isOperator && (
                   <div>
-                    <label className="text-[10px] text-muted-foreground block mb-0.5">Narx ($)</label>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <label className="text-[10px] text-muted-foreground block">
+                        Narx ({currency || "UZS"})
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextCur = formState.originalCurrency === "UZS" ? "USD" : "UZS";
+                          const rate = Number(exchangeRate) || 12850;
+                          const orderCur = (currency || "UZS").toUpperCase();
+                          const orig = formState.originalUnitPrice !== undefined ? formState.originalUnitPrice : formState.unitPrice;
+                          let converted = orig;
+                          if (nextCur === "USD" && orderCur === "UZS") converted = Number((orig * rate).toFixed(2));
+                          else if (nextCur === "UZS" && orderCur === "USD") converted = Number((orig / rate).toFixed(4));
+                          setFormState((p) => ({
+                            ...p,
+                            originalCurrency: nextCur,
+                            unitPrice: converted,
+                            totalPrice: Number(((p.actualQty || 0) * converted).toFixed(2)),
+                          }));
+                        }}
+                        className="text-[9px] px-1 py-0 border rounded font-mono text-muted-foreground hover:bg-muted"
+                      >
+                        {formState.originalCurrency || "USD"}
+                      </button>
+                    </div>
                     <MoneyInput
                       thousandSeparator=" "
-                      decimalScale={3}
+                      decimalScale={(currency || "UZS").toUpperCase() === "UZS" ? 0 : 3}
                       min={0}
                       value={formState.unitPrice}
                       onValueChange={(values) => {
                         const uVal = values.floatValue ?? 0;
+                        const rate = Number(exchangeRate) || 12850;
+                        const orderCur = (currency || "UZS").toUpperCase();
+                        const origCur = formState.originalCurrency || "USD";
+                        let origP = uVal;
+                        if (origCur === "USD" && orderCur === "UZS") origP = Number((uVal / rate).toFixed(4));
+                        else if (origCur === "UZS" && orderCur === "USD") origP = Math.round(uVal * rate);
+
                         setFormState((p) => ({
                           ...p,
                           unitPrice: uVal,
+                          originalUnitPrice: origP,
                           totalPrice: Number(((p.actualQty || 0) * uVal).toFixed(2)),
                         }));
                       }}
@@ -2329,7 +2505,7 @@ export function BomMaterialsGrid({
                   <div className="flex items-center gap-1.5">
                     <span>Jami summa:</span>
                     <span className="font-mono font-bold text-foreground">
-                      ${Number((formState.actualQty * formState.unitPrice).toFixed(2)).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                      {formatMoney(Number((formState.actualQty * formState.unitPrice).toFixed(2)), currency || "UZS")}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
