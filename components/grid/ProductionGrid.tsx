@@ -218,6 +218,14 @@ export function ProductionGrid({ type }: ProductionGridProps) {
 
   const mouseCoordsRef = useRef({ x: 0, y: 0 });
 
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("mousemove", handleGlobalMouseMove, { passive: true });
+    return () => window.removeEventListener("mousemove", handleGlobalMouseMove);
+  }, []);
+
   const getCursorCardPosition = useCallback((clientX: number, clientY: number, cardWidth = 380, cardHeight = 380) => {
     const margin = 16;
     const vpW = typeof window !== "undefined" ? window.innerWidth : 1920;
@@ -286,6 +294,8 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         realId: m.id,
         code: m.code,
         name: m.name,
+        image: m.imageUrl ? [m.imageUrl] : [],
+        imageUrl: m.imageUrl || "",
         type: `${m.department || "Production"} (${m.category || "machine"})`,
         maxFormat,
         maxGrammage,
@@ -547,6 +557,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     } else if (type === "machines") {
       cols = [
         { id: "id", title: "Machine ID", width: 105, icon: GridColumnIcon.HeaderReference },
+        { id: "image", title: "Rasm", width: 80, icon: GridColumnIcon.HeaderImage },
         { id: "name", title: "Equipment Name / Model", width: 255, icon: GridColumnIcon.HeaderString },
         { id: "type", title: "Process Type", width: 165, icon: GridColumnIcon.HeaderLookup },
         { id: "maxFormat", title: "Max Sheet / Web", width: 165, icon: GridColumnIcon.HeaderString },
@@ -792,11 +803,11 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         const column = columns[col];
         if (column?.id === "image" || column?.id === "preview") {
           const rowData = filteredRows[row];
-          const imageUrl =
+          const raw =
             (rowData as any)?.imageUrl ||
-            (Array.isArray((rowData as any)?.preview)
-              ? (rowData as any).preview[0]
-              : (rowData as any)?.preview);
+            (rowData as any)?.image ||
+            (rowData as any)?.preview;
+          const imageUrl = Array.isArray(raw) ? (raw.length > 0 ? raw[0] : null) : (raw || null);
           if (imageUrl) {
             let clientX = mouseCoordsRef.current.x;
             let clientY = mouseCoordsRef.current.y;
@@ -958,6 +969,18 @@ export function ProductionGrid({ type }: ProductionGridProps) {
 
       const column = columns[col];
       const val = rowData[column.id as keyof typeof rowData];
+
+      if (column.id === "image" || column.id === "preview") {
+        const imgArr = Array.isArray(val) ? val : (val ? [String(val)] : []);
+        return {
+          kind: GridCellKind.Image,
+          data: imgArr,
+          displayData: imgArr,
+          allowOverlay: false,
+          rounding: 4,
+          contentAlign: "center",
+        };
+      }
 
       if (column.id === "orderType") {
         const isSample = val === "Sample";
@@ -1493,7 +1516,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                   columns={columns}
                   rows={filteredRows.length}
                   rowMarkers="both"
-                  freezeColumns={1}
+                  freezeColumns={type === "machines" ? 2 : 1}
                   smoothScrollX={true}
                   smoothScrollY={true}
                   width="100%"
