@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import {
   GridCell,
@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
+import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   DocumentHeader,
@@ -46,6 +47,9 @@ import {
 } from "./common/DocumentShell";
 import { ReturnOffcutDialog } from "@/components/grid/ReturnOffcutDialog";
 import { WarehouseSelect } from "@/components/common/WarehouseSelect";
+import { MaterialImageModal } from "@/components/documents/MaterialImageModal";
+import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
+import { SupplierSelect } from "@/components/common/SupplierSelect";
 import {
   Boxes,
   FileText,
@@ -64,10 +68,15 @@ import {
   CheckCircle2,
   PackagePlus,
   Building2,
+  Warehouse,
   Sparkles,
   History,
   Tag,
   Factory,
+  Camera,
+  ZoomIn,
+  Upload,
+  Trash2,
 } from "lucide-react";
 
 const DataEditor = dynamic(
@@ -105,6 +114,8 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     warehouseStock,
     warehouseMovements,
     productionQueue,
+    warehousesList,
+    loadWarehouses,
     upsertWarehouseStock,
     upsertWarehouseStockAsync,
     openTab,
@@ -113,6 +124,12 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     addNotification,
     theme,
   } = useWorkspaceStore();
+
+  useEffect(() => {
+    if (warehousesList.length === 0) {
+      loadWarehouses();
+    }
+  }, [warehousesList.length, loadWarehouses]);
 
   const isDark = theme === "dark";
 
@@ -126,6 +143,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     if (found) {
       return {
         ...found,
+        locationShelf: found.locationShelf || undefined,
         imageUrl: found.imageUrl || undefined,
       };
     }
@@ -137,7 +155,9 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       grammage: d.grammage !== undefined && d.grammage !== "" ? Number(d.grammage) : undefined,
       sheetFormat: d.sheetFormat || "",
       unit: d.unit || "sheets",
-      location: d.location || "",
+      location: d.location || d.locationName || "",
+      warehouseId: d.warehouseId || d.warehouse_id || "",
+      locationShelf: d.locationShelf || "",
       stockLevel: Number(d.stockLevel) || 0,
       reserved: Number(d.reserved) || 0,
       available: Number(d.available) || 0,
@@ -167,6 +187,177 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
   // Default to specs (Texnik Pasport) - the logical primary tab
   const [activeTabKey, setActiveTabKey] = useState<string>("specs");
   const [isOffcutDialogOpen, setIsOffcutDialogOpen] = useState<boolean>(false);
+  const [isImageModalOpen, setIsImageModalOpen] = useState<boolean>(false);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState<boolean>(false);
+
+  // ─── WMS Kaskadli Manzilli Saqlash (Ombor -> Stelaj -> Katak) ─────────────
+  const [wmsData, setWmsData] = useState<{
+    warehouse?: any;
+    zones: any[];
+    racks: any[];
+    bins: any[];
+  } | null>(null);
+  const [isWmsLoading, setIsWmsLoading] = useState(false);
+  const [selectedRackId, setSelectedRackId] = useState<string>("");
+
+  // Tanlangan ombor ID sini aniqlash (doc.warehouseId yoki doc.location nomi orqali)
+  const activeWarehouseId = useMemo(() => {
+    if (doc.warehouseId) return doc.warehouseId;
+    if (doc.location && warehousesList.length > 0) {
+      const found = warehousesList.find(
+        (w) =>
+          w.name?.toLowerCase().trim() === doc.location.toLowerCase().trim() ||
+          w.id === doc.location
+      );
+      if (found) return found.id;
+    }
+    return warehousesList[0]?.id || "";
+  }, [doc.warehouseId, doc.location, warehousesList]);
+
+  // Tanlangan ombor o'zgarganda faqat shu omborning topologiyasini (racks, bins) yuklash
+  useEffect(() => {
+    if (!activeWarehouseId) return;
+    let isCancelled = false;
+    setIsWmsLoading(true);
+
+    fetch(`/api/v1/warehouse/wms?warehouseId=${encodeURIComponent(activeWarehouseId)}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (isCancelled) return;
+        if (json.success && json.data) {
+          setWmsData({
+            warehouse: json.data.warehouse,
+            zones: json.data.zones || [],
+            racks: json.data.racks || [],
+            bins: json.data.bins || [],
+          });
+        }
+      })
+      .catch((err) => console.error("WMS ma'lumotlarini yuklashda xatolik:", err))
+      .finally(() => {
+        if (!isCancelled) setIsWmsLoading(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeWarehouseId]);
+
+  // Agar mavjud doc.locationShelf bo'lsa (masalan: "A-01-2-3"), unga tegishli stelajni avtomatik aniqlash
+  useEffect(() => {
+    if (!wmsData || !doc.locationShelf) return;
+    const currentBin = wmsData.bins.find((b: any) => b.code === doc.locationShelf);
+    if (currentBin && currentBin.rackId) {
+      setSelectedRackId(currentBin.rackId);
+    } else {
+      const parts = doc.locationShelf.split("-");
+      if (parts.length >= 2) {
+        const rackCodeOrName = `${parts[0]}-${parts[1]}`;
+        const matchingRack = wmsData.racks.find(
+          (r: any) =>
+            r.code === parts[1] ||
+            r.name.includes(rackCodeOrName) ||
+            r.name.includes(parts[1])
+        );
+        if (matchingRack) {
+          setSelectedRackId(matchingRack.id);
+        }
+      }
+    }
+  }, [wmsData, doc.locationShelf]);
+
+  // Tanlangan omborga mos stelajlar ro'yxati
+  const rackOptions: ComboboxItem[] = useMemo(() => {
+    if (!wmsData?.racks) return [];
+    return wmsData.racks.map((r: any) => {
+      const rackBins = (wmsData.bins || []).filter((b: any) => b.rackId === r.id);
+      const totalBins = rackBins.length || (r.levelsCount * r.baysCount);
+      const occupiedBins = rackBins.filter((b: any) => b.status === "full" || b.status === "partial").length;
+
+      return {
+        value: r.id,
+        label: `${r.code} — ${r.name}`,
+        description: `${r.levelsCount} qavat · ${totalBins} katak (${occupiedBins} band)`,
+        badge: r.type || "Stelaj",
+      };
+    });
+  }, [wmsData]);
+
+  // Tanlangan stelajga mos kataklar ro'yxati
+  const binOptions: ComboboxItem[] = useMemo(() => {
+    if (!wmsData?.bins) return [];
+    const filteredBins = selectedRackId
+      ? wmsData.bins.filter((b: any) => b.rackId === selectedRackId)
+      : wmsData.bins;
+
+    return filteredBins.map((b: any) => {
+      const rack = wmsData.racks.find((r: any) => r.id === b.rackId);
+      const statusLabel = b.status === "empty" ? "Bo'sh" : b.status === "partial" ? "Qisman" : "To'la";
+      return {
+        value: b.code,
+        label: b.code,
+        description: `${rack?.name ? `${rack.name} · ` : ""}${b.level}-qavat, ${b.bay}-katak · Maks: ${b.maxWeightKg} kg`,
+        badge: statusLabel,
+      };
+    });
+  }, [wmsData, selectedRackId]);
+
+  // Tanlangan katak ma'lumotlari
+  const selectedBinInfo = useMemo(() => {
+    if (!wmsData?.bins || !doc.locationShelf) return null;
+    const bin = wmsData.bins.find((b: any) => b.code === doc.locationShelf);
+    if (!bin) return null;
+    const rack = wmsData.racks.find((r: any) => r.id === bin.rackId);
+    return {
+      code: bin.code,
+      rackName: rack?.name || "Stelaj",
+      level: bin.level,
+      bay: bin.bay,
+      maxWeight: bin.maxWeightKg,
+      occupancyPct: bin.occupancyPct,
+      statusLabel: bin.status === "empty" ? "Bo'sh" : bin.status === "partial" ? "Qisman band" : "To'la",
+      statusColor: bin.status === "empty" ? "text-emerald-500 font-semibold" : bin.status === "partial" ? "text-amber-500 font-semibold" : "text-rose-500 font-semibold",
+    };
+  }, [wmsData, doc.locationShelf]);
+
+  const handleOpenWmsMap = () => {
+    openTab({
+      id: "tab-warehouse-wms-map",
+      title: "Ombor boshqaruvi (WMS)",
+      type: "registry",
+      module: "warehouse",
+      documentData: {
+        targetWarehouseId: activeWarehouseId,
+        targetRackId: selectedRackId,
+        targetBin: doc.locationShelf,
+        targetSku: doc.sku,
+      },
+    });
+  };
+
+  const directFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleDirectFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        handleFieldChange("imageUrl", dataUrl);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveImage = useCallback((newUrl: string) => {
+    handleFieldChange("imageUrl", newUrl);
+  }, []);
+
+  const handleResetImage = useCallback(() => {
+    handleFieldChange("imageUrl", undefined);
+  }, []);
 
   useEffect(() => {
     setDoc(stockItem);
@@ -205,6 +396,8 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       available: Math.max(0, (Number(doc.stockLevel) || 0) - (Number(doc.reserved) || 0)),
       reorder: Number(doc.reorder) || 0,
       grammage: doc.grammage ? Number(doc.grammage) : undefined,
+      warehouseId: doc.warehouseId || activeWarehouseId || undefined,
+      locationShelf: doc.locationShelf || undefined,
     };
     await upsertWarehouseStockAsync(updated);
     setDoc(updated);
@@ -686,6 +879,54 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                 title={doc.name || "Xomashyo kartochkasi"}
                 subtitle={doc.sku || "SKU belgilanmagan"}
               >
+                {/* Real photo / upload preview */}
+                <div className="py-2 flex flex-col items-center justify-center">
+                  <div
+                    className="w-full h-28 rounded-md border border-border bg-muted/20 overflow-hidden flex flex-col items-center justify-center relative group cursor-pointer"
+                    onClick={() => setIsUploadDialogOpen(true)}
+                    title={doc.imageUrl ? "Rasmni almashtirish" : "Haqiqiy rasm yuklash"}
+                  >
+                    {doc.imageUrl ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={doc.imageUrl}
+                          alt={doc.name || "Material"}
+                          className="size-full object-contain p-1 select-none"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                          <Button
+                            size="icon-xs"
+                            variant="secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsImageModalOpen(true);
+                            }}
+                            title="Kattalashtirish"
+                          >
+                            <ZoomIn className="size-3" />
+                          </Button>
+                          <Button
+                            size="icon-xs"
+                            variant="secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsUploadDialogOpen(true);
+                            }}
+                            title="Rasmni almashtirish"
+                          >
+                            <Camera className="size-3" />
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center p-2 text-center gap-1.5 text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                        <Camera className="size-6 text-muted-foreground/40 group-hover:text-blue-600 dark:group-hover:text-blue-400" />
+                        <span className="text-[10px] font-medium">Haqiqiy rasm yuklash</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <InfoRow label="Toifa">
                   <span className="font-semibold text-foreground truncate">{doc.category}</span>
                 </InfoRow>
@@ -717,9 +958,16 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                   </div>
                 </InfoRow>
                 {doc.location && (
-                  <InfoRow label="Joylashuv">
+                  <InfoRow label="Ombor">
                     <span className="font-mono text-muted-foreground truncate max-w-[110px]" title={doc.location}>
                       {doc.location}
+                    </span>
+                  </InfoRow>
+                )}
+                {doc.locationShelf && (
+                  <InfoRow label="WMS Katak">
+                    <span className="font-mono font-bold text-primary truncate max-w-[110px]" title={doc.locationShelf}>
+                      {doc.locationShelf}
                     </span>
                   </InfoRow>
                 )}
@@ -739,263 +987,501 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
             {/* ── 1. Tab: Specs (Texnik Pasport va Parametrlar - Logical 1st) ── */}
             <TabsContent value="specs" className="flex-1 w-full h-full m-0 p-4 overflow-y-auto">
-              <div className="max-w-4xl space-y-4">
-                {/* Asosiy identifikatsiya kartochkasi */}
-                <div className="p-4 rounded-xl border border-border bg-card shadow-xs space-y-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant="outline" className="text-xs font-mono font-semibold">
-                      {doc.sku || "Yangi SKU"}
-                    </Badge>
-                    <Badge variant="secondary" className="text-xs">
-                      {doc.category}
-                    </Badge>
-                    <Badge
-                      variant="secondary"
-                      className="text-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+              <div className="max-w-5xl space-y-3.5 pb-8">
+                {/* ─── 1. Asosiy identifikatsiya (Hero Panel) ─────────────────── */}
+                <div className="p-3 rounded-lg border border-border bg-card flex flex-col sm:flex-row gap-3.5 items-center sm:items-start">
+                  {/* Kichik rasm miniatyurasi */}
+                  <div className="relative group shrink-0">
+                    <input
+                      type="file"
+                      ref={directFileInputRef}
+                      onChange={handleDirectFileSelect}
+                      accept="image/*"
+                      className="hidden"
+                    />
+
+                    <div
+                      className="w-24 h-24 rounded border border-border bg-muted/20 overflow-hidden flex flex-col items-center justify-center cursor-pointer relative transition-colors hover:border-primary/50"
+                      onClick={() => {
+                        if (doc.imageUrl) {
+                          setIsImageModalOpen(true);
+                        } else {
+                          directFileInputRef.current?.click();
+                        }
+                      }}
+                      title={doc.imageUrl ? "Rasmni to'liq ko'rish" : "Rasm faylini yuklash"}
                     >
-                      {doc.status || "In Stock"}
-                    </Badge>
-                    {doc.isOffcut && (
-                      <Badge
-                        variant="outline"
-                        className="text-xs bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-semibold"
-                      >
-                        Delovoy Otxod
-                      </Badge>
-                    )}
+                      {doc.imageUrl ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={doc.imageUrl}
+                            alt={doc.name || "Material"}
+                            className="size-full object-contain select-none"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <ZoomIn className="size-4 text-white" />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-center p-2 text-muted-foreground gap-1">
+                          <Upload className="size-4 text-muted-foreground/60" />
+                          <span className="text-[10px] font-medium leading-tight">Rasm yuklash</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-foreground">
-                      Xomashyo / Mahsulot To&apos;liq Nomi *
-                    </Label>
-                    <Input
-                      value={doc.name}
-                      onChange={(e) => handleFieldChange("name", e.target.value)}
-                      placeholder="Masalan: Galerie Art Silk 150g/m² (700×1000)"
-                      className="h-8 text-xs font-medium bg-background"
-                    />
-                  </div>
+                  {/* Asosiy nom va badjlar */}
+                  <div className="flex-1 min-w-0 space-y-2 w-full">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge variant="outline" className="text-xs font-mono font-bold">
+                          {doc.sku || "YANGI-SKU"}
+                        </Badge>
+                        <Badge variant="secondary" className="text-[11px]">
+                          {doc.category}
+                        </Badge>
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            "text-[11px] font-semibold",
+                            doc.status === "Critical"
+                              ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                              : doc.status === "Low Stock"
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                              : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                          )}
+                        >
+                          {doc.status || "In Stock"}
+                        </Badge>
+                        {doc.isOffcut && (
+                          <Badge
+                            variant="outline"
+                            className="text-[11px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 font-semibold"
+                          >
+                            Delovoy Otxod
+                          </Badge>
+                        )}
+                      </div>
 
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    Ushbu nom va parametrlar barcha ishlab chiqarish (Work Order BOM), ombor hisob-kitob va kirim hujjatlarida avtomatik tarzda aks etadi.
-                  </p>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Texnik Xususiyatlar va Parametrlarni Tahrirlash
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Xomashyoning ishlab chiqarish standartlari, o&apos;lchov birligi va ombor parametrlari
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Artikul / SKU *</Label>
-                    <Input
-                      value={doc.sku}
-                      onChange={(e) => handleFieldChange("sku", e.target.value)}
-                      placeholder="Masalan: MAT-1010"
-                      className="h-7 text-xs font-mono font-semibold"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Asosiy Toifa *</Label>
-                    <ComboboxSelect
-                      items={STOCK_CATEGORY_OPTIONS}
-                      value={doc.category}
-                      onValueChange={(val) => handleFieldChange("category", val)}
-                      placeholder="Toifani tanlang..."
-                      className="w-full h-8 text-xs bg-background"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">O&apos;lchov Birligi *</Label>
-                    <ComboboxSelect
-                      items={STOCK_UNIT_OPTIONS}
-                      value={doc.unit}
-                      onValueChange={(val) => handleFieldChange("unit", val)}
-                      placeholder="O'lchov birligini tanlang..."
-                      className="w-full h-8 text-xs bg-background"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Format / O&apos;lcham (mm)</Label>
-                    <Input
-                      value={doc.sheetFormat || ""}
-                      onChange={(e) => handleFieldChange("sheetFormat", e.target.value)}
-                      placeholder="Masalan: 700×1000"
-                      className="h-7 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Zichlik (Grammage, g/m²)</Label>
-                    <Input
-                      type="number"
-                      value={doc.grammage !== undefined ? doc.grammage : ""}
-                      onChange={(e) => handleFieldChange("grammage", e.target.value ? Number(e.target.value) : undefined)}
-                      placeholder="Masalan: 150"
-                      className="h-7 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Boshlang&apos;ich Qoldiq ({doc.unit})</Label>
-                    <Input
-                      type="number"
-                      value={doc.stockLevel || ""}
-                      onChange={(e) => handleFieldChange("stockLevel", Number(e.target.value) || 0)}
-                      placeholder="0"
-                      className="h-7 text-xs font-mono font-bold text-foreground"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Minimal Chegara (Reorder Point)</Label>
-                    <Input
-                      type="number"
-                      value={doc.reorder || ""}
-                      onChange={(e) => handleFieldChange("reorder", Number(e.target.value) || 0)}
-                      placeholder="0"
-                      className="h-7 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Birlik narxi</Label>
+                      {/* Rasm amallari */}
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newCur = "USD";
-                            const p = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / 12850).toFixed(4)) : 0);
-                            setDoc((prev) => ({
-                              ...prev,
-                              currency: newCur,
-                              unitPrice: p,
-                              unitPriceUsd: p,
-                              unitPriceUzs: Math.round(p * 12850),
-                            }));
-                            setTabUnsaved(tab.id, true);
-                          }}
-                          className={cn(
-                            "px-1.5 py-0.5 text-[10px] font-mono rounded border transition-colors cursor-pointer",
-                            doc.currency !== "UZS"
-                              ? "border-primary bg-primary text-primary-foreground font-semibold"
-                              : "border-border text-muted-foreground hover:bg-muted"
-                          )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setIsUploadDialogOpen(true)}
+                          className="h-6 px-2 text-[11px] gap-1"
                         >
-                          USD ($)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newCur = "UZS";
-                            const p = doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * 12850);
-                            setDoc((prev) => ({
-                              ...prev,
-                              currency: newCur,
-                              unitPrice: p,
-                              unitPriceUzs: p,
-                              unitPriceUsd: p > 0 ? Number((p / 12850).toFixed(4)) : 0,
-                            }));
-                            setTabUnsaved(tab.id, true);
-                          }}
-                          className={cn(
-                            "px-1.5 py-0.5 text-[10px] font-mono rounded border transition-colors cursor-pointer",
-                            doc.currency === "UZS"
-                              ? "border-primary bg-primary text-primary-foreground font-semibold"
-                              : "border-border text-muted-foreground hover:bg-muted"
-                          )}
-                        >
-                          UZS (so&apos;m)
-                        </button>
+                          <Camera className="size-3 text-muted-foreground" />
+                          <span>{doc.imageUrl ? "Almashtirish" : "Yuklash"}</span>
+                        </Button>
+                        {doc.imageUrl && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleResetImage}
+                            className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-destructive"
+                            title="Rasmni o'chirish"
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        )}
                       </div>
                     </div>
 
-                    <MoneyInput
-                      thousandSeparator=" "
-                      decimalScale={doc.currency === "UZS" ? 0 : 3}
-                      value={doc.currency === "UZS" ? (doc.unitPriceUzs || doc.unitPrice || "") : (doc.unitPriceUsd || doc.unitPrice || "")}
-                      onValueChange={(values) => {
-                        const val = values.floatValue ?? 0;
-                        if (doc.currency === "UZS") {
-                          setDoc((prev) => ({
-                            ...prev,
-                            unitPrice: val,
-                            unitPriceUzs: val,
-                            unitPriceUsd: val > 0 ? Number((val / 12850).toFixed(4)) : 0,
-                          }));
-                        } else {
-                          setDoc((prev) => ({
-                            ...prev,
-                            unitPrice: val,
-                            unitPriceUsd: val,
-                            unitPriceUzs: Math.round(val * 12850),
-                          }));
-                        }
-                        setTabUnsaved(tab.id, true);
-                      }}
-                      placeholder={doc.currency === "UZS" ? "0" : "0.00"}
-                      className="h-7 text-xs font-mono"
-                    />
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-muted-foreground">
+                        Material To&apos;liq Nomi *
+                      </Label>
+                      <Input
+                        value={doc.name}
+                        onChange={(e) => handleFieldChange("name", e.target.value)}
+                        placeholder="Masalan: Galerie Art Silk 150g/m² (700×1000)"
+                        className="h-8 text-xs font-semibold bg-background"
+                      />
+                    </div>
+                  </div>
+                </div>
 
-                    <div className="text-[10px] font-mono text-muted-foreground">
-                      Ekvivalent:{" "}
-                      <span className="font-semibold text-foreground">
-                        {doc.currency === "UZS"
-                          ? `$${(doc.unitPriceUsd || 0).toFixed(3)}`
-                          : `${(doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * 12850)).toLocaleString()} UZS`}
+                {/* ─── 2. Texnik Parametrlar (Technical Specs) ────────────────── */}
+                <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground border-b border-border/50 pb-2">
+                    <FileText className="size-3.5 text-primary" />
+                    <span>Texnik parametrlar</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {/* Artikul */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Artikul (SKU) *</Label>
+                      <Input
+                        value={doc.sku}
+                        onChange={(e) => handleFieldChange("sku", e.target.value)}
+                        placeholder="MAT-0001"
+                        className="h-7 text-xs font-mono font-semibold"
+                      />
+                    </div>
+
+                    {/* Toifa */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Asosiy Toifa *</Label>
+                      <ComboboxSelect
+                        items={STOCK_CATEGORY_OPTIONS}
+                        value={doc.category}
+                        onValueChange={(val) => handleFieldChange("category", val)}
+                        placeholder="Toifani tanlang..."
+                        className="w-full h-7 text-xs bg-background"
+                      />
+                    </div>
+
+                    {/* O'lchov Birligi */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">O&apos;lchov Birligi *</Label>
+                      <ComboboxSelect
+                        items={STOCK_UNIT_OPTIONS}
+                        value={doc.unit}
+                        onValueChange={(val) => handleFieldChange("unit", val)}
+                        placeholder="Birlikni tanlang..."
+                        className="w-full h-7 text-xs bg-background"
+                      />
+                    </div>
+
+                    {/* Format */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Format / O&apos;lcham (mm)</Label>
+                      <Input
+                        value={doc.sheetFormat || ""}
+                        onChange={(e) => handleFieldChange("sheetFormat", e.target.value)}
+                        placeholder="700×1000"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+
+                    {/* Zichlik */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Zichlik (g/m²)</Label>
+                      <Input
+                        type="number"
+                        value={doc.grammage !== undefined ? doc.grammage : ""}
+                        onChange={(e) => handleFieldChange("grammage", e.target.value ? Number(e.target.value) : undefined)}
+                        placeholder="150"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+
+                    {/* Tola Yo'nalishi */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Tola Yo&apos;nalishi</Label>
+                      <ComboboxSelect
+                        items={GRAIN_DIRECTION_OPTIONS}
+                        value={doc.grainDirection || "Long Grain"}
+                        onValueChange={(val) => handleFieldChange("grainDirection", val)}
+                        placeholder="Yo'nalishni tanlang..."
+                        className="w-full h-7 text-xs bg-background"
+                      />
+                    </div>
+
+                    {/* Boshlang'ich Qoldiq */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Boshlang&apos;ich Qoldiq</Label>
+                      <Input
+                        type="number"
+                        value={doc.stockLevel || ""}
+                        onChange={(e) => handleFieldChange("stockLevel", Number(e.target.value) || 0)}
+                        placeholder="0"
+                        className="h-7 text-xs font-mono font-bold text-foreground"
+                      />
+                    </div>
+
+                    {/* Minimal Zaxira */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Minimal Chegara (Reorder)</Label>
+                      <Input
+                        type="number"
+                        value={doc.reorder || ""}
+                        onChange={(e) => handleFieldChange("reorder", Number(e.target.value) || 0)}
+                        placeholder="0"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+
+                    {/* Birlik narxi */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-[11px] text-muted-foreground font-semibold">Birlik Narxi</Label>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newCur = "USD";
+                              const p = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / 12850).toFixed(4)) : 0);
+                              setDoc((prev) => ({
+                                ...prev,
+                                currency: newCur,
+                                unitPrice: p,
+                                unitPriceUsd: p,
+                                unitPriceUzs: Math.round(p * 12850),
+                              }));
+                              setTabUnsaved(tab.id, true);
+                            }}
+                            className={cn(
+                              "px-1.5 py-0.2 text-[9px] font-mono rounded border transition-colors cursor-pointer",
+                              doc.currency !== "UZS"
+                                ? "border-primary bg-primary text-primary-foreground font-bold"
+                                : "border-border text-muted-foreground hover:bg-muted"
+                            )}
+                          >
+                            USD ($)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newCur = "UZS";
+                              const p = doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * 12850);
+                              setDoc((prev) => ({
+                                ...prev,
+                                currency: newCur,
+                                unitPrice: p,
+                                unitPriceUzs: p,
+                                unitPriceUsd: p > 0 ? Number((p / 12850).toFixed(4)) : 0,
+                              }));
+                              setTabUnsaved(tab.id, true);
+                            }}
+                            className={cn(
+                              "px-1.5 py-0.2 text-[9px] font-mono rounded border transition-colors cursor-pointer",
+                              doc.currency === "UZS"
+                                ? "border-primary bg-primary text-primary-foreground font-bold"
+                                : "border-border text-muted-foreground hover:bg-muted"
+                            )}
+                          >
+                            UZS
+                          </button>
+                        </div>
+                      </div>
+
+                      <MoneyInput
+                        thousandSeparator=" "
+                        decimalScale={doc.currency === "UZS" ? 0 : 3}
+                        value={doc.currency === "UZS" ? (doc.unitPriceUzs || doc.unitPrice || "") : (doc.unitPriceUsd || doc.unitPrice || "")}
+                        onValueChange={(values) => {
+                          const val = values.floatValue ?? 0;
+                          if (doc.currency === "UZS") {
+                            setDoc((prev) => ({
+                              ...prev,
+                              unitPrice: val,
+                              unitPriceUzs: val,
+                              unitPriceUsd: val > 0 ? Number((val / 12850).toFixed(4)) : 0,
+                            }));
+                          } else {
+                            setDoc((prev) => ({
+                              ...prev,
+                              unitPrice: val,
+                              unitPriceUsd: val,
+                              unitPriceUzs: Math.round(val * 12850),
+                            }));
+                          }
+                          setTabUnsaved(tab.id, true);
+                        }}
+                        placeholder={doc.currency === "UZS" ? "0" : "0.00"}
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ─── 3. Manzilli Saqlash — WMS (To'liq kenglikdagi kaskadli panel) ─ */}
+                <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
+                  <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Warehouse className="size-3.5 text-primary" />
+                      <span className="text-xs font-semibold text-foreground">
+                        Ombordagi joylashuv (WMS)
                       </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {doc.locationShelf && (
+                        <span className="font-mono text-[11px] font-bold text-primary px-2 py-0.5 rounded bg-primary/10 border border-primary/20">
+                          {doc.location || "Ombor"} &middot; {doc.locationShelf}
+                        </span>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleOpenWmsMap}
+                        disabled={!activeWarehouseId}
+                        className="h-7 text-xs px-2.5 gap-1.5"
+                        title="Ombor WMS xaritasida ochish"
+                      >
+                        <MapPin className="size-3.5 text-primary" />
+                        <span>Xaritada ko&apos;rish</span>
+                      </Button>
                     </div>
                   </div>
 
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Saqlash Joyi (Ombor) *</Label>
-                    <WarehouseSelect
-                      value={doc.location || ""}
-                      onValueChange={(val) => handleFieldChange("location", val.warehouseName)}
-                      placeholder="Omborni tanlang..."
-                      className="h-7 text-xs"
-                    />
+                  {/* 3 ta Kaskadli Bosqich — To'liq kenglikda */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* 1. Ombor */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold flex items-center justify-between">
+                        <span>1. Ombor *</span>
+                        {isWmsLoading && <span className="text-[9px] text-primary animate-pulse font-normal">Yuklanmoqda...</span>}
+                      </Label>
+                      <WarehouseSelect
+                        value={doc.location || ""}
+                        warehouseId={doc.warehouseId || activeWarehouseId}
+                        onValueChange={(val) => {
+                          handleFieldChange("location", val.warehouseName);
+                          handleFieldChange("warehouseId", val.warehouseId);
+                          setSelectedRackId("");
+                          handleFieldChange("locationShelf", "");
+                        }}
+                        placeholder="Omborni tanlang..."
+                        className="h-8 text-xs font-medium"
+                      />
+                    </div>
+
+                    {/* 2. Stelaj */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-[11px] text-muted-foreground font-semibold">
+                          2. Stelaj (Qator)
+                        </Label>
+                        {selectedRackId && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedRackId("")}
+                            className="text-[10px] text-muted-foreground hover:text-foreground underline decoration-dotted"
+                            title="Barcha stelajlarni ko'rish"
+                          >
+                            Barchasi
+                          </button>
+                        )}
+                      </div>
+                      <SmartCombobox
+                        value={selectedRackId}
+                        onChange={(val) => {
+                          setSelectedRackId(val);
+                          if (doc.locationShelf && wmsData?.bins) {
+                            const currentBin = wmsData.bins.find((b: any) => b.code === doc.locationShelf);
+                            if (currentBin && currentBin.rackId !== val) {
+                              handleFieldChange("locationShelf", "");
+                            }
+                          }
+                        }}
+                        options={rackOptions}
+                        placeholder={!activeWarehouseId ? "Avval omborni tanlang" : "Stelajni tanlang..."}
+                        searchPlaceholder="Stelaj kodi yoki nomi..."
+                        disabled={!activeWarehouseId}
+                        allowCustom={false}
+                        className="h-8 text-xs font-medium"
+                      />
+                    </div>
+
+                    {/* 3. Katak */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-[11px] text-muted-foreground font-semibold">
+                          3. Katak (Yacheyka)
+                        </Label>
+                        {doc.locationShelf && (
+                          <button
+                            type="button"
+                            onClick={() => handleFieldChange("locationShelf", "")}
+                            className="text-[10px] text-destructive hover:underline"
+                            title="Katak biriktirishni bekor qilish"
+                          >
+                            Tozalash
+                          </button>
+                        )}
+                      </div>
+                      <SmartCombobox
+                        value={doc.locationShelf || ""}
+                        onChange={(val) => {
+                          handleFieldChange("locationShelf", val);
+                          if (val && wmsData?.bins) {
+                            const bin = wmsData.bins.find((b: any) => b.code === val);
+                            if (bin && bin.rackId) {
+                              setSelectedRackId(bin.rackId);
+                            }
+                          }
+                        }}
+                        options={binOptions}
+                        placeholder={
+                          !activeWarehouseId
+                            ? "Avval omborni tanlang"
+                            : !selectedRackId
+                            ? "Katakni tanlang..."
+                            : "Katak kodi (masalan: A-01-2-3)..."
+                        }
+                        searchPlaceholder="Katak kodi bo'yicha qidiring..."
+                        disabled={!activeWarehouseId}
+                        allowCustom={true}
+                        className="h-8 text-xs font-mono font-medium"
+                      />
+                    </div>
                   </div>
 
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Yetkazib Beruvchi (Supplier)</Label>
-                    <Input
-                      value={doc.supplier || ""}
-                      onChange={(e) => handleFieldChange("supplier", e.target.value)}
-                      placeholder="Masalan: Antalis Central Asia"
-                      className="h-7 text-xs"
-                    />
+                  {/* Telemetriya qatori */}
+                  <div className="bg-muted/40 rounded px-3 py-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+                    {selectedBinInfo ? (
+                      <div className="flex items-center gap-3">
+                        <span>Stelaj: <strong className="text-foreground">{selectedBinInfo.rackName}</strong></span>
+                        <span>&middot;</span>
+                        <span>Holati: <strong className={selectedBinInfo.statusColor}>{selectedBinInfo.statusLabel}</strong></span>
+                        <span>&middot;</span>
+                        <span>Bandlik: <strong className="font-mono text-foreground">{selectedBinInfo.occupancyPct}%</strong></span>
+                        <span>&middot;</span>
+                        <span>Maksimal: <strong className="font-mono text-foreground">{selectedBinInfo.maxWeight} kg</strong></span>
+                      </div>
+                    ) : (
+                      <span>Ombor va stelaj tanlanganda tegishli kataklar avtomatik filtrlanadi.</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* ─── 4. Ta'minot va Partiya ─────────────────────────────────── */}
+                <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground border-b border-border/50 pb-2">
+                    <Building2 className="size-3.5 text-primary" />
+                    <span>Ta&apos;minot va Partiya</span>
                   </div>
 
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Tola Yo&apos;nalishi (Grain Direction)</Label>
-                    <ComboboxSelect
-                      items={GRAIN_DIRECTION_OPTIONS}
-                      value={doc.grainDirection || "Long Grain"}
-                      onValueChange={(val) => handleFieldChange("grainDirection", val)}
-                      placeholder="Yo'nalishni tanlang..."
-                      className="w-full h-8 text-xs bg-background"
-                    />
-                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {/* Yetkazib beruvchi */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Yetkazib Beruvchi</Label>
+                      <SupplierSelect
+                        value={doc.supplier || ""}
+                        onValueChange={(val) => handleFieldChange("supplier", val)}
+                        placeholder="Yetkazib beruvchini tanlang..."
+                        className="h-7 text-xs"
+                      />
+                    </div>
 
-                  <div className="p-3 rounded border border-border bg-card space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground font-semibold">Partiya / Batch No</Label>
-                    <Input
-                      value={doc.batchNo || ""}
-                      onChange={(e) => handleFieldChange("batchNo", e.target.value)}
-                      placeholder="B-2026-001"
-                      className="h-7 text-xs font-mono"
-                    />
+                    {/* Partiya */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Partiya / Batch</Label>
+                      <Input
+                        value={doc.batchNo || ""}
+                        onChange={(e) => handleFieldChange("batchNo", e.target.value)}
+                        placeholder="B-2026-001"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+
+                    {/* Oxirgi Kirim Sanasi */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-semibold">Oxirgi Kirim Sanasi</Label>
+                      <Input
+                        type="date"
+                        value={doc.lastReceived ? doc.lastReceived.split("T")[0] : ""}
+                        onChange={(e) => handleFieldChange("lastReceived", e.target.value)}
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1241,6 +1727,34 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       </Tabs>
 
       <ReturnOffcutDialog open={isOffcutDialogOpen} onOpenChange={setIsOffcutDialogOpen} />
+      <MaterialImageModal
+        isOpen={isImageModalOpen && Boolean(doc.imageUrl)}
+        onClose={() => setIsImageModalOpen(false)}
+        data={
+          doc.imageUrl
+            ? {
+                imageUrl: doc.imageUrl,
+                title: doc.name || doc.sku,
+                sku: doc.sku,
+                category: doc.category,
+                spec: doc.sheetFormat ? `${doc.sheetFormat} mm` : doc.cutDimensions,
+                stock: doc.available,
+                unit: doc.unit,
+                location: doc.location,
+                supplier: doc.supplier,
+                status: doc.status,
+              }
+            : null
+        }
+      />
+      <MaterialImageUploadDialog
+        isOpen={isUploadDialogOpen}
+        onClose={() => setIsUploadDialogOpen(false)}
+        materialName={doc.name}
+        materialSku={doc.sku}
+        currentImageUrl={doc.imageUrl}
+        onSave={handleSaveImage}
+      />
     </div>
   );
 }

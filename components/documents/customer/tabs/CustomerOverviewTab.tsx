@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
+import { cn } from "cn";
 import {
   Building2,
   UserCheck,
@@ -30,6 +31,8 @@ import {
   FileSignature,
   ScrollText,
   Plus,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -165,6 +168,8 @@ export function CustomerOverviewTab({
     isCrmIndustriesLoading,
     loadCrmIndustries,
     addCrmIndustryAsync,
+    addNotification,
+    upsertCustomer,
   } = useWorkspaceStore();
 
   React.useEffect(() => {
@@ -187,6 +192,94 @@ export function CustomerOverviewTab({
   const [isNewIndustryDialogOpen, setIsNewIndustryDialogOpen] = useState(false);
   const [newIndustryInput, setNewIndustryInput] = useState("");
   const [isSavingIndustry, setIsSavingIndustry] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+
+  const handleLogoUpload = async (file: File) => {
+    if (!file) return;
+    const allowed = [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+      "image/svg+xml",
+      "image/gif",
+    ];
+    if (!allowed.includes(file.type)) {
+      addNotification({
+        title: "Xatolik",
+        description: "Faqat PNG, JPG, WebP yoki SVG rasmlari qabul qilinadi.",
+        severity: "error",
+      });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      addNotification({
+        title: "Xatolik",
+        description: "Logotip hajmi 5MB dan oshmasligi kerak.",
+        severity: "error",
+      });
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("clientId", form.dbId || form.id);
+
+      const res = await fetch("/api/v1/crm/clients/logo", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Logotipni yuklab bo'lmadi");
+      }
+
+      onChange("logoUrl", data.url);
+      upsertCustomer({ ...form, logoUrl: data.url });
+      addNotification({
+        title: "Logotip yuklandi",
+        description: "Mijoz logotipi muvaffaqiyatli saqlandi.",
+        severity: "success",
+      });
+    } catch (err: any) {
+      addNotification({
+        title: "Yuklashda xatolik",
+        description: err.message || "Logotipni serverga yuklashda xatolik yuz berdi.",
+        severity: "error",
+      });
+    } finally {
+      setIsUploadingLogo(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDeleteLogo = async () => {
+    const currentLogo = form.logoUrl;
+    setIsUploadingLogo(true);
+    try {
+      onChange("logoUrl", "");
+      upsertCustomer({ ...form, logoUrl: "" });
+      if (currentLogo) {
+        await fetch(
+          `/api/v1/crm/clients/logo?clientId=${encodeURIComponent(form.dbId || form.id)}&logoUrl=${encodeURIComponent(currentLogo)}`,
+          { method: "DELETE" }
+        );
+      }
+      addNotification({
+        title: "Logotip o'chirildi",
+        severity: "info",
+      });
+    } catch (err: any) {
+      console.warn("Failed to delete logo on server:", err);
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
 
   const handleAddNewIndustry = async (newVal: string) => {
     const trimmed = newVal.trim();
@@ -505,6 +598,105 @@ export function CustomerOverviewTab({
             <span className="font-semibold text-xs text-foreground">
               Yuridik va soliq
             </span>
+          </div>
+
+          {/* Mijoz logotipi (Logo upload) */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingLogo(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setIsDraggingLogo(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDraggingLogo(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) handleLogoUpload(file);
+            }}
+            className={cn(
+              "flex items-center gap-3 p-2.5 rounded-md border bg-muted/30 transition-colors",
+              isDraggingLogo ? "border-primary bg-primary/5" : "border-border"
+            )}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleLogoUpload(file);
+              }}
+            />
+
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="relative w-14 h-14 rounded-md border border-border bg-background flex items-center justify-center shrink-0 cursor-pointer overflow-hidden group hover:border-primary/60 transition-colors"
+              title="Logotip yuklash yoki almashtirish"
+            >
+              {form.logoUrl ? (
+                <img
+                  src={form.logoUrl}
+                  alt={form.name || "Logotip"}
+                  className="w-full h-full object-contain p-1"
+                />
+              ) : (
+                <Building2 className="w-6 h-6 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
+              )}
+              {isUploadingLogo && (
+                <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-foreground">
+                  Mijoz logotipi
+                </span>
+                {form.logoUrl && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] h-4 px-1.5 text-emerald-600 dark:text-emerald-400 font-normal"
+                  >
+                    Yuklangan
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                PNG, JPG, WebP yoki SVG (maks. 5MB)
+              </p>
+              <div className="flex items-center gap-1.5 pt-0.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isUploadingLogo}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-6 px-2 text-[11px] gap-1 cursor-pointer"
+                >
+                  <Upload className="w-3 h-3 text-primary" />
+                  <span>{form.logoUrl ? "O'zgartirish" : "Logotip yuklash"}</span>
+                </Button>
+                {form.logoUrl && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isUploadingLogo}
+                    onClick={handleDeleteLogo}
+                    className="h-6 px-1.5 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>O&apos;chirish</span>
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="space-y-1.5">

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useMemo } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
   DataEditor,
   GridCell,
@@ -11,6 +11,7 @@ import {
   CompactSelection,
   GridColumnIcon,
   Theme,
+  GridMouseEventArgs,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
@@ -208,7 +209,34 @@ export function ProductionGrid({ type }: ProductionGridProps) {
   const [editTitle, setEditTitle] = useState("");
   const [editParam1, setEditParam1] = useState("");
   const [editParam2, setEditParam2] = useState("");
+  const [hoveredPreview, setHoveredPreview] = useState<{
+    url: string;
+    x: number;
+    y: number;
+    title?: string;
+  } | null>(null);
 
+  const mouseCoordsRef = useRef({ x: 0, y: 0 });
+
+  const getCursorCardPosition = useCallback((clientX: number, clientY: number, cardWidth = 380, cardHeight = 380) => {
+    const margin = 16;
+    const vpW = typeof window !== "undefined" ? window.innerWidth : 1920;
+    const vpH = typeof window !== "undefined" ? window.innerHeight : 1080;
+
+    let x = clientX + margin;
+    let y = clientY + margin;
+
+    if (x + cardWidth > vpW - margin) {
+      x = clientX - cardWidth - margin;
+    }
+    if (y + cardHeight > vpH - margin) {
+      y = clientY - cardHeight - margin;
+    }
+    if (x < margin) x = margin;
+    if (y < margin) y = margin;
+
+    return { x, y };
+  }, []);
   const mappedMachines = useMemo(() => {
     const list = machines || [];
     return list.map((m: any) => {
@@ -755,6 +783,47 @@ export function ProductionGrid({ type }: ProductionGridProps) {
       }
     },
     [filteredRows, type, openTab, planningData, productionQueue, addNotification, masterSpecifications]
+  );
+
+  const onItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      if (args.kind === "cell") {
+        const [col, row] = args.location;
+        const column = columns[col];
+        if (column?.id === "image" || column?.id === "preview") {
+          const rowData = filteredRows[row];
+          const imageUrl =
+            (rowData as any)?.imageUrl ||
+            (Array.isArray((rowData as any)?.preview)
+              ? (rowData as any).preview[0]
+              : (rowData as any)?.preview);
+          if (imageUrl) {
+            let clientX = mouseCoordsRef.current.x;
+            let clientY = mouseCoordsRef.current.y;
+            if (clientX === 0 && clientY === 0 && typeof document !== "undefined") {
+              const container = document.getElementById("production-grid-root");
+              const rect = container?.getBoundingClientRect();
+              if (rect) {
+                clientX = rect.left + ((args as any).localEventX ?? 20);
+                clientY = rect.top + ((args as any).localEventY ?? 20);
+              }
+            }
+
+            const { x, y } = getCursorCardPosition(clientX, clientY);
+
+            setHoveredPreview({
+              url: imageUrl,
+              x,
+              y,
+              title: (rowData as any)?.name || (rowData as any)?.code || "",
+            });
+            return;
+          }
+        }
+      }
+      setHoveredPreview(null);
+    },
+    [columns, filteredRows, getCursorCardPosition]
   );
 
   const handleSaveToolModal = async () => {
@@ -1407,7 +1476,18 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                 }}
               />
             ) : (
-              <div className="flex-1 w-full h-full relative" id="production-grid-root">
+              <div
+                className="flex-1 w-full h-full relative"
+                id="production-grid-root"
+                onMouseMove={(e) => {
+                  mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
+                  if (hoveredPreview) {
+                    const { x, y } = getCursorCardPosition(e.clientX, e.clientY);
+                    setHoveredPreview((prev) => (prev ? { ...prev, x, y } : null));
+                  }
+                }}
+                onMouseLeave={() => setHoveredPreview(null)}
+              >
                 <DataEditor
                   getCellContent={getContent}
                   columns={columns}
@@ -1421,11 +1501,32 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                   gridSelection={selection}
                   onGridSelectionChange={setSelection}
                   onCellActivated={(cell) => handleOpenRow(cell[1])}
+                  onItemHovered={onItemHovered}
                   getRowThemeOverride={getRowThemeOverride}
                   headerHeight={28}
                   rowHeight={32}
                   theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
                 />
+
+                {/* Hover Image Preview (1:1 with Work Orders DataGrid) */}
+                {hoveredPreview && (
+                  <div
+                    style={{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }}
+                    className="fixed z-50 pointer-events-none rounded-lg bg-popover/95 backdrop-blur-xs border border-border shadow-2xl p-1 animate-in fade-in-0 zoom-in-95 duration-75 max-w-[430px] max-h-[430px] flex flex-col items-center justify-center overflow-hidden"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={hoveredPreview.url}
+                      alt={hoveredPreview.title || "Uskuna fotosurati"}
+                      className="max-w-[415px] max-h-[400px] w-auto h-auto object-contain rounded select-none"
+                    />
+                    {hoveredPreview.title && (
+                      <span className="text-[11px] font-medium text-foreground py-0.5 truncate max-w-full">
+                        {hoveredPreview.title}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

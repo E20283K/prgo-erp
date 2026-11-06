@@ -75,6 +75,7 @@ export function DocumentHeader({
   status,
   priority,
   parentDocRef,
+  avatar,
   actions,
 }: {
   icon: LucideIcon;
@@ -83,6 +84,7 @@ export function DocumentHeader({
   date?: string;
   status?: string;
   priority?: string;
+  avatar?: React.ReactNode;
   parentDocRef?: {
     docNo: string;
     label?: string;
@@ -93,7 +95,11 @@ export function DocumentHeader({
   return (
     <div className="h-9 shrink-0 px-3 flex items-center justify-between gap-2 border-b border-border bg-muted/60">
       <div className="flex items-center gap-2 min-w-0">
-        <Icon className="w-4 h-4 text-primary shrink-0" />
+        {avatar ? (
+          <div className="shrink-0">{avatar}</div>
+        ) : Icon ? (
+          <Icon className="w-4 h-4 text-primary shrink-0" />
+        ) : null}
         <span className="font-semibold text-xs text-foreground truncate" title={title}>
           {title}
         </span>

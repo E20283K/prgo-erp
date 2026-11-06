@@ -193,10 +193,22 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Boxes,
         defaultOpen: true,
         items: [
+          { id: "wms-map", label: "Ombor boshqaruvi (WMS)", icon: MapPin },
           { id: "stock-balance", label: "Stock Balance", icon: Layers },
           { id: "requirements", label: "Requirements", icon: AlertTriangle },
           { id: "finished-goods", label: "Finished Goods", icon: PackageCheck },
           { id: "movements", label: "Movements", icon: ArrowLeftRight },
+          { id: "inventory", label: "Stocktaking", icon: ClipboardList },
+        ],
+      },
+      {
+        id: "warehouse-ops",
+        label: "Operations",
+        icon: Cpu,
+        defaultOpen: true,
+        items: [
+          { id: "production-issue", label: "Production Issue", icon: PlayCircle },
+          { id: "write-offs", label: "Write-offs", icon: AlertOctagon },
         ],
       },
       {

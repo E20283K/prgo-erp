@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { MachineRecord, MachineCategory } from "../types";
 import { getDefaultCounterUnit, getDefaultDepartmentForCategory } from "../cleanBlankMachine";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,16 +22,157 @@ import {
   Zap,
   DollarSign,
   Building,
+  Building2,
+  Users,
   Activity,
   Sliders,
+  Camera,
+  ExternalLink,
+  Image as ImageIcon,
 } from "lucide-react";
+import { useWorkspaceStore } from "@/store/workspaceStore";
+import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
+
+const CATEGORY_OPTIONS: { value: MachineCategory; label: string }[] = [
+  { value: "offset", label: "Ofset chop etish stanogi" },
+  { value: "flexo", label: "Ruloli flekso stanok" },
+  { value: "die-cutting", label: "Shtampli qirqish avtoplatinasi" },
+  { value: "guillotine", label: "Gilotin qog'oz kesish stanogi" },
+  { value: "lamination", label: "Laminatsiya va laklash agregati" },
+  { value: "mounting", label: "Kashirovka qilish stanogi" },
+  { value: "casing-in", label: "Muqovalash & tikish liniyasi" },
+  { value: "jacquard", label: "To'qimachilik / Jakkard stanogi" },
+];
 
 interface MachineOverviewTabProps {
   machine: MachineRecord;
   onUpdate: (updated: Partial<MachineRecord>) => void;
+  onUploadImage?: () => void;
+  onOpenPreviewModal?: () => void;
 }
 
-export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProps) {
+export function MachineOverviewTab({
+  machine,
+  onUpdate,
+  onUploadImage,
+  onOpenPreviewModal,
+}: MachineOverviewTabProps) {
+  const { companiesList, plants, departmentsList, employees } = useWorkspaceStore();
+
+  // Deduce or determine selected companyId
+  const effectiveCompanyId = useMemo(() => {
+    if (machine.companyId) return machine.companyId;
+    if (machine.branchId) {
+      const foundPlant = plants.find((p) => p.id === machine.branchId);
+      if (foundPlant?.companyId) return foundPlant.companyId;
+    }
+    return companiesList[0]?.id || "";
+  }, [machine.companyId, machine.branchId, plants, companiesList]);
+
+  // Plants filtered by company
+  const availablePlants = useMemo(() => {
+    if (!effectiveCompanyId) return plants;
+    const filtered = plants.filter((p) => p.companyId === effectiveCompanyId);
+    return filtered.length > 0 ? filtered : plants;
+  }, [plants, effectiveCompanyId]);
+
+  // Departments filtered by selected branch
+  const availableDepartments = useMemo(() => {
+    if (!machine.branchId) return departmentsList;
+    const pId = machine.branchId.toLowerCase();
+    const plantObj = plants.find((p) => p.id === machine.branchId);
+    const pName = (plantObj?.name || "").toLowerCase();
+
+    const filtered = departmentsList.filter((d) => {
+      if (d.branchId && (d.branchId === machine.branchId || d.branchId.toLowerCase() === pId)) {
+        return true;
+      }
+      if (pName && d.plant && d.plant.toLowerCase().includes(pName)) {
+        return true;
+      }
+      return false;
+    });
+
+    return filtered.length > 0 ? filtered : departmentsList;
+  }, [departmentsList, machine.branchId, plants]);
+
+  // Department Combobox items
+  const departmentOptions: ComboboxItem[] = useMemo(() => {
+    return availableDepartments.map((d) => ({
+      value: d.name,
+      label: d.name,
+      code: d.code,
+      description: d.plant ? `Filial: ${d.plant}` : undefined,
+    }));
+  }, [availableDepartments]);
+
+  // Company options for SmartCombobox
+  const companyOptions: ComboboxItem[] = useMemo(() => {
+    return companiesList.map((c) => ({
+      value: c.id,
+      label: c.name,
+      code: c.code,
+    }));
+  }, [companiesList]);
+
+  // Plant options for SmartCombobox
+  const plantOptions: ComboboxItem[] = useMemo(() => {
+    return availablePlants.map((p) => ({
+      value: p.id,
+      label: p.name,
+      code: p.code,
+      description: p.shortName || undefined,
+    }));
+  }, [availablePlants]);
+
+  // Employee Combobox items
+  const employeeOptions: ComboboxItem[] = useMemo(() => {
+    return employees.map((emp) => ({
+      value: emp.fullName,
+      label: emp.fullName,
+      code: emp.badgeNo,
+      description: [emp.positionTitle || emp.position, emp.department].filter(Boolean).join(" • "),
+      badge: emp.badgeNo ? `#${emp.badgeNo}` : undefined,
+    }));
+  }, [employees]);
+
+  const handleCompanyChange = (newCompId: string) => {
+    const matched = companiesList.find(
+      (c) => c.id === newCompId || c.code.toLowerCase() === newCompId.toLowerCase() || c.name.toLowerCase() === newCompId.toLowerCase()
+    );
+    const resolvedCompId = matched ? matched.id : newCompId;
+    const compPlants = plants.filter((p) => p.companyId === resolvedCompId);
+    const keepCurrent = compPlants.some((p) => p.id === machine.branchId);
+    const defaultPlant = keepCurrent ? compPlants.find((p) => p.id === machine.branchId) : compPlants[0];
+
+    onUpdate({
+      companyId: resolvedCompId,
+      branchId: defaultPlant?.id || undefined,
+      location: defaultPlant?.name || machine.location,
+    });
+  };
+
+  const handleBranchChange = (newBranchId: string) => {
+    const matched = plants.find(
+      (p) => p.id === newBranchId || p.code.toLowerCase() === newBranchId.toLowerCase() || p.name.toLowerCase() === newBranchId.toLowerCase()
+    );
+    const resolvedBranchId = matched ? matched.id : newBranchId;
+    onUpdate({
+      branchId: resolvedBranchId,
+      companyId: matched?.companyId || machine.companyId,
+      location: matched?.name || machine.location,
+    });
+  };
+
+  const handleDepartmentChange = (val: string) => {
+    const matched = departmentsList.find(
+      (d) => d.name.toLowerCase() === val.toLowerCase() || d.id === val
+    );
+    onUpdate({
+      department: matched ? matched.name : val,
+      departmentId: matched ? matched.id : undefined,
+    });
+  };
   const getSpeedLabel = () => {
     switch (machine.category) {
       case "flexo":
@@ -121,12 +263,11 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
   };
 
   const handleCategoryChange = (newCat: MachineCategory) => {
-    const nextDept = getDefaultDepartmentForCategory(newCat);
     const nextUnit = getDefaultCounterUnit(newCat);
     onUpdate({
       category: newCat,
-      department: nextDept,
       counterUnit: nextUnit,
+      ...(!machine.department ? { department: getDefaultDepartmentForCategory(newCat) } : {}),
     });
   };
 
@@ -229,6 +370,78 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
           </div>
 
           <div className="p-3.5 space-y-3 text-xs">
+                        {/* Sleek Equipment Photo & Quick Actions Bar */}
+            <div className="flex items-center gap-3 p-2 rounded-md border border-border bg-muted/20">
+              <div
+                className="size-12 rounded border border-border bg-background overflow-hidden relative group cursor-pointer shrink-0 flex items-center justify-center shadow-2xs hover:border-primary/50 transition-colors"
+                onClick={() => (machine.imageUrl ? onOpenPreviewModal?.() : onUploadImage?.())}
+                title={machine.imageUrl ? "Rasmni to'liq ko'rish" : "Uskuna rasmini yuklash"}
+              >
+                {machine.imageUrl ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={machine.imageUrl}
+                      alt={machine.name || "Uskuna"}
+                      className="size-full object-contain p-0.5 select-none"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                      <Camera className="size-3.5" />
+                    </div>
+                  </>
+                ) : (
+                  <Camera className="size-4 text-muted-foreground/60" />
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground truncate">
+                    {machine.name || "Uskuna fotosurati"}
+                  </span>
+                  <Badge variant="outline" className="text-[10px] font-mono py-0 h-4">
+                    {machine.imageUrl ? "Rasm yuklangan" : "Rasmsiz"}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={onUploadImage}
+                    className="h-6 px-2 text-[11px] gap-1"
+                  >
+                    <Camera className="size-3 text-muted-foreground" />
+                    <span>{machine.imageUrl ? "Almashtirish" : "Rasm yuklash"}</span>
+                  </Button>
+                  {machine.imageUrl && (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={onOpenPreviewModal}
+                        className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
+                      >
+                        <ExternalLink className="size-3" />
+                        <span>Ko&apos;rish</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onUpdate({ imageUrl: "" })}
+                        className="h-6 px-2 text-[11px] text-destructive hover:bg-destructive/10"
+                      >
+                        <span>O&apos;chirish</span>
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Asosiy Identifikatsiya */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-[11px] font-medium text-muted-foreground">
@@ -266,108 +479,19 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
                     if (val) handleCategoryChange(val);
                   }}
                 >
-                  <SelectTrigger className="h-8 text-xs font-semibold">
-                    <SelectValue />
+                  <SelectTrigger className="h-8 text-xs font-semibold w-full">
+                    <SelectValue placeholder="Kategoriyani tanlang">
+                      {CATEGORY_OPTIONS.find((c) => c.value === machine.category)?.label || machine.category}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="offset">Ofset chop etish (Offset)</SelectItem>
-                    <SelectItem value="flexo">Ruloli flekso chop etish (Flexo)</SelectItem>
-                    <SelectItem value="die-cutting">Shtampli qirqish (Die-cutting)</SelectItem>
-                    <SelectItem value="guillotine">Gilotinli qog'oz kesish (Guillotine)</SelectItem>
-                    <SelectItem value="lamination">Laminatsiya va laklash (Lamination)</SelectItem>
-                    <SelectItem value="mounting">Kashirovka qilish (Mounting)</SelectItem>
-                    <SelectItem value="casing-in">Muqovalash & tikish (Casing-in)</SelectItem>
-                    <SelectItem value="jacquard">To'qimachilik / Jakkard (Jacquard)</SelectItem>
+                    {CATEGORY_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                        {opt.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Bo'lim / Sex
-                </Label>
-                <Select
-                  value={machine.department}
-                  onValueChange={(val: any) => onUpdate({ department: val })}
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Offset">Offset (Ofset Sexi)</SelectItem>
-                    <SelectItem value="Flexo">Flexo (Flekso Sexi)</SelectItem>
-                    <SelectItem value="Post-press">Post-press (Kesim & Pardozlash)</SelectItem>
-                    <SelectItem value="Packaging">Packaging (Qadoqlash)</SelectItem>
-                    <SelectItem value="Jacquard">Jacquard (Jakkard Sexi)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Ishlab Chiqaruvchi Zavod (Brend)
-                </Label>
-                <Input
-                  value={machine.manufacturer}
-                  onChange={(e) => onUpdate({ manufacturer: e.target.value })}
-                  placeholder="Ishlab chiqaruvchi nomi"
-                  className="h-8 text-xs"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Ishlab Chiqarilgan Davlat
-                </Label>
-                <Input
-                  value={machine.country}
-                  onChange={(e) => onUpdate({ country: e.target.value })}
-                  placeholder="Mamlakat"
-                  className="h-8 text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Ishlab Chiqarilgan Yili
-                </Label>
-                <Input
-                  type="number"
-                  value={machine.year || ""}
-                  onChange={(e) => onUpdate({ year: Number(e.target.value) || new Date().getFullYear() })}
-                  placeholder="Yil"
-                  className="h-8 text-xs font-mono"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Zavod Seriya Raqami
-                </Label>
-                <Input
-                  value={machine.serialNo}
-                  onChange={(e) => onUpdate({ serialNo: e.target.value })}
-                  placeholder="Seriya raqami"
-                  className="h-8 text-xs font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Sex / Joylashuvi
-                </Label>
-                <Input
-                  value={machine.location}
-                  onChange={(e) => onUpdate({ location: e.target.value })}
-                  placeholder="Joylashuv manzili"
-                  className="h-8 text-xs"
-                />
               </div>
 
               <div className="space-y-1">
@@ -377,84 +501,231 @@ export function MachineOverviewTab({ machine, onUpdate }: MachineOverviewTabProp
                 <Input
                   value={machine.shiftPattern}
                   onChange={(e) => onUpdate({ shiftPattern: e.target.value })}
-                  placeholder="Masalan: 2 smena"
+                  placeholder="Masalan: 2 smena (16 soat)"
                   className="h-8 text-xs"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Mas'ul Bosh Operator
-                </Label>
-                <Input
-                  value={machine.leadOperator}
-                  onChange={(e) => onUpdate({ leadOperator: e.target.value })}
-                  placeholder="Operator F.I.Sh."
-                  className="h-8 text-xs font-medium"
-                />
+            {/* Tashkiliy Biriktirish (Korxona & Joylashuv) */}
+            <div className="pt-2 border-t border-border/60 space-y-2.5">
+              <div className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+                <Building2 className="size-3.5 text-primary" />
+                <span>Tashkiliy biriktirish</span>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Yordamchi Operator
-                </Label>
-                <Input
-                  value={machine.assistantOperator}
-                  onChange={(e) => onUpdate({ assistantOperator: e.target.value })}
-                  placeholder="Yordamchi F.I.Sh."
-                  className="h-8 text-xs"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1 min-w-0">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Kompaniya (Tashkilot)
+                  </Label>
+                  <SmartCombobox
+                    value={effectiveCompanyId}
+                    onChange={handleCompanyChange}
+                    options={companyOptions}
+                    placeholder="Kompaniyani tanlang..."
+                    searchPlaceholder="Kompaniya qidirish..."
+                    allowCustom={false}
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
+
+                <div className="space-y-1 min-w-0">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Filial / Zavod
+                  </Label>
+                  <SmartCombobox
+                    value={machine.branchId || ""}
+                    onChange={handleBranchChange}
+                    options={plantOptions}
+                    placeholder="Filialni tanlang..."
+                    searchPlaceholder="Filial qidirish..."
+                    allowCustom={false}
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1 min-w-0">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Bo&apos;lim / Ishlab chiqarish sexi
+                  </Label>
+                  <SmartCombobox
+                    value={machine.department}
+                    onChange={handleDepartmentChange}
+                    options={departmentOptions}
+                    placeholder="Sexni tanlang yoki yozing..."
+                    searchPlaceholder="Sex nomini qidirish..."
+                    allowCustom={true}
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Sexdagi aniq joylashuvi
+                  </Label>
+                  <Input
+                    value={machine.location}
+                    onChange={(e) => onUpdate({ location: e.target.value })}
+                    placeholder="Masalan: 1-zal, 2-qator"
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1 border-t border-border/50">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  OEE Samaradorlik (%)
-                </Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={machine.overallEfficiency ?? 90}
-                  onChange={(e) => onUpdate({ overallEfficiency: Number(e.target.value) || 0 })}
-                  className="h-8 text-xs font-mono"
-                />
+            {/* Ishlab Chiqaruvchi & Pasport */}
+            <div className="pt-2 border-t border-border/60 space-y-2.5">
+              <div className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+                <Building className="size-3.5 text-primary" />
+                <span>Ishlab chiqaruvchi ma&apos;lumotlari</span>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Odometer Hisoblagich
-                </Label>
-                <Input
-                  type="number"
-                  value={machine.totalLifetimeCounter ?? 0}
-                  onChange={(e) => onUpdate({ totalLifetimeCounter: Number(e.target.value) || 0 })}
-                  className="h-8 text-xs font-mono"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Ishlab Chiqaruvchi Zavod (Brend)
+                  </Label>
+                  <Input
+                    value={machine.manufacturer}
+                    onChange={(e) => onUpdate({ manufacturer: e.target.value })}
+                    placeholder="Ishlab chiqaruvchi nomi"
+                    className="h-8 text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Ishlab Chiqarilgan Davlat
+                  </Label>
+                  <Input
+                    value={machine.country}
+                    onChange={(e) => onUpdate({ country: e.target.value })}
+                    placeholder="Mamlakat"
+                    className="h-8 text-xs"
+                  />
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-[11px] font-medium text-muted-foreground">
-                  Hisoblagich Birligi
-                </Label>
-                <Select
-                  value={machine.counterUnit || "sheets"}
-                  onValueChange={(val: any) => onUpdate({ counterUnit: val })}
-                >
-                  <SelectTrigger className="h-8 text-xs font-mono">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="sheets">varaq (sheets)</SelectItem>
-                    <SelectItem value="meters">metr (meters)</SelectItem>
-                    <SelectItem value="cuts">kesim (cuts)</SelectItem>
-                    <SelectItem value="picks">zarb (picks)</SelectItem>
-                    <SelectItem value="books">kitob (books)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Ishlab Chiqarilgan Yili
+                  </Label>
+                  <Input
+                    type="number"
+                    value={machine.year || ""}
+                    onChange={(e) => onUpdate({ year: Number(e.target.value) || new Date().getFullYear() })}
+                    placeholder="Yil"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Zavod Seriya Raqami
+                  </Label>
+                  <Input
+                    value={machine.serialNo}
+                    onChange={(e) => onUpdate({ serialNo: e.target.value })}
+                    placeholder="Seriya raqami"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Mas'ul Operatorlar (HR) */}
+            <div className="pt-2 border-t border-border/60 space-y-2.5">
+              <div className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+                <Users className="size-3.5 text-primary" />
+                <span>Mas&apos;ul operatorlar</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1 min-w-0">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Mas&apos;ul Bosh Operator
+                  </Label>
+                  <SmartCombobox
+                    value={machine.leadOperator}
+                    onChange={(val) => onUpdate({ leadOperator: val })}
+                    options={employeeOptions}
+                    placeholder="Bosh operatorni tanlang yoki yozing..."
+                    searchPlaceholder="F.I.Sh. yoki tabel raqami..."
+                    allowCustom={true}
+                    className="h-8 text-xs bg-background font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1 min-w-0">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Yordamchi Operator
+                  </Label>
+                  <SmartCombobox
+                    value={machine.assistantOperator}
+                    onChange={(val) => onUpdate({ assistantOperator: val })}
+                    options={employeeOptions}
+                    placeholder="Yordamchi operatorni tanlang..."
+                    searchPlaceholder="F.I.Sh. yoki tabel raqami..."
+                    allowCustom={true}
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* OEE & Odometer */}
+            <div className="pt-2 border-t border-border/60 space-y-2.5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    OEE Samaradorlik (%)
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={machine.overallEfficiency ?? 90}
+                    onChange={(e) => onUpdate({ overallEfficiency: Number(e.target.value) || 0 })}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Odometer Hisoblagich
+                  </Label>
+                  <Input
+                    type="number"
+                    value={machine.totalLifetimeCounter ?? 0}
+                    onChange={(e) => onUpdate({ totalLifetimeCounter: Number(e.target.value) || 0 })}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">
+                    Hisoblagich Birligi
+                  </Label>
+                  <Select
+                    value={machine.counterUnit || "sheets"}
+                    onValueChange={(val: any) => onUpdate({ counterUnit: val })}
+                  >
+                    <SelectTrigger className="h-8 text-xs font-mono w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sheets">varaq (sheets)</SelectItem>
+                      <SelectItem value="meters">metr (meters)</SelectItem>
+                      <SelectItem value="cuts">kesim (cuts)</SelectItem>
+                      <SelectItem value="picks">zarb (picks)</SelectItem>
+                      <SelectItem value="books">kitob (books)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </div>

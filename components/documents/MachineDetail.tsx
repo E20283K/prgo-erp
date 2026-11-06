@@ -33,6 +33,7 @@ import {
   ExternalLink,
   Loader2,
   CircleDot,
+  Camera,
 } from "lucide-react";
 import { MachineOverviewTab } from "./machine/tabs/MachineOverviewTab";
 import { MachineEnergyTab } from "./machine/tabs/MachineEnergyTab";
@@ -40,6 +41,7 @@ import { MachineCostingTab } from "./machine/tabs/MachineCostingTab";
 import { MachineQueueTab } from "./machine/tabs/MachineQueueTab";
 import { MachineMaintenanceTab } from "./machine/tabs/MachineMaintenanceTab";
 import { MachineCylindersTab } from "./machine/tabs/MachineCylindersTab";
+import { MachineImageModal } from "./machine/MachineImageModal";
 
 export { getCleanBlankMachine as getBlankMachine };
 
@@ -53,6 +55,15 @@ export function MachineDetail({ tab }: MachineDetailProps) {
     upsertMachine,
     upsertMachineAsync,
     loadMachines,
+    companiesList,
+    loadCompanies,
+    plants,
+    fetchPlants,
+    departmentsList,
+    loadDepartments,
+    setDepartmentsList,
+    employees,
+    loadEmployees,
     setTabUnsaved,
     updateTabData,
     productionQueue,
@@ -60,10 +71,23 @@ export function MachineDetail({ tab }: MachineDetailProps) {
     addNotification,
   } = useWorkspaceStore();
 
-  // Make sure machines are loaded from real DB
+  // Make sure machines, plants, companies, departments and employees are loaded
   useEffect(() => {
-    if (machines.length === 0 && loadMachines) {
-      loadMachines();
+    if (machines.length === 0 && loadMachines) loadMachines();
+    if (companiesList.length === 0 && loadCompanies) loadCompanies();
+    if (plants.length === 0 && fetchPlants) fetchPlants();
+    if (employees.length === 0 && loadEmployees) loadEmployees();
+    if (departmentsList.length === 0) {
+      if (loadDepartments) {
+        loadDepartments();
+      } else {
+        fetch("/api/v1/hr/departments")
+          .then((r) => r.json())
+          .then((j) => {
+            if (j.success && Array.isArray(j.data)) setDepartmentsList(j.data);
+          })
+          .catch(() => {});
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -107,6 +131,40 @@ export function MachineDetail({ tab }: MachineDetailProps) {
   const [machineData, setMachineData] = useState<MachineRecord>(initialMachine);
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleTriggerUpload = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      addNotification?.({
+        title: "Xatolik",
+        description: "Faqat rasm formatidagi fayllarni yuklash mumkin (PNG, JPG, WEBP).",
+        severity: "warning",
+      });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        setMachineData((prev) => ({ ...prev, imageUrl: dataUrl }));
+        setTabUnsaved(tab.id, true);
+        addNotification?.({
+          title: "Rasm biriktirildi",
+          description: "Uskuna fotosurati muvaffaqiyatli yuklandi.",
+          severity: "success",
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }, [addNotification, setTabUnsaved, tab.id]);
 
   // Sync if store updates with newly fetched database record
   useEffect(() => {
@@ -286,6 +344,18 @@ export function MachineDetail({ tab }: MachineDetailProps) {
               </SelectContent>
             </Select>
 
+            {/* Direct Image File Picker Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTriggerUpload}
+              className="h-7 text-xs gap-1"
+              title="Uskuna fotosuratini yuklash yoki almashtirish"
+            >
+              <Camera className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="hidden sm:inline">{machineData.imageUrl ? "Almashtirish" : "Rasm"}</span>
+            </Button>
+
             {/* Print Passport Button */}
             <Button
               variant="outline"
@@ -340,6 +410,39 @@ export function MachineDetail({ tab }: MachineDetailProps) {
                 title={machineData.name || "Yangi Uskuna"}
                 subtitle={`${machineData.code || "Kodsiz"} • ${machineData.department || "Bo'limsiz"}`}
               >
+                {/* Equipment Thumbnail Photo */}
+                <div
+                  className="w-full h-28 rounded-md border border-border bg-muted/20 overflow-hidden flex flex-col items-center justify-center relative group cursor-pointer shadow-2xs mb-2 transition-colors hover:border-primary/50"
+                  onClick={() => {
+                    if (machineData.imageUrl) {
+                      setIsImageModalOpen(true);
+                    } else {
+                      handleTriggerUpload();
+                    }
+                  }}
+                  title={machineData.imageUrl ? "Rasmni to'liq ko'rish" : "Uskuna rasmini yuklash"}
+                >
+                  {machineData.imageUrl ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={machineData.imageUrl}
+                        alt={machineData.name || "Uskuna"}
+                        className="size-full object-contain p-1 select-none"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white">
+                        <Camera className="size-4" />
+                        <span className="text-[10px] font-medium">Ko&apos;rish</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-1 text-muted-foreground p-2 text-center">
+                      <Camera className="size-5 text-muted-foreground/50" />
+                      <span className="text-[10px]">Rasm yuklash</span>
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-1.5 text-[11px] pt-1">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Tijoriy Stavka:</span>
@@ -388,7 +491,9 @@ export function MachineDetail({ tab }: MachineDetailProps) {
                   title={activeJob.id}
                   subtitle={activeJob.customer}
                 >
-                  <div className="space-y-1.5 text-[11px] pt-1">
+
+
+                <div className="space-y-1.5 text-[11px] pt-1">
                     <p className="font-medium text-foreground truncate">
                       {activeJob.product}
                     </p>
@@ -446,8 +551,11 @@ export function MachineDetail({ tab }: MachineDetailProps) {
         <div className="flex-1 min-w-0 flex flex-col overflow-y-auto p-4 bg-background">
           {activeTab === "overview" && (
             <MachineOverviewTab
+              onUploadImage={handleTriggerUpload}
+              onOpenPreviewModal={() => setIsImageModalOpen(true)}
               machine={machineData}
               onUpdate={handleUpdate}
+
             />
           )}
 
@@ -455,6 +563,7 @@ export function MachineDetail({ tab }: MachineDetailProps) {
             <MachineCylindersTab
               machine={machineData}
               onUpdate={handleUpdate}
+
             />
           )}
 
@@ -462,6 +571,7 @@ export function MachineDetail({ tab }: MachineDetailProps) {
             <MachineEnergyTab
               machine={machineData}
               onUpdate={handleUpdate}
+
             />
           )}
 
@@ -469,6 +579,7 @@ export function MachineDetail({ tab }: MachineDetailProps) {
             <MachineCostingTab
               machine={machineData}
               onUpdate={handleUpdate}
+
             />
           )}
 
@@ -480,10 +591,45 @@ export function MachineDetail({ tab }: MachineDetailProps) {
             <MachineMaintenanceTab
               machine={machineData}
               onUpdate={handleUpdate}
+
             />
           )}
         </div>
       </div>
+
+
+      <MachineImageModal
+        isOpen={isImageModalOpen && Boolean(machineData.imageUrl)}
+        onClose={() => setIsImageModalOpen(false)}
+        onEditImage={handleTriggerUpload}
+        data={
+          machineData.imageUrl
+            ? {
+                imageUrl: machineData.imageUrl,
+                name: machineData.name,
+                code: machineData.code,
+                department: machineData.department,
+                category: machineData.category,
+                status: machineData.status,
+                hourlyRate: machineData.costing?.standardHourlyRateUsd,
+                speed: machineData.offsetSpecs?.practicalSpeedSph
+                  ? `${machineData.offsetSpecs.practicalSpeedSph.toLocaleString()} varaq/soat`
+                  : undefined,
+                location: machineData.location,
+                leadOperator: machineData.leadOperator,
+              }
+            : null
+        }
+      />
+
+      {/* Hidden file input for direct OS native file picker */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileInputChange}
+      />
     </div>
   );
 }

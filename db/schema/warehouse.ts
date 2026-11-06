@@ -7,6 +7,8 @@ import {
   boolean,
   numeric,
   integer,
+  doublePrecision,
+  jsonb,
   timestamp,
   index,
   uniqueIndex,
@@ -70,6 +72,49 @@ export const finishedGoodStatusEnum = pgEnum("warehouse_finished_good_status", [
   "Reserved",    // Band qilingan
   "Shipped",     // Jo'natilgan
   "Scrapped",    // Yaroqsizga chiqarilgan
+]);
+
+export const wmsZoneTypeEnum = pgEnum("wms_zone_type", [
+  "storage",     // Asosiy saqlash zonasi
+  "receiving",   // Qabul qilish / Rampa
+  "shipping",    // Yuklash / Jo'natish
+  "staging",     // Vaqtinchalik oraliq zona
+  "quarantine",  // Karantin / Brak zonasi
+]);
+
+export const wmsMapElementTypeEnum = pgEnum("wms_map_element_type", [
+  "rack",        // Stelaj
+  "zone",        // Sektor/zona chegarasi
+  "aisle",       // Yo'lak (yo'l)
+  "gate",        // Rampa / Darvoza
+  "pillar",      // Ustun / To'siq
+  "wall",        // Devor
+]);
+
+export const wmsRackTypeEnum = pgEnum("wms_rack_type", [
+  "pallet",      // Paletli stelaj
+  "shelf",       // Polkali stelaj
+  "cantilever",  // Konsol stelaj
+  "roll_stand",  // Rulon stendi
+  "floor_stack", // Poldagi maydon
+  "obstacle",    // To'siq / Ustun
+  "gate",        // Rampa / Darvoza
+]);
+
+export const wmsBinStatusEnum = pgEnum("wms_bin_status", [
+  "empty",       // Bo'sh
+  "partial",     // Qisman band
+  "full",        // To'la
+  "reserved",    // Band qilingan
+  "blocked",     // Bloklangan / Ta'mirda
+]);
+
+export const wmsContainerTypeEnum = pgEnum("wms_container_type", [
+  "pallet",      // Palet
+  "box",         // Quti
+  "roll",        // Rulon
+  "drum",        // Bochka
+  "bundle",      // Bog'lam
 ]);
 
 // ─── 1. Warehouses (Omborlar Katalogi) ────────────────────────────────────────
@@ -387,6 +432,9 @@ export const warehousesRelations = relations(warehouses, ({ one, many }) => ({
   receipts: many(warehouseReceipts),
   shipments: many(warehouseShipments),
   balances: many(warehouseStockBalances),
+  wmsZones: many(wmsZones),
+  wmsRacks: many(wmsRacks),
+  wmsBins: many(wmsBins),
 }));
 
 export const warehouseReceiptsRelations = relations(warehouseReceipts, ({ one, many }) => ({
@@ -529,5 +577,230 @@ export const carriersRelations = relations(carriers, ({ one }) => ({
   company: one(companies, {
     fields: [carriers.companyId],
     references: [companies.id],
+  }),
+}));
+
+// ─── 9. WMS Zones (Ombor Sektorlari / Zonalar) ──────────────────────────────
+
+export const wmsZones = pgTable(
+  "wms_zones",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    warehouseId: uuid("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 32 }).notNull(), // Masalan: "A", "B", "RECEIVING", "SHIPPING"
+    name: varchar("name", { length: 255 }).notNull(), // Masalan: "A Sektor — Qog'oz va karton"
+    type: wmsZoneTypeEnum("type").default("storage").notNull(),
+    color: varchar("color", { length: 32 }).default("#3b82f6").notNull(),
+    // 2D Canvas xaritadagi pozitsiya (santimetr yoki piksel nisbatida)
+    x: doublePrecision("x").default(0).notNull(),
+    y: doublePrecision("y").default(0).notNull(),
+    width: doublePrecision("width").default(400).notNull(),
+    height: doublePrecision("height").default(300).notNull(),
+    rotation: doublePrecision("rotation").default(0).notNull(),
+    notes: text("notes"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("wms_zones_warehouse_code_uq").on(table.warehouseId, table.code),
+    index("wms_zones_warehouse_idx").on(table.warehouseId),
+  ]
+);
+
+// ─── 10. WMS Racks & Elements (Stelajlar va Xarita Obyektlari) ────────────────
+
+export const wmsRacks = pgTable(
+  "wms_racks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    warehouseId: uuid("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id, { onDelete: "cascade" }),
+    zoneId: uuid("zone_id").references(() => wmsZones.id, { onDelete: "set null" }),
+    code: varchar("code", { length: 32 }).notNull(), // Masalan: "R01", "R02", "GATE-1"
+    name: varchar("name", { length: 255 }).notNull(), // Masalan: "Stelaj A-01"
+    type: wmsRackTypeEnum("type").default("pallet").notNull(),
+    // 2D Top-Down koordinatalar
+    x: doublePrecision("x").default(100).notNull(),
+    y: doublePrecision("y").default(100).notNull(),
+    width: doublePrecision("width").default(240).notNull(), // Stelajning xaritadagi eni (masalan, 240px = 2.4m)
+    depth: doublePrecision("depth").default(80).notNull(),  // Stelaj chuqurligi (masalan, 80px = 0.8m)
+    rotation: doublePrecision("rotation").default(0).notNull(), // 0, 90, 180, 270
+    // Qavatlar va kataklar matritsasi
+    levelsCount: integer("levels_count").default(4).notNull(), // Qavatlar soni (vertikal)
+    baysCount: integer("bays_count").default(6).notNull(),     // Har bir qavatdagi kataklar soni (gorizontal)
+    maxWeightKg: numeric("max_weight_kg", { precision: 12, scale: 2 }).default("10000").notNull(),
+    status: varchar("status", { length: 32 }).default("active").notNull(), // active, maintenance, full, blocked
+    visualConfig: jsonb("visual_config"), // Qo'shimcha UI sozlamalari (rang, teglari, belgilari)
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("wms_racks_warehouse_code_uq").on(table.warehouseId, table.code),
+    index("wms_racks_warehouse_idx").on(table.warehouseId),
+    index("wms_racks_zone_idx").on(table.zoneId),
+  ]
+);
+
+// ─── 11. WMS Bins (Kataklar / Yacheykalar) ───────────────────────────────────
+
+export const wmsBins = pgTable(
+  "wms_bins",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    warehouseId: uuid("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id, { onDelete: "cascade" }),
+    rackId: uuid("rack_id")
+      .notNull()
+      .references(() => wmsRacks.id, { onDelete: "cascade" }),
+    zoneId: uuid("zone_id").references(() => wmsZones.id, { onDelete: "set null" }),
+    code: varchar("code", { length: 64 }).notNull(), // Unikal WMS manzil: "WH1-A-R01-L02-B04"
+    barcode: varchar("barcode", { length: 64 }), // Shtrix/QR kod skan qilish uchun
+    level: integer("level").notNull(), // Qavat raqami: 1, 2, 3...
+    bay: integer("bay").notNull(),     // Ustun/katak raqami: 1, 2, 3...
+    // Moslashuvchan kataklar: birlashtirish (merge) va o'lcham
+    rowSpan: integer("row_span").default(1).notNull(),
+    colSpan: integer("col_span").default(1).notNull(),
+    widthCm: numeric("width_cm", { precision: 10, scale: 2 }).default("120").notNull(),
+    heightCm: numeric("height_cm", { precision: 10, scale: 2 }).default("150").notNull(),
+    depthCm: numeric("depth_cm", { precision: 10, scale: 2 }).default("100").notNull(),
+    maxWeightKg: numeric("max_weight_kg", { precision: 10, scale: 2 }).default("1000").notNull(),
+    currentWeightKg: numeric("current_weight_kg", { precision: 10, scale: 2 }).default("0").notNull(),
+    occupancyPct: integer("occupancy_pct").default(0).notNull(), // 0 - 100%
+    status: wmsBinStatusEnum("status").default("empty").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("wms_bins_warehouse_code_uq").on(table.warehouseId, table.code),
+    index("wms_bins_rack_idx").on(table.rackId),
+    index("wms_bins_status_idx").on(table.status),
+  ]
+);
+
+// ─── 12. WMS Bin Items (Katak Ichidagi Mahsulotlar & Konteynerlar) ─────────────
+
+export const wmsBinItems = pgTable(
+  "wms_bin_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    warehouseId: uuid("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id, { onDelete: "cascade" }),
+    rackId: uuid("rack_id")
+      .notNull()
+      .references(() => wmsRacks.id, { onDelete: "cascade" }),
+    binId: uuid("bin_id")
+      .notNull()
+      .references(() => wmsBins.id, { onDelete: "cascade" }),
+    // Mavjud zaxiralar bilan bog'lanish
+    stockBalanceId: uuid("stock_balance_id").references(() => warehouseStockBalances.id, { onDelete: "set null" }),
+    finishedGoodId: uuid("finished_good_id").references(() => warehouseFinishedGoods.id, { onDelete: "set null" }),
+    itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+    // Mahsulot rekvizitlari
+    sku: varchar("sku", { length: 64 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    category: varchar("category", { length: 64 }).default("Paper & Board").notNull(),
+    batchNumber: varchar("batch_number", { length: 64 }),
+    workOrderId: varchar("work_order_id", { length: 128 }),
+    quantity: numeric("quantity", { precision: 15, scale: 3 }).notNull(),
+    reservedQty: numeric("reserved_qty", { precision: 15, scale: 3 }).default("0").notNull(),
+    unit: varchar("unit", { length: 32 }).default("sheets").notNull(),
+    weightKg: numeric("weight_kg", { precision: 10, scale: 2 }).default("0").notNull(),
+    // 3-Rejim (Katak ichki 2D ko'rinishi) uchun konteyner parametrlari
+    containerType: wmsContainerTypeEnum("container_type").default("pallet").notNull(),
+    posX: doublePrecision("pos_x").default(10).notNull(),     // Katak ichidagi X siljish (px)
+    posY: doublePrecision("pos_y").default(10).notNull(),     // Katak ichidagi Y siljish (px)
+    widthPx: doublePrecision("width_px").default(80).notNull(),
+    heightPx: doublePrecision("height_px").default(80).notNull(),
+    color: varchar("color", { length: 32 }).default("#3b82f6"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("wms_bin_items_bin_idx").on(table.binId),
+    index("wms_bin_items_sku_idx").on(table.sku),
+    index("wms_bin_items_stock_balance_idx").on(table.stockBalanceId),
+  ]
+);
+
+// ─── Relations for WMS ────────────────────────────────────────────────────────
+
+export const wmsZonesRelations = relations(wmsZones, ({ one, many }) => ({
+  warehouse: one(warehouses, {
+    fields: [wmsZones.warehouseId],
+    references: [warehouses.id],
+  }),
+  racks: many(wmsRacks),
+  bins: many(wmsBins),
+}));
+
+export const wmsRacksRelations = relations(wmsRacks, ({ one, many }) => ({
+  warehouse: one(warehouses, {
+    fields: [wmsRacks.warehouseId],
+    references: [warehouses.id],
+  }),
+  zone: one(wmsZones, {
+    fields: [wmsRacks.zoneId],
+    references: [wmsZones.id],
+  }),
+  bins: many(wmsBins),
+  items: many(wmsBinItems),
+}));
+
+export const wmsBinsRelations = relations(wmsBins, ({ one, many }) => ({
+  warehouse: one(warehouses, {
+    fields: [wmsBins.warehouseId],
+    references: [warehouses.id],
+  }),
+  rack: one(wmsRacks, {
+    fields: [wmsBins.rackId],
+    references: [wmsRacks.id],
+  }),
+  zone: one(wmsZones, {
+    fields: [wmsBins.zoneId],
+    references: [wmsZones.id],
+  }),
+  items: many(wmsBinItems),
+}));
+
+export const wmsBinItemsRelations = relations(wmsBinItems, ({ one }) => ({
+  warehouse: one(warehouses, {
+    fields: [wmsBinItems.warehouseId],
+    references: [warehouses.id],
+  }),
+  rack: one(wmsRacks, {
+    fields: [wmsBinItems.rackId],
+    references: [wmsRacks.id],
+  }),
+  bin: one(wmsBins, {
+    fields: [wmsBinItems.binId],
+    references: [wmsBins.id],
+  }),
+  stockBalance: one(warehouseStockBalances, {
+    fields: [wmsBinItems.stockBalanceId],
+    references: [warehouseStockBalances.id],
+  }),
+  finishedGood: one(warehouseFinishedGoods, {
+    fields: [wmsBinItems.finishedGoodId],
+    references: [warehouseFinishedGoods.id],
   }),
 }));

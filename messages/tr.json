@@ -472,7 +472,10 @@
     "bank-cash": "Banka ve Kasa Hesapları",
     "p-and-l": "Kâr/Zarar Tabloları",
     "roles-permissions": "Erişim Yetkileri ve Roller",
-    "audit-logs": "Sistem Olay Günlüğü"
+    "audit-logs": "Sistem Olay Günlüğü",
+    "warehouse-ops": "Operasyonlar",
+    "production-issue": "Üretime Çıkış",
+    "write-offs": "Fire / İmha"
   },
   "BOM": {
     "title": "Ürün Ağacı Listesi #BOM-9821",

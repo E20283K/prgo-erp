@@ -149,6 +149,7 @@ export const clients = pgTable(
     contractNo: varchar("contract_no", { length: 64 }),
     contractDate: varchar("contract_date", { length: 32 }),
     contractExpiry: varchar("contract_expiry", { length: 32 }),
+    logoUrl: text("logo_url"),
     isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

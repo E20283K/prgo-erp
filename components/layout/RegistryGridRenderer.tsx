@@ -7,6 +7,7 @@ const DataGrid = dynamic(() => import("@/components/grid/DataGrid").then((mod) =
 const CrmGrid = dynamic(() => import("@/components/grid/CrmGrid").then((mod) => mod.CrmGrid), { ssr: false });
 const ProductionGrid = dynamic(() => import("@/components/grid/ProductionGrid").then((mod) => mod.ProductionGrid), { ssr: false });
 const WarehouseGrid = dynamic(() => import("@/components/grid/WarehouseGrid").then((mod) => mod.WarehouseGrid), { ssr: false });
+const WarehouseWmsView = dynamic(() => import("@/components/documents/warehouse/wms/WarehouseWmsView").then((mod) => mod.WarehouseWmsView), { ssr: false });
 const SalesGrid = dynamic(() => import("@/components/grid/SalesGrid").then((mod) => mod.SalesGrid), { ssr: false });
 const FinanceGrid = dynamic(() => import("@/components/grid/FinanceGrid").then((mod) => mod.FinanceGrid), { ssr: false });
 const TaskGrid = dynamic(() => import("@/components/grid/TaskGrid").then((mod) => mod.TaskGrid), { ssr: false });
@@ -47,9 +48,12 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("tooling")) return <ProductionGrid type="tooling" />;
     return <DataGrid />;
   } else if (tab.module === "warehouse") {
+    if (tab.id.includes("wms") || tab.id.includes("topology")) return <WarehouseWmsView tab={tab} />;
     if (tab.id.includes("requirements") || tab.id.includes("deficits")) return <WarehouseGrid type="requirements" />;
     if (tab.id.includes("finished-goods")) return <WarehouseGrid type="finished-goods" />;
     if (tab.id.includes("stock-balance")) return <WarehouseGrid type="stock-balance" />;
+    if (tab.id.includes("production-issue")) return <WarehouseGrid type="production-issue" />;
+    if (tab.id.includes("write-offs")) return <WarehouseGrid type="write-offs" />;
     if (tab.id.includes("movements")) return <WarehouseGrid type="movements" />;
     if (tab.id.includes("inventory")) return <WarehouseGrid type="inventory" />;
     if (tab.id.includes("receipts")) return <WarehouseGrid type="receipts" />;

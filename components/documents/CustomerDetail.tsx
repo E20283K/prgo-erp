@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   useWorkspaceStore,
   DocumentTab,
@@ -32,6 +32,10 @@ import {
   Phone,
   Mail,
   UserCheck,
+  Camera,
+  Upload,
+  Loader2,
+  Trash2,
 } from "lucide-react";
 import { CustomerOverviewTab } from "./customer/tabs/CustomerOverviewTab";
 import { CustomerSettlementsTab } from "./customer/tabs/CustomerSettlementsTab";
@@ -188,6 +192,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
       requiresPowerOfAttorney: d.requiresPowerOfAttorney ?? false,
       deliveryTransportNote: d.deliveryTransportNote || "",
       specialRequirements: d.specialRequirements || "",
+      logoUrl: d.logoUrl || (storeCustomer as any)?.logoUrl || "",
     };
     baseCust.contacts = ensureCustomerContacts(baseCust);
     baseCust.contracts = ensureCustomerContracts(baseCust);
@@ -197,6 +202,92 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   const [form, setForm] = useState<CrmCustomerRecord>(initialRecord);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const sidebarFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+
+  const handleLogoUpload = async (file: File) => {
+    if (!file) return;
+    const allowed = [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+      "image/svg+xml",
+      "image/gif",
+    ];
+    if (!allowed.includes(file.type)) {
+      addNotification({
+        title: "Xatolik",
+        description: "Faqat PNG, JPG, WebP yoki SVG rasmlari qabul qilinadi.",
+        severity: "error",
+      });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      addNotification({
+        title: "Xatolik",
+        description: "Logotip hajmi 5MB dan oshmasligi kerak.",
+        severity: "error",
+      });
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("clientId", form.dbId || form.id);
+
+      const res = await fetch("/api/v1/crm/clients/logo", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Logotipni yuklab bo'lmadi");
+      }
+
+      handleFieldChange("logoUrl", data.url);
+      upsertCustomer({ ...form, logoUrl: data.url });
+      addNotification({
+        title: "Logotip yuklandi",
+        description: "Mijoz logotipi muvaffaqiyatli saqlandi.",
+        severity: "success",
+      });
+    } catch (err: any) {
+      addNotification({
+        title: "Yuklashda xatolik",
+        description: err.message || "Logotipni serverga yuklashda xatolik yuz berdi.",
+        severity: "error",
+      });
+    } finally {
+      setIsUploadingLogo(false);
+      if (sidebarFileInputRef.current) sidebarFileInputRef.current.value = "";
+    }
+  };
+
+  const handleDeleteLogo = async () => {
+    const currentLogo = form.logoUrl;
+    setIsUploadingLogo(true);
+    try {
+      handleFieldChange("logoUrl", "");
+      upsertCustomer({ ...form, logoUrl: "" });
+      if (currentLogo) {
+        await fetch(
+          `/api/v1/crm/clients/logo?clientId=${encodeURIComponent(form.dbId || form.id)}&logoUrl=${encodeURIComponent(currentLogo)}`,
+          { method: "DELETE" }
+        );
+      }
+      addNotification({
+        title: "Logotip o'chirildi",
+        severity: "info",
+      });
+    } catch (err: any) {
+      console.warn("Failed to delete logo on server:", err);
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
 
   useEffect(() => {
     if (storeCustomer) {
@@ -463,6 +554,17 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
         {/* Standard 1C Document Header */}
         <DocumentHeader
           icon={Building2}
+          avatar={
+            form.logoUrl ? (
+              <div className="w-5 h-5 rounded border border-border bg-background overflow-hidden shrink-0 flex items-center justify-center p-0.5">
+                <img
+                  src={form.logoUrl}
+                  alt={form.name || "Logotip"}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+            ) : undefined
+          }
           title={form.name}
           docNo={isDraft ? "Yangi (Avtomatik)" : form.id}
           status={form.status}
@@ -520,7 +622,54 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
             onSelect={(id) => setLevel3Tab(tab.id, id)}
             summary={
               <SidebarSummaryCard
-                icon={Building2}
+                avatar={
+                  <div className="relative shrink-0">
+                    <input
+                      ref={sidebarFileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleLogoUpload(file);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => sidebarFileInputRef.current?.click()}
+                      disabled={isUploadingLogo}
+                      className="w-12 h-12 rounded-md border border-border bg-background hover:border-primary/60 flex items-center justify-center shrink-0 cursor-pointer overflow-hidden transition-all relative group shadow-2xs"
+                      title={form.logoUrl ? "Logotipni o'zgartirish (bosing)" : "Logotip yuklash (bosing)"}
+                    >
+                      {form.logoUrl ? (
+                        <img
+                          src={form.logoUrl}
+                          alt={form.name || "Logotip"}
+                          className="w-full h-full object-contain p-1"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-muted-foreground group-hover:text-primary transition-colors gap-0.5">
+                          <Camera className="w-5 h-5" />
+                          <span className="text-[8px] font-semibold tracking-tighter">LOGO</span>
+                        </div>
+                      )}
+
+                      {/* Hover action overlay */}
+                      <div className="absolute inset-0 bg-black/55 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Camera className="w-4 h-4" />
+                        <span className="text-[7px] font-medium leading-tight mt-0.5">
+                          {form.logoUrl ? "O'zgartirish" : "Yuklash"}
+                        </span>
+                      </div>
+
+                      {isUploadingLogo && (
+                        <div className="absolute inset-0 bg-background/90 flex items-center justify-center">
+                          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                        </div>
+                      )}
+                    </button>
+                  </div>
+                }
                 title={form.name}
                 subtitle={`INN: ${form.tin} • ${form.industry}`}
               >
@@ -532,6 +681,39 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
                   <Badge variant="secondary" className="text-[10px] h-4 font-mono font-bold">
                     {form.currency === "USD" ? "USD ($)" : "UZS (so'm)"}
                   </Badge>
+                </InfoRow>
+
+                <InfoRow label="Logotip:">
+                  <div className="flex items-center gap-1.5 justify-end">
+                    {form.logoUrl ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => sidebarFileInputRef.current?.click()}
+                          className="text-[10px] text-primary hover:underline font-medium cursor-pointer"
+                        >
+                          O&apos;zgartirish
+                        </button>
+                        <span className="text-muted-foreground text-[10px]">•</span>
+                        <button
+                          type="button"
+                          onClick={handleDeleteLogo}
+                          className="text-[10px] text-destructive hover:underline font-medium cursor-pointer"
+                        >
+                          O&apos;chirish
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => sidebarFileInputRef.current?.click()}
+                        className="text-[10px] text-primary hover:underline font-medium flex items-center gap-1 cursor-pointer"
+                      >
+                        <Upload className="w-3 h-3" />
+                        <span>Yuklash</span>
+                      </button>
+                    )}
+                  </div>
                 </InfoRow>
 
                 <InfoRow label="Joriy Saldo:">

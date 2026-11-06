@@ -186,13 +186,17 @@ export interface MachineMaintenanceRecord {
 
 export interface MachineRecord {
   id: string;
+  companyId?: string;
+  branchId?: string;
+  departmentId?: string;
   name: string;
   code: string;
   manufacturer: string;
   country: string;
   year: number;
   serialNo: string;
-  department: "Offset" | "Flexo" | "Post-press" | "Jacquard" | "Packaging";
+  imageUrl?: string;
+  department: string;
   category: MachineCategory;
   location: string;
   status: MachineStatus;

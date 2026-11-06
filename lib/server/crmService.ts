@@ -94,6 +94,7 @@ export async function getCrmClients(companyCode: string = "PRINTGOO"): Promise<C
     requiresPowerOfAttorney: c.requiresPowerOfAttorney ?? true,
     deliveryTransportNote: c.deliveryTransportNote || undefined,
     specialRequirements: c.specialRequirements || undefined,
+    logoUrl: c.logoUrl || undefined,
     contacts: c.contacts.map((contact) => ({
       id: contact.id,
       name: contact.name,
@@ -193,6 +194,7 @@ export async function upsertCrmClient(
     requiresPowerOfAttorney: data.requiresPowerOfAttorney ?? true,
     deliveryTransportNote: data.deliveryTransportNote || null,
     specialRequirements: data.specialRequirements || null,
+    logoUrl: data.logoUrl !== undefined ? (data.logoUrl || null) : (existingClient?.logoUrl || null),
     notes: data.notes || null,
     contractNo: data.contractNo || null,
     contractDate: data.contractDate || null,
@@ -256,7 +258,8 @@ export async function upsertCrmClient(
   }
 
   // Yangilangan natijani qaytarish
-  const [updatedRecord] = await getCrmClients(companyCode);
+  const allClients = await getCrmClients(companyCode);
+  const updatedRecord = allClients.find((c) => c.dbId === clientId) || allClients[0];
   return {
     success: true,
     client: updatedRecord,

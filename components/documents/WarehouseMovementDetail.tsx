@@ -76,6 +76,13 @@ export interface WarehouseMovementDoc {
   items: MovementLineItem[];
 }
 
+export const MOVEMENT_TYPE_LABELS: Record<string, string> = {
+  Transfer: "Omborlararo ko'chirish",
+  ProductionIssue: "Sexga sarf (Ishlab chiqarish)",
+  WriteOff: "Spisaniye (Brak/Yaroqsiz)",
+  CuttingReturn: "Qirqim qoldig'i (Otxod)",
+};
+
 export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
   const {
     warehouseStock,
@@ -621,8 +628,10 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
             disabled={isLocked}
             onValueChange={(val: any) => handleFieldChange("movementType", val)}
           >
-            <SelectTrigger className="h-7 text-xs bg-background">
-              <SelectValue />
+            <SelectTrigger className="h-7 w-full text-xs bg-background">
+              <SelectValue>
+                {MOVEMENT_TYPE_LABELS[doc.movementType] || doc.movementType}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="Transfer" className="text-xs">Omborlararo ko'chirish</SelectItem>

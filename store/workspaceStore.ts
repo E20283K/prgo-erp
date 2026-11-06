@@ -72,7 +72,7 @@ export interface CompanyRecord {
 export interface DocumentTab {
   id: string;
   title: string;
-  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "supplier" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "warehouse-movement" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "company-detail" | "tariff-detail" | "employee-detail" | "department-detail" | "position-detail" | "shift-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog" | "trading-ytt-limit" | "user-detail";
+  type: "registry" | "work-order" | "bom" | "product-spec" | "customer" | "supplier" | "delivery-act" | "warehouse-receipt" | "warehouse-shipment" | "warehouse-movement" | "planning-slot" | "machine-detail" | "warehouse-stock" | "plant-detail" | "company-detail" | "tariff-detail" | "employee-detail" | "department-detail" | "position-detail" | "shift-detail" | "payroll-detail" | "trading-sale" | "trading-order" | "trading-settlement" | "trading-import" | "trading-catalog" | "trading-ytt-limit" | "user-detail" | "warehouse-production-issue" | "warehouse-write-off" | "warehouse-inventory";
   module: string;
   isUnsaved?: boolean;
   documentData?: any;
@@ -205,6 +205,8 @@ export interface CustomerToolingItem {
   format: string;
   cavities: string;
   location: string;
+  warehouseId?: string;
+  locationShelf?: string;
   impressionsUsed: number;
   maxLife: number;
   status: "Ready" | "Re-knifing Soon" | "Damaged" | "In Maintenance";
@@ -296,6 +298,7 @@ export interface CrmCustomerRecord {
   requiresPowerOfAttorney?: boolean;
   deliveryTransportNote?: string;
   specialRequirements?: string;
+  logoUrl?: string;
 }
 
 export interface MasterSpecificationRecord {
@@ -334,6 +337,8 @@ export interface WarehouseStockRecord {
   sheetFormat?: string;
   unit: "sheets" | "rolls" | "kg" | "pcs" | "m²";
   location: string;
+  warehouseId?: string;
+  locationShelf?: string;
   stockLevel: number;
   reserved: number;
   available: number;
@@ -407,7 +412,9 @@ export interface WarehouseMovementRecord {
   status: "Completed" | "In Transit" | "Pending";
   operator: string;
   isOffcut?: boolean;
-  movementType?: "Transfer" | "CuttingReturn" | "WriteOff" | "ProductionIssue";
+  movementType?: "Transfer" | "CuttingReturn" | "WriteOff" | "ProductionIssue" | "ProductionReturn";
+  pressMachine?: string;
+  items?: MovementLineItem[];
   parentMaterialSku?: string;
   cutDimensions?: string;
   workOrderId?: string;
@@ -431,7 +438,9 @@ export interface FinishedGoodStockRecord {
   unit: string; // "dona"
   costPricePerUnit: number; // 0.42
   totalStockValue: number; // 2100.00
-  location: string; // "Tayyor Mahsulot Ombori — Rampa 2, Pallet P-04"
+  location: string;
+  warehouseId?: string;
+  locationShelf?: string; // "Tayyor Mahsulot Ombori — Rampa 2, Pallet P-04"
   palletCount?: number; // 3
   daysInStock: number; // 7
   status: "In Stock" | "Ready for Dispatch" | "Partially Shipped" | "Reserved";
@@ -746,7 +755,7 @@ interface WorkspaceState {
   warehouseMovements: WarehouseMovementRecord[];
   isWarehouseMovementsLoading: boolean;
   loadWarehouseMovements: (companyCode?: string) => Promise<void>;
-  upsertWarehouseMovementAsync: (mov: any, companyCode?: string) => Promise<boolean>;
+  upsertWarehouseMovementAsync: (mov: any, companyCode?: string) => Promise<any>;
   addWarehouseMovement: (movement: WarehouseMovementRecord) => void;
   returnOffcutToStock: (payload: {
     parentSku: string;
@@ -1331,7 +1340,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         if (json.success) {
           get().loadWarehouseMovements(companyCode);
           get().loadWarehouseStock(companyCode);
-          return true;
+          return {
+            success: true,
+            movementNumber: json.movementNumber || json.data?.movementNumber,
+            data: json.data,
+          };
         }
       }
       return false;

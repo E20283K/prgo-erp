@@ -1034,6 +1034,9 @@ export async function updateWorkOrderReadiness(
 function formatMachineDbToRecord(m: any): any {
   return {
     id: m.id,
+    companyId: m.companyId || undefined,
+    branchId: m.branchId || undefined,
+    departmentId: m.departmentId || undefined,
     code: m.code,
     name: m.name,
     department: m.department || "Offset",
@@ -1045,6 +1048,7 @@ function formatMachineDbToRecord(m: any): any {
     country: m.country || "",
     year: m.year || new Date().getFullYear(),
     serialNo: m.serialNo || "",
+    imageUrl: m.imageUrl || undefined,
     location: m.location || "",
     leadOperator: m.leadOperator || "",
     assistantOperator: m.assistantOperator || "",
@@ -1187,8 +1191,9 @@ export async function createProductionMachine(data: any, companyCode: string = "
   const [inserted] = await db
     .insert(productionMachines)
     .values({
-      companyId,
+      companyId: data.companyId || companyId,
       branchId: data.branchId || null,
+      departmentId: data.departmentId || null,
       code,
       name: data.name,
       department: data.department || "Offset",
@@ -1200,6 +1205,7 @@ export async function createProductionMachine(data: any, companyCode: string = "
       country: data.country || null,
       year: data.year ? Number(data.year) : null,
       serialNo: data.serialNo || null,
+      imageUrl: data.imageUrl || null,
       location: data.location || null,
       leadOperator: data.leadOperator || null,
       assistantOperator: data.assistantOperator || null,
@@ -1240,6 +1246,10 @@ export async function updateProductionMachine(id: string, data: any, companyCode
   if (data.country !== undefined) updatePayload.country = data.country;
   if (data.year !== undefined) updatePayload.year = Number(data.year);
   if (data.serialNo !== undefined) updatePayload.serialNo = data.serialNo;
+  if (data.companyId !== undefined) updatePayload.companyId = data.companyId || companyId;
+  if (data.imageUrl !== undefined) updatePayload.imageUrl = data.imageUrl || null;
+  if (data.branchId !== undefined) updatePayload.branchId = data.branchId || null;
+  if (data.departmentId !== undefined) updatePayload.departmentId = data.departmentId || null;
   if (data.location !== undefined) updatePayload.location = data.location;
   if (data.leadOperator !== undefined) updatePayload.leadOperator = data.leadOperator;
   if (data.assistantOperator !== undefined) updatePayload.assistantOperator = data.assistantOperator;

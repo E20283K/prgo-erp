@@ -12,9 +12,11 @@ import {
   carriers,
   companies,
   branches,
+  wmsBins,
+  wmsBinItems,
 } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
-import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku } from "./numberingService";
+import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber } from "./numberingService";
 import { emitNotification } from "./notificationService";
 
 /**
@@ -206,9 +208,23 @@ export async function upsertStockBalance(payload: any, companyCode: string = "PR
   else if (available <= reorder * 0.3) computedStatus = "Critical";
   else if (available <= reorder) computedStatus = "Low Stock";
 
+  let resolvedWarehouseId = payload.warehouseId || null;
+  if (!resolvedWarehouseId && (payload.locationName || payload.location)) {
+    const locName = payload.locationName || payload.location;
+    const foundWh = await db.query.warehouses.findFirst({
+      where: and(
+        eq(warehouses.companyId, companyId),
+        eq(warehouses.name, locName)
+      ),
+    });
+    if (foundWh) {
+      resolvedWarehouseId = foundWh.id;
+    }
+  }
+
   const values = {
     companyId,
-    warehouseId: payload.warehouseId || null,
+    warehouseId: resolvedWarehouseId,
     locationName: payload.locationName || payload.location || "Asosiy ombor",
     itemId: payload.itemId || null,
     sku: payload.sku && !payload.sku.startsWith("tab-") ? payload.sku : await getNextMaterialSku(companyCode),
@@ -241,6 +257,75 @@ export async function upsertStockBalance(payload: any, companyCode: string = "PR
       set: values,
     })
     .returning();
+
+  // Agar WMS saqlash katagi (locationShelf) ko'rsatilgan bo'lsa, wms_bin_items bilan sinxronlash
+  // Agar WMS saqlash katagi bo'shatilgan bo'lsa, eski birikmani o'chirish
+  if (record && !record.locationShelf) {
+    try {
+      await db.delete(wmsBinItems).where(eq(wmsBinItems.stockBalanceId, record.id));
+    } catch (err) {
+      console.error("WMS bin items clearing error:", err);
+    }
+  }
+
+  // Agar WMS saqlash katagi (locationShelf) ko'rsatilgan bo'lsa, wms_bin_items bilan sinxronlash
+  if (record && record.locationShelf) {
+    try {
+      const targetBin = await db.query.wmsBins.findFirst({
+        where: and(
+          eq(wmsBins.companyId, companyId),
+          resolvedWarehouseId ? eq(wmsBins.warehouseId, resolvedWarehouseId) : undefined,
+          eq(wmsBins.code, record.locationShelf)
+        ),
+      });
+      if (targetBin) {
+        const existingBinItem = await db.query.wmsBinItems.findFirst({
+          where: and(
+            eq(wmsBinItems.binId, targetBin.id),
+            eq(wmsBinItems.sku, record.sku)
+          ),
+        });
+        if (existingBinItem) {
+          await db
+            .update(wmsBinItems)
+            .set({
+              stockBalanceId: record.id,
+              quantity: record.available,
+              unit: record.unit,
+              name: record.name,
+              updatedAt: new Date(),
+            })
+            .where(eq(wmsBinItems.id, existingBinItem.id));
+        } else {
+          await db.insert(wmsBinItems).values({
+            companyId,
+            warehouseId: targetBin.warehouseId,
+            rackId: targetBin.rackId,
+            binId: targetBin.id,
+            stockBalanceId: record.id,
+            sku: record.sku,
+            name: record.name,
+            category: record.category,
+            quantity: record.available,
+            unit: record.unit,
+            weightKg: "150",
+            containerType: "pallet",
+            color: "#2563eb",
+          });
+        }
+        await db
+          .update(wmsBins)
+          .set({
+            status: "partial",
+            occupancyPct: 70,
+            updatedAt: new Date(),
+          })
+          .where(eq(wmsBins.id, targetBin.id));
+      }
+    } catch (err) {
+      console.error("WMS bin item sync error:", err);
+    }
+  }
 
   return record;
 }
@@ -491,18 +576,101 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
 
 export async function getWarehouseMovements(companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  return db.query.warehouseMovements.findMany({
+  const rows = await db.query.warehouseMovements.findMany({
     where: eq(warehouseMovements.companyId, companyId),
     orderBy: [desc(warehouseMovements.movementDate)],
+  });
+
+  return rows.map((r) => {
+    let parsedNote = r.reason || "";
+    let movementType = "Transfer";
+    let pressMachine = "";
+    let items: any[] = [];
+
+    if (r.reason && r.reason.startsWith("{") && r.reason.endsWith("}")) {
+      try {
+        const meta = JSON.parse(r.reason);
+        parsedNote = meta.note || "";
+        movementType = meta.movementType || movementType;
+        pressMachine = meta.pressMachine || "";
+        if (Array.isArray(meta.items) && meta.items.length > 0) {
+          items = meta.items;
+        }
+      } catch (_) {}
+    }
+
+    if (movementType === "Transfer") {
+      if (r.movementNumber.startsWith("ISS-")) movementType = "ProductionIssue";
+      else if (r.movementNumber.startsWith("RET-")) movementType = "ProductionReturn";
+      else if (r.movementNumber.startsWith("CUT-")) movementType = "CuttingReturn";
+      else if (r.movementNumber.startsWith("WOF-")) movementType = "WriteOff";
+    }
+
+    if (items.length === 0 && r.materialName) {
+      items = [
+        {
+          id: `item-${r.id}`,
+          sku: r.materialSku || "",
+          name: r.materialName || "Material",
+          sheetFormat: r.sheetFormat || "",
+          quantity: Number(r.quantity) || 0,
+          receivedQty: Number(r.receivedQty) || Number(r.quantity) || 0,
+          unit: r.unit || "sheets",
+          notes: parsedNote,
+        },
+      ];
+    }
+
+    return {
+      ...r,
+      id: r.movementNumber || r.id,
+      date: r.movementDate ? new Date(r.movementDate).toISOString().split("T")[0] : "",
+      from: r.fromLocationName,
+      to: r.toLocationName,
+      material: r.materialName,
+      reason: parsedNote,
+      movementType,
+      pressMachine: pressMachine || (movementType === "ProductionIssue" ? r.toLocationName : r.fromLocationName),
+      items,
+    };
   });
 }
 
 export async function upsertWarehouseMovement(payload: any, companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  const movementNumber = payload.movementNumber || payload.id || `MOV-${Date.now().toString().slice(-4)}`;
+  const rawCandidate = (payload.movementNumber || payload.id || "").trim();
+  const isDraft =
+    !rawCandidate ||
+    rawCandidate.startsWith("draft-") ||
+    rawCandidate.startsWith("new-") ||
+    rawCandidate.startsWith("tab-") ||
+    rawCandidate.startsWith("ISSUE-NEW-") ||
+    rawCandidate.startsWith("WOFF-NEW-") ||
+    rawCandidate.includes("NEW") ||
+    rawCandidate.includes("Qoralama") ||
+    rawCandidate.includes("Yangi") ||
+    rawCandidate === "NEW";
+
+  const movementType = payload.movementType || "Transfer";
+  let prefix: "ISS" | "RET" | "WOF" | "MOV" = "MOV";
+  if (movementType === "ProductionIssue") prefix = "ISS";
+  else if (movementType === "ProductionReturn" || movementType === "CuttingReturn") prefix = "RET";
+  else if (movementType === "WriteOff") prefix = "WOF";
+
+  const movementNumber = isDraft ? await getNextMovementNumber(prefix, companyCode) : rawCandidate;
   const status = payload.status || "Pending";
   const qty = Number(payload.quantity) || 0;
   const receivedQty = Number(payload.receivedQty) || (status === "Completed" ? qty : 0);
+  const itemsList: any[] = Array.isArray(payload.items) && payload.items.length > 0 ? payload.items : [
+    {
+      sku: payload.materialSku,
+      name: payload.materialName || payload.material || "Material",
+      sheetFormat: payload.sheetFormat,
+      quantity: qty,
+      receivedQty: receivedQty,
+      unit: payload.unit || "sheets",
+    }
+  ];
 
   const values = {
     companyId,
@@ -513,13 +681,18 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
     fromLocationName: payload.fromLocationName || payload.from || "A ombor",
     toLocationName: payload.toLocationName || payload.to || "B ombor",
     itemId: payload.itemId || null,
-    materialSku: payload.materialSku || null,
-    materialName: payload.materialName || payload.material || "Material",
-    sheetFormat: payload.sheetFormat || null,
+    materialSku: payload.materialSku || itemsList[0]?.sku || null,
+    materialName: payload.materialName || payload.material || itemsList.map((i: any) => i.name).join(", ") || "Material",
+    sheetFormat: payload.sheetFormat || itemsList[0]?.sheetFormat || null,
     quantity: qty.toString(),
     receivedQty: receivedQty.toString(),
-    unit: payload.unit || "sheets",
-    reason: payload.reason || null,
+    unit: payload.unit || itemsList[0]?.unit || "sheets",
+    reason: JSON.stringify({
+      note: typeof payload.reason === "string" ? payload.reason : "",
+      movementType,
+      pressMachine: payload.pressMachine || "",
+      items: itemsList,
+    }),
     status: status as any,
     operator: payload.operator || null,
     workOrderId: payload.workOrderId || null,
@@ -535,28 +708,62 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
     })
     .returning();
 
-  // Agar yakunlangan bo'lsa (Completed), A ombordan ayirish va B omborga qo'shish
-  if (status === "Completed" && values.materialSku) {
-    await applyStockBalanceDelta({
-      companyId,
-      locationName: values.fromLocationName,
-      sku: values.materialSku,
-      name: values.materialName,
-      deltaQty: -qty,
-      unit: values.unit,
-    });
-    await applyStockBalanceDelta({
-      companyId,
-      locationName: values.toLocationName,
-      sku: values.materialSku,
-      name: values.materialName,
-      deltaQty: receivedQty,
-      unit: values.unit,
-      sheetFormat: values.sheetFormat,
-    });
+  // Ombor balansi deltalarini hisoblash
+  if (status === "Completed") {
+    for (const line of itemsList) {
+      const lineQty = Number(line.quantity) || 0;
+      const lineRcvQty = Number(line.receivedQty) || lineQty;
+      const sku = line.sku || values.materialSku;
+      const name = line.name || values.materialName;
+      const unit = line.unit || values.unit;
+
+      if (!sku) continue;
+
+      if (movementType === "Transfer") {
+        await applyStockBalanceDelta({
+          companyId,
+          locationName: values.fromLocationName,
+          sku,
+          name,
+          deltaQty: -lineQty,
+          unit,
+        });
+        await applyStockBalanceDelta({
+          companyId,
+          locationName: values.toLocationName,
+          sku,
+          name,
+          deltaQty: lineRcvQty,
+          unit,
+          sheetFormat: line.sheetFormat,
+        });
+      } else if (movementType === "ProductionIssue" || movementType === "WriteOff") {
+        await applyStockBalanceDelta({
+          companyId,
+          locationName: values.fromLocationName,
+          sku,
+          name,
+          deltaQty: -lineQty,
+          unit,
+        });
+      } else if (movementType === "ProductionReturn" || movementType === "CuttingReturn") {
+        await applyStockBalanceDelta({
+          companyId,
+          locationName: values.toLocationName,
+          sku,
+          name,
+          deltaQty: lineRcvQty,
+          unit,
+          sheetFormat: line.sheetFormat,
+        });
+      }
+    }
   }
 
-  return movementRecord;
+  return {
+    ...movementRecord,
+    movementNumber: movementRecord.movementNumber,
+  };
 }
 
 // ─── 6. Inventory Counts (Inventarizatsiya) ────────────────────────────────────
@@ -575,10 +782,17 @@ export async function upsertInventoryCount(payload: any, companyCode: string = "
   const systemQty = Number(payload.systemQty) || 0;
   const actualQty = Number(payload.actualQty) || 0;
   const variance = actualQty - systemQty;
-
-  let computedStatus: "Matched" | "Surplus" | "Shortage" = "Matched";
-  if (variance > 0) computedStatus = "Surplus";
-  else if (variance < 0) computedStatus = "Shortage";
+  const status = payload.status || (variance === 0 ? "Matched" : variance > 0 ? "Surplus" : "Shortage");
+  const itemsList: any[] = Array.isArray(payload.items) && payload.items.length > 0 ? payload.items : [
+    {
+      sku: payload.materialSku,
+      name: payload.materialName || payload.material || "Material",
+      systemQty: systemQty,
+      actualQty: actualQty,
+      variance: variance,
+      unit: payload.unit || "sheets",
+    }
+  ];
 
   const values = {
     companyId,
@@ -587,13 +801,13 @@ export async function upsertInventoryCount(payload: any, companyCode: string = "
     countNumber,
     countDate: payload.countDate || payload.date ? new Date(payload.countDate || payload.date) : new Date(),
     itemId: payload.itemId || null,
-    materialSku: payload.materialSku || null,
-    materialName: payload.materialName || payload.material || "Material",
+    materialSku: payload.materialSku || itemsList[0]?.sku || null,
+    materialName: payload.materialName || payload.material || itemsList.map((i: any) => i.name).join(", ") || "Material",
     systemQty: systemQty.toString(),
     actualQty: actualQty.toString(),
     variance: variance.toString(),
-    unit: payload.unit || "sheets",
-    status: (payload.status as any) || computedStatus,
+    unit: payload.unit || itemsList[0]?.unit || "sheets",
+    status: status as any,
     countedBy: payload.countedBy || null,
     notes: payload.notes || null,
     updatedAt: new Date(),
@@ -607,6 +821,27 @@ export async function upsertInventoryCount(payload: any, companyCode: string = "
       set: values,
     })
     .returning();
+
+  // Agar yakunlangan bo'lsa (Completed), ombor balansini haqiqiy qoldiqqa tenglashtirish (applyStockBalanceDelta)
+  if (status === "Completed") {
+    for (const item of itemsList) {
+      const itemVariance = Number(item.variance) || (Number(item.actualQty) - Number(item.systemQty)) || 0;
+      const sku = item.sku || values.materialSku;
+      const name = item.name || values.materialName;
+      const unit = item.unit || values.unit;
+
+      if (sku && itemVariance !== 0) {
+        await applyStockBalanceDelta({
+          companyId,
+          locationName: values.locationName,
+          sku,
+          name,
+          deltaQty: itemVariance,
+          unit,
+        });
+      }
+    }
+  }
 
   return record;
 }

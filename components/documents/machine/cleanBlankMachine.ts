@@ -51,12 +51,16 @@ export function getCleanBlankMachine(
 
   return {
     id: generatedId,
+    companyId: initData?.companyId || undefined,
+    branchId: initData?.branchId || undefined,
+    departmentId: initData?.departmentId || undefined,
     name: initData?.name || "",
     code: initData?.code || "MAC-0001",
     manufacturer: initData?.manufacturer || "",
     country: initData?.country || "",
     year: initData?.year || new Date().getFullYear(),
     serialNo: initData?.serialNo || "",
+    imageUrl: initData?.imageUrl || undefined,
     department,
     category,
     location: initData?.location || "",

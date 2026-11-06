@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useMemo } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
   DataEditor,
   GridCell,
@@ -10,6 +10,7 @@ import {
   GridSelection,
   CompactSelection,
   GridColumnIcon,
+  GridMouseEventArgs,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
@@ -111,6 +112,7 @@ export function CrmGrid({ type }: CrmGridProps) {
       );
       return {
         ...c,
+        image: c.logoUrl || "",
         balance: settlement ? settlement.closingBalance : 0,
       };
     });
@@ -153,6 +155,7 @@ export function CrmGrid({ type }: CrmGridProps) {
 
     // Default: "customers"
     const cols: GridColumn[] = [
+      { id: "image", title: "Rasm", width: 56, icon: GridColumnIcon.HeaderImage },
       { id: "id", title: "Cust ID", width: 95, icon: GridColumnIcon.HeaderReference },
       { id: "name", title: "Company Name", width: 230, icon: GridColumnIcon.HeaderString },
       { id: "tin", title: "STIR / INN", width: 110, icon: GridColumnIcon.HeaderCode },
@@ -193,6 +196,73 @@ export function CrmGrid({ type }: CrmGridProps) {
     updateGridStats(selectedRowsCount, filteredRows.length, coords);
   }, [selection, filteredRows.length, columns, updateGridStats]);
 
+  const mouseCoordsRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const getCursorCardPosition = useCallback((clientX: number, clientY: number) => {
+    const cardWidth = 340;
+    const cardHeight = 340;
+    let x = clientX + 16;
+    let y = clientY + 12;
+
+    if (typeof window !== "undefined") {
+      if (x + cardWidth > window.innerWidth - 16) {
+        x = clientX - cardWidth - 16;
+      }
+      if (x < 16) x = 16;
+
+      if (y + cardHeight > window.innerHeight - 16) {
+        y = clientY - cardHeight - 12;
+      }
+      if (y < 16) y = 16;
+    }
+
+    return { x, y };
+  }, []);
+
+  const [hoveredPreview, setHoveredPreview] = useState<{
+    url: string;
+    name?: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const onItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      if (args.kind === "cell") {
+        const [col, row] = args.location;
+        const column = columns[col];
+        if (column?.id === "image" || column?.id === "logoUrl") {
+          const rowData: any = filteredRows[row];
+          const photo = String(rowData?.logoUrl || rowData?.image || "").trim();
+          if (photo) {
+            let clientX = mouseCoordsRef.current.x;
+            let clientY = mouseCoordsRef.current.y;
+            if (clientX === 0 && clientY === 0 && typeof document !== "undefined") {
+              const container = document.getElementById("crm-grid-root");
+              const rect = container?.getBoundingClientRect();
+              if (rect) {
+                clientX = rect.left + ((args as any).localEventX ?? 20);
+                clientY = rect.top + ((args as any).localEventY ?? 20);
+              }
+            }
+
+            const { x, y } = getCursorCardPosition(clientX, clientY);
+
+            setHoveredPreview({
+              url: photo,
+              name: rowData?.name || rowData?.company,
+              x,
+              y,
+            });
+            return;
+          }
+        }
+      }
+      setHoveredPreview(null);
+    },
+    [columns, filteredRows, getCursorCardPosition]
+  );
+
   const getContent = useCallback(
     (cell: Item): GridCell => {
       const [col, row] = cell;
@@ -204,6 +274,18 @@ export function CrmGrid({ type }: CrmGridProps) {
       const column = columns[col];
       const colId = column?.id || "";
       const val = rowData[colId];
+
+      if (colId === "image" || colId === "logoUrl") {
+        const photo = String(rowData.logoUrl || rowData.image || "").trim();
+        return {
+          kind: GridCellKind.Image,
+          data: photo ? [photo] : [],
+          displayData: photo ? [photo] : [],
+          allowOverlay: false,
+          rounding: 4,
+          contentAlign: "center",
+        };
+      }
 
       if (colId === "id" || colId === "code" || colId === "tin" || colId === "contractNo") {
         return {
@@ -330,6 +412,7 @@ export function CrmGrid({ type }: CrmGridProps) {
       });
     } else {
       const custRecord: CrmCustomerRecord = {
+        ...rowData,
         id: rowData.id,
         name: rowData.name,
         tin: rowData.tin,
@@ -341,6 +424,7 @@ export function CrmGrid({ type }: CrmGridProps) {
         paymentTerms: rowData.paymentTerms,
         manager: rowData.manager,
         status: rowData.status,
+        logoUrl: rowData.logoUrl,
       };
       openTab({
         id: custRecord.id,
@@ -646,7 +730,18 @@ export function CrmGrid({ type }: CrmGridProps) {
             </div>
 
             {/* Grid */}
-            <div className="flex-1 w-full h-full relative" id="crm-grid-root">
+            <div
+              className="flex-1 w-full h-full relative"
+              id="crm-grid-root"
+              onMouseMove={(e) => {
+                mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
+                if (hoveredPreview) {
+                  const { x, y } = getCursorCardPosition(e.clientX, e.clientY);
+                  setHoveredPreview((prev) => (prev ? { ...prev, x, y } : null));
+                }
+              }}
+              onMouseLeave={() => setHoveredPreview(null)}
+            >
               <DataEditor
                 getCellContent={getContent}
                 columns={columns}
@@ -659,10 +754,30 @@ export function CrmGrid({ type }: CrmGridProps) {
                 gridSelection={selection}
                 onGridSelectionChange={setSelection}
                 onCellActivated={(cell) => handleOpenRow(cell[1])}
+                onItemHovered={onItemHovered}
                 rowHeight={30}
                 headerHeight={32}
                 theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
               />
+
+              {/* Hover Image Preview (Full format image only) */}
+              {hoveredPreview && (
+                <div
+                  style={{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }}
+                  className="fixed z-50 pointer-events-none rounded-lg bg-popover/95 backdrop-blur-xs border border-border shadow-2xl p-1.5 animate-in fade-in-0 zoom-in-95 duration-75 max-w-[340px] max-h-[340px] flex flex-col items-center justify-center overflow-hidden"
+                >
+                  <img
+                    src={hoveredPreview.url}
+                    alt={hoveredPreview.name || "Mijoz logotipi"}
+                    className="max-w-[320px] max-h-[300px] w-auto h-auto object-contain rounded select-none bg-background p-1"
+                  />
+                  {hoveredPreview.name && (
+                    <div className="mt-1 text-[11px] font-semibold text-foreground truncate max-w-[300px] text-center">
+                      {hoveredPreview.name}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </ContextMenuTrigger>

@@ -236,6 +236,59 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   };
 
   const handleCreateNew = () => {
+    if (type === "production-issue") {
+      const draftId = `draft-iss-${Date.now()}`;
+      openTab({
+        id: draftId,
+        title: "Sexga berish (Qoralama)",
+        type: "warehouse-production-issue",
+        module: "warehouse",
+        isUnsaved: false,
+        documentData: {
+          id: draftId,
+          date: new Date().toISOString().split("T")[0],
+          operationType: "ProductionIssue",
+          status: "Pending",
+          items: [],
+        },
+      });
+      return;
+    }
+    if (type === "write-offs") {
+      const draftId = `draft-woff-${Date.now()}`;
+      openTab({
+        id: draftId,
+        title: "Hisobdan chiqarish (Brak)",
+        type: "warehouse-write-off",
+        module: "warehouse",
+        isUnsaved: false,
+        documentData: {
+          id: draftId,
+          date: new Date().toISOString().split("T")[0],
+          reasonCategory: "SetupWaste",
+          status: "Pending",
+          items: [],
+        },
+      });
+      return;
+    }
+    if (type === "inventory") {
+      const draftId = `draft-ic-${Date.now()}`;
+      openTab({
+        id: draftId,
+        title: "Inventarizatsiya (Qoralama)",
+        type: "warehouse-inventory",
+        module: "warehouse",
+        isUnsaved: false,
+        documentData: {
+          id: draftId,
+          date: new Date().toISOString().split("T")[0],
+          status: "Draft",
+          items: [],
+        },
+      });
+      return;
+    }
     if (type === "receipts") {
       const draftId = `draft-rcv-${Date.now()}`;
       openTab({
@@ -384,6 +437,36 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   };
 
   const handleOpenSheet = (record: any) => {
+    if (type === "production-issue") {
+      openTab({
+        id: record.id,
+        title: `${record.id}: ${record.movementType === "ProductionIssue" ? "Sexga berish" : "Sexdan qaytarish"}`,
+        type: "warehouse-production-issue",
+        module: "warehouse",
+        documentData: record,
+      });
+      return;
+    }
+    if (type === "write-offs") {
+      openTab({
+        id: record.id,
+        title: `${record.id}: Hisobdan chiqarish`,
+        type: "warehouse-write-off",
+        module: "warehouse",
+        documentData: record,
+      });
+      return;
+    }
+    if (type === "inventory") {
+      openTab({
+        id: record.id,
+        title: `${record.id}: Inventarizatsiya`,
+        type: "warehouse-inventory",
+        module: "warehouse",
+        documentData: record,
+      });
+      return;
+    }
     if (type === "requirements") {
       openTab({
         id: record.workOrderId,
@@ -517,6 +600,37 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
   const columns = useMemo(() => {
     let cols: GridColumn[] = [];
+    if (type === 'production-issue') {
+      cols = [
+        { id: 'id', title: 'Hujjat №', width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: 'date', title: 'Sana', width: 105, icon: GridColumnIcon.HeaderDate },
+        { id: 'movementType', title: 'Amal turi', width: 150, icon: GridColumnIcon.HeaderLookup },
+        { id: 'material', title: 'Xomashyo nomi', width: 260, icon: GridColumnIcon.HeaderString },
+        { id: 'quantity', title: 'Miqdor', width: 100, icon: GridColumnIcon.HeaderNumber },
+        { id: 'unit', title: 'Birlik', width: 75, icon: GridColumnIcon.HeaderString },
+        { id: 'from', title: 'Chiquvchi ombor', width: 180, icon: GridColumnIcon.HeaderString },
+        { id: 'to', title: 'Qabul qiluvchi sex', width: 180, icon: GridColumnIcon.HeaderString },
+        { id: 'reason', title: 'Buyurtma / Izoh', width: 240, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: 'operator', title: 'Mas\'ul shaxs', width: 140, icon: GridColumnIcon.HeaderString },
+        { id: 'status', title: 'Holati', width: 110, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+      return cols;
+    }
+    if (type === 'write-offs') {
+      cols = [
+        { id: 'id', title: 'Akt №', width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: 'date', title: 'Sana', width: 105, icon: GridColumnIcon.HeaderDate },
+        { id: 'reasonCategory', title: 'Brak toifasi', width: 160, icon: GridColumnIcon.HeaderLookup },
+        { id: 'material', title: 'Hisobdan chiqarilgan material', width: 270, icon: GridColumnIcon.HeaderString },
+        { id: 'quantity', title: 'Brak miqdori', width: 110, icon: GridColumnIcon.HeaderNumber },
+        { id: 'unit', title: 'Birlik', width: 75, icon: GridColumnIcon.HeaderString },
+        { id: 'from', title: 'Ombor', width: 180, icon: GridColumnIcon.HeaderString },
+        { id: 'reason', title: 'Nuqson sababi', width: 240, icon: GridColumnIcon.HeaderTextTemplate },
+        { id: 'operator', title: 'Komissiya / Mas\'ul', width: 140, icon: GridColumnIcon.HeaderString },
+        { id: 'status', title: 'Holati', width: 110, icon: GridColumnIcon.HeaderSingleValue },
+      ];
+      return cols;
+    }
     if (type === 'finished-goods') {
       cols = [
         { id: 'id', title: 'Partiya / WO №', width: 125, icon: GridColumnIcon.HeaderReference },
@@ -652,7 +766,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       loadWarehouseShipments();
     } else if (type === 'stock-balance') {
       loadWarehouseStock();
-    } else if (type === 'movements') {
+    } else if (type === 'movements' || type === 'production-issue' || type === 'write-offs') {
       loadWarehouseMovements();
     } else if (type === 'receipts') {
       loadWarehouseReceipts();
@@ -711,7 +825,30 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     } else if (type === 'stock-balance') {
       setRowsData(warehouseStock);
     } else if (type === 'movements') {
-      setRowsData(warehouseMovements);
+      setRowsData(
+        warehouseMovements.filter(
+          (m) =>
+            m.movementType === 'Transfer' ||
+            (!m.movementType && !m.id?.startsWith('ISS-') && !m.id?.startsWith('RET-') && !m.id?.startsWith('WOF-'))
+        )
+      );
+    } else if (type === 'production-issue') {
+      setRowsData(
+        warehouseMovements.filter(
+          (m) =>
+            m.movementType === 'ProductionIssue' ||
+            m.movementType === 'ProductionReturn' ||
+            m.movementType === 'CuttingReturn' ||
+            m.id?.startsWith('ISS-') ||
+            m.id?.startsWith('RET-')
+        )
+      );
+    } else if (type === 'write-offs') {
+      setRowsData(
+        warehouseMovements.filter(
+          (m) => m.movementType === 'WriteOff' || m.id?.startsWith('WOF-')
+        )
+      );
     } else if (type === 'receipts') {
       setRowsData(warehouseReceipts);
     } else if (type === 'inventory') {
@@ -1181,6 +1318,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     "receipts": "receipts",
     "shipments": "shipments",
     "locations": "locations",
+    "production-issue": "sexga berish",
+    "write-offs": "hisobdan chiqarish",
   };
 
   return (

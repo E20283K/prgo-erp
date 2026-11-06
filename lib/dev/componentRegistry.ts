@@ -132,6 +132,15 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     category: "registry-grid",
     description: "Warehouse stock balance, raw materials, and barcode movements.",
   },
+  "grid-warehouse-wms": {
+    componentName: "WarehouseWmsView",
+    fileName: "WarehouseWmsView.tsx",
+    relativePath: "components/documents/warehouse/wms/WarehouseWmsView.tsx",
+    linesOfCode: 650,
+    featureModule: "warehouse",
+    category: "registry-grid",
+    description: "Konva.js 2D interaktiv ombor xaritasi, stelaj va kataklar boshqaruvi (WMS).",
+  },
   "grid-sales": {
     componentName: "SalesGrid",
     fileName: "SalesGrid.tsx",
@@ -344,6 +353,33 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
     category: "document-editor",
     description: "Chiqim yuk xati (Rasxodnaya nakladnaya).",
   },
+  "doc-warehouse-production-issue": {
+    componentName: "WarehouseProductionIssueDetail",
+    fileName: "WarehouseProductionIssueDetail.tsx",
+    relativePath: "components/documents/WarehouseProductionIssueDetail.tsx",
+    linesOfCode: 650,
+    featureModule: "warehouse",
+    category: "document-editor",
+    description: "Sexga xomashyo berish va sexdan qoldiqni qaytarish hujjati.",
+  },
+  "doc-warehouse-write-off": {
+    componentName: "WarehouseWriteOffDetail",
+    fileName: "WarehouseWriteOffDetail.tsx",
+    relativePath: "components/documents/WarehouseWriteOffDetail.tsx",
+    linesOfCode: 600,
+    featureModule: "warehouse",
+    category: "document-editor",
+    description: "Brak va chiqindini hisobdan chiqarish dalolatnomasi (Akt spisaniya).",
+  },
+  "doc-warehouse-inventory": {
+    componentName: "WarehouseInventoryDetail",
+    fileName: "WarehouseInventoryDetail.tsx",
+    relativePath: "components/documents/WarehouseInventoryDetail.tsx",
+    linesOfCode: 580,
+    featureModule: "warehouse",
+    category: "document-editor",
+    description: "1C uslubidagi to'liq ombor inventarizatsiyasi va qoldiqni tenglashtirish hujjati.",
+  },
   "doc-warehouse-movement": {
     componentName: "WarehouseMovementDetail",
     fileName: "WarehouseMovementDetail.tsx",
@@ -438,7 +474,7 @@ export function resolveActiveComponent(
       else if (tabId.includes("tooling")) meta = COMPONENT_REGISTRY["grid-production-tooling"];
       else meta = COMPONENT_REGISTRY["grid-production-work-orders"];
     } else if (mod === "warehouse") {
-      meta = COMPONENT_REGISTRY["grid-warehouse"];
+      meta = COMPONENT_REGISTRY[tabId.includes("wms") ? "grid-warehouse-wms" : "grid-warehouse"];
     } else if (mod === "sales") {
       meta = COMPONENT_REGISTRY["grid-sales"];
     } else if (mod === "finance") {

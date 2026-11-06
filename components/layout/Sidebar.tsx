@@ -38,6 +38,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -53,6 +54,7 @@ import {
   SidebarMenuSubItem,
   SidebarRail,
   SidebarHeader,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   Collapsible,
@@ -60,6 +62,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Kbd } from "@/components/ui/kbd";
+import { cn } from "@/lib/utils";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -101,6 +104,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     activeTabId,
     currentUser,
   } = useWorkspaceStore();
+
+  const { state, isMobile } = useSidebar();
+  const isCollapsed = state === "collapsed" && !isMobile;
 
   // Filter modules based on user permissions
   const allowedModules = React.useMemo(() => {
@@ -376,6 +382,82 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     const sectionName = tMod.has(section.id)
                       ? tMod(section.id)
                       : section.label;
+                    const isSectionActive = section.items.some(
+                      (i) => i.id === currentSubModule,
+                    );
+
+                    if (isCollapsed) {
+                      return (
+                        <SidebarMenuItem key={section.id}>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <SidebarMenuButton
+                                  isActive={isSectionActive}
+                                  className="cursor-pointer"
+                                  title={sectionName}
+                                />
+                              }
+                            >
+                              {SectionIcon && (
+                                <SectionIcon className="size-4 shrink-0 text-muted-foreground" />
+                              )}
+                              <span className="sr-only">{sectionName}</span>
+                            </DropdownMenuTrigger>
+
+                            <DropdownMenuContent
+                              side="right"
+                              align="start"
+                              sideOffset={8}
+                              className="w-56 rounded-md p-1 bg-popover border border-border shadow-md"
+                            >
+                              <DropdownMenuGroup>
+                                <DropdownMenuLabel className="px-2 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                  {sectionName}
+                                </DropdownMenuLabel>
+                                <DropdownMenuSeparator className="my-1" />
+                                {section.items.map((item) => {
+                                  const ItemIcon = item.icon;
+                                  const itemName = tMod.has(item.id)
+                                    ? tMod(item.id)
+                                    : item.label;
+                                  const isItemActive =
+                                    currentSubModule === item.id;
+                                  return (
+                                    <DropdownMenuItem
+                                      key={item.id}
+                                      onClick={() =>
+                                        handleSubItemClick(item.id, item.label)
+                                      }
+                                      className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm cursor-pointer"
+                                    >
+                                      <div className="flex size-4 items-center justify-center shrink-0">
+                                        {ItemIcon && (
+                                          <ItemIcon className="size-3.5 text-muted-foreground shrink-0" />
+                                        )}
+                                      </div>
+                                      <span
+                                        className={cn(
+                                          "flex-1 truncate",
+                                          isItemActive &&
+                                            "font-semibold text-foreground",
+                                        )}
+                                      >
+                                        {itemName}
+                                      </span>
+                                      {isItemActive && (
+                                        <Check className="size-3.5 text-primary shrink-0 ml-auto" />
+                                      )}
+                                    </DropdownMenuItem>
+                                  );
+                                })}
+                              </DropdownMenuGroup>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </SidebarMenuItem>
+                      );
+                    }
+
                     return (
                       <Collapsible
                         key={section.id}
@@ -387,9 +469,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                             render={
                               <SidebarMenuButton
                                 tooltip={sectionName}
-                                isActive={section.items.some(
-                                  (i) => i.id === currentSubModule,
-                                )}
+                                isActive={isSectionActive}
                               />
                             }
                           >

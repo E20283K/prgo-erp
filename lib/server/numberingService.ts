@@ -2,6 +2,8 @@ import { db } from "@/db";
 import {
   warehouseShipments,
   warehouseReceipts,
+  warehouseMovements,
+  warehouseInventoryCounts,
   warehouseStockBalances,
   productionSpecifications,
   clients,
@@ -192,4 +194,55 @@ export async function getNextMaterialSku(
 
   const nextNum = maxNum + 1;
   return `MAT-${String(nextNum).padStart(padLength, "0")}`;
+}
+
+/**
+ * Ombor Harakatlari (Sexga berish, qaytish, brak, siljitish) uchun rasmiy tartib raqami:
+ * - ISS-26-XXXX (Sexga xomashyo berish)
+ * - RET-26-XXXX (Sexdan xomashyo qaytishi)
+ * - WOF-26-XXXX (Hisobdan chiqarish / Brak)
+ * - MOV-26-XXXX (Ichki omborlararo ko'chirish)
+ */
+export async function getNextMovementNumber(
+  prefix: "ISS" | "RET" | "WOF" | "MOV" = "MOV",
+  companyCode: string = "PRINTGOO"
+): Promise<string> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const yearSuffix = getCurrentYearSuffix();
+  const searchPattern = `${prefix}-${yearSuffix}-%`;
+
+  const rows = await db
+    .select({ num: warehouseMovements.movementNumber })
+    .from(warehouseMovements)
+    .where(
+      and(
+        eq(warehouseMovements.companyId, companyId),
+        ilike(warehouseMovements.movementNumber, searchPattern)
+      )
+    );
+
+  return calculateNextNumber(prefix, rows.map((r) => r.num), yearSuffix);
+}
+
+/**
+ * Ombor Inventarizatsiyasi uchun rasmiy tartib raqami: INV-26-XXXX
+ */
+export async function getNextInventoryCountNumber(
+  companyCode: string = "PRINTGOO"
+): Promise<string> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const yearSuffix = getCurrentYearSuffix();
+  const searchPattern = `INV-${yearSuffix}-%`;
+
+  const rows = await db
+    .select({ num: warehouseInventoryCounts.countNumber })
+    .from(warehouseInventoryCounts)
+    .where(
+      and(
+        eq(warehouseInventoryCounts.companyId, companyId),
+        ilike(warehouseInventoryCounts.countNumber, searchPattern)
+      )
+    );
+
+  return calculateNextNumber("INV", rows.map((r) => r.num), yearSuffix);
 }

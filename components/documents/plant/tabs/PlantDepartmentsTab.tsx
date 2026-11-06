@@ -12,6 +12,7 @@ import {
   Cpu,
   ExternalLink,
   Users,
+  Plus,
 } from "lucide-react";
 
 interface PlantDepartmentsTabProps {
@@ -91,12 +92,18 @@ export function PlantDepartmentsTab({ plant }: PlantDepartmentsTabProps) {
 
   // 4. Filter real machines assigned to this plant
   const assignedMachines = useMemo(() => {
+    const pId = (plant.id || "").toLowerCase();
     const pName = (plant.name || "").toLowerCase();
     const pShort = (plant.shortName || "").toLowerCase();
     const pCode = (plant.code || "").toLowerCase();
     const isMain = Boolean(plant.isMain || plant.id === "PLT-001" || pName.includes("bosh"));
 
     return machines.filter((m) => {
+      // 1. Direct branchId match
+      if (m.branchId && (m.branchId === plant.id || m.branchId.toLowerCase() === pId || m.branchId.toLowerCase() === pCode)) {
+        return true;
+      }
+      // 2. Location string match
       const loc = (m.location || "").toLowerCase();
       if (loc) {
         if (
@@ -108,13 +115,29 @@ export function PlantDepartmentsTab({ plant }: PlantDepartmentsTabProps) {
           return true;
         }
       }
-      // If main factory, also match default / unassigned machines
-      if (isMain && (!m.location || loc.includes("tashkent") || loc.includes("main") || loc.includes("bosh"))) {
+      // 3. Fallback for main factory if machine has no branchId or location
+      if (isMain && !m.branchId && (!m.location || loc.includes("tashkent") || loc.includes("main") || loc.includes("bosh"))) {
         return true;
       }
       return false;
     });
   }, [machines, plant]);
+
+  const handleCreateMachineForPlant = () => {
+    const newMachineId = `machine-new-${Date.now()}`;
+    openTab({
+      id: newMachineId,
+      title: "Yangi uskuna",
+      type: "machine-detail",
+      module: "production",
+      documentData: {
+        isNew: true,
+        companyId: plant.companyId,
+        branchId: plant.id,
+        location: plant.name,
+      },
+    });
+  };
 
   const handleOpenDepartmentDetail = (dept: DepartmentRecord) => {
     openTab({
@@ -257,16 +280,27 @@ export function PlantDepartmentsTab({ plant }: PlantDepartmentsTabProps) {
             </Badge>
           </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleOpenProductionModule}
-            className="h-7 text-xs px-2.5 gap-1.5"
-          >
-            <ExternalLink className="w-3.5 h-3.5" />
-            <span>Mashinalar reyestri</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleCreateMachineForPlant}
+              className="h-7 text-xs px-2.5 gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Yangi uskuna biriktirish</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleOpenProductionModule}
+              className="h-7 text-xs px-2.5 gap-1.5"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Mashinalar reyestri</span>
+            </Button>
+          </div>
         </div>
 
         {assignedMachines.length === 0 ? (
@@ -274,16 +308,27 @@ export function PlantDepartmentsTab({ plant }: PlantDepartmentsTabProps) {
             <p className="text-xs text-muted-foreground">
               Ushbu korxonaga biriktirilgan uskunalar mavjud emas.
             </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleOpenProductionModule}
-              className="h-7 text-xs gap-1"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>Production modulida ro&apos;yxatdan o&apos;tkazish</span>
-            </Button>
+            <div className="flex items-center justify-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleCreateMachineForPlant}
+                className="h-7 text-xs gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Yangi uskuna biriktirish</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleOpenProductionModule}
+                className="h-7 text-xs gap-1"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Mashinalar reyestri</span>
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">

@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { companies, branches } from "./core";
+import { departments } from "./hr";
 import { clients } from "./crm";
 
 // ─── Enums ─────────────────────────────────────────────────────────────────────
@@ -200,6 +201,7 @@ export const productionMachines = pgTable(
       .notNull()
       .references(() => companies.id, { onDelete: "restrict" }),
     branchId: uuid("branch_id").references(() => branches.id, { onDelete: "set null" }),
+    departmentId: uuid("department_id").references(() => departments.id, { onDelete: "set null" }),
 
     code: varchar("code", { length: 64 }).notNull(), // Masalan: "M-OFF-106"
     name: varchar("name", { length: 255 }).notNull(), // Masalan: "Heidelberg Speedmaster XL 106"
@@ -212,6 +214,7 @@ export const productionMachines = pgTable(
     country: varchar("country", { length: 128 }),
     year: integer("year"),
     serialNo: varchar("serial_no", { length: 128 }),
+    imageUrl: text("image_url"),
     location: varchar("location", { length: 255 }),
     leadOperator: varchar("lead_operator", { length: 128 }),
     assistantOperator: varchar("assistant_operator", { length: 128 }),
@@ -512,6 +515,10 @@ export const productionMachinesRelations = relations(productionMachines, ({ one 
   branch: one(branches, {
     fields: [productionMachines.branchId],
     references: [branches.id],
+  }),
+  departmentRel: one(departments, {
+    fields: [productionMachines.departmentId],
+    references: [departments.id],
   }),
 }));
 

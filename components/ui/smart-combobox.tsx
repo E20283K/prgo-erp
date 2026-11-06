@@ -1,14 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { cn } from "cn";
-import { Check, ChevronsUpDown, Plus } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Check, ChevronsUpDown, Plus, Search, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
   CommandEmpty,
   CommandGroup,
-  CommandInput,
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
@@ -17,18 +16,21 @@ import { Button } from "@/components/ui/button";
 export interface ComboboxItem {
   value: string;
   label: string;
+  code?: string;
   description?: string;
   badge?: string;
+  group?: string;
   icon?: React.ComponentType<{ className?: string }>;
 }
 
-interface SmartComboboxProps {
+export interface SmartComboboxProps {
   value?: string;
   onChange: (value: string) => void;
   onAddNew?: (newValue: string) => void;
   options: (ComboboxItem | string)[];
   placeholder?: string;
   searchPlaceholder?: string;
+  emptyText?: string;
   allowCustom?: boolean;
   className?: string;
   popoverWidth?: string;
@@ -40,8 +42,9 @@ export function SmartCombobox({
   onChange,
   onAddNew,
   options,
-  placeholder = "Select or type...",
-  searchPlaceholder = "Search...",
+  placeholder = "Tanlang...",
+  searchPlaceholder = "Qidirish...",
+  emptyText = "Hech narsa topilmadi",
   allowCustom = true,
   className,
   popoverWidth,
@@ -60,13 +63,55 @@ export function SmartCombobox({
     });
   }, [options]);
 
-  const selected = normalizedOptions.find((o) => o.value.toLowerCase() === (value || "").toLowerCase());
-  const displayLabel = selected ? selected.label : value || placeholder;
+  // Robust selected item matching: by value, label, or code
+  const selected = React.useMemo(() => {
+    if (!value) return undefined;
+    const lowerVal = value.toLowerCase().trim();
+    return normalizedOptions.find(
+      (o) =>
+        o.value.toLowerCase() === lowerVal ||
+        o.label.toLowerCase() === lowerVal ||
+        (o.code && o.code.toLowerCase() === lowerVal)
+    );
+  }, [normalizedOptions, value]);
 
-  // Check if current search matches any existing option
+  const isUuid = React.useMemo(() => {
+    return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim()));
+  }, [value]);
+
+  const displayLabel = selected ? selected.label : (isUuid ? placeholder : value || placeholder);
+  const isPlaceholder = !selected && (!value || isUuid);
+
+  // Instant, responsive filtering in React (avoids cmdk prefix score drops on IDs/UUIDs)
+  const filteredOptions = React.useMemo(() => {
+    const query = searchValue.trim().toLowerCase();
+    if (!query) return normalizedOptions;
+    return normalizedOptions.filter((opt) => {
+      const labelMatch = opt.label.toLowerCase().includes(query);
+      const descMatch = opt.description?.toLowerCase().includes(query);
+      const badgeMatch = opt.badge?.toLowerCase().includes(query);
+      const codeMatch = opt.code?.toLowerCase().includes(query);
+      const valueMatch = opt.value.toLowerCase().includes(query);
+      return labelMatch || descMatch || badgeMatch || codeMatch || valueMatch;
+    });
+  }, [normalizedOptions, searchValue]);
+
+  // Group items if any item has a `group` defined
+  const groupedOptions = React.useMemo(() => {
+    const groups: Record<string, ComboboxItem[]> = {};
+    filteredOptions.forEach((opt) => {
+      const key = opt.group || "";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(opt);
+    });
+    return groups;
+  }, [filteredOptions]);
+
+  // Check if current search matches any existing option exactly
   const exactMatch = normalizedOptions.some(
-    (o) => o.value.toLowerCase() === searchValue.trim().toLowerCase() ||
-           o.label.toLowerCase() === searchValue.trim().toLowerCase()
+    (o) =>
+      o.value.toLowerCase() === searchValue.trim().toLowerCase() ||
+      o.label.toLowerCase() === searchValue.trim().toLowerCase()
   );
 
   return (
@@ -80,35 +125,149 @@ export function SmartCombobox({
             aria-expanded={open}
             disabled={disabled}
             className={cn(
-              "h-8 w-full justify-between px-2.5 font-normal text-xs bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 shadow-none hover:border-blue-400 dark:hover:border-blue-500 transition-colors",
-              !value && "text-muted-foreground",
-              disabled && "opacity-75 cursor-not-allowed hover:border-zinc-200 dark:hover:border-zinc-800",
+              "h-8 w-full justify-between px-2.5 font-normal text-xs bg-card hover:bg-accent/40 border border-input shadow-none transition-colors",
+              !selected && !value && "text-muted-foreground",
+              disabled && "opacity-60 cursor-not-allowed hover:bg-card",
               className
             )}
           />
         }
       >
-        <div className="flex items-center gap-1.5 truncate text-left flex-1 font-medium text-foreground min-w-0">
-          {selected?.icon && <selected.icon className="size-3.5 shrink-0 text-muted-foreground" />}
-          <span className="truncate">{displayLabel}</span>
+        <div className="flex items-center gap-1.5 truncate text-left flex-1 min-w-0">
+          {selected?.icon && (
+            <selected.icon className="size-3.5 shrink-0 text-primary" />
+          )}
+          <span className={cn("truncate", isPlaceholder ? "text-muted-foreground font-normal" : "font-medium text-foreground")}>
+            {displayLabel}
+          </span>
+          {selected?.code && (
+            <span className="text-[10px] font-mono px-1 py-0 rounded bg-muted border border-border text-muted-foreground shrink-0 hidden sm:inline-block">
+              {selected.code}
+            </span>
+          )}
         </div>
-        <ChevronsUpDown className="ml-1.5 h-3.5 w-3.5 shrink-0 opacity-50" />
+        <ChevronsUpDown className="ml-1.5 size-3.5 shrink-0 opacity-50" />
       </PopoverTrigger>
+
       <PopoverContent
-        className={cn("w-(--anchor-width) min-w-[220px] p-0 shadow-lg border border-border bg-popover", popoverWidth)}
+        className={cn(
+          "p-0 gap-0 border border-border bg-popover text-popover-foreground shadow-lg overflow-hidden",
+          popoverWidth || "w-72 min-w-[260px]"
+        )}
         align="start"
         sideOffset={4}
       >
-        <Command className="w-full">
-          <CommandInput
-            placeholder={searchPlaceholder}
-            value={searchValue}
-            onValueChange={setSearchValue}
-            className="h-8 text-xs"
-          />
-          <CommandList className="max-h-56">
-            <CommandEmpty className="py-2.5 px-3 text-center text-xs text-muted-foreground">
-              {allowCustom && searchValue.trim() ? (
+        <Command shouldFilter={false} className="w-full border-none p-0 bg-transparent">
+          {/* Qidiruv qatori */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-border bg-muted/20">
+            <Search className="size-3.5 text-muted-foreground shrink-0" />
+            <input
+              type="text"
+              autoFocus
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+            />
+            {searchValue && (
+              <button
+                type="button"
+                onClick={() => setSearchValue("")}
+                className="p-0.5 text-muted-foreground hover:text-foreground rounded cursor-pointer"
+                title="Tozalash"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Umumiy miqdor ko'rsatkichi */}
+          {normalizedOptions.length > 4 && (
+            <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-muted-foreground bg-muted/10 border-b border-border/40 font-mono">
+              <span>Jami: {normalizedOptions.length} ta</span>
+              {searchValue.trim() && (
+                <span>Mos keldi: {filteredOptions.length} ta</span>
+              )}
+            </div>
+          )}
+
+          <CommandList className="max-h-60 p-1 overflow-y-auto no-scrollbar">
+            {filteredOptions.length === 0 ? (
+              <CommandEmpty className="py-6 px-3 text-center text-xs text-muted-foreground">
+                {emptyText}
+              </CommandEmpty>
+            ) : (
+              Object.entries(groupedOptions).map(([groupName, items]) => (
+                <CommandGroup
+                  key={groupName || "all"}
+                  heading={groupName || undefined}
+                  className="p-0.5"
+                >
+                  {items.map((opt) => {
+                    const isSelected = selected?.value === opt.value;
+                    return (
+                      <CommandItem
+                        key={opt.value}
+                        value={opt.value}
+                        data-checked={isSelected}
+                        onSelect={() => {
+                          onChange(opt.value);
+                          setOpen(false);
+                          setSearchValue("");
+                        }}
+                        className={cn(
+                          "py-1.5 px-2 text-xs rounded cursor-pointer flex items-center justify-between gap-2 transition-colors [&>svg:last-child]:hidden",
+                          isSelected
+                            ? "bg-accent/80 font-medium text-foreground"
+                            : "hover:bg-accent/50 text-foreground"
+                        )}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {opt.icon && (
+                            <opt.icon
+                              className={cn(
+                                "size-3.5 shrink-0",
+                                isSelected ? "text-primary" : "text-muted-foreground"
+                              )}
+                            />
+                          )}
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="truncate">{opt.label}</span>
+                              {opt.code && (
+                                <span className="text-[9px] font-mono px-1 py-0 rounded bg-muted text-muted-foreground border border-border/60 shrink-0">
+                                  {opt.code}
+                                </span>
+                              )}
+                            </div>
+                            {opt.description && (
+                              <span className="text-[10px] text-muted-foreground truncate">
+                                {opt.description}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {opt.badge && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded border border-border bg-muted/60 text-muted-foreground shrink-0">
+                              {opt.badge}
+                            </span>
+                          )}
+                          {isSelected && (
+                            <Check className="size-3.5 text-primary shrink-0" />
+                          )}
+                        </div>
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              ))
+            )}
+
+            {/* Qo'lda yangi qiymat qo'shish (allowCustom true bo'lsa) */}
+            {allowCustom && searchValue.trim() && !exactMatch && (
+              <div className="p-1 border-t border-border mt-1">
                 <button
                   type="button"
                   onClick={() => {
@@ -118,74 +277,13 @@ export function SmartCombobox({
                     setOpen(false);
                     setSearchValue("");
                   }}
-                  className="flex items-center justify-center gap-1.5 w-full py-1 text-blue-600 dark:text-blue-400 font-medium hover:underline cursor-pointer"
+                  className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs text-primary font-medium hover:bg-accent/60 rounded cursor-pointer transition-colors"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Use &quot;{searchValue.trim()}&quot;</span>
+                  <Plus className="size-3.5" />
+                  <span>&quot;{searchValue.trim()}&quot; sifatida qo&apos;shish</span>
                 </button>
-              ) : (
-                "No results found."
-              )}
-            </CommandEmpty>
-
-            <CommandGroup>
-              {normalizedOptions.map((opt) => {
-                const isSelected = (value || "").toLowerCase() === opt.value.toLowerCase();
-                return (
-                  <CommandItem
-                    key={opt.value}
-                    value={`${opt.value} ${opt.label} ${opt.description || ""}`}
-                    onSelect={() => {
-                      onChange(opt.value);
-                      setOpen(false);
-                      setSearchValue("");
-                    }}
-                    className="py-1.5 px-2 text-xs cursor-pointer flex items-center justify-between"
-                  >
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        {opt.icon && <opt.icon className="size-3.5 shrink-0 text-muted-foreground" />}
-                        <span className={cn("font-medium", isSelected ? "text-blue-600 dark:text-blue-400" : "text-foreground")}>
-                          {opt.label}
-                        </span>
-                        {opt.badge && (
-                          <span className="text-[9px] px-1 py-0 rounded border border-border bg-muted/60 text-muted-foreground">
-                            {opt.badge}
-                          </span>
-                        )}
-                      </div>
-                      {opt.description && (
-                        <span className="text-[10px] text-muted-foreground line-clamp-1">{opt.description}</span>
-                      )}
-                    </div>
-                    <Check
-                      className={cn(
-                        "ml-2 h-3.5 w-3.5 text-blue-600 shrink-0",
-                        isSelected ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                  </CommandItem>
-                );
-              })}
-
-              {/* Allow direct custom creation item if typed value doesn't match */}
-              {allowCustom && searchValue.trim() && !exactMatch && (
-                <CommandItem
-                  value={searchValue.trim()}
-                  onSelect={() => {
-                    const clean = searchValue.trim();
-                    onChange(clean);
-                    onAddNew?.(clean);
-                    setOpen(false);
-                    setSearchValue("");
-                  }}
-                  className="py-1.5 px-2 text-xs cursor-pointer text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5 border-t border-border mt-1"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add custom: &quot;{searchValue.trim()}&quot;</span>
-                </CommandItem>
-              )}
-            </CommandGroup>
+              </div>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>

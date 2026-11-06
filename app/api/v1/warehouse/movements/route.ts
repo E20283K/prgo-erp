@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: result,
+      movementNumber: result.movementNumber,
     });
   } catch (error) {
     return NextResponse.json(
