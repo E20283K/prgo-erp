@@ -411,7 +411,7 @@ export async function upsertTariff(
 
   // Check if exists by ID or code
   let existing = null;
-  if (data.id && data.id.length > 20) {
+  if (data.id && data.id.length >= 32 && !data.id.startsWith("tariff-") && !data.id.startsWith("TRF-")) {
     existing = await db.query.tariffs.findFirst({
       where: and(eq(tariffs.companyId, companyId), eq(tariffs.id, data.id)),
     });
@@ -572,7 +572,7 @@ export async function deleteTariff(
   const existing = await db.query.tariffs.findFirst({
     where: and(
       eq(tariffs.companyId, companyId),
-      idOrCode.includes("-") && idOrCode.length > 25
+      idOrCode.includes("-") && idOrCode.length >= 32 && !idOrCode.startsWith("tariff-") && !idOrCode.startsWith("TRF-")
         ? eq(tariffs.id, idOrCode)
         : eq(tariffs.code, idOrCode)
     ),

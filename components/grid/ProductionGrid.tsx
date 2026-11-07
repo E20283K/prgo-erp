@@ -43,6 +43,7 @@ import {
   Trash2,
   Building,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import {
   Dialog,
@@ -57,7 +58,21 @@ import { useWorkspaceStore } from "@/store/workspaceStore";
 import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
+import type { OrderRow } from "./DataGrid";
 import { MachineQueueBoard } from "./MachineQueueBoard";
+import dynamic from "next/dynamic";
+
+const WorkOrderTimelineView = dynamic(
+  () => import("./WorkOrderTimelineView").then((m) => m.WorkOrderTimelineView),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+        Yuklanmoqda...
+      </div>
+    ),
+  }
+);
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -71,6 +86,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuGroup,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   Select,
@@ -90,7 +107,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { SmartCombobox } from "@/components/ui/smart-combobox";
+import { SmartCombobox, type ComboboxItem } from "@/components/ui/smart-combobox";
 import { formatMoney } from "@/components/documents/common/DocumentShell";
 
 interface ProductionGridProps {
@@ -160,7 +177,31 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     deleteSpecificationAsync,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
-  const [viewMode, setViewMode] = useState<"board" | "table">("board");
+  const [viewMode, setViewMode] = useState<"timeline" | "board" | "table">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("printgoo_planning_view_mode") as
+        | "timeline"
+        | "board"
+        | "table"
+        | null;
+      if (saved && ["timeline", "board", "table"].includes(saved)) {
+        return saved;
+      }
+    }
+    return "timeline";
+  });
+
+  const handleViewModeChange = useCallback(
+    (mode: "timeline" | "board" | "table") => {
+      setViewMode(mode);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("printgoo_planning_view_mode", mode);
+        } catch (e) {}
+      }
+    },
+    []
+  );
   const [specToDelete, setSpecToDelete] = useState<any | null>(null);
   const [toolModalOpen, setToolModalOpen] = useState(false);
   const [toolFormData, setToolFormData] = useState<any>(null);
@@ -545,7 +586,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           colors: item.colors ? (item.spotColors && item.spotColors.length > 0 ? `${item.colors} (+${item.spotColors.length}s)` : item.colors) : "4+4",
           machine: item.pressMachine,
           operator: item.operator || "A. Kovalev (1-smena)",
-          readiness: readyCount === 4 ? "✅ 4/4 Tayyor" : `⚠️ ${readyCount}/4 Kutilmoqda`,
+          readiness: readyCount === 4 ? "4/4 Tayyor" : `${readyCount}/4 Kutilmoqda`,
           progress: `${completed.toLocaleString()} / ${planned.toLocaleString()} (${pct}%)`,
           orderDate: item.orderDate || "—",
           deadline: item.deadline,
@@ -651,6 +692,32 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     });
     return Array.from(map.values());
   }, [machines, productionQueue]);
+
+  const machineComboboxOptions: ComboboxItem[] = useMemo(() => {
+    const list: ComboboxItem[] = [
+      {
+        value: "ALL",
+        label: "Barcha Stanoklar",
+        description: "Barcha uskunalar buyurtmalari",
+      },
+    ];
+
+    const codeMap = new Map<string, string>();
+    (machines || []).forEach((m) => {
+      if (m.name && m.code) codeMap.set(m.name, m.code);
+    });
+
+    availableMachines.forEach((m) => {
+      list.push({
+        value: m.name,
+        label: m.name,
+        code: codeMap.get(m.name) || m.name.split(" ")[0],
+        group: m.department || "Uskunalar",
+      });
+    });
+
+    return list;
+  }, [availableMachines, machines]);
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
@@ -687,6 +754,77 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     if (!selectedRecordId) return null;
     return rows.find((r) => r.id === selectedRecordId) || null;
   }, [rows, selectedRecordId]);
+
+  const timelineOrders = useMemo<OrderRow[]>(() => {
+    if (type !== "planning") return [];
+
+    const filteredQueue = (productionQueue || []).filter((item) => {
+      if (item.id?.startsWith("draft-") || item.id?.startsWith("temp-")) return false;
+
+      if (searchFilter) {
+        const q = searchFilter.toLowerCase();
+        const match =
+          item.id.toLowerCase().includes(q) ||
+          (item.docNo && item.docNo.toLowerCase().includes(q)) ||
+          (item.customer && item.customer.toLowerCase().includes(q)) ||
+          (item.product && item.product.toLowerCase().includes(q)) ||
+          (item.pressMachine && item.pressMachine.toLowerCase().includes(q));
+        if (!match) return false;
+      }
+
+      if (machineFilter !== "ALL" && item.pressMachine !== machineFilter) {
+        return false;
+      }
+
+      if (statusFilter !== "ALL") {
+        if (statusFilter === "Running") {
+          if (item.stage !== "In Production") return false;
+        } else if (statusFilter === "Ready to Print") {
+          if (item.stage !== "Ready to Print") return false;
+        } else if (statusFilter === "Queue") {
+          if (item.stage !== "Queue") return false;
+        } else if (statusFilter === "Completed") {
+          if (item.stage !== "Completed") return false;
+        }
+      }
+
+      return true;
+    });
+
+    return filteredQueue.map((item) => {
+      let orderStatus: OrderRow["status"] = "Active";
+      if (item.stage === "Completed") {
+        orderStatus = "Completed";
+      } else if (item.stage === "In Production") {
+        orderStatus = "In Production";
+      } else {
+        orderStatus = "Active";
+      }
+
+      return {
+        id: item.id,
+        orderNumber: item.docNo || item.id,
+        customer: item.customer || "—",
+        productName: item.product || "—",
+        product: item.product || "—",
+        orderDate: item.orderDate || new Date().toISOString().split("T")[0],
+        startDate: item.startDate || item.orderDate || "",
+        deadline: item.deadline || new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+        actualEndDate: item.actualEndDate || "",
+        quantity: item.plannedSheets || item.quantity || 0,
+        completedQuantity: item.completedSheets || 0,
+        status: orderStatus,
+        priority: (item.priority as any) || "Normal",
+        totalAmount: 0,
+        paidAmount: 0,
+        paymentStatus: "Paid",
+        pressMachine: item.pressMachine,
+        machine: item.pressMachine,
+        department: item.department || "Production",
+        rawOrder: item,
+      } as unknown as OrderRow;
+    });
+  }, [type, productionQueue, searchFilter, machineFilter, statusFilter]);
 
   const handleOpenRow = useCallback(
     (rowIndex: number) => {
@@ -1191,38 +1329,51 @@ export function ProductionGrid({ type }: ProductionGridProps) {
 
                     <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
 
-                    {/* View Mode Toggle (Machine Queues vs Data Table) */}
+                    {/* View Mode Toggle (Timeline vs Machine Queues vs Data Table) */}
                     <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
                       <button
                         type="button"
-                        onClick={() => setViewMode("board")}
+                        onClick={() => handleViewModeChange("timeline")}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                          viewMode === "timeline"
+                            ? "bg-background text-primary font-semibold shadow-xs"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                        title="Vaqt shkalasi"
+                      >
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>Timeline</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleViewModeChange("board")}
                         className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           viewMode === "board"
                             ? "bg-background text-primary font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
                         }`}
-                        title="Stanoklar Navbati (Board)"
+                        title="Stanoklar Navbati"
                       >
                         <LayoutGrid className="w-3.5 h-3.5" />
                         <span>Navbat</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => setViewMode("table")}
+                        onClick={() => handleViewModeChange("table")}
                         className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           viewMode === "table"
                             ? "bg-background text-primary font-semibold shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
                         }`}
-                        title="Jadval (Table)"
+                        title="Reja Jadvali"
                       >
                         <TableIcon className="w-3.5 h-3.5" />
                         <span>Jadval</span>
                       </button>
                     </div>
 
-                    {/* Machine Selector: Only in Table Mode (in Board mode, machine cards are on the board) */}
-                    {viewMode === "table" && (
+                    {/* Machine Selector: in Timeline and Table Mode */}
+                    {(viewMode === "timeline" || viewMode === "table") && (
                       <>
                         <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
                         <div className="flex items-center gap-1 shrink-0">
@@ -1230,29 +1381,34 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                             <Cpu className="w-3.5 h-3.5 text-blue-500" />
                             <span className="hidden md:inline">Stanok:</span>
                           </span>
-                          <Select
+                          <SmartCombobox
                             value={machineFilter}
-                            onValueChange={(val) => setMachineFilter(val ?? "ALL")}
-                          >
-                            <SelectTrigger className="h-6.5 text-xs w-[130px] sm:w-[150px] bg-background shrink-0">
-                              <SelectValue placeholder="Barcha stanoklar" />
-                            </SelectTrigger>
-                            <SelectContent className="text-xs">
-                              <SelectItem value="ALL">Barcha Stanoklar (All)</SelectItem>
-                              {(machines || []).map((m) => (
-                                <SelectItem key={m.code || m.id} value={m.name}>
-                                  {m.code ? `[${m.code}] ` : ""}{m.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            onChange={(val) => setMachineFilter(val || "ALL")}
+                            options={machineComboboxOptions}
+                            placeholder="Barcha stanoklar"
+                            searchPlaceholder="Stanok nomi yoki kodi..."
+                            emptyText="Uskuna topilmadi"
+                            allowCustom={false}
+                            className="h-6.5 text-xs w-[180px] sm:w-[220px] md:w-[260px] bg-background shrink-0 font-normal"
+                            popoverWidth="w-80"
+                          />
+                          {machineFilter !== "ALL" && (
+                            <button
+                              type="button"
+                              onClick={() => setMachineFilter("ALL")}
+                              className="h-6.5 w-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground text-[11px] cursor-pointer shrink-0 transition-colors"
+                              title="Barcha stanoklarga qaytish"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
                       </>
                     )}
 
                     <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
 
-                    {/* Operational Status Filters */}
+                    {/* Grouped Status Filters */}
                     <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0">
                       <button
                         type="button"
@@ -1276,67 +1432,84 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                       >
                         Jarayonda
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setStatusFilter("Ready to Print")}
-                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                          statusFilter === "Ready to Print"
-                            ? "bg-background text-emerald-600 dark:text-emerald-400 font-semibold shadow-xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        Chopga tayyor
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setStatusFilter("Queue")}
-                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                          statusFilter === "Queue"
-                            ? "bg-background text-blue-600 dark:text-blue-400 font-semibold shadow-xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        Navbatda
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setStatusFilter("Completed")}
-                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                          statusFilter === "Completed"
-                            ? "bg-background text-zinc-600 dark:text-zinc-300 font-semibold shadow-xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        Bajarilgan
-                      </button>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <button
+                              type="button"
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                                statusFilter !== "ALL" && statusFilter !== "Running"
+                                  ? "bg-background text-primary font-semibold shadow-xs"
+                                  : "text-muted-foreground hover:text-foreground"
+                              }`}
+                            />
+                          }
+                        >
+                          <span className="truncate max-w-[120px]">
+                            {statusFilter === "Ready to Print"
+                              ? "Chopga tayyor"
+                              : statusFilter === "Queue"
+                                ? "Navbatda"
+                                : statusFilter === "Completed"
+                                  ? "Bajarilgan"
+                                  : "Boshqalar"}
+                          </span>
+                          <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-48 text-xs p-1">
+                          <DropdownMenuGroup>
+                            <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground font-semibold px-2 py-1">
+                              Ish jarayonida
+                            </DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onClick={() => setStatusFilter("Ready to Print")}
+                              className="flex items-center justify-between text-xs cursor-pointer py-1.5"
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="size-2 rounded-full bg-emerald-500 shrink-0" />
+                                <span>Chopga tayyor</span>
+                              </span>
+                              {statusFilter === "Ready to Print" && (
+                                <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => setStatusFilter("Queue")}
+                              className="flex items-center justify-between text-xs cursor-pointer py-1.5"
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="size-2 rounded-full bg-blue-500 shrink-0" />
+                                <span>Navbatda</span>
+                              </span>
+                              {statusFilter === "Queue" && (
+                                <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                              )}
+                            </DropdownMenuItem>
+
+                            <DropdownMenuSeparator className="my-1" />
+
+                            <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground font-semibold px-2 py-1">
+                              Tugallangan
+                            </DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onClick={() => setStatusFilter("Completed")}
+                              className="flex items-center justify-between text-xs cursor-pointer py-1.5"
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="size-2 rounded-full bg-zinc-400 shrink-0" />
+                                <span>Bajarilgan</span>
+                              </span>
+                              {statusFilter === "Completed" && (
+                                <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                              )}
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
 
-                    {/* Color Rows Feature Toggle: Only in Table Mode */}
-                    {viewMode === "table" && (
-                      <>
-                        <Separator orientation="vertical" className="h-3.5 mx-0.5 shrink-0" />
-                        <div
-                          className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors cursor-pointer select-none whitespace-nowrap shrink-0 ${
-                            enableStatusColors
-                              ? "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 font-medium"
-                              : "bg-muted/50 border-border/60 text-muted-foreground hover:text-foreground"
-                          }`}
-                          onClick={() => handleToggleColorRows(!enableStatusColors)}
-                          title={tGrid("toggleColorRowsTip")}
-                        >
-                          <Palette className="w-3 h-3" />
-                          <span className="text-[11px] hidden xl:inline">
-                            {tGrid("statusColors")}
-                          </span>
-                          <Switch
-                            checked={enableStatusColors}
-                            onCheckedChange={handleToggleColorRows}
-                            className="scale-75 h-4 w-7 data-[state=checked]:bg-blue-600"
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </div>
-                      </>
-                    )}
+
                   </>
                 ) : (
                   <>
@@ -1451,8 +1624,26 @@ export function ProductionGrid({ type }: ProductionGridProps) {
               </div>
             </div>
 
-            {/* Content: Machine Queue Board or Data Table */}
-            {type === "planning" && viewMode === "board" ? (
+            {/* Content: Timeline, Machine Queue Board, or Data Table */}
+            {type === "planning" && viewMode === "timeline" ? (
+              <div className="flex-1 w-full h-full relative overflow-hidden">
+                <WorkOrderTimelineView
+                  orders={timelineOrders}
+                  onOpenOrder={(order) => {
+                    const raw = (order as any).rawOrder || order;
+                    openTab({
+                      id: order.id,
+                      title: `${order.id} (${(order.customer || "").split(" ")[0] || order.id})`,
+                      type: "work-order",
+                      module: "production",
+                      activeLevel3Tab: "timeline",
+                      documentData: raw,
+                    });
+                  }}
+                  onCreateNew={handleCreateNew}
+                />
+              </div>
+            ) : type === "planning" && viewMode === "board" ? (
               <MachineQueueBoard
                 searchFilter={searchFilter}
                 statusFilter={statusFilter}

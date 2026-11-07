@@ -52,6 +52,16 @@ services:
         condition: service_healthy
       doc-service:
         condition: service_healthy
+    volumes:
+      - app_uploads:/app/public/uploads
+      - app_artwork:/app/public/artwork
+      - app_cache:/app/public/cache
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   worker:
     build:
@@ -203,8 +213,31 @@ services:
     depends_on:
       - app
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: printgoo-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-erp.printg.uz}
+      S3_PUBLIC_DOMAIN: ${S3_PUBLIC_DOMAIN:-s3.printg.uz}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - minio
+
 volumes:
   pgdata_prod:
   redisdata_prod:
   miniodata_prod:
   pgbackups_prod:
+  app_uploads:
+  app_artwork:
+  app_cache:
+  caddy_data:
+  caddy_config:

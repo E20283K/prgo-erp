@@ -3131,24 +3131,34 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const today = new Date().toISOString().split("T")[0];
     const qty = payload.quantity || 1000;
     const totalWithVat = payload.priceTotal && payload.priceTotal > 0 ? payload.priceTotal : qty * 2.5;
-    const vatRate = 12;
-    const subtotal = Number((totalWithVat / (1 + vatRate / 100)).toFixed(2));
-    const vatAmount = Number((totalWithVat - subtotal).toFixed(2));
-    const unitPrice = Number((subtotal / Math.max(qty, 1)).toFixed(4));
 
     const existingClient = state.clientSettlements.find(
       (c) => c.customer.toLowerCase().includes((payload.customer || "").toLowerCase()) ||
              (payload.customer || "").toLowerCase().includes(c.customer.toLowerCase())
     );
+    const existingCrmClient = state.crmCustomers.find(
+      (c) => c.company.toLowerCase().trim() === (payload.customer || "").toLowerCase().trim() ||
+             c.company.toLowerCase().includes((payload.customer || "").toLowerCase())
+    );
+
+    const vatRate = existingCrmClient ? (existingCrmClient.vatPayer ? 12 : 0) : 0;
+    const subtotal = Number((totalWithVat / (1 + vatRate / 100)).toFixed(2));
+    const vatAmount = Number((totalWithVat - subtotal).toFixed(2));
+    const unitPrice = Number((subtotal / Math.max(qty, 1)).toFixed(6));
+    const effectiveCurrency =
+      payload.currency ||
+      existingCrmClient?.currency ||
+      existingClient?.currency ||
+      "UZS";
 
     const newAct: DeliveryActRecord = {
       id: newId,
       date: today,
       orderId: payload.orderId || "CO-00041",
       workOrderId: payload.workOrderId || "WOOF-26-0351",
-      contractNo: existingClient?.contractNo || "CON-2026-101",
+      contractNo: existingCrmClient?.contractNo || existingClient?.contractNo || "CON-2026-101",
       customer: payload.customer || "Alpha Media Group LLC",
-      customerTin: existingClient?.customerTin || "305841920",
+      customerTin: existingCrmClient?.tin || existingClient?.customerTin || "",
       product: payload.product || "Printed Packaging / Catalog",
       quantity: qty,
       unit: payload.unit || "pcs",
@@ -3156,7 +3166,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       vatRate,
       vatAmount,
       totalAmount: Number(totalWithVat.toFixed(2)),
-      currency: payload.currency || "USD",
+      currency: effectiveCurrency,
       warehouse: "Main Factory — Tashkent",
       carrier: "PrintGoo Fleet #1",
       driverName: "R. Ismoilov (01 A 772 BB)",

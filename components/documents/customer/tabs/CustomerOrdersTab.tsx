@@ -29,6 +29,7 @@ import {
   ClipboardList,
   RotateCw,
   Loader2,
+  FileText,
 } from "lucide-react";
 import {
   useWorkspaceStore,
@@ -115,7 +116,6 @@ export function CustomerOrdersTab({
   const isLoading = Boolean(isProductionQueueLoading || isFinishedGoodsLoading || isFinanceLoading);
 
   const isUsd = customer.currency === "USD";
-  const currencyLabel = isUsd ? "USD" : "so'm";
 
   const formatMoney = useCallback(
     (val: number) => {
@@ -151,120 +151,152 @@ export function CustomerOrdersTab({
     return customerFinishedGoods.reduce((sum, item) => sum + (Number(item.totalStockValue) || 0), 0);
   }, [customerFinishedGoods]);
 
-  // Match live orders from production queue & delivery acts + finished goods
+  // Match live orders from production queue + finished goods (merging linked Schet-faktura data into each Work Order)
   const customerOrders = useMemo(() => {
-    // 1. Delivery Acts (SF)
-    const matchedActs = deliveryActs
-      .filter((a) =>
-        isSameCustomer(customer, {
-          customer: a.customer,
-          customerTin: a.customerTin,
-        })
-      )
-      .map((a) => {
-        const linkedFg = customerFinishedGoods.find(
-          (fg) =>
-            (a.workOrderId && fg.workOrderId === a.workOrderId) ||
-            (a.product && fg.productName === a.product)
-        );
-        const fgStock = linkedFg ? Number(linkedFg.stockQty ?? (linkedFg as any).quantity) || 0 : 0;
-        return {
-          docId: a.id,
-          docType: "Schet-faktura (SF)",
-          date: a.date || "—",
-          pressMachine: "Realizatsiya",
-          workOrderRef: a.workOrderId || a.orderId,
-          product: a.product,
-          orderedQty: linkedFg ? Number(linkedFg.orderedQty || a.quantity || 0) : Number(a.quantity || 0),
-          producedQty: linkedFg ? Number(linkedFg.producedQty || a.quantity || 0) : Number(a.quantity || 0),
-          shippedQty: Number(a.quantity || 0),
-          remainingStock: fgStock,
-          location: linkedFg
-            ? linkedFg.location || (linkedFg as any).locationName || "Tayyor Mahsulot Ombori"
-            : "Topshirilgan",
-          unit: a.unit || "pcs",
-          amountUsd: Number(a.totalAmount || 0),
-          status: a.status,
-        };
+    const customerActs = deliveryActs.filter((a) =>
+      isSameCustomer(customer, {
+        customer: a.customer,
+        customerTin: a.customerTin,
+      })
+    );
+
+    const customerQueueItems = productionQueue.filter((q) =>
+      isSameCustomer(customer, {
+        clientId: q.clientId,
+        customer: q.customer,
+      })
+    );
+
+    // 1. Production Queue Work Orders (WO) with merged Schet-faktura (SF) & Stock info
+    const matchedQueue = customerQueueItems.map((q) => {
+      const linkedFg = customerFinishedGoods.find(
+        (fg) =>
+          fg.workOrderId === q.id ||
+          (q.docNo && fg.workOrderId === q.docNo) ||
+          (q.product &&
+            fg.productName &&
+            fg.productName.trim().toLowerCase() === q.product.trim().toLowerCase())
+      );
+
+      // Find delivery acts (SF) linked to this Work Order by ID or product name
+      const linkedActs = customerActs.filter((a) => {
+        if (
+          a.workOrderId &&
+          (a.workOrderId === q.id ||
+            a.workOrderId === q.docNo ||
+            a.workOrderId === (q as any).dbId)
+        ) {
+          return true;
+        }
+        if (a.orderId && (a.orderId === q.id || a.orderId === q.clientOrderId)) {
+          return true;
+        }
+        const actLinkedToAnotherWo =
+          a.workOrderId &&
+          customerQueueItems.some(
+            (other) =>
+              other.id !== q.id &&
+              (other.id === a.workOrderId ||
+                other.docNo === a.workOrderId ||
+                (other as any).dbId === a.workOrderId)
+          );
+        if (!actLinkedToAnotherWo && a.product && q.product) {
+          return a.product.trim().toLowerCase() === q.product.trim().toLowerCase();
+        }
+        return false;
       });
 
-    // 2. Production Queue Work Orders (WO)
-    const matchedQueue = productionQueue
-      .filter((q) =>
-        isSameCustomer(customer, {
-          clientId: q.clientId,
-          customer: q.customer,
-        })
-      )
-      .map((q) => {
-        const linkedFg = customerFinishedGoods.find(
-          (fg) => fg.workOrderId === q.id || (q.product && fg.productName === q.product)
-        );
-        const ordered = Number(linkedFg?.orderedQty || q.quantity || 0);
+      const ordered = Number(linkedFg?.orderedQty || q.quantity || 0);
 
-        const shippedFromActs = deliveryActs
-          .filter((a) => a.workOrderId && a.workOrderId === q.id)
-          .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
-        const shippedFromShipments = (warehouseShipments || [])
-          .filter(
-            (s) =>
-              s.workOrder === q.id &&
-              (s.status === "Dispatched" || s.status === "Delivered")
-          )
-          .reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+      const shippedFromActs = linkedActs.reduce(
+        (sum, a) => sum + (Number(a.quantity) || 0),
+        0
+      );
 
-        const shipped = linkedFg
-          ? Number(linkedFg.shippedQty || 0)
-          : Math.max(shippedFromActs, shippedFromShipments, 0);
+      const shippedFromShipments = (warehouseShipments || [])
+        .filter(
+          (s) =>
+            (s.workOrder === q.id ||
+              (q.docNo && s.workOrder === q.docNo) ||
+              (isSameCustomer(customer, { customer: s.customer }) &&
+                s.product &&
+                q.product &&
+                s.product.trim().toLowerCase() === q.product.trim().toLowerCase())) &&
+            (s.status === "Dispatched" || s.status === "Delivered")
+        )
+        .reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
 
-        const remaining = linkedFg
-          ? Number(linkedFg.stockQty ?? (linkedFg as any).quantity ?? 0)
-          : 0;
+      const shipped = Math.max(
+        linkedFg ? Number(linkedFg.shippedQty || 0) : 0,
+        shippedFromActs,
+        shippedFromShipments,
+        0
+      );
 
-        const isCompleted = q.stage === "Completed" || q.status === "Completed";
-        const produced = linkedFg
-          ? Number(linkedFg.producedQty ?? remaining + shipped)
-          : isCompleted
-          ? Math.max(ordered, shipped)
-          : shipped;
+      const remaining = linkedFg
+        ? Number(linkedFg.stockQty ?? (linkedFg as any).quantity ?? 0)
+        : 0;
 
-        const displayStatus =
-          q.status === "Draft" || q.status === "Cancelled"
-            ? q.status
-            : q.stage || q.status || "Queue";
+      const isCompleted = q.stage === "Completed" || q.status === "Completed";
+      const produced = linkedFg
+        ? Number(linkedFg.producedQty ?? remaining + shipped)
+        : isCompleted
+        ? Math.max(ordered, shipped)
+        : shipped;
 
-        const location = linkedFg
-          ? linkedFg.location || (linkedFg as any).locationName || "Tayyor Mahsulot Ombori"
-          : q.status === "Draft"
-          ? "Prepress"
-          : q.pressMachine || q.department || "Navbatda";
+      const displayStatus =
+        q.status === "Draft" || q.status === "Cancelled"
+          ? q.status
+          : q.stage || q.status || "Queue";
 
-        const amountUsd = Number(q.priceTotal || (q as any).financials?.totalPrice || 0);
+      const isFullyDelivered =
+        shipped > 0 && remaining === 0 && (isCompleted || shipped >= ordered);
 
-        return {
-          docId: q.id,
-          docType: "Work Order (WO)",
-          date: q.deadline || q.startDate || "—",
-          pressMachine: q.pressMachine || q.department || "—",
-          workOrderRef: q.clientOrderId || q.id,
-          product: q.product,
-          orderedQty: ordered,
-          producedQty: produced,
-          shippedQty: shipped,
-          remainingStock: remaining,
-          location,
-          unit: q.unit || "pcs",
-          amountUsd,
-          status: displayStatus,
-        };
-      });
+      const location = isFullyDelivered
+        ? "Topshirilgan"
+        : linkedFg
+        ? linkedFg.location || (linkedFg as any).locationName || "Tayyor Mahsulot Ombori"
+        : shipped > 0
+        ? "Qisman topshirilgan"
+        : q.status === "Draft"
+        ? "Prepress"
+        : q.pressMachine || q.department || "Navbatda";
 
-    // 3. Any customer finished goods not yet linked to queue or acts
+      const amountUsd =
+        Number(q.priceTotal || (q as any).financials?.totalPrice || 0) ||
+        linkedActs.reduce((sum, a) => sum + (Number(a.totalAmount) || 0), 0);
+
+      return {
+        docId: q.id,
+        docType: "Work Order (WO)",
+        linkedActId: linkedActs[0]?.id,
+        linkedActAmount: linkedActs[0]?.totalAmount,
+        date: q.deadline || q.startDate || linkedActs[0]?.date || "—",
+        pressMachine: q.pressMachine || q.department || "—",
+        workOrderRef: q.clientOrderId || q.id,
+        product: q.product,
+        orderedQty: ordered,
+        producedQty: produced,
+        shippedQty: shipped,
+        remainingStock: remaining,
+        location,
+        unit: q.unit || "pcs",
+        amountUsd,
+        status: displayStatus,
+      };
+    });
+
+    // 2. Any customer finished goods not yet linked to a Work Order in queue
     const standaloneFg = customerFinishedGoods
       .filter(
         (fg) =>
-          !matchedQueue.some((q) => q.docId === fg.workOrderId) &&
-          !matchedActs.some((a) => a.workOrderRef === fg.workOrderId)
+          !matchedQueue.some(
+            (q) =>
+              q.docId === fg.workOrderId ||
+              (q.product &&
+                fg.productName &&
+                q.product.trim().toLowerCase() === fg.productName.trim().toLowerCase())
+          )
       )
       .map((fg) => {
         const stockQty = Number(fg.stockQty ?? (fg as any).quantity ?? 0);
@@ -274,6 +306,8 @@ export function CustomerOrdersTab({
         return {
           docId: fg.workOrderId || fg.id,
           docType: "Zaxira Partiyasi (FG)",
+          linkedActId: undefined,
+          linkedActAmount: undefined,
           date:
             fg.completionDate ||
             ((fg as any).producedAt
@@ -296,7 +330,7 @@ export function CustomerOrdersTab({
         };
       });
 
-    return [...matchedActs, ...matchedQueue, ...standaloneFg];
+    return [...matchedQueue, ...standaloneFg];
   }, [customer, deliveryActs, productionQueue, warehouseShipments, customerFinishedGoods]);
 
   // Resizable columns
@@ -407,7 +441,7 @@ export function CustomerOrdersTab({
         allowOverlay: false,
       };
     },
-    [customerOrders, columns, isDark]
+    [customerOrders, columns, isDark, formatMoney]
   );
 
   const handleRowActivated = useCallback(
@@ -464,6 +498,11 @@ export function CustomerOrdersTab({
       },
     });
   };
+
+  const selectedRowItem = useMemo(() => {
+    const rows = selection.rows.toArray();
+    return rows.length > 0 ? customerOrders[rows[0]] : undefined;
+  }, [selection.rows, customerOrders]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden h-full">
@@ -530,15 +569,11 @@ export function CustomerOrdersTab({
             </Button>
           )}
 
-          {selection.rows.toArray().length > 0 && onReorderWorkOrder && (
+          {selectedRowItem && onReorderWorkOrder && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
-                const rows = selection.rows.toArray();
-                const selectedItem = rows.length > 0 ? customerOrders[rows[0]] : undefined;
-                if (selectedItem) onReorderWorkOrder(selectedItem);
-              }}
+              onClick={() => onReorderWorkOrder(selectedRowItem)}
               className="h-7 px-2.5 text-xs gap-1.5 border-blue-500/40 text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/50 cursor-pointer shadow-xs font-medium"
               title="Tanlangan buyurtma asosida takroriy buyurtma ochish"
             >
@@ -617,15 +652,28 @@ export function CustomerOrdersTab({
             className="gap-2 cursor-pointer"
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            <span>Hujjatni ochish (F12)</span>
+            <span>Buyurtmani ochish (F12)</span>
           </ContextMenuItem>
+
+          {selectedRowItem?.linkedActId && (
+            <ContextMenuItem
+              onClick={() =>
+                onOpenDeliveryAct(
+                  selectedRowItem.linkedActId!,
+                  selectedRowItem.linkedActAmount || selectedRowItem.amountUsd
+                )
+              }
+              className="gap-2 cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5 text-primary" />
+              <span>Schet-fakturani ochish ({selectedRowItem.linkedActId})</span>
+            </ContextMenuItem>
+          )}
 
           {onReorderWorkOrder && (
             <ContextMenuItem
               onClick={() => {
-                const rows = selection.rows.toArray();
-                const selectedItem = rows.length > 0 ? customerOrders[rows[0]] : undefined;
-                if (selectedItem) onReorderWorkOrder(selectedItem);
+                if (selectedRowItem) onReorderWorkOrder(selectedRowItem);
               }}
               className="gap-2 cursor-pointer text-blue-700 dark:text-blue-400 font-medium"
             >
@@ -636,9 +684,7 @@ export function CustomerOrdersTab({
 
           <ContextMenuItem
             onClick={() => {
-              const rows = selection.rows.toArray();
-              const selectedItem = rows.length > 0 ? customerOrders[rows[0]] : undefined;
-              handleCreateShipmentFromStock(selectedItem);
+              handleCreateShipmentFromStock(selectedRowItem);
             }}
             className="gap-2 cursor-pointer text-emerald-700 dark:text-emerald-400 font-medium"
           >

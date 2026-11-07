@@ -93,6 +93,7 @@ export function TariffDetail({ tab }: TariffDetailProps) {
     departmentsList,
     loadDepartments,
     productionQueue,
+    loadProductionQueue,
     masterSpecifications,
     loadSpecificationsAsync,
     currentUser,
@@ -119,13 +120,18 @@ export function TariffDetail({ tab }: TariffDetailProps) {
     if ((!masterSpecifications || masterSpecifications.length === 0) && loadSpecificationsAsync) {
       loadSpecificationsAsync();
     }
+    if ((!productionQueue || productionQueue.length === 0) && loadProductionQueue) {
+      loadProductionQueue();
+    }
   }, [
     machines?.length,
     departmentsList?.length,
     masterSpecifications?.length,
+    productionQueue?.length,
     loadMachines,
     loadDepartments,
     loadSpecificationsAsync,
+    loadProductionQueue,
   ]);
 
   const availableDepartments = useMemo(() => {
@@ -237,6 +243,12 @@ export function TariffDetail({ tab }: TariffDetailProps) {
           severity: "success",
         });
         setTimeout(() => setIsSaved(false), 3000);
+      } else {
+        addNotification?.({
+          title: "Xatolik",
+          description: "Tarifni saqlashda xatolik yuz berdi. Server javob bermadi.",
+          severity: "error",
+        });
       }
     } catch (err) {
       console.error("Tariff save error:", err);
@@ -254,6 +266,15 @@ export function TariffDetail({ tab }: TariffDetailProps) {
     if (!confirm(`Haqiqatan ham "${tariffData.code} — ${tariffData.operationName}" tarifini o'chirmoqchimisiz?`)) {
       return;
     }
+    if (tariffData.id.startsWith("tariff-") || tariffData.id.startsWith("TRF-NEW") || !tariffData.code) {
+      addNotification?.({
+        title: "Qoralama yopildi",
+        description: "Saqlanmagan tarif qoralamasi yopildi.",
+        severity: "info",
+      });
+      closeTab(tab.id);
+      return;
+    }
     const ok = await deleteTariffFromDb(tariffData.id);
     if (ok) {
       addNotification?.({
@@ -262,6 +283,12 @@ export function TariffDetail({ tab }: TariffDetailProps) {
         severity: "info",
       });
       closeTab(tab.id);
+    } else {
+      addNotification?.({
+        title: "Xatolik",
+        description: "Tarifni o'chirish imkoni bo'lmadi.",
+        severity: "error",
+      });
     }
   };
 

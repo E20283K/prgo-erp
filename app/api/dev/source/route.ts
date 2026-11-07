@@ -91,6 +91,11 @@ async function getComponentIndex(): Promise<Record<string, IndexedComponentInfo>
 }
 
 export async function GET(req: NextRequest) {
+  // Production muhitida xavfsizlik maqsadida ushbu dev-endpoint to'liq bloklanadi
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not available in production" }, { status: 404 });
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const requestedFile = searchParams.get("file");
@@ -112,9 +117,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ componentMap, lines: [], totalLines: 0 });
     }
 
-    // Security check: normalize and ensure inside project root
+    // Security check: faqat components/ va app/ ichidagi tsx/ts fayllariga ruxsat beriladi
     const rootDir = process.cwd();
     const safeRelPath = targetRelPath.replace(/\\/g, "/").replace(/^\/+/, "");
+    const isAllowedDir = SCAN_DIRS.some((d) => safeRelPath.startsWith(`${d}/`));
+    const isAllowedExt = /\.(tsx|ts|css)$/i.test(safeRelPath);
+
+    if (!isAllowedDir || !isAllowedExt || safeRelPath.includes("..")) {
+      return NextResponse.json({ error: "Access denied to requested file path" }, { status: 403 });
+    }
+
     const resolvedFull = path.resolve(rootDir, safeRelPath);
     if (!resolvedFull.startsWith(rootDir)) {
       return NextResponse.json({ error: "Invalid file path" }, { status: 400 });

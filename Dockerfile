@@ -32,9 +32,16 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Fayl yuklash (avatarlar, maketlar, logolar, kesh) papkalarini yaratish va to'liq yozish huquqini ta'minlash
+RUN mkdir -p /app/public/uploads/avatars \
+             /app/public/uploads/clients/logos \
+             /app/public/artwork \
+             /app/public/cache/telegram/avatars && \
+    chown -R nextjs:nodejs /app/public
 
 USER nextjs
 EXPOSE 3000

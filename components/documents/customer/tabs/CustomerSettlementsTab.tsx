@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -36,10 +35,7 @@ import {
   CreditCard,
   Printer,
   Check,
-  X,
-  FileText,
   Filter,
-  Copy,
   ExternalLink,
 } from "lucide-react";
 import {
@@ -70,15 +66,18 @@ export function CustomerSettlementsTab({
   setIsPaymentOpen,
   onOpenDeliveryAct,
 }: CustomerSettlementsTabProps) {
-  const { recordClientPayment, theme, addNotification } = useWorkspaceStore();
+  const { recordClientPayment, recordPaymentAsync, theme, addNotification } = useWorkspaceStore();
   const isDark = theme === "dark";
 
   const isUsd = (customer.currency || settlement?.currency) === "USD";
-  const currencyLabel = isUsd ? "USD" : "UZS";
+  const currencyLabel = isUsd ? "USD" : "so'm";
 
   const formatMoney = useCallback(
     (val: number, showSign: boolean = false) => {
-      const numStr = Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2 });
+      const numStr = Math.abs(val).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
       const sign = val < 0 ? "-" : showSign && val > 0 ? "+" : "";
       if (isUsd) {
         return `${sign}$${numStr}`;
@@ -96,19 +95,29 @@ export function CustomerSettlementsTab({
 
   // Payment Form state
   const [paymentAmount, setPaymentAmount] = useState("5000");
-  const [paymentCurrency, setPaymentCurrency] = useState("USD");
-  const [paymentMethod, setPaymentMethod] = useState("Bank o'tkazmasi (UZS/USD)");
+  const [paymentMethod, setPaymentMethod] = useState("Bank o'tkazmasi");
   const [paymentNote, setPaymentNote] = useState("");
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
     const amt = Number(paymentAmount);
     if (!amt || amt <= 0) return;
     const customerKey = settlement ? settlement.customer : customer.name;
     const noteText = paymentNote.trim()
       ? `${paymentNote.trim()} (${paymentMethod})`
-      : `Shartnoma ${customer.contractNo} bo'yicha to'lov (${paymentMethod})`;
+      : `Shartnoma ${customer.contractNo || ""} bo'yicha to'lov (${paymentMethod})`.trim();
 
-    recordClientPayment(customerKey, amt, undefined, noteText);
+    if (recordPaymentAsync) {
+      await recordPaymentAsync({
+        customer: customerKey,
+        amount: amt,
+        currency: isUsd ? "USD" : "UZS",
+        contractNo: customer.contractNo,
+        note: noteText,
+      });
+    } else {
+      recordClientPayment(customerKey, amt, undefined, noteText);
+    }
+
     addNotification({
       title: "Mijoz to'lovi qabul qilindi",
       description: `${customer.name} hisobiga +${formatMoney(amt)} (${paymentMethod}) yozildi va Akt Sverka yangilandi.`,
@@ -134,38 +143,59 @@ export function CustomerSettlementsTab({
     });
   }, [settlement]);
 
+  // Counts for segmented filter
+  const { debitCount, creditCount } = useMemo(() => {
+    let d = 0;
+    let c = 0;
+    for (const r of rawLedgerRows) {
+      if (r.debit > 0) d++;
+      if (r.credit > 0) c++;
+    }
+    return { debitCount: d, creditCount: c };
+  }, [rawLedgerRows]);
+
   // Filtered Ledger Rows
   const filteredLedgerRows = useMemo(() => {
-    if (filterPeriod === "all") return rawLedgerRows;
+    let rows = rawLedgerRows;
     if (filterPeriod === "debit-only") {
-      return rawLedgerRows.filter((r) => r.debit > 0);
+      rows = rawLedgerRows.filter((r) => r.debit > 0);
+    } else if (filterPeriod === "credit-only") {
+      rows = rawLedgerRows.filter((r) => r.credit > 0);
     }
-    if (filterPeriod === "credit-only") {
-      return rawLedgerRows.filter((r) => r.credit > 0);
-    }
-    if (filterPeriod === "last30") {
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const isoThreshold = thirtyDaysAgo.toISOString().split("T")[0];
-      return rawLedgerRows.filter((r) => r.date >= isoThreshold);
-    }
-    return rawLedgerRows;
+    return rows.map((r, i) => ({ ...r, idx: i + 1 }));
   }, [rawLedgerRows, filterPeriod]);
 
   // Columns definition with resizing support
-  const getColumns = useCallback(
-    (): GridColumn[] => [
+  const getColumns = useCallback((): GridColumn[] => {
+    const baseCols: GridColumn[] = [
       { id: "idx", title: "№", width: 45, icon: GridColumnIcon.HeaderNumber },
       { id: "date", title: "Sana", width: 110, icon: GridColumnIcon.HeaderDate },
-      { id: "docNo", title: "Hujjat №", width: 120, icon: GridColumnIcon.HeaderReference },
+      { id: "docNo", title: "Hujjat №", width: 130, icon: GridColumnIcon.HeaderReference },
       { id: "docType", title: "Operatsiya turi", width: 150, icon: GridColumnIcon.HeaderSingleValue },
-      { id: "description", title: "Mazmuni / Asos", width: 380, icon: GridColumnIcon.HeaderString },
+      { id: "description", title: "Mazmuni / Asos", width: 420, icon: GridColumnIcon.HeaderString },
+    ];
+
+    if (filterPeriod === "debit-only") {
+      return [
+        ...baseCols,
+        { id: "debit", title: `Summa (${currencyLabel})`, width: 180, icon: GridColumnIcon.HeaderNumber },
+      ];
+    }
+
+    if (filterPeriod === "credit-only") {
+      return [
+        ...baseCols,
+        { id: "credit", title: `To'lov summasi (${currencyLabel})`, width: 180, icon: GridColumnIcon.HeaderNumber },
+      ];
+    }
+
+    return [
+      ...baseCols,
       { id: "debit", title: `Debet (+Dt ${currencyLabel})`, width: 165, icon: GridColumnIcon.HeaderNumber },
       { id: "credit", title: `Kredit (-Kt ${currencyLabel})`, width: 165, icon: GridColumnIcon.HeaderNumber },
       { id: "runningSaldo", title: `Saldo (${currencyLabel})`, width: 155, icon: GridColumnIcon.HeaderNumber },
-    ],
-    [currencyLabel]
-  );
+    ];
+  }, [currencyLabel, filterPeriod]);
 
   const [columns, setColumns] = useState<GridColumn[]>(getColumns());
 
@@ -230,10 +260,11 @@ export function CustomerSettlementsTab({
         const display =
           val === 0 && !isSaldo
             ? "—"
-            : `${isDebit && val > 0 ? "+" : isCredit && val > 0 ? "-" : ""}$${Math.abs(val).toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}`;
+            : isDebit && val > 0
+            ? formatMoney(val, true)
+            : isCredit && val > 0
+            ? `-${formatMoney(Math.abs(val), false)}`
+            : formatMoney(val, false);
 
         return {
           kind: GridCellKind.Text,
@@ -255,7 +286,7 @@ export function CustomerSettlementsTab({
         allowOverlay: false,
       };
     },
-    [filteredLedgerRows, columns, isDark]
+    [filteredLedgerRows, columns, isDark, formatMoney]
   );
 
   const handleRowActivated = useCallback(
@@ -263,7 +294,11 @@ export function CustomerSettlementsTab({
       const [, row] = cell;
       const entry = filteredLedgerRows[row];
       if (!entry) return;
-      if (entry.docType === "Schet-faktura" || entry.docNo.startsWith("SF-")) {
+      if (
+        entry.docType === "Schet-faktura" ||
+        entry.docNo.startsWith("SF-") ||
+        entry.docNo.startsWith("ACT-")
+      ) {
         onOpenDeliveryAct(entry.docNo, entry.debit);
       }
     },
@@ -293,7 +328,7 @@ export function CustomerSettlementsTab({
               Jami Yuklandi (+Dt)
             </div>
             <div className="font-mono text-xs font-bold text-rose-600 dark:text-rose-400">
-              +${(settlement?.totalDebit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatMoney(settlement?.totalDebit ?? 0, true)}
             </div>
           </div>
 
@@ -304,7 +339,7 @@ export function CustomerSettlementsTab({
               Jami To&apos;landi (-Kt)
             </div>
             <div className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
-              -${(settlement?.totalCredit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              -{formatMoney(settlement?.totalCredit ?? 0, false)}
             </div>
           </div>
 
@@ -323,7 +358,7 @@ export function CustomerSettlementsTab({
                   : "text-emerald-600 dark:text-emerald-400"
               }`}
             >
-              ${closingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}{" "}
+              {formatMoney(closingBalance, false)}{" "}
               <span className="font-sans text-[10px] font-normal">
                 ({closingBalance > 0 ? "Mijoz qarzdor" : closingBalance < 0 ? "Avans" : "Yopilgan"})
               </span>
@@ -332,20 +367,44 @@ export function CustomerSettlementsTab({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Quick Period Filter */}
-          <div className="flex items-center gap-1.5">
-            <Filter className="w-3.5 h-3.5 text-muted-foreground" />
-            <Select value={filterPeriod} onValueChange={(v) => v && setFilterPeriod(v)}>
-              <SelectTrigger className="h-7 text-[11px] w-36 bg-background">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Barcha operatsiyalar</SelectItem>
-                <SelectItem value="last30">Oxirgi 30 kun</SelectItem>
-                <SelectItem value="debit-only">Faqat yuklangan (+Dt)</SelectItem>
-                <SelectItem value="credit-only">Faqat to&apos;lovlar (-Kt)</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Segmented Filter: Hammasi | Schet-faktura | To'lovlar */}
+          <div className="inline-flex items-center rounded-md border border-border bg-muted/50 p-0.5 h-7">
+            <button
+              type="button"
+              onClick={() => setFilterPeriod("all")}
+              className={`h-6 px-2.5 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                filterPeriod === "all"
+                  ? "bg-background text-foreground shadow-xs border border-border/60"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <span>Hammasi</span>
+              <span className="font-mono text-[10px] opacity-70">{rawLedgerRows.length}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterPeriod("debit-only")}
+              className={`h-6 px-2.5 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                filterPeriod === "debit-only"
+                  ? "bg-background text-rose-600 dark:text-rose-400 shadow-xs border border-border/60"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <span>Schet-faktura</span>
+              <span className="font-mono text-[10px] opacity-70">{debitCount}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterPeriod("credit-only")}
+              className={`h-6 px-2.5 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                filterPeriod === "credit-only"
+                  ? "bg-background text-emerald-600 dark:text-emerald-400 shadow-xs border border-border/60"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <span>To&apos;lovlar</span>
+              <span className="font-mono text-[10px] opacity-70">{creditCount}</span>
+            </button>
           </div>
 
           <Button

@@ -106,7 +106,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
     const d = tab.documentData || {};
     const qty = Number(d.quantity) || 1000;
     const total = Number(d.totalAmount || d.priceTotal) || 2800;
-    const vatRate = 12;
+    const vatRate = typeof d.vatRate === "number" ? d.vatRate : 0;
     const subtotal = Number((total / (1 + vatRate / 100)).toFixed(2));
     const vatAmount = Number((total - subtotal).toFixed(2));
     return {
@@ -116,7 +116,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
       workOrderId: d.workOrderId || "WOOF-26-0351",
       contractNo: d.contractNo || "CON-2026-101",
       customer: d.customer || "Alpha Media Group LLC",
-      customerTin: d.customerTin || "305841920",
+      customerTin: d.customerTin || "",
       product: d.product || "A4 Hardcover Catalog 96p",
       quantity: qty,
       unit: d.unit || "pcs",
@@ -124,7 +124,7 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
       vatRate,
       vatAmount,
       totalAmount: total,
-      currency: d.currency || "USD",
+      currency: d.currency || "UZS",
       warehouse: d.warehouse || "Main Factory — Tashkent",
       carrier: d.carrier || "PrintGoo Fleet #1",
       driverName: d.driverName || "R. Ismoilov (01 A 772 BB)",
@@ -139,8 +139,8 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
           name: d.product || "A4 Hardcover Catalog 96p",
           unit: d.unit || "pcs",
           quantity: qty,
-          unitPrice: Number((subtotal / Math.max(qty, 1)).toFixed(4)),
-          vatRate: 12,
+          unitPrice: Number((subtotal / Math.max(qty, 1)).toFixed(6)),
+          vatRate,
         },
       ],
     };
@@ -195,10 +195,14 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
       vat += lineVat;
       totalQty += item.quantity;
     });
+    const rawTotal = Number((sub + vat).toFixed(2));
+    const nearestThousand = Math.round(rawTotal / 1000) * 1000;
+    const snappedTotal =
+      nearestThousand > 0 && Math.abs(rawTotal - nearestThousand) < 1.5 ? nearestThousand : rawTotal;
     return {
       subtotal: Number(sub.toFixed(2)),
-      vatAmount: Number(vat.toFixed(2)),
-      totalAmount: Number((sub + vat).toFixed(2)),
+      vatAmount: Number((snappedTotal - Number(sub.toFixed(2))).toFixed(2)),
+      totalAmount: snappedTotal,
       totalQty,
     };
   }, [form.items]);

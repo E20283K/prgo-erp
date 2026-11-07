@@ -305,34 +305,102 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  // Match live Client Settlement (Akt Sverka)
+  // Match live Client Settlement (Akt Sverka) + ensure all customer Delivery Acts (SF) are reflected in ledger
   const settlement = useMemo(() => {
-    return (
+    const base =
       clientSettlements.find((s) =>
         isSameCustomer(form, {
           customer: s.customer,
           customerTin: s.customerTin,
         })
-      ) || null
-    );
-  }, [clientSettlements, form]);
+      ) || null;
 
-  // Customer Orders count (Work Orders + Delivery Acts)
-  const ordersCount = useMemo(() => {
-    const acts = deliveryActs.filter((a) =>
+    const customerActs = deliveryActs.filter((a) =>
       isSameCustomer(form, {
         customer: a.customer,
         customerTin: a.customerTin,
       })
-    ).length;
-    const queues = productionQueue.filter((q) =>
+    );
+
+    const existingLedger = base?.ledger || [];
+    const missingActEntries = customerActs
+      .filter((a) => !existingLedger.some((l) => l.docNo === a.id))
+      .map((a) => ({
+        id: `act-${a.id}`,
+        date: a.date || new Date().toISOString().split("T")[0],
+        docNo: a.id,
+        docType: "Schet-faktura" as const,
+        description: `${a.product || "Bosma mahsulot"} (${Number(a.quantity || 0).toLocaleString()} ${a.unit || "pcs"})`,
+        debit: Number(a.totalAmount || 0),
+        credit: 0,
+      }));
+
+    if (!base && missingActEntries.length === 0) return null;
+
+    const mergedLedger = [...existingLedger, ...missingActEntries].sort((a, b) =>
+      (a.date || "").localeCompare(b.date || "")
+    );
+
+    const openingBalance = base?.openingBalance || 0;
+    const totalDebit =
+      mergedLedger.length > 0
+        ? mergedLedger.reduce((sum, e) => sum + (Number(e.debit) || 0), 0)
+        : base?.totalDebit || 0;
+    const totalCredit =
+      mergedLedger.length > 0
+        ? mergedLedger.reduce((sum, e) => sum + (Number(e.credit) || 0), 0)
+        : base?.totalCredit || 0;
+    const closingBalance = Number((openingBalance + totalDebit - totalCredit).toFixed(2));
+
+    return {
+      id: base?.id || `STL-${form.id}`,
+      customer: form.name || base?.customer || "",
+      customerTin: form.tin || base?.customerTin || "",
+      contractNo: form.contractNo || base?.contractNo || "",
+      openingBalance,
+      totalDebit,
+      totalCredit,
+      closingBalance,
+      currency: form.currency || base?.currency || "UZS",
+      lastActivityDate:
+        mergedLedger[mergedLedger.length - 1]?.date ||
+        base?.lastActivityDate ||
+        new Date().toISOString().split("T")[0],
+      status: (closingBalance > 0 ? "Debt" : closingBalance < 0 ? "Advance" : "Settled") as
+        | "Debt"
+        | "Settled"
+        | "Advance",
+      ledger: mergedLedger,
+    };
+  }, [clientSettlements, deliveryActs, form]);
+
+  // Customer Orders count (Work Orders + standalone Finished Goods)
+  const ordersCount = useMemo(() => {
+    const matchedQueue = productionQueue.filter((q) =>
       isSameCustomer(form, {
         clientId: q.clientId,
         customer: q.customer,
       })
-    ).length;
-    return acts + queues;
-  }, [deliveryActs, productionQueue, form]);
+    );
+    const standaloneFg = finishedGoods.filter(
+      (fg) =>
+        isSameCustomer(form, {
+          customerId: fg.customerId,
+          clientId: (fg as any).clientId,
+          customerName: fg.customerName,
+          customerTin: fg.customerTin,
+        }) &&
+        !matchedQueue.some(
+          (q) =>
+            q.id === fg.workOrderId ||
+            (q.docNo && q.docNo === fg.workOrderId) ||
+            (q.product &&
+              fg.productName &&
+              q.product.trim().toLowerCase() === fg.productName.trim().toLowerCase())
+        )
+    );
+    return matchedQueue.length + standaloneFg.length;
+  }, [productionQueue, finishedGoods, form]);
 
   // Customer Tooling count
   const toolingCount = useMemo(() => {

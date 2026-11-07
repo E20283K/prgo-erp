@@ -7,6 +7,7 @@ import {
   bankAccounts,
   companies,
   clients,
+  workOrders,
 } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
@@ -26,6 +27,7 @@ export async function getDeliveryActs(companyCode: string = "PRINTGOO"): Promise
         orderBy: (items, { asc }) => [asc(items.sortOrder)],
       },
       client: true,
+      workOrder: true,
     },
     orderBy: [desc(deliveryActs.createdAt)],
   });
@@ -39,22 +41,57 @@ export async function getDeliveryActs(companyCode: string = "PRINTGOO"): Promise
       disputed: "Disputed",
     };
 
+    const clientCurr = (act.client?.currency || act.currency || "UZS").toUpperCase();
+    const rawUsd = Number(act.totalAmountUsd) || 0;
+    const rawUzs = Number(act.totalAmountUzs) || 0;
+    // Detect if a UZS amount (e.g. 10,000,000 / 9,999,999.52) was mistakenly saved as USD and multiplied by exchangeRate
+    const isMistakenlyMultipliedUzs =
+      clientCurr === "UZS" &&
+      rawUsd >= 100_000 &&
+      rawUzs > rawUsd * 1000;
+
+    const effectiveCurrency = isMistakenlyMultipliedUzs ? "UZS" : (act.currency || clientCurr || "UZS").toUpperCase();
+    const isActUzs = effectiveCurrency === "UZS";
+
+    const snapRounding = (val: number) => {
+      const nearestThousand = Math.round(val / 1000) * 1000;
+      return nearestThousand > 0 && Math.abs(nearestThousand - val) < 1 ? nearestThousand : val;
+    };
+
+    const resolvedTotal = isMistakenlyMultipliedUzs
+      ? snapRounding(rawUsd)
+      : isActUzs
+      ? snapRounding(rawUzs || rawUsd || 0)
+      : rawUsd || rawUzs || 0;
+
+    const resolvedSubtotal = isMistakenlyMultipliedUzs
+      ? Number(act.subtotalUsd) || 0
+      : isActUzs
+      ? Number(act.subtotalUzs) || Number(act.subtotalUsd) || 0
+      : Number(act.subtotalUsd) || Number(act.subtotalUzs) || 0;
+
+    const resolvedVat = isMistakenlyMultipliedUzs
+      ? Number(act.vatAmountUsd) || 0
+      : isActUzs
+      ? Number(act.vatAmountUzs) || Number(act.vatAmountUsd) || 0
+      : Number(act.vatAmountUsd) || Number(act.vatAmountUzs) || 0;
+
     return {
       id: act.docNo || act.id,
       date: act.date,
       orderId: act.docNo,
-      workOrderId: act.workOrderId || "",
+      workOrderId: (act as any).workOrder?.docNo || act.workOrderId || "",
       contractNo: act.contractNo || "",
       customer: act.clientName || act.client?.name || "",
       customerTin: act.clientTin || act.client?.tin || "",
       product: firstItem ? firstItem.name : "Bosma mahsulotlar",
       quantity: firstItem ? Number(firstItem.quantity) : 0,
       unit: firstItem ? firstItem.unit : "dona",
-      subtotal: Number(act.subtotalUsd) || Number(act.subtotalUzs) || 0,
+      subtotal: resolvedSubtotal,
       vatRate: Number(act.vatRate) || 12,
-      vatAmount: Number(act.vatAmountUsd) || Number(act.vatAmountUzs) || 0,
-      totalAmount: Number(act.totalAmountUsd) || Number(act.totalAmountUzs) || 0,
-      currency: act.currency || "USD",
+      vatAmount: resolvedVat,
+      totalAmount: resolvedTotal,
+      currency: effectiveCurrency,
       warehouse: act.warehouse || "Asosiy Ombor (Tayyor Mahsulot)",
       carrier: act.carrier || "",
       driverName: act.driverName || "",
@@ -69,7 +106,11 @@ export async function getDeliveryActs(companyCode: string = "PRINTGOO"): Promise
         size: it.size || undefined,
         unit: it.unit,
         quantity: Number(it.quantity),
-        unitPrice: Number(it.unitPriceUsd) || Number(it.unitPriceUzs) || 0,
+        unitPrice: isMistakenlyMultipliedUzs
+          ? Number(it.unitPriceUsd) || 0
+          : isActUzs
+          ? Number(it.unitPriceUzs) || Number(it.unitPriceUsd) || 0
+          : Number(it.unitPriceUsd) || Number(it.unitPriceUzs) || 0,
         vatRate: Number(it.vatRate) || 12,
       })),
     };
@@ -84,6 +125,7 @@ export async function upsertDeliveryAct(
 
   // 1. Mijozni INN yoki nomi bo'yicha topish yoki yaratish
   let targetClientId: string | null = null;
+  let clientDefaultCurrency = "UZS";
   const tinToSearch = data.customerTin?.trim();
   if (tinToSearch) {
     const existingClient = await db.query.clients.findFirst({
@@ -91,6 +133,7 @@ export async function upsertDeliveryAct(
     });
     if (existingClient) {
       targetClientId = existingClient.id;
+      clientDefaultCurrency = existingClient.currency || "UZS";
     }
   }
 
@@ -100,6 +143,7 @@ export async function upsertDeliveryAct(
     });
     if (existingByName) {
       targetClientId = existingByName.id;
+      clientDefaultCurrency = existingByName.currency || "UZS";
     }
   }
 
@@ -117,9 +161,13 @@ export async function upsertDeliveryAct(
       })
       .returning();
     targetClientId = insertedClient.id;
+    clientDefaultCurrency = insertedClient.currency || "UZS";
   }
 
-  const docNo = data.id?.startsWith("ACT-") ? data.id : await getNextDeliveryActNumber(companyCode);
+  const docNo =
+    data.id?.startsWith("ACT-") || data.id?.startsWith("SF-")
+      ? data.id
+      : await getNextDeliveryActNumber(companyCode);
   const date = data.date || new Date().toISOString().split("T")[0];
 
   const dbStatusMap: Record<string, "draft" | "pending_signature" | "signed" | "disputed"> = {
@@ -131,10 +179,21 @@ export async function upsertDeliveryAct(
 
   const status = data.status ? dbStatusMap[data.status] || "draft" : "draft";
   const rate = data.exchangeRate || 12850;
-  const total = Number(data.totalAmount) || 0;
+  const snapRounding = (val: number) => {
+    const nearestThousand = Math.round(val / 1000) * 1000;
+    return nearestThousand > 0 && Math.abs(val - nearestThousand) < 1.5 ? nearestThousand : val;
+  };
+  const total = snapRounding(Number(data.totalAmount) || 0);
   const subtotal = Number(data.subtotal) || 0;
-  const vatAmount = Number(data.vatAmount) || 0;
-  const isUsd = (data.currency || "USD").toUpperCase() === "USD";
+  const vatAmount = Number((total - subtotal).toFixed(2));
+
+  // Agar mijoz valyutasi UZS bo'lsa va summa >= 100,000 bo'lsa, uni USD deb kursga ko'paytirib yubormaslik
+  const rawCurr = (data.currency || clientDefaultCurrency || "UZS").toUpperCase();
+  const effectiveCurr =
+    clientDefaultCurrency.toUpperCase() === "UZS" && rawCurr === "USD" && total >= 100_000
+      ? "UZS"
+      : rawCurr;
+  const isUsd = effectiveCurr === "USD";
 
   const totalUsd = isUsd ? total : Math.round((total / rate) * 100) / 100;
   const totalUzs = isUsd ? Math.round(total * rate) : total;
@@ -148,6 +207,22 @@ export async function upsertDeliveryAct(
     where: and(eq(deliveryActs.companyId, companyId), eq(deliveryActs.docNo, docNo)),
   });
 
+  // WorkOrder ID ni (docNo yoki UUID orqali) aniqlash
+  let targetWorkOrderId: string | null = null;
+  if (data.workOrderId) {
+    const woKey = data.workOrderId.trim();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(woKey);
+    const foundWo = await db.query.workOrders.findFirst({
+      where: and(
+        eq(workOrders.companyId, companyId),
+        isUuid ? eq(workOrders.id, woKey) : eq(workOrders.docNo, woKey)
+      ),
+    });
+    if (foundWo) {
+      targetWorkOrderId = foundWo.id;
+    }
+  }
+
   let actId: string;
 
   if (existingAct) {
@@ -160,6 +235,7 @@ export async function upsertDeliveryAct(
         clientName: data.customer || existingAct.clientName,
         clientTin: data.customerTin || existingAct.clientTin,
         contractNo: data.contractNo || existingAct.contractNo,
+        workOrderId: targetWorkOrderId ?? existingAct.workOrderId,
         carrier: data.carrier || existingAct.carrier,
         driverName: data.driverName || existingAct.driverName,
         recipientName: data.recipientName || existingAct.recipientName,
@@ -171,7 +247,7 @@ export async function upsertDeliveryAct(
         vatAmountUzs: vatUzs.toString(),
         totalAmountUsd: totalUsd.toString(),
         totalAmountUzs: totalUzs.toString(),
-        currency: data.currency || "USD",
+        currency: effectiveCurr,
         warehouse: data.warehouse || existingAct.warehouse,
         status,
         notes: data.notes || existingAct.notes,
@@ -192,6 +268,7 @@ export async function upsertDeliveryAct(
         clientName: data.customer || "Noma'lum Mijoz",
         clientTin: data.customerTin || null,
         contractNo: data.contractNo || null,
+        workOrderId: targetWorkOrderId,
         carrier: data.carrier || null,
         driverName: data.driverName || null,
         recipientName: data.recipientName || null,
@@ -203,7 +280,7 @@ export async function upsertDeliveryAct(
         vatAmountUzs: vatUzs.toString(),
         totalAmountUsd: totalUsd.toString(),
         totalAmountUzs: totalUzs.toString(),
-        currency: data.currency || "USD",
+        currency: effectiveCurr,
         warehouse: data.warehouse || "Asosiy Ombor (Tayyor Mahsulot)",
         status,
         notes: data.notes || null,
@@ -343,13 +420,28 @@ export async function syncClientSettlement(
 export async function getClientSettlements(companyCode: string = "PRINTGOO"): Promise<ClientSettlementRecord[]> {
   const companyId = await getCompanyIdByCode(companyCode);
 
-  const raw = await db.query.clientSettlements.findMany({
-    where: eq(clientSettlements.companyId, companyId),
-    with: {
-      client: true,
-    },
-    orderBy: [desc(clientSettlements.updatedAt)],
-  });
+  const [raw, allActs, allPayments] = await Promise.all([
+    db.query.clientSettlements.findMany({
+      where: eq(clientSettlements.companyId, companyId),
+      with: {
+        client: true,
+      },
+      orderBy: [desc(clientSettlements.updatedAt)],
+    }),
+    db.query.deliveryActs.findMany({
+      where: eq(deliveryActs.companyId, companyId),
+      with: {
+        items: {
+          orderBy: (items, { asc }) => [asc(items.sortOrder)],
+        },
+      },
+      orderBy: [desc(deliveryActs.date), desc(deliveryActs.createdAt)],
+    }),
+    db.query.clientPayments.findMany({
+      where: eq(clientPayments.companyId, companyId),
+      orderBy: [desc(clientPayments.date), desc(clientPayments.createdAt)],
+    }),
+  ]);
 
   const statusMap: Record<string, "Debt" | "Settled" | "Advance"> = {
     debt: "Debt",
@@ -357,20 +449,157 @@ export async function getClientSettlements(companyCode: string = "PRINTGOO"): Pr
     advance: "Advance",
   };
 
-  return raw.map((s) => ({
-    id: s.id,
-    customer: s.customer || s.client?.name || "",
-    customerTin: s.customerTin || s.client?.tin || "",
-    contractNo: s.contractNo || s.client?.contractNo || "K-2026/01",
-    openingBalance: Number(s.openingBalanceUsd) || 0,
-    totalDebit: Number(s.totalDebitUsd) || 0,
-    totalCredit: Number(s.totalCreditUsd) || 0,
-    closingBalance: Number(s.closingBalanceUsd) || 0,
-    currency: s.currency || "USD",
-    lastActivityDate: s.lastActivityDate || new Date().toISOString().split("T")[0],
-    status: statusMap[s.status] || "Settled",
-    ledger: [],
-  }));
+  return raw.map((s) => {
+    const custName = (s.customer || s.client?.name || "").trim();
+    const custTin = (s.customerTin || s.client?.tin || "").trim();
+    const currency = (s.client?.currency || s.currency || "UZS").toUpperCase();
+    const isUzs = currency === "UZS";
+
+    const matchesClient = (targetClientId?: string | null, targetName?: string | null, targetTin?: string | null) => {
+      if (s.clientId && targetClientId && s.clientId === targetClientId) return true;
+      if (custTin.length >= 4 && targetTin && custTin === targetTin.trim()) return true;
+      if (custName && targetName && custName.toLowerCase() === targetName.trim().toLowerCase()) return true;
+      return false;
+    };
+
+    const clientActs = allActs.filter((a) => matchesClient(a.clientId, a.clientName, a.clientTin));
+    const clientPays = allPayments.filter((p) => matchesClient(p.clientId, p.customer, null));
+
+    const snapRounding = (val: number) => {
+      const nearestThousand = Math.round(val / 1000) * 1000;
+      return nearestThousand > 0 && Math.abs(val - nearestThousand) < 1.5 ? nearestThousand : val;
+    };
+
+    const combinedEntries = [
+      ...clientActs.map((a) => {
+        const rate = Number(a.exchangeRate) || 12850;
+        const rawUsd = Number(a.totalAmountUsd) || 0;
+        const rawUzs = Number(a.totalAmountUzs) || 0;
+        const isMistakenlyMultipliedUzs =
+          isUzs &&
+          (a.currency || "USD").toUpperCase() === "USD" &&
+          rawUsd >= 100_000 &&
+          Math.abs(rawUzs - Math.round(rawUsd * rate)) <= 5;
+
+        const cleanDebit = isMistakenlyMultipliedUzs
+          ? snapRounding(rawUsd)
+          : isUzs
+          ? snapRounding(rawUzs || rawUsd || 0)
+          : rawUsd || rawUzs || 0;
+
+        if (isMistakenlyMultipliedUzs) {
+          const healedUzs = cleanDebit;
+          const healedUsd = Math.round((healedUzs / rate) * 100) / 100;
+          const vatR = Number(a.vatRate) || 12;
+          const healedSubUzs = Number((healedUzs / (1 + vatR / 100)).toFixed(2));
+          const healedVatUzs = Number((healedUzs - healedSubUzs).toFixed(2));
+          db.update(deliveryActs)
+            .set({
+              currency: "UZS",
+              totalAmountUzs: healedUzs.toString(),
+              totalAmountUsd: healedUsd.toString(),
+              subtotalUzs: healedSubUzs.toString(),
+              subtotalUsd: (Math.round((healedSubUzs / rate) * 100) / 100).toString(),
+              vatAmountUzs: healedVatUzs.toString(),
+              vatAmountUsd: (Math.round((healedVatUzs / rate) * 100) / 100).toString(),
+            })
+            .where(eq(deliveryActs.id, a.id))
+            .catch(() => {});
+        }
+
+        return {
+          id: a.id,
+          date: a.date,
+          docNo: a.docNo,
+          docType: "Schet-faktura" as const,
+          description:
+            a.items.length > 0
+              ? a.items.map((it) => `${it.name} (${Number(it.quantity).toLocaleString()} ${it.unit})`).join(", ")
+              : a.notes || "Mahsulot yuklandi (Schet-faktura)",
+          debit: cleanDebit,
+          credit: 0,
+          _ts: a.createdAt ? new Date(a.createdAt).getTime() : 0,
+        };
+      }),
+      ...clientPays.map((p) => ({
+        id: p.id,
+        date: p.date,
+        docNo: p.docNo,
+        docType: "Payment" as const,
+        description: p.note || `Shartnoma ${p.contractNo || s.contractNo || ""} bo'yicha to'lov`.trim(),
+        debit: 0,
+        credit: isUzs
+          ? Number(p.amountUzs) || Number(p.amountUsd) || 0
+          : Number(p.amountUsd) || Number(p.amountUzs) || 0,
+        _ts: p.createdAt ? new Date(p.createdAt).getTime() : 0,
+      })),
+    ].sort((a, b) => {
+      const dateCmp = (a.date || "").localeCompare(b.date || "");
+      if (dateCmp !== 0) return dateCmp;
+      return a._ts - b._ts;
+    });
+
+    const ledger = combinedEntries.map(({ _ts, ...entry }) => entry);
+
+    const openingBalance = isUzs
+      ? Number(s.openingBalanceUzs) || Number(s.openingBalanceUsd) || 0
+      : Number(s.openingBalanceUsd) || 0;
+
+    const totalDebit =
+      ledger.length > 0
+        ? ledger.reduce((sum, e) => sum + e.debit, 0)
+        : isUzs
+        ? Number(s.totalDebitUzs) || Number(s.totalDebitUsd) || 0
+        : Number(s.totalDebitUsd) || 0;
+
+    const totalCredit =
+      ledger.length > 0
+        ? ledger.reduce((sum, e) => sum + e.credit, 0)
+        : isUzs
+        ? Number(s.totalCreditUzs) || Number(s.totalCreditUsd) || 0
+        : Number(s.totalCreditUsd) || 0;
+
+    const closingBalance = Number((openingBalance + totalDebit - totalCredit).toFixed(2));
+    const computedStatus: "Debt" | "Settled" | "Advance" =
+      closingBalance > 0.01 ? "Debt" : closingBalance < -0.01 ? "Advance" : "Settled";
+
+    // Agar bazadagi clientSettlements qatorida eski noto'g'ri debit/closingBalance turgan bo'lsa, uni avtomatik tuzatib qo'yamiz
+    if (
+      isUzs &&
+      (Math.abs((Number(s.totalDebitUzs) || 0) - totalDebit) > 1 ||
+        Math.abs((Number(s.closingBalanceUzs) || 0) - closingBalance) > 1)
+    ) {
+      const dbSt = closingBalance > 0.01 ? "debt" : closingBalance < -0.01 ? "advance" : "settled";
+      db.update(clientSettlements)
+        .set({
+          currency: "UZS",
+          totalDebitUzs: totalDebit.toString(),
+          totalDebitUsd: (Math.round((totalDebit / 12850) * 100) / 100).toString(),
+          totalCreditUzs: totalCredit.toString(),
+          totalCreditUsd: (Math.round((totalCredit / 12850) * 100) / 100).toString(),
+          closingBalanceUzs: closingBalance.toString(),
+          closingBalanceUsd: (Math.round((closingBalance / 12850) * 100) / 100).toString(),
+          status: dbSt,
+        })
+        .where(eq(clientSettlements.id, s.id))
+        .catch(() => {});
+    }
+
+    return {
+      id: s.id,
+      customer: custName,
+      customerTin: custTin,
+      contractNo: s.contractNo || s.client?.contractNo || "K-2026/01",
+      openingBalance,
+      totalDebit,
+      totalCredit,
+      closingBalance,
+      currency,
+      lastActivityDate: s.lastActivityDate || new Date().toISOString().split("T")[0],
+      status: computedStatus,
+      ledger,
+    };
+  });
 }
 
 // ─── 4. Payments ──────────────────────────────────────────────────────────────
