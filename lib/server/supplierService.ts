@@ -41,6 +41,8 @@ export interface SupplierRecord {
   paymentTerms?: string;
   address?: string;
   notes?: string;
+  imageUrl?: string;
+  logoUrl?: string;
   status: "Active" | "Blocked" | "Archived";
   createdAt?: string;
   updatedAt?: string;
@@ -62,6 +64,7 @@ export interface SupplierContractRecord {
   attachmentUrl?: string;
   attachmentSize?: string;
   notes?: string;
+  imageUrl?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -83,7 +86,20 @@ export interface SupplierOrderRecord {
   status: "Draft" | "Ordered" | "In_Production" | "Ready" | "Delivered" | "Cancelled";
   specDetails?: string;
   notes?: string;
+  fileUrl?: string;
+  fileName?: string;
+  imageUrl?: string;
+  telegramChatId?: string | null;
+  telegramMessageId?: number | null;
+  telegramSentAt?: string | null;
+  telegramConfirmedBy?: string | null;
   createdAt?: string;
+}
+
+export interface ToolingOrderRecord extends SupplierOrderRecord {
+  supplierName?: string;
+  supplierCode?: string;
+  supplierPhone?: string;
 }
 
 export interface SupplierPaymentRecord {
@@ -256,6 +272,7 @@ export async function getSuppliers(companyCode: string = "PRINTGOO"): Promise<Su
     paymentTerms: s.paymentTerms || "",
     address: s.address || "",
     notes: s.notes || "",
+    logoUrl: s.logoUrl || undefined,
     status: s.status as SupplierRecord["status"],
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
@@ -293,6 +310,7 @@ export async function getSupplierById(idOrCode: string, companyCode: string = "P
     paymentTerms: s.paymentTerms || "",
     address: s.address || "",
     notes: s.notes || "",
+    logoUrl: s.logoUrl || undefined,
     status: s.status as SupplierRecord["status"],
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
@@ -344,6 +362,7 @@ export async function upsertSupplier(
         paymentTerms: data.paymentTerms !== undefined ? data.paymentTerms : existing.paymentTerms,
         address: data.address !== undefined ? data.address : existing.address,
         notes: data.notes !== undefined ? data.notes : existing.notes,
+        logoUrl: data.logoUrl !== undefined ? data.logoUrl : existing.logoUrl,
         status: (data.status as any) || existing.status,
         updatedAt: new Date(),
       })
@@ -373,6 +392,7 @@ export async function upsertSupplier(
         paymentTerms: data.paymentTerms || null,
         address: data.address || null,
         notes: data.notes || null,
+        logoUrl: data.logoUrl || null,
         status: (data.status as any) || "Active",
       })
       .returning();
@@ -442,8 +462,186 @@ export async function getSupplierOrders(supplierIdOrCode: string, companyCode: s
     status: o.status as any,
     specDetails: o.specDetails || undefined,
     notes: o.notes || undefined,
+    fileUrl: o.fileUrl || undefined,
+    fileName: o.fileName || undefined,
+    telegramChatId: o.telegramChatId || undefined,
+    telegramMessageId: o.telegramMessageId || undefined,
+    telegramSentAt: o.telegramSentAt?.toISOString() || undefined,
+    telegramConfirmedBy: o.telegramConfirmedBy || undefined,
     createdAt: o.createdAt.toISOString(),
   }));
+}
+
+export async function getAllToolingOrders(
+  companyCode: string = "PRINTGOO"
+): Promise<ToolingOrderRecord[]> {
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  const rawSuppliers = await getSuppliers(companyCode);
+  const suppMap = new Map(rawSuppliers.map((s) => [s.id, s]));
+
+  let raw = await db.query.supplierOrders.findMany({
+    where: eq(supplierOrders.companyId, companyId),
+    with: {
+      supplier: true,
+      workOrder: true,
+    },
+    orderBy: [desc(supplierOrders.orderDate), desc(supplierOrders.createdAt)],
+  });
+
+  if (raw.length === 0) {
+    const ctpSupp = rawSuppliers.find((s) => s.category === "ctp_prepress") || rawSuppliers[0];
+    const dieSupp = rawSuppliers.find((s) => s.category === "die_tooling") || rawSuppliers[1] || rawSuppliers[0];
+    const clicheSupp = rawSuppliers.find((s) => s.category === "cliche_stamping") || rawSuppliers[2] || rawSuppliers[0];
+
+    const todayStr = new Date().toISOString().split("T")[0];
+
+    const seedOrders: Array<Partial<SupplierOrderRecord>> = [
+      {
+        supplierId: ctpSupp?.id || "",
+        orderNo: "PO-2026-0041",
+        orderDate: todayStr,
+        deliveryDeadline: todayStr,
+        orderType: "ctp_plates",
+        title: "4 ta CTP Forma (CMYK) — Choy qutisi 250g",
+        workOrderNo: "WO-2026-084",
+        quantity: 4,
+        unit: "dona",
+        amount: 280000,
+        currency: "UZS",
+        status: "In_Production",
+        specDetails: "Format: 745x605mm, 0.30mm termal plita, 2400 DPI",
+        notes: "Bugun 15:00 gacha yetkazilishi shart (smena kutmoqda)",
+      },
+      {
+        supplierId: dieSupp?.id || "",
+        orderNo: "PO-2026-0042",
+        orderDate: todayStr,
+        deliveryDeadline: todayStr,
+        orderType: "die_tooling",
+        title: "Lazer kesish shtansformasi — Dori qutisi",
+        workOrderNo: "WO-2026-085",
+        quantity: 1,
+        unit: "kompl",
+        amount: 1450000,
+        currency: "UZS",
+        status: "Ordered",
+        specDetails: "12-pozitsiyali avtomat Bobst, ejektor rezina, 23.8mm pichoq",
+        notes: "Dieline chizmasi tasdiqlangan",
+      },
+      {
+        supplierId: clicheSupp?.id || "",
+        orderNo: "PO-2026-0043",
+        orderDate: todayStr,
+        deliveryDeadline: todayStr,
+        orderType: "cliche",
+        title: "Zarhal bosish (Hot Foil) latun klishe",
+        workOrderNo: "WO-2026-086",
+        quantity: 1,
+        unit: "dona",
+        amount: 620000,
+        currency: "UZS",
+        status: "Ready",
+        specDetails: "Latun 7mm, 3D relyefli, 140x95mm logo",
+        notes: "Prepress xonasida qabul qilishga tayyor",
+      },
+      {
+        supplierId: clicheSupp?.id || "",
+        orderNo: "PO-2026-0044",
+        orderDate: todayStr,
+        deliveryDeadline: todayStr,
+        orderType: "cliche",
+        title: "Kongrev bo'rtma klishe (Patriza bilan)",
+        workOrderNo: "WO-2026-087",
+        quantity: 1,
+        unit: "kompl",
+        amount: 480000,
+        currency: "UZS",
+        status: "Delivered",
+        specDetails: "Magniy 4mm + kompozit patriza",
+        notes: "Omborga qabul qilindi, qolip javoniga joylandi",
+      },
+      {
+        supplierId: ctpSupp?.id || "",
+        orderNo: "PO-2026-0045",
+        orderDate: todayStr,
+        deliveryDeadline: todayStr,
+        orderType: "ctp_plates",
+        title: "8 ta CTP Forma (Oldi-orqa 4+4) — Mahsulot katalogi",
+        workOrderNo: "WO-2026-088",
+        quantity: 8,
+        unit: "dona",
+        amount: 560000,
+        currency: "UZS",
+        status: "Ordered",
+        specDetails: "Heidelberg SM-74 (605x745mm), 175 lpi",
+        notes: "Ertaga ertalabki smenaga rejalashtirilgan",
+      },
+    ];
+
+    if (ctpSupp?.id) {
+      for (const item of seedOrders) {
+        if (item.supplierId) {
+          await upsertSupplierOrder(item, companyCode);
+        }
+      }
+      raw = await db.query.supplierOrders.findMany({
+        where: eq(supplierOrders.companyId, companyId),
+        with: { supplier: true, workOrder: true },
+        orderBy: [desc(supplierOrders.orderDate), desc(supplierOrders.createdAt)],
+      });
+    }
+  }
+
+  // Map any work orders by docNo for orders that only have workOrderNo string
+  const allWos = await db.query.workOrders.findMany({
+    where: eq(workOrders.companyId, companyId),
+    columns: { id: true, docNo: true, photoUrl: true, photoUrls: true, productName: true },
+  });
+  const woByDocNo = new Map(allWos.map((w) => [w.docNo?.toLowerCase() || "", w]));
+  const woById = new Map(allWos.map((w) => [w.id, w]));
+
+  return raw.map((o) => {
+    const supp = o.supplier || suppMap.get(o.supplierId);
+    const wo =
+      (o as any).workOrder ||
+      (o.workOrderId ? woById.get(o.workOrderId) : null) ||
+      (o.workOrderNo ? woByDocNo.get(o.workOrderNo.toLowerCase().trim()) : null);
+    const woPhoto =
+      wo?.photoUrl ||
+      (Array.isArray(wo?.photoUrls) && wo.photoUrls.length > 0 ? wo.photoUrls[0] : undefined);
+
+    return {
+      id: o.id,
+      supplierId: o.supplierId,
+      supplierName: supp?.name || "Yetkazib beruvchi",
+      supplierCode: supp?.code || "",
+      supplierPhone: supp?.phone || "",
+      orderNo: o.orderNo,
+      orderDate: o.orderDate,
+      deliveryDeadline: o.deliveryDeadline || undefined,
+      orderType: o.orderType as any,
+      title: o.title,
+      workOrderId: o.workOrderId || wo?.id || undefined,
+      workOrderNo: o.workOrderNo || wo?.docNo || undefined,
+      imageUrl: woPhoto || undefined,
+      workOrderProduct: (wo as any)?.productName || (wo as any)?.product || undefined,
+      quantity: Number(o.quantity) || 1,
+      unit: o.unit || "dona",
+      amount: Number(o.amount) || 0,
+      currency: o.currency || "UZS",
+      status: o.status as any,
+      specDetails: o.specDetails || undefined,
+      notes: o.notes || undefined,
+      fileUrl: o.fileUrl || undefined,
+      fileName: o.fileName || undefined,
+      telegramChatId: o.telegramChatId || undefined,
+      telegramMessageId: o.telegramMessageId || undefined,
+      telegramSentAt: o.telegramSentAt?.toISOString() || undefined,
+      telegramConfirmedBy: o.telegramConfirmedBy || undefined,
+      createdAt: o.createdAt.toISOString(),
+    };
+  });
 }
 
 export async function getNextSupplierOrderNo(companyId: string): Promise<string> {
@@ -521,6 +719,12 @@ export async function upsertSupplierOrder(
         status: data.status || existing.status,
         specDetails: data.specDetails !== undefined ? data.specDetails : existing.specDetails,
         notes: data.notes !== undefined ? data.notes : existing.notes,
+        fileUrl: data.fileUrl !== undefined ? data.fileUrl : existing.fileUrl,
+        fileName: data.fileName !== undefined ? data.fileName : existing.fileName,
+        telegramChatId: data.telegramChatId !== undefined ? data.telegramChatId : existing.telegramChatId,
+        telegramMessageId: data.telegramMessageId !== undefined ? data.telegramMessageId : existing.telegramMessageId,
+        telegramSentAt: data.telegramSentAt ? new Date(data.telegramSentAt) : existing.telegramSentAt,
+        telegramConfirmedBy: data.telegramConfirmedBy !== undefined ? data.telegramConfirmedBy : existing.telegramConfirmedBy,
         updatedAt: new Date(),
       })
       .where(eq(supplierOrders.id, existing.id))
@@ -546,6 +750,12 @@ export async function upsertSupplierOrder(
         status: data.status || "Ordered",
         specDetails: data.specDetails || null,
         notes: data.notes || null,
+        fileUrl: data.fileUrl || null,
+        fileName: data.fileName || null,
+        telegramChatId: data.telegramChatId || null,
+        telegramMessageId: data.telegramMessageId || null,
+        telegramSentAt: data.telegramSentAt ? new Date(data.telegramSentAt) : null,
+        telegramConfirmedBy: data.telegramConfirmedBy || null,
       })
       .returning();
     savedOrder = created;

@@ -7,6 +7,7 @@ export function openWorkOrderTab(
   order: OrderRow,
   openTab: OpenTabFn
 ) {
+  const raw = order.rawOrder || {};
   openTab({
     id: order.id,
     title: `${order.id}: Production Order`,
@@ -15,6 +16,7 @@ export function openWorkOrderTab(
     isUnsaved: false,
     activeLevel3Tab: "overview",
     documentData: {
+      ...raw,
       docNo: order.id,
       customer: order.customer,
       product: order.product,
@@ -30,6 +32,8 @@ export function openWorkOrderTab(
       priceTotal: order.priceTotal,
       currency: "USD",
       responsible: order.responsible,
+      skuArtworks: raw.skuArtworks || raw.dimensions?.skuArtworks || [],
+      sizes: raw.sizes || raw.dimensions?.sizes || [],
     },
   });
 }

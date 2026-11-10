@@ -92,6 +92,7 @@ export function SupplierDetail({ tab }: { tab: DocumentTab }) {
       paymentTerms: d.paymentTerms || "",
       address: d.address || "",
       notes: d.notes || "",
+      logoUrl: d.logoUrl || "",
       status: d.status === "Blocked" || d.status === "Archived" ? d.status : "Active",
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
@@ -335,6 +336,17 @@ export function SupplierDetail({ tab }: { tab: DocumentTab }) {
               <div className="space-y-3">
                 <SidebarSummaryCard
                   icon={Building2}
+                  avatar={
+                    form.logoUrl ? (
+                      <div className="w-7 h-7 rounded-md border border-border bg-background flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+                        <img
+                          src={form.logoUrl}
+                          alt={form.name || "Ta'minotchi"}
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                    ) : undefined
+                  }
                   title={form.name || "Ta'minotchi"}
                   subtitle={
                     <div className="flex items-center gap-1.5 mt-0.5">

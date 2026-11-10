@@ -429,10 +429,10 @@ function StockMaterialDialog({
               Mos keluvchi material topilmadi
             </CommandEmpty>
             <CommandGroup heading="Ombordagi qoldiqlar">
-              {stock.map((item) => (
+              {stock.map((item, idx) => (
                 <CommandItem
-                  key={item.sku}
-                  value={`${item.sku} ${item.name} ${item.category} ${item.sheetFormat || ""}`}
+                  key={`${item.id || item.sku}-${item.location || ""}-${idx}`}
+                  value={`${item.sku} ${item.name} ${item.category} ${item.sheetFormat || ""} ${item.id || idx}`}
                   onSelect={() => {
                     onSelectMaterial(item.sku);
                     onOpenChange(false);
@@ -946,6 +946,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     upsertWarehouseShipmentAsync,
     replaceTabId,
     productionQueue,
+    upsertProductionQueueItem,
     crmCustomers,
     warehouseStock,
     deliveryActs,
@@ -1096,6 +1097,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       grossWeightKg: d.grossWeightKg || Math.round(defaultQty * 0.045) || 145,
       volumeM3: d.volumeM3 || 0.85,
       notes: d.notes || "",
+      batchId: d.batchId || undefined,
+      batchNo: d.batchNo !== undefined ? Number(d.batchNo) : undefined,
       status: d.status || "Draft",
       shipmentType: defaultShipmentType,
       items: defaultItems,
@@ -1217,6 +1220,70 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         items: updatedItems,
       };
     });
+    setTabUnsaved(tab.id, true);
+  };
+
+  const handleBatchSelect = (batchId: string) => {
+    if (isLocked) return;
+    const wo = productionQueue.find((w) => w.id === doc.workOrder);
+    if (!wo || !wo.deliveryBatches) return;
+
+    if (!batchId || batchId === "all") {
+      setDoc((prev) => ({
+        ...prev,
+        batchId: undefined,
+        batchNo: undefined,
+      }));
+      setTabUnsaved(tab.id, true);
+      return;
+    }
+
+    const batch = wo.deliveryBatches.find((b) => b.id === batchId);
+    if (!batch) return;
+
+    const bQty = Number(batch.quantity) || 0;
+    const rawOrderNo = wo.id;
+    const updatedItems: ShipmentLineItem[] =
+      batch.sizeItems && batch.sizeItems.filter((si) => si.quantity > 0).length > 0
+        ? batch.sizeItems
+            .filter((si) => si.quantity > 0)
+            .map((si, idx) => ({
+              id: `ship-item-${Date.now()}-${idx}`,
+              sku: `PRN-${rawOrderNo}-${si.sizeName}`,
+              name: `${wo.product} (${si.sizeName})`,
+              orderQty: si.quantity,
+              shippedQty: si.quantity,
+              unit: wo.unit || "pcs",
+              packageCount: Math.ceil(si.quantity / 500) || 1,
+              packageType: "Gofroquti",
+              palletNo: `Pallet P-${batch.batchNo}`,
+              notes: `${batch.title} bo'yicha`,
+            }))
+        : [
+            {
+              id: `ship-item-${Date.now()}`,
+              sku: `PRN-${rawOrderNo}`,
+              name: wo.product,
+              orderQty: bQty,
+              shippedQty: bQty,
+              unit: wo.unit || "pcs",
+              packageCount: Math.ceil(bQty / 500) || 5,
+              packageType: "Gofroquti",
+              palletNo: `Pallet P-${batch.batchNo}`,
+              notes: `${batch.title} bo'yicha`,
+            },
+          ];
+
+    setDoc((prev) => ({
+      ...prev,
+      batchId: batch.id,
+      batchNo: batch.batchNo,
+      quantity: bQty,
+      packagesCount: Math.ceil(bQty / 500) || 5,
+      grossWeightKg: Math.round(bQty * 0.05) || 120,
+      notes: batch.notes || `${rawOrderNo} ${batch.title} jo'natmasi`,
+      items: updatedItems,
+    }));
     setTabUnsaved(tab.id, true);
   };
 
@@ -1376,6 +1443,36 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       setDoc(updated);
       upsertWarehouseShipment(updated);
     }
+    // Live sync with Work Order delivery batches
+    if (doc.workOrder && (status === "Dispatched" || status === "Delivered")) {
+      const targetWo = productionQueue.find((w) => w.id === doc.workOrder || w.docNo === doc.workOrder);
+      if (targetWo && targetWo.deliveryBatches && targetWo.deliveryBatches.length > 0) {
+        const batchMatch = targetWo.deliveryBatches.find(
+          (b) =>
+            (doc.batchId && b.id === doc.batchId) ||
+            (doc.batchNo && b.batchNo === doc.batchNo) ||
+            (doc.notes && doc.notes.includes(`Partiya #${b.batchNo}`))
+        );
+        if (batchMatch) {
+          const nextBatches = targetWo.deliveryBatches.map((b) =>
+            b.id === batchMatch.id
+              ? {
+                  ...b,
+                  status: status === "Delivered" ? ("delivered" as const) : ("dispatched" as const),
+                  linkedShipmentId: doc.id,
+                  linkedShipmentNo: doc.id,
+                  dispatchedAt: new Date().toISOString(),
+                }
+              : b
+          );
+          upsertProductionQueueItem({
+            ...targetWo,
+            deliveryBatches: nextBatches,
+          });
+        }
+      }
+    }
+
     setTabUnsaved(tab.id, false);
   };
 
@@ -1814,6 +1911,36 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               onSelect={handleWorkOrderSelect}
             />
           )}
+
+
+          {(() => {
+            const currentWo = productionQueue.find((w) => w.id === doc.workOrder);
+            if (!currentWo || !currentWo.deliveryBatches || currentWo.deliveryBatches.length === 0) return null;
+            return (
+              <div className="mt-1">
+                <Select
+                  value={doc.batchId || "all"}
+                  disabled={isLocked}
+                  onValueChange={(val) => handleBatchSelect(val || "all")}
+                >
+                  <SelectTrigger className="h-6 text-[10px] font-mono border-dashed border-primary/40 bg-primary/5 text-primary">
+                    <SelectValue placeholder="Partiyani tanlash" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">
+                      Barcha adad (Taqsimlanmagan)
+                    </SelectItem>
+                    {currentWo.deliveryBatches.map((b) => (
+                      <SelectItem key={b.id} value={b.id} className="text-xs">
+                        {b.title} ({(Number(b.quantity) || 0).toLocaleString()} {doc.unit || "dona"}) · {b.targetDate}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            );
+          })()}
+
         </div>
 
         {/* Col 5 (span 3): Qabul qiluvchi */}

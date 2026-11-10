@@ -15,6 +15,20 @@
       "when": 1793986320102,
       "tag": "0001_productive_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794131605286,
+      "tag": "0002_reflective_mariko_yashida",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794206153563,
+      "tag": "0003_eager_thunderball",
+      "breakpoints": true
     }
   ]
 }

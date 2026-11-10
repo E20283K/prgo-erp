@@ -168,6 +168,8 @@ export interface SizeDistribution {
   quantity: number;
   model?: string;
   sizeCode?: string;
+  width?: number;
+  height?: number;
 }
 
 export interface SizeScalePreset {
@@ -248,12 +250,21 @@ export interface PackagingBoxItem {
   boxCode: string;
   model?: string;
   sizeCode?: string;
+  width?: number;
+  height?: number;
   quantity: number;
   grossWeightKg?: number;
   packerName: string;
   packedAt: string;
   barcode: string;
   notes?: string;
+  batchId?: string;
+  batchNo?: number;
+  shipmentId?: string;
+  status?: "ready" | "dispatched";
+  unitWeightGrams?: number;
+  isWeighed?: boolean;
+  countDeviation?: number;
 }
 
 export interface WorkOrderPackagingSummary {
@@ -264,6 +275,10 @@ export interface WorkOrderPackagingSummary {
   targetQty: number;
   isCompleted: boolean;
   completedAt?: string;
+  unitWeightGrams?: number;
+  calibrationMethod?: "theoretical" | "scale_sample";
+  samplePcs?: number;
+  sampleWeightGrams?: number;
   boxes: PackagingBoxItem[];
 }
 
@@ -331,6 +346,36 @@ export function autoGeneratePackagingBoxes(params: {
   }
 
   return generated;
+}
+
+// ─── Partial Shipments & Delivery Batches (Bo'lib jo'natish jadvali) ─────────
+
+export type DeliveryBatchStatus = "scheduled" | "in_production" | "ready" | "dispatched" | "delivered";
+
+export interface DeliveryBatchSizeItem {
+  sizeId: string;
+  sizeName: string;
+  quantity: number;
+}
+
+export interface WorkOrderDeliveryBatch {
+  id: string;
+  batchNo: number; // 1, 2, 3...
+  title: string; // Masalan: "Partiya #1"
+  targetDate: string; // YYYY-MM-DD
+  quantity: number;
+  status: DeliveryBatchStatus;
+  sizeItems?: DeliveryBatchSizeItem[];
+  destination?: string;
+  notes?: string;
+  linkedShipmentId?: string;
+  linkedShipmentNo?: string;
+  linkedDeliveryActId?: string;
+  linkedDeliveryActNo?: string;
+  dispatchedAt?: string;
+  dispatchedQty?: number;
+  boxIds?: string[];
+  packedQty?: number;
 }
 
 export type ClientOrderFormData = WorkOrderFormData;
@@ -622,8 +667,13 @@ export interface WorkOrderFormData {
     actualMaterialCost: number;
     plannedMachineCost: number;
     actualMachineCost: number;
+    toolingCost?: number;
+    laborCost?: number;
+    baseCost?: number;
     wasteCost: number;
     margin: number;
+    unitBaseCost?: number;
+    totalBaseCost?: number;
   };
   // Physical Item Specifications from planned Client Order
   itemCategory?: string;
@@ -702,7 +752,16 @@ export interface WorkOrderFormData {
   packagingData?: WorkOrderPackagingSummary;
   toolingItems?: WorkOrderToolingItem[];
   plannedSheets?: number;
+  contractNo?: string;
+  customerTin?: string;
+  clientId?: string;
   impositionState?: PersistedImpositionState;
+  deliveryBatches?: WorkOrderDeliveryBatch[];
+  materialsReserved?: boolean;
+  materialsReservedAt?: string;
+  materialsConsumed?: boolean;
+  materialsConsumedAt?: string;
+  materialIssueDocNo?: string;
 }
 
 export interface PersistedImpositionState {
@@ -913,7 +972,7 @@ export const TECHNOLOGY_OPTIONS: TechOption[] = [
     code: "TECH-OFF",
     description: "Yuqori tezlikdagi varaqali ofset, katalog va qutilar",
     badgeClass: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200",
-    equipmentCount: 3,
+    equipmentCount: 0,
   },
   {
     id: "Flexo",
@@ -921,7 +980,7 @@ export const TECHNOLOGY_OPTIONS: TechOption[] = [
     code: "TECH-FLX",
     description: "Rulondan-rulonga etiketka va tekstil lentalar bosmasi",
     badgeClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200",
-    equipmentCount: 3,
+    equipmentCount: 0,
   },
   {
     id: "Jacquard",
@@ -929,7 +988,7 @@ export const TECHNOLOGY_OPTIONS: TechOption[] = [
     code: "TECH-JCQ",
     description: "Yuqori zichlikdagi damask, satin va taffeta to'qima yorliqlar",
     badgeClass: "bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border-purple-200",
-    equipmentCount: 3,
+    equipmentCount: 0,
   },
   {
     id: "Post-press",
@@ -937,7 +996,7 @@ export const TECHNOLOGY_OPTIONS: TechOption[] = [
     code: "TECH-PST",
     description: "Avtomatik tigel kesish, buklash, yelimlash va zarhal bosish",
     badgeClass: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200",
-    equipmentCount: 3,
+    equipmentCount: 0,
   },
 ];
 
@@ -965,24 +1024,7 @@ export const getInitialOperations = (
       status: "Queued",
     }));
   }
-  if (department === "Flexo") {
-    return [
-      { id: "op-init-1", stepNumber: 10, name: "Flekso-polimer qolip tayyorlash", department: "Flexo", machine: "Esko CDI Crystal", operator: "", duration: 0.5, qtyCompleted: qtyLabel, status: "Queued" },
-      { id: "op-init-2", stepNumber: 20, name: "Rulonli flekso bosma", department: "Flexo", machine: pressMachine || "", operator: "", duration: 2.5, qtyCompleted: qtyLabel, status: "Queued" },
-      { id: "op-init-3", stepNumber: 30, name: "Bo'ylama kesish va o'rash", department: "Flexo", machine: "Rotoflex Slitter", operator: "", duration: 1.0, qtyCompleted: qtyLabel, status: "Queued" },
-    ];
-  }
-  if (department === "Jacquard") {
-    return [
-      { id: "op-init-1", stepNumber: 10, name: "Jakkard to'qish", department: "Jacquard", machine: pressMachine || "", operator: "", duration: 3.0, qtyCompleted: qtyLabel, status: "Queued" },
-      { id: "op-init-2", stepNumber: 20, name: "Ultrasonik kesish va buklash", department: "Jacquard", machine: "Focus Label Cut/Fold", operator: "", duration: 1.5, qtyCompleted: qtyLabel, status: "Queued" },
-    ];
-  }
-  return [
-    { id: "op-init-1", stepNumber: 10, name: "Prepress va CTP qolip tayyorlash", department: "Offset", machine: "Screen PlateRite 8600", operator: "", duration: 0.5, qtyCompleted: qtyLabel, status: "Queued" },
-    { id: "op-init-2", stepNumber: 20, name: "Ofset bosma", department: "Offset", machine: pressMachine || "", operator: "", duration: 2.0, qtyCompleted: qtyLabel, status: "Queued" },
-    { id: "op-init-3", stepNumber: 30, name: "Tigel kesish", department: "Offset", machine: "Bobst Novacut 106", operator: "", duration: 1.2, qtyCompleted: qtyLabel, status: "Queued" },
-  ];
+  return [];
 };
 
 export type ProductNameNamingPreset = "standard" | "compact" | "technical" | "clean";

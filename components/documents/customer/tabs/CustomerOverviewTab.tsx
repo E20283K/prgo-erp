@@ -48,6 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { LinkedTelegramGroupCard } from "@/components/documents/common/LinkedTelegramGroupCard";
 import {
   Dialog,
   DialogContent,
@@ -1127,6 +1128,13 @@ export function CustomerOverviewTab({
           </div>
         </div>
       </div>
+
+      {/* Telegram Guruh Bloki */}
+      <LinkedTelegramGroupCard
+        entityType="client"
+        entityId={form.dbId || form.id}
+        entityName={form.name || "Mijoz"}
+      />
 
       {/* 4: Tashkilot mas'ullari */}
       <div className="bg-card border border-border rounded-md p-4 space-y-3">

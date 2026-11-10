@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
   DataEditor,
   GridCell,
@@ -23,7 +23,7 @@ import {
 import { TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+
 import { MoneyInput } from "@/components/ui/money-input";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "cn";
@@ -43,6 +43,9 @@ import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
 import { formatMoney } from "../../common/DocumentShell";
 import { BomItem } from "../../BomMaterialsGrid";
+import {
+  calculateWorkOrderFinancials,
+} from "../utils/financialsEngine";
 
 interface FinancialsTabProps {
   shiftEvents: ShiftEvent[];
@@ -51,19 +54,10 @@ interface FinancialsTabProps {
   operations?: RouteStep[];
   materials?: BomItem[];
   docNo?: string;
-  onPriceChange?: (newPrice: number, financials?: any) => void;
+  onPriceChange?: (newPrice: number, financials?: Record<string, unknown>) => void;
+  onFinancialsChange?: (financials: NonNullable<WorkOrderFormData["financials"]>) => void;
 }
 
-interface CostBreakdownRow {
-  id: string;
-  category: string;
-  name: string;
-  quantity: string;
-  unitRate: string;
-  totalCost: number;
-  share: number;
-  type: string;
-}
 
 const MARKUP_PRESETS = [15, 25, 35, 50, 75, 100];
 
@@ -75,10 +69,10 @@ export function FinancialsTab({
   materials = [],
   docNo = "WOOF-26-0001",
   onPriceChange,
+  onFinancialsChange,
 }: FinancialsTabProps) {
-  const { warehouseStock, theme, machines } = useWorkspaceStore(
+  const { theme, machines } = useWorkspaceStore(
     useShallow((s) => ({
-      warehouseStock: s.warehouseStock,
       theme: s.theme,
       machines: s.machines,
     }))
@@ -91,227 +85,72 @@ export function FinancialsTab({
   const currency = formData?.currency || "UZS";
   const exchangeRate = Number(formData?.exchangeRate) || 12850;
   const isUsd = currency.toUpperCase() === "USD";
-  const hasQty = targetQty > 0;
 
-  // ─── 1. REAL MACHINE FLEET LOOKUP & RATES ──────────────────────────────────
-  const getMachineHourlyRate = useCallback((machineName?: string): { machineRate: number; operatorRate: number } => {
-    if (!machineName) return { machineRate: 35.0, operatorRate: 12.0 };
-    const cleanName = machineName.toLowerCase();
-    const matched = (machines || []).find((m) => {
-      const mName = m.name?.toLowerCase() || "";
-      const mCode = (m as any).code?.toLowerCase() || "";
-      return mName.includes(cleanName) || cleanName.includes(mName) || (mCode && mCode.includes(cleanName));
+
+  // ─── 3. BUILD GRANULAR 100% REAL COST BREAKDOWN ROWS VIA UNIFIED ENGINE ──────
+  const {
+    rawCostRows,
+    totalBaseCost,
+    unitBaseCost,
+    wasteLossCost,
+    materialCost,
+    toolingCost,
+    machineCost,
+    laborCost,
+  } = useMemo(() => {
+    return calculateWorkOrderFinancials({
+      quantity: targetQty,
+      currency,
+      exchangeRate,
+      materials,
+      toolingItems: formData?.toolingItems,
+      operations,
+      shiftEvents,
+      machines,
     });
-
-    const machineRate = matched?.costing?.standardHourlyRateUsd ||
-      ((matched as any)?.hourlyRate ? Number((matched as any).hourlyRate) : 35.0);
-    const operatorRate = matched?.costing?.operatorHourlyWageUsd || 12.0;
-
-    return {
-      machineRate: Number(machineRate) || 35.0,
-      operatorRate: Number(operatorRate) || 12.0,
-    };
-  }, [machines]);
-
-  const toolingItems = formData?.toolingItems || [];
-  const wasteEvents = (shiftEvents || []).filter((ev) => ev.type === "Waste" && ev.wasteQty);
-  const totalWasteQty = wasteEvents.reduce((sum, ev) => sum + (ev.wasteQty || 0), 0);
-
-  // ─── 3. BUILD GRANULAR 100% REAL COST BREAKDOWN ROWS ────────────────────────
-  const { rawCostRows, totalBaseCost, unitBaseCost, wasteLossCost } = useMemo(() => {
-    const rows: CostBreakdownRow[] = [];
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // A. XOMASHYO VA MATERIALLAR (BOM TABIDAGI REAL HAR BIR MODDA)
-    // ──────────────────────────────────────────────────────────────────────────
-    if (materials && materials.length > 0) {
-      materials.forEach((mat, idx) => {
-        const qty = Number(mat.actualQty !== undefined ? mat.actualQty : (mat.qty !== undefined ? mat.qty : mat.planQty || 0));
-        const matCur = ((mat as any).originalCurrency || ((mat as any).currency === "UZS" ? "UZS" : "USD")).toUpperCase();
-        const origPrice = Number((mat as any).originalUnitPrice !== undefined ? (mat as any).originalUnitPrice : mat.unitPrice || 0);
-
-        let unitP = Number(mat.unitPrice || 0);
-        if ((mat as any).originalUnitPrice !== undefined || (mat as any).originalCurrency) {
-          if (matCur === "USD" && currency === "UZS") {
-            unitP = Number((origPrice * exchangeRate).toFixed(2));
-          } else if (matCur === "UZS" && currency === "USD") {
-            unitP = Number((origPrice / exchangeRate).toFixed(4));
-          } else {
-            unitP = origPrice;
-          }
-        }
-        const lineTotal = Number(((mat as any).totalPrice !== undefined && (mat as any).totalPrice > 0 ? (mat as any).totalPrice : (qty * unitP)).toFixed(2));
-
-        let catLabel = "Xomashyo";
-        const catClean = (mat.category || "").toLowerCase();
-        if (catClean.includes("paper") || catClean.includes("board") || catClean.includes("roll")) {
-          catLabel = "Xomashyo (Qog'oz)";
-        } else if (catClean.includes("ink") || catClean.includes("plate") || catClean.includes("chemical")) {
-          catLabel = "Kraska & Kimyo";
-        } else if (catClean.includes("pack") || catClean.includes("box")) {
-          catLabel = "Qadoqlash";
-        } else {
-          catLabel = "Yordamchi xomashyo";
-        }
-
-        const origDisplay = (mat as any).originalUnitPrice !== undefined && matCur !== currency
-          ? ` [${matCur === "UZS" ? `${(mat as any).originalUnitPrice.toLocaleString()} UZS` : `$${(mat as any).originalUnitPrice}`}]`
-          : "";
-
-        rows.push({
-          id: `bom-${mat.id || idx}`,
-          category: catLabel,
-          name: `${mat.name}${mat.spec ? ` (${mat.spec})` : ""}${origDisplay}`,
-          quantity: `${qty.toLocaleString()} ${mat.unit || "birlik"}`,
-          unitRate: unitP > 0 ? `${formatMoney(unitP, currency, currency === "UZS" ? 0 : 3)}/${mat.unit || "birlik"}` : "—",
-          totalCost: lineTotal,
-          share: 0,
-          type: "BOM (Fakt)",
-        });
-      });
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // B. TEXNOLOGIK JIHOZLAR (PRE-PRESS TABIDAGI REAL SHTANS-QOLIPLAR VA CTP)
-    // ──────────────────────────────────────────────────────────────────────────
-    if (toolingItems && toolingItems.length > 0) {
-      toolingItems.forEach((tool, idx) => {
-        const rawCost = Number(tool.actualCost !== undefined ? tool.actualCost : tool.estimatedCost || 0);
-        const toolCur = (tool.currency || (isUsd ? "USD" : "UZS")).toUpperCase();
-        let cost = rawCost;
-        if (toolCur === "USD" && currency === "UZS") {
-          cost = Number((rawCost * exchangeRate).toFixed(2));
-        } else if (toolCur === "UZS" && currency === "USD") {
-          cost = Number((rawCost / exchangeRate).toFixed(2));
-        }
-        const qty = Number(tool.quantity || 1);
-        const unitP = qty > 0 ? Number((cost / qty).toFixed(2)) : cost;
-
-        rows.push({
-          id: `tool-${tool.id || idx}`,
-          category: "Jihozlar & Qoliplar",
-          name: `${tool.name}${tool.category ? ` [${tool.category}]` : ""}`,
-          quantity: `${qty} ${tool.unit || "dona"}`,
-          unitRate: unitP > 0 ? `${formatMoney(unitP, currency, currency === "UZS" ? 0 : 2)}/${tool.unit || "dona"}` : "—",
-          totalCost: cost,
-          share: 0,
-          type: tool.actualCost !== undefined ? "Jihoz (Fakt)" : "Jihoz (Reja)",
-        });
-      });
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // C. USKUNALAR VA MEHNAT HAQI (OPERATIONSTAB REAL BOSQICHLAR BO'YICHA)
-    // ──────────────────────────────────────────────────────────────────────────
-    if (operations && operations.length > 0) {
-      operations.forEach((op, idx) => {
-        const duration = Number(op.duration) || 0;
-        const rates = getMachineHourlyRate(op.machine);
-
-        // Stanok / Operatsiya qiymati (Tarif bo'yicha yoki soatlik me'yor)
-        if (op.machine && op.machine !== "Manual" && op.machine !== "—") {
-          const hasTariffCost = op.plannedCostUsd !== undefined && op.plannedCostUsd > 0;
-          const rawMachCost = hasTariffCost
-            ? Number(op.plannedCostUsd!.toFixed(2))
-            : Number((duration * rates.machineRate).toFixed(2));
-          const machineCost = isUsd ? rawMachCost : Number((rawMachCost * exchangeRate).toFixed(2));
-
-          const rawMachRate = hasTariffCost && op.rateUsd !== undefined ? op.rateUsd : rates.machineRate;
-          const machRateConv = isUsd ? rawMachRate : rawMachRate * exchangeRate;
-          const unitRateDisplay = duration > 0 || hasTariffCost
-            ? `${formatMoney(machRateConv, currency, currency === "UZS" ? 0 : 2)}/${hasTariffCost ? (op.calcUnit || "birlik") : "soat"}`
-            : "—";
-
-          rows.push({
-            id: `op-mach-${op.id || idx}`,
-            category: "Uskuna & Mashina",
-            name: `${op.name} (${op.machine})`,
-            quantity: hasTariffCost ? (formData?.quantity ? `${formData.quantity.toLocaleString()} dona` : `${duration} soat`) : `${duration} soat`,
-            unitRate: unitRateDisplay,
-            totalCost: machineCost,
-            share: 0,
-            type: op.tariffCode ? `Tarif (${op.tariffCode})` : `Stanok (#${op.stepNumber})`,
-          });
-        }
-
-        // Ishchilar mehnati / FOT (Sdelka yoki soatbay stavka)
-        const hasPiecework = op.pieceworkTotalUsd !== undefined && op.pieceworkTotalUsd > 0;
-        const rawLabCost = hasPiecework
-          ? Number(op.pieceworkTotalUsd!.toFixed(2))
-          : Number((duration * rates.operatorRate).toFixed(2));
-        const laborCost = isUsd ? rawLabCost : Number((rawLabCost * exchangeRate).toFixed(2));
-
-        const rawLabRate = hasPiecework && op.pieceworkRateUsd !== undefined ? op.pieceworkRateUsd : rates.operatorRate;
-        const labRateConv = isUsd ? rawLabRate : rawLabRate * exchangeRate;
-        const laborRateDisplay = duration > 0 || hasPiecework
-          ? `${formatMoney(labRateConv, currency, currency === "UZS" ? 0 : 2)}/${hasPiecework ? (op.calcUnit || "birlik") : "soat"}`
-          : "—";
-
-        rows.push({
-          id: `op-lab-${op.id || idx}`,
-          category: "Mehnat haqi (FOT)",
-          name: `${op.name} — ${op.operator || "Navbatchi usta"}`,
-          quantity: hasPiecework ? (formData?.quantity ? `${formData.quantity.toLocaleString()} dona` : `${duration} soat`) : `${duration} soat`,
-          unitRate: laborRateDisplay,
-          totalCost: laborCost,
-          share: 0,
-          type: op.tariffCode ? `Sdelka (${op.tariffCode})` : `Ishchi (#${op.stepNumber})`,
-        });
-      });
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // D. SIFAT NUQSONLARI VA BRAK ZIYONLARI (SMENA JURNALI REAL VOQELIKLARI)
-    // ──────────────────────────────────────────────────────────────────────────
-    const preWasteSubtotal = rows.reduce((s, r) => s + r.totalCost, 0);
-    const approxUnitCost = (hasQty && preWasteSubtotal > 0) ? preWasteSubtotal / targetQty : 0;
-    let computedWasteCost = 0;
-
-    if (wasteEvents && wasteEvents.length > 0 && approxUnitCost > 0) {
-      wasteEvents.forEach((we, idx) => {
-        const wasteQty = Number(we.wasteQty || 0);
-        const lineWasteCost = Number((wasteQty * approxUnitCost).toFixed(2));
-        computedWasteCost += lineWasteCost;
-
-        rows.push({
-          id: `waste-${we.id || idx}`,
-          category: "Nuqson & Brak (COPQ)",
-          name: `${we.note || "Brak listlar"} [${we.wasteReason || "Texnologik chiqindi"}]`,
-          quantity: `${wasteQty} dona list`,
-          unitRate: `${formatMoney(approxUnitCost, currency, currency === "UZS" ? 0 : 3)}/list`,
-          totalCost: lineWasteCost,
-          share: 0,
-          type: `Smena (${we.shift || we.time})`,
-        });
-      });
-    }
-
-    const grandTotal = Number((preWasteSubtotal + computedWasteCost).toFixed(2));
-    const unitCost = hasQty && grandTotal > 0 ? Number((grandTotal / targetQty).toFixed(4)) : 0;
-
-    // Ulush foizlarini hisoblash
-    rows.forEach((r) => {
-      r.share = grandTotal > 0 ? Number(((r.totalCost / grandTotal) * 100).toFixed(1)) : 0;
-    });
-
-    return {
-      rawCostRows: rows,
-      totalBaseCost: grandTotal,
-      unitBaseCost: unitCost,
-      wasteLossCost: computedWasteCost,
-    };
   }, [
-    materials,
+    targetQty,
     currency,
     exchangeRate,
-    isUsd,
-    toolingItems,
+    materials,
+    formData?.toolingItems,
     operations,
-    getMachineHourlyRate,
-    formData?.quantity,
-    hasQty,
-    targetQty,
-    wasteEvents,
+    shiftEvents,
+    machines,
+  ]);
+
+  // Auto-propagate calculated financials to parent WorkOrderDetail
+  useEffect(() => {
+    if (onFinancialsChange && totalBaseCost > 0) {
+      if (
+        formData?.financials?.unitBaseCost !== unitBaseCost ||
+        formData?.financials?.totalBaseCost !== totalBaseCost
+      ) {
+        onFinancialsChange({
+          plannedMaterialCost: materialCost,
+          actualMaterialCost: materialCost + wasteLossCost,
+          plannedMachineCost: machineCost,
+          actualMachineCost: machineCost,
+          toolingCost: toolingCost,
+          laborCost: laborCost,
+          baseCost: totalBaseCost,
+          unitBaseCost: unitBaseCost,
+          totalBaseCost: totalBaseCost,
+          wasteCost: wasteLossCost,
+          margin: formData?.financials?.margin ?? 25,
+        });
+      }
+    }
+  }, [
+    unitBaseCost,
+    totalBaseCost,
+    materialCost,
+    wasteLossCost,
+    machineCost,
+    toolingCost,
+    laborCost,
+    formData?.financials,
+    onFinancialsChange,
   ]);
 
   // ─── 4. PRICING & MARKUP CALCULATOR STATE ────────────────────────────────────
@@ -332,7 +171,6 @@ export function FinancialsTab({
   const unitSellingPrice = targetQty > 0 && activeSellingPrice > 0 ? Number((activeSellingPrice / targetQty).toFixed(4)) : 0;
   const grossProfit = (activeSellingPrice > 0 && totalBaseCost > 0) ? Number((activeSellingPrice - totalBaseCost).toFixed(2)) : 0;
   const profitMarginPercent = (activeSellingPrice > 0 && totalBaseCost > 0) ? Number(((grossProfit / activeSellingPrice) * 100).toFixed(1)) : 0;
-  const unitGrossProfit = (activeSellingPrice > 0 && totalBaseCost > 0 && unitSellingPrice > 0) ? Number((unitSellingPrice - unitBaseCost).toFixed(4)) : 0;
 
   // Handlers
   const handleSelectMarkupPreset = (pct: number) => {
@@ -376,6 +214,8 @@ export function FinancialsTab({
         toolingCost: toolingCost,
         laborCost: laborCost,
         baseCost: totalBaseCost,
+        unitBaseCost: unitBaseCost,
+        totalBaseCost: totalBaseCost,
         wasteCost: wasteCost,
         margin: profitMarginPercent,
         itemsCount: rawCostRows.length,

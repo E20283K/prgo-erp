@@ -127,7 +127,7 @@ import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEn
 import { WarehouseStockRecord } from "@/store/workspaceStore";
 import { computeTariffEstimate, TariffRecord } from "@/components/documents/tariff/types";
 
-function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string): WorkOrderToolingItem[] {
+export function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string): WorkOrderToolingItem[] {
   const hasAppliedImposition = Boolean((data as any).plannedSheets && Number((data as any).plannedSheets) > 0);
 
   if (data.toolingItems && data.toolingItems.length > 0) {
@@ -815,6 +815,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const [docNo, setDocNo] = useState(initialDocNo);
   const savedDocNoRef = React.useRef<string>(initialDocNo);
   const isSavingRef = React.useRef<boolean>(false);
+  const persistOrderDetailsRef = React.useRef<() => Promise<string>>(null!);
   const [isSaving, setIsSaving] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const isDraft = !docNo || tab.id.startsWith("draft-") || tab.id.startsWith("temp-");
@@ -2249,6 +2250,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       setIsSaving(false);
     }
   };
+  persistOrderDetailsRef.current = persistOrderDetails;
 
   const handleSave = async () => {
     if (isSavingRef.current) return;
@@ -2331,6 +2333,120 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [tab.isUnsaved]);
 
+  const totalShiftWasteSheets = useMemo(() => {
+    return shiftEvents.reduce((acc, ev) => acc + (Number(ev.wasteQty) || 0), 0);
+  }, [shiftEvents]);
+
+  const handleOpenMaterialIssueTab = useCallback((targetDocNo: string) => {
+    openTab({
+      id: targetDocNo,
+      type: "warehouse-movement",
+      title: targetDocNo,
+      module: "WAREHOUSE",
+      documentData: { docNo: targetDocNo },
+    });
+  }, [openTab]);
+
+  const handleExecuteSpisanie = useCallback(async (customItems?: BomItem[]) => {
+    const { consumeMaterialsForWorkOrder, employees } = useWorkspaceStore.getState();
+
+    if (formData.materialsConsumed) {
+      addNotification({
+        title: "Xomashyo allaqachon hisobdan chiqarilgan",
+        description: `Chiqim hujjati: ${formData.materialIssueDocNo}`,
+        severity: "info",
+      });
+      return;
+    }
+
+    const itemsToConsume = customItems || currentBomItems;
+    if (!itemsToConsume || itemsToConsume.length === 0) {
+      addNotification({
+        title: "Xomashyo topilmadi",
+        description: "BOM jadvalida hisobdan chiqarish uchun material mavjud emas.",
+        severity: "warning",
+      });
+      return;
+    }
+
+    const currentDocNo = docNo || data.docNo || tab.id;
+
+    const preparedItems: BomItem[] = itemsToConsume.map((item, idx) => {
+      let actual = Number(item.actualQty);
+      const plan = Number(item.planQty) || Number(item.qty) || 0;
+      if (isNaN(actual) || actual <= 0) {
+        actual = plan;
+      }
+      const isSubstrate = idx === 0 || item.category === "Paper & Board" || item.category === "Roll & Label";
+      let waste = Number(item.wasteQty) || 0;
+      if (isSubstrate && totalShiftWasteSheets > 0 && actual === plan) {
+        actual += totalShiftWasteSheets;
+        waste = totalShiftWasteSheets;
+      } else if (actual > plan && waste === 0) {
+        waste = actual - plan;
+      }
+
+      return {
+        ...item,
+        planQty: plan,
+        actualQty: actual,
+        wasteQty: waste,
+      };
+    });
+
+    const movement = consumeMaterialsForWorkOrder({
+      workOrderId: currentDocNo,
+      orderNumber: currentDocNo,
+      customer: formData.customer,
+      pressMachine: formData.pressMachine,
+      operator: employees[0]?.fullName || "Smena boshlig'i",
+      reason: `Ishlab chiqarishga sarf (Spisanie) — ${currentDocNo} (${formData.product})`,
+      items: preparedItems,
+    });
+
+    const now = new Date().toISOString();
+    const updates = {
+      materials: preparedItems,
+      materialsConsumed: true,
+      materialsConsumedAt: now,
+      materialIssueDocNo: movement.id,
+    };
+
+    setCurrentBomItems(preparedItems);
+    setFormData((prev) => ({ ...prev, ...updates }));
+    updateTabData(tab.id, updates);
+
+    // Auto-save Work Order immediately to database so that materials and issueDocNo are NEVER lost
+    try {
+      if (persistOrderDetailsRef.current) {
+        await persistOrderDetailsRef.current();
+      }
+    } catch (err) {
+      console.error("Failed to auto-save work order on spisanie:", err);
+    }
+
+    addNotification({
+      title: "Xomashyo hisobdan chiqarildi va saqlandi",
+      description: `${movement.id} hujjati yaratildi va ish hujjati avtomatik saqlandi.`,
+      severity: "success",
+    });
+
+    return movement;
+  }, [
+    formData.materialsConsumed,
+    formData.materialIssueDocNo,
+    formData.customer,
+    formData.pressMachine,
+    formData.product,
+    currentBomItems,
+    totalShiftWasteSheets,
+    docNo,
+    data.docNo,
+    tab.id,
+    addNotification,
+    setFormData,
+    updateTabData,
+  ]);
   const activePrintPlan = React.useMemo(
     () =>
       calculatePrintPlanning({
@@ -3422,7 +3538,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     defaultBleed={formData.bleed}
                     onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                     onAuditLog={() => {}}
-                    onFlexoSave={(res) => {
+                    onFlexoSave={(res: any) => {
                       if (
                         formData.flexoCylinderTeeth !== res.gearTeeth ||
                         formData.flexoWebWidth !== res.webWidth
@@ -3523,6 +3639,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 initialItems={currentBomItems}
                 currency={formData.currency || "UZS"}
                 exchangeRate={formData.exchangeRate || 12850}
+                materialsConsumed={formData.materialsConsumed}
+                materialIssueDocNo={formData.materialIssueDocNo}
+                onExecuteSpisanie={handleExecuteSpisanie}
+                onOpenIssueTab={handleOpenMaterialIssueTab}
+                shiftWasteSheets={totalShiftWasteSheets}
                 onRecipeChange={(code, dept) => {
                   handleFieldChange("recipe", code);
                   if (dept && formData.department !== dept) {

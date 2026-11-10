@@ -1202,9 +1202,9 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
                   Bunday material topilmadi.
                 </div>
               ) : (
-                filteredCatalog.map((stock) => (
+                filteredCatalog.map((stock, idx) => (
                   <div
-                    key={stock.sku}
+                    key={`${stock.id || stock.sku}-${stock.location || ""}-${idx}`}
                     onClick={() => handleAddLineFromCatalog(stock)}
                     className="flex items-center justify-between py-1 px-1.5 rounded border bg-card hover:bg-blue-50/50 dark:hover:bg-blue-950/20 hover:border-blue-300 dark:hover:border-blue-800 text-xs transition-colors cursor-pointer group"
                   >

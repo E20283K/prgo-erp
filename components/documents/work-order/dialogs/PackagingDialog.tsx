@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Package,
   Plus,
@@ -12,6 +12,9 @@ import {
   Copy,
   UserCheck,
   RotateCcw,
+  Scale,
+  ArrowRight,
+  Check,
 } from "lucide-react";
 import {
   Dialog,
@@ -21,6 +24,11 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +55,15 @@ import {
   SizeDistribution,
   autoGeneratePackagingBoxes,
   FLOOR_OPERATORS,
+  KashirovkaMode,
+  SubstrateLayer,
 } from "../types";
+import {
+  calculateTheoreticalUnitWeight,
+  calibrateFromScaleSample,
+  calculatePiecesFromWeight,
+  calculateWeightFromPieces,
+} from "../utils/weightCountingEngine";
 
 const BOX_TYPE_OPTIONS: ComboboxItem[] = [
   { value: "Gofrokarobka T-23 (300×200×150 mm)", label: "Gofrokarobka T-23 (300×200×150 mm)", badge: "T-23" },
@@ -65,6 +81,7 @@ const OPERATOR_OPTIONS: ComboboxItem[] = FLOOR_OPERATORS.map((op) => ({
 }));
 
 const CAPACITY_PRESETS = [100, 250, 500, 1000];
+const SAMPLE_PCS_PRESETS = [50, 100, 200];
 
 interface PackagingDialogProps {
   isOpen: boolean;
@@ -77,6 +94,13 @@ interface PackagingDialogProps {
   unit?: string;
   sizes?: SizeDistribution[];
   existingPackaging?: WorkOrderPackagingSummary;
+  width?: number;
+  height?: number;
+  paperDensity?: number;
+  kashirovkaMode?: KashirovkaMode;
+  kashirovkaLayers?: SubstrateLayer[];
+  lamination?: string;
+  coating?: string;
   onSavePackaging: (summary: WorkOrderPackagingSummary, markComplete: boolean) => void;
   onOpenPrintModal: (summary: WorkOrderPackagingSummary) => void;
 }
@@ -92,6 +116,13 @@ export function PackagingDialog({
   unit = "dona",
   sizes = [],
   existingPackaging,
+  width,
+  height,
+  paperDensity,
+  kashirovkaMode,
+  kashirovkaLayers,
+  lamination,
+  coating,
   onSavePackaging,
   onOpenPrintModal,
 }: PackagingDialogProps) {
@@ -100,32 +131,127 @@ export function PackagingDialog({
   const [packerName, setPackerName] = useState<string>("N. Fedorov (Packaging)");
   const [boxes, setBoxes] = useState<PackagingBoxItem[]>([]);
 
+  // Theoretical 1 pc weight calculated from order specs
+  const theoreticalUnitWeight = useMemo(() => {
+    return calculateTheoreticalUnitWeight({
+      widthMm: width,
+      heightMm: height,
+      paperDensity,
+      kashirovkaMode,
+      kashirovkaLayers,
+      lamination,
+      coating,
+    });
+  }, [width, height, paperDensity, kashirovkaMode, kashirovkaLayers, lamination, coating]);
+
+  // Calibration state (Derived when theoretical, explicit when scale calibrated)
+  const [calibratedWeight, setCalibratedWeight] = useState<number | null>(() => {
+    if (existingPackaging?.calibrationMethod === "scale_sample" && existingPackaging.unitWeightGrams) {
+      return existingPackaging.unitWeightGrams;
+    }
+    return null;
+  });
+  const [samplePcs, setSamplePcs] = useState<number>(existingPackaging?.samplePcs || 100);
+  const [sampleWeightInput, setSampleWeightInput] = useState<string>(
+    existingPackaging?.sampleWeightGrams ? String(existingPackaging.sampleWeightGrams) : ""
+  );
+  const [isCalibratePopoverOpen, setIsCalibratePopoverOpen] = useState<boolean>(false);
+
+  const calibrationMethod: "theoretical" | "scale_sample" =
+    calibratedWeight !== null ? "scale_sample" : "theoretical";
+
+  const unitWeightGrams = calibratedWeight !== null ? calibratedWeight : theoreticalUnitWeight;
+
+  // Express Weigh input state
+  const [isExpressWeighOpen, setIsExpressWeighOpen] = useState<boolean>(false);
+  const [expressWeightInput, setExpressWeightInput] = useState<string>("");
+  const expressInputRef = useRef<HTMLInputElement>(null);
+
   // Detect whether size matrix is active
   const hasValidSizeMatrix = useMemo(() => {
     return (sizes || []).some((s) => Number(s.quantity) > 0);
   }, [sizes]);
 
-  // Load existing or pre-generate on open
+  const prevIsOpenRef = useRef(false);
+
+  // Load existing or pre-generate on dialog open
   useEffect(() => {
-    if (isOpen) {
-      if (existingPackaging && existingPackaging.boxes && existingPackaging.boxes.length > 0) {
-        setBoxes(existingPackaging.boxes);
-        setStandardCapacity(existingPackaging.standardBoxCapacity || 500);
-        setBoxType(existingPackaging.boxType || BOX_TYPE_OPTIONS[0].value);
-      } else {
-        const initialCapacity = targetQuantity >= 20000 ? 1000 : targetQuantity >= 5000 ? 500 : 250;
-        setStandardCapacity(initialCapacity);
-        const generated = autoGeneratePackagingBoxes({
-          workOrderNo,
-          targetQuantity,
-          standardCapacity: initialCapacity,
-          sizes: hasValidSizeMatrix ? sizes : undefined,
-          defaultPacker: packerName,
-        });
-        setBoxes(generated);
-      }
+    if (isOpen && !prevIsOpenRef.current) {
+      setTimeout(() => {
+        if (existingPackaging && existingPackaging.boxes && existingPackaging.boxes.length > 0) {
+          setBoxes(existingPackaging.boxes);
+          setStandardCapacity(existingPackaging.standardBoxCapacity || 500);
+          setBoxType(existingPackaging.boxType || BOX_TYPE_OPTIONS[0].value);
+          if (existingPackaging.calibrationMethod === "scale_sample" && existingPackaging.unitWeightGrams) {
+            setCalibratedWeight(existingPackaging.unitWeightGrams);
+            setSamplePcs(existingPackaging.samplePcs || 100);
+            if (existingPackaging.sampleWeightGrams) {
+              setSampleWeightInput(String(existingPackaging.sampleWeightGrams));
+            }
+          } else {
+            setCalibratedWeight(null);
+          }
+        } else {
+          const initialCapacity = targetQuantity >= 20000 ? 1000 : targetQuantity >= 5000 ? 500 : 250;
+          setStandardCapacity(initialCapacity);
+          const generated = autoGeneratePackagingBoxes({
+            workOrderNo,
+            targetQuantity,
+            standardCapacity: initialCapacity,
+            sizes: hasValidSizeMatrix ? sizes : undefined,
+            defaultPacker: packerName,
+          });
+
+          // Pre-fill gross weight from theoretical unit weight
+          const filled = generated.map((b) => ({
+            ...b,
+            grossWeightKg: calculateWeightFromPieces(b.quantity, theoreticalUnitWeight),
+            unitWeightGrams: theoreticalUnitWeight,
+            countDeviation: 0,
+          }));
+          setBoxes(filled);
+          setCalibratedWeight(null);
+        }
+      }, 0);
     }
-  }, [isOpen, existingPackaging, workOrderNo, targetQuantity, hasValidSizeMatrix, sizes, packerName]);
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen, existingPackaging, workOrderNo, targetQuantity, hasValidSizeMatrix, sizes, packerName, theoreticalUnitWeight]);
+
+  // Apply Scale Sample Calibration
+  const handleApplyCalibration = () => {
+    const w = parseFloat(sampleWeightInput);
+    if (!isNaN(w) && w > 0 && samplePcs > 0) {
+      const calibratedUnit = calibrateFromScaleSample(samplePcs, w);
+      setCalibratedWeight(calibratedUnit);
+      setIsCalibratePopoverOpen(false);
+
+      // Recalculate quantities for weighed boxes
+      setBoxes((prev) =>
+        prev.map((b) => {
+          if (b.grossWeightKg && b.grossWeightKg > 0) {
+            const calculatedQty = calculatePiecesFromWeight(b.grossWeightKg, calibratedUnit);
+            return {
+              ...b,
+              quantity: calculatedQty,
+              unitWeightGrams: calibratedUnit,
+              isWeighed: true,
+              countDeviation: calculatedQty - standardCapacity,
+            };
+          }
+          return {
+            ...b,
+            unitWeightGrams: calibratedUnit,
+          };
+        })
+      );
+    }
+  };
+
+  const handleResetToTheoretical = () => {
+    setCalibratedWeight(null);
+    setSampleWeightInput("");
+    setIsCalibratePopoverOpen(false);
+  };
 
   // Handle auto-split click
   const handleAutoSplit = () => {
@@ -136,7 +262,13 @@ export function PackagingDialog({
       sizes: hasValidSizeMatrix ? sizes : undefined,
       defaultPacker: packerName,
     });
-    setBoxes(generated);
+    const filled = generated.map((b) => ({
+      ...b,
+      grossWeightKg: calculateWeightFromPieces(b.quantity, unitWeightGrams),
+      unitWeightGrams,
+      countDeviation: 0,
+    }));
+    setBoxes(filled);
   };
 
   // Add manual box
@@ -145,6 +277,8 @@ export function PackagingDialog({
     const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
     const defaultSize = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].size : undefined;
     const defaultModel = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].model : undefined;
+    const defaultWeight = calculateWeightFromPieces(standardCapacity, unitWeightGrams);
+
     const newBox: PackagingBoxItem = {
       id: `box-manual-${Date.now()}-${nextNum}`,
       boxNumber: nextNum,
@@ -152,6 +286,9 @@ export function PackagingDialog({
       model: defaultModel,
       sizeCode: defaultSize,
       quantity: standardCapacity,
+      grossWeightKg: defaultWeight,
+      unitWeightGrams,
+      countDeviation: 0,
       packerName,
       packedAt: new Date().toISOString(),
       barcode: `${cleanWo}-B${String(nextNum).padStart(2, "0")}`,
@@ -174,17 +311,82 @@ export function PackagingDialog({
     setBoxes((prev) => [...prev, newBox]);
   };
 
-  // Box cell edits
-  const handleBoxQtyChange = (boxId: string, val: number) => {
+  // Interactive 2-Way Box Edits:
+  // 1) When Weight is edited -> calculate quantity
+  const handleBoxWeightChange = (boxId: string, val: number) => {
     setBoxes((prev) =>
-      prev.map((b) => (b.id === boxId ? { ...b, quantity: Math.max(0, val) } : b))
+      prev.map((b) => {
+        if (b.id !== boxId) return b;
+        if (val <= 0) {
+          return { ...b, grossWeightKg: undefined, countDeviation: 0, isWeighed: false };
+        }
+        if (unitWeightGrams > 0) {
+          const calculatedQty = calculatePiecesFromWeight(val, unitWeightGrams);
+          return {
+            ...b,
+            grossWeightKg: val,
+            quantity: calculatedQty,
+            unitWeightGrams,
+            isWeighed: true,
+            countDeviation: calculatedQty - standardCapacity,
+          };
+        }
+        return { ...b, grossWeightKg: val };
+      })
     );
   };
 
-  const handleBoxWeightChange = (boxId: string, val: number) => {
+  // 2) When Quantity is edited manually -> recalculate theoretical weight
+  const handleBoxQtyChange = (boxId: string, val: number) => {
+    const nextQty = Math.max(0, val);
     setBoxes((prev) =>
-      prev.map((b) => (b.id === boxId ? { ...b, grossWeightKg: val > 0 ? val : undefined } : b))
+      prev.map((b) => {
+        if (b.id !== boxId) return b;
+        const estWeight = unitWeightGrams > 0 ? calculateWeightFromPieces(nextQty, unitWeightGrams) : b.grossWeightKg;
+        return {
+          ...b,
+          quantity: nextQty,
+          grossWeightKg: estWeight,
+          isWeighed: false,
+          countDeviation: nextQty - standardCapacity,
+        };
+      })
     );
+  };
+
+  // Express Weigh: Add box from scale weight input directly
+  const handleAddExpressWeighBox = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const weightKg = parseFloat(expressWeightInput);
+    if (isNaN(weightKg) || weightKg <= 0) return;
+
+    const nextNum = boxes.length + 1;
+    const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
+    const defaultSize = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].size : undefined;
+    const defaultModel = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].model : undefined;
+    const calculatedQty = calculatePiecesFromWeight(weightKg, unitWeightGrams);
+
+    const newBox: PackagingBoxItem = {
+      id: `box-weighed-${Date.now()}-${nextNum}`,
+      boxNumber: nextNum,
+      boxCode: `BX-${cleanWo}-${String(nextNum).padStart(2, "0")}`,
+      model: defaultModel,
+      sizeCode: defaultSize,
+      quantity: calculatedQty,
+      grossWeightKg: weightKg,
+      unitWeightGrams,
+      isWeighed: true,
+      countDeviation: calculatedQty - standardCapacity,
+      packerName,
+      packedAt: new Date().toISOString(),
+      barcode: `${cleanWo}-B${String(nextNum).padStart(2, "0")}`,
+    };
+
+    setBoxes((prev) => [...prev, newBox]);
+    setExpressWeightInput("");
+    if (expressInputRef.current) {
+      expressInputRef.current.focus();
+    }
   };
 
   const handleBoxPackerChange = (boxId: string, newPacker: string) => {
@@ -233,10 +435,6 @@ export function PackagingDialog({
     setBoxes((prev) => prev.map((b) => ({ ...b, packerName })));
   };
 
-  const handleClearAllBoxes = () => {
-    setBoxes([]);
-  };
-
   // Calculations
   const totalPackedQty = useMemo(() => {
     return boxes.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
@@ -259,9 +457,13 @@ export function PackagingDialog({
       targetQty: targetQuantity,
       isCompleted: existingPackaging?.isCompleted || false,
       completedAt: existingPackaging?.completedAt,
+      unitWeightGrams,
+      calibrationMethod,
+      samplePcs,
+      sampleWeightGrams: sampleWeightInput ? parseFloat(sampleWeightInput) : undefined,
       boxes,
     };
-  }, [standardCapacity, boxType, boxes, totalPackedQty, targetQuantity, existingPackaging]);
+  }, [standardCapacity, boxType, boxes, totalPackedQty, targetQuantity, existingPackaging, unitWeightGrams, calibrationMethod, samplePcs, sampleWeightInput]);
 
   const handleSaveDraft = () => {
     onSavePackaging(currentSummary, false);
@@ -284,7 +486,7 @@ export function PackagingDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[880px] max-h-[92vh] flex flex-col p-0 overflow-hidden text-xs">
+      <DialogContent className="sm:max-w-[940px] max-h-[92vh] flex flex-col p-0 overflow-hidden text-xs">
         {/* Header */}
         <DialogHeader className="p-3 pr-12 border-b border-border bg-card shrink-0">
           <div className="flex items-center justify-between gap-3 mb-2">
@@ -293,7 +495,7 @@ export function PackagingDialog({
                 <Package className="size-4" />
               </div>
               <DialogTitle className="text-sm font-semibold text-foreground">
-                Qadoqlash va sifat qabuli
+                Qadoqlash va tarozi orqali qabul
               </DialogTitle>
               {hasValidSizeMatrix ? (
                 <Badge variant="secondary" className="text-[10px] font-medium shrink-0">
@@ -314,7 +516,7 @@ export function PackagingDialog({
                 className="h-7 text-xs font-medium gap-1.5 shrink-0 cursor-pointer mr-1"
               >
                 <Printer className="size-3.5" />
-                <span>Yorliqlar</span>
+                <span>Yorliqlar (100×150)</span>
               </Button>
             )}
           </div>
@@ -333,7 +535,7 @@ export function PackagingDialog({
                   <th className="py-1 px-2.5 text-left border-r border-border font-medium">Mahsulot</th>
                   <th className="py-1 px-2.5 text-right font-medium w-28">Reja miqdori</th>
                   {hasValidSizeMatrix && (
-                    <th className="py-1 px-2.5 text-left border-l border-border font-medium">O&apos;lchamlar taqsimoti</th>
+                    <th className="py-1 px-2.5 text-left border-l border-border font-medium">O&apos;lchamlar</th>
                   )}
                 </tr>
               </thead>
@@ -375,6 +577,216 @@ export function PackagingDialog({
             </table>
           </div>
         </DialogHeader>
+
+        {/* ── Counting Scale & Calibration Control Bar ── */}
+        <div className="p-2.5 bg-card border-b border-border flex flex-wrap items-center justify-between gap-3 shrink-0">
+          {/* Unit Weight & Method Indicator */}
+          <div className="flex items-center gap-2.5">
+            <div className="size-6 rounded border border-border bg-muted flex items-center justify-center text-foreground shrink-0">
+              <Scale className="size-3.5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-foreground">
+                  1 dona birlik og&apos;irligi:
+                </span>
+                <span className="font-mono font-bold text-xs text-primary">
+                  {unitWeightGrams > 0 ? `${unitWeightGrams} g` : "0 g"}
+                </span>
+                <Badge
+                  variant="outline"
+                  className={
+                    calibrationMethod === "scale_sample"
+                      ? "text-[9px] px-1 py-0 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 font-mono"
+                      : "text-[9px] px-1 py-0 text-muted-foreground font-mono"
+                  }
+                >
+                  {calibrationMethod === "scale_sample" ? "Etalon kalibrovka" : "Nazariy hisob"}
+                </Badge>
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                {width && height ? `${width}×${height} mm` : "Standart format"} •{" "}
+                {paperDensity ? `${paperDensity} g/m²` : "Qog'oz"}
+                {calibrationMethod === "scale_sample" && sampleWeightInput
+                  ? ` (Etalon: ${samplePcs} dona = ${sampleWeightInput} g)`
+                  : ""}
+              </div>
+            </div>
+          </div>
+
+          {/* Scale Actions */}
+          <div className="flex items-center gap-1.5">
+            {/* Popover: Calibrate with scale sample */}
+            <Popover open={isCalibratePopoverOpen} onOpenChange={setIsCalibratePopoverOpen}>
+              <PopoverTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1.5"
+                  >
+                    <Scale className="size-3.5" />
+                    <span>Etalondan kalibrovka</span>
+                  </Button>
+                }
+              />
+              <PopoverContent align="end" className="w-72 p-3 space-y-2.5 text-xs">
+                <div className="space-y-1">
+                  <div className="font-semibold text-xs flex items-center gap-1 text-foreground">
+                    <Scale className="size-3.5" />
+                    <span>Etalon namuna tortish</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-tight">
+                    Taroziga 50 yoki 100 dona kesilgan mahsulotni qo&apos;ying va sof vaznini kiriting.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>Namuna donasi:</span>
+                    <div className="flex items-center gap-1">
+                      {SAMPLE_PCS_PRESETS.map((pcs) => (
+                        <button
+                          key={pcs}
+                          type="button"
+                          onClick={() => setSamplePcs(pcs)}
+                          className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+                            samplePcs === pcs
+                              ? "bg-primary text-primary-foreground border-primary font-bold"
+                              : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
+                          }`}
+                        >
+                          {pcs}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] text-muted-foreground">
+                      Tarozidagi vazn (gramm):
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        placeholder="masalan: 142.5"
+                        value={sampleWeightInput}
+                        onChange={(e) => setSampleWeightInput(e.target.value)}
+                        className="h-7.5 text-xs font-mono font-semibold"
+                        autoFocus
+                      />
+                      <span className="text-xs text-muted-foreground font-mono">g</span>
+                    </div>
+                  </div>
+
+                  {sampleWeightInput && parseFloat(sampleWeightInput) > 0 && (
+                    <div className="p-1.5 rounded bg-muted text-[10px] font-mono flex items-center justify-between">
+                      <span className="text-muted-foreground">1 dona natija:</span>
+                      <strong className="text-foreground">
+                        {(parseFloat(sampleWeightInput) / samplePcs).toFixed(3)} g
+                      </strong>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-border">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetToTheoretical}
+                    className="h-7 text-[10px] text-muted-foreground px-2"
+                  >
+                    <RotateCcw className="size-3 mr-1" />
+                    Nazariyga qaytish
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleApplyCalibration}
+                    disabled={!sampleWeightInput || parseFloat(sampleWeightInput) <= 0}
+                    className="h-7 text-xs px-2.5"
+                  >
+                    <Check className="size-3.5 mr-1" />
+                    Kalibrovka
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            {/* Toggle Express Weigh Mode */}
+            <Button
+              type="button"
+              variant={isExpressWeighOpen ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => {
+                setIsExpressWeighOpen((prev) => !prev);
+                setTimeout(() => expressInputRef.current?.focus(), 50);
+              }}
+              className="h-7 text-xs gap-1.5"
+            >
+              <Sparkles className="size-3.5 text-primary" />
+              <span>Tezkor tortish</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* ── Express Weigh Input Bar (When Active) ── */}
+        {isExpressWeighOpen && (
+          <form
+            onSubmit={handleAddExpressWeighBox}
+            className="p-2.5 bg-muted/60 border-b border-border flex items-center gap-3 shrink-0"
+          >
+            <div className="flex items-center gap-1.5 text-xs font-medium text-foreground shrink-0">
+              <Scale className="size-4 text-primary" />
+              <span>Quti sof vazni (kg):</span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-1 max-w-xs">
+              <Input
+                ref={expressInputRef}
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="Tarozidagi vazn (masalan: 7.12)"
+                value={expressWeightInput}
+                onChange={(e) => setExpressWeightInput(e.target.value)}
+                className="h-7.5 text-xs font-mono font-bold bg-background"
+                autoFocus
+              />
+              <span className="text-xs text-muted-foreground font-mono">kg</span>
+            </div>
+
+            {expressWeightInput && parseFloat(expressWeightInput) > 0 && unitWeightGrams > 0 && (
+              <div className="flex items-center gap-2 text-xs font-mono">
+                <ArrowRight className="size-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">Hisoblandi:</span>
+                <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
+                  {calculatePiecesFromWeight(parseFloat(expressWeightInput), unitWeightGrams).toLocaleString()} {unit}
+                </strong>
+                <span className="text-[10px] text-muted-foreground">
+                  (Og&apos;ish:{" "}
+                  {calculatePiecesFromWeight(parseFloat(expressWeightInput), unitWeightGrams) - standardCapacity >= 0
+                    ? `+${calculatePiecesFromWeight(parseFloat(expressWeightInput), unitWeightGrams) - standardCapacity}`
+                    : calculatePiecesFromWeight(parseFloat(expressWeightInput), unitWeightGrams) - standardCapacity})
+                </span>
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!expressWeightInput || parseFloat(expressWeightInput) <= 0}
+              className="h-7.5 text-xs px-3 ml-auto gap-1"
+            >
+              <Plus className="size-3.5" />
+              <span>Qutini qo&apos;shish (Enter)</span>
+            </Button>
+          </form>
+        )}
 
         {/* Configuration Bar */}
         <div className="p-3 bg-muted/40 border-b border-border grid grid-cols-1 sm:grid-cols-4 gap-2.5 shrink-0 items-end">
@@ -514,8 +926,8 @@ export function PackagingDialog({
               </div>
               {totalGrossWeight > 0 && (
                 <div className="flex items-baseline gap-1">
-                  <span className="text-muted-foreground text-[11px]">Jami brutto:</span>
-                  <strong className="font-mono text-xs">{totalGrossWeight.toFixed(1)}</strong>
+                  <span className="text-muted-foreground text-[11px]">Jami sof vazn:</span>
+                  <strong className="font-mono text-xs">{totalGrossWeight.toFixed(2)}</strong>
                   <span className="text-[10px] text-muted-foreground">kg</span>
                 </div>
               )}
@@ -587,127 +999,170 @@ export function PackagingDialog({
               <TableHeader className="bg-muted/70 sticky top-0 z-10 text-[11px]">
                 <TableRow className="h-7 hover:bg-transparent">
                   <TableHead className="w-10 text-center">#</TableHead>
-                  <TableHead className="w-32">Quti kodi</TableHead>
+                  <TableHead className="w-28">Quti kodi</TableHead>
                   {hasValidSizeMatrix && <TableHead className="w-28">Model</TableHead>}
                   {hasValidSizeMatrix && <TableHead className="w-28">O&apos;lcham</TableHead>}
-                  <TableHead className="w-24 text-right">Miqdor (dona)</TableHead>
-                  <TableHead className="w-24 text-right">Brutto (kg)</TableHead>
+                  <TableHead className="w-28 text-right">Tarozida (kg)</TableHead>
+                  <TableHead className="w-32 text-right">Miqdor (dona)</TableHead>
                   <TableHead className="w-36">Mas&apos;ul xodim</TableHead>
-                  <TableHead className="w-28">Izoh</TableHead>
+                  <TableHead className="w-24">Izoh</TableHead>
                   <TableHead className="w-16 text-center">Amallar</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {boxes.map((box) => (
-                  <TableRow key={box.id} className="h-8 hover:bg-muted/40 text-xs">
-                    <TableCell className="text-center font-mono font-bold text-muted-foreground">
-                      {box.boxNumber}
-                    </TableCell>
-                    <TableCell className="font-mono font-medium text-foreground">
-                      {box.boxCode}
-                    </TableCell>
-                    {hasValidSizeMatrix && (
-                      <TableCell className="font-medium text-foreground truncate max-w-[110px]">
-                        {box.model || "—"}
+                {boxes.map((box) => {
+                  const hasDeviation = box.countDeviation !== undefined && box.countDeviation !== 0;
+
+                  return (
+                    <TableRow key={box.id} className="h-8 hover:bg-muted/40 text-xs">
+                      {/* Box Number */}
+                      <TableCell className="text-center font-mono font-bold text-muted-foreground">
+                        {box.boxNumber}
                       </TableCell>
-                    )}
-                    {hasValidSizeMatrix && (
+
+                      {/* Box Code */}
+                      <TableCell className="font-mono font-medium text-foreground">
+                        {box.boxCode}
+                      </TableCell>
+
+                      {/* Size Matrix: Model */}
+                      {hasValidSizeMatrix && (
+                        <TableCell className="font-medium text-foreground truncate max-w-[110px]">
+                          {box.model || "—"}
+                        </TableCell>
+                      )}
+
+                      {/* Size Matrix: Size Code */}
+                      {hasValidSizeMatrix && (
+                        <TableCell>
+                          <Select
+                            value={box.sizeCode || "all"}
+                            onValueChange={(val) => handleBoxSizeCodeChange(box.id, val || "all")}
+                          >
+                            <SelectTrigger className="h-6 w-24 text-[11px] font-mono bg-background px-2">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all" className="text-xs font-mono">
+                                Barchasi
+                              </SelectItem>
+                              {sizes.map((s) => (
+                                <SelectItem key={s.id || s.size} value={s.size} className="text-xs font-mono">
+                                  {s.size} ({Number(s.quantity).toLocaleString()})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                      )}
+
+                      {/* Net Weight (kg) with Scale indication */}
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {box.isWeighed && (
+                            <span title="Tarozida tortib aniqlangan" className="inline-flex">
+                              <Scale className="size-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            </span>
+                          )}
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0.00"
+                            value={box.grossWeightKg ?? ""}
+                            onChange={(e) =>
+                              handleBoxWeightChange(
+                                box.id,
+                                e.target.value === "" ? 0 : Number(e.target.value)
+                              )
+                            }
+                            className="h-6 w-20 text-right font-mono text-xs ml-auto"
+                            title="Tarozidagi sof og'irlik (kg)"
+                          />
+                        </div>
+                      </TableCell>
+
+                      {/* Quantity (dona) with deviation indicator */}
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {hasDeviation && (
+                            <span
+                              className={`text-[9px] font-mono px-1 rounded ${
+                                box.countDeviation! > 0
+                                  ? "text-blue-600 dark:text-blue-400 bg-blue-500/10"
+                                  : "text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                              }`}
+                              title={`Standart ${standardCapacity} ga nisbatan farq`}
+                            >
+                              {box.countDeviation! > 0 ? `+${box.countDeviation}` : box.countDeviation}
+                            </span>
+                          )}
+                          <Input
+                            type="number"
+                            min="0"
+                            value={box.quantity}
+                            onChange={(e) => handleBoxQtyChange(box.id, Number(e.target.value) || 0)}
+                            className="h-6 w-20 text-right font-mono font-bold ml-auto text-xs"
+                          />
+                        </div>
+                      </TableCell>
+
+                      {/* Packer Name */}
                       <TableCell>
                         <Select
-                          value={box.sizeCode || "all"}
-                          onValueChange={(val) => handleBoxSizeCodeChange(box.id, val || "all")}
+                          value={box.packerName || packerName}
+                          onValueChange={(val) => handleBoxPackerChange(box.id, val || packerName)}
                         >
-                          <SelectTrigger className="h-6 w-24 text-[11px] font-mono bg-background px-2">
+                          <SelectTrigger className="h-6 w-34 text-[11px] bg-background px-2 truncate">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="all" className="text-xs font-mono">
-                              Barchasi
-                            </SelectItem>
-                            {sizes.map((s) => (
-                              <SelectItem key={s.id || s.size} value={s.size} className="text-xs font-mono">
-                                {s.size} ({Number(s.quantity).toLocaleString()})
+                            {FLOOR_OPERATORS.map((op) => (
+                              <SelectItem key={op} value={op} className="text-xs">
+                                {op}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                       </TableCell>
-                    )}
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        min="0"
-                        value={box.quantity}
-                        onChange={(e) => handleBoxQtyChange(box.id, Number(e.target.value) || 0)}
-                        className="h-6 w-20 text-right font-mono font-bold ml-auto text-xs"
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        placeholder="0.0"
-                        value={box.grossWeightKg ?? ""}
-                        onChange={(e) =>
-                          handleBoxWeightChange(
-                            box.id,
-                            e.target.value === "" ? 0 : Number(e.target.value)
-                          )
-                        }
-                        className="h-6 w-18 text-right font-mono text-xs ml-auto"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Select
-                        value={box.packerName || packerName}
-                        onValueChange={(val) => handleBoxPackerChange(box.id, val || packerName)}
-                      >
-                        <SelectTrigger className="h-6 w-34 text-[11px] bg-background px-2 truncate">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {FLOOR_OPERATORS.map((op) => (
-                            <SelectItem key={op} value={op} className="text-xs">
-                              {op}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        type="text"
-                        placeholder="Izoh..."
-                        value={box.notes || ""}
-                        onChange={(e) => handleBoxNotesChange(box.id, e.target.value)}
-                        className="h-6 text-[11px] bg-background px-1.5"
-                      />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <div className="flex items-center justify-center gap-0.5">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDuplicateBox(box)}
-                          className="size-6 text-muted-foreground hover:text-foreground cursor-pointer"
-                          title="Nusxalash"
-                        >
-                          <Copy className="size-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDeleteBox(box.id)}
-                          className="size-6 text-muted-foreground hover:text-destructive cursor-pointer"
-                          title="O'chirish"
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+
+                      {/* Notes */}
+                      <TableCell>
+                        <Input
+                          type="text"
+                          placeholder="Izoh..."
+                          value={box.notes || ""}
+                          onChange={(e) => handleBoxNotesChange(box.id, e.target.value)}
+                          className="h-6 text-[11px] bg-background px-1.5"
+                        />
+                      </TableCell>
+
+                      {/* Actions */}
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDuplicateBox(box)}
+                            className="size-6 text-muted-foreground hover:text-foreground cursor-pointer"
+                            title="Nusxalash"
+                          >
+                            <Copy className="size-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteBox(box.id)}
+                            className="size-6 text-muted-foreground hover:text-destructive cursor-pointer"
+                            title="O'chirish"
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
               <TableFooter className="bg-muted/70 sticky bottom-0 z-10 text-xs font-semibold border-t border-border">
                 <TableRow className="h-8 hover:bg-transparent">
@@ -715,10 +1170,10 @@ export function PackagingDialog({
                     Jami ({boxes.length} ta quti)
                   </TableCell>
                   <TableCell className="text-right font-mono font-bold">
-                    {totalPackedQty.toLocaleString()} {unit}
+                    {totalGrossWeight > 0 ? `${totalGrossWeight.toFixed(2)} kg` : "—"}
                   </TableCell>
                   <TableCell className="text-right font-mono font-bold">
-                    {totalGrossWeight > 0 ? `${totalGrossWeight.toFixed(1)} kg` : "—"}
+                    {totalPackedQty.toLocaleString()} {unit}
                   </TableCell>
                   <TableCell colSpan={3} className="text-muted-foreground text-[11px]">
                     {isExactMatch ? (
@@ -748,46 +1203,24 @@ export function PackagingDialog({
               onClick={handleSaveDraft}
               className="h-8 text-xs font-medium cursor-pointer"
             >
-              Qoralama saqlash
+              Qoralamani saqlash
             </Button>
-            {boxes.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handlePrintLabelsClick}
-                className="h-8 text-xs font-medium gap-1.5 cursor-pointer text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900"
-              >
-                <Printer className="size-3.5" />
-                <span>Chop etish</span>
-              </Button>
-            )}
-            {boxes.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleClearAllBoxes}
-                className="h-8 text-xs text-muted-foreground hover:text-destructive cursor-pointer gap-1"
-                title="Barcha qutilarni tozalash"
-              >
-                <RotateCcw className="size-3" />
-                <span>Tozalash</span>
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              className="h-8 text-xs text-muted-foreground cursor-pointer"
+            >
+              Bekor qilish
+            </Button>
           </div>
 
           <div className="flex items-center gap-2">
             <Button
-              variant="outline"
               size="sm"
-              onClick={() => onOpenChange(false)}
-              className="h-8 text-xs font-medium cursor-pointer"
-            >
-              Bekor qilish
-            </Button>
-            <Button
               onClick={handleCompletePackaging}
-              size="sm"
-              className="h-8 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 cursor-pointer shadow-xs"
+              disabled={boxes.length === 0}
+              className="h-8 text-xs font-medium gap-1.5 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
             >
               <CheckCircle2 className="size-3.5" />
               <span>Qadoqlashni yakunlash</span>

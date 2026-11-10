@@ -52,6 +52,7 @@ interface FilesTabProps {
   docNo?: string;
   uploadInputId?: string;
   onFileUploaded?: (attachment: OrderAttachment) => void;
+  onFileDeleted?: (attachment: OrderAttachment) => void;
 }
 
 interface UploadTask {
@@ -82,6 +83,7 @@ export function FilesTab({
   docNo = "DOC-001",
   uploadInputId = "doc-files-upload-input",
   onFileUploaded,
+  onFileDeleted,
 }: FilesTabProps) {
   const [previewFile, setPreviewFile] = useState<ViewableFile | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -654,8 +656,20 @@ export function FilesTab({
                     <AttachmentAction
                       onClick={(e) => {
                         e.stopPropagation();
+                        // 1. Interfeys xotirasidan o'chirish
                         setOrderAttachments((prev) => prev.filter((f) => f.id !== file.id));
+                        onFileDeleted?.(file);
                         onMarkUnsaved();
+
+                        // 2. Server va MinIO S3 omboridan tozalash (background so'rov)
+                        if (docNo) {
+                          try {
+                            fetch(
+                              `/api/v1/production/work-orders/${encodeURIComponent(docNo)}/files?attachmentId=${encodeURIComponent(file.id)}&url=${encodeURIComponent(file.url || "")}`,
+                              { method: "DELETE" }
+                            ).catch((err) => console.warn("Faylni serverdan o'chirishda ogohlantirish:", err));
+                          } catch (_) {}
+                        }
                       }}
                       title="O'chirish (Delete)"
                       className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer"

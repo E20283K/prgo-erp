@@ -621,6 +621,14 @@ export function SpecificationsTab({
   const isFlexo = formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false);
   const isJacquard = formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false);
   const isOffset = !isFlexo && !isJacquard;
+  const isTextileRibbon = isFlexo && (
+    formData.labelMaterialType === "polyester_satin_white" ||
+    formData.labelMaterialType === "polyester_satin_black" ||
+    formData.labelMaterialType === "nylon_taffeta" ||
+    formData.labelMaterialType === "cotton_tape" ||
+    Boolean(formData.paperStock && (formData.paperStock.toLowerCase().includes("satin") || formData.paperStock.toLowerCase().includes("nylon")))
+  );
+  const isSticker = isFlexo && !isTextileRibbon;
 
   // Hole calculation
   const effectiveHoleSize = formData.holeSize !== undefined
@@ -1047,7 +1055,9 @@ export function SpecificationsTab({
         height={formData.height}
         workOrderId={docNo || (formData as any).docNo}
         skuArtworks={skuArtworks || formData.skuArtworks || []}
+        orderAttachments={orderAttachments}
         setOrderAttachments={setOrderAttachments}
+        isStickerMode={isFlexo || isSticker}
         onSkuArtworksChange={(artworks) => {
           if (onSkuArtworksChange) {
             onSkuArtworksChange(artworks);
@@ -1097,6 +1107,13 @@ export function SpecificationsTab({
               handleFieldChange("quantity", total);
             }
           }
+          if (isSticker && nextSizes.length > 0 && nextSizes[0].width && nextSizes[0].height) {
+            handleFieldChange({
+              width: nextSizes[0].width,
+              height: nextSizes[0].height,
+              itemCategory: formData.itemCategory || "Label",
+            });
+          }
           onMarkUnsaved();
         }}
       />
@@ -1108,7 +1125,7 @@ export function SpecificationsTab({
           {/* ════════════════════════════════════════════════════════════════
               1. FLEXO TEXTILE & RIBBON LABEL CARDS (NYLON, SATIN, COTTON)
           ════════════════════════════════════════════════════════════════ */}
-          {isFlexo && (
+          {isTextileRibbon && (
             <>
               {/* Flexo Card 1: Ribbon Dimensions & Label Fold */}
               <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-3">
@@ -1465,9 +1482,9 @@ export function SpecificationsTab({
           )}
 
           {/* ════════════════════════════════════════════════════════════════
-              3. OFFSET PACKAGING & SHEETFED PRINT CARDS
+              3. OFFSET PACKAGING & ROLL STICKER CARDS
           ════════════════════════════════════════════════════════════════ */}
-          {isOffset && (
+          {(isOffset || isSticker) && (
             <>
               {/* Card 1: Geometry & Dimensions */}
               <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
@@ -2051,8 +2068,8 @@ export function SpecificationsTab({
             </div>
           </div>
 
-          {/* Card 3b: Dedicated Lamination (Offset only) */}
-          {isOffset && (
+          {/* Card 3b: Dedicated Lamination (Offset & Sticker) */}
+          {(isOffset || isSticker) && (
             <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
               <div className="flex items-center justify-between pb-1.5 border-b border-border">
                 <div className="flex items-center gap-1.5">
@@ -2201,8 +2218,8 @@ export function SpecificationsTab({
             </div>
           )}
 
-          {/* Card 3c: Varnish Coating & Special Print (Offset only) */}
-          {isOffset && (
+          {/* Card 3c: Varnish Coating & Special Print (Offset & Sticker) */}
+          {(isOffset || isSticker) && (
             <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
               <div className="flex items-center justify-between pb-1.5 border-b border-border">
                 <div className="flex items-center gap-1.5">
@@ -2487,8 +2504,9 @@ export function SpecificationsTab({
             </div>
           )}
 
-          {/* Card 4: Multi-Layer Substrate & Kashirovka (Duplex / Triplex) */}
-          <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
+          {/* Card 4: Multi-Layer Substrate & Kashirovka (Duplex / Triplex - Offset only) */}
+          {isOffset && (
+            <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
             <div className="flex items-center justify-between pb-1.5 border-b border-border">
               <div className="flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5 text-primary shrink-0" />
@@ -2596,14 +2614,15 @@ export function SpecificationsTab({
               </div>
             )}
           </div>
+          )}
             </>
           )}
         </div>
 
         {/* Right Column: Visual Die-Line / Textile Label Preview, Print Inks & Sizes */}
         <div className="space-y-3">
-          {/* Visual Preview: 2D Die-Line (Offset) OR Textile Care Label Preview (Flexo / Jacquard) */}
-          {isOffset ? (
+          {/* Visual Preview: 2D Die-Line (Offset & Sticker) OR Textile Care Label Preview (Flexo Ribbon / Jacquard) */}
+          {(isOffset || isSticker) ? (
             <DieLinePreview
               width={formData.width ?? 50}
               height={formData.height ?? 90}
@@ -2623,16 +2642,18 @@ export function SpecificationsTab({
               holePosition={effectiveHolePos}
               holeOffset={effectiveHoleOffset}
               artworkFront={
+                (skuArtworks && (skuArtworks[0]?.frontArtworkThumb || skuArtworks[0]?.frontArtworkUrl)) ||
                 (formData.skuArtworks && (formData.skuArtworks[0]?.frontArtworkThumb || formData.skuArtworks[0]?.frontArtworkUrl)) ||
                 formData.artworkFront ||
                 undefined
               }
               artworkBack={
+                (skuArtworks && (skuArtworks[0]?.backArtworkThumb || skuArtworks[0]?.backArtworkUrl)) ||
                 (formData.skuArtworks && (formData.skuArtworks[0]?.backArtworkThumb || formData.skuArtworks[0]?.backArtworkUrl)) ||
                 formData.artworkBack ||
                 undefined
               }
-              skuArtworks={formData.skuArtworks}
+              skuArtworks={skuArtworks || formData.skuArtworks}
               artworkBleedIncluded={formData.artworkBleedIncluded}
               artworkDielineOpacity={formData.artworkDielineOpacity}
               onArtworkChange={(front, back, sourcePdf, detectedW, detectedH, rawFile) => {

@@ -1604,9 +1604,9 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {derivedOffcuts.map((off) => (
+                      {derivedOffcuts.map((off, idx) => (
                         <div
-                          key={off.sku}
+                          key={`${off.id || off.sku}-${idx}`}
                           className="p-3 rounded-lg border border-border bg-card space-y-2 hover:border-amber-500/50 transition-colors"
                         >
                           <div className="flex items-start justify-between gap-2">

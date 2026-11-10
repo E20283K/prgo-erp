@@ -50,6 +50,9 @@ venv/
 
 # Cache
 /public/cache/
+/doc-service/cache/**
+!/doc-service/cache/.gitkeep
+scratch/
 
 # Uploads
 /public/uploads/**

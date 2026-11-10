@@ -70,6 +70,9 @@ services:
       - "${DOC_SERVICE_PORT:-8000}:8000"
     volumes:
       - ./doc-service:/app
+      - ./public/artwork:/app/public/artwork:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       minio:
         condition: service_healthy

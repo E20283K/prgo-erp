@@ -14,13 +14,7 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SmartCombobox, type ComboboxItem } from "@/components/ui/smart-combobox";
 import {
   Truck,
   Building2,
@@ -32,6 +26,8 @@ import {
   Trash2,
   Save,
   Tag,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import type { SupplierRecord, SupplierCategory } from "@/lib/server/supplierService";
 
@@ -116,8 +112,12 @@ export function SupplierDetailModal({
     paymentTerms: "",
     address: "",
     notes: "",
+    logoUrl: "",
     status: "Active",
   });
+
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   useEffect(() => {
     if (supplier) {
@@ -138,10 +138,37 @@ export function SupplierDetailModal({
         paymentTerms: "100% Shartnoma bo'yicha",
         address: "",
         notes: "",
+        logoUrl: "",
         status: "Active",
       });
     }
   }, [supplier, open]);
+
+  const handleLogoUpload = async (file: File) => {
+    if (!file) return;
+    setUploadingLogo(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("supplierId", form.id || "");
+
+      const res = await fetch("/api/v1/crm/suppliers/logo", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.url) {
+        setForm((prev) => ({ ...prev, logoUrl: data.url }));
+      } else {
+        alert(data.error || "Rasm yuklashda xatolik yuz berdi");
+      }
+    } catch {
+      alert("Rasm yuklashda xatolik yuz berdi");
+    } finally {
+      setUploadingLogo(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   const isNew = !supplier || !supplier.id;
 
@@ -156,14 +183,49 @@ export function SupplierDetailModal({
     SUPPLIER_CATEGORY_LABELS[form.category as SupplierCategory] ||
     SUPPLIER_CATEGORY_LABELS.raw_materials;
 
+  const categoryOptions: ComboboxItem[] = Object.entries(SUPPLIER_CATEGORY_LABELS).map(
+    ([k, v]) => ({
+      value: k,
+      label: v.label,
+      dot: v.dot,
+    })
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader className="border-b pb-3">
           <div className="flex items-center justify-between gap-3 pr-6">
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                <Truck className="w-5 h-5" />
+            <div className="flex items-center gap-2.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleLogoUpload(file);
+                }}
+              />
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="w-10 h-10 rounded-lg border border-border bg-background flex items-center justify-center shrink-0 overflow-hidden cursor-pointer hover:border-primary/60 transition-colors relative group"
+                title="Rasm yuklash yoki almashtirish"
+              >
+                {form.logoUrl ? (
+                  <img
+                    src={form.logoUrl}
+                    alt={form.name || "Ta'minotchi"}
+                    className="w-full h-full object-contain p-0.5"
+                  />
+                ) : (
+                  <Truck className="w-5 h-5 text-primary" />
+                )}
+                {uploadingLogo && (
+                  <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                  </div>
+                )}
               </div>
               <div>
                 <DialogTitle className="text-base font-semibold">
@@ -177,6 +239,15 @@ export function SupplierDetailModal({
                     <span className={`w-1.5 h-1.5 rounded-full mr-1 ${catConfig.dot}`} />
                     {catConfig.label}
                   </Badge>
+                  {form.logoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, logoUrl: "" }))}
+                      className="text-[10px] text-destructive hover:underline ml-1 cursor-pointer"
+                    >
+                      Rasmni o&apos;chirish
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -201,27 +272,17 @@ export function SupplierDetailModal({
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs">Faoliyat yo'nalishi / Toifasi*</Label>
-              <Select
+              <Label className="text-xs">Faoliyat toifasi*</Label>
+              <SmartCombobox
                 value={form.category}
-                onValueChange={(val) =>
+                onChange={(val) =>
                   setForm({ ...form, category: val as SupplierCategory })
                 }
-              >
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="Toifani tanlang" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(SUPPLIER_CATEGORY_LABELS).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${v.dot}`} />
-                        <span>{v.label}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={categoryOptions}
+                placeholder="Toifani tanlang..."
+                searchPlaceholder="Toifa bo'yicha qidirish..."
+                allowCustom={false}
+              />
             </div>
           </div>
 

@@ -65,7 +65,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useWorkspaceStore, ProductionReadinessChecks } from "@/store/workspaceStore";
 import { formatMoney } from "@/components/documents/common/DocumentShell";
 
 interface OperationsTabProps {
@@ -78,6 +78,7 @@ interface OperationsTabProps {
     quantity?: number;
     deadline?: string;
     department?: string;
+    checks?: ProductionReadinessChecks;
   };
   operations: RouteStep[];
   setOperations: React.Dispatch<React.SetStateAction<RouteStep[]>>;

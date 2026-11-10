@@ -82,6 +82,7 @@ import {
   Edit3,
   ShoppingCart,
   Package,
+  PackageMinus,
   AlertTriangle,
   Info,
   Truck,
@@ -243,6 +244,11 @@ interface BomMaterialsGridProps {
   onItemsChange?: (items: BomItem[]) => void;
   currency?: string;
   exchangeRate?: number;
+  materialsConsumed?: boolean;
+  materialIssueDocNo?: string;
+  onExecuteSpisanie?: (customItems?: BomItem[]) => void;
+  onOpenIssueTab?: (docNo: string) => void;
+  shiftWasteSheets?: number;
 }
 
 export function BomMaterialsGrid({
@@ -259,6 +265,11 @@ export function BomMaterialsGrid({
   onItemsChange,
   currency = "UZS",
   exchangeRate = 12850,
+  materialsConsumed,
+  materialIssueDocNo,
+  onExecuteSpisanie,
+  onOpenIssueTab,
+  shiftWasteSheets,
 }: BomMaterialsGridProps) {
   const t = useTranslations("BOM");
   const {
@@ -274,6 +285,8 @@ export function BomMaterialsGrid({
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [isSpecPickerOpen, setIsSpecPickerOpen] = useState(false);
+  const [isSpisanieDialogOpen, setIsSpisanieDialogOpen] = useState(false);
+  const [spisanieDraftItems, setSpisanieDraftItems] = useState<BomItem[]>([]);
   const [isWarehousePickerOpen, setIsWarehousePickerOpen] = useState(false);
 
   useEffect(() => {
@@ -311,6 +324,40 @@ export function BomMaterialsGrid({
   });
 
   const [items, setItems] = useState<BomItem[]>(defaultItems);
+
+  const handleOpenSpisanieDialog = useCallback(() => {
+    const prepared = items.map((it, idx) => {
+      let actual = Number(it.actualQty);
+      const plan = Number(it.planQty) || Number(it.qty) || 0;
+      if (isNaN(actual) || actual <= 0) actual = plan;
+      let waste = Number(it.wasteQty) || 0;
+      const isSubstrate = idx === 0 || it.category === "Paper & Board" || it.category === "Roll & Label";
+      if (isSubstrate && shiftWasteSheets && shiftWasteSheets > 0 && actual === plan) {
+        actual += shiftWasteSheets;
+        waste = shiftWasteSheets;
+      } else if (actual > plan && waste === 0) {
+        waste = actual - plan;
+      }
+      return {
+        ...it,
+        planQty: plan,
+        actualQty: actual,
+        wasteQty: waste,
+      };
+    });
+    setSpisanieDraftItems(prepared);
+    setIsSpisanieDialogOpen(true);
+  }, [items, shiftWasteSheets]);
+
+  const handleConfirmSpisanie = useCallback(() => {
+    if (onExecuteSpisanie) {
+      onExecuteSpisanie(spisanieDraftItems);
+    }
+    setItems(spisanieDraftItems);
+    if (onItemsChange) onItemsChange(spisanieDraftItems);
+    setIsSpisanieDialogOpen(false);
+  }, [onExecuteSpisanie, spisanieDraftItems, onItemsChange]);
+
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
@@ -1579,6 +1626,34 @@ export function BomMaterialsGrid({
             <span>{t("addMaterial")}</span>
           </Button>
 
+          {/* Material Spisanie status / Action */}
+          {materialsConsumed && materialIssueDocNo ? (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs shrink-0">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span className="text-muted-foreground hidden sm:inline">Chiqim:</span>
+              <button
+                type="button"
+                onClick={() => onOpenIssueTab?.(materialIssueDocNo)}
+                className="font-mono font-semibold text-emerald-700 dark:text-emerald-300 hover:underline cursor-pointer flex items-center gap-1"
+                title="Chiqim hujjatini ochish"
+              >
+                <span>{materialIssueDocNo}</span>
+                <ExternalLink className="w-3 h-3" />
+              </button>
+            </div>
+          ) : !isOperator ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleOpenSpisanieDialog}
+              className="h-6.5 px-2.5 text-xs font-medium gap-1 rounded cursor-pointer shrink-0 text-amber-700 dark:text-amber-300 border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20"
+            >
+              <PackageMinus className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Hisobdan chiqarish</span>
+            </Button>
+          ) : null}
+
           {/* Row Actions (Compact when selected) */}
           {hasSelectedRow && (
             <div className="flex items-center gap-1 shrink-0 animate-in fade-in duration-150">
@@ -1625,7 +1700,7 @@ export function BomMaterialsGrid({
                       }
                     />
                     <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                      Mijoz xomashyosi deb belgilash yoki omborga qaytarish
+                      Manbani almashtirish (Mijozniki / Ombordan)
                     </TooltipContent>
                   </Tooltip>
 
@@ -1717,8 +1792,8 @@ export function BomMaterialsGrid({
               {shortageItems.length} ta material omborda yetarli emas:
             </span>
             <div className="hidden lg:flex items-center gap-1 overflow-hidden">
-              {shortageItems.slice(0, 2).map((si) => (
-                <span key={si.id} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-300 font-medium">
+              {shortageItems.slice(0, 2).map((si, idx) => (
+                <span key={`${si.id}-${idx}`} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-300 font-medium">
                   {si.id}: {si.name}
                 </span>
               ))}
@@ -2020,10 +2095,10 @@ export function BomMaterialsGrid({
                           if (itemsInCat.length === 0) return null;
                           return (
                             <CommandGroup key={cat} heading={cat} className="text-xs">
-                              {itemsInCat.map((stock) => (
+                              {itemsInCat.map((stock, idx) => (
                                 <CommandItem
-                                  key={stock.sku}
-                                  value={`${stock.sku} ${stock.name} ${stock.category}`}
+                                  key={`${stock.id || stock.sku}-${stock.location || ""}-${idx}`}
+                                  value={`${stock.sku} ${stock.name} ${stock.category} ${stock.sheetFormat || ""} ${stock.location || ""} ${stock.id || idx}`}
                                   onSelect={() => handleSelectWarehouseStock(stock)}
                                   className="text-xs flex items-center justify-between py-1.5 cursor-pointer"
                                 >
@@ -2344,8 +2419,8 @@ export function BomMaterialsGrid({
                         placeholder="Ta'minotchi..."
                       />
                       <datalist id="supplier-options-list">
-                        {supplierOptions.map((s) => (
-                          <option key={s} value={s} />
+                        {supplierOptions.map((s, idx) => (
+                          <option key={`${s}-${idx}`} value={s} />
                         ))}
                       </datalist>
                     </div>
@@ -2615,7 +2690,7 @@ export function BomMaterialsGrid({
 
       {/* ── 3. SPECIFICATION / BOM TEMPLATE PICKER DIALOG ── */}
       <Dialog open={isSpecPickerOpen} onOpenChange={setIsSpecPickerOpen}>
-        <DialogContent className="max-w-lg p-0 overflow-hidden bg-card border border-border">
+        <DialogContent className="sm:max-w-lg w-full p-0 overflow-hidden bg-card border border-border">
           <DialogHeader className="px-4 py-3 border-b border-border bg-muted/20">
             <DialogTitle className="text-xs font-semibold flex items-center gap-2">
               <Layers className="size-4 text-primary" />
@@ -2678,6 +2753,137 @@ export function BomMaterialsGrid({
               })}
             </CommandList>
           </Command>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 4. MATERIAL CONSUMPTION (SPISANIE) DIALOG ── */}
+      <Dialog open={isSpisanieDialogOpen} onOpenChange={setIsSpisanieDialogOpen}>
+        <DialogContent className="sm:max-w-[760px] w-[95vw] p-0 overflow-hidden bg-card border border-border shadow-2xl flex flex-col">
+          <DialogHeader className="px-4 py-3 border-b border-border bg-muted/20 shrink-0">
+            <div className="flex items-center justify-between pr-6">
+              <DialogTitle className="text-xs font-semibold flex items-center gap-2">
+                <Boxes className="size-4 text-primary" />
+                <span>Xomashyoni hisobdan chiqarish</span>
+              </DialogTitle>
+            </div>
+            <DialogDescription className="sr-only">
+              Xomashyoni hisobdan chiqarish
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-4 space-y-3 max-h-[65vh] overflow-y-auto">
+            {shiftWasteSheets && shiftWasteSheets > 0 ? (
+              <div className="flex items-center gap-2 p-2 px-3 bg-amber-500/10 border border-amber-500/20 rounded text-xs text-amber-800 dark:text-amber-300">
+                <AlertTriangle className="size-3.5 text-amber-600 shrink-0" />
+                <span>Smena jurnallaridan +{shiftWasteSheets.toLocaleString()} ta qo&apos;shimcha chiqindi list asosiy qog&apos;oz sarfiga qo&apos;shildi.</span>
+              </div>
+            ) : null}
+
+            <div className="border border-border rounded overflow-x-auto">
+              <table className="w-full text-left text-xs min-w-[620px]">
+                <thead className="bg-muted/50 border-b border-border font-medium text-muted-foreground text-[11px]">
+                  <tr>
+                    <th className="py-2 px-3">Xomashyo</th>
+                    <th className="py-2 px-3 text-right">Reja</th>
+                    <th className="py-2 px-3 text-right w-32">Haqiqiy sarf</th>
+                    <th className="py-2 px-3 text-right">Chiqindi</th>
+                    <th className="py-2 px-2 text-center">Birlik</th>
+                    <th className="py-2 px-3 text-right">Manba</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {spisanieDraftItems.map((item, idx) => {
+                    const isClient = item.acquisitionSource === "client" || item.supplier?.toLowerCase().includes("mijoz");
+                    return (
+                      <tr key={item.id || idx} className="hover:bg-muted/30">
+                        <td className="py-2 px-3">
+                          <div className="font-medium text-foreground text-xs leading-tight max-w-[240px] truncate" title={item.name}>
+                            {item.name}
+                          </div>
+                          {item.sheetFormat && (
+                            <span className="text-[10px] text-muted-foreground font-mono">{item.sheetFormat}</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono text-muted-foreground whitespace-nowrap">
+                          {Number(item.planQty || item.qty || 0).toLocaleString()}
+                        </td>
+                        <td className="py-2 px-3 text-right">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={item.actualQty ?? ""}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setSpisanieDraftItems((prev) =>
+                                prev.map((it, i) =>
+                                  i === idx
+                                    ? {
+                                        ...it,
+                                        actualQty: val,
+                                        wasteQty: Math.max(0, val - (Number(it.planQty) || Number(it.qty) || 0)),
+                                      }
+                                    : it
+                                )
+                              );
+                            }}
+                            className="h-7 text-xs text-right font-mono font-medium w-28 ml-auto"
+                          />
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono whitespace-nowrap">
+                          {(Number(item.wasteQty) || 0) > 0 ? (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-mono">
+                              +{Number(item.wasteQty).toLocaleString()}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-[10px]">0</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-center text-muted-foreground font-mono text-[11px] whitespace-nowrap">
+                          {item.unit || "dona"}
+                        </td>
+                        <td className="py-2 px-3 text-right whitespace-nowrap">
+                          {isClient ? (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                              Mijoz
+                            </Badge>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">Ombor</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <DialogFooter className="m-0 mx-0 mb-0 px-4 py-2.5 border-t border-border bg-muted/20 flex sm:flex-row flex-row items-center justify-between sm:justify-between shrink-0">
+            <span className="text-[11px] text-muted-foreground font-mono">
+              Jami: {spisanieDraftItems.length} ta pozitsiya
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsSpisanieDialogOpen(false)}
+                className="h-7 text-xs"
+              >
+                Bekor qilish
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleConfirmSpisanie}
+                className="h-7 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium"
+              >
+                <Check className="size-3.5" />
+                <span>Hisobdan chiqarish</span>
+              </Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

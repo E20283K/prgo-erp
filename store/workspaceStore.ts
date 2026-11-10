@@ -16,6 +16,7 @@ import {
 } from "@/components/documents/hr/types";
 import { getUserInitials } from "@/lib/utils";
 import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
+import type { WorkOrderDeliveryBatch } from "@/components/documents/work-order/types";
 import type { SystemUserRecord } from "@/components/documents/user/types";
 import { INITIAL_SYSTEM_USERS } from "@/components/documents/user/data";
 import type { SupplierRecord } from "@/lib/server/supplierService";
@@ -166,6 +167,8 @@ export interface WarehouseShipmentRecord {
   grossWeightKg?: number;
   volumeM3?: number;
   notes?: string;
+  batchId?: string;
+  batchNo?: number;
   status: "Draft" | "Packed" | "Dispatched" | "In Transit" | "Delivered";
   shipmentType?: ShipmentType;
   items?: ShipmentLineItem[];
@@ -269,6 +272,7 @@ export interface CrmCustomerRecord {
   id: string;
   dbId?: string;
   name: string;
+  company?: string;
   tin: string;
   industry: string;
   industryId?: string;
@@ -330,6 +334,7 @@ export interface MasterSpecificationRecord {
 }
 
 export interface WarehouseStockRecord {
+  id?: string;
   sku: string;
   name: string;
   category: "Paper & Board" | "Roll & Label" | "Inks & Plates" | "Foil & Film" | "Adhesives & Binding" | "Offcuts & Scraps";
@@ -443,7 +448,7 @@ export interface FinishedGoodStockRecord {
   locationShelf?: string; // "Tayyor Mahsulot Ombori — Rampa 2, Pallet P-04"
   palletCount?: number; // 3
   daysInStock: number; // 7
-  status: "In Stock" | "Ready for Dispatch" | "Partially Shipped" | "Reserved";
+  status: "In Stock" | "Ready for Dispatch" | "Partially Shipped" | "Reserved" | "Shipped";
   notes?: string;
 }
 
@@ -563,6 +568,7 @@ export interface ProductionQueueItem {
   milestones?: any[];
   operations?: any[];
   events?: any[];
+  deliveryBatches?: WorkOrderDeliveryBatch[];
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -768,6 +774,52 @@ interface WorkspaceState {
     operator?: string;
     unitPriceUsd?: number;
   }) => void;
+  reserveMaterialsForWorkOrder: (
+    orderDocNo: string,
+    materials: Array<{
+      id?: string;
+      sku?: string;
+      code?: string;
+      name: string;
+      quantity: number;
+      unit?: string;
+      acquisitionSource?: string;
+    }>
+  ) => void;
+  releaseMaterialsReservation: (
+    orderDocNo: string,
+    materials: Array<{
+      id?: string;
+      sku?: string;
+      code?: string;
+      name: string;
+      quantity: number;
+      unit?: string;
+      acquisitionSource?: string;
+    }>
+  ) => void;
+  consumeMaterialsForWorkOrder: (payload: {
+    workOrderId: string;
+    orderNumber?: string;
+    customer?: string;
+    pressMachine?: string;
+    operator?: string;
+    reason?: string;
+    items: Array<{
+      id?: string;
+      sku?: string;
+      name: string;
+      category?: string;
+      grammage?: number;
+      sheetFormat?: string;
+      planQty: number;
+      actualQty: number;
+      wasteQty?: number;
+      unit?: string;
+      unitPrice?: number;
+      acquisitionSource?: string;
+    }>;
+  }) => WarehouseMovementRecord;
   recordClientPayment: (customer: string, amount: number, docNo?: string, note?: string) => void;
   isFinanceLoading: boolean;
   loadFinanceData: (companyCode?: string) => Promise<void>;
@@ -2329,7 +2381,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const newShipped = fg.shippedQty + shipQty;
         const newStock = Math.max(0, fg.producedQty - newShipped);
         const newStatus: FinishedGoodStockRecord["status"] =
-          newStock === 0 ? "Partially Shipped" : "In Stock";
+          newStock === 0 ? "Shipped" : newShipped > 0 ? "Partially Shipped" : "In Stock";
         return {
           ...fg,
           shippedQty: newShipped,
@@ -3137,8 +3189,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
              (payload.customer || "").toLowerCase().includes(c.customer.toLowerCase())
     );
     const existingCrmClient = state.crmCustomers.find(
-      (c) => c.company.toLowerCase().trim() === (payload.customer || "").toLowerCase().trim() ||
-             c.company.toLowerCase().includes((payload.customer || "").toLowerCase())
+      (c) => (c.name || c.company || "").toLowerCase().trim() === (payload.customer || "").toLowerCase().trim() ||
+             (c.name || c.company || "").toLowerCase().includes((payload.customer || "").toLowerCase())
     );
 
     const vatRate = existingCrmClient ? (existingCrmClient.vatPayer ? 12 : 0) : 0;
@@ -3466,6 +3518,255 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ],
       };
     }),
+
+  reserveMaterialsForWorkOrder: (orderDocNo, materials) =>
+    set((state) => {
+      if (!orderDocNo || !materials || materials.length === 0) return state;
+      const validItems = materials.filter(
+        (m) =>
+          m.acquisitionSource !== "client" &&
+          !(m.name || "").toLowerCase().includes("mijoz") &&
+          Number(m.quantity) > 0
+      );
+      if (validItems.length === 0) return state;
+
+      let matchCount = 0;
+      const updatedStock = state.warehouseStock.map((stock) => {
+        const item = validItems.find((m) => {
+          const skuMatch =
+            (m.sku && m.sku.toLowerCase() === stock.sku.toLowerCase()) ||
+            (m.id && m.id.toLowerCase() === stock.sku.toLowerCase()) ||
+            (m.code && m.code.toLowerCase() === stock.sku.toLowerCase());
+          if (skuMatch) return true;
+          const nameMatch =
+            m.name &&
+            stock.name &&
+            (m.name.toLowerCase().includes(stock.name.toLowerCase()) ||
+              stock.name.toLowerCase().includes(m.name.toLowerCase()));
+          return nameMatch;
+        });
+
+        if (!item) return stock;
+        matchCount++;
+        const reserveQty = Number(item.quantity) || 0;
+        const newReserved = stock.reserved + reserveQty;
+        const newAvailable = Math.max(0, stock.stockLevel - newReserved);
+        const newStatus: WarehouseStockRecord["status"] =
+          newAvailable <= stock.reorder * 0.5
+            ? "Critical"
+            : newAvailable <= stock.reorder
+            ? "Low Stock"
+            : "In Stock";
+        return {
+          ...stock,
+          reserved: newReserved,
+          available: newAvailable,
+          status: newStatus,
+        };
+      });
+
+      const notif = {
+        id: `notif-${Date.now()}`,
+        title: `Xomashyo band qilindi (${orderDocNo})`,
+        description: `${validItems.length} ta xomashyo ishlab chiqarish uchun zaxiraga olindi (${matchCount} ta ombor pozitsiyasi).`,
+        severity: "info" as const,
+        timestamp: Date.now(),
+        read: false,
+        link: { module: "warehouse", subModule: "stock-balance" },
+      };
+
+      return {
+        warehouseStock: updatedStock,
+        notifications: [notif, ...state.notifications],
+      };
+    }),
+
+  releaseMaterialsReservation: (orderDocNo, materials) =>
+    set((state) => {
+      if (!orderDocNo || !materials || materials.length === 0) return state;
+      const validItems = materials.filter(
+        (m) =>
+          m.acquisitionSource !== "client" &&
+          !(m.name || "").toLowerCase().includes("mijoz") &&
+          Number(m.quantity) > 0
+      );
+      if (validItems.length === 0) return state;
+
+      const updatedStock = state.warehouseStock.map((stock) => {
+        const item = validItems.find((m) => {
+          const skuMatch =
+            (m.sku && m.sku.toLowerCase() === stock.sku.toLowerCase()) ||
+            (m.id && m.id.toLowerCase() === stock.sku.toLowerCase()) ||
+            (m.code && m.code.toLowerCase() === stock.sku.toLowerCase());
+          if (skuMatch) return true;
+          const nameMatch =
+            m.name &&
+            stock.name &&
+            (m.name.toLowerCase().includes(stock.name.toLowerCase()) ||
+              stock.name.toLowerCase().includes(m.name.toLowerCase()));
+          return nameMatch;
+        });
+
+        if (!item) return stock;
+        const releaseQty = Number(item.quantity) || 0;
+        const newReserved = Math.max(0, stock.reserved - releaseQty);
+        const newAvailable = Math.max(0, stock.stockLevel - newReserved);
+        const newStatus: WarehouseStockRecord["status"] =
+          newAvailable <= stock.reorder * 0.5
+            ? "Critical"
+            : newAvailable <= stock.reorder
+            ? "Low Stock"
+            : "In Stock";
+        return {
+          ...stock,
+          reserved: newReserved,
+          available: newAvailable,
+          status: newStatus,
+        };
+      });
+
+      const notif = {
+        id: `notif-${Date.now()}`,
+        title: `Xomashyo bandi bekor qilindi (${orderDocNo})`,
+        description: `Buyurtma bekor qilinganligi sababli xomashyo zaxiradan chiqarildi.`,
+        severity: "info" as const,
+        timestamp: Date.now(),
+        read: false,
+        link: { module: "warehouse", subModule: "stock-balance" },
+      };
+
+      return {
+        warehouseStock: updatedStock,
+        notifications: [notif, ...state.notifications],
+      };
+    }),
+
+  consumeMaterialsForWorkOrder: (payload) => {
+    let resultRecord: WarehouseMovementRecord;
+    set((state) => {
+      const today = new Date().toISOString().split("T")[0];
+      const validItems = (payload.items || []).filter(
+        (m) =>
+          m.acquisitionSource !== "client" &&
+          !(m.name || "").toLowerCase().includes("mijoz")
+      );
+
+      // Sequential ISS-26-XXXX generation
+      const existingIss = state.warehouseMovements.filter((m) =>
+        m.id.startsWith("ISS-26-")
+      );
+      let maxNum = 0;
+      for (const m of existingIss) {
+        const parts = m.id.split("-");
+        const n = parseInt(parts[2], 10);
+        if (!isNaN(n) && n > maxNum) maxNum = n;
+      }
+      const nextNum = maxNum > 0 ? maxNum + 1 : 1001 + existingIss.length;
+      const issueNumber = `ISS-26-${String(nextNum).padStart(4, "0")}`;
+
+      // Update warehouse stock
+      const updatedStock = state.warehouseStock.map((stock) => {
+        const item = validItems.find((m) => {
+          const skuMatch =
+            (m.sku && m.sku.toLowerCase() === stock.sku.toLowerCase()) ||
+            (m.id && m.id.toLowerCase() === stock.sku.toLowerCase());
+          if (skuMatch) return true;
+          const nameMatch =
+            m.name &&
+            stock.name &&
+            (m.name.toLowerCase().includes(stock.name.toLowerCase()) ||
+              stock.name.toLowerCase().includes(m.name.toLowerCase()));
+          return nameMatch;
+        });
+
+        if (!item) return stock;
+        const actualQty = Number(item.actualQty) || Number(item.planQty) || 0;
+        const planQty = Number(item.planQty) || actualQty;
+        const newStockLevel = Math.max(0, stock.stockLevel - actualQty);
+        const newReserved = Math.max(0, stock.reserved - planQty);
+        const newAvailable = Math.max(0, newStockLevel - newReserved);
+        const newStatus: WarehouseStockRecord["status"] =
+          newAvailable <= stock.reorder * 0.5
+            ? "Critical"
+            : newAvailable <= stock.reorder
+            ? "Low Stock"
+            : "In Stock";
+        return {
+          ...stock,
+          stockLevel: newStockLevel,
+          reserved: newReserved,
+          available: newAvailable,
+          status: newStatus,
+        };
+      });
+
+      const lineItems: MovementLineItem[] = validItems.map((item, idx) => ({
+        id: `line-${Date.now()}-${idx}`,
+        sku: item.sku || item.id || `MAT-${String(idx + 1).padStart(4, "0")}`,
+        name: item.name,
+        category: item.category,
+        grammage: item.grammage,
+        sheetFormat: item.sheetFormat,
+        quantity: Number(item.actualQty) || Number(item.planQty) || 0,
+        receivedQty: Number(item.actualQty) || Number(item.planQty) || 0,
+        unit: item.unit || "birlik",
+        notes: item.wasteQty ? `Texnologik chiqindi: +${item.wasteQty} ${item.unit}` : undefined,
+      }));
+
+      const totalQty = lineItems.reduce((sum, l) => sum + l.quantity, 0);
+
+      resultRecord = {
+        id: issueNumber,
+        date: today,
+        material: lineItems[0]?.name || "Ishlab chiqarish materiallari",
+        materialSku: lineItems[0]?.sku,
+        sheetFormat: lineItems[0]?.sheetFormat,
+        quantity: totalQty,
+        receivedQty: totalQty,
+        unit: lineItems[0]?.unit || "birlik",
+        from: "Asosiy xomashyo ombori",
+        to: payload.pressMachine || "Ishlab chiqarish sexi",
+        reason:
+          payload.reason ||
+          `Ishlab chiqarishga sarf (Spisanie) — ${payload.orderNumber || payload.workOrderId}`,
+        status: "Completed",
+        operator: payload.operator || "Smena boshlig'i",
+        movementType: "ProductionIssue",
+        pressMachine: payload.pressMachine,
+        items: lineItems,
+        workOrderId: payload.workOrderId,
+      };
+
+      const notif = {
+        id: `notif-${Date.now()}`,
+        title: `Xomashyo hisobdan chiqarildi (${issueNumber})`,
+        description: `${payload.workOrderId} buyurtmasi bo'yicha ${lineItems.length} ta xomashyo ombordan to'liq sarflandi.`,
+        severity: "info" as const,
+        timestamp: Date.now(),
+        read: false,
+        link: { module: "warehouse", subModule: "stock-balance" },
+      };
+
+      return {
+        warehouseStock: updatedStock,
+        warehouseMovements: [resultRecord, ...state.warehouseMovements],
+        notifications: [notif, ...state.notifications],
+      };
+    });
+
+    // Asynchronous backend persistence
+    if (typeof window !== "undefined") {
+      fetch("/api/v1/warehouse/movements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(resultRecord!),
+      }).catch((err) => {
+        console.warn("Async warehouse movement persist warning:", err);
+      });
+    }
+
+    return resultRecord!;
+  },
 
   recordClientPayment: (customer, amount, docNo, note) =>
     set((state) => {
@@ -4287,9 +4588,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (state.masterSpecifications.length === 0 && state.loadSpecificationsAsync) {
       state.loadSpecificationsAsync();
     }
-    const defaultSpec = state.masterSpecifications.find((s) => s.department === "Offset");
-    const initialRecipe = defaultSpec ? defaultSpec.code : "OFFSET_STD_V1";
-    const initialProduct = defaultSpec ? defaultSpec.name : "New Print Order";
     get().openTab({
       id: draftId,
       title: "Yangi buyruq (Qoralama)",
@@ -4301,19 +4599,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         docNo: "",
         orderType: "Production",
         customer: "",
-        product: initialProduct,
+        product: "",
         department: "Offset",
         site: "Building 1",
-        recipe: initialRecipe,
-        quantity: 5000,
+        recipe: "",
+        quantity: 0,
         unit: "pcs",
         status: "Draft",
         priority: "Normal",
-        pressMachine: "Heidelberg Speedmaster XL 106",
+        pressMachine: "",
         startDate: today,
         deadline: nextWeek,
         currency: "USD",
         priceTotal: 0,
+        materials: [],
+        operations: [],
       },
     });
   },

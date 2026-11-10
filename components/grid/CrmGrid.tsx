@@ -136,6 +136,7 @@ export function CrmGrid({ type }: CrmGridProps) {
 
     if (type === "suppliers") {
       const cols: GridColumn[] = [
+        { id: "image", title: "Rasm", width: 56, icon: GridColumnIcon.HeaderImage },
         { id: "code", title: "Ta'minotchi ID", width: 110, icon: GridColumnIcon.HeaderReference },
         { id: "name", title: "Ta'minotchi / Hamkor", width: 230, icon: GridColumnIcon.HeaderString },
         { id: "categoryLabel", title: "Yo'nalishi / Toifasi", width: 185, icon: GridColumnIcon.HeaderLookup },
@@ -148,6 +149,7 @@ export function CrmGrid({ type }: CrmGridProps) {
       ];
       const suppRows = suppliers.map((s) => ({
         ...s,
+        image: s.logoUrl || "",
         categoryLabel: SUPPLIER_CATEGORY_LABELS[s.category]?.label || s.category,
       }));
       return { columns: cols, rows: suppRows };
@@ -757,6 +759,7 @@ export function CrmGrid({ type }: CrmGridProps) {
                 onItemHovered={onItemHovered}
                 rowHeight={30}
                 headerHeight={32}
+                freezeColumns={type === "leads" ? 1 : 2}
                 theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
               />
 

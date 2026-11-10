@@ -61,6 +61,7 @@ import {
   Code,
   Coins,
   Stamp,
+  Scissors,
   Volume2,
   // HR icons
   UserCheck,
@@ -167,6 +168,7 @@ export const MODULE_NAV: ModuleDef[] = [
         items: [
           { id: "work-orders", label: "Work Orders", icon: ClipboardList },
           { id: "planning", label: "Planning", icon: Calendar },
+          { id: "tooling-orders", label: "Tooling & CTP", icon: Stamp },
         ],
       },
       {
@@ -177,7 +179,7 @@ export const MODULE_NAV: ModuleDef[] = [
         items: [
           { id: "products", label: "Products", icon: Layers },
           { id: "machines", label: "Machines", icon: Cpu },
-          { id: "tooling", label: "Tooling", icon: Stamp },
+          { id: "tooling", label: "Tooling", icon: Scissors },
         ],
       },
     ],

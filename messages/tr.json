@@ -62,7 +62,11 @@
     "emptyCredentials": "Lütfen kullanıcı adı ve şifrenizi girin",
     "accountInactive": "Hesap aktif değil veya engellenmiş",
     "serverErrorTitle": "Sunucu Hatası",
-    "serverErrorDesc": "Sunucuya bağlanırken bir hata oluştu"
+    "serverErrorDesc": "Sunucuya bağlanırken bir hata oluştu",
+    "termsPrefix": "Devam ederek",
+    "termsAnd": "ve",
+    "termsOfService": "Kullanım Koşulları",
+    "privacyPolicy": "Gizlilik Politikasını kabul etmiş olursunuz"
   },
   "Topbar": {
     "commands": "Komutlar",
@@ -373,6 +377,7 @@
     "operations": "Operasyonlar",
     "work-orders": "İş Emirleri",
     "planning": "Planlama",
+    "tooling-orders": "Kalıp ve CTP Siparişleri",
     "history": "Vardiya Geçmişi",
     "master-data": "Ana Veriler",
     "machines": "Makineler",

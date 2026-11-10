@@ -26,6 +26,7 @@ const DevicesGrid = dynamic(() => import("@/components/documents/hr/devices/Devi
 const TelegramInbox = dynamic(() => import("@/components/documents/crm/TelegramInbox").then((mod) => mod.TelegramInbox), { ssr: false });
 const TelegramSettingsView = dynamic(() => import("@/components/documents/settings/TelegramSettingsView").then((mod) => mod.TelegramSettingsView), { ssr: false });
 const NotificationSoundSettingsView = dynamic(() => import("@/components/documents/settings/NotificationSoundSettingsView").then((mod) => mod.NotificationSoundSettingsView), { ssr: false });
+const ToolingOrdersGrid = dynamic(() => import("@/components/grid/ToolingOrdersGrid").then((mod) => mod.ToolingOrdersGrid), { ssr: false });
 
 export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
   if (tab.id.includes("tasks")) {
@@ -45,6 +46,7 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("planning")) return <ProductionGrid type="planning" />;
     if (tab.id.includes("machines")) return <ProductionGrid type="machines" />;
     if (tab.id.includes("bom") || tab.id.includes("products")) return <ProductionGrid type="bom" />;
+    if (tab.id.includes("tooling-orders") || tab.id.includes("prepress-orders")) return <ToolingOrdersGrid />;
     if (tab.id.includes("tooling")) return <ProductionGrid type="tooling" />;
     return <DataGrid />;
   } else if (tab.module === "warehouse") {

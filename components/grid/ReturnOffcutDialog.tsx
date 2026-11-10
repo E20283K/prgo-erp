@@ -37,8 +37,8 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
 
   // Filter paper substrates that can be cut
   const paperSubstrates = useMemo(() => {
-    return warehouseStock.filter(
-      (s) => s.category === "Paper & Board" && !s.isOffcut
+    const seen = new Set<string>(); return warehouseStock.filter(
+      (s) => s.category === "Paper & Board" && !s.isOffcut && !seen.has(s.sku) && (seen.add(s.sku), true)
     );
   }, [warehouseStock]);
 
@@ -136,8 +136,8 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
                   <SelectValue placeholder="Qog'oz xomashyosini tanlang..." />
                 </SelectTrigger>
                 <SelectContent className="text-xs">
-                  {paperSubstrates.map((s) => (
-                    <SelectItem key={s.sku} value={s.sku} className="text-xs">
+                  {paperSubstrates.map((s, idx) => (
+                    <SelectItem key={`${s.sku}-${idx}`} value={s.sku} className="text-xs">
                       {s.sku} — {s.name} ({s.sheetFormat || "700×1000"})
                     </SelectItem>
                   ))}

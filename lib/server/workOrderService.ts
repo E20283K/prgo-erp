@@ -50,6 +50,59 @@ import {
   computeAndRecordWorkOrderDiffs,
   recordWorkOrderAuditLog,
 } from "./workOrderAuditService";
+import { s3Client, S3_BUCKETS, deleteStorageObject } from "@/lib/server/storage";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+
+/**
+ * Vaqtinchalik Flexo Imposition keshidagi faylni (qirqilgan SKU PDF yoki generatsiya qilingan film/prevyu)
+ * MinIO S3 ga doimiy saqlab, /api/v1/storage/file havolasiga aylantiradi.
+ */
+export async function persistCachedImpositionUrlToS3(
+  docNo: string,
+  url?: string | null,
+  preferredName?: string
+): Promise<string | undefined> {
+  if (!url || typeof url !== "string") return undefined;
+  if (!url.includes("/api/flexo-imposition/")) {
+    return url;
+  }
+
+  try {
+    const rawFileName = preferredName || url.split("/").pop()?.split("?")[0] || "artwork.pdf";
+    const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const s3Key = `PRINTGOO/orders/${docNo}/artwork/${cleanFileName}`;
+    const ext = cleanFileName.toLowerCase().endsWith(".png") ? "image/png" : "application/pdf";
+
+    // 1. Fetch file from local doc-service / Next.js proxy
+    const localUrl = url.startsWith("http")
+      ? url
+      : `http://localhost:3000${url.startsWith("/") ? "" : "/"}${url}`;
+    const fileRes = await fetch(localUrl);
+    if (!fileRes.ok) {
+      console.warn(`[persistImposition] Could not download cached file ${url}: ${fileRes.status}`);
+      return url;
+    }
+    const arrBuf = await fileRes.arrayBuffer();
+    const buffer = Buffer.from(arrBuf);
+
+    // 2. Upload to MinIO (printgoo-docs)
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: S3_BUCKETS.docs,
+        Key: s3Key,
+        Body: buffer,
+        ContentType: ext,
+      })
+    );
+
+    const permanentUrl = `/api/v1/storage/file?key=${encodeURIComponent(s3Key)}`;
+    console.log(`[persistImposition] Promoted cached ${cleanFileName} -> ${permanentUrl}`);
+    return permanentUrl;
+  } catch (err: any) {
+    console.error(`[persistImposition] Failed to promote ${url} to MinIO:`, err?.message || err);
+    return url;
+  }
+}
 
 const isUuid = (val: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
@@ -273,6 +326,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       sampleQty: (wo.sampleData as any)?.sampleQty || undefined,
       sampleData: wo.sampleData || {},
       packagingData: wo.packagingData || {},
+      deliveryBatches: wo.deliveryBatches || [],
       notes: wo.notes || "",
       photoUrl: normalizePermanentMediaUrl(wo.photoUrl) || normalizePermanentMediaUrl(wo.attachments && wo.attachments.find((a: any) => a.category === "proofs" || a.fileType?.startsWith("image/"))?.url) || undefined,
       photoUrls: (wo.photoUrls && wo.photoUrls.length > 0
@@ -370,6 +424,7 @@ export async function upsertWorkOrder(
     operations?: RouteStep[];
     sampleData?: any;
     packagingData?: any;
+    deliveryBatches?: any[];
     events?: any[];
     user?: { id?: string; name?: string; role?: string; initials?: string };
     author?: { id?: string; name?: string; role?: string; initials?: string };
@@ -428,6 +483,33 @@ export async function upsertWorkOrder(
     stageVal = "Completed";
   }
 
+  // Sliced SKU Artworks ichidagi kesh URL larini MinIO S3 ga doimiy saqlash
+  let resolvedSkuArtworks =
+    (data as any).skuArtworks ??
+    (data as any).dimensions?.skuArtworks ??
+    (existingOrder?.dimensions as any)?.skuArtworks ??
+    [];
+
+  if (Array.isArray(resolvedSkuArtworks) && resolvedSkuArtworks.length > 0) {
+    resolvedSkuArtworks = await Promise.all(
+      resolvedSkuArtworks.map(async (art: any) => {
+        let frontUrl = art.frontArtworkUrl;
+        let thumbUrl = art.frontArtworkThumb;
+        if (frontUrl && frontUrl.includes("/api/flexo-imposition/")) {
+          frontUrl = (await persistCachedImpositionUrlToS3(docNo, frontUrl, art.frontArtworkName)) || frontUrl;
+        }
+        if (thumbUrl && thumbUrl.includes("/api/flexo-imposition/")) {
+          thumbUrl = (await persistCachedImpositionUrlToS3(docNo, thumbUrl, (art.model || "sku") + "_thumb.png")) || thumbUrl;
+        }
+        return {
+          ...art,
+          frontArtworkUrl: frontUrl,
+          frontArtworkThumb: thumbUrl,
+        };
+      })
+    );
+  }
+
   const payload: any = {
     companyId,
     clientId,
@@ -476,8 +558,8 @@ export async function upsertWorkOrder(
       holeSize: data.holeSize,
       holePosition: data.holePosition,
       holeOffset: data.holeOffset,
-      sizes: data.sizes,
-      skuArtworks: (data as any).skuArtworks,
+      sizes: data.sizes ?? (data as any).dimensions?.sizes ?? (existingOrder?.dimensions as any)?.sizes ?? [],
+      skuArtworks: resolvedSkuArtworks,
       kashirovkaMode: data.kashirovkaMode,
       kashirovkaStrategy: data.kashirovkaStrategy,
       kashirovkaLayers: data.kashirovkaLayers,
@@ -573,6 +655,7 @@ export async function upsertWorkOrder(
     })(),
     sampleData: data.sampleData || {},
     packagingData: data.packagingData || {},
+    deliveryBatches: data.deliveryBatches || [],
     notes: (data as any).notes || null,
     updatedAt: new Date(),
   };
@@ -698,14 +781,40 @@ export async function upsertWorkOrder(
     }
   }
 
-  // 5. Fayllar va ilovalarni (attachments) saqlash
-  if (data.attachments && Array.isArray(data.attachments)) {
-    for (const att of data.attachments) {
-      const attUrl = att.url;
+  // 5. Fayllar va ilovalarni (attachments) saqlash va sinxronlash
+  const inputAttachments = data.attachments !== undefined ? data.attachments : (data as any).orderAttachments;
+  if (inputAttachments && Array.isArray(inputAttachments)) {
+    // 5.1 Bazadagi mavjud fayllarni olish
+    const existingAttachments = await db.query.workOrderAttachments.findMany({
+      where: eq(workOrderAttachments.workOrderId, targetId),
+    });
+
+    const inputUrls = new Set(
+      inputAttachments
+        .map((a: any) => a?.url)
+        .filter((u: any): u is string => typeof u === "string" && u.trim().length > 0)
+    );
+
+    // 5.2 Foydalanuvchi interfeysdan o'chirgan fayllarni DB va MinIO S3 omboridan tozalash
+    for (const oldAtt of existingAttachments) {
+      if (!inputUrls.has(oldAtt.url)) {
+        await db.delete(workOrderAttachments).where(eq(workOrderAttachments.id, oldAtt.id));
+        if (oldAtt.storagePath) {
+          try {
+            await deleteStorageObject({ bucket: "prepress", objectKey: oldAtt.storagePath });
+          } catch (_) {}
+        }
+      }
+    }
+
+    // 5.3 Yangi yoki o'zgargan fayllarni qo'shish
+    for (const att of inputAttachments) {
+      let attUrl = att.url;
       if (!attUrl) continue;
-      const existing = await db.query.workOrderAttachments.findFirst({
-        where: (a, { and, eq }) => and(eq(a.workOrderId, targetId), eq(a.url, attUrl)),
-      });
+      if (attUrl.includes("/api/flexo-imposition/")) {
+        attUrl = (await persistCachedImpositionUrlToS3(docNo, attUrl, att.name)) || attUrl;
+      }
+      const existing = existingAttachments.find((a) => a.url === attUrl);
       if (!existing) {
         await db.insert(workOrderAttachments).values({
           workOrderId: targetId,
@@ -1581,4 +1690,66 @@ export async function createWorkOrderAttachment(data: {
 }) {
   const [inserted] = await db.insert(workOrderAttachments).values(data).returning();
   return inserted;
+}
+
+export async function deleteWorkOrderAttachment(params: {
+  workOrderId: string;
+  attachmentId?: string;
+  url?: string;
+}) {
+  const { workOrderId, attachmentId, url } = params;
+
+  let found: any = null;
+  if (attachmentId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attachmentId)) {
+    found = await db.query.workOrderAttachments.findFirst({
+      where: (a, { and, eq }) => and(eq(a.workOrderId, workOrderId), eq(a.id, attachmentId)),
+    });
+  }
+  if (!found && url) {
+    found = await db.query.workOrderAttachments.findFirst({
+      where: (a, { and, eq }) => and(eq(a.workOrderId, workOrderId), eq(a.url, url)),
+    });
+  }
+  if (!found && attachmentId) {
+    found = await db.query.workOrderAttachments.findFirst({
+      where: (a, { and, eq }) => and(eq(a.workOrderId, workOrderId), eq(a.id, attachmentId)),
+    });
+  }
+
+  if (found) {
+    await db.delete(workOrderAttachments).where(eq(workOrderAttachments.id, found.id));
+    if (found.storagePath) {
+      try {
+        await deleteStorageObject({ bucket: "prepress", objectKey: found.storagePath });
+      } catch (s3Err) {
+        console.warn("[deleteWorkOrderAttachment] S3 object delete failed:", s3Err);
+      }
+    }
+  }
+
+  // Agar ushbu fayl buyurtmaning asosiy fotosurati (photoUrl) yoki photoUrls ro'yxatida bo'lsa, tozalaymiz
+  const targetUrl = found?.url || url;
+  if (targetUrl) {
+    const wo = await db.query.workOrders.findFirst({
+      where: (w, { eq }) => eq(w.id, workOrderId),
+    });
+    if (wo) {
+      const currentPhotos = (wo.photoUrls as string[]) || [];
+      const updatedPhotos = currentPhotos.filter((u) => u !== targetUrl);
+      const isPhotoUrlAffected = wo.photoUrl === targetUrl;
+      const newPrimaryPhoto = isPhotoUrlAffected ? updatedPhotos[0] || null : wo.photoUrl;
+
+      if (currentPhotos.length !== updatedPhotos.length || isPhotoUrlAffected) {
+        await db
+          .update(workOrders)
+          .set({
+            photoUrl: newPrimaryPhoto,
+            photoUrls: updatedPhotos,
+          })
+          .where(eq(workOrders.id, workOrderId));
+      }
+    }
+  }
+
+  return { success: true, deleted: found || null };
 }

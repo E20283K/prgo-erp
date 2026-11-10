@@ -1,0 +1,211 @@
+name: printgoo-erp-coolify
+
+services:
+  app:
+    build:
+      context: .
+      target: runner
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://erp.printg.uz}
+        NEXT_PUBLIC_S3_ENDPOINT: ${NEXT_PUBLIC_S3_ENDPOINT:-https://s3.printg.uz}
+    container_name: printgoo-app
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      APP_DOMAIN: ${APP_DOMAIN:-erp.printg.uz}
+      S3_PUBLIC_DOMAIN: ${S3_PUBLIC_DOMAIN:-s3.printg.uz}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://erp.printg.uz}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://erp.printg.uz}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-admin}
+      NEXT_PUBLIC_S3_ENDPOINT: ${NEXT_PUBLIC_S3_ENDPOINT:-https://s3.printg.uz}
+      S3_INTERNAL_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET_PREPRESS: ${S3_BUCKET_PREPRESS:-printgoo-prepress}
+      S3_BUCKET_DOCS: ${S3_BUCKET_DOCS:-printgoo-docs}
+      S3_BUCKET_THUMBNAILS: ${S3_BUCKET_THUMBNAILS:-printgoo-thumbnails}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-printgoo}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-printgoo_erp}
+      REDIS_URL: redis://redis:6379
+      DOC_SERVICE_URL: http://doc-service:8000
+      ISUP_GATEWAY_URL: http://isup-gateway:7662
+      GATEWAY_SECRET: ${GATEWAY_SECRET:-printgoo_isup_secret_2026}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      CBU_API_URL: ${CBU_API_URL:-https://cbu.uz/oz/arkhiv-kursov-valyut/json/}
+      GEMINI_API_KEY_1: ${GEMINI_API_KEY_1:-}
+      GEMINI_API_KEY_2: ${GEMINI_API_KEY_2:-}
+      GEMINI_API_KEY_3: ${GEMINI_API_KEY_3:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      doc-service:
+        condition: service_healthy
+    volumes:
+      - app_uploads:/app/public/uploads
+      - app_artwork:/app/public/artwork
+      - app_cache:/app/public/cache
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      target: worker
+    container_name: printgoo-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://erp.printg.uz}
+      NEXT_PUBLIC_S3_ENDPOINT: ${NEXT_PUBLIC_S3_ENDPOINT:-https://s3.printg.uz}
+      S3_INTERNAL_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET_PREPRESS: ${S3_BUCKET_PREPRESS:-printgoo-prepress}
+      S3_BUCKET_DOCS: ${S3_BUCKET_DOCS:-printgoo-docs}
+      S3_BUCKET_THUMBNAILS: ${S3_BUCKET_THUMBNAILS:-printgoo-thumbnails}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-printgoo}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-printgoo_erp}
+      REDIS_URL: redis://redis:6379
+      DOC_SERVICE_URL: http://doc-service:8000
+      ISUP_GATEWAY_URL: http://isup-gateway:7662
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      doc-service:
+        condition: service_healthy
+
+  doc-service:
+    build:
+      context: ./doc-service
+    container_name: printgoo-doc-service
+    restart: unless-stopped
+    environment:
+      S3_INTERNAL_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET_DOCS: ${S3_BUCKET_DOCS:-printgoo-docs}
+      TZ: Asia/Tashkent
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: printgoo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-printgoo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-printgoo_erp}
+      TZ: Asia/Tashkent
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printgoo} -d ${POSTGRES_DB:-printgoo_erp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: printgoo-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "1gb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata_prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: elestio/minio:latest
+    container_name: printgoo-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    expose:
+      - "9000"
+      - "9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+      MINIO_SERVER_URL: ${NEXT_PUBLIC_S3_ENDPOINT:-https://s3.printg.uz}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${NEXT_PUBLIC_APP_URL:-https://erp.printg.uz},*
+    volumes:
+      - miniodata_prod:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pg-backup:
+    image: prodrigestivill/postgres-backup-local:17-alpine
+    container_name: printgoo-pg-backup
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-printgoo_erp}
+      POSTGRES_USER: ${POSTGRES_USER:-printgoo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: 14
+      BACKUP_KEEP_WEEKS: 8
+      BACKUP_KEEP_MONTHS: 12
+      TZ: Asia/Tashkent
+    volumes:
+      - pgbackups_prod:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  isup-gateway:
+    build:
+      context: ./services/isup-gateway
+    container_name: printgoo-isup-gateway
+    restart: unless-stopped
+    ports:
+      - "${ISUP_CMS_PORT:-7660}:7660"
+      - "${ISUP_ALARM_PORT:-7661}:7661"
+      - "127.0.0.1:${ISUP_HTTP_PORT:-7662}:7662"
+    environment:
+      - ISUP_CMS_PORT=7660
+      - ISUP_ALARM_PORT=7661
+      - HTTP_PORT=7662
+      - ERP_WEBHOOK_URL=http://app:3000/api/v1/hr/attendance/hikvision-event
+      - GATEWAY_SECRET=${GATEWAY_SECRET:-printgoo_isup_secret_2026}
+      - COMPANY_CODE=${COMPANY_CODE:-PRINTGOO}
+    depends_on:
+      - app
+
+volumes:
+  pgdata_prod:
+  redisdata_prod:
+  miniodata_prod:
+  pgbackups_prod:
+  app_uploads:
+  app_artwork:
+  app_cache:

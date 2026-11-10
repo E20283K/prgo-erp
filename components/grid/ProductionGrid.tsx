@@ -460,6 +460,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           paperStock: "",
           priceTotal: 0,
           currency: "UZS",
+          recipe: "",
+          materials: [],
+          operations: [],
         },
       });
     } else if (type === "tooling") {

@@ -69,28 +69,36 @@ export async function GET(req: NextRequest) {
   }
 
   // 6. Fetch directly from MinIO / S3 using server client (no expiration, no CORS)
-  try {
-    const bucketName = S3_BUCKETS[bucketKey] || S3_BUCKETS.prepress;
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: cleanKey,
-    });
-    const s3Res = await s3Client.send(command);
-    if (!s3Res.Body) {
-      return new NextResponse("File not found in storage", { status: 404 });
+  const bucketsToTry = [
+    S3_BUCKETS[bucketKey] || S3_BUCKETS.prepress,
+    S3_BUCKETS.docs,
+    S3_BUCKETS.prepress,
+    S3_BUCKETS.thumbnails,
+  ];
+  const uniqueBuckets = Array.from(new Set(bucketsToTry));
+
+  for (const bName of uniqueBuckets) {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: bName,
+        Key: cleanKey,
+      });
+      const s3Res = await s3Client.send(command);
+      if (!s3Res.Body) continue;
+
+      const contentType = s3Res.ContentType || "application/octet-stream";
+      const byteArray = await s3Res.Body.transformToByteArray();
+
+      return new NextResponse(Buffer.from(byteArray), {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+        },
+      });
+    } catch (_) {
+      // Try next bucket
     }
-
-    const contentType = s3Res.ContentType || "image/jpeg";
-    const byteArray = await s3Res.Body.transformToByteArray();
-
-    return new NextResponse(Buffer.from(byteArray), {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
-      },
-    });
-  } catch (err: any) {
-    console.error("[storage/file] Error fetching from S3:", err?.message || err);
-    return new NextResponse("Failed to load file from storage", { status: 404 });
   }
+
+  return new NextResponse("File not found in storage", { status: 404 });
 }

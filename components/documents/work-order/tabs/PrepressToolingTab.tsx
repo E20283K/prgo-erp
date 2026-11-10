@@ -10,6 +10,7 @@ import {
   GridSelection,
   CompactSelection,
   GridColumnIcon,
+  GridMouseEventArgs,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
@@ -216,6 +217,19 @@ export function PrepressToolingTab({
     [openTab]
   );
 
+  const handleOpenToolingRegistry = useCallback(() => {
+    openTab({
+      id: "tooling-orders",
+      title: "Qolip va CTP buyurtmalari",
+      type: "registry",
+      module: "production",
+      documentData: {
+        workOrderNo: docNo,
+        viewMode: "deficits",
+      },
+    });
+  }, [openTab, docNo]);
+
   useEffect(() => {
     const s = useWorkspaceStore.getState();
     if (s.suppliers.length === 0 && s.loadSuppliers) s.loadSuppliers();
@@ -228,6 +242,7 @@ export function PrepressToolingTab({
   // Modals state
   const [isAddEditOpen, setIsAddEditOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Partial<WorkOrderToolingItem> | null>(null);
+  const [fileError, setFileError] = useState(false);
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
   const imageFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const cadFileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -301,45 +316,7 @@ export function PrepressToolingTab({
     });
   };
 
-  const [isPoModalOpen, setIsPoModalOpen] = useState(false);
-  const [targetPoItem, setTargetPoItem] = useState<WorkOrderToolingItem | null>(null);
-  const [poForm, setPoForm] = useState({
-    supplierId: "",
-    amount: 0,
-    currency: formData.currency || "UZS",
-    deliveryDeadline: formData.deadline || "",
-    notes: "",
-  });
-  const [poSubmitting, setPoSubmitting] = useState(false);
 
-  // Supplier options for ComboboxSelect
-  const supplierOptions = useMemo<ComboboxOption[]>(() => {
-    const list: ComboboxOption[] = [
-      {
-        value: "in_house",
-        label: "Ichki ombor / O'zimizda",
-        description: "Mavjud korxona inventari",
-      },
-    ];
-
-    for (const s of suppliers) {
-      list.push({
-        value: s.id,
-        label: `${s.name} (${s.code})`,
-        description: s.contactPerson ? `${s.contactPerson} • ${s.phone || ""}` : (s.phone || ""),
-      });
-    }
-
-    return list;
-  }, [suppliers]);
-
-  const poSupplierOptions = useMemo<ComboboxOption[]>(() => {
-    return suppliers.map((s) => ({
-      value: s.id,
-      label: `${s.name} (${s.code})`,
-      description: s.contactPerson ? `${s.contactPerson} • ${s.phone || ""}` : (s.phone || ""),
-    }));
-  }, [suppliers]);
 
   // Statistics
   const stats = useMemo(() => {
@@ -362,18 +339,60 @@ export function PrepressToolingTab({
     return { totalCount, ctpCount, dieCount, clicheCount, readyCount, totalCost };
   }, [items]);
 
+  // Hover Magnified Artwork / Image Preview
+  const [hoveredPreview, setHoveredPreview] = useState<{
+    url: string;
+    x: number;
+    y: number;
+    title?: string;
+    subtitle?: string;
+  } | null>(null);
+  const mouseCoordsRef = React.useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
+
+  const getCursorCardPosition = useCallback(
+    (clientX: number, clientY: number, cardWidth = 340, cardHeight = 340) => {
+      const margin = 16;
+      const vpW = typeof window !== "undefined" ? window.innerWidth : 1920;
+      const vpH = typeof window !== "undefined" ? window.innerHeight : 1080;
+
+      let x = clientX + margin;
+      let y = clientY + margin;
+
+      if (x + cardWidth > vpW - margin) {
+        x = clientX - cardWidth - margin;
+      }
+      if (y + cardHeight > vpH - margin) {
+        y = clientY - cardHeight - margin;
+      }
+      if (x < margin) x = margin;
+      if (y < margin) y = margin;
+
+      return { x, y };
+    },
+    []
+  );
+
   // Columns definition
   const [columns, setColumns] = useState<GridColumn[]>([
-    { id: "category", title: "Toifasi", width: 170, icon: GridColumnIcon.HeaderSingleValue },
-    { id: "name", title: "Jihoz / Qolip Nomi", width: 270, icon: GridColumnIcon.HeaderString },
-    { id: "specDetails", title: "Spetsifikatsiya / Format", width: 250, icon: GridColumnIcon.HeaderString },
-    { id: "location", title: "Stellaj / Joyi", width: 110, icon: GridColumnIcon.HeaderString },
-    { id: "quantity", title: "Miqdori", width: 90, icon: GridColumnIcon.HeaderNumber },
-    { id: "supplierName", title: "Pudratchi / Ta'minotchi", width: 170, icon: GridColumnIcon.HeaderReference },
-    { id: "attachments", title: "Rasm & Chizma", width: 120, icon: GridColumnIcon.HeaderReference },
+    { id: "image", title: "Rasm", width: 68, icon: GridColumnIcon.HeaderImage },
+    { id: "category", title: "Toifasi", width: 165, icon: GridColumnIcon.HeaderSingleValue },
+    { id: "name", title: "Jihoz / Qolip Nomi", width: 260, icon: GridColumnIcon.HeaderString },
+    { id: "specDetails", title: "Spetsifikatsiya / Format", width: 240, icon: GridColumnIcon.HeaderString },
+    { id: "location", title: "Stellaj / Joyi", width: 105, icon: GridColumnIcon.HeaderString },
+    { id: "quantity", title: "Miqdori", width: 85, icon: GridColumnIcon.HeaderNumber },
+    { id: "supplierName", title: "Pudratchi / Ta'minotchi", width: 165, icon: GridColumnIcon.HeaderReference },
+    { id: "attachments", title: "Chizma & Fayl", width: 110, icon: GridColumnIcon.HeaderReference },
     { id: "purchaseOrderNo", title: "Xarid PO №", width: 120, icon: GridColumnIcon.HeaderReference },
-    { id: "cost", title: `Summasi (${formData.currency || "UZS"})`, width: 140, icon: GridColumnIcon.HeaderNumber },
-    { id: "status", title: "Holati", width: 140, icon: GridColumnIcon.HeaderSingleValue },
+    { id: "cost", title: `Summasi (${formData.currency || "UZS"})`, width: 135, icon: GridColumnIcon.HeaderNumber },
+    { id: "status", title: "Holati", width: 130, icon: GridColumnIcon.HeaderSingleValue },
   ]);
 
   const handleColumnResize = useCallback((column: GridColumn, newSize: number) => {
@@ -394,6 +413,24 @@ export function PrepressToolingTab({
       const column = columns[col];
       if (!item || !column) {
         return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+      }
+
+      if (column.id === "image") {
+        const directImg =
+          item.imageUrl ||
+          formData.photoUrl ||
+          (Array.isArray(formData.photoUrls) && formData.photoUrls.length > 0
+            ? formData.photoUrls[0]
+            : "");
+        const data = directImg ? [directImg] : [];
+        return {
+          kind: GridCellKind.Image,
+          data,
+          displayData: data,
+          allowOverlay: false,
+          rounding: 4,
+          contentAlign: "center",
+        };
       }
 
       if (column.id === "category") {
@@ -483,15 +520,16 @@ export function PrepressToolingTab({
       }
 
       if (column.id === "purchaseOrderNo") {
-        const po = item.purchaseOrderNo || "—";
+        const hasPo = Boolean(item.purchaseOrderNo);
+        const po = item.purchaseOrderNo || "— (Kutilmoqda)";
         return {
           kind: GridCellKind.Text,
           data: po,
           displayData: po,
           allowOverlay: false,
-          themeOverride: po !== "—"
+          themeOverride: hasPo
             ? { textDark: isDark ? "#4ade80" : "#15803d", baseFontStyle: "bold 11px monospace" }
-            : undefined,
+            : { textDark: isDark ? "#71717a" : "#a1a1aa", baseFontStyle: "italic 11px sans-serif" },
         };
       }
 
@@ -540,7 +578,44 @@ export function PrepressToolingTab({
         allowOverlay: false,
       };
     },
-    [filteredItems, columns, isDark, formData.currency]
+    [filteredItems, columns, isDark, formData.currency, formData.photoUrl, formData.photoUrls]
+  );
+
+  // Hover item callback for magnified proof artwork
+  const onItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      if (args.kind === "cell") {
+        const [col, row] = args.location;
+        const column = columns[col];
+        if (column?.id === "image") {
+          const item = filteredItems[row];
+          if (item) {
+            const img =
+              item.imageUrl ||
+              formData.photoUrl ||
+              (Array.isArray(formData.photoUrls) && formData.photoUrls.length > 0
+                ? formData.photoUrls[0]
+                : null);
+            if (img) {
+              const { x, y } = getCursorCardPosition(
+                mouseCoordsRef.current.x,
+                mouseCoordsRef.current.y
+              );
+              setHoveredPreview({
+                url: img,
+                x,
+                y,
+                title: item.name,
+                subtitle: `${docNo || "Buyurtma"} • ${CATEGORY_CONFIG[item.category]?.label || item.category}`,
+              });
+              return;
+            }
+          }
+        }
+      }
+      setHoveredPreview(null);
+    },
+    [columns, filteredItems, formData.photoUrl, formData.photoUrls, docNo, getCursorCardPosition]
   );
 
   const selectedItem = useMemo(() => {
@@ -549,94 +624,7 @@ export function PrepressToolingTab({
     return filteredItems[selectedRows[0]] || null;
   }, [selection, filteredItems]);
 
-  // Handle open PO modal
-  const handleOpenPoModal = (item: WorkOrderToolingItem) => {
-    setTargetPoItem(item);
-    const matchingSuppliers = suppliers.filter((s) => {
-      if (item.category === "ctp_plates") return s.category === "ctp_prepress";
-      if (item.category === "die_cutting") return s.category === "die_tooling";
-      if (item.category === "foil_cliche" || item.category === "emboss_cliche")
-        return s.category === "cliche_stamping";
-      return true;
-    });
 
-    const defaultSupplier = matchingSuppliers[0] || suppliers[0];
-    setPoForm({
-      supplierId: item.supplierId || defaultSupplier?.id || "",
-      amount: item.estimatedCost || 0,
-      currency: defaultSupplier?.currency || item.currency || formData.currency || "UZS",
-      deliveryDeadline: formData.deadline || "",
-      notes: `${docNo}: ${item.name} (${item.specDetails}) tayyorlash xaridi`,
-    });
-    setIsPoModalOpen(true);
-  };
-
-  // Submit PO to backend
-  const handleSubmitPo = async () => {
-    if (!targetPoItem || !poForm.supplierId) {
-      alert("Iltimos, ta'minotchini tanlang!");
-      return;
-    }
-
-    setPoSubmitting(true);
-    try {
-      const selectedSupp = suppliers.find((s) => s.id === poForm.supplierId);
-      const catConfig = CATEGORY_CONFIG[targetPoItem.category];
-
-      const res = await fetch(`/api/v1/crm/suppliers/${encodeURIComponent(poForm.supplierId)}/orders`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          orderType: catConfig.orderType,
-          title: targetPoItem.name,
-          workOrderNo: docNo,
-          quantity: targetPoItem.quantity,
-          unit: targetPoItem.unit || "dona",
-          amount: Number(poForm.amount) || 0,
-          currency: poForm.currency,
-          status: "Ordered",
-          deliveryDeadline: poForm.deliveryDeadline,
-          specDetails: targetPoItem.specDetails,
-          notes: poForm.notes,
-        }),
-      });
-
-      const json = await res.json();
-      if (json.success && json.order) {
-        const updatedList = items.map((it) => {
-          if (it.id === targetPoItem.id) {
-            return {
-              ...it,
-              status: "Ordered" as ToolingStatus,
-              supplierId: poForm.supplierId,
-              supplierName: selectedSupp?.name || "Ta'minotchi",
-              purchaseOrderId: json.order.id,
-              purchaseOrderNo: json.order.orderNo,
-              actualCost: Number(poForm.amount) || it.estimatedCost,
-              currency: poForm.currency,
-            };
-          }
-          return it;
-        });
-
-        onUpdateTooling(updatedList);
-        onMarkUnsaved();
-        setIsPoModalOpen(false);
-        addNotification({
-          title: "Ta'minotchiga buyurtma yuborildi",
-          description: `${json.order.orderNo}: ${targetPoItem.name} ta'minotchi (${selectedSupp?.name}) profilida qayd etildi.`,
-          severity: "success",
-          link: { module: "crm", subModule: "suppliers" },
-        });
-      } else {
-        alert(json.error || "Xarid buyurtmasini yaratishda xatolik yuz berdi");
-      }
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Server bilan bog'lanishda xatolik");
-    } finally {
-      setPoSubmitting(false);
-    }
-  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -672,6 +660,7 @@ export function PrepressToolingTab({
           fileUrl: dataUrl,
           fileName: file.name,
         }));
+        setFileError(false);
       }
     };
     reader.readAsDataURL(file);
@@ -684,6 +673,19 @@ export function PrepressToolingTab({
       addNotification({
         title: "Xatolik",
         description: "Iltimos, jihoz nomini kiriting!",
+        severity: "error",
+      });
+      return;
+    }
+
+    // Validation: tooling items must have an attached file if not in Draft status
+    const isDraft = !editingItem.status || editingItem.status === "Draft";
+    const hasFile = Boolean(editingItem.fileUrl || editingItem.fileName);
+    if (!isDraft && !hasFile) {
+      setFileError(true);
+      addNotification({
+        title: "Fayl biriktirilmagan",
+        description: "Buyurtma berish uchun jihoz chizma faylini (PDF/DXF/AI) biriktirish shart",
         severity: "error",
       });
       return;
@@ -715,49 +717,6 @@ export function PrepressToolingTab({
       faultParty: editingItem.faultParty || "none",
       createdAt: editingItem.createdAt || new Date().toISOString(),
     };
-
-    // Auto-create or sync Purchase Order (PO) if assigned to an external supplier
-    if (targetItem.supplierId && targetItem.supplierId !== "in_house") {
-      try {
-        const catConfig = CATEGORY_CONFIG[targetItem.category] || CATEGORY_CONFIG.ctp_plates;
-        const res = await fetch(`/api/v1/crm/suppliers/${encodeURIComponent(targetItem.supplierId)}/orders`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: targetItem.purchaseOrderId || undefined,
-            orderType: catConfig.orderType,
-            title: targetItem.name,
-            workOrderNo: docNo,
-            workOrderId: docNo,
-            quantity: targetItem.quantity,
-            unit: targetItem.unit || "dona",
-            amount: targetItem.estimatedCost || 0,
-            currency: targetItem.currency,
-            status: targetItem.status === "Draft" ? "Ordered" : targetItem.status,
-            deliveryDeadline: formData.deadline || "",
-            specDetails: targetItem.specDetails,
-            notes: targetItem.notes || `${docNo} buyrug'i uchun jihoz xaridi`,
-          }),
-        });
-
-        const json = await res.json();
-        if (json.success && json.order) {
-          targetItem.purchaseOrderId = json.order.id;
-          targetItem.purchaseOrderNo = json.order.orderNo;
-          if (targetItem.status === "Draft") {
-            targetItem.status = "Ordered";
-          }
-          addNotification({
-            title: "Ta'minotchiga buyurtma berildi",
-            description: `${json.order.orderNo}: ${targetItem.name} ta'minotchi (${targetItem.supplierName}) profilida qayd etildi.`,
-            severity: "success",
-            link: { module: "crm", subModule: "suppliers" },
-          });
-        }
-      } catch (err) {
-        console.error("Xarid buyurtmasini saqlashda xatolik:", err);
-      }
-    }
 
     let updatedList: WorkOrderToolingItem[];
     if (editingItem.id) {
@@ -856,6 +815,19 @@ export function PrepressToolingTab({
       const column = columns[col];
       if (!target) return;
 
+      if (column?.id === "image") {
+        const img =
+          target.imageUrl ||
+          formData.photoUrl ||
+          (Array.isArray(formData.photoUrls) && formData.photoUrls.length > 0
+            ? formData.photoUrls[0]
+            : null);
+        if (img) {
+          setActivePreviewImage(img);
+          return;
+        }
+      }
+
       if (
         (column?.id === "supplierName" || column?.id === "purchaseOrderNo") &&
         target.supplierId &&
@@ -865,10 +837,15 @@ export function PrepressToolingTab({
         return;
       }
 
+      if (column?.id === "purchaseOrderNo" && !target.purchaseOrderNo) {
+        handleOpenToolingRegistry();
+        return;
+      }
+
       setEditingItem(target);
       setIsAddEditOpen(true);
     },
-    [filteredItems, columns, handleOpenSupplierOrders]
+    [filteredItems, columns, handleOpenSupplierOrders, handleOpenToolingRegistry]
   );
 
   return (
@@ -917,7 +894,7 @@ export function PrepressToolingTab({
                   setEditingItem({
                     category: "die_cutting",
                     name: `${formData.product || "Mahsulot"} Kesish Shtampi`,
-                    specDetails: `Format: ${formData.width || 700}×${formData.height || 1000} mm (Flatbed Die)`,
+                    specDetails: `Format: ${formData.width || 700}×${formData.height || 1000} mm (Tekis shtansforma, pichoq 23.8 mm)`,
                     quantity: 1,
                     unit: "dona",
                     estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 65 : 800000,
@@ -972,6 +949,28 @@ export function PrepressToolingTab({
                 <span>Kongrev klishesi (Magniy)</span>
               </DropdownMenuItem>
 
+              <DropdownMenuItem
+                onClick={() => {
+                  const isDraftDocNo = !docNo || docNo.startsWith("draft-") || docNo.startsWith("temp-");
+                  const displayDocNo = !isDraftDocNo ? docNo : (formData.product ? formData.product : "");
+                  setEditingItem({
+                    category: "flexo_polymer",
+                    name: displayDocNo ? `${displayDocNo} Flexo Polimer Klishe Komplekti` : "Flexo Polimer Klishe Komplekti",
+                    specDetails: `Format: ${formData.width || 330} mm, qalinligi 1.14 mm / 1.70 mm, CMYK`,
+                    quantity: 4,
+                    unit: "dona",
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 40 : 450000,
+                    currency: formData.currency || "UZS",
+                    status: "Draft",
+                  });
+                  setIsAddEditOpen(true);
+                }}
+                className="gap-2 cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5 text-cyan-600" />
+                <span>Flexo polimer klishe</span>
+              </DropdownMenuItem>
+
               <DropdownMenuSeparator />
 
               <DropdownMenuSeparator />
@@ -1006,6 +1005,27 @@ export function PrepressToolingTab({
             </TooltipContent>
           </Tooltip>
 
+          {/* Centralized Tooling & CTP Orders Registry Navigation */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  onClick={handleOpenToolingRegistry}
+                  variant="outline"
+                  size="sm"
+                  className="h-6.5 px-2 text-xs font-medium gap-1.5 rounded cursor-pointer shrink-0 text-primary border-primary/30 hover:bg-primary/5"
+                >
+                  <Stamp className="w-3.5 h-3.5 text-primary" />
+                  <span className="hidden sm:inline">Qolip &amp; CTP buyurtmalari</span>
+                  <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+              Qoliplar va CTP buyurtmalari markaziy reestrini ochish
+            </TooltipContent>
+          </Tooltip>
+
           {/* Row Actions when selected */}
           {selectedItem && (
             <div className="flex items-center gap-1 shrink-0 animate-in fade-in duration-150">
@@ -1030,6 +1050,28 @@ export function PrepressToolingTab({
                   Jihozni tahrirlash
                 </TooltipContent>
               </Tooltip>
+
+              {/* Order in Central Registry Shortcut */}
+              {!selectedItem.purchaseOrderNo && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        onClick={handleOpenToolingRegistry}
+                        variant="outline"
+                        size="sm"
+                        className="h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer shrink-0 text-primary border-primary/30 hover:bg-primary/5"
+                      >
+                        <Stamp className="w-3 h-3 text-primary" />
+                        <span className="hidden sm:inline">Reestrda buyurtma berish</span>
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom" sideOffset={4} className="text-xs">
+                    Qoliplar va CTP buyurtmalari modulida rasmiy PO ochish
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               {/* Supplier / PO Navigation Button */}
               {selectedItem.supplierId && selectedItem.supplierId !== "in_house" && (
@@ -1158,6 +1200,7 @@ export function PrepressToolingTab({
               onColumnResize={handleColumnResize}
               gridSelection={selection}
               onGridSelectionChange={setSelection}
+              onItemHovered={onItemHovered}
               onCellContextMenu={(cell) => {
                 const [, row] = cell;
                 setSelection({
@@ -1167,15 +1210,39 @@ export function PrepressToolingTab({
               }}
               onCellActivated={handleCellActivated}
               rowMarkers="both"
-              freezeColumns={1}
+              freezeColumns={2}
               smoothScrollX
               smoothScrollY
               headerHeight={28}
-              rowHeight={30}
+              rowHeight={32}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
               width="100%"
               height="100%"
             />
+
+            {/* Hover Magnified Artwork Preview */}
+            {hoveredPreview && (
+              <div
+                style={{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }}
+                className="fixed z-50 pointer-events-none rounded-md bg-popover/95 backdrop-blur-xs border border-border shadow-2xl p-2 animate-in fade-in-0 zoom-in-95 duration-75 max-w-[340px] max-h-[360px] flex flex-col gap-1.5 overflow-hidden"
+              >
+                <img
+                  src={hoveredPreview.url}
+                  alt="Qolip / Buyurtma eskizi"
+                  className="max-w-[320px] max-h-[280px] w-auto h-auto object-contain rounded border border-border/40 bg-background select-none"
+                />
+                {hoveredPreview.title && (
+                  <div className="text-[11px] font-semibold text-foreground truncate max-w-[320px]">
+                    {hoveredPreview.title}
+                  </div>
+                )}
+                {hoveredPreview.subtitle && (
+                  <div className="text-[10px] text-muted-foreground truncate max-w-[320px]">
+                    {hoveredPreview.subtitle}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </ContextMenuTrigger>
 
@@ -1214,7 +1281,7 @@ export function PrepressToolingTab({
                   setEditingItem({
                     category: "die_cutting",
                     name: `${formData.product || "Mahsulot"} Kesish Shtampi`,
-                    specDetails: `Format: ${formData.width || 700}×${formData.height || 1000} mm (Flatbed Die)`,
+                    specDetails: `Format: ${formData.width || 700}×${formData.height || 1000} mm (Tekis shtansforma, pichoq 23.8 mm)`,
                     quantity: 1,
                     unit: "dona",
                     estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 65 : 800000,
@@ -1269,6 +1336,28 @@ export function PrepressToolingTab({
                 <span>Kongrev klishesi (Magniy)</span>
               </ContextMenuItem>
 
+              <ContextMenuItem
+                onClick={() => {
+                  const isDraftDocNo = !docNo || docNo.startsWith("draft-") || docNo.startsWith("temp-");
+                  const displayDocNo = !isDraftDocNo ? docNo : (formData.product ? formData.product : "");
+                  setEditingItem({
+                    category: "flexo_polymer",
+                    name: displayDocNo ? `${displayDocNo} Flexo Polimer Klishe Komplekti` : "Flexo Polimer Klishe Komplekti",
+                    specDetails: `Format: ${formData.width || 330} mm, qalinligi 1.14 mm / 1.70 mm, CMYK`,
+                    quantity: 4,
+                    unit: "dona",
+                    estimatedCost: (formData.currency || "UZS").toUpperCase() === "USD" ? 40 : 450000,
+                    currency: formData.currency || "UZS",
+                    status: "Draft",
+                  });
+                  setIsAddEditOpen(true);
+                }}
+                className="gap-2 cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5 text-cyan-600" />
+                <span>Flexo polimer klishe</span>
+              </ContextMenuItem>
+
               <ContextMenuSeparator />
 
               <ContextMenuItem
@@ -1321,35 +1410,27 @@ export function PrepressToolingTab({
                 </ContextMenuItem>
               )}
 
-              {selectedItem.status === "Draft" && !selectedItem.purchaseOrderNo && (
+              {!selectedItem.purchaseOrderNo && (
                 <ContextMenuItem
-                  onClick={() => handleOpenPoModal(selectedItem)}
+                  onClick={handleOpenToolingRegistry}
                   className="gap-2 cursor-pointer font-medium text-primary"
                 >
-                  <ShoppingBag className="w-3.5 h-3.5" />
-                  <span>Pudratchiga buyurtma berish (PO)</span>
+                  <Stamp className="w-3.5 h-3.5" />
+                  <span>Qoliplar va CTP modulida ochish</span>
+                  <ExternalLink className="w-3 h-3 ml-auto opacity-70" />
                 </ContextMenuItem>
               )}
 
-              {/* Status Change Submenu */}
-              <ContextMenuSub>
-                <ContextMenuSubTrigger className="gap-2 cursor-pointer">
-                  <Clock className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Holat: {STATUS_CONFIG[selectedItem.status]?.label || selectedItem.status}</span>
-                </ContextMenuSubTrigger>
-                <ContextMenuSubContent className="text-xs">
-                  {(["Draft", "Ordered", "In_Production", "Ready", "Delivered"] as ToolingStatus[]).map((st) => (
-                    <ContextMenuItem
-                      key={st}
-                      onClick={() => handleUpdateItemStatus(selectedItem, st)}
-                      className="gap-2 cursor-pointer"
-                    >
-                      <Check className={cn("w-3.5 h-3.5", selectedItem.status === st ? "opacity-100 text-primary" : "opacity-0")} />
-                      <span>{STATUS_CONFIG[st]?.label || st}</span>
-                    </ContextMenuItem>
-                  ))}
-                </ContextMenuSubContent>
-              </ContextMenuSub>
+              {/* Production Floor: Mark as Mounted when tool is on press */}
+              {selectedItem.status === "Ready" && (
+                <ContextMenuItem
+                  onClick={() => handleUpdateItemStatus(selectedItem, "Mounted")}
+                  className="gap-2 cursor-pointer font-medium text-emerald-600 dark:text-emerald-400"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Stanokda o&apos;rnatildi</span>
+                </ContextMenuItem>
+              )}
 
               <ContextMenuSeparator />
 
@@ -1389,143 +1470,44 @@ export function PrepressToolingTab({
         </ContextMenuContent>
       </ContextMenu>
 
-      {/* 3. PO Creation Modal */}
-      <Dialog open={isPoModalOpen} onOpenChange={setIsPoModalOpen}>
-        <DialogContent className="sm:max-w-md w-full p-5 text-xs">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
-              <ShoppingBag className="w-4 h-4 text-primary" />
-              <span>Ta&apos;minotchiga Rasmiy Buyurtma (PO) berish</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Ushbu jihoz bo&apos;yicha tanlangan pudratchiga xarid buyurtmasi shakllantiriladi va buyurtma tannarxiga kiritiladi.
-            </DialogDescription>
-          </DialogHeader>
-
-          {targetPoItem && (
-            <div className="space-y-3 py-2">
-              <div className="p-2.5 rounded bg-muted/40 border border-border/60 space-y-1">
-                <div className="font-semibold text-foreground text-xs">{targetPoItem.name}</div>
-                <div className="text-[11px] text-muted-foreground">{targetPoItem.specDetails}</div>
-                <div className="text-[11px] font-mono">
-                  Miqdori: <strong>{targetPoItem.quantity} {targetPoItem.unit}</strong> | Work Order: <strong>{docNo}</strong>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
-                  <Building2 className="w-3 h-3 text-muted-foreground" />
-                  <span>Xizmat ko&apos;rsatuvchi Pudratchi / Ta&apos;minotchi *</span>
-                </Label>
-                <ComboboxSelect
-                  items={poSupplierOptions}
-                  value={poForm.supplierId}
-                  onValueChange={(val) => {
-                    const s = suppliers.find((x) => x.id === val);
-                    setPoForm((prev) => ({
-                      ...prev,
-                      supplierId: val,
-                      currency: s?.currency || prev.currency || "UZS",
-                    }));
-                  }}
-                  placeholder="Xarid uchun ta'minotchi qidirish..."
-                  className="h-8 text-xs bg-background"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground font-medium">
-                    Kelishilgan summa
-                  </Label>
-                  <Input
-                    type="number"
-                    value={poForm.amount}
-                    onChange={(e) => setPoForm((prev) => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
-                    className="h-8 text-xs font-mono bg-background"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground font-medium">Valyuta</Label>
-                  <Select
-                    value={poForm.currency}
-                    onValueChange={(val) => setPoForm((prev) => ({ ...prev, currency: val || "UZS" }))}
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-background">
-                      <SelectValue>{(val) => (val === "USD" ? "USD ($)" : "UZS (So'm)")}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="UZS" className="text-xs">UZS (So&apos;m)</SelectItem>
-                      <SelectItem value="USD" className="text-xs">USD ($)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground font-medium">
-                  Yetkazish muddati (Deadline)
-                </Label>
-                <DatePicker
-                  value={poForm.deliveryDeadline}
-                  onChange={(val) => setPoForm((prev) => ({ ...prev, deliveryDeadline: val }))}
-                  className="h-8 text-xs bg-background"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground font-medium">
-                  Izoh va texnik ko&apos;rsatmalar
-                </Label>
-                <Textarea
-                  value={poForm.notes}
-                  onChange={(e) => setPoForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  rows={2}
-                  className="text-xs bg-background resize-none min-h-[48px]"
-                />
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setIsPoModalOpen(false)}
-              className="h-7 text-xs"
-            >
-              Bekor qilish
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={poSubmitting}
-              onClick={handleSubmitPo}
-              className="h-7 text-xs bg-primary text-primary-foreground font-medium"
-            >
-              {poSubmitting ? "Yaratilmoqda..." : "Xarid Buyurtmasini (PO) Tasdiqlash"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 4. Add / Edit Tooling Item Modal */}
-      <Dialog open={isAddEditOpen} onOpenChange={setIsAddEditOpen}>
+      {/* 3. Add / Edit Tooling Item Modal */}
+      <Dialog
+        open={isAddEditOpen}
+        onOpenChange={(open) => {
+          setIsAddEditOpen(open);
+          if (!open) setFileError(false);
+        }}
+      >
         <DialogContent className="sm:max-w-[680px] w-full p-5 text-xs max-h-[92vh] flex flex-col bg-card border-border">
           <DialogHeader className="gap-1 pb-2 border-b border-border shrink-0">
-            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
-              <Wrench className="w-4 h-4 text-primary" />
-              <span>{editingItem?.id ? "Jihozni tahrirlash" : "Yangi texnologik jihoz qo'shish"}</span>
-            </DialogTitle>
+            <div className="flex items-center justify-between w-full pr-6">
+              <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-primary" />
+                <span>{editingItem?.id ? "Jihozni tahrirlash" : "Yangi texnologik jihoz qo'shish"}</span>
+              </DialogTitle>
+              {editingItem?.id && (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px] font-medium h-5 px-2",
+                    editingItem.status === "Ready" || editingItem.status === "Delivered" || editingItem.status === "Mounted"
+                      ? "text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                      : editingItem.status === "Ordered" || editingItem.status === "In_Production"
+                      ? "text-blue-600 dark:text-blue-400 border-blue-500/30 bg-blue-500/10"
+                      : "text-muted-foreground border-border bg-muted/30"
+                  )}
+                >
+                  {STATUS_CONFIG[editingItem.status as ToolingStatus]?.label || "Kutilmoqda"}
+                </Badge>
+              )}
+            </div>
           </DialogHeader>
 
           {editingItem && (
             <div className="flex-1 overflow-y-auto space-y-3 py-2 pr-1 text-xs">
               {/* Row 1: Category & Status */}
-              <div className="grid grid-cols-12 gap-3">
-                <div className="col-span-7 space-y-1.5">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="space-y-1.5">
                   <Label className="text-[11px] text-muted-foreground font-medium">Jihoz toifasi *</Label>
                   <Select
                     value={editingItem.category}
@@ -1547,22 +1529,24 @@ export function PrepressToolingTab({
                   </Select>
                 </div>
 
-                <div className="col-span-5 space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground font-medium">Holati</Label>
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground font-medium">Buyurtma holati *</Label>
                   <Select
                     value={editingItem.status || "Draft"}
-                    onValueChange={(val: any) => setEditingItem((prev) => ({ ...prev, status: val }))}
+                    onValueChange={(val: any) => setEditingItem((prev) => ({ ...prev, status: val || "Draft" }))}
                   >
                     <SelectTrigger className="h-8 text-xs bg-background">
                       <SelectValue>
-                        {(val) => STATUS_CONFIG[val as ToolingStatus]?.label || val}
+                        {(val) => STATUS_CONFIG[val as ToolingStatus]?.label || val || "Qoralama"}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Draft" className="text-xs">Kutilmoqda (Loyiha)</SelectItem>
-                      <SelectItem value="Ordered" className="text-xs">Buyurtma berilgan</SelectItem>
+                      <SelectItem value="Draft" className="text-xs">Qoralama (Kutilmoqda)</SelectItem>
+                      <SelectItem value="Ordered" className="text-xs">Buyurtma berildi</SelectItem>
+                      <SelectItem value="In_Production" className="text-xs">Ishlab chiqarilmoqda</SelectItem>
                       <SelectItem value="Ready" className="text-xs">Tayyor</SelectItem>
-                      <SelectItem value="Mounted" className="text-xs">Stanokda o&apos;rnatilgan</SelectItem>
+                      <SelectItem value="Delivered" className="text-xs">Yetkazib berildi</SelectItem>
+                      <SelectItem value="Mounted" className="text-xs">Stanokka o&apos;rnatildi</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1625,6 +1609,7 @@ export function PrepressToolingTab({
                     <SelectContent>
                       <SelectItem value="dona" className="text-xs">dona</SelectItem>
                       <SelectItem value="komplekt" className="text-xs">komplekt</SelectItem>
+                      <SelectItem value="kv.sm" className="text-xs">kv.sm (sm²)</SelectItem>
                       <SelectItem value="kv.m" className="text-xs">kv.m</SelectItem>
                       <SelectItem value="metr" className="text-xs">metr</SelectItem>
                       <SelectItem value="list" className="text-xs">list (varaq)</SelectItem>
@@ -1678,77 +1663,76 @@ export function PrepressToolingTab({
                 </div>
               </div>
 
-              {/* Row 5: Supplier / Contractor & Storage Location */}
-              <div className="grid grid-cols-12 gap-3">
-                <div className="col-span-7 space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
-                    <Building2 className="w-3 h-3 text-muted-foreground" />
-                    <span>Pudratchi / Ta&apos;minotchi</span>
-                  </Label>
-                  <ComboboxSelect
-                    items={supplierOptions}
-                    value={editingItem.supplierId || "in_house"}
-                    onValueChange={(val) => {
-                      if (!val || val === "in_house") {
-                        setEditingItem((prev) => ({
-                          ...prev,
-                          supplierId: undefined,
-                          supplierName: "Ichki ombor / O'zimizda",
-                        }));
-                      } else {
-                        const s = suppliers.find((x) => x.id === val);
-                        setEditingItem((prev) => ({
-                          ...prev,
-                          supplierId: val,
-                          supplierName: s?.name || val,
-                          currency: s?.currency || prev?.currency || formData.currency || "UZS",
-                        }));
-                      }
-                    }}
-                    placeholder="Ta'minotchi qidirish..."
-                    className="h-8 text-xs bg-background"
-                  />
-                </div>
-
-                <div className="col-span-5 space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
-                    <MapPin className="w-3 h-3 text-muted-foreground" />
-                    <span>Ombor joyi (Stellaj)</span>
-                  </Label>
-                  <Input
-                    value={editingItem.location || ""}
-                    onChange={(e) => setEditingItem((prev) => ({ ...prev, location: e.target.value }))}
-                    placeholder="SHELF-A1, RACK-CYL-02..."
-                    className="h-8 text-xs font-mono bg-background"
-                  />
-                </div>
+              {/* Row 5: Storage Location */}
+              <div className="space-y-1.5">
+                <Label className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
+                  <MapPin className="w-3 h-3 text-muted-foreground" />
+                  <span>Ombor / Stellaj joylashuvi (Inventar)</span>
+                </Label>
+                <Input
+                  value={editingItem.location || ""}
+                  onChange={(e) => setEditingItem((prev) => ({ ...prev, location: e.target.value }))}
+                  placeholder="Masalan: SHELF-A1, RACK-CYL-02 yoki Stanok yoni..."
+                  className="h-8 text-xs font-mono bg-background"
+                />
               </div>
 
-              {/* Supplier PO Connection Notice */}
-              {editingItem.supplierId && editingItem.supplierId !== "in_house" && (
-                <div className="flex items-center justify-between px-2.5 py-1.5 rounded bg-muted/40 border border-border text-[11px]">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                    <span>
-                      {editingItem.purchaseOrderNo
-                        ? `Rasmiy PO: ${editingItem.purchaseOrderNo}`
-                        : "Saqlanganda ta'minotchi uchun rasmiy PO buyurtmasi ochiladi"}
-                    </span>
-                  </div>
-                  {editingItem.purchaseOrderNo && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-5 text-[10px] gap-1 text-emerald-600 dark:text-emerald-400 p-1 cursor-pointer"
-                      onClick={() => handleOpenSupplierOrders(editingItem.supplierId, editingItem.supplierName)}
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      <span>Ta&apos;minotchida ko&apos;rish</span>
-                    </Button>
+              {/* Centralized Procurement Notice */}
+              <div className="flex items-center justify-between px-2.5 py-2 rounded bg-muted/40 border border-border text-[11px]">
+                <div className="flex items-center gap-2">
+                  {editingItem.purchaseOrderNo ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-foreground">
+                          Rasmiy PO: {editingItem.purchaseOrderNo} ({editingItem.supplierName || "Ta'minotchi"})
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          Holati: {STATUS_CONFIG[editingItem.status as ToolingStatus]?.label || editingItem.status}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Stamp className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-foreground">
+                          Markazlashtirilgan ta&apos;minot
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          Ta&apos;minotchi tanlash va rasmiy xarid &quot;Qoliplar va CTP buyurtmalari&quot; modulida amalga oshiriladi.
+                        </span>
+                      </div>
+                    </>
                   )}
                 </div>
-              )}
+                {editingItem.purchaseOrderNo ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[10px] gap-1 text-emerald-600 dark:text-emerald-400 p-1 cursor-pointer"
+                    onClick={() => handleOpenSupplierOrders(editingItem.supplierId, editingItem.supplierName)}
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Ta&apos;minotchida ko&apos;rish</span>
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[10px] gap-1 text-primary p-1 cursor-pointer"
+                    onClick={() => {
+                      setIsAddEditOpen(false);
+                      handleOpenToolingRegistry();
+                    }}
+                  >
+                    <Stamp className="w-3 h-3" />
+                    <span>Reestrda ochish</span>
+                  </Button>
+                )}
+              </div>
 
               {/* Row 6: Attachments: Photo and CAD / Dieline file */}
               <div className="grid grid-cols-2 gap-3 pt-1">
@@ -1818,10 +1802,22 @@ export function PrepressToolingTab({
                 </div>
 
                 {/* CAD / Dieline / Texnik fayl */}
-                <div className="border border-border rounded-md p-2.5 bg-muted/20 space-y-2">
+                <div
+                  className={cn(
+                    "border rounded-md p-2.5 transition-colors space-y-2",
+                    fileError && !editingItem.fileUrl
+                      ? "border-destructive/80 bg-destructive/5"
+                      : "border-border bg-muted/20"
+                  )}
+                >
                   <div className="flex items-center justify-between">
-                    <Label className="text-[11px] font-medium text-foreground flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5 text-purple-500" />
+                    <Label
+                      className={cn(
+                        "text-[11px] font-medium flex items-center gap-1.5",
+                        fileError && !editingItem.fileUrl ? "text-destructive" : "text-foreground"
+                      )}
+                    >
+                      <FileText className={cn("w-3.5 h-3.5", fileError && !editingItem.fileUrl ? "text-destructive" : "text-purple-500")} />
                       <span>CAD / Dieline chizma</span>
                     </Label>
                     {editingItem.fileUrl && (
@@ -1877,11 +1873,20 @@ export function PrepressToolingTab({
                   ) : (
                     <div
                       onClick={() => cadFileInputRef.current?.click()}
-                      className="border border-dashed border-border rounded p-3 text-center cursor-pointer hover:bg-muted/40 transition-colors space-y-1"
+                      className={cn(
+                        "border border-dashed rounded p-3 text-center cursor-pointer transition-colors space-y-1",
+                        fileError
+                          ? "border-destructive bg-destructive/10 text-destructive ring-1 ring-destructive/40"
+                          : "border-border hover:bg-muted/40 text-muted-foreground"
+                      )}
                     >
-                      <FileText className="w-4 h-4 mx-auto text-muted-foreground" />
-                      <div className="text-[11px] font-medium text-muted-foreground">CAD / PDF biriktirish</div>
-                      <div className="text-[10px] text-muted-foreground/70">PDF, DXF, CF2, AI, EPS</div>
+                      <FileText className={cn("w-4 h-4 mx-auto", fileError ? "text-destructive" : "text-muted-foreground")} />
+                      <div className={cn("text-[11px] font-medium", fileError ? "text-destructive font-semibold" : "text-muted-foreground")}>
+                        {fileError ? "Chizma faylini biriktirish shart" : "CAD / PDF biriktirish"}
+                      </div>
+                      <div className={cn("text-[10px]", fileError ? "text-destructive/80" : "text-muted-foreground/70")}>
+                        PDF, DXF, CF2, AI, EPS
+                      </div>
                     </div>
                   )}
                   <input
@@ -1891,6 +1896,11 @@ export function PrepressToolingTab({
                     className="hidden"
                     onChange={handleCadFileUpload}
                   />
+                  {fileError && !editingItem.fileUrl && (
+                    <div className="text-[10px] text-destructive font-medium pt-0.5">
+                      Buyurtma berish uchun jihoz chizma fayli yuklanishi shart
+                    </div>
+                  )}
                 </div>
               </div>
 

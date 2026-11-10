@@ -11,6 +11,7 @@ import {
   Clock,
   AlertTriangle,
   Building2,
+  Truck,
   FileText,
   PlusCircle,
   RefreshCw,
@@ -123,6 +124,11 @@ interface TelegramChatListItem {
   clientName?: string | null;
   clientCode?: string | null;
   clientPhone?: string | null;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  supplierCode?: string | null;
+  supplierCategory?: string | null;
+  chatCategory?: string | null;
   assignedUserId?: string | null;
   status: "active" | "unlinked" | "archived";
   unreadCount: number;
@@ -171,6 +177,8 @@ export function TelegramInbox() {
     openTab,
     crmCustomers,
     loadCrmCustomers,
+    suppliers,
+    loadSuppliers,
     addNotification,
     activeTelegramChatId,
     setActiveTelegramChatId,
@@ -194,7 +202,9 @@ export function TelegramInbox() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [linkingDialogOpen, setLinkingDialogOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [linkTargetType, setLinkTargetType] = useState<"client" | "supplier">("client");
   const [selectedClientId, setSelectedClientId] = useState<string>("");
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
 
   const [groupChatSettings, setGroupChatSettings] = useState<TelegramChatSettings>({
     notifyOrderCreated: true,
@@ -563,6 +573,7 @@ export function TelegramInbox() {
     fetchChats();
     fetchTemplates();
     loadCrmCustomers();
+    loadSuppliers();
   }, [filter]);
 
   // ─── Real-Time Live Sync (Har 2 soniyada yangi xabarlarni avtomatik qabul qilish) ───
@@ -683,16 +694,20 @@ export function TelegramInbox() {
     }
   };
 
-  // Guruhni mijozga biriktirish
-  const handleLinkClient = async () => {
-    if (!activeChat || !selectedClientId) return;
+  // Guruhni mijoz yoki yetkazib beruvchiga biriktirish
+  const handleLinkTarget = async () => {
+    if (!activeChat) return;
+    if (linkTargetType === "client" && !selectedClientId) return;
+    if (linkTargetType === "supplier" && !selectedSupplierId) return;
+
     try {
       const res = await fetch("/api/v1/crm/telegram/link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatId: activeChat.id,
-          clientId: selectedClientId,
+          clientId: linkTargetType === "client" ? selectedClientId : undefined,
+          supplierId: linkTargetType === "supplier" ? selectedSupplierId : undefined,
           assignedUserId: "manager_1",
         }),
       });
@@ -703,9 +718,23 @@ export function TelegramInbox() {
         if (activeChat) {
           fetchMessages(activeChat.id);
         }
+        addNotification({
+          title: "Guruh biriktirildi",
+          description:
+            linkTargetType === "client"
+              ? "Mijozga muvaffaqiyatli bog'landi"
+              : "Yetkazib beruvchiga muvaffaqiyatli bog'landi",
+          severity: "success",
+        });
+      } else {
+        addNotification({
+          title: "Biriktirishda xatolik",
+          description: json.error || "Guruhni biriktirishda xatolik yuz berdi",
+          severity: "error",
+        });
       }
     } catch (err) {
-      console.error("handleLinkClient error:", err);
+      console.error("handleLinkTarget error:", err);
     }
   };
 
@@ -1047,6 +1076,11 @@ export function TelegramInbox() {
                               <span className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 font-medium truncate">
                                 <Building2 className="w-3 h-3 shrink-0" />
                                 <span className="truncate">{c.clientName}</span>
+                              </span>
+                            ) : c.supplierName ? (
+                              <span className="flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 font-medium truncate">
+                                <Truck className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{c.supplierName}</span>
                               </span>
                             ) : (
                               <Badge
@@ -1719,23 +1753,33 @@ export function TelegramInbox() {
             </div>
           </div>
 
-          {/* 2. Bog'langan mijoz */}
+          {/* 2. Bog'langan mijoz yoki ta'minotchi */}
           <div>
             <div className="flex items-center justify-between text-xs font-semibold text-foreground mb-1.5">
               <div className="flex items-center gap-1.5">
-                <Building2 className="w-3.5 h-3.5 text-blue-500" />
-                <span>{t("linkedCustomer")}</span>
+                {activeChat.supplierName ? (
+                  <Truck className="w-3.5 h-3.5 text-purple-500" />
+                ) : (
+                  <Building2 className="w-3.5 h-3.5 text-blue-500" />
+                )}
+                <span>{activeChat.supplierName ? "Biriktirilgan ta'minotchi" : t("linkedCustomer")}</span>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setSelectedClientId(activeChat.clientId || crmCustomers[0]?.id || "");
+                  if (activeChat.supplierId) {
+                    setLinkTargetType("supplier");
+                    setSelectedSupplierId(activeChat.supplierId);
+                  } else {
+                    setLinkTargetType("client");
+                    setSelectedClientId(activeChat.clientId || crmCustomers[0]?.dbId || crmCustomers[0]?.id || "");
+                  }
                   setLinkingDialogOpen(true);
                 }}
-                className="h-5 text-[10px] px-1.5 text-blue-600 dark:text-blue-400 cursor-pointer hover:bg-blue-500/10"
+                className="h-5 text-[10px] px-1.5 text-primary cursor-pointer hover:bg-primary/10"
               >
-                {activeChat.clientId ? "O'zgartirish" : "Biriktirish"}
+                {activeChat.clientId || activeChat.supplierId ? "O'zgartirish" : "Biriktirish"}
               </Button>
             </div>
 
@@ -1759,6 +1803,9 @@ export function TelegramInbox() {
                     {activeChat.clientName}
                     <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-60" />
                   </span>
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 bg-blue-500/10 text-blue-600 border-blue-500/20">
+                    Mijoz
+                  </Badge>
                 </div>
                 {activeChat.clientCode && (
                   <div className="flex justify-between text-[10px]">
@@ -1773,20 +1820,58 @@ export function TelegramInbox() {
                   </div>
                 )}
               </div>
+            ) : activeChat.supplierName ? (
+              <div className="p-2.5 rounded-md bg-muted/40 border border-border space-y-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span
+                    onClick={() => {
+                      if (activeChat.supplierId) {
+                        openTab({
+                          id: activeChat.supplierId,
+                          title: activeChat.supplierName || "Ta'minotchi",
+                          type: "supplier",
+                          module: "crm",
+                        });
+                      }
+                    }}
+                    className="font-semibold text-[11px] text-foreground hover:text-primary hover:underline cursor-pointer flex items-center gap-1 truncate max-w-[200px]"
+                    title="Ta'minotchi kartasini ochish"
+                  >
+                    {activeChat.supplierName}
+                    <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-60" />
+                  </span>
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 bg-purple-500/10 text-purple-600 border-purple-500/20">
+                    Ta'minotchi
+                  </Badge>
+                </div>
+                {activeChat.supplierCode && (
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-muted-foreground">Kodi:</span>
+                    <span className="font-mono text-foreground">{activeChat.supplierCode}</span>
+                  </div>
+                )}
+                {activeChat.supplierCategory && (
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-muted-foreground">Yo'nalishi:</span>
+                    <span className="font-mono text-foreground">{activeChat.supplierCategory}</span>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="p-2.5 text-center border border-dashed border-border rounded-md text-[11px] text-muted-foreground space-y-1.5">
-                <p>Ushbu guruh hali ERP mijoziga biriktirilmagan</p>
+                <p>Ushbu guruh hali ERP kontragentiga biriktirilmagan</p>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    setSelectedClientId(crmCustomers[0]?.id || "");
+                    setLinkTargetType("client");
+                    setSelectedClientId(crmCustomers[0]?.dbId || crmCustomers[0]?.id || "");
                     setLinkingDialogOpen(true);
                   }}
                   className="h-6 text-[10px] px-2 gap-1 cursor-pointer border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
                 >
                   <Link2 className="w-2.5 h-2.5" />
-                  {t("linkClient")}
+                  <span>Guruhni biriktirish</span>
                 </Button>
               </div>
             )}
@@ -2027,13 +2112,13 @@ export function TelegramInbox() {
         </DialogContent>
       </Dialog>
 
-      {/* ─── Mijozga biriktirish Dialog (Modal) ─────────────────────────── */}
+      {/* ─── Kontragentga biriktirish Dialog (Modal) ─────────────────────────── */}
       <Dialog open={linkingDialogOpen} onOpenChange={setLinkingDialogOpen}>
         <DialogContent className="max-w-md p-4">
           <DialogHeader>
             <DialogTitle className="text-xs font-semibold flex items-center gap-1.5">
-              <Link2 className="w-4 h-4 text-blue-500" />
-              {t("linkClient")}
+              <Link2 className="w-4 h-4 text-primary" />
+              <span>Guruhni biriktirish</span>
             </DialogTitle>
           </DialogHeader>
 
@@ -2042,23 +2127,71 @@ export function TelegramInbox() {
               Guruh: <strong className="text-foreground">{activeChat?.title}</strong>
             </p>
 
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-muted-foreground">
-                {t("selectClient")}
-              </label>
-              <select
-                value={selectedClientId}
-                onChange={(e) => setSelectedClientId(e.target.value)}
-                className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs focus:ring-1 focus:ring-primary"
+            {/* Target type switcher: Mijoz vs Yetkazib beruvchi */}
+            <div className="grid grid-cols-2 gap-1 p-0.5 bg-muted rounded-md border border-border">
+              <button
+                type="button"
+                onClick={() => setLinkTargetType("client")}
+                className={`h-7 rounded text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                  linkTargetType === "client"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
               >
-                <option value="">-- Mijozni tanlang --</option>
-                {crmCustomers.map((c: CrmCustomerRecord) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} {c.phone ? `(${c.phone})` : ""}
-                  </option>
-                ))}
-              </select>
+                <Building2 className="w-3.5 h-3.5 text-blue-500" />
+                <span>Mijoz</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLinkTargetType("supplier")}
+                className={`h-7 rounded text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                  linkTargetType === "supplier"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5 text-purple-500" />
+                <span>Yetkazib beruvchi</span>
+              </button>
             </div>
+
+            {linkTargetType === "client" ? (
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-muted-foreground">
+                  {t("selectClient")}
+                </label>
+                <select
+                  value={selectedClientId}
+                  onChange={(e) => setSelectedClientId(e.target.value)}
+                  className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">-- Mijozni tanlang --</option>
+                  {crmCustomers.map((c: CrmCustomerRecord) => (
+                    <option key={c.id} value={c.dbId || c.id}>
+                      {c.name} {c.phone ? `(${c.phone})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-muted-foreground">
+                  Yetkazib beruvchini tanlang
+                </label>
+                <select
+                  value={selectedSupplierId}
+                  onChange={(e) => setSelectedSupplierId(e.target.value)}
+                  className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">-- Yetkazib beruvchini tanlang --</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.code || s.category})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="gap-1 pt-2">
@@ -2072,11 +2205,15 @@ export function TelegramInbox() {
             </Button>
             <Button
               size="sm"
-              onClick={handleLinkClient}
-              disabled={!selectedClientId}
+              onClick={handleLinkTarget}
+              disabled={
+                linkTargetType === "client"
+                  ? !selectedClientId
+                  : !selectedSupplierId
+              }
               className="h-7 text-xs cursor-pointer bg-primary text-primary-foreground font-semibold"
             >
-              {t("linkClient")}
+              Biriktirish
             </Button>
           </DialogFooter>
         </DialogContent>

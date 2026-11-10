@@ -20,6 +20,7 @@ export interface ComboboxItem {
   description?: string;
   badge?: string;
   group?: string;
+  dot?: string;
   icon?: React.ComponentType<{ className?: string }>;
 }
 
@@ -32,6 +33,7 @@ export interface SmartComboboxProps {
   searchPlaceholder?: string;
   emptyText?: string;
   allowCustom?: boolean;
+  searchable?: boolean;
   className?: string;
   popoverWidth?: string;
   disabled?: boolean;
@@ -46,6 +48,7 @@ export function SmartCombobox({
   searchPlaceholder = "Qidirish...",
   emptyText = "Hech narsa topilmadi",
   allowCustom = true,
+  searchable = true,
   className,
   popoverWidth,
   disabled = false,
@@ -133,7 +136,10 @@ export function SmartCombobox({
           />
         }
       >
-        <div className="flex items-center gap-1.5 truncate text-left flex-1 min-w-0">
+        <div className="flex items-center gap-2 truncate text-left flex-1 min-w-0">
+          {selected?.dot && (
+            <span className={cn("size-2 rounded-full shrink-0", selected.dot)} />
+          )}
           {selected?.icon && (
             <selected.icon className="size-3.5 shrink-0 text-primary" />
           )}
@@ -152,37 +158,39 @@ export function SmartCombobox({
       <PopoverContent
         className={cn(
           "p-0 gap-0 border border-border bg-popover text-popover-foreground shadow-lg overflow-hidden",
-          popoverWidth || "w-72 min-w-[260px]"
+          popoverWidth || "w-(--anchor-width) min-w-[240px]"
         )}
         align="start"
         sideOffset={4}
       >
         <Command shouldFilter={false} className="w-full border-none p-0 bg-transparent">
           {/* Qidiruv qatori */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-border bg-muted/20">
-            <Search className="size-3.5 text-muted-foreground shrink-0" />
-            <input
-              type="text"
-              autoFocus
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              placeholder={searchPlaceholder}
-              className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
-            />
-            {searchValue && (
-              <button
-                type="button"
-                onClick={() => setSearchValue("")}
-                className="p-0.5 text-muted-foreground hover:text-foreground rounded cursor-pointer"
-                title="Tozalash"
-              >
-                <X className="size-3" />
-              </button>
-            )}
-          </div>
+          {searchable && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-border bg-muted/20">
+              <Search className="size-3.5 text-muted-foreground shrink-0" />
+              <input
+                type="text"
+                autoFocus
+                value={searchValue}
+                onChange={(e) => setSearchValue(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+              />
+              {searchValue && (
+                <button
+                  type="button"
+                  onClick={() => setSearchValue("")}
+                  className="p-0.5 text-muted-foreground hover:text-foreground rounded cursor-pointer"
+                  title="Tozalash"
+                >
+                  <X className="size-3" />
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Umumiy miqdor ko'rsatkichi */}
-          {normalizedOptions.length > 4 && (
+          {searchable && normalizedOptions.length > 4 && (
             <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-muted-foreground bg-muted/10 border-b border-border/40 font-mono">
               <span>Jami: {normalizedOptions.length} ta</span>
               {searchValue.trim() && (
@@ -191,7 +199,7 @@ export function SmartCombobox({
             </div>
           )}
 
-          <CommandList className="max-h-60 p-1 overflow-y-auto no-scrollbar">
+          <CommandList className="max-h-64 p-1 overflow-y-auto no-scrollbar">
             {filteredOptions.length === 0 ? (
               <CommandEmpty className="py-6 px-3 text-center text-xs text-muted-foreground">
                 {emptyText}
@@ -223,6 +231,9 @@ export function SmartCombobox({
                         )}
                       >
                         <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {opt.dot && (
+                            <span className={cn("size-2 rounded-full shrink-0", opt.dot)} />
+                          )}
                           {opt.icon && (
                             <opt.icon
                               className={cn(

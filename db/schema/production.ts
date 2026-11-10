@@ -393,6 +393,7 @@ export const workOrders = pgTable(
 
     sampleData: jsonb("sample_data").$type<Record<string, unknown>>().default({}).notNull(),
     packagingData: jsonb("packaging_data").$type<Record<string, unknown>>().default({}).notNull(),
+    deliveryBatches: jsonb("delivery_batches").$type<any[]>().default([]).notNull(),
 
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

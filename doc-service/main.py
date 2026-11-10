@@ -1,7 +1,7 @@
 from datetime import datetime
 from fastapi import FastAPI
 from app.core.fonts import FONT_REGULAR
-from app.routers import pdf, office
+from app.routers import pdf, office, imposition
 from app.schemas.documents import ArtworkAnalysisRequest, ArtworkAnalysisResponse
 from app.generators.artwork_analyzer import analyze_artwork_payload
 
@@ -27,3 +27,4 @@ def direct_analyze_artwork(req: ArtworkAnalysisRequest):
 # Register Routers
 app.include_router(pdf.router)
 app.include_router(office.router)
+app.include_router(imposition.router)

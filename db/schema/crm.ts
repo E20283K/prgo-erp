@@ -326,6 +326,7 @@ export const suppliers = pgTable(
     paymentTerms: varchar("payment_terms", { length: 128 }),
     address: text("address"),
     notes: text("notes"),
+    logoUrl: text("logo_url"),
     status: supplierStatusEnum("status").default("Active").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -376,6 +377,12 @@ export const supplierOrders = pgTable(
     status: supplierOrderStatusEnum("status").default("Ordered").notNull(),
     specDetails: text("spec_details"), // "Format: 745x605mm, 4 rang (CMYK), 0.3mm metall"
     notes: text("notes"),
+    fileUrl: text("file_url"), // Biriktirilgan chizma/fayl URL (PDF, DXF, DWG, AI yoki rasm)
+    fileName: varchar("file_name", { length: 255 }), // Fayl nomi (masalan: "die_cut_box_745x605.dxf")
+    telegramChatId: varchar("telegram_chat_id", { length: 64 }), // Yuborilgan Telegram chat/guruh ID
+    telegramMessageId: integer("telegram_message_id"),            // Guruhdagi xabar ID (inline button callback uchun)
+    telegramSentAt: timestamp("telegram_sent_at", { withTimezone: true }),
+    telegramConfirmedBy: varchar("telegram_confirmed_by", { length: 128 }), // Statusni tasdiqlagan ta'minotchi user
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

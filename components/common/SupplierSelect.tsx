@@ -16,6 +16,7 @@ interface SupplierItem {
   name: string;
   category?: string;
   phone?: string;
+  logoUrl?: string;
 }
 
 interface SupplierSelectProps {
@@ -49,6 +50,7 @@ export function SupplierSelect({
       name: s.name,
       category: s.category || "",
       phone: s.phone || "",
+      logoUrl: s.logoUrl || "",
     }));
 
     if (value && !list.some((item) => item.name.toLowerCase() === value.toLowerCase())) {
@@ -99,7 +101,15 @@ export function SupplierSelect({
             )}
           >
             <div className="flex items-center gap-1.5 truncate min-w-0">
-              <Building2 className="size-3.5 text-muted-foreground shrink-0" />
+              {selectedItem?.logoUrl ? (
+                <img
+                  src={selectedItem.logoUrl}
+                  alt={selectedItem.name}
+                  className="w-4 h-4 rounded object-contain border border-border bg-background shrink-0 p-0.5"
+                />
+              ) : (
+                <Building2 className="size-3.5 text-muted-foreground shrink-0" />
+              )}
               <span className="truncate text-foreground font-medium">
                 {selectedItem ? selectedItem.name : placeholder}
               </span>
@@ -142,15 +152,26 @@ export function SupplierSelect({
                     isSelected && "bg-accent font-semibold text-primary"
                   )}
                 >
-                  <div className="flex flex-col min-w-0 flex-1 pr-1">
-                    <span className="truncate font-medium text-foreground">
-                      {item.name}
-                    </span>
-                    {(item.category || item.phone) && (
-                      <span className="text-[10px] text-muted-foreground truncate">
-                        {[item.category, item.phone].filter(Boolean).join(" • ")}
-                      </span>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {item.logoUrl ? (
+                      <img
+                        src={item.logoUrl}
+                        alt={item.name}
+                        className="w-5 h-5 rounded object-contain border border-border bg-background shrink-0 p-0.5"
+                      />
+                    ) : (
+                      <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
                     )}
+                    <div className="flex flex-col min-w-0 flex-1 pr-1">
+                      <span className="truncate font-medium text-foreground">
+                        {item.name}
+                      </span>
+                      {(item.category || item.phone) && (
+                        <span className="text-[10px] text-muted-foreground truncate">
+                          {[item.category, item.phone].filter(Boolean).join(" • ")}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {isSelected && (
                     <Check className="size-3.5 text-primary shrink-0 ml-1" />

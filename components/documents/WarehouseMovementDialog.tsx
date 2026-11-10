@@ -54,6 +54,15 @@ export function WarehouseMovementDialog({
 }: WarehouseMovementDialogProps) {
   const { warehouseStock, employees } = useWorkspaceStore();
 
+  const uniqueStock = useMemo(() => {
+    const seen = new Set<string>();
+    return warehouseStock.filter((s) => {
+      if (!s.name || seen.has(s.name)) return false;
+      seen.add(s.name);
+      return true;
+    });
+  }, [warehouseStock]);
+
   const isEdit = Boolean(record?.id && !record.id.startsWith("draft-"));
   const isLocked = record?.status === "Completed";
   const isPending = record?.status === "Pending" || record?.status === "In Transit";
@@ -280,8 +289,8 @@ export function WarehouseMovementDialog({
                       <SelectValue placeholder="Materialni tanlang..." />
                     </SelectTrigger>
                     <SelectContent className="max-h-56">
-                      {warehouseStock.map((s) => (
-                        <SelectItem key={s.sku} value={s.name} className="text-xs">
+                      {uniqueStock.map((s, idx) => (
+                        <SelectItem key={`${s.id || s.sku}-${idx}`} value={s.name} className="text-xs">
                           <span className="font-medium">{s.name}</span>
                           <span className="ml-1 text-muted-foreground font-mono">({s.sku})</span>
                           <span className="ml-2 text-[10px] text-emerald-600 dark:text-emerald-400">

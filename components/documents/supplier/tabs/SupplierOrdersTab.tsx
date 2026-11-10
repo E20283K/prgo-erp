@@ -10,6 +10,7 @@ import {
   GridSelection,
   CompactSelection,
   GridColumnIcon,
+  GridMouseEventArgs,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ import {
   Truck,
   Layers,
   Sparkles,
+  Send,
 } from "lucide-react";
 import type { SupplierRecord, SupplierOrderRecord } from "@/lib/server/supplierService";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -96,7 +98,47 @@ export function SupplierOrdersTab({
   isCreateOpen,
   setIsCreateOpen,
 }: SupplierOrdersTabProps) {
-  const { openTab, theme, addNotification } = useWorkspaceStore();
+  const { openTab, theme, addNotification, productionQueue } = useWorkspaceStore();
+  // Hover magnified proof preview
+  const [hoveredPreview, setHoveredPreview] = useState<{
+    url: string;
+    x: number;
+    y: number;
+    title?: string;
+    subtitle?: string;
+  } | null>(null);
+  const mouseCoordsRef = React.useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
+
+  const getCursorCardPosition = useCallback(
+    (clientX: number, clientY: number, cardWidth = 340, cardHeight = 340) => {
+      const margin = 16;
+      const vpW = typeof window !== "undefined" ? window.innerWidth : 1920;
+      const vpH = typeof window !== "undefined" ? window.innerHeight : 1080;
+
+      let x = clientX + margin;
+      let y = clientY + margin;
+
+      if (x + cardWidth > vpW - margin) {
+        x = clientX - cardWidth - margin;
+      }
+      if (y + cardHeight > vpH - margin) {
+        y = clientY - cardHeight - margin;
+      }
+      if (x < margin) x = margin;
+      if (y < margin) y = margin;
+
+      return { x, y };
+    },
+    []
+  );
   const isDark = theme === "dark";
 
   const [orders, setOrders] = useState<SupplierOrderRecord[]>([]);
@@ -223,6 +265,39 @@ export function SupplierOrdersTab({
     }
   };
 
+  const handleSendToTelegram = async (order: SupplierOrderRecord) => {
+    try {
+      const res = await fetch(
+        `/api/v1/production/tooling-orders/${encodeURIComponent(order.id)}/send-telegram`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileUrl: order.fileUrl,
+            fileName: order.fileName,
+          }),
+        }
+      );
+      const json = await res.json();
+      if (json.success) {
+        addNotification({
+          title: "Telegramga yuborildi",
+          description: `${order.orderNo} ta'minotchi guruhiga inline tugmalar bilan jo'natildi.`,
+          severity: "success",
+        });
+        fetchOrders();
+      } else {
+        addNotification({
+          title: "Yuborilmadi",
+          description: json.error || "Guruhga yuborishda xatolik",
+          severity: "error",
+        });
+      }
+    } catch (err) {
+      console.error("handleSendToTelegram error:", err);
+    }
+  };
+
   // Filtered rows
   const filteredOrders = useMemo(() => {
     if (filterStatus === "all") return orders;
@@ -241,6 +316,7 @@ export function SupplierOrdersTab({
   // Columns definition
   const [columns, setColumns] = useState<GridColumn[]>([
     { id: "idx", title: "№", width: 45, icon: GridColumnIcon.HeaderNumber },
+    { id: "image", title: "Rasm", width: 68, icon: GridColumnIcon.HeaderImage },
     { id: "orderNo", title: "Buyurtma №", width: 125, icon: GridColumnIcon.HeaderReference },
     { id: "orderDate", title: "Sana", width: 105, icon: GridColumnIcon.HeaderDate },
     { id: "orderType", title: "Turi", width: 180, icon: GridColumnIcon.HeaderSingleValue },
@@ -276,6 +352,24 @@ export function SupplierOrdersTab({
           data: row + 1,
           displayData: String(row + 1),
           allowOverlay: false,
+          contentAlign: "center",
+        };
+      }
+
+      if (column.id === "image") {
+        const wo = (productionQueue || []).find((q) =>
+          (q.id && item.workOrderNo && q.id.trim().toLowerCase() === item.workOrderNo.trim().toLowerCase()) ||
+          (q.docNo && item.workOrderNo && q.docNo.trim().toLowerCase() === item.workOrderNo.trim().toLowerCase()) ||
+          (item.workOrderNo && (q.id || "").toLowerCase().includes(item.workOrderNo.toLowerCase()))
+        );
+        const img = item.imageUrl || wo?.photoUrl || (Array.isArray(wo?.photoUrls) && wo.photoUrls.length > 0 ? wo.photoUrls[0] : null);
+        const data = img ? [img] : [];
+        return {
+          kind: GridCellKind.Image,
+          data,
+          displayData: data,
+          allowOverlay: false,
+          rounding: 4,
           contentAlign: "center",
         };
       }
@@ -346,7 +440,43 @@ export function SupplierOrdersTab({
         allowOverlay: false,
       };
     },
-    [filteredOrders, columns, isDark]
+    [filteredOrders, columns, isDark, productionQueue]
+  );
+
+  const onItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      if (args.kind === "cell") {
+        const [col, row] = args.location;
+        const column = columns[col];
+        if (column?.id === "image") {
+          const item = filteredOrders[row];
+          if (item) {
+            const wo = (productionQueue || []).find((q) =>
+              (q.id && item.workOrderNo && q.id.trim().toLowerCase() === item.workOrderNo.trim().toLowerCase()) ||
+              (q.docNo && item.workOrderNo && q.docNo.trim().toLowerCase() === item.workOrderNo.trim().toLowerCase()) ||
+              (item.workOrderNo && (q.id || "").toLowerCase().includes(item.workOrderNo.toLowerCase()))
+            );
+            const img = item.imageUrl || wo?.photoUrl || (Array.isArray(wo?.photoUrls) && wo.photoUrls.length > 0 ? wo.photoUrls[0] : null);
+            if (img) {
+              const { x, y } = getCursorCardPosition(
+                mouseCoordsRef.current.x,
+                mouseCoordsRef.current.y
+              );
+              setHoveredPreview({
+                url: img,
+                x,
+                y,
+                title: item.title,
+                subtitle: item.workOrderNo ? `Ish buyurtmasi: ${item.workOrderNo}` : undefined,
+              });
+              return;
+            }
+          }
+        }
+      }
+      setHoveredPreview(null);
+    },
+    [columns, filteredOrders, productionQueue, getCursorCardPosition]
   );
 
   const handleCellActivated = useCallback(
@@ -473,6 +603,8 @@ export function SupplierOrdersTab({
             gridSelection={selection}
             onGridSelectionChange={setSelection}
             onCellActivated={handleCellActivated}
+            onItemHovered={onItemHovered}
+            rowHeight={32}
             rowMarkers="both"
             freezeColumns={2}
             smoothScrollX
@@ -481,6 +613,29 @@ export function SupplierOrdersTab({
             width="100%"
             height="100%"
           />
+          {/* Hover Magnified Artwork Preview */}
+          {hoveredPreview && (
+            <div
+              style={{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }}
+              className="fixed z-50 pointer-events-none rounded-md bg-popover/95 backdrop-blur-xs border border-border shadow-2xl p-2 animate-in fade-in-0 zoom-in-95 duration-75 max-w-[340px] max-h-[360px] flex flex-col gap-1.5 overflow-hidden"
+            >
+              <img
+                src={hoveredPreview.url}
+                alt="Buyurtma eskizi"
+                className="max-w-[320px] max-h-[280px] w-auto h-auto object-contain rounded border border-border/40 bg-background select-none"
+              />
+              {hoveredPreview.title && (
+                <div className="text-[11px] font-semibold text-foreground truncate max-w-[320px]">
+                  {hoveredPreview.title}
+                </div>
+              )}
+              {hoveredPreview.subtitle && (
+                <div className="text-[10px] text-muted-foreground truncate max-w-[320px]">
+                  {hoveredPreview.subtitle}
+                </div>
+              )}
+            </div>
+          )}
         </ContextMenuTrigger>
         <ContextMenuContent className="text-xs">
           {selectedOrder?.workOrderNo && (
@@ -497,6 +652,16 @@ export function SupplierOrdersTab({
             >
               <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
               <span>Work Orderni ochish ({selectedOrder.workOrderNo})</span>
+            </ContextMenuItem>
+          )}
+
+          {selectedOrder && (
+            <ContextMenuItem
+              onClick={() => handleSendToTelegram(selectedOrder)}
+              className="gap-2 text-blue-600 dark:text-blue-400 font-medium"
+            >
+              <Send className="w-3.5 h-3.5 text-blue-500" />
+              <span>Telegram guruhga yuborish (PO)</span>
             </ContextMenuItem>
           )}
 

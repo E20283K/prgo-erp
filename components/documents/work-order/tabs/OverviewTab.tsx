@@ -289,11 +289,13 @@ export function OverviewTab({
     masterSpecifications,
     crmCustomers,
     plants,
+    machines,
   } = useWorkspaceStore(
     useShallow((s) => ({
       masterSpecifications: s.masterSpecifications,
       crmCustomers: s.crmCustomers,
       plants: s.plants,
+      machines: s.machines,
     }))
   );
   const {
@@ -354,44 +356,6 @@ export function OverviewTab({
     return list;
   }, [crmCustomers, customers, formData.customer]);
 
-  const handleAddNewCustomer = async (newCust: string) => {
-    const clean = newCust.trim();
-    if (!clean) return;
-    addCustomer(clean);
-    const existingIds = crmCustomers
-      .map((c) => parseInt(c.id.replace(/\D/g, ""), 10))
-      .filter((n) => !isNaN(n));
-    const nextNum = existingIds.length > 0 ? Math.max(...existingIds) + 1 : Math.floor(100 + Math.random() * 899);
-    const newRecord: CrmCustomerRecord = {
-      id: `CUST-${nextNum}`,
-      name: clean,
-      tin: "",
-      industry: "General",
-      contactPerson: "",
-      phone: "",
-      email: "",
-      contractNo: "",
-      paymentTerms: "",
-      manager: "",
-      status: "New",
-      contacts: [],
-      contracts: [],
-    };
-    await upsertCustomerAsync(newRecord);
-    handleFieldChange("customer", clean);
-    onMarkUnsaved();
-
-    // Open CustomerDetail tab
-    openTab({
-      id: newRecord.id,
-      title: `${newRecord.id}: ${clean}`,
-      type: "customer",
-      module: "crm",
-      isUnsaved: false,
-      activeLevel3Tab: "overview",
-      documentData: newRecord,
-    });
-  };
 
   const handleOpenNewCustomer = (initialName?: string) => {
     const clean = (initialName || "").trim();
@@ -553,13 +517,24 @@ export function OverviewTab({
   }, [formData.site, plants, sites, activeSite]);
 
   const techOptions = useMemo<ComboboxOption[]>(() => {
-    return TECHNOLOGY_OPTIONS.map((tech) => ({
-      value: tech.id,
-      label: tech.name,
-      description: tech.description,
-      equipmentCount: tech.equipmentCount,
-    }));
-  }, []);
+    return TECHNOLOGY_OPTIONS.map((tech) => {
+      const matchCount = (machines || []).filter((m: any) => {
+        const dept = (m.department || "").toLowerCase();
+        const tid = tech.id.toLowerCase();
+        if (tid === "offset") return dept.includes("offset") || dept.includes("ofset");
+        if (tid === "flexo") return dept.includes("flexo") || dept.includes("flekso");
+        if (tid === "jacquard") return dept.includes("jacquard") || dept.includes("jakkard") || dept.includes("to'quv");
+        if (tid === "post-press") return dept.includes("post") || dept.includes("pardoz") || dept.includes("kesish") || dept.includes("packag") || dept.includes("qadoq");
+        return dept.includes(tid);
+      }).length;
+      return {
+        value: tech.id,
+        label: tech.name,
+        description: tech.description,
+        equipmentCount: matchCount,
+      };
+    });
+  }, [machines]);
 
   const machineOptions = useMemo<ComboboxOption[]>(() => {
     return currentDeptMachines.map((mach: any) => ({
@@ -704,9 +679,13 @@ export function OverviewTab({
   }, [carouselApi]);
 
   const handleRemovePhoto = (indexToRemove: number) => {
+    const removedUrl = photos[indexToRemove];
     const updated = photos.filter((_, idx) => idx !== indexToRemove);
     handleFieldChange("photoUrls", updated);
     handleFieldChange("photoUrl", updated[0] || "");
+    if (removedUrl && setOrderAttachments) {
+      setOrderAttachments((prev) => prev.filter((a) => a.url !== removedUrl));
+    }
     onMarkUnsaved();
   };
 
@@ -865,6 +844,19 @@ export function OverviewTab({
             <span className="text-border mx-0.5">•</span>
             <span>{data.orderType === "Sample" ? "Sample Order" : "Production Order"}</span>
           </div>
+
+          {/* Material Spisanie & Reservation Status */}
+          {formData.materialsConsumed && formData.materialIssueDocNo ? (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 gap-1 font-mono">
+              <Boxes className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+              <span>Chiqim: {formData.materialIssueDocNo}</span>
+            </Badge>
+          ) : formData.materialsReserved ? (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30 gap-1">
+              <Boxes className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+              <span>Xomashyo band</span>
+            </Badge>
+          ) : null}
         </div>
       </div>
 
@@ -1140,8 +1132,6 @@ export function OverviewTab({
                       onMarkUnsaved();
                     }}
                     disabled={isOperator}
-                    allowCustom
-                    onAddNew={handleAddNewCustomer}
                     actionLabel={!isOperator ? (tOrder("addCustomer") || "Yangi mijoz qo'shish...") : undefined}
                     onAction={!isOperator ? (search) => handleOpenNewCustomer(search) : undefined}
                     placeholder={tOrder("selectCustomer") || "Select customer..."}
@@ -1384,19 +1374,22 @@ export function OverviewTab({
                 <label className="text-xs font-medium text-muted-foreground block mb-1">
                   {tOrder("quantityLabel")} <span className="text-destructive font-bold">*</span>
                 </label>
-                <Input 
-                  type="number"
-                  min={0}
-                  value={hasSizes && totalSizesQty > 0 ? totalSizesQty : formData.quantity} 
+                <MoneyInput 
                   id="wo-input-quantity"
-                  onChange={(e) => {
-                    handleFieldChange("quantity", Number(e.target.value));
-                    if (errors?.quantity && setErrors) {
-                      setErrors((prev) => {
-                        const next = { ...prev };
-                        delete next.quantity;
-                        return next;
-                      });
+                  thousandSeparator=" "
+                  allowNegative={false}
+                  value={hasSizes && totalSizesQty > 0 ? totalSizesQty : (formData.quantity || "")}
+                  onValueChange={(values, sourceInfo) => {
+                    if (!sourceInfo || sourceInfo.source === "event") {
+                      handleFieldChange("quantity", values.floatValue ?? 0);
+                      onMarkUnsaved();
+                      if (errors?.quantity && setErrors) {
+                        setErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.quantity;
+                          return next;
+                        });
+                      }
                     }
                   }}
                   disabled={isOperator || (hasSizes && totalSizesQty > 0)}
@@ -1405,6 +1398,7 @@ export function OverviewTab({
                       ? "Miqdor o'lchamlar matritsasi orqali avtomatik hisoblanadi"
                       : undefined
                   }
+                  placeholder="0"
                   className={cn(
                     "h-8 text-xs bg-muted/30 font-mono font-semibold disabled:opacity-85",
                     errors?.quantity && "border-destructive focus-visible:ring-destructive ring-1 ring-destructive"
@@ -1978,7 +1972,7 @@ export function OverviewTab({
                         <div className="flex items-center justify-between">
                           <span className="font-semibold text-foreground">{tech.label}</span>
                           <span className="text-[10px] text-muted-foreground font-mono">
-                            {tech.equipmentCount} lines
+                            {tech.equipmentCount ?? 0} liniya
                           </span>
                         </div>
                         {tech.description && (

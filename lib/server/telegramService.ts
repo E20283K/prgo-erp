@@ -6,7 +6,10 @@ import {
   telegramMessages,
   quickReplyTemplates,
   clients,
+  suppliers,
+  supplierOrders,
   workOrders,
+  workOrderAttachments,
   companies,
   type TelegramChat,
   type TelegramMessage,
@@ -47,6 +50,13 @@ export async function getEffectiveTelegramBotToken(companyCode: string = "PRINTG
 }
 
 const AVATARS_CACHE_DIR = path.join(process.cwd(), "public", "cache", "telegram", "avatars");
+const FILES_CACHE_DIR = path.join(process.cwd(), "public", "cache", "telegram", "files");
+
+function ensureFilesCacheDir() {
+  if (!fs.existsSync(FILES_CACHE_DIR)) {
+    fs.mkdirSync(FILES_CACHE_DIR, { recursive: true });
+  }
+}
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -550,6 +560,9 @@ export interface TelegramChatWithClient extends TelegramChat {
   clientName?: string | null;
   clientCode?: string | null;
   clientPhone?: string | null;
+  supplierName?: string | null;
+  supplierCode?: string | null;
+  supplierCategory?: string | null;
   isSlaBreached?: boolean;
 }
 
@@ -573,16 +586,20 @@ export async function getTelegramChats(
       clientName: clients.name,
       clientCode: clients.code,
       clientPhone: clients.phone,
+      supplierName: suppliers.name,
+      supplierCode: suppliers.code,
+      supplierCategory: suppliers.category,
     })
     .from(telegramChats)
     .leftJoin(clients, eq(telegramChats.clientId, clients.id))
+    .leftJoin(suppliers, eq(telegramChats.supplierId, suppliers.id))
     .where(whereClause)
     .orderBy(desc(telegramChats.lastMessageAt));
 
   const now = new Date();
   const fifteenMinutesMs = 15 * 60 * 1000;
 
-  let results: TelegramChatWithClient[] = rawChats.map(({ chat, clientName, clientCode, clientPhone }) => {
+  let results: TelegramChatWithClient[] = rawChats.map(({ chat, clientName, clientCode, clientPhone, supplierName, supplierCode, supplierCategory }) => {
     let isSlaBreached = false;
     if (chat.unansweredSince) {
       const waitTime = now.getTime() - new Date(chat.unansweredSince).getTime();
@@ -603,6 +620,9 @@ export async function getTelegramChats(
       clientName,
       clientCode,
       clientPhone,
+      supplierName,
+      supplierCode,
+      supplierCategory,
       isSlaBreached,
     };
   });
@@ -622,6 +642,7 @@ export async function getTelegramChats(
       (c) =>
         c.title.toLowerCase().includes(q) ||
         (c.clientName && c.clientName.toLowerCase().includes(q)) ||
+        (c.supplierName && c.supplierName.toLowerCase().includes(q)) ||
         (c.lastMessageSnippet && c.lastMessageSnippet.toLowerCase().includes(q))
     );
   }
@@ -644,6 +665,7 @@ export async function getTelegramChatMessages(
     where: chatMatchWhere(chatId),
     with: {
       client: true,
+      supplier: true,
     },
   });
 
@@ -705,6 +727,9 @@ export async function getTelegramChatMessages(
       clientName: chatRecord.client?.name ?? null,
       clientCode: chatRecord.client?.code ?? null,
       clientPhone: chatRecord.client?.phone ?? null,
+      supplierName: chatRecord.supplier?.name ?? null,
+      supplierCode: chatRecord.supplier?.code ?? null,
+      supplierCategory: chatRecord.supplier?.category ?? null,
       isSlaBreached: Boolean(isSlaBreached),
     },
     messages,
@@ -714,15 +739,67 @@ export async function getTelegramChatMessages(
   };
 }
 
-/**
- * 3. ERP orqali mijoz guruhiga javob yozish (2 tomonlama muloqot)
- */
-export async function sendTelegramMessage(params: {
+export interface SendTelegramMessageParams {
   chatId: string; // Database chat UUID or Telegram chatId
   text: string;
   senderName?: string;
   replyToTelegramMessageId?: number;
-}): Promise<{ success: boolean; message?: TelegramMessage; error?: string }> {
+  parseMode?: "HTML" | "Markdown" | "MarkdownV2";
+  replyMarkup?: any; // Telegram InlineKeyboardMarkup
+  photoUrl?: string; // Image URL or local path
+  documentUrl?: string; // Document/PDF URL
+  fileName?: string;
+}
+
+function resolveMediaBuffer(
+  rawUrl?: string,
+  defaultFileName?: string
+): { buffer: Buffer; mimeType: string; fileName: string; isPhoto: boolean } | null {
+  if (!rawUrl) return null;
+  if (rawUrl.startsWith("data:")) {
+    const matches = rawUrl.match(/^data:([A-Za-z0-9-+./]+);base64,(.+)$/);
+    if (matches) {
+      const mimeType = matches[1];
+      const buffer = Buffer.from(matches[2], "base64");
+      const isPhoto = mimeType.startsWith("image/") && !mimeType.includes("svg");
+      const ext = mimeType.includes("pdf")
+        ? ".pdf"
+        : mimeType.includes("png")
+        ? ".png"
+        : mimeType.includes("jpeg") || mimeType.includes("jpg")
+        ? ".jpg"
+        : mimeType.includes("dxf")
+        ? ".dxf"
+        : mimeType.includes("dwg")
+        ? ".dwg"
+        : ".bin";
+      const fileName = defaultFileName || `file_${Date.now()}${ext}`;
+      return { buffer, mimeType, fileName, isPhoto };
+    }
+  } else if (rawUrl.startsWith("/") || rawUrl.includes("/cache/") || rawUrl.includes("/uploads/")) {
+    const cleanPath = rawUrl.split("?")[0].replace(/^\//, "");
+    const absPath = path.join(process.cwd(), "public", cleanPath);
+    if (fs.existsSync(absPath) && fs.statSync(absPath).isFile()) {
+      const buffer = fs.readFileSync(absPath);
+      const ext = path.extname(absPath).toLowerCase();
+      const isPhoto = [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext);
+      const mimeType = isPhoto
+        ? `image/${ext.replace(".", "")}`
+        : ext === ".pdf"
+        ? "application/pdf"
+        : "application/octet-stream";
+      return { buffer, mimeType, fileName: defaultFileName || path.basename(absPath), isPhoto };
+    }
+  }
+  return null;
+}
+
+/**
+ * 3. ERP orqali mijoz yoki ta'minotchi guruhiga xabar/buyurtma jo'natish
+ */
+export async function sendTelegramMessage(
+  params: SendTelegramMessageParams
+): Promise<{ success: boolean; message?: TelegramMessage; error?: string }> {
   const chatRecord = await db.query.telegramChats.findFirst({
     where: chatMatchWhere(params.chatId),
   });
@@ -734,21 +811,99 @@ export async function sendTelegramMessage(params: {
   let tgMsgId = Math.floor(Date.now() / 1000);
   const token = await getEffectiveTelegramBotToken();
 
+  let storedMediaUrl = params.photoUrl || params.documentUrl || null;
+  const mediaBufferInfo = resolveMediaBuffer(params.photoUrl || params.documentUrl, params.fileName);
+
+  if (mediaBufferInfo && storedMediaUrl && storedMediaUrl.startsWith("data:")) {
+    ensureFilesCacheDir();
+    const safeName = `${Date.now()}_${mediaBufferInfo.fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const localDest = path.join(FILES_CACHE_DIR, safeName);
+    try {
+      fs.writeFileSync(localDest, mediaBufferInfo.buffer);
+      storedMediaUrl = `/cache/telegram/files/${safeName}`;
+    } catch {}
+  }
+
   // Agar real Telegram Bot Token mavjud bo'lsa, Telegram Bot API ga so'rov yuboramiz
   if (token && !token.includes("mock") && !token.includes("test")) {
     try {
-      const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatRecord.chatId,
-          text: params.text,
-          reply_to_message_id: params.replyToTelegramMessageId,
-        }),
-      });
-      const data = await response.json();
-      if (data.ok && data.result?.message_id) {
-        tgMsgId = data.result.message_id;
+      if (mediaBufferInfo) {
+        // Binariy fayl (chizma/PDF/rasm) ni multipart/form-data orqali jo'natish
+        const form = new FormData();
+        form.append("chat_id", chatRecord.chatId);
+        if (params.text) form.append("caption", params.text);
+        if (params.parseMode) form.append("parse_mode", params.parseMode);
+        if (params.replyMarkup) form.append("reply_markup", JSON.stringify(params.replyMarkup));
+        if (params.replyToTelegramMessageId) form.append("reply_to_message_id", String(params.replyToTelegramMessageId));
+
+        const blob = new Blob([new Uint8Array(mediaBufferInfo.buffer)], { type: mediaBufferInfo.mimeType });
+        const fieldName = mediaBufferInfo.isPhoto ? "photo" : "document";
+        form.append(fieldName, blob, mediaBufferInfo.fileName);
+
+        const endpoint = mediaBufferInfo.isPhoto ? "sendPhoto" : "sendDocument";
+        const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/${endpoint}`, {
+          method: "POST",
+          body: form,
+        });
+        const data = await response.json();
+        if (data.ok && data.result?.message_id) {
+          tgMsgId = data.result.message_id;
+        } else {
+          console.warn(`[sendTelegramMessage] ${endpoint} error:`, data);
+        }
+      } else if (params.photoUrl && (params.photoUrl.startsWith("http://") || params.photoUrl.startsWith("https://"))) {
+        // Rasm URL bilan yuborish
+        const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendPhoto`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatRecord.chatId,
+            photo: params.photoUrl,
+            caption: params.text,
+            parse_mode: params.parseMode || "HTML",
+            reply_markup: params.replyMarkup,
+            reply_to_message_id: params.replyToTelegramMessageId,
+          }),
+        });
+        const data = await response.json();
+        if (data.ok && data.result?.message_id) {
+          tgMsgId = data.result.message_id;
+        }
+      } else if (params.documentUrl && (params.documentUrl.startsWith("http://") || params.documentUrl.startsWith("https://"))) {
+        // Hujjat URL bilan yuborish
+        const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendDocument`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatRecord.chatId,
+            document: params.documentUrl,
+            caption: params.text,
+            parse_mode: params.parseMode || "HTML",
+            reply_markup: params.replyMarkup,
+            reply_to_message_id: params.replyToTelegramMessageId,
+          }),
+        });
+        const data = await response.json();
+        if (data.ok && data.result?.message_id) {
+          tgMsgId = data.result.message_id;
+        }
+      } else {
+        // Oddiy matnli xabar yuborish
+        const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatRecord.chatId,
+            text: params.text,
+            parse_mode: params.parseMode || "HTML",
+            reply_to_message_id: params.replyToTelegramMessageId,
+            reply_markup: params.replyMarkup,
+          }),
+        });
+        const data = await response.json();
+        if (data.ok && data.result?.message_id) {
+          tgMsgId = data.result.message_id;
+        }
       }
     } catch (err) {
       console.error("[sendTelegramMessage] Telegram API error:", err);
@@ -767,6 +922,9 @@ export async function sendTelegramMessage(params: {
       senderAvatarUrl: botAvatarUrl || "/cache/telegram/avatars/bot.jpg",
       isOutgoing: true,
       text: params.text,
+      mediaType: mediaBufferInfo?.isPhoto || params.photoUrl ? "photo" : mediaBufferInfo || params.documentUrl ? "document" : null,
+      mediaUrl: storedMediaUrl,
+      mediaFileName: mediaBufferInfo?.fileName || params.fileName || null,
       replyToTelegramMessageId: params.replyToTelegramMessageId,
       sentAt: new Date(),
     })
@@ -794,10 +952,24 @@ export async function linkTelegramChatToClient(params: {
   clientId: string;
   assignedUserId?: string;
 }): Promise<{ success: boolean; chat?: TelegramChat; error?: string }> {
+  let resolvedClientId = params.clientId;
+  if (!UUID_REGEX.test(resolvedClientId)) {
+    const found = await db.query.clients.findFirst({
+      where: or(eq(clients.code, resolvedClientId), eq(clients.name, resolvedClientId)),
+    });
+    if (found) {
+      resolvedClientId = found.id;
+    } else {
+      return { success: false, error: `"${params.clientId}" kodli mijoz topilmadi` };
+    }
+  }
+
   const [updated] = await db
     .update(telegramChats)
     .set({
-      clientId: params.clientId,
+      clientId: resolvedClientId,
+      supplierId: null,
+      chatCategory: "client",
       assignedUserId: params.assignedUserId,
       status: "active",
       updatedAt: new Date(),
@@ -813,6 +985,417 @@ export async function linkTelegramChatToClient(params: {
 }
 
 /**
+ * 4.1 Guruhni ERP dagi yetkazib beruvchiga (ta'minotchiga) biriktirish
+ */
+export async function linkTelegramChatToSupplier(params: {
+  chatId: string;
+  supplierId: string;
+  assignedUserId?: string;
+}): Promise<{ success: boolean; chat?: TelegramChat; error?: string }> {
+  let resolvedSupplierId = params.supplierId;
+  if (!UUID_REGEX.test(resolvedSupplierId)) {
+    const found = await db.query.suppliers.findFirst({
+      where: or(eq(suppliers.code, resolvedSupplierId), eq(suppliers.name, resolvedSupplierId)),
+    });
+    if (found) {
+      resolvedSupplierId = found.id;
+    } else {
+      return { success: false, error: `"${params.supplierId}" kodli ta'minotchi topilmadi` };
+    }
+  }
+
+  const [updated] = await db
+    .update(telegramChats)
+    .set({
+      supplierId: resolvedSupplierId,
+      clientId: null,
+      chatCategory: "supplier",
+      assignedUserId: params.assignedUserId,
+      status: "active",
+      updatedAt: new Date(),
+    })
+    .where(chatMatchWhere(params.chatId))
+    .returning();
+
+  if (!updated) {
+    return { success: false, error: "Guruh topilmadi" };
+  }
+
+  return { success: true, chat: updated };
+}
+
+/**
+ * 4.2 Guruhni biriktirishdan ozod qilish (Unlink)
+ */
+export async function unlinkTelegramChat(
+  chatId: string
+): Promise<{ success: boolean; chat?: TelegramChat; error?: string }> {
+  const [updated] = await db
+    .update(telegramChats)
+    .set({
+      clientId: null,
+      supplierId: null,
+      status: "unlinked",
+      updatedAt: new Date(),
+    })
+    .where(chatMatchWhere(chatId))
+    .returning();
+
+  if (!updated) {
+    return { success: false, error: "Guruh topilmadi" };
+  }
+
+  return { success: true, chat: updated };
+}
+
+/**
+ * 4.3 Mijoz yoki ta'minotchi bo'yicha bog'langan faol guruhni olish
+ */
+export async function getLinkedTelegramChatForEntity(
+  type: "client" | "supplier",
+  entityId: string,
+  companyCode: string = "PRINTGOO"
+): Promise<TelegramChat | null> {
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  let resolvedId = entityId;
+  if (!UUID_REGEX.test(resolvedId)) {
+    if (type === "client") {
+      const found = await db.query.clients.findFirst({
+        where: and(eq(clients.companyId, companyId), or(eq(clients.code, resolvedId), eq(clients.name, resolvedId))),
+      });
+      if (found) resolvedId = found.id;
+      else return null;
+    } else {
+      const found = await db.query.suppliers.findFirst({
+        where: and(eq(suppliers.companyId, companyId), or(eq(suppliers.code, resolvedId), eq(suppliers.name, resolvedId))),
+      });
+      if (found) resolvedId = found.id;
+      else return null;
+    }
+  }
+
+  const whereClause =
+    type === "client"
+      ? and(eq(telegramChats.companyId, companyId), eq(telegramChats.clientId, resolvedId))
+      : and(eq(telegramChats.companyId, companyId), eq(telegramChats.supplierId, resolvedId));
+
+  const chat = await db.query.telegramChats.findFirst({
+    where: whereClause,
+  });
+
+  return chat || null;
+}
+
+/**
+ * 4.4 Ish buyurtmasi (Work Order) ni mijozning Telegram guruhiga yuborish
+ */
+export async function sendWorkOrderToTelegram(params: {
+  workOrderId: string;
+  sendArtwork?: boolean;
+  customMessage?: string;
+  companyCode?: string;
+}): Promise<{ success: boolean; message?: TelegramMessage; error?: string }> {
+  const companyCode = params.companyCode || "PRINTGOO";
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  const order = await db.query.workOrders.findFirst({
+    where: and(eq(workOrders.companyId, companyId), or(eq(workOrders.id, params.workOrderId), eq(workOrders.docNo, params.workOrderId))),
+    with: {
+      client: true,
+    },
+  });
+
+  if (!order) {
+    return { success: false, error: "Ish buyurtmasi topilmadi" };
+  }
+
+  if (!order.clientId) {
+    return { success: false, error: "Ushbu buyurtmaga mijoz biriktirilmagan" };
+  }
+
+  const linkedChat = await db.query.telegramChats.findFirst({
+    where: and(
+      eq(telegramChats.companyId, companyId),
+      eq(telegramChats.clientId, order.clientId),
+      eq(telegramChats.status, "active")
+    ),
+  });
+
+  if (!linkedChat) {
+    return {
+      success: false,
+      error: `"${order.client?.name || "Mijoz"}" uchun biriktirilgan faol Telegram guruh topilmadi. Avval mijoz profilidan guruhni ulang.`,
+    };
+  }
+
+  const orderNo = order.docNo;
+  const clientName = order.client?.name || order.customerName || "Mijoz";
+  const productName = order.productName || "Poligrafiya mahsuloti";
+  const quantity = Number(order.quantity || 0).toLocaleString("uz-UZ");
+  const deliveryDate = order.deadline ? order.deadline : "Kelishilmoqda";
+  const statusLabel = order.status;
+
+  const textLines = [
+    `📋 <b>BUYURTMA MA'LUMOTI: ${orderNo}</b>`,
+    ``,
+    `🏢 <b>Mijoz:</b> ${clientName}`,
+    `📦 <b>Mahsulot:</b> ${productName}`,
+    `🔢 <b>Miqdori:</b> ${quantity} dona`,
+    `📅 <b>Topshirish muddati:</b> ${deliveryDate}`,
+    `📌 <b>Holati:</b> ${statusLabel}`,
+  ];
+
+  if (params.customMessage?.trim()) {
+    textLines.push(``);
+    textLines.push(`💬 <i>Izoh: ${params.customMessage.trim()}</i>`);
+  }
+
+  textLines.push(``);
+  textLines.push(`⚙️ <i>PrintGoo ERP avtomatlashtirilgan xabarnomasi</i>`);
+
+  const fullText = textLines.join("\n");
+
+  const sendResult = await sendTelegramMessage({
+    chatId: linkedChat.id,
+    text: fullText,
+    senderName: "PrintGoo ERP",
+    photoUrl: params.sendArtwork && order.photoUrl ? order.photoUrl : undefined,
+    parseMode: "HTML",
+  });
+
+  return sendResult;
+}
+
+/**
+ * 4.5 Yetkazib beruvchiga buyurtma (PO - CTP, Shtamp, Xomashyo) ni inline tugmalar bilan jo'natish
+ */
+export async function sendPurchaseOrderToTelegram(params: {
+  supplierOrderId: string;
+  customNote?: string;
+  companyCode?: string;
+  fileUrl?: string;
+  fileName?: string;
+}): Promise<{ success: boolean; message?: TelegramMessage; error?: string }> {
+  const companyCode = params.companyCode || "PRINTGOO";
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  const order = await db.query.supplierOrders.findFirst({
+    where: and(
+      eq(supplierOrders.companyId, companyId),
+      or(eq(supplierOrders.id, params.supplierOrderId), eq(supplierOrders.orderNo, params.supplierOrderId))
+    ),
+    with: {
+      supplier: true,
+      workOrder: true,
+    },
+  });
+
+  if (!order) {
+    return { success: false, error: "Ta'minot buyurtmasi topilmadi" };
+  }
+
+  const linkedChat = await db.query.telegramChats.findFirst({
+    where: and(
+      eq(telegramChats.companyId, companyId),
+      eq(telegramChats.supplierId, order.supplierId),
+      eq(telegramChats.status, "active")
+    ),
+  });
+
+  if (!linkedChat) {
+    return {
+      success: false,
+      error: `"${order.supplier?.name || "Yetkazib beruvchi"}" uchun biriktirilgan faol Telegram guruh topilmadi. Avval ta'minotchi profilidan guruhni ulang.`,
+    };
+  }
+
+  // 1. Faylni aniqlash (buyurtmaning o'zidan yoki bog'langan ish buyurtmasidan)
+  let fileUrl = params.fileUrl || order.fileUrl || null;
+  let fileName = params.fileName || order.fileName || null;
+
+  if (!fileUrl && order.workOrderId) {
+    try {
+      const woAttachments = await db.query.workOrderAttachments.findMany({
+        where: eq(workOrderAttachments.workOrderId, order.workOrderId),
+      });
+
+      if (woAttachments && woAttachments.length > 0) {
+        if (order.orderType === "die_tooling") {
+          const dieline = woAttachments.find(
+            (a) => a.category === "dieline" || /\.(dxf|dwg|pdf|ai)$/i.test(a.name || a.url)
+          );
+          if (dieline) {
+            fileUrl = dieline.url;
+            fileName = dieline.name;
+          }
+        } else if (order.orderType === "ctp_plates" || order.orderType === "cliche") {
+          const art = woAttachments.find(
+            (a) =>
+              a.category === "artwork" ||
+              a.category === "proofs" ||
+              /\.(pdf|ai|tiff?|png|jpe?g)$/i.test(a.name || a.url)
+          );
+          if (art) {
+            fileUrl = art.url;
+            fileName = art.name;
+          }
+        }
+
+        if (!fileUrl && woAttachments[0]) {
+          fileUrl = woAttachments[0].url;
+          fileName = woAttachments[0].name;
+        }
+      }
+    } catch (woAttErr) {
+      console.warn("[sendPurchaseOrderToTelegram] Error fetching wo attachments:", woAttErr);
+    }
+
+    if (!fileUrl && order.workOrder?.photoUrl) {
+      fileUrl = order.workOrder.photoUrl;
+      fileName = `${order.workOrderNo || "buyurtma"}_namuna.jpg`;
+    }
+  }
+
+  // Fayl topilgan bo'lsa, uni ta'minot buyurtmasi kartasida ham saqlab qo'yamiz
+  if ((fileUrl && fileUrl !== order.fileUrl) || (fileName && fileName !== order.fileName)) {
+    try {
+      await db
+        .update(supplierOrders)
+        .set({
+          fileUrl,
+          fileName,
+          updatedAt: new Date(),
+        })
+        .where(eq(supplierOrders.id, order.id));
+    } catch (saveErr) {
+      console.warn("[sendPurchaseOrderToTelegram] Failed to update file fields:", saveErr);
+    }
+  }
+
+  const ORDER_TYPE_TITLES: Record<string, string> = {
+    ctp_plates: "CTP Metall Forma (Ofset)",
+    die_tooling: "Kesish Shtansformasi & Bigovka",
+    cliche: "Folga / Kongrev Klishe",
+    raw_materials: "Xomashyo & Materiallar",
+    outsourcing: "Autsorsing xizmati",
+    spare_parts: "Ehtiyot qismlar va servis",
+  };
+
+  const typeTitle = ORDER_TYPE_TITLES[order.orderType] || order.orderType;
+  const deadline = order.deliveryDeadline || "Tezkor (kelishilgan vaqtda)";
+
+  const textLines = [
+    `📦 <b>TA'MINOT BUYURTMASI: ${order.orderNo}</b>`,
+    "",
+    `🏭 <b>Yetkazib beruvchi:</b> ${order.supplier?.name}`,
+    `🔧 <b>Jihoz/Xizmat turi:</b> ${typeTitle}`,
+    `📝 <b>Tavsif:</b> ${order.title}`,
+  ];
+
+  if (order.workOrderNo) {
+    textLines.push(`📋 <b>Asosiy buyurtma:</b> ${order.workOrderNo}`);
+  }
+
+  textLines.push(`🔢 <b>Miqdori:</b> ${order.quantity} ${order.unit}`);
+  textLines.push(`⏳ <b>Muddati:</b> ${deadline}`);
+
+  if (order.specDetails?.trim()) {
+    textLines.push("");
+    textLines.push(`📐 <b>Spetsifikatsiya:</b>\n${order.specDetails.trim()}`);
+  }
+
+  if (fileName) {
+    textLines.push("");
+    textLines.push(`📎 <b>Biriktirilgan fayl:</b> ${fileName}`);
+  }
+
+  if (params.customNote?.trim()) {
+    textLines.push("");
+    textLines.push(`💬 <i>Izoh: ${params.customNote.trim()}</i>`);
+  }
+
+  textLines.push("");
+  textLines.push("👇 <i>Iltimos, buyurtma holatini quyidagi tugmalar orqali belgilang:</i>");
+
+  const fullText = textLines.join("\n");
+
+  // Bosqichma-bosqich dinamik tugmalar
+  let initialButtons: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  if (order.status === "In_Production") {
+    initialButtons = [
+      [
+        {
+          text: "✅ Tayyor bo'ldi",
+          callback_data: `po_status:${order.id}:Ready`,
+        },
+      ],
+    ];
+  } else if (order.status === "Ready") {
+    initialButtons = [
+      [
+        {
+          text: "🚚 Yo'lga chiqdi / Kuryerda",
+          callback_data: `po_status:${order.id}:Delivered`,
+        },
+      ],
+    ];
+  } else if (order.status === "Delivered" || order.status === "Cancelled") {
+    initialButtons = [];
+  } else {
+    // Dastlabki yuborilgan holat (Ordered / Draft): Qabul qilish yoki Rad etish
+    initialButtons = [
+      [
+        {
+          text: "🟢 Qabul qilish",
+          callback_data: `po_status:${order.id}:In_Production`,
+        },
+        {
+          text: "❌ Rad etish",
+          callback_data: `po_status:${order.id}:Cancelled`,
+        },
+      ],
+    ];
+  }
+
+  const replyMarkup = {
+    inline_keyboard: initialButtons,
+  };
+
+  const isImage = Boolean(
+    fileUrl &&
+      (/\.(png|jpe?g|webp|gif)$/i.test(fileName || fileUrl) ||
+        fileUrl.startsWith("data:image/"))
+  );
+
+  const sendResult = await sendTelegramMessage({
+    chatId: linkedChat.id,
+    text: fullText,
+    senderName: "PrintGoo Ta'minot",
+    replyMarkup,
+    photoUrl: isImage && fileUrl ? fileUrl : undefined,
+    documentUrl: !isImage && fileUrl ? fileUrl : undefined,
+    fileName: fileName || undefined,
+    parseMode: "HTML",
+  });
+
+  if (sendResult.success && sendResult.message) {
+    await db
+      .update(supplierOrders)
+      .set({
+        telegramChatId: linkedChat.chatId,
+        telegramMessageId: sendResult.message.telegramMessageId,
+        telegramSentAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(supplierOrders.id, order.id));
+  }
+
+  return sendResult;
+}
+
+/**
  * 5. Telegram Webhook yangilanishini qayta ishlash (Incoming Update)
  */
 export async function processTelegramWebhookUpdate(
@@ -820,15 +1403,175 @@ export async function processTelegramWebhookUpdate(
   companyCode: string = "PRINTGOO"
 ): Promise<{ success: boolean; handled: boolean; error?: string }> {
   try {
+    const callbackQuery = update.callback_query;
     const message = update.message || update.edited_message || update.channel_post;
     const myChatMember = update.my_chat_member;
+
+    const companyId = await getCompanyIdByCode(companyCode);
+    const token = await getEffectiveTelegramBotToken(companyCode);
+
+    // ── 1. Inline tugma bosilishi (Callback Query) ───────────────────────────
+    if (callbackQuery) {
+      const cqData = String(callbackQuery.data || "");
+      if (cqData.startsWith("po_status:")) {
+        const [, orderId, newStatus] = cqData.split(":");
+        const validStatuses = ["In_Production", "Cancelled", "Ready", "Delivered"];
+        if (orderId && validStatuses.includes(newStatus)) {
+          const order = await db.query.supplierOrders.findFirst({
+            where: and(eq(supplierOrders.companyId, companyId), eq(supplierOrders.id, orderId)),
+            with: { supplier: true },
+          });
+
+          if (order) {
+            const fromUser = callbackQuery.from;
+            const userName =
+              [fromUser?.first_name, fromUser?.last_name].filter(Boolean).join(" ") ||
+              fromUser?.username ||
+              "Ta'minotchi";
+            const confirmedBy = fromUser?.username ? `${userName} (@${fromUser.username})` : userName;
+
+            let statusLabel = "";
+            let emoji = "";
+            let nextKeyboard = { inline_keyboard: [] as any[] };
+            let notifSeverity: "info" | "warning" | "success" = "info";
+
+            if (newStatus === "In_Production") {
+              statusLabel = "Qabul qilindi (Jarayonda)";
+              emoji = "🟢";
+              nextKeyboard = {
+                inline_keyboard: [
+                  [
+                    {
+                      text: "✅ Tayyor bo'ldi",
+                      callback_data: `po_status:${order.id}:Ready`,
+                    },
+                  ],
+                ],
+              };
+            } else if (newStatus === "Cancelled") {
+              statusLabel = "Rad etildi / Qabul qilinmadi";
+              emoji = "❌";
+              nextKeyboard = { inline_keyboard: [] };
+              notifSeverity = "warning";
+            } else if (newStatus === "Ready") {
+              statusLabel = "Tayyor bo'ldi";
+              emoji = "✅";
+              nextKeyboard = {
+                inline_keyboard: [
+                  [
+                    {
+                      text: "🚚 Yo'lga chiqdi / Kuryerda",
+                      callback_data: `po_status:${order.id}:Delivered`,
+                    },
+                  ],
+                ],
+              };
+            } else if (newStatus === "Delivered") {
+              statusLabel = "Yo'lga chiqdi (Yetkazildi)";
+              emoji = "🚚";
+              nextKeyboard = { inline_keyboard: [] };
+            }
+
+            // Baza statusini yangilash
+            await db
+              .update(supplierOrders)
+              .set({
+                status: newStatus as any,
+                telegramConfirmedBy: confirmedBy,
+                updatedAt: new Date(),
+              })
+              .where(eq(supplierOrders.id, order.id));
+
+            // Telegram bot orqali javob (Toast) qaytarish
+            if (token && !token.includes("mock") && !token.includes("test")) {
+              try {
+                await fetch(`${TELEGRAM_API_BASE}/bot${token}/answerCallbackQuery`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    callback_query_id: callbackQuery.id,
+                    text: `Holat: ${statusLabel}`,
+                    show_alert: false,
+                  }),
+                });
+
+                // Xabarni tahrirlab yangi statusni belgilash
+                const originalMsg = callbackQuery.message;
+                if (originalMsg) {
+                  const nowStr = new Date().toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" });
+                  const baseText = originalMsg.text || originalMsg.caption || "";
+                  const updatedText = `${baseText}\n\n${emoji} <b>Holat:</b> ${statusLabel} (${nowStr})\n👤 <b>Mas'ul:</b> ${confirmedBy}`;
+
+                  if (originalMsg.caption !== undefined) {
+                    await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageCaption`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        chat_id: originalMsg.chat.id,
+                        message_id: originalMsg.message_id,
+                        caption: updatedText,
+                        parse_mode: "HTML",
+                        reply_markup: nextKeyboard,
+                      }),
+                    });
+                  } else {
+                    await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageText`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        chat_id: originalMsg.chat.id,
+                        message_id: originalMsg.message_id,
+                        text: updatedText,
+                        parse_mode: "HTML",
+                        reply_markup: nextKeyboard,
+                      }),
+                    });
+                  }
+                }
+              } catch (apiErr) {
+                console.error("[processTelegramWebhookUpdate] CallbackQuery handling error:", apiErr);
+              }
+            }
+
+            // Menejerlarga ERP bildirishnoma uzatish
+            try {
+              await emitNotification(
+                {
+                  dedupKey: `po-status-${order.id}-${newStatus}`,
+                  severity: notifSeverity,
+                  category: "production",
+                  eventType: "telegram_message",
+                  entityCode: order.orderNo,
+                  title: `Ta'minotchi • ${statusLabel}`,
+                  description: `${order.orderNo} (${order.title}) — ${confirmedBy} tomonidan "${statusLabel}" holatiga o'tkazildi.`,
+                  link: {
+                    module: "production",
+                    subModule: "tooling-orders",
+                  },
+                  targetTab: {
+                    id: "tab-production-tooling-orders",
+                    title: "Tooling & CTP Orders",
+                    type: "registry",
+                    module: "production",
+                  },
+                },
+                companyCode
+              );
+            } catch (notifErr) {
+              console.warn("[processTelegramWebhookUpdate] emitNotification error:", notifErr);
+            }
+
+            return { success: true, handled: true };
+          }
+        }
+      }
+      return { success: true, handled: false };
+    }
 
     // Agar na xabar va na guruhga a'zo bo'lish hodisasi bo'lsa
     if (!message && !myChatMember) {
       return { success: true, handled: false };
     }
-
-    const companyId = await getCompanyIdByCode(companyCode);
 
     // Agar bot guruhga qo'shilgan hodisasi bo'lsa (my_chat_member)
     if (!message && myChatMember) {

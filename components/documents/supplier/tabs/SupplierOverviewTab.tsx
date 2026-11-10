@@ -1,18 +1,13 @@
 "use client";
 
-import React from "react";
+import React, { useMemo, useState, useRef } from "react";
+import { cn } from "cn";
 import { Input } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SmartCombobox, type ComboboxItem } from "@/components/ui/smart-combobox";
 import { Badge } from "@/components/ui/badge";
 import {
   Building2,
@@ -21,16 +16,66 @@ import {
   User,
   CreditCard,
   MapPin,
-  FileText,
   Scale,
   Landmark,
   UserCheck,
   ShieldAlert,
+  Upload,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import {
   SUPPLIER_CATEGORY_LABELS,
 } from "@/components/crm/SupplierDetailModal";
 import type { SupplierRecord, SupplierCategory } from "@/lib/server/supplierService";
+import { useWorkspaceStore } from "@/store/workspaceStore";
+import { LinkedTelegramGroupCard } from "@/components/documents/common/LinkedTelegramGroupCard";
+
+const SUPPLIER_CATEGORY_DESCRIPTIONS: Record<SupplierCategory, string> = {
+  raw_materials: "Melovanniy qog'oz, karton, o'z-o'zidan yopishqoq va rulon xomashyo",
+  cmyk_inks: "CMYK/Pantone bo'yoqlar, UF/suvli lak va bosma kimyosi",
+  ctp_prepress: "Ofset bosma uchun CTP alyuminiy formalar",
+  die_tooling: "Kesish shtamplari, bigovka chizg'ichlari va pichoq qoliplari",
+  cliche_stamping: "Issiq folga bosish va kongrev bo'rttirma klishelari",
+  outsourcing: "Tashqi laminatsiya, UF laklash, muqovalash va tikish",
+  logistics: "Yuk tashish, ekspeditorlik va kuryerlik xizmati",
+  spare_parts: "Poligrafiya dastgohlari ehtiyot qismlari va texnik servis",
+  other: "Yordamchi materiallar va umumiy ta'minot",
+};
+
+const SUPPLIER_STATUS_OPTIONS: ComboboxItem[] = [
+  {
+    value: "Active",
+    label: "Faol",
+    dot: "bg-emerald-500",
+    description: "Doimiy hamkorlikdagi ta'minotchi",
+  },
+  {
+    value: "Blocked",
+    label: "Bloklangan",
+    dot: "bg-rose-500",
+    description: "Stop-list — buyurtma va to'lovlar cheklangan",
+  },
+  {
+    value: "Archived",
+    label: "Arxiv",
+    dot: "bg-zinc-400",
+    description: "Faoliyati to'xtatilgan ta'minotchi",
+  },
+];
+
+const SUPPLIER_CURRENCY_OPTIONS: ComboboxItem[] = [
+  {
+    value: "UZS",
+    label: "O'zbekiston so'mi",
+    code: "UZS",
+  },
+  {
+    value: "USD",
+    label: "AQSH dollari",
+    code: "USD",
+  },
+];
 
 interface SupplierOverviewTabProps {
   supplier: SupplierRecord;
@@ -52,9 +97,109 @@ export function SupplierOverviewTab({
   onNavigateTab,
   onOpenPaymentModal,
 }: SupplierOverviewTabProps) {
+  const { addNotification } = useWorkspaceStore();
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+
+  const handleLogoUpload = async (file: File) => {
+    if (!file) return;
+    const allowed = [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+      "image/svg+xml",
+      "image/gif",
+    ];
+    if (!allowed.includes(file.type)) {
+      addNotification({
+        title: "Xatolik",
+        description: "Faqat PNG, JPG, WebP yoki SVG rasmlari qabul qilinadi.",
+        severity: "error",
+      });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      addNotification({
+        title: "Xatolik",
+        description: "Rasm hajmi 5MB dan oshmasligi kerak.",
+        severity: "error",
+      });
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("supplierId", supplier.id || "");
+
+      const res = await fetch("/api/v1/crm/suppliers/logo", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Rasmni yuklab bo'lmadi");
+      }
+
+      onChange({ logoUrl: data.url });
+      addNotification({
+        title: "Rasm yuklandi",
+        description: "Ta'minotchi rasmi muvaffaqiyatli saqlandi.",
+        severity: "success",
+      });
+    } catch (err: any) {
+      addNotification({
+        title: "Yuklashda xatolik",
+        description: err.message || "Rasmni serverga yuklashda xatolik yuz berdi.",
+        severity: "error",
+      });
+    } finally {
+      setIsUploadingLogo(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDeleteLogo = async () => {
+    const currentLogo = supplier.logoUrl;
+    setIsUploadingLogo(true);
+    try {
+      onChange({ logoUrl: "" });
+      if (currentLogo) {
+        await fetch(
+          `/api/v1/crm/suppliers/logo?supplierId=${encodeURIComponent(supplier.id || "")}&logoUrl=${encodeURIComponent(currentLogo)}`,
+          { method: "DELETE" }
+        );
+      }
+      addNotification({
+        title: "Rasm o'chirildi",
+        severity: "info",
+      });
+    } catch (err: any) {
+      console.warn("Failed to delete supplier logo on server:", err);
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
   const catConfig =
     SUPPLIER_CATEGORY_LABELS[supplier.category as SupplierCategory] ||
     SUPPLIER_CATEGORY_LABELS.raw_materials;
+
+  const categoryOptions = useMemo<ComboboxItem[]>(() => {
+    return (Object.entries(SUPPLIER_CATEGORY_LABELS) as [
+      SupplierCategory,
+      { label: string; dot: string; badge: string }
+    ][]).map(([key, cfg]) => ({
+      value: key,
+      label: cfg.label,
+      dot: cfg.dot,
+      description: SUPPLIER_CATEGORY_DESCRIPTIONS[key],
+    }));
+  }, []);
 
   const curr = supplier.currency || "UZS";
   const fmtMoney = (val: number) => new Intl.NumberFormat("uz-UZ").format(val);
@@ -71,7 +216,7 @@ export function SupplierOverviewTab({
         <div className="flex items-center gap-3 p-3 rounded-md bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-900 text-rose-900 dark:text-rose-200 text-xs">
           <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
           <div className="flex-1 min-w-0">
-            <span className="font-bold">DIQQAT: Ushbu ta&apos;minotchi BLOKLANGAN (Stop-List)!</span>{" "}
+            <span className="font-bold">DIQQAT: Ushbu ta&apos;minotchi BLOKLANGAN!</span>{" "}
             <span>
               Yangi buyurtmalar va to&apos;lovlar to&apos;xtatilgan. Rahbariyat ruxsatisiz xarid amalga oshirilmaydi.
             </span>
@@ -84,7 +229,7 @@ export function SupplierOverviewTab({
         <div className="bg-card border border-border rounded-md p-3 flex items-center justify-between">
           <div>
             <div className="text-[11px] text-muted-foreground font-medium">
-              Boshlang&apos;ich qoldiq (Opening)
+              Boshlang&apos;ich qoldiq
             </div>
             <div className="font-mono text-base font-bold mt-0.5">
               {fmtMoney(openingBalance)} {curr}
@@ -98,7 +243,7 @@ export function SupplierOverviewTab({
         <div className="bg-card border border-border rounded-md p-3 flex items-center justify-between">
           <div>
             <div className="text-[11px] text-muted-foreground font-medium">
-              Jami Yetkazilgan (+Kt / Kirim)
+              Jami yetkazilgan (+Kt)
             </div>
             <div className="font-mono text-base font-bold text-primary mt-0.5">
               +{fmtMoney(totalCredit)} {curr}
@@ -112,7 +257,7 @@ export function SupplierOverviewTab({
         <div className="bg-card border border-border rounded-md p-3 flex items-center justify-between">
           <div>
             <div className="text-[11px] text-muted-foreground font-medium">
-              Jami To&apos;langan (-Dt / Chiqim)
+              Jami to&apos;langan (-Dt)
             </div>
             <div className="font-mono text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
               -{fmtMoney(totalDebit)} {curr}
@@ -126,7 +271,7 @@ export function SupplierOverviewTab({
         <div className="bg-card border border-border rounded-md p-3 flex items-center justify-between">
           <div>
             <div className="text-[11px] text-muted-foreground font-medium">
-              Yakuniy Saldo (Balance)
+              Yakuniy saldo
             </div>
             <div
               className={`font-mono text-base font-bold mt-0.5 ${
@@ -156,7 +301,7 @@ export function SupplierOverviewTab({
                 className="h-6 px-2 text-[11px] gap-1 cursor-pointer"
               >
                 <Scale className="w-3 h-3 text-primary" />
-                <span>Akt Sverka</span>
+                <span>Akt sverka</span>
               </Button>
             )}
             {onOpenPaymentModal && (
@@ -181,7 +326,7 @@ export function SupplierOverviewTab({
             <div className="flex items-center gap-2">
               <Building2 className="w-4 h-4 text-primary" />
               <span className="font-semibold text-xs text-foreground">
-                1. Korxona va Identifikatsiya
+                Korxona rekvizitlari
               </span>
             </div>
             <Badge variant="outline" className={`text-[10px] py-0 px-1.5 ${catConfig.badge}`}>
@@ -190,9 +335,108 @@ export function SupplierOverviewTab({
             </Badge>
           </div>
 
+          {/* Ta'minotchi rasmi / Logotipi (Upload Box) */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingLogo(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setIsDraggingLogo(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDraggingLogo(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) handleLogoUpload(file);
+            }}
+            className={cn(
+              "flex items-center gap-3 p-2.5 rounded-md border bg-muted/30 transition-colors",
+              isDraggingLogo ? "border-primary bg-primary/5" : "border-border"
+            )}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleLogoUpload(file);
+              }}
+            />
+
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="relative w-14 h-14 rounded-md border border-border bg-background flex items-center justify-center shrink-0 cursor-pointer overflow-hidden group hover:border-primary/60 transition-colors"
+              title="Rasm yuklash yoki almashtirish"
+            >
+              {supplier.logoUrl ? (
+                <img
+                  src={supplier.logoUrl}
+                  alt={supplier.name || "Ta'minotchi rasmi"}
+                  className="w-full h-full object-contain p-1"
+                />
+              ) : (
+                <Building2 className="w-6 h-6 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
+              )}
+              {isUploadingLogo && (
+                <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-foreground">
+                  Ta&apos;minotchi rasmi
+                </span>
+                {supplier.logoUrl && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] h-4 px-1.5 text-emerald-600 dark:text-emerald-400 font-normal"
+                  >
+                    Yuklangan
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                PNG, JPG, WebP yoki SVG (maks. 5MB)
+              </p>
+              <div className="flex items-center gap-1.5 pt-0.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isUploadingLogo}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-6 px-2 text-[11px] gap-1 cursor-pointer"
+                >
+                  <Upload className="w-3 h-3 text-primary" />
+                  <span>{supplier.logoUrl ? "O'zgartirish" : "Rasm yuklash"}</span>
+                </Button>
+                {supplier.logoUrl && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isUploadingLogo}
+                    onClick={handleDeleteLogo}
+                    className="h-6 px-1.5 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>O&apos;chirish</span>
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Ta&apos;minotchi / Brend nomi *
+              Ta&apos;minotchi nomi *
             </Label>
             <Input
               value={supplier.name}
@@ -204,33 +448,24 @@ export function SupplierOverviewTab({
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Faoliyat yo&apos;nalishi / Toifasi *
+              Faoliyat toifasi *
             </Label>
-            <Select
+            <SmartCombobox
               value={supplier.category}
-              onValueChange={(val) => {
+              onChange={(val) => {
                 if (val) onChange({ category: val as SupplierCategory });
               }}
-            >
-              <SelectTrigger className="h-8 text-xs bg-background">
-                <SelectValue placeholder="Toifani tanlang" />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(SUPPLIER_CATEGORY_LABELS).map(([k, v]) => (
-                  <SelectItem key={k} value={k} className="text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${v.dot}`} />
-                      <span>{v.label}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={categoryOptions}
+              placeholder="Toifani tanlang..."
+              searchPlaceholder="Toifa bo'yicha qidirish..."
+              allowCustom={false}
+              className="h-8 text-xs bg-background"
+            />
           </div>
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              STIR (INN) soliq raqami
+              STIR raqami
             </Label>
             <Input
               value={supplier.tin || ""}
@@ -254,29 +489,19 @@ export function SupplierOverviewTab({
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Ta&apos;minotchi maqomi (Status)
+              Ta&apos;minotchi maqomi
             </Label>
-            <Select
+            <SmartCombobox
               value={supplier.status}
-              onValueChange={(val: any) => {
-                if (val) onChange({ status: val });
+              onChange={(val) => {
+                if (val) onChange({ status: val as SupplierRecord["status"] });
               }}
-            >
-              <SelectTrigger className="h-8 text-xs bg-background">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Active" className="text-xs">
-                  Faol (Hamkorlikda)
-                </SelectItem>
-                <SelectItem value="Blocked" className="text-xs text-rose-600">
-                  Bloklangan (Stop-List)
-                </SelectItem>
-                <SelectItem value="Archived" className="text-xs text-muted-foreground">
-                  Arxiv / Faoliyatsiz
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              options={SUPPLIER_STATUS_OPTIONS}
+              placeholder="Maqomni tanlang"
+              searchable={false}
+              allowCustom={false}
+              className="h-8 text-xs bg-background"
+            />
           </div>
         </div>
 
@@ -285,13 +510,13 @@ export function SupplierOverviewTab({
           <div className="flex items-center gap-2 border-b border-border pb-2">
             <CreditCard className="w-4 h-4 text-primary" />
             <span className="font-semibold text-xs text-foreground">
-              2. Bank va Hisob-kitob Rekvizitlari
+              Bank va moliya
             </span>
           </div>
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Xizmat ko&apos;rsatuvchi Bank
+              Xizmat ko&apos;rsatuvchi bank
             </Label>
             <div className="relative">
               <Landmark className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
@@ -318,7 +543,7 @@ export function SupplierOverviewTab({
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              MFO (Bank kodi)
+              MFO kodi
             </Label>
             <Input
               value={supplier.mfo || ""}
@@ -330,31 +555,24 @@ export function SupplierOverviewTab({
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Asosiy hisob-kitob valyutasi
+              Hisob-kitob valyutasi
             </Label>
-            <Select
-              value={supplier.currency}
-              onValueChange={(val) => {
+            <SmartCombobox
+              value={supplier.currency || "UZS"}
+              onChange={(val) => {
                 if (val) onChange({ currency: val });
               }}
-            >
-              <SelectTrigger className="h-8 text-xs bg-background">
-                <SelectValue placeholder="Valyuta" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="UZS" className="text-xs">
-                  UZS (O&apos;zbekiston so&apos;mi)
-                </SelectItem>
-                <SelectItem value="USD" className="text-xs">
-                  USD (AQSH Dollari $)
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              options={SUPPLIER_CURRENCY_OPTIONS}
+              placeholder="Valyuta"
+              searchable={false}
+              allowCustom={false}
+              className="h-8 text-xs bg-background"
+            />
           </div>
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Boshlang&apos;ich qoldiq (Opening Saldo)
+              Boshlang&apos;ich qoldiq
             </Label>
             <Input
               type="number"
@@ -367,7 +585,7 @@ export function SupplierOverviewTab({
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              To&apos;lov shartlari & muddatlari
+              To&apos;lov shartlari
             </Label>
             <Input
               value={supplier.paymentTerms || ""}
@@ -383,13 +601,13 @@ export function SupplierOverviewTab({
           <div className="flex items-center gap-2 border-b border-border pb-2">
             <UserCheck className="w-4 h-4 text-primary" />
             <span className="font-semibold text-xs text-foreground">
-              3. Aloqa va Manzil Ma&apos;lumotlari
+              Aloqa va manzil
             </span>
           </div>
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Mas&apos;ul shaxs (Menejer / Usta)
+              Mas&apos;ul shaxs
             </Label>
             <div className="relative">
               <User className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
@@ -419,7 +637,7 @@ export function SupplierOverviewTab({
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Email / Telegram username
+              Email / Telegram
             </Label>
             <div className="relative">
               <Mail className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
@@ -434,7 +652,7 @@ export function SupplierOverviewTab({
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Ustaxona / Ofis manzili
+              Manzil
             </Label>
             <div className="relative">
               <MapPin className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
@@ -449,7 +667,7 @@ export function SupplierOverviewTab({
 
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              Qo&apos;shimcha izohlar va spetsifikatsiyalar
+              Qo&apos;shimcha izohlar
             </Label>
             <Textarea
               value={supplier.notes || ""}
@@ -461,6 +679,13 @@ export function SupplierOverviewTab({
           </div>
         </div>
       </div>
+
+      {/* Telegram Guruh Bloki */}
+      <LinkedTelegramGroupCard
+        entityType="supplier"
+        entityId={supplier.id}
+        entityName={supplier.name}
+      />
     </div>
   );
 }

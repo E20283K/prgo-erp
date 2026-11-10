@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { companies } from "./core";
-import { clients } from "./crm";
+import { clients, suppliers } from "./crm";
 import { workOrders } from "./production";
 
 // ─── Enums: Telegram Guruhlari & Xabarlari ───────────────────────────────────
@@ -38,6 +38,8 @@ export interface TelegramChatSettings {
   notifyProofReady?: boolean;
   notifyProductionDone?: boolean;
   notifyPaymentReminder?: boolean;
+  notifyPoCreated?: boolean;
+  notifyPoReady?: boolean;
 }
 
 export const telegramChats = pgTable(
@@ -52,8 +54,11 @@ export const telegramChats = pgTable(
     type: telegramChatTypeEnum("type").default("supergroup").notNull(),
     username: varchar("username", { length: 128 }),       // Telegram username (agar bo'lsa)
     photoUrl: text("photo_url"),                           // Telegram chat/guruh avatari URL
+    chatCategory: varchar("chat_category", { length: 32 }).default("client").notNull(), // "client" | "supplier" | "internal"
     clientId: uuid("client_id")
       .references(() => clients.id, { onDelete: "set null" }), // Bog'langan CRM mijozi
+    supplierId: uuid("supplier_id")
+      .references(() => suppliers.id, { onDelete: "set null" }), // Bog'langan ta'minotchi / hamkor
     assignedUserId: varchar("assigned_user_id", { length: 128 }), // Mas'ul menejer
     status: telegramChatStatusEnum("status").default("unlinked").notNull(),
     unreadCount: integer("unread_count").default(0).notNull(),
@@ -62,6 +67,8 @@ export const telegramChats = pgTable(
       notifyProofReady: true,
       notifyProductionDone: true,
       notifyPaymentReminder: false,
+      notifyPoCreated: true,
+      notifyPoReady: true,
     }).notNull(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     lastMessageSnippet: text("last_message_snippet"),
@@ -73,6 +80,8 @@ export const telegramChats = pgTable(
     uniqueIndex("telegram_chats_company_chat_id_uq").on(table.companyId, table.chatId),
     index("telegram_chats_company_idx").on(table.companyId),
     index("telegram_chats_client_idx").on(table.clientId),
+    index("telegram_chats_supplier_idx").on(table.supplierId),
+    index("telegram_chats_category_idx").on(table.chatCategory),
     index("telegram_chats_status_idx").on(table.status),
     index("telegram_chats_last_msg_idx").on(table.lastMessageAt),
   ]
@@ -148,6 +157,10 @@ export const telegramChatsRelations = relations(telegramChats, ({ one, many }) =
   client: one(clients, {
     fields: [telegramChats.clientId],
     references: [clients.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [telegramChats.supplierId],
+    references: [suppliers.id],
   }),
   messages: many(telegramMessages),
 }));

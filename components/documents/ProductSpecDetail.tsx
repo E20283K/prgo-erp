@@ -1896,12 +1896,12 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                         if (items.length === 0) return null;
                         return (
                           <CommandGroup key={cat} heading={cat} className="text-xs">
-                            {items.map((stock) => {
+                            {items.map((stock, stockIdx) => {
                               const isSelected = matDialogForm.name === stock.name;
                               return (
                                 <CommandItem
-                                  key={stock.sku}
-                                  value={`${stock.sku} ${stock.name} ${stock.sheetFormat || ""} ${stock.category}`}
+                                  key={`${stock.id || stock.sku}-${stock.location || ""}-${stockIdx}`}
+                                  value={`${stock.sku} ${stock.name} ${stock.sheetFormat || ""} ${stock.category} ${stock.location || ""} ${stock.id || stockIdx}`}
                                   onSelect={() => {
                                     handleSelectStockMaterial(stock);
                                     setIsMatSelectOpen(false);

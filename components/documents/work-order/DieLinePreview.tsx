@@ -15,7 +15,6 @@ import {
   UploadCloud,
   Eye,
   EyeOff,
-  Sparkles,
   RefreshCw,
   Image as ImageIcon,
 } from "lucide-react";
@@ -23,7 +22,6 @@ import {
   extractPdfPagesToImages,
   readFileAsDataUrl,
   getImageDimensions,
-  generateSampleRedFlagArtwork,
 } from "./utils/artworkExtractor";
 import {
   ProductShapeType,
@@ -168,14 +166,6 @@ export function DieLinePreview({
       setIsProcessingFile(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  };
-
-  const handleLoadSample = () => {
-    const sample = generateSampleRedFlagArtwork();
-    if (onArtworkChange) {
-      onArtworkChange(sample.front, sample.back, "red_flag_sample.pdf");
-    }
-    setViewMode("proof");
   };
 
   const safeW = Math.max(5, Number(width) || 50);
@@ -1573,18 +1563,6 @@ export function DieLinePreview({
           >
             <UploadCloud className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
             <span>{isProcessingFile ? "Yuklanmoqda..." : "PDF / Rasm yuklash"}</span>
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            onClick={handleLoadSample}
-            className="h-6 px-1.5 text-[10.5px] text-zinc-500 hover:text-foreground gap-1 cursor-pointer"
-            title="Red Flag hangtag namunasini tiklash"
-          >
-            <Sparkles className="w-3 h-3 text-amber-500" />
-            <span>Namuna</span>
           </Button>
         </div>
       </div>

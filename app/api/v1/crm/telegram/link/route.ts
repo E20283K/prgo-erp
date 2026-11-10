@@ -1,25 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
-import { linkTelegramChatToClient } from "@/lib/server/telegramService";
+import { linkTelegramChatToClient, linkTelegramChatToSupplier } from "@/lib/server/telegramService";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { chatId, clientId, assignedUserId } = body;
+    const { chatId, clientId, supplierId, assignedUserId } = body;
 
-    if (!chatId || !clientId) {
+    if (!chatId || (!clientId && !supplierId)) {
       return NextResponse.json(
-        { success: false, error: "chatId va clientId talab qilinadi" },
+        { success: false, error: "chatId va clientId yoki supplierId talab qilinadi" },
         { status: 400 }
       );
     }
 
-    const result = await linkTelegramChatToClient({
-      chatId,
-      clientId,
-      assignedUserId,
-    });
+    let result;
+    if (supplierId) {
+      result = await linkTelegramChatToSupplier({
+        chatId,
+        supplierId,
+        assignedUserId,
+      });
+    } else {
+      result = await linkTelegramChatToClient({
+        chatId,
+        clientId,
+        assignedUserId,
+      });
+    }
 
     if (!result.success) {
       return NextResponse.json(

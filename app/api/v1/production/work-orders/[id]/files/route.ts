@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { getWorkOrderAttachments, createWorkOrderAttachment } from "@/lib/server/workOrderService";
+import {
+  getWorkOrderAttachments,
+  createWorkOrderAttachment,
+  deleteWorkOrderAttachment,
+} from "@/lib/server/workOrderService";
 import { createPresignedUploadUrl, createPresignedDownloadUrl, type StorageBucketKey } from "@/lib/server/storage";
 import { db } from "@/db";
 import { workOrders } from "@/db/schema";
@@ -119,6 +123,62 @@ export async function POST(
     });
   } catch (error) {
     console.error("POST file attachment error:", error);
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : "Internal Server Error" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * Biriktirilgan faylni o'chirish (DB va MinIO S3 omboridan tozalash)
+ */
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: workOrderId } = await params;
+    const { searchParams } = new URL(request.url);
+    let attachmentId = searchParams.get("attachmentId") || searchParams.get("id");
+    let url = searchParams.get("url");
+
+    if (!attachmentId && !url) {
+      try {
+        const body = await request.json();
+        attachmentId = body.attachmentId || body.id;
+        url = body.url;
+      } catch (_) {}
+    }
+
+    if (!attachmentId && !url) {
+      return NextResponse.json(
+        { success: false, error: "attachmentId yoki url parametri kiritilishi shart" },
+        { status: 400 }
+      );
+    }
+
+    // docNo orqali real workOrderId (UUID) ni aniqlash
+    let targetWorkOrderId = workOrderId;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetWorkOrderId);
+    if (!isUuid) {
+      const order = await db.query.workOrders.findFirst({
+        where: (wo, { eq }) => eq(wo.docNo, targetWorkOrderId),
+      });
+      if (order) {
+        targetWorkOrderId = order.id;
+      }
+    }
+
+    const res = await deleteWorkOrderAttachment({
+      workOrderId: targetWorkOrderId,
+      attachmentId: attachmentId || undefined,
+      url: url || undefined,
+    });
+
+    return NextResponse.json(res);
+  } catch (error) {
+    console.error("DELETE file attachment error:", error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Internal Server Error" },
       { status: 500 }
