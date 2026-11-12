@@ -1706,27 +1706,19 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const handleShipmentTypeChange = (st: ShipmentType) => {
     if (isLocked) return;
     let defaultRecipient = doc.customer;
-    let defaultWo = doc.workOrder;
 
     if (st === "BranchTransfer") {
-      defaultRecipient = BRANCH_RECIPIENTS[0];
-      defaultWo = "— (Filiallararo)";
+      defaultRecipient = doc.customer || BRANCH_RECIPIENTS[0];
     } else if (st === "Outsourcing") {
-      defaultRecipient = SUBCONTRACTORS[0];
-      defaultWo = productionQueue[0]?.id || "WOOF-26-0351";
+      defaultRecipient = doc.customer || SUBCONTRACTORS[0];
     } else if (st === "VendorReturn") {
-      defaultRecipient = VENDORS[0];
-      defaultWo = "— (Reklamatsiya)";
-    } else if (st === "CustomerDelivery") {
-      defaultRecipient = crmCustomers[0]?.name || "Alpha Media Group LLC";
-      defaultWo = productionQueue[0]?.id || "WOOF-26-0351";
+      defaultRecipient = doc.customer || VENDORS[0];
     }
 
     setDoc((prev) => ({
       ...prev,
       shipmentType: st,
       customer: defaultRecipient,
-      workOrder: defaultWo,
     }));
     setTabUnsaved(tab.id, true);
   };
@@ -1850,63 +1842,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const handleCustomerChange = (newCustomer: string) => {
     if (isLocked) return;
 
-    setDoc((prev) => {
-      let nextWorkOrder = prev.workOrder;
-      let nextProduct = prev.product;
-      let nextItems = prev.items;
-
-      if ((prev.shipmentType || "CustomerDelivery") === "CustomerDelivery") {
-        if (!newCustomer) {
-          return {
-            ...prev,
-            customer: "",
-          };
-        }
-
-        const currentWo = productionQueue.find((w) => w.id === prev.workOrder);
-        const isMismatch = currentWo && currentWo.customer?.toLowerCase() !== newCustomer.toLowerCase();
-
-        if (isMismatch || !prev.workOrder || prev.workOrder.startsWith("—")) {
-          // Check if this newly picked customer has active orders
-          const customerOrders = productionQueue.filter(
-            (w) => w.customer && w.customer.toLowerCase() === newCustomer.toLowerCase()
-          );
-
-          if (customerOrders.length === 1) {
-            // Auto-select if only 1 order exists!
-            const autoWo = customerOrders[0];
-            const orderQty = autoWo.quantity || 1000;
-            nextWorkOrder = autoWo.id;
-            nextProduct = autoWo.product;
-            nextItems = [
-              {
-                id: `ship-item-${Date.now()}`,
-                sku: `PRN-${autoWo.id}`,
-                name: autoWo.product,
-                orderQty: orderQty,
-                shippedQty: orderQty,
-                unit: autoWo.unit || "pcs",
-                packageCount: Math.ceil(orderQty / 500) || 5,
-                packageType: "Gofroquti",
-                palletNo: "Pallet P-01",
-                notes: `${autoWo.id} buyurtmasi bo'yicha`,
-              },
-            ];
-          } else {
-            // Multiple or 0 orders: reset workOrder so user picks from the filtered list in WorkOrderPicker
-            nextWorkOrder = "";
-          }
-        }
-      }
-
-      return {
-        ...prev,
-        customer: newCustomer,
-        workOrder: nextWorkOrder,
-        product: nextProduct,
-        items: nextItems,
-      };
-    });
+    setDoc((prev) => ({
+      ...prev,
+      customer: newCustomer,
+    }));
     setTabUnsaved(tab.id, true);
   };
 
@@ -2293,7 +2232,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </span>
             <span className="text-muted-foreground">—</span>
             <span className="truncate text-foreground">
-              {doc.customer ? `${doc.customer} (${doc.product})` : (isDraft ? "Yangi chiqim hujjati" : "Ombor chiqimi")}
+              {doc.customer ? (doc.product ? `${doc.customer} (${doc.product})` : doc.customer) : (isDraft ? "Yangi chiqim hujjati" : "Ombor chiqimi")}
             </span>
           </div>
 
