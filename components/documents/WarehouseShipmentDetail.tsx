@@ -491,6 +491,8 @@ function RecipientCombobox({
   branches,
   subcontractors,
   vendors,
+  productionQueue = [],
+  warehouseShipments = [],
   disabled = false,
   isAutoLinked = false,
 }: {
@@ -501,27 +503,70 @@ function RecipientCombobox({
   branches: string[];
   subcontractors: string[];
   vendors: string[];
+  productionQueue?: ProductionQueueItem[];
+  warehouseShipments?: WarehouseShipmentRecord[];
   disabled?: boolean;
   isAutoLinked?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const options = useMemo(() => {
     if (shipmentType === "BranchTransfer") {
-      return branches.map((b) => ({ id: b, name: b, hint: "Filial" }));
+      return (branches || []).map((b, idx) => ({ id: `br-${idx}-${b}`, name: b, hint: "Filial" }));
     }
     if (shipmentType === "Outsourcing") {
-      return subcontractors.map((s) => ({ id: s, name: s, hint: "Subpudrat" }));
+      return (subcontractors || []).map((s, idx) => ({ id: `sub-${idx}-${s}`, name: s, hint: "Subpudrat" }));
     }
     if (shipmentType === "VendorReturn") {
-      return vendors.map((v) => ({ id: v, name: v, hint: "Ta'minotchi" }));
+      return (vendors || []).map((v, idx) => ({ id: `ven-${idx}-${v}`, name: v, hint: "Ta'minotchi" }));
     }
-    return customers.map((c) => ({
-      id: c.name,
-      name: c.name,
-      hint: c.tin ? `STIR: ${c.tin}` : c.industry,
-    }));
-  }, [shipmentType, branches, subcontractors, vendors, customers]);
+
+    const seen = new Set<string>();
+    const list: { id: string; name: string; hint?: string }[] = [];
+
+    // 1. CRM mijozlar
+    (customers || []).forEach((c, idx) => {
+      const name = (c.name || "").trim();
+      if (!name || seen.has(name.toLowerCase())) return;
+      seen.add(name.toLowerCase());
+      list.push({
+        id: c.id || `crm-${idx}-${name}`,
+        name,
+        hint: c.tin ? `STIR: ${c.tin}` : c.industry || undefined,
+      });
+    });
+
+    // 2. Buyurtmalar navbatidagi mijozlar
+    (productionQueue || []).forEach((pq, idx) => {
+      const name = (pq.customer || "").trim();
+      if (!name || seen.has(name.toLowerCase())) return;
+      seen.add(name.toLowerCase());
+      list.push({
+        id: `pq-${idx}-${name}`,
+        name,
+        hint: "Buyurtmachi",
+      });
+    });
+
+    // 3. Avvalgi jo'natmalardagi mijozlar
+    (warehouseShipments || []).forEach((ws, idx) => {
+      const name = (ws.customer || "").trim();
+      if (!name || seen.has(name.toLowerCase())) return;
+      seen.add(name.toLowerCase());
+      list.push({
+        id: `ws-${idx}-${name}`,
+        name,
+        hint: "Avvalgi jo'natmalar",
+      });
+    });
+
+    return list;
+  }, [shipmentType, branches, subcontractors, vendors, customers, productionQueue, warehouseShipments]);
+
+  const hasExactMatch = options.some(
+    (o) => o.name.toLowerCase() === searchQuery.trim().toLowerCase()
+  );
 
   return (
     <Popover open={open && !disabled} onOpenChange={disabled ? undefined : setOpen}>
@@ -541,13 +586,55 @@ function RecipientCombobox({
         }
       />
       <PopoverContent className="w-[320px] p-0 border border-border shadow-md" align="start">
-        <Command className="w-full">
-          <CommandInput placeholder="Qabul qiluvchini qidirish..." className="h-7 text-xs" />
+        <Command
+          className="w-full"
+          filter={(itemValue, search) => {
+            if (!search) return 1;
+            return itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0;
+          }}
+        >
+          <CommandInput
+            placeholder="Qabul qiluvchini qidirish..."
+            className="h-7 text-xs"
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+          />
           <CommandList className="max-h-60 p-1">
-            <CommandEmpty className="p-2.5 text-xs text-muted-foreground text-center">
-              Topilmadi
+            <CommandEmpty className="p-2 text-xs text-muted-foreground text-center">
+              {searchQuery.trim() ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(searchQuery.trim());
+                    setOpen(false);
+                    setSearchQuery("");
+                  }}
+                  className="w-full py-1.5 px-2 text-xs text-primary hover:bg-primary/10 rounded flex items-center justify-center gap-1.5 font-medium cursor-pointer"
+                >
+                  <Plus className="size-3.5" />
+                  <span className="truncate">Kiritish: &quot;{searchQuery.trim()}&quot;</span>
+                </button>
+              ) : (
+                <span>Qabul qiluvchi topilmadi</span>
+              )}
             </CommandEmpty>
             <CommandGroup>
+              {searchQuery.trim() && !hasExactMatch && (
+                <CommandItem
+                  value={searchQuery.trim()}
+                  onSelect={() => {
+                    onChange(searchQuery.trim());
+                    setOpen(false);
+                    setSearchQuery("");
+                  }}
+                  className="cursor-pointer text-xs py-1.5 px-2 flex items-center justify-between gap-2 text-primary font-medium border-b border-border/50 mb-1"
+                >
+                  <span className="flex items-center gap-1.5 truncate">
+                    <Plus className="size-3.5 shrink-0" />
+                    <span>Kiritish: &quot;{searchQuery.trim()}&quot;</span>
+                  </span>
+                </CommandItem>
+              )}
               {options.map((opt) => (
                 <CommandItem
                   key={opt.id}
@@ -556,6 +643,7 @@ function RecipientCombobox({
                   onSelect={() => {
                     onChange(opt.name);
                     setOpen(false);
+                    setSearchQuery("");
                   }}
                   className="cursor-pointer text-xs py-1.5 px-2 flex items-center justify-between gap-2"
                 >
@@ -960,6 +1048,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     productionQueue,
     upsertProductionQueueItem,
     crmCustomers,
+    loadCrmCustomers,
     warehouseStock,
     deliveryActs,
     warehousesList,
@@ -1003,6 +1092,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     }
     if ((!dispatchManifests || dispatchManifests.length === 0) && loadDispatchManifests) {
       loadDispatchManifests();
+    }
+    if ((!crmCustomers || crmCustomers.length === 0) && loadCrmCustomers) {
+      loadCrmCustomers();
     }
     if ((!finishedGoods || finishedGoods.length === 0) && loadFinishedGoods) {
       loadFinishedGoods();
@@ -2578,6 +2670,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             branches={branchList}
             subcontractors={SUBCONTRACTORS}
             vendors={vendorList}
+            productionQueue={productionQueue}
+            warehouseShipments={warehouseShipments}
             disabled={isLocked}
           />
         </div>

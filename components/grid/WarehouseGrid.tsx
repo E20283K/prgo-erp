@@ -104,6 +104,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     finishedGoods,
     inventoryCounts,
     crmCustomers,
+    loadCrmCustomers,
     loadWarehouseStock,
     loadWarehouseMovements,
     loadWarehouseReceipts,
@@ -802,6 +803,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       loadWarehouseShipments();
       loadDispatchManifests();
       loadCarriers();
+      if (loadCrmCustomers) loadCrmCustomers();
     } else if (type === 'stock-balance') {
       loadWarehouseStock();
     } else if (type === 'movements' || type === 'production-issue' || type === 'write-offs') {
