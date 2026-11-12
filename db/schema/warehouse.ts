@@ -38,7 +38,9 @@ export const warehouseReceiptStatusEnum = pgEnum("warehouse_receipt_status", [
 
 export const warehouseShipmentStatusEnum = pgEnum("warehouse_shipment_status", [
   "Draft",       // Qoralama
-  "Packed",      // Qadoqlangan
+  "Reserved",    // Zaxira band qilingan (qoldiq rezervda)
+  "Picking",     // Terilmoqda (rezerv saqlanadi)
+  "Packed",      // Qadoqlangan (rezerv saqlanadi)
   "Dispatched",  // Jo'natilgan
   "In Transit",  // Yo'lda
   "Delivered",   // Yetkazildi / Topshirildi (Tasdiqlangan)
@@ -249,6 +251,11 @@ export const warehouseShipments = pgTable(
     trackingNo: varchar("tracking_no", { length: 128 }),
     shippedBy: varchar("shipped_by", { length: 255 }),
     notes: text("notes"),
+    // Holat o'tishlari vaqt belgilari (audit)
+    reservedAt: timestamp("reserved_at", { withTimezone: true }),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

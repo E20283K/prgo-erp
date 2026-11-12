@@ -111,7 +111,7 @@ export interface DeliveryActRecord {
   carrier: string;
   driverName: string;
   recipientName: string;
-  status: "Draft" | "Pending Signature" | "Signed & Stamped" | "Disputed";
+  status: "Draft" | "Pending Signature" | "Signed & Stamped" | "Disputed" | "Cancelled";
   linkedShipmentId?: string;
   notes?: string;
   items: DeliveryActItem[];
@@ -174,6 +174,8 @@ export interface WarehouseShipmentRecord {
   warehouseId?: string | null;
   date: string;
   customer: string;
+  /** CRM clients.id (UUID) — CustomerDelivery uchun band qilish/jo'natishda majburiy */
+  clientId?: string | null;
   deliveryActId: string;
   tradingSaleId?: string;
   workOrder: string;
@@ -198,7 +200,7 @@ export interface WarehouseShipmentRecord {
   manifestNumber?: string;
   deliveryMode?: "manifest" | "dedicated" | "self" | "courier";
   scannedBoxes?: ScannedBoxEntry[];
-  status: "Draft" | "Packed" | "Dispatched" | "In Transit" | "Delivered";
+  status: "Draft" | "Reserved" | "Picking" | "Packed" | "Dispatched" | "In Transit" | "Delivered" | "Cancelled";
   shipmentType?: ShipmentType;
   items?: ShipmentLineItem[];
 }
@@ -1524,26 +1526,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(shipment),
       });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success) {
-          await get().loadWarehouseShipments();
-          await get().loadWarehouseStock();
-          get().loadFinanceData();
-          get().loadTradingData("sales");
-          get().loadTradingData("catalog");
-          return {
-            success: true,
-            shipment: json.shipment,
-            shipmentNumber: json.shipmentNumber || json.shipment?.shipmentNumber,
-            deliveryActId: json.deliveryActId || json.shipment?.deliveryActId,
-          };
-        }
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        return {
+          success: false,
+          error: json?.error || "Chiqim hujjatini saqlashda server xatoligi",
+        };
       }
-      return null;
+      await get().loadWarehouseShipments();
+      await get().loadWarehouseStock();
+      get().loadFinanceData();
+      get().loadTradingData("sales");
+      get().loadTradingData("catalog");
+      get().loadFinishedGoods?.();
+      return {
+        success: true,
+        shipment: json.shipment,
+        shipmentNumber: json.shipmentNumber || json.shipment?.shipmentNumber,
+        deliveryActId: json.deliveryActId || json.shipment?.deliveryActId,
+      };
     } catch (e) {
       console.error("Failed to save warehouse shipment:", e);
-      return null;
+      return { success: false, error: "Tarmoq xatoligi: server bilan bog'lanib bo'lmadi" };
     }
   },
 

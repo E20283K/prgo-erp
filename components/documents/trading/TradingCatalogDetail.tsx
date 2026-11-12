@@ -34,8 +34,13 @@ import {
   Warehouse,
   History,
   Truck,
+  Camera,
+  ZoomIn,
+  Trash2,
 } from "lucide-react";
-import { TradingCatalogItemRecord, TRADING_UNITS } from "./types";
+import { MaterialImageModal } from "@/components/documents/MaterialImageModal";
+import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
+import { TradingCatalogItemRecord, TradingCatalogImageRecord, TRADING_UNITS } from "./types";
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
@@ -77,6 +82,57 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Image & Dialog States
+  const [imageUrl, setImageUrl] = useState<string>(rawData.imageUrl || "");
+  const [images, setImages] = useState<TradingCatalogImageRecord[]>(rawData.images || []);
+  const [isImageModalOpen, setIsImageModalOpen] = useState<boolean>(false);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState<boolean>(false);
+  const directFileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const handleDirectFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("sku", rawData.sku || sku || "accessory");
+
+      const res = await fetch("/api/v1/trading/catalog/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const json = await res.json();
+      if (json.success && json.url) {
+        setImageUrl(json.url);
+        setTabUnsaved(tab.id, true);
+        addNotification({
+          title: "Rasm yuklandi",
+          description: `${file.name} serverga saqlandi.`,
+          severity: "success",
+        });
+        return;
+      }
+    } catch (_) {
+      // Fallback to FileReader
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      if (dataUrl) {
+        setImageUrl(dataUrl);
+        setTabUnsaved(tab.id, true);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = () => {
+    setImageUrl("");
+    setTabUnsaved(tab.id, true);
+  };
 
   // Form State
   const [sku] = useState<string>(rawData.sku || "");
@@ -308,6 +364,8 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
       colorCode,
       dimensions,
       supplier,
+      imageUrl: imageUrl || undefined,
+      images,
       notes,
     };
     const saved = await upsertTradingCatalogItemAsync(payload);
@@ -411,31 +469,134 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
       {/* SINGLE UNIFIED PAGE BODY */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* ALL TOP FORM FIELDS, PRICING & SPECS (NO SUB-TABS) */}
-        <div className="p-3 border-b border-border bg-card shrink-0 space-y-2.5 overflow-y-auto max-h-[38vh]">
-          {/* TOP METRIC CARDS */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
-              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Standart Narx:</span>
-              <div className="text-sm font-mono font-bold text-primary">{priceUZS.toLocaleString()} UZS</div>
-              <span className="text-[10px] text-muted-foreground font-mono">~${priceUSD.toFixed(3)} USD</span>
+        <div className="p-3 border-b border-border bg-card shrink-0 space-y-2.5 overflow-y-auto max-h-[42vh]">
+          {/* TOP SECTION: PHOTO CARD ON LEFT + METRICS ON RIGHT */}
+          <div className="flex flex-col sm:flex-row gap-3 items-start">
+            {/* PRODUCT PHOTO CONTAINER */}
+            <div className="w-full sm:w-36 shrink-0 flex flex-col gap-1.5">
+              <input
+                ref={directFileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleDirectFileUpload}
+              />
+              <div
+                className="w-full h-32 rounded border border-border bg-muted/20 overflow-hidden flex flex-col items-center justify-center relative group cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => {
+                  if (imageUrl) {
+                    setIsImageModalOpen(true);
+                  } else {
+                    setIsUploadDialogOpen(true);
+                  }
+                }}
+                title={imageUrl ? "Rasmni to'liq ko'rish (Zoom)" : "Rasm yuklash"}
+              >
+                {imageUrl ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={imageUrl}
+                      alt={name || "Aksessuar"}
+                      className="size-full object-contain p-1 select-none"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        className="h-6 w-6"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsImageModalOpen(true);
+                        }}
+                        title="Kattalashtirish"
+                      >
+                        <ZoomIn className="size-3" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        className="h-6 w-6"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsUploadDialogOpen(true);
+                        }}
+                        title="Almashtirish"
+                      >
+                        <Camera className="size-3" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="destructive"
+                        className="h-6 w-6"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveImage();
+                        }}
+                        title="O'chirish"
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-center p-2 text-muted-foreground gap-1">
+                    <Camera className="size-5 text-muted-foreground/60" />
+                    <span className="text-[10px] font-medium leading-tight">Rasm yuklash</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Photo Action Buttons */}
+              <div className="flex items-center gap-1 w-full">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsUploadDialogOpen(true)}
+                  className="h-6 px-1.5 text-[10px] flex-1 gap-1"
+                >
+                  <Camera className="size-3 text-muted-foreground" />
+                  <span>{imageUrl ? "Almashtirish" : "Yuklash"}</span>
+                </Button>
+                {imageUrl && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleRemoveImage}
+                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
+                    title="Rasmni o'chirish"
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                )}
+              </div>
             </div>
 
-            <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
-              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Ulgurji Narx (50k+):</span>
-              <div className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">{wholesalePriceUZS.toLocaleString()} UZS</div>
-              <span className="text-[10px] text-muted-foreground font-mono">Muntazam fabrikalarga</span>
-            </div>
+            {/* TOP METRIC CARDS */}
+            <div className="flex-1 grid grid-cols-2 lg:grid-cols-4 gap-2 w-full">
+              <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+                <span className="text-[10px] text-muted-foreground uppercase font-semibold">Standart Narx:</span>
+                <div className="text-sm font-mono font-bold text-primary">{priceUZS.toLocaleString()} UZS</div>
+                <span className="text-[10px] text-muted-foreground font-mono">~${priceUSD.toFixed(3)} USD</span>
+              </div>
 
-            <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
-              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Joriy Zaxira:</span>
-              <div className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">{stockQty.toLocaleString()} {unit}</div>
-              <span className="text-[10px] text-muted-foreground">Toshkent Omborida</span>
-            </div>
+              <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+                <span className="text-[10px] text-muted-foreground uppercase font-semibold">Ulgurji Narx (50k+):</span>
+                <div className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">{wholesalePriceUZS.toLocaleString()} UZS</div>
+                <span className="text-[10px] text-muted-foreground font-mono">Muntazam fabrikalarga</span>
+              </div>
 
-            <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
-              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Minimal Chegara:</span>
-              <div className="text-sm font-mono font-bold text-foreground">{minStockLevel.toLocaleString()} {unit}</div>
-              <span className="text-[10px] text-muted-foreground">Xavfsiz qoldiq</span>
+              <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+                <span className="text-[10px] text-muted-foreground uppercase font-semibold">Joriy Zaxira:</span>
+                <div className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">{stockQty.toLocaleString()} {unit}</div>
+                <span className="text-[10px] text-muted-foreground">Toshkent Omborida</span>
+              </div>
+
+              <div className="p-2 rounded border border-border bg-muted/20 space-y-0.5">
+                <span className="text-[10px] text-muted-foreground uppercase font-semibold">Minimal Chegara:</span>
+                <div className="text-sm font-mono font-bold text-foreground">{minStockLevel.toLocaleString()} {unit}</div>
+                <span className="text-[10px] text-muted-foreground">Xavfsiz qoldiq</span>
+              </div>
             </div>
           </div>
 
@@ -620,6 +781,40 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
           </div>
         </div>
       </div>
+
+      {/* Image Preview & Upload Modals */}
+      <MaterialImageModal
+        isOpen={isImageModalOpen && Boolean(imageUrl)}
+        onClose={() => setIsImageModalOpen(false)}
+        data={
+          imageUrl
+            ? {
+                imageUrl,
+                title: name || sku,
+                sku,
+                category,
+                spec: dimensions || material,
+                stock: stockQty,
+                unit,
+                location: origin,
+                supplier,
+                status: stockQty > minStockLevel ? "Active" : "Low Stock",
+              }
+            : null
+        }
+      />
+
+      <MaterialImageUploadDialog
+        isOpen={isUploadDialogOpen}
+        onClose={() => setIsUploadDialogOpen(false)}
+        materialName={name || "Aksessuar"}
+        materialSku={sku}
+        currentImageUrl={imageUrl}
+        onSave={(newUrl) => {
+          setImageUrl(newUrl);
+          setTabUnsaved(tab.id, true);
+        }}
+      />
     </div>
   );
 }

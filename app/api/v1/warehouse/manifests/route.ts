@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDispatchManifests, upsertDispatchManifest } from "@/lib/server/warehouseService";
+import { getRequestActor, errorHttpStatus } from "@/lib/server/requestActor";
 
 export const dynamic = "force-dynamic";
 
@@ -31,19 +32,22 @@ export async function POST(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "ALL";
 
-    const result = await upsertDispatchManifest(body, companyCode);
+    const actor = await getRequestActor(request);
+    const result = await upsertDispatchManifest(body, companyCode, actor);
     return NextResponse.json({
       success: true,
       data: result,
       message: "Yuk manifesti muvaffaqiyatli saqlandi",
     });
   } catch (error) {
+    const status = errorHttpStatus(error);
+    if (status === 500) console.error("[POST /api/v1/warehouse/manifests]", error);
     return NextResponse.json(
       {
         success: false,
         error: error instanceof Error ? error.message : "Yuk manifestini saqlashda xatolik",
       },
-      { status: 500 }
+      { status }
     );
   }
 }

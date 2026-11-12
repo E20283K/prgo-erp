@@ -105,6 +105,8 @@ import {
   AlertTriangle,
   Route,
   X,
+  BookmarkCheck,
+  Ban,
 } from "lucide-react";
 
 const DataEditor = dynamic(
@@ -1221,6 +1223,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       warehouseId: d.warehouseId || undefined,
       date: d.date || new Date().toISOString().split("T")[0],
       customer: defaultCustomer,
+      clientId: d.clientId || null,
       deliveryActId: d.deliveryActId || "",
       workOrder: defaultWo,
       product: defaultProduct,
@@ -1274,7 +1277,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const [isFgPickerOpen, setIsFgPickerOpen] = useState(false);
   const [isTradingPickerOpen, setIsTradingPickerOpen] = useState(false);
   const [isTradingLabelModalOpen, setIsTradingLabelModalOpen] = useState(false);
-  const isLocked = doc.status === "Delivered" || doc.status === "Dispatched" || doc.status === "In Transit";
+  const isLocked =
+    doc.status === "Delivered" || doc.status === "Dispatched" || doc.status === "In Transit" || doc.status === "Cancelled";
+  const isHolding = doc.status === "Reserved" || doc.status === "Picking" || doc.status === "Packed";
   const [isManifestDialogOpen, setIsManifestDialogOpen] = useState(false);
 
   const tradingItems = useMemo(() => {
@@ -1501,7 +1506,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         const res = await fetch("/api/v1/warehouse/scan-box", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ barcode: code }),
+          body: JSON.stringify({ barcode: code, companyId: doc.companyId || undefined }),
         });
         const data = await res.json();
 
@@ -1587,7 +1592,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         setIsScanning(false);
       }
     },
-    [applyScannedBoxesToDoc, doc.customer, doc.scannedBoxes, doc.shipmentType, isLocked, isScanning]
+    [applyScannedBoxesToDoc, doc.companyId, doc.customer, doc.scannedBoxes, doc.shipmentType, isLocked, isScanning]
   );
 
   // Global Hardware USB Barcode Scanner HID listener
@@ -1952,9 +1957,17 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const handleCustomerChange = (newCustomer: string) => {
     if (isLocked) return;
 
+    // CRM mijozi tanlansa, uning UUID si saqlanadi (server ham nom bo'yicha qayta tekshiradi)
+    const crmMatch = (crmCustomers || []).find(
+      (c) => (c.name || "").trim().toLowerCase() === newCustomer.trim().toLowerCase()
+    );
+    const crmId = crmMatch?.dbId || crmMatch?.id;
+    const nextClientId = crmId && /^[0-9a-f-]{36}$/i.test(crmId) ? crmId : null;
+
     setDoc((prev) => ({
       ...prev,
       customer: newCustomer,
+      clientId: nextClientId,
     }));
     setTabUnsaved(tab.id, true);
     if (isDraft) {
@@ -2019,6 +2032,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       orderQty: Math.min(1000, stockItem.available),
       shippedQty: Math.min(1000, stockItem.available),
       unit: stockItem.unit,
+      accountCode: "1010",
       packageCount: 1,
       packageType: "Karton quti / Poddon",
       palletNo: stockItem.location.slice(0, 15),
@@ -2044,7 +2058,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       quantity: totalShippedQty,
     };
     const res = await upsertWarehouseShipmentAsync(payload);
-    if (res && res.shipmentNumber) {
+    if (res?.success && res.shipmentNumber) {
       const realId = res.shipmentNumber;
       const generatedActId = res.deliveryActId || res.shipment?.deliveryActId || doc.deliveryActId;
       const updated = {
@@ -2053,6 +2067,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         status,
         quantity: totalShippedQty,
         deliveryActId: generatedActId,
+        clientId: res.shipment?.clientId ?? doc.clientId ?? null,
       };
       setDoc(updated);
       upsertWarehouseShipment(updated);
@@ -2063,6 +2078,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             ? "Ombor chiqimi yuborildi"
             : status === "Packed"
             ? "Tayyor yuk sifatida saqlandi"
+            : status === "Reserved"
+            ? "Qoldiq band qilindi"
+            : status === "Cancelled"
+            ? "Chiqim bekor qilindi"
             : "Ombor chiqimi saqlandi",
         description:
           generatedActId && status === "Dispatched"
@@ -2071,13 +2090,33 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         severity: "success",
       });
     } else {
+      const message = res?.error || "Serverga ma'lumotlarni saqlashda xatolik yuz berdi. Iltimos qayta urinib ko'ring.";
+      toast.add({
+        title: status === "Dispatched" ? "Chiqarib bo'lmadi" : "Saqlashda xatolik",
+        description: message,
+        type: "error",
+      });
       addNotification({
-        title: "Saqlashda xatolik",
-        description: "Serverga ma'lumotlarni saqlashda xatolik yuz berdi. Iltimos qayta urinib ko'ring.",
+        title: status === "Dispatched" ? "Chiqarib bo'lmadi" : "Saqlashda xatolik",
+        description: message,
         severity: "error",
       });
       return;
     }
+    // Storno: WO partiyasini yana "ready" holatiga qaytarish
+    const wasPosted = doc.status === "Dispatched" || doc.status === "In Transit";
+    if (doc.workOrder && wasPosted && status !== "Dispatched" && status !== "In Transit" && status !== "Delivered") {
+      const targetWo = productionQueue.find((w) => w.id === doc.workOrder || w.docNo === doc.workOrder);
+      if (targetWo?.deliveryBatches?.length) {
+        upsertProductionQueueItem({
+          ...targetWo,
+          deliveryBatches: targetWo.deliveryBatches.map((b) =>
+            b.linkedShipmentId === doc.id ? { ...b, status: "ready" as const, dispatchedAt: undefined } : b
+          ),
+        });
+      }
+    }
+
     // Live sync with Work Order delivery batches
     if (doc.workOrder && (status === "Dispatched" || status === "Delivered")) {
       const targetWo = productionQueue.find((w) => w.id === doc.workOrder || w.docNo === doc.workOrder);
@@ -2379,8 +2418,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 font-semibold"
                 : doc.status === "Dispatched" || doc.status === "In Transit"
                 ? "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30 font-semibold"
-                : doc.status === "Packed"
+                : isHolding
                 ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                : doc.status === "Cancelled"
+                ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30"
                 : "bg-muted text-muted-foreground"
             }`}
           >
@@ -2392,6 +2433,12 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 ? "Yuborilgan"
                 : doc.status === "Packed"
                 ? "Qadoqlangan"
+                : doc.status === "Picking"
+                ? "Terilmoqda"
+                : doc.status === "Reserved"
+                ? "Band qilingan"
+                : doc.status === "Cancelled"
+                ? "Bekor qilingan"
                 : "Qoralama"}
             </span>
           </Badge>
@@ -2538,22 +2585,54 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </Button>
           )}
 
-          {/* Revert Packed to Draft */}
-          {doc.status === "Packed" && (
+          {/* Rezervni bo'shatib qoralamaga qaytarish */}
+          {isHolding && (
             <Button
               size="sm"
               variant="ghost"
               onClick={() => saveShipmentInternal("Draft")}
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
-              title="Qoralama holatiga qaytarish"
+              title="Rezervni bo'shatib, qoralamaga qaytarish"
             >
               <RotateCcw className="size-3" />
               <span>Qoralama</span>
             </Button>
           )}
 
-          {/* Mark as Packed / Shipment Ready */}
+          {/* Bekor qilish (qoralama yoki rezerv holatidan) */}
+          {(doc.status === "Draft" || isHolding) && !isDraft && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (window.confirm(`${doc.id} chiqimi bekor qilinadi${isHolding ? ", band qilingan qoldiq bo'shatiladi" : ""}. Davom etilsinmi?`)) {
+                  saveShipmentInternal("Cancelled");
+                }
+              }}
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-red-600 gap-1"
+              title="Chiqimni bekor qilish"
+            >
+              <Ban className="size-3" />
+              <span>Bekor qilish</span>
+            </Button>
+          )}
+
+          {/* Qoldiqni band qilish */}
           {doc.status === "Draft" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => saveShipmentInternal("Reserved")}
+              className="h-7 px-2.5 text-xs gap-1.5 border-border"
+              title="Qoldiqni shu chiqim uchun band qilish"
+            >
+              <BookmarkCheck className="size-3.5" />
+              <span>Band qilish</span>
+            </Button>
+          )}
+
+          {/* Mark as Packed / Shipment Ready */}
+          {(doc.status === "Draft" || doc.status === "Reserved" || doc.status === "Picking") && (
             <Button
               size="sm"
               variant="outline"
@@ -2565,8 +2644,21 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </Button>
           )}
 
+          {/* Qayta ochish (bekor qilingandan) */}
+          {doc.status === "Cancelled" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => saveShipmentInternal("Draft")}
+              className="h-7 px-2.5 text-xs gap-1.5 border-border"
+            >
+              <RotateCcw className="size-3.5" />
+              <span>Qayta ochish</span>
+            </Button>
+          )}
+
           {/* Dispatch / Post Button */}
-          {doc.status !== "Dispatched" && doc.status !== "Delivered" && doc.status !== "In Transit" && (
+          {(doc.status === "Draft" || isHolding) && (
             <Button
               size="sm"
               onClick={handleDispatch}
@@ -2582,12 +2674,20 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => saveShipmentInternal("Packed")}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `${doc.id} chiqimi stornolanadi: qoldiq omborga qaytariladi, schet-faktura bekor qilinadi, savdo hujjati qoralamaga qaytadi. Hujjat "Qadoqlangan" (band qilingan) holatiga o'tadi. Davom etilsinmi?`
+                  )
+                ) {
+                  saveShipmentInternal("Packed");
+                }
+              }}
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
-              title="Qadoqlangan holatiga qaytarish"
+              title="Chiqimni bekor qilish: qoldiq omborga qaytariladi"
             >
               <RotateCcw className="size-3" />
-              <span>Qaytarish</span>
+              <span>Storno</span>
             </Button>
           )}
 

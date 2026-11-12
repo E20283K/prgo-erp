@@ -1503,7 +1503,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                     >
                       <span>Tayyor yuklar</span>
                       <span className="px-1 rounded-full text-[9px] bg-amber-500/20 text-amber-800 dark:text-amber-200 font-mono leading-none flex items-center justify-center">
-                        {(warehouseShipments || []).filter((s) => (s.status === "Packed" || s.status === "Draft") && !s.manifestId).length}
+                        {(warehouseShipments || []).filter((s) => (s.status === "Packed" || s.status === "Draft" || s.status === "Reserved" || s.status === "Picking") && !s.manifestId).length}
                       </span>
                     </button>
                     <button

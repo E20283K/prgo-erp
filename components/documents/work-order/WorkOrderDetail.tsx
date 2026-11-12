@@ -2479,15 +2479,16 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const handleCreateShipmentForBatch = useCallback(
     async (batch: WorkOrderDeliveryBatch, allocatedBoxIds?: string[]) => {
-      const { warehouseShipments, upsertWarehouseShipmentAsync } = useWorkspaceStore.getState();
-      const nextNum = 6010 + (warehouseShipments?.length || 0);
-      const newShipmentId = `SHP-${nextNum}`;
+      const { upsertWarehouseShipmentAsync } = useWorkspaceStore.getState();
       const qty = Number(batch.packedQty || batch.quantity) || 0;
       const currentDocNo = docNo || data.docNo || tab.id;
 
+      // Raqamni server (numberingService: SHP-YY-NNNN) beradi
       const shipmentData = {
-        id: newShipmentId,
-        shipmentNumber: newShipmentId,
+        id: "",
+        shipmentNumber: "",
+        shipmentType: "CustomerDelivery",
+        clientId: (data as any).clientId || undefined,
         date: new Date().toISOString().split("T")[0],
         status: "Draft",
         customerName: formData.customer,
@@ -2510,10 +2511,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         ],
       };
 
-      if (upsertWarehouseShipmentAsync) {
-        await upsertWarehouseShipmentAsync(shipmentData);
+      const saved = upsertWarehouseShipmentAsync ? await upsertWarehouseShipmentAsync(shipmentData) : null;
+      if (!saved?.success || !saved.shipmentNumber) {
+        addNotification({
+          title: "Chiqim yaratilmadi",
+          description: saved?.error || "Serverda xatolik yuz berdi.",
+          severity: "error",
+        });
+        return;
       }
+      const newShipmentId = saved.shipmentNumber;
 
+      // Chiqim hali qoralama: partiya "ready" bo'ladi; "dispatched" faqat ombor chiqarganda qo'yiladi
       const currentBatches = formData.deliveryBatches || [];
       const updatedBatches = currentBatches.map((b) =>
         b.id === batch.id
@@ -2521,8 +2530,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               ...b,
               linkedShipmentId: newShipmentId,
               linkedShipmentNo: newShipmentId,
-              dispatchedQty: qty,
-              status: "dispatched" as const,
+              status: "ready" as const,
             }
           : b
       );
@@ -2535,7 +2543,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         type: "warehouse-shipment",
         module: "warehouse",
         isUnsaved: false,
-        documentData: shipmentData,
+        documentData: { ...shipmentData, id: newShipmentId, shipmentNumber: newShipmentId, customer: formData.customer },
       });
 
       addNotification({

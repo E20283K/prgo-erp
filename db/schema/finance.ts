@@ -37,6 +37,7 @@ export const deliveryActStatusEnum = pgEnum("finance_delivery_act_status", [
   "pending_signature",
   "signed",
   "disputed",
+  "cancelled", // Ombor chiqimi stornosi natijasida bekor qilingan
 ]);
 
 export const settlementStatusEnum = pgEnum("finance_settlement_status", [

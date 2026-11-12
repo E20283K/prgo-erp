@@ -101,6 +101,17 @@ export interface TradingImportBatchRecord {
   notes?: string;
 }
 
+export interface TradingCatalogImageRecord {
+  id: string;
+  catalogId?: string;
+  imageUrl: string;
+  thumbnailUrl?: string;
+  title?: string;
+  isPrimary?: boolean;
+  sortOrder?: number;
+  createdAt?: string;
+}
+
 export interface TradingCatalogItemRecord {
   id: string;
   sku: string;
@@ -118,6 +129,8 @@ export interface TradingCatalogItemRecord {
   colorCode?: string;
   dimensions?: string;
   supplier?: string;
+  imageUrl?: string;
+  images?: TradingCatalogImageRecord[];
   notes?: string;
 }
 

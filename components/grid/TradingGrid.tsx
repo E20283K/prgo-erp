@@ -352,6 +352,7 @@ export function TradingGrid({ type }: TradingGridProps) {
     } else {
       // catalog
       cols = [
+        { id: "image", title: "Rasm", width: 56, icon: GridColumnIcon.HeaderImage },
         { id: "sku", title: "Artikul", width: 130, icon: GridColumnIcon.HeaderReference },
         { id: "name", title: "Aksessuar Nomi", width: 280, icon: GridColumnIcon.HeaderString },
         { id: "category", title: "Kategoriya", width: 120, icon: GridColumnIcon.HeaderSingleValue },
@@ -364,6 +365,7 @@ export function TradingGrid({ type }: TradingGridProps) {
       rawRows = (tradingCatalog || []).map((c) => ({
         ...c,
         id: c.sku,
+        image: c.imageUrl,
         priceUZSFormatted: `${(Number(c.priceUZS) || 0).toLocaleString()} UZS`,
         priceUSDFormatted: `$${(Number(c.priceUSD) || 0).toFixed(3)}`,
         stockQtyFormatted: `${(Number(c.stockQty) || 0).toLocaleString()} ${c.unit}`,
@@ -418,6 +420,26 @@ export function TradingGrid({ type }: TradingGridProps) {
 
       const col = columns[colIndex];
       const val = col?.id ? (row as any)[col.id] ?? "" : "";
+
+      if (col?.id === "image" || col?.id === "imageUrl") {
+        const img = (row as any).imageUrl || (row as any).image;
+        if (img) {
+          return {
+            kind: GridCellKind.Image,
+            data: [img],
+            displayData: [img],
+            allowOverlay: true,
+            readonly: true,
+          };
+        }
+        return {
+          kind: GridCellKind.Text,
+          data: "",
+          displayData: "",
+          allowOverlay: false,
+          readonly: true,
+        };
+      }
 
       if (col?.id === "shipmentStatus") {
         const isShipped = !!(row as any).linkedShipmentId;

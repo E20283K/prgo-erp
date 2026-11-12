@@ -357,6 +357,7 @@ export const INITIAL_TRADING_CATALOG: TradingCatalogItemRecord[] = [
     colorCode: "Antik bronza / Kumush",
     dimensions: "18mm diametr",
     supplier: "Yiwu Accessories Industrial Group Ltd",
+    imageUrl: "https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?w=400&auto=format&fit=crop&q=80",
     notes: "Kurtka va qalin kiyimlar uchun maxsus gravirovkali tugma.",
   },
   {
@@ -376,6 +377,7 @@ export const INITIAL_TRADING_CATALOG: TradingCatalogItemRecord[] = [
     colorCode: "#000000 (Black)",
     dimensions: "45sm uzunlik, N5 spiralli",
     supplier: "Zhejiang Zipper & Button Factory",
+    imageUrl: "https://images.unsplash.com/photo-1563245372-f21724e3856d?w=400&auto=format&fit=crop&q=80",
     notes: "Sport kiyimlari va qishki kurtkalar uchun standart molniya.",
   },
   {
@@ -395,6 +397,7 @@ export const INITIAL_TRADING_CATALOG: TradingCatalogItemRecord[] = [
     colorCode: "Mijoz brendiga mos (Pantone)",
     dimensions: "50x25 mm",
     supplier: "PrintGoo Bosmaxona Departamenti",
+    imageUrl: "https://images.unsplash.com/photo-1607344645866-009c320c5ab8?w=400&auto=format&fit=crop&q=80",
     notes: "O'z uskunalarimizda tayyorlanadi, qisqa muddatda yetkaziladi.",
   },
   {
@@ -414,6 +417,7 @@ export const INITIAL_TRADING_CATALOG: TradingCatalogItemRecord[] = [
     colorCode: "Barcha asosiy ranglar",
     dimensions: "5000 metr bobina",
     supplier: "Yiwu Accessories Industrial Group Ltd",
+    imageUrl: "https://images.unsplash.com/photo-1605518216938-7c31b7b14ad0?w=400&auto=format&fit=crop&q=80",
     notes: "Yuqori tezlikdagi tikuv mashinalari uchun mustahkam ip.",
   },
 ];

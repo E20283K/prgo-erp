@@ -1,4 +1,4 @@
-import { db, writeAuditLog } from "@/db";
+import { db, writeAuditLog, type DbExec } from "@/db";
 import {
   warehouses,
   warehouseReceipts,
@@ -12,33 +12,46 @@ import {
   warehouseDispatchManifests,
   workOrders,
   carriers,
-  companies,
   branches,
   wmsBins,
   wmsBinItems,
   tradingCatalog,
   tradingSales,
+  clients,
+  deliveryActs,
 } from "@/db/schema";
-import { eq, desc, and, or } from "drizzle-orm";
+import { eq, desc, and, or, sql } from "drizzle-orm";
 import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber, getNextManifestNumber } from "./numberingService";
 import { emitNotification } from "./notificationService";
-import { upsertDeliveryAct } from "./financeService";
-import { applySalePostedEffects } from "./tradingService";
+import { upsertDeliveryAct, cancelDeliveryAct } from "./financeService";
+import { applySalePostedEffects, reverseSalePostedEffects } from "./tradingService";
+import { getCompanyIdByCode as resolveCompanyId } from "./crmService";
+import {
+  UUID_RE,
+  ShipmentError,
+  type ShipmentStatus,
+  normalizeStatus,
+  assertTransition,
+  phaseOf,
+  resolveShipmentAccount,
+  normalizeShipmentLines,
+  assertLinesValid,
+  reserveLines,
+  postLines,
+} from "./shipmentEngine";
+
+export { ShipmentError };
 
 /**
- * Korxona kodi bo'yicha korxona ID sini olish
+ * Korxona kodi yoki UUID bo'yicha korxona ID sini olish.
+ * crmService dagi yagona implementatsiyadan foydalanadi (UUID ni ham qabul qiladi).
  */
 export async function getCompanyIdByCode(code: string = "PRINTGOO"): Promise<string> {
-  const comp = await db.query.companies.findFirst({
-    where: eq(companies.code, code),
-  });
-  if (!comp) {
-    const firstComp = await db.query.companies.findFirst();
-    if (!firstComp) throw new Error("Tizimda korxona (Company) topilmadi!");
-    return firstComp.id;
-  }
-  return comp.id;
+  return resolveCompanyId(code);
 }
+
+/** Chiqim qoldiqqa ta'sir qiladigan (o'tkazilgan) statuslar */
+const SHIPMENT_POSTED_STATUSES = new Set(["Dispatched", "In Transit", "Delivered"]);
 
 // ─── 1. Warehouses (Omborlar Katalogi & Ierarxiya) ────────────────────────────
 
@@ -359,6 +372,17 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
   const status = payload.status || "Draft";
   const locationName = payload.locationName || payload.location || "Asosiy ombor";
 
+  // Idempotentlik: hujjat avval "Accepted" bo'lgan bo'lsa, qoldiq qayta oshirilmaydi
+  const existingReceipt = !isDraft
+    ? await db.query.warehouseReceipts.findFirst({
+        where: and(eq(warehouseReceipts.companyId, companyId), eq(warehouseReceipts.receiptNumber, receiptNumber)),
+      })
+    : null;
+  if (existingReceipt?.status === "Accepted" && status !== "Accepted") {
+    throw new Error(`${receiptNumber} kirimi allaqachon qabul qilingan va qoldiqqa o'tkazilgan. Uni qoralamaga qaytarib bo'lmaydi.`);
+  }
+  const shouldPostStock = status === "Accepted" && existingReceipt?.status !== "Accepted";
+
   // Calculate total amount from items
   const itemsList = Array.isArray(payload.items) ? payload.items : [];
   let totalAmount = 0;
@@ -431,8 +455,8 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
         notes: item.notes || null,
       });
 
-      // 1C Jamg'arish Registri: Agar hujjat tasdiqlangan bo'lsa (Accepted), qoldiqni oshirish
-      if (status === "Accepted") {
+      // 1C Jamg'arish Registri: hujjat birinchi marta tasdiqlanganda (Accepted) qoldiqni oshirish
+      if (shouldPostStock) {
         await applyStockBalanceDelta({
           companyId,
           locationName,
@@ -451,7 +475,7 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
 
   // Biznes bildirishnoma triggeri (Ombor kirimi)
   try {
-    if (status === "Posted") {
+    if (shouldPostStock) {
       await emitNotification(
         {
           dedupKey: `receipt-posted:${receiptNumber}`,
@@ -551,53 +575,256 @@ export async function getWarehouseShipments(companyCode: string = "ALL") {
   });
 }
 
-export async function upsertWarehouseShipment(payload: any, companyCode: string = "ALL") {
+// ─── 4b. Chiqimni saqlash: holat mashinasi + rezerv + tranzaksiya ──────────────
+
+export interface ShipmentActor {
+  id: string;
+  name: string;
+}
+
+export interface ShipmentTxContext {
+  /** Commit'dan keyin bajariladigan tashqi effektlar (bildirishnomalar) */
+  afterCommit: Array<() => Promise<void>>;
+  actor?: ShipmentActor | null;
+}
+
+/** Mijozni aniqlash: payload.clientId > mavjud > nom (registrsiz) > savdo hujjati > ishlab chiqarish buyurtmasi */
+async function resolveShipmentClientId(
+  tx: DbExec,
+  companyId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  existing: { clientId: string | null; customerName: string | null; tradingSaleId: string | null; workOrderId: string | null } | null
+): Promise<string | null> {
+  for (const candidate of [payload.clientId, existing?.clientId]) {
+    if (candidate && UUID_RE.test(String(candidate))) {
+      const row = await tx.query.clients.findFirst({
+        where: and(eq(clients.companyId, companyId), eq(clients.id, String(candidate))),
+      });
+      if (row) return row.id;
+    }
+  }
+
+  const name = String(payload.customerName || payload.customer || existing?.customerName || "").trim();
+  if (name && !name.startsWith("—")) {
+    const byName = await tx.query.clients.findFirst({
+      where: and(eq(clients.companyId, companyId), sql`lower(trim(${clients.name})) = lower(${name})`),
+    });
+    if (byName) return byName.id;
+  }
+
+  const saleKey = payload.tradingSaleId || existing?.tradingSaleId;
+  if (saleKey) {
+    const sale = await tx.query.tradingSales.findFirst({
+      where: and(
+        eq(tradingSales.companyId, companyId),
+        UUID_RE.test(String(saleKey))
+          ? or(eq(tradingSales.id, String(saleKey)), eq(tradingSales.docNo, String(saleKey)))
+          : eq(tradingSales.docNo, String(saleKey))
+      ),
+    });
+    if (sale?.clientId) return sale.clientId;
+  }
+
+  const woKey = payload.workOrderId || payload.workOrder || existing?.workOrderId;
+  if (woKey && !String(woKey).startsWith("—")) {
+    const wo = await tx.query.workOrders.findFirst({
+      where: and(eq(workOrders.companyId, companyId), eq(workOrders.docNo, String(woKey))),
+    });
+    if (wo?.clientId) return wo.clientId;
+  }
+  return null;
+}
+
+async function findDeliveryActByKey(tx: DbExec, companyId: string, key: string | null | undefined) {
+  if (!key) return null;
+  return (
+    (await tx.query.deliveryActs.findFirst({
+      where: and(
+        eq(deliveryActs.companyId, companyId),
+        UUID_RE.test(key) ? or(eq(deliveryActs.id, key), eq(deliveryActs.docNo, key)) : eq(deliveryActs.docNo, key)
+      ),
+    })) || null
+  );
+}
+
+/** Shu chiqim bilan bog'liq WO qutilarining holatini o'zgartirish */
+async function updateWorkOrderBoxes(
+  tx: DbExec,
+  companyId: string,
+  shipmentNumber: string,
+  mode: "dispatch" | "reset",
+  scannedCodes: Set<string>
+) {
+  if (mode === "dispatch" && scannedCodes.size === 0) return;
+  const allWos = await tx.query.workOrders.findMany({ where: eq(workOrders.companyId, companyId) });
+  for (const wo of allWos) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pkg = wo.packagingData as any;
+    if (!pkg || !Array.isArray(pkg.boxes)) continue;
+    let changed = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const boxes = pkg.boxes.map((box: any) => {
+      if (mode === "reset") {
+        if (box.shipmentId === shipmentNumber && box.status === "dispatched") {
+          changed = true;
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { shipmentId: _omit, ...rest } = box;
+          return { ...rest, status: "ready" };
+        }
+        return box;
+      }
+      const bCode = String(box.barcode || "").trim().toUpperCase();
+      const bxCode = String(box.boxCode || "").trim().toUpperCase();
+      if (scannedCodes.has(bCode) || scannedCodes.has(bxCode)) {
+        changed = true;
+        return { ...box, status: "dispatched", shipmentId: shipmentNumber };
+      }
+      return box;
+    });
+    if (changed) {
+      await tx
+        .update(workOrders)
+        .set({ packagingData: { ...pkg, boxes }, updatedAt: new Date() })
+        .where(eq(workOrders.id, wo.id));
+    }
+  }
+}
+
+/**
+ * Chiqimni saqlash va holat o'tishini tranzaksiya ichida bajarish.
+ * Effektlar tartibi: (1) eski rezervni bo'shatish → (2) storno → (3) o'tkazish → (4) yangi rezerv.
+ * Har qanday xatoda butun tranzaksiya bekor bo'ladi.
+ */
+export async function upsertWarehouseShipmentTx(
+  tx: DbExec,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  companyCode: string,
+  ctx: ShipmentTxContext
+) {
   const effectiveCompanyCode = companyCode && companyCode !== "ALL" ? companyCode : "PRINTGOO";
-  const companyId = payload.companyId || (await getCompanyIdByCode(effectiveCompanyCode));
-  const rawNo = (payload.shipmentNumber || payload.id || "").trim();
-  const isDraft = !rawNo || rawNo.startsWith("draft-") || rawNo.startsWith("SHP-NEW-") || rawNo.startsWith("tab-") || rawNo === "NEW" || rawNo.includes("Qoralama") || rawNo.includes("Yangi");
-  const shipmentNumber = isDraft ? await getNextShipmentNumber(effectiveCompanyCode) : rawNo;
-  const status = payload.status || "Draft";
-  const fromLocationName = payload.fromLocationName || payload.from || "Asosiy ombor";
+  const companyId =
+    payload.companyId && UUID_RE.test(String(payload.companyId))
+      ? String(payload.companyId)
+      : await getCompanyIdByCode(effectiveCompanyCode);
 
-  // Oldin bazada ushbu chiqim "Dispatched" yoki "Delivered" bo'lganligini tekshiramiz (qoldiq ikki marta yechilmasligi uchun)
-  const existingShipment = !isDraft
-    ? await db.query.warehouseShipments.findFirst({
-        where: and(
-          eq(warehouseShipments.companyId, companyId),
-          eq(warehouseShipments.shipmentNumber, shipmentNumber)
-        ),
-      })
-    : null;
-  const wasAlreadyDispatched =
-    existingShipment?.status === "Dispatched" || existingShipment?.status === "Delivered";
-  const isNowDispatched = status === "Dispatched" || status === "Delivered";
-  const shouldTriggerDispatchEffects = isNowDispatched && !wasAlreadyDispatched;
+  const rawNo = String(payload.shipmentNumber || payload.id || "").trim();
+  const isDraftNo =
+    !rawNo ||
+    rawNo.startsWith("draft-") ||
+    rawNo.startsWith("SHP-NEW-") ||
+    rawNo.startsWith("tab-") ||
+    rawNo === "NEW" ||
+    rawNo.includes("Qoralama") ||
+    rawNo.includes("Yangi");
+  const shipmentNumber = isDraftNo ? await getNextShipmentNumber(companyId) : rawNo;
 
+  // Mavjud hujjatni qulflab o'qish (parallel o'tishlarga qarshi)
+  const [existing] = isDraftNo
+    ? []
+    : await tx
+        .select()
+        .from(warehouseShipments)
+        .where(and(eq(warehouseShipments.companyId, companyId), eq(warehouseShipments.shipmentNumber, shipmentNumber)))
+        .for("update")
+        .limit(1);
+  const existingItems = existing
+    ? await tx.query.warehouseShipmentItems.findMany({ where: eq(warehouseShipmentItems.shipmentId, existing.id) })
+    : [];
+
+  const prevStatus: ShipmentStatus = existing ? normalizeStatus(existing.status) : "Draft";
+  const nextStatus: ShipmentStatus = normalizeStatus(payload.status || existing?.status || "Draft");
+  assertTransition(prevStatus, nextStatus);
+  const prevPhase = phaseOf(prevStatus);
+  const nextPhase = phaseOf(nextStatus);
+  const isPosting = nextPhase === "posted" && prevPhase !== "posted";
+  const isStorno = prevPhase === "posted" && nextPhase !== "posted";
+
+  // O'tkazilgan hujjat qatorlari va ombori muzlatilgan
+  const frozen = prevPhase === "posted" && nextPhase === "posted";
+  const shipmentType = frozen
+    ? existing!.shipmentType
+    : payload.shipmentType || existing?.shipmentType || "CustomerDelivery";
+  const fromLocationName = frozen
+    ? existing!.fromLocationName || "Asosiy ombor"
+    : payload.fromLocationName || payload.from || existing?.fromLocationName || "Asosiy ombor";
+  const workOrderId = payload.workOrderId || payload.workOrder || existing?.workOrderId || null;
+
+  const incomingItems: unknown[] | null = Array.isArray(payload.items) && payload.items.length > 0 ? payload.items : null;
+  const existingItemsNum = existingItems.map((it) => ({ ...it, quantity: Number(it.quantity) || 0 }));
+  const effectiveItems = frozen ? existingItemsNum : incomingItems ?? existingItemsNum;
+
+  const oldLines = normalizeShipmentLines(existingItemsNum, { workOrderId: existing?.workOrderId });
+  const newLines = normalizeShipmentLines(effectiveItems, { workOrderId });
+  const oldCtx = {
+    companyId,
+    fromLocationName: existing?.fromLocationName || fromLocationName,
+    shipmentType: existing?.shipmentType || shipmentType,
+  };
+  const newCtx = { companyId, fromLocationName, shipmentType };
+
+  const customerName = String(payload.customerName || payload.customer || existing?.customerName || "").trim();
+  const clientId = await resolveShipmentClientId(tx, companyId, payload, existing || null);
+
+  if (nextPhase !== "free" && !frozen) {
+    assertLinesValid(newLines);
+    if (shipmentType === "CustomerDelivery") {
+      if (!customerName || customerName.startsWith("—")) {
+        throw new ShipmentError("Qabul qiluvchi (mijoz) ko'rsatilmagan.");
+      }
+      if (!clientId) {
+        throw new ShipmentError(
+          `"${customerName}" mijozi CRM bazasida topilmadi. Mijozni ro'yxatdan tanlang yoki avval CRM'da ro'yxatdan o'tkazing.`
+        );
+      }
+    }
+  }
+
+  // ── Qoldiq effektlari ──
+  if (prevPhase === "holding") await reserveLines(tx, oldCtx, oldLines, -1);
+  if (isStorno) {
+    if (prevStatus === "Delivered") {
+      throw new ShipmentError("Yetkazilgan chiqimni bekor qilib bo'lmaydi. Qaytarish hujjatini rasmiylashtiring.", 409);
+    }
+    await postLines(tx, oldCtx, oldLines, 1);
+  }
+  if (isPosting) await postLines(tx, newCtx, newLines, -1);
+  if (nextPhase === "holding") await reserveLines(tx, newCtx, newLines, 1);
+
+  // ── Hujjat yozuvi ──
+  const now = new Date();
   const shipmentValues = {
     companyId,
-    warehouseId: payload.warehouseId || null,
-    manifestId: payload.manifestId || existingShipment?.manifestId || null,
-    originSource: payload.originSource || existingShipment?.originSource || "direct",
+    warehouseId: payload.warehouseId || existing?.warehouseId || null,
+    manifestId: payload.manifestId || existing?.manifestId || null,
+    originSource: payload.originSource || existing?.originSource || "direct",
     shipmentNumber,
-    shipmentDate: payload.shipmentDate || payload.date ? new Date(payload.shipmentDate || payload.date) : new Date(),
-    shipmentType: payload.shipmentType || existingShipment?.shipmentType || "CustomerDelivery",
-    clientId: payload.clientId || existingShipment?.clientId || null,
-    customerName: payload.customerName || payload.customer || existingShipment?.customerName || "Mijoz",
-    workOrderId: payload.workOrderId || payload.workOrder || existingShipment?.workOrderId || null,
-    deliveryActId: payload.deliveryActId || existingShipment?.deliveryActId || null,
-    tradingSaleId: payload.tradingSaleId || existingShipment?.tradingSaleId || null,
+    shipmentDate:
+      payload.shipmentDate || payload.date
+        ? new Date(payload.shipmentDate || payload.date)
+        : existing?.shipmentDate || now,
+    shipmentType,
+    clientId,
+    customerName: customerName || "Mijoz",
+    workOrderId,
+    deliveryActId: payload.deliveryActId || existing?.deliveryActId || null,
+    tradingSaleId: payload.tradingSaleId || existing?.tradingSaleId || null,
     fromLocationName,
-    status: status as any,
-    carrier: payload.carrier || existingShipment?.carrier || null,
-    driverName: payload.driverName || existingShipment?.driverName || null,
-    trackingNo: payload.trackingNo || existingShipment?.trackingNo || null,
-    shippedBy: payload.shippedBy || existingShipment?.shippedBy || null,
-    notes: payload.notes || existingShipment?.notes || null,
-    updatedAt: new Date(),
+    status: nextStatus,
+    carrier: payload.carrier || existing?.carrier || null,
+    driverName: payload.driverName || existing?.driverName || null,
+    trackingNo: payload.trackingNo || existing?.trackingNo || null,
+    shippedBy: payload.shippedBy || existing?.shippedBy || ctx.actor?.name || null,
+    notes: payload.notes || existing?.notes || null,
+    reservedAt: nextPhase === "holding" ? existing?.reservedAt || now : null,
+    dispatchedAt: nextPhase === "posted" ? existing?.dispatchedAt || now : null,
+    deliveredAt: nextStatus === "Delivered" ? existing?.deliveredAt || now : null,
+    cancelledAt: nextStatus === "Cancelled" ? now : null,
+    updatedAt: now,
   };
 
-  const [shipmentRecord] = await db
+  const [shipmentRecord] = await tx
     .insert(warehouseShipments)
     .values(shipmentValues)
     .onConflictDoUpdate({
@@ -606,243 +833,194 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
     })
     .returning();
 
-  const itemsList = Array.isArray(payload.items) ? payload.items : [];
-  if (itemsList.length > 0) {
-    await db.delete(warehouseShipmentItems).where(eq(warehouseShipmentItems.shipmentId, shipmentRecord.id));
-
-    for (const item of itemsList) {
+  if (!frozen && incomingItems) {
+    await tx.delete(warehouseShipmentItems).where(eq(warehouseShipmentItems.shipmentId, shipmentRecord.id));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const item of incomingItems as any[]) {
       const qty = Number(item.quantity ?? item.shippedQty) || 0;
       const unitPrice = Number(item.unitPrice) || 0;
-      const totalPrice = qty * unitPrice;
-
-      await db.insert(warehouseShipmentItems).values({
+      await tx.insert(warehouseShipmentItems).values({
         shipmentId: shipmentRecord.id,
-        itemId: item.itemId || null,
+        itemId: item.itemId && UUID_RE.test(String(item.itemId)) ? item.itemId : null,
         finishedGoodId: item.finishedGoodId || null,
         tradingCatalogId: item.tradingCatalogId || null,
-        accountCode: item.accountCode || (item.tradingCatalogId ? "2910" : "2810"),
-        sourceWorkOrderId: item.sourceWorkOrderId || payload.workOrderId || payload.workOrder || null,
+        accountCode: resolveShipmentAccount(item, shipmentType),
+        sourceWorkOrderId: item.sourceWorkOrderId || workOrderId || null,
         sku: item.sku || `SKU-${Date.now().toString().slice(-4)}`,
         name: item.name || item.product || "Mahsulot",
         quantity: qty.toString(),
         unit: item.unit || "pcs",
         unitPrice: unitPrice.toString(),
-        totalPrice: totalPrice.toString(),
+        totalPrice: (qty * unitPrice).toString(),
         notes: item.notes || null,
       });
-
-      // 1C Jamg'arish Registri: Faqat ilk marta Dispatched/Delivered bo'lganda tegishli ombordan 1 marta qoldiqni kamaytirish
-      if (shouldTriggerDispatchEffects) {
-        const itemAccount = item.accountCode || (item.tradingCatalogId ? "2910" : "2810");
-
-        if (itemAccount === "2910" || item.tradingCatalogId) {
-          // 2910 Savdo tovarlari (aksessuarlar) omboridan kamaytirish
-          let catRow = null;
-          if (item.tradingCatalogId) {
-            catRow = await db.query.tradingCatalog.findFirst({
-              where: and(
-                eq(tradingCatalog.companyId, companyId),
-                eq(tradingCatalog.id, item.tradingCatalogId)
-              ),
-            });
-          }
-          if (!catRow && item.sku) {
-            catRow = await db.query.tradingCatalog.findFirst({
-              where: and(
-                eq(tradingCatalog.companyId, companyId),
-                eq(tradingCatalog.sku, item.sku)
-              ),
-            });
-          }
-          if (catRow) {
-            const currentCatQty = Number(catRow.stockQty) || 0;
-            const newCatQty = Math.max(0, currentCatQty - qty);
-            await db
-              .update(tradingCatalog)
-              .set({
-                stockQty: newCatQty.toString(),
-                updatedAt: new Date(),
-              })
-              .where(eq(tradingCatalog.id, catRow.id));
-          }
-        } else if (itemAccount === "2810") {
-          // 2810 Tayyor mahsulot zaxirasidan kamaytirish
-          if (item.finishedGoodId) {
-            const fgRow = await db.query.warehouseFinishedGoods.findFirst({
-              where: and(
-                eq(warehouseFinishedGoods.companyId, companyId),
-                eq(warehouseFinishedGoods.id, item.finishedGoodId)
-              ),
-            });
-            if (fgRow) {
-              const newFgQty = Math.max(0, (Number(fgRow.quantity) || 0) - qty);
-              await db
-                .update(warehouseFinishedGoods)
-                .set({
-                  quantity: newFgQty.toString(),
-                  status: newFgQty <= 0 ? ("Out of Stock" as any) : ("In Stock" as any),
-                  updatedAt: new Date(),
-                })
-                .where(eq(warehouseFinishedGoods.id, fgRow.id));
-            }
-          }
-        } else if (itemAccount === "1010") {
-          // 1010 Xomashyo omboridan kamaytirish
-          await applyStockBalanceDelta({
-            companyId,
-            locationName: fromLocationName,
-            sku: item.sku,
-            name: item.name || item.product,
-            deltaQty: -qty,
-            unit: item.unit,
-          });
-        }
-      }
     }
   }
 
-  // Agar shtrix-kod skaneri orqali qutilar biriktirilgan bo'lsa va chiqim qilinsa, qutilar statusini yangilash
-  if ((status === "Dispatched" || status === "Delivered") && Array.isArray(payload.scannedBoxes) && payload.scannedBoxes.length > 0) {
-    const scannedBarcodes = new Set(
-      payload.scannedBoxes.map((b: any) => (typeof b === "string" ? b : b.barcode || b.boxCode || "").trim().toUpperCase())
+  // ── Qutilar (WO packagingData) ──
+  if (isStorno) {
+    await updateWorkOrderBoxes(tx, companyId, shipmentNumber, "reset", new Set());
+  }
+  if (isPosting && Array.isArray(payload.scannedBoxes) && payload.scannedBoxes.length > 0) {
+    const codes = new Set<string>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      payload.scannedBoxes.map((b: any) => String(typeof b === "string" ? b : b.barcode || b.boxCode || "").trim().toUpperCase())
     );
-    const allWos = await db.query.workOrders.findMany({
-      where: eq(workOrders.companyId, companyId),
-    });
-    for (const wo of allWos) {
-      const pkg = wo.packagingData as any;
-      if (pkg && Array.isArray(pkg.boxes)) {
-        let changed = false;
-        const updatedBoxes = pkg.boxes.map((box: any) => {
-          const bCode = String(box.barcode || "").trim().toUpperCase();
-          const bxCode = String(box.boxCode || "").trim().toUpperCase();
-          if (scannedBarcodes.has(bCode) || scannedBarcodes.has(bxCode)) {
-            changed = true;
-            return {
-              ...box,
-              status: "dispatched",
-              shipmentId: shipmentNumber,
-            };
-          }
-          return box;
-        });
-        if (changed) {
-          await db
-            .update(workOrders)
-            .set({
-              packagingData: { ...pkg, boxes: updatedBoxes },
-              updatedAt: new Date(),
-            })
-            .where(eq(workOrders.id, wo.id));
-        }
-      }
-    }
+    await updateWorkOrderBoxes(tx, companyId, shipmentNumber, "dispatch", codes);
   }
 
-  const linkedTradingSaleKey = shipmentValues.tradingSaleId;
-  if (linkedTradingSaleKey) {
-    try {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(linkedTradingSaleKey).trim());
-      const [updatedSale] = await db
-        .update(tradingSales)
-        .set({
-          linkedShipmentId: shipmentRecord.shipmentNumber,
-          ...(isNowDispatched ? { status: "Posted" as const } : {}),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(tradingSales.companyId, companyId),
-            isUuid
-              ? or(
-                  eq(tradingSales.docNo, linkedTradingSaleKey),
-                  eq(tradingSales.id, linkedTradingSaleKey)
-                )
-              : eq(tradingSales.docNo, linkedTradingSaleKey)
-          )
+  // ── Savdo hujjati (2910) ──
+  const saleKey = shipmentValues.tradingSaleId;
+  if (saleKey) {
+    const isUuidSale = UUID_RE.test(String(saleKey).trim());
+    const [sale] = await tx
+      .update(tradingSales)
+      .set({
+        linkedShipmentId: shipmentRecord.shipmentNumber,
+        ...(isPosting ? { status: "Posted" as const } : {}),
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(tradingSales.companyId, companyId),
+          isUuidSale
+            ? or(eq(tradingSales.docNo, saleKey), eq(tradingSales.id, saleKey))
+            : eq(tradingSales.docNo, saleKey)
         )
-        .returning();
-
-      if (isNowDispatched && updatedSale) {
-        await applySalePostedEffects(companyId, updatedSale.id, updatedSale, itemsList as any);
-      }
-    } catch (e) {
-      console.warn("Failed to back-sync trading sale linkedShipmentId:", e);
+      )
+      .returning();
+    if (sale && isPosting) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await applySalePostedEffects(companyId, sale.id, sale, effectiveItems as any, tx);
+    }
+    if (sale && isStorno) {
+      await reverseSalePostedEffects(companyId, sale, tx);
     }
   }
 
-  // Avtomatik yagona Schet-faktura (Delivery Act / SF-...) yaratish (CustomerDelivery yoki MaterialSale Dispatched bo'lganda)
-  let finalDeliveryActId = shipmentRecord.deliveryActId || null;
-  if (
-    isNowDispatched &&
-    !finalDeliveryActId &&
-    itemsList.length > 0 &&
-    (shipmentValues.shipmentType === "CustomerDelivery" || shipmentValues.shipmentType === "MaterialSale")
-  ) {
+  // ── Schet-faktura (SF) ──
+  let deliveryActDocNo: string | null = null;
+  const linkedAct = await findDeliveryActByKey(tx, companyId, shipmentRecord.deliveryActId);
+  if (linkedAct) deliveryActDocNo = linkedAct.docNo;
+
+  if (isStorno && linkedAct) {
     try {
-      const invoiceItems = itemsList.map((it: any, idx: number) => {
-        const q = Number(it.quantity ?? it.shippedQty) || 0;
-        const p = Number(it.unitPrice) || 0;
-        return {
-          id: `act-item-${idx + 1}`,
-          sku: it.sku || `SKU-${idx + 1}`,
-          name: it.name || it.product || "Mahsulot",
-          unit: it.unit || "dona",
-          quantity: q,
-          unitPrice: p,
-          totalPrice: q * p,
-          vatRate: 0,
-          vatAmount: 0,
-        };
-      });
-      const totalInvoiceAmount = invoiceItems.reduce((acc: number, it: any) => acc + it.totalPrice, 0);
-
-      const generatedAct = await upsertDeliveryAct(
-        {
-          date: new Date(shipmentValues.shipmentDate).toISOString().split("T")[0],
-          workOrderId: shipmentValues.workOrderId || undefined,
-          customer: shipmentValues.customerName,
-          product: invoiceItems.map((i: any) => i.name).join(", "),
-          quantity: invoiceItems.reduce((acc: number, i: any) => acc + i.quantity, 0),
-          unit: invoiceItems[0]?.unit || "dona",
-          subtotal: totalInvoiceAmount,
-          vatRate: 0,
-          vatAmount: 0,
-          totalAmount: totalInvoiceAmount,
-          currency: "UZS",
-          warehouse: shipmentValues.fromLocationName,
-          carrier: shipmentValues.carrier || undefined,
-          driverName: shipmentValues.driverName || undefined,
-          status: "Pending Signature",
-          linkedShipmentId: shipmentRecord.shipmentNumber,
-          notes: `Ombor chiqimi ${shipmentRecord.shipmentNumber} asosida avtomatik shakllantirildi`,
-          items: invoiceItems,
-        },
-        effectiveCompanyCode
-      );
-
-      if (generatedAct && generatedAct.id) {
-        finalDeliveryActId = generatedAct.id;
-        await db
-          .update(warehouseShipments)
-          .set({ deliveryActId: finalDeliveryActId, updatedAt: new Date() })
-          .where(eq(warehouseShipments.id, shipmentRecord.id));
-        shipmentRecord.deliveryActId = finalDeliveryActId;
-      }
+      await cancelDeliveryAct(companyId, linkedAct.docNo, tx);
     } catch (e) {
-      console.warn("Failed to auto-generate DeliveryAct for shipment:", e);
+      throw new ShipmentError(e instanceof Error ? e.message : String(e), 409);
     }
   }
 
-  const allShipments = await getWarehouseShipments(companyCode);
+  const invoiceable = shipmentType === "CustomerDelivery" || shipmentType === "MaterialSale";
+  if (isPosting && invoiceable && effectiveItems.length > 0 && (!linkedAct || linkedAct.status === "cancelled")) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const invoiceItems = (effectiveItems as any[]).map((it, idx) => {
+      const q = Number(it.quantity ?? it.shippedQty) || 0;
+      const p = Number(it.unitPrice) || 0;
+      return {
+        id: `act-item-${idx + 1}`,
+        sku: it.sku || `SKU-${idx + 1}`,
+        name: it.name || it.product || "Mahsulot",
+        unit: it.unit || "dona",
+        quantity: q,
+        unitPrice: p,
+        totalPrice: q * p,
+        vatRate: 0,
+        vatAmount: 0,
+      };
+    });
+    const total = invoiceItems.reduce((acc, it) => acc + it.totalPrice, 0);
+    const act = await upsertDeliveryAct(
+      {
+        // Bekor qilingan SF bo'lsa — o'sha raqam qayta faollashtiriladi
+        id: linkedAct?.docNo,
+        date: new Date(shipmentValues.shipmentDate).toISOString().split("T")[0],
+        workOrderId: workOrderId || undefined,
+        clientId,
+        customer: shipmentValues.customerName,
+        product: invoiceItems.map((i) => i.name).join(", "),
+        quantity: invoiceItems.reduce((acc, i) => acc + i.quantity, 0),
+        unit: invoiceItems[0]?.unit || "dona",
+        subtotal: total,
+        vatRate: 0,
+        vatAmount: 0,
+        totalAmount: total,
+        currency: "UZS",
+        warehouse: fromLocationName,
+        carrier: shipmentValues.carrier || undefined,
+        driverName: shipmentValues.driverName || undefined,
+        status: "Pending Signature",
+        linkedShipmentId: shipmentRecord.shipmentNumber,
+        linkedShipmentUuid: shipmentRecord.id,
+        notes: `Ombor chiqimi ${shipmentRecord.shipmentNumber} asosida avtomatik shakllantirildi`,
+        items: invoiceItems,
+      },
+      companyId,
+      { exec: tx, afterCommit: ctx.afterCommit }
+    );
+    deliveryActDocNo = act.docNo;
+  }
+
+  if (deliveryActDocNo && shipmentRecord.deliveryActId !== deliveryActDocNo) {
+    // UI aktni docNo (SF-YY-NNNN) bo'yicha topadi — UUID emas, docNo saqlaymiz
+    await tx
+      .update(warehouseShipments)
+      .set({ deliveryActId: deliveryActDocNo, updatedAt: now })
+      .where(eq(warehouseShipments.id, shipmentRecord.id));
+    shipmentRecord.deliveryActId = deliveryActDocNo;
+  }
+
+  // ── Audit ──
+  if (prevStatus !== nextStatus || !existing) {
+    await writeAuditLog(
+      {
+        companyId,
+        userId: ctx.actor?.id || "system",
+        userName: ctx.actor?.name || "Warehouse",
+        entityType: "warehouse_shipment",
+        entityId: shipmentRecord.shipmentNumber,
+        action: isPosting ? "post" : isStorno ? "unpost" : existing ? "update" : "create",
+        oldData: existing ? { status: prevStatus } : null,
+        newData: { status: nextStatus, items: newLines.length, deliveryActId: shipmentRecord.deliveryActId },
+      },
+      tx as typeof db
+    );
+  }
+
   return {
-    success: true,
     shipment: shipmentRecord,
     shipmentNumber: shipmentRecord.shipmentNumber,
-    deliveryActId: finalDeliveryActId,
-    allShipments,
+    deliveryActId: shipmentRecord.deliveryActId || null,
+    prevStatus,
+    nextStatus,
   };
 }
+
+/** Ommaviy API: chiqimni bitta tranzaksiyada saqlaydi, commit'dan keyin bildirishnomalarni yuboradi */
+export async function upsertWarehouseShipment(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  companyCode: string = "ALL",
+  actor?: ShipmentActor | null
+) {
+  const ctx: ShipmentTxContext = { afterCommit: [], actor };
+  const result = await db.transaction((tx) => upsertWarehouseShipmentTx(tx, payload, companyCode, ctx));
+  await runAfterCommit(ctx);
+
+  const allShipments = await getWarehouseShipments(companyCode);
+  return { success: true, ...result, allShipments };
+}
+
+async function runAfterCommit(ctx: ShipmentTxContext) {
+  for (const fn of ctx.afterCommit) {
+    try {
+      await fn();
+    } catch (e) {
+      console.warn("[shipment] afterCommit effect failed:", e);
+    }
+  }
+}
+
 
 // ─── 5. Warehouse Movements (Ichki Ko'chirishlar) ──────────────────────────────
 
@@ -931,6 +1109,19 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
 
   const movementNumber = isDraft ? await getNextMovementNumber(prefix, companyCode) : rawCandidate;
   const status = payload.status || "Pending";
+
+  const existingMovement = !isDraft
+    ? await db.query.warehouseMovements.findFirst({
+        where: and(eq(warehouseMovements.companyId, companyId), eq(warehouseMovements.movementNumber, movementNumber)),
+      })
+    : null;
+  if (existingMovement?.status === "Completed") {
+    if (status !== "Completed") {
+      throw new Error(`${movementNumber} harakati allaqachon yakunlangan va qoldiqqa o'tkazilgan. Uni o'zgartirib bo'lmaydi.`);
+    }
+    // Yakunlangan hujjat qayta yuborilsa — qoldiqqa takroran ta'sir qilmasdan qaytaramiz
+    return { ...existingMovement, movementNumber: existingMovement.movementNumber };
+  }
   const qty = Number(payload.quantity) || 0;
   const receivedQty = Number(payload.receivedQty) || (status === "Completed" ? qty : 0);
   const itemsList: any[] = Array.isArray(payload.items) && payload.items.length > 0 ? payload.items : [
@@ -1050,7 +1241,19 @@ export async function getInventoryCounts(companyCode: string = "PRINTGOO") {
 
 export async function upsertInventoryCount(payload: any, companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  const countNumber = payload.countNumber || payload.id || `IC-${Date.now().toString().slice(-4)}`;
+  const rawCount = String(payload.countNumber || payload.id || "").trim();
+  const isDraftCount =
+    !rawCount || /^(draft-|new-|tab-|IC-NEW)/i.test(rawCount) || rawCount.includes("NEW") || rawCount.includes("Yangi");
+  const countNumber = isDraftCount ? await getNextInventoryCountNumber(companyCode) : rawCount;
+
+  const existingCount = !isDraftCount
+    ? await db.query.warehouseInventoryCounts.findFirst({
+        where: and(eq(warehouseInventoryCounts.companyId, companyId), eq(warehouseInventoryCounts.countNumber, countNumber)),
+      })
+    : null;
+  if (existingCount?.status === "Completed") {
+    throw new Error(`${countNumber} inventarizatsiyasi yakunlangan va qoldiqqa o'tkazilgan. Uni o'zgartirib bo'lmaydi.`);
+  }
   const systemQty = Number(payload.systemQty) || 0;
   const actualQty = Number(payload.actualQty) || 0;
   const variance = actualQty - systemQty;
@@ -1194,6 +1397,15 @@ export async function upsertFinishedGood(payload: any, companyCode: string = "PR
     status: (payload.status as any) || "In Stock",
     locationShelf: payload.locationShelf || null,
     notes: payload.notes || null,
+    // Ixtiyoriy maydonlar: payload'da berilgan bo'lsagina yoziladi (mavjud qiymat default bilan ustidan yozilmasin)
+    ...(payload.receiptStatus ? { receiptStatus: String(payload.receiptStatus) } : {}),
+    ...(payload.allocationStatus ? { allocationStatus: String(payload.allocationStatus) } : {}),
+    ...(payload.costPricePerUnit !== undefined && payload.costPricePerUnit !== null
+      ? { costPricePerUnit: (Number(payload.costPricePerUnit) || 0).toString() }
+      : {}),
+    ...(payload.totalStockValue !== undefined && payload.totalStockValue !== null
+      ? { totalStockValue: (Number(payload.totalStockValue) || 0).toString() }
+      : {}),
     updatedAt: new Date(),
   };
 
@@ -1226,9 +1438,11 @@ async function applyStockBalanceDelta(params: {
   unitPriceUsd?: number;
   sheetFormat?: string;
   grammage?: number;
+  /** true bo'lsa, registrda qator bo'lmasa hech narsa yaratilmaydi */
+  onlyIfExists?: boolean;
 }) {
   const { companyId, locationName, sku, name, deltaQty } = params;
-  if (!sku) return;
+  if (!sku || !deltaQty) return;
 
   const existing = await db.query.warehouseStockBalances.findFirst({
     where: and(
@@ -1237,6 +1451,7 @@ async function applyStockBalanceDelta(params: {
       eq(warehouseStockBalances.sku, sku)
     ),
   });
+  if (!existing && params.onlyIfExists) return;
 
   const currentLevel = existing ? Number(existing.stockLevel) : 0;
   const currentReserved = existing ? Number(existing.reserved) : 0;
@@ -1389,6 +1604,9 @@ export async function confirmFinishedGoodsReceipt(
 
   if (!existing) {
     throw new Error("Kutilayotgan tayyor mahsulot topilmadi");
+  }
+  if (existing.receiptStatus === "Received") {
+    throw new Error(`${existing.sku} allaqachon omborga qabul qilingan.`);
   }
 
   const finalQty = confirmedQty !== undefined ? confirmedQty : Number(existing.quantity);
@@ -1574,7 +1792,7 @@ export async function getDispatchManifests(companyCode: string = "ALL") {
   }));
 }
 
-export async function upsertDispatchManifest(payload: any, companyCode: string = "ALL") {
+export async function upsertDispatchManifest(payload: any, companyCode: string = "ALL", actor?: ShipmentActor | null) {
   let companyId = payload.companyId;
   if (!companyId && Array.isArray(payload.shipmentIds) && payload.shipmentIds.length > 0) {
     const firstShpId = String(payload.shipmentIds[0]);
@@ -1629,17 +1847,23 @@ export async function upsertDispatchManifest(payload: any, companyCode: string =
     updatedAt: new Date(),
   };
 
-  const [manifestRecord] = await db
-    .insert(warehouseDispatchManifests)
-    .values(manifestValues)
-    .onConflictDoUpdate({
-      target: [warehouseDispatchManifests.companyId, warehouseDispatchManifests.manifestNumber],
-      set: manifestValues,
-    })
-    .returning();
+  // Reys va unga biriktirilgan chiqimlarning holat o'tishlari — bitta tranzaksiyada.
+  // Biror chiqimda qoldiq yoki validatsiya xatosi bo'lsa, reys ham, boshqa chiqimlar ham o'zgarmaydi.
+  const ctx: ShipmentTxContext = { afterCommit: [], actor };
+  const shipmentIds: string[] = Array.isArray(payload.shipmentIds) ? payload.shipmentIds.map(String) : [];
+  const cascadeStatus: ShipmentStatus | undefined =
+    manifestValues.status === "Dispatched" ? "Dispatched" : manifestValues.status === "Delivered" ? "Delivered" : undefined;
 
-  // Chiqim hujjatlarini ushbu manifestga biriktirish va mashina/haydovchi ma'lumotlarini tushirish
-  if (Array.isArray(payload.shipmentIds) && payload.shipmentIds.length > 0) {
+  const manifestRecord = await db.transaction(async (tx) => {
+    const [record] = await tx
+      .insert(warehouseDispatchManifests)
+      .values(manifestValues)
+      .onConflictDoUpdate({
+        target: [warehouseDispatchManifests.companyId, warehouseDispatchManifests.manifestNumber],
+        set: manifestValues,
+      })
+      .returning();
+
     const carrierSummary = [
       manifestValues.vehicleModel || "Reys transporti",
       manifestValues.vehiclePlate ? `(${manifestValues.vehiclePlate})` : "",
@@ -1647,99 +1871,74 @@ export async function upsertDispatchManifest(payload: any, companyCode: string =
       .filter(Boolean)
       .join(" ");
 
-    for (const shpId of payload.shipmentIds) {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(shpId));
-      const targetShp = await db.query.warehouseShipments.findFirst({
-        where: isUuid
+    const problems: string[] = [];
+    for (const shpId of shipmentIds) {
+      const targetShp = await tx.query.warehouseShipments.findFirst({
+        where: UUID_RE.test(shpId)
           ? or(eq(warehouseShipments.id, shpId), eq(warehouseShipments.shipmentNumber, shpId))
           : eq(warehouseShipments.shipmentNumber, shpId),
-        with: {
-          items: true,
-        },
       });
+      if (!targetShp) continue;
 
-      const nextStatus =
-        manifestValues.status === "InTransit" || manifestValues.status === "Dispatched"
-          ? "Dispatched"
-          : manifestValues.status === "Delivered"
-          ? "Delivered"
-          : undefined;
-
-      if (targetShp && nextStatus && targetShp.status !== "Dispatched" && targetShp.status !== "Delivered") {
-        // Reys jo'natilganda unga biriktirilgan chiqimlarni rasmiy ravishda o'tkazamiz (qoldiq kamayishi + SF- faktura yaratilishi)
-        await upsertWarehouseShipment(
-          {
-            companyId: targetShp.companyId,
-            shipmentNumber: targetShp.shipmentNumber,
-            shipmentDate: targetShp.shipmentDate,
-            shipmentType: targetShp.shipmentType,
-            clientId: targetShp.clientId,
-            customerName: targetShp.customerName,
-            workOrderId: targetShp.workOrderId,
-            deliveryActId: targetShp.deliveryActId,
-            tradingSaleId: targetShp.tradingSaleId,
-            fromLocationName: targetShp.fromLocationName,
-            manifestId: manifestRecord.id,
-            carrier: carrierSummary,
-            driverName: manifestValues.driverName || targetShp.driverName,
-            trackingNo: manifestNumber,
-            status: nextStatus,
-            notes: targetShp.notes,
-            items: (targetShp.items || []).map((it: any) => ({
-              itemId: it.itemId,
-              finishedGoodId: it.finishedGoodId,
-              tradingCatalogId: it.tradingCatalogId,
-              accountCode: it.accountCode,
-              sourceWorkOrderId: it.sourceWorkOrderId,
-              sku: it.sku,
-              name: it.name,
-              quantity: Number(it.quantity) || 0,
-              unit: it.unit,
-              unitPrice: Number(it.unitPrice) || 0,
-              totalPrice: Number(it.totalPrice) || 0,
-              notes: it.notes,
-            })),
-          },
-          companyCode
-        );
-      } else {
-        const updateFields: Record<string, any> = {
-          manifestId: manifestRecord.id,
-          carrier: carrierSummary,
-          driverName: manifestValues.driverName || null,
-          trackingNo: manifestNumber,
-          updatedAt: new Date(),
-        };
-        if (nextStatus) {
-          updateFields.status = nextStatus;
-        }
-        await db
-          .update(warehouseShipments)
-          .set(updateFields)
-          .where(
-            isUuid
-              ? or(eq(warehouseShipments.id, shpId), eq(warehouseShipments.shipmentNumber, shpId))
-              : eq(warehouseShipments.shipmentNumber, shpId)
+      if (cascadeStatus && targetShp.status !== cascadeStatus) {
+        try {
+          await upsertWarehouseShipmentTx(
+            tx,
+            {
+              companyId: targetShp.companyId,
+              shipmentNumber: targetShp.shipmentNumber,
+              manifestId: record.id,
+              carrier: carrierSummary,
+              driverName: manifestValues.driverName || targetShp.driverName,
+              trackingNo: manifestNumber,
+              status: cascadeStatus,
+              // items berilmaydi — dvigatel bazadagi qatorlardan foydalanadi
+            },
+            companyCode,
+            ctx
           );
+        } catch (e) {
+          // Faqat biznes xatolarini yig'amiz; SQL xatosi tranzaksiyani buzadi — darhol chiqamiz
+          if (e instanceof ShipmentError) {
+            problems.push(`${targetShp.shipmentNumber}: ${e.message}`);
+            continue;
+          }
+          throw e;
+        }
+      } else {
+        await tx
+          .update(warehouseShipments)
+          .set({
+            manifestId: record.id,
+            carrier: carrierSummary,
+            driverName: manifestValues.driverName || null,
+            trackingNo: manifestNumber,
+            updatedAt: new Date(),
+          })
+          .where(eq(warehouseShipments.id, targetShp.id));
       }
     }
-  }
-
-  // Agar mavjud reysdan ayrim chiqimlar olib tashlangan bo'lsa, ularni reysdan bo'shatamiz
-  const allLinked = await db.query.warehouseShipments.findMany({
-    where: eq(warehouseShipments.manifestId, manifestRecord.id),
-  });
-  for (const linked of allLinked) {
-    const stillSelected = Array.isArray(payload.shipmentIds) && payload.shipmentIds.some(
-      (id: string) => id === linked.id || id === linked.shipmentNumber
-    );
-    if (!stillSelected) {
-      await db
-        .update(warehouseShipments)
-        .set({ manifestId: null, trackingNo: null, updatedAt: new Date() })
-        .where(eq(warehouseShipments.id, linked.id));
+    if (problems.length > 0) {
+      throw new ShipmentError(`Reysni jo'natib bo'lmaydi. ${problems.join(" | ")}`, 409);
     }
-  }
+
+    // Reysdan olib tashlangan chiqimlarni bo'shatish
+    const allLinked = await tx.query.warehouseShipments.findMany({
+      where: eq(warehouseShipments.manifestId, record.id),
+    });
+    for (const linked of allLinked) {
+      const stillSelected = shipmentIds.some((id) => id === linked.id || id === linked.shipmentNumber);
+      if (!stillSelected) {
+        await tx
+          .update(warehouseShipments)
+          .set({ manifestId: null, trackingNo: null, updatedAt: new Date() })
+          .where(eq(warehouseShipments.id, linked.id));
+      }
+    }
+    return record;
+  });
+  await runAfterCommit(ctx);
+
 
   const allManifests = await getDispatchManifests(companyCode);
   return {
@@ -1828,7 +2027,7 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
   }
 
   // 2) Check if code is a synthesized box pattern like "WO-OF-26-0001-B01", "WOOF260001-B01", or "BX-WOOF260001-01"
-  const boxSuffixMatch = code.match(/^(?:BX-)?(.+?)-(?:B)?(d{1,3})$/);
+  const boxSuffixMatch = code.match(/^(?:BX-)?(.+?)-(?:B)?(\d{1,3})$/);
   if (boxSuffixMatch) {
     const rawWoPart = boxSuffixMatch[1].replace(/[^A-Z0-9]/g, "");
     const boxNum = parseInt(boxSuffixMatch[2], 10) || 1;
@@ -2007,12 +2206,24 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
     const totalQty = saleItems.reduce((acc, it) => acc + it.quantity, 0);
     const totalWeightKg = Number((totalQty * 0.005).toFixed(2)) || 5;
 
+    // Savdo qoralama chiqimga biriktirilgan bo'lishi mumkin — faqat o'tkazilgan chiqim "jo'natilgan" hisoblanadi
+    let saleAlreadyDispatched = false;
+    if (matchedSale.linkedShipmentId) {
+      const linkedShp = await db.query.warehouseShipments.findFirst({
+        where: and(
+          eq(warehouseShipments.companyId, companyId),
+          eq(warehouseShipments.shipmentNumber, matchedSale.linkedShipmentId)
+        ),
+      });
+      saleAlreadyDispatched = !!linkedShp && SHIPMENT_POSTED_STATUSES.has(linkedShp.status);
+    }
+
     return {
       found: true,
       mode: "trading_sale_package" as const,
       accountCode: "2910" as const,
-      alreadyDispatched: !!matchedSale.linkedShipmentId,
-      dispatchedShipmentId: matchedSale.linkedShipmentId || null,
+      alreadyDispatched: saleAlreadyDispatched,
+      dispatchedShipmentId: saleAlreadyDispatched ? matchedSale.linkedShipmentId : null,
       workOrderNo: matchedSale.docNo,
       docNo: matchedSale.docNo,
       customerName: matchedSale.customer,
@@ -2051,7 +2262,8 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
   );
 
   if (matchedCatalogItem) {
-    const stdQty = Math.min(1000, Math.max(1, Number(matchedCatalogItem.stockQty) || 100));
+    // Bitta skan = 1 birlik (POS/WMS standarti). Ko'proq kerak bo'lsa qayta skanerlanadi yoki jadvalda tahrirlanadi.
+    const stdQty = 1;
     const price = Number(matchedCatalogItem.wholesalePriceUzs) || Number(matchedCatalogItem.priceUzs) || 0;
 
     return {

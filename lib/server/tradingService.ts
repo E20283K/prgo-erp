@@ -1,5 +1,5 @@
 import { upsertCompany } from "./companyService";
-import { db } from "@/db";
+import { db, type DbExec } from "@/db";
 import {
   tradingYttEntities,
   tradingSales,
@@ -9,6 +9,7 @@ import {
   tradingImportBatches,
   tradingImportItems,
   tradingCatalog,
+  tradingCatalogImages,
   tradingSettlements,
   companies,
   clients,
@@ -21,6 +22,7 @@ import type {
   TradingImportBatchRecord,
   ImportBatchItem,
   TradingCatalogItemRecord,
+  TradingCatalogImageRecord,
   TradingSettlementLedgerEntry,
   TradingOrderRecord,
   TradingOrderItem,
@@ -376,12 +378,13 @@ export async function applySalePostedEffects(
   companyId: string,
   saleId: string,
   sale: any,
-  items: TradingSaleItem[]
+  items: TradingSaleItem[],
+  exec: DbExec = db
 ) {
   // Eslatma: 2910 ombor qoldig'i (stockQty) faqat Ombor Chiqimi (Shipment -> Chiqarish) bosilganda 1 marta kamayadi.
 
   // 1. Check if already posted to settlements (idempotency guard)
-  const existingStl = await db
+  const existingStl = await exec
     .select({ id: tradingSettlements.id })
     .from(tradingSettlements)
     .where(and(eq(tradingSettlements.companyId, companyId), eq(tradingSettlements.docNo, sale.docNo)))
@@ -392,7 +395,7 @@ export async function applySalePostedEffects(
   // 2. Increase YTT turnover
   if (sale.sellerEntityId) {
     const saleUzs = Number(sale.totalUzs) || 0;
-    await db
+    await exec
       .update(tradingYttEntities)
       .set({
         currentTurnoverUzs: sql`${tradingYttEntities.currentTurnoverUzs} + ${saleUzs}`,
@@ -402,7 +405,7 @@ export async function applySalePostedEffects(
       .where(eq(tradingYttEntities.id, sale.sellerEntityId));
   }
   // 3. Add to trading_settlements
-  await db.insert(tradingSettlements).values({
+  await exec.insert(tradingSettlements).values({
     companyId,
     docNo: sale.docNo,
     date: sale.date,
@@ -417,6 +420,45 @@ export async function applySalePostedEffects(
     balance: sale.totalAmount, // Customer debt increases
     notes: `Sotuv hujjati bo'yicha mahsulot topshirildi (${items.length} xil pozitsiya)`,
   });
+}
+
+/**
+ * applySalePostedEffects teskarisi (ombor chiqimi stornosi):
+ * settlement yozuvi o'chiriladi, YTT aylanmasi kamaytiriladi, savdo hujjati qoralamaga qaytadi.
+ * Qayta jo'natilganda applySalePostedEffects yana bir marta (idempotent) yozadi.
+ */
+export async function reverseSalePostedEffects(
+  companyId: string,
+  sale: { id: string; docNo: string; sellerEntityId?: string | null; totalUzs?: string | number | null },
+  exec: DbExec = db
+) {
+  const removed = await exec
+    .delete(tradingSettlements)
+    .where(
+      and(
+        eq(tradingSettlements.companyId, companyId),
+        eq(tradingSettlements.docNo, sale.docNo),
+        eq(tradingSettlements.docType, "Sotuv Hujjati")
+      )
+    )
+    .returning({ id: tradingSettlements.id });
+
+  if (removed.length > 0 && sale.sellerEntityId) {
+    const saleUzs = Number(sale.totalUzs) || 0;
+    await exec
+      .update(tradingYttEntities)
+      .set({
+        currentTurnoverUzs: sql`GREATEST(0, ${tradingYttEntities.currentTurnoverUzs} - ${saleUzs})`,
+        activeContractsCount: sql`GREATEST(0, ${tradingYttEntities.activeContractsCount} - 1)`,
+        updatedAt: new Date(),
+      })
+      .where(eq(tradingYttEntities.id, sale.sellerEntityId));
+  }
+
+  await exec
+    .update(tradingSales)
+    .set({ status: "Draft", updatedAt: new Date() })
+    .where(and(eq(tradingSales.companyId, companyId), eq(tradingSales.id, sale.id)));
 }
 
 export async function deleteTradingSale(id: string, companyCode = "PRINTGOO"): Promise<boolean> {
@@ -1048,33 +1090,71 @@ function orEq(col1: any, val1: any, col2: any, val2: any) {
 
 export async function getTradingCatalog(companyCode = "PRINTGOO"): Promise<TradingCatalogItemRecord[]> {
   let query;
+  let companyId: string | null = null;
   if (companyCode === "ALL") {
     query = db.select().from(tradingCatalog).orderBy(tradingCatalog.sku);
   } else {
-    const companyId = await resolveCompanyId(companyCode);
+    companyId = await resolveCompanyId(companyCode);
     query = db.select().from(tradingCatalog).where(eq(tradingCatalog.companyId, companyId)).orderBy(tradingCatalog.sku);
   }
 
   const rows = await query;
-  return rows.map((r) => ({
-    id: r.id,
-    sku: r.sku,
-    name: r.name,
-    category: r.category as any,
-    unit: r.unit,
-    priceUZS: Number(r.priceUzs || 0),
-    priceUSD: Number(r.priceUsd || 0),
-    wholesalePriceUZS: Number(r.wholesalePriceUzs || 0),
-    retailPriceUZS: Number(r.retailPriceUzs || 0),
-    stockQty: Number(r.stockQty || 0),
-    minStockLevel: Number(r.minStockLevel || 0),
-    origin: r.origin || "",
-    material: r.material || undefined,
-    colorCode: r.colorCode || undefined,
-    dimensions: r.dimensions || undefined,
-    supplier: r.supplier || undefined,
-    notes: r.notes || undefined,
-  }));
+  const catalogIds = rows.map((r) => r.id);
+
+  let imageMap = new Map<string, TradingCatalogImageRecord[]>();
+  if (catalogIds.length > 0) {
+    try {
+      const allImages = await db
+        .select()
+        .from(tradingCatalogImages)
+        .where(sql`${tradingCatalogImages.catalogId} IN ${catalogIds}`)
+        .orderBy(tradingCatalogImages.sortOrder, desc(tradingCatalogImages.createdAt));
+
+      for (const img of allImages) {
+        const list = imageMap.get(img.catalogId) || [];
+        list.push({
+          id: img.id,
+          catalogId: img.catalogId,
+          imageUrl: img.imageUrl,
+          thumbnailUrl: img.thumbnailUrl || undefined,
+          title: img.title || undefined,
+          isPrimary: img.isPrimary,
+          sortOrder: img.sortOrder,
+          createdAt: img.createdAt?.toISOString(),
+        });
+        imageMap.set(img.catalogId, list);
+      }
+    } catch (e) {
+      console.warn("Could not load tradingCatalogImages:", e);
+    }
+  }
+
+  return rows.map((r) => {
+    const itemImages = imageMap.get(r.id) || [];
+    const primaryImg = itemImages.find((i) => i.isPrimary)?.imageUrl || r.imageUrl || itemImages[0]?.imageUrl || undefined;
+
+    return {
+      id: r.id,
+      sku: r.sku,
+      name: r.name,
+      category: r.category as any,
+      unit: r.unit,
+      priceUZS: Number(r.priceUzs || 0),
+      priceUSD: Number(r.priceUsd || 0),
+      wholesalePriceUZS: Number(r.wholesalePriceUzs || 0),
+      retailPriceUZS: Number(r.retailPriceUzs || 0),
+      stockQty: Number(r.stockQty || 0),
+      minStockLevel: Number(r.minStockLevel || 0),
+      origin: r.origin || "",
+      material: r.material || undefined,
+      colorCode: r.colorCode || undefined,
+      dimensions: r.dimensions || undefined,
+      supplier: r.supplier || undefined,
+      imageUrl: primaryImg,
+      images: itemImages,
+      notes: r.notes || undefined,
+    };
+  });
 }
 
 export async function upsertTradingCatalogItem(
@@ -1100,9 +1180,12 @@ export async function upsertTradingCatalogItem(
     colorCode: payload.colorCode || null,
     dimensions: payload.dimensions || null,
     supplier: payload.supplier || null,
+    imageUrl: payload.imageUrl || null,
     notes: payload.notes || null,
     updatedAt: new Date(),
   };
+
+  let savedItem: any = null;
 
   if (payload.id) {
     const [updated] = await db
@@ -1112,48 +1195,91 @@ export async function upsertTradingCatalogItem(
       .returning();
 
     if (updated) {
-      return {
-        id: updated.id,
-        sku: updated.sku,
-        name: updated.name,
-        category: updated.category as any,
-        unit: updated.unit,
-        priceUZS: Number(updated.priceUzs || 0),
-        priceUSD: Number(updated.priceUsd || 0),
-        wholesalePriceUZS: Number(updated.wholesalePriceUzs || 0),
-        retailPriceUZS: Number(updated.retailPriceUzs || 0),
-        stockQty: Number(updated.stockQty || 0),
-        minStockLevel: Number(updated.minStockLevel || 0),
-        origin: updated.origin || "",
-        material: updated.material || undefined,
-        colorCode: updated.colorCode || undefined,
-        dimensions: updated.dimensions || undefined,
-        supplier: updated.supplier || undefined,
-        notes: updated.notes || undefined,
-      };
+      savedItem = updated;
     }
   }
 
-  // Insert new
-  const [inserted] = await db.insert(tradingCatalog).values(values).returning();
+  if (!savedItem) {
+    const [inserted] = await db.insert(tradingCatalog).values(values).returning();
+    savedItem = inserted;
+  }
+
+  // Sync to tradingCatalogImages if an image was provided
+  if (savedItem && payload.imageUrl) {
+    try {
+      const existingImages = await db
+        .select()
+        .from(tradingCatalogImages)
+        .where(
+          and(
+            eq(tradingCatalogImages.catalogId, savedItem.id),
+            eq(tradingCatalogImages.imageUrl, payload.imageUrl)
+          )
+        );
+
+      if (existingImages.length === 0) {
+        // Unset any existing primaries
+        await db
+          .update(tradingCatalogImages)
+          .set({ isPrimary: false })
+          .where(eq(tradingCatalogImages.catalogId, savedItem.id));
+
+        await db.insert(tradingCatalogImages).values({
+          companyId,
+          catalogId: savedItem.id,
+          imageUrl: payload.imageUrl,
+          isPrimary: true,
+          sortOrder: 0,
+        });
+      }
+    } catch (e) {
+      console.warn("Could not sync tradingCatalogImages:", e);
+    }
+  }
+
+  // Fetch all images for this catalog item
+  let images: TradingCatalogImageRecord[] = [];
+  try {
+    const imgRows = await db
+      .select()
+      .from(tradingCatalogImages)
+      .where(eq(tradingCatalogImages.catalogId, savedItem.id))
+      .orderBy(tradingCatalogImages.sortOrder, desc(tradingCatalogImages.createdAt));
+
+    images = imgRows.map((img) => ({
+      id: img.id,
+      catalogId: img.catalogId,
+      imageUrl: img.imageUrl,
+      thumbnailUrl: img.thumbnailUrl || undefined,
+      title: img.title || undefined,
+      isPrimary: img.isPrimary,
+      sortOrder: img.sortOrder,
+      createdAt: img.createdAt?.toISOString(),
+    }));
+  } catch (e) {
+    console.warn("Could not load item images:", e);
+  }
+
   return {
-    id: inserted.id,
-    sku: inserted.sku,
-    name: inserted.name,
-    category: inserted.category as any,
-    unit: inserted.unit,
-    priceUZS: Number(inserted.priceUzs || 0),
-    priceUSD: Number(inserted.priceUsd || 0),
-    wholesalePriceUZS: Number(inserted.wholesalePriceUzs || 0),
-    retailPriceUZS: Number(inserted.retailPriceUzs || 0),
-    stockQty: Number(inserted.stockQty || 0),
-    minStockLevel: Number(inserted.minStockLevel || 0),
-    origin: inserted.origin || "",
-    material: inserted.material || undefined,
-    colorCode: inserted.colorCode || undefined,
-    dimensions: inserted.dimensions || undefined,
-    supplier: inserted.supplier || undefined,
-    notes: inserted.notes || undefined,
+    id: savedItem.id,
+    sku: savedItem.sku,
+    name: savedItem.name,
+    category: savedItem.category as any,
+    unit: savedItem.unit,
+    priceUZS: Number(savedItem.priceUzs || 0),
+    priceUSD: Number(savedItem.priceUsd || 0),
+    wholesalePriceUZS: Number(savedItem.wholesalePriceUzs || 0),
+    retailPriceUZS: Number(savedItem.retailPriceUzs || 0),
+    stockQty: Number(savedItem.stockQty || 0),
+    minStockLevel: Number(savedItem.minStockLevel || 0),
+    origin: savedItem.origin || "",
+    material: savedItem.material || undefined,
+    colorCode: savedItem.colorCode || undefined,
+    dimensions: savedItem.dimensions || undefined,
+    supplier: savedItem.supplier || undefined,
+    imageUrl: savedItem.imageUrl || undefined,
+    images,
+    notes: savedItem.notes || undefined,
   };
 }
 
@@ -1167,4 +1293,88 @@ export async function deleteTradingCatalogItem(
     .where(and(eq(tradingCatalog.id, id), eq(tradingCatalog.companyId, companyId)))
     .returning();
   return result.length > 0;
+}
+
+// ─── 8. Trading Catalog Images CRUD ──────────────────────────────────────────
+
+export async function getTradingCatalogImages(
+  catalogId: string
+): Promise<TradingCatalogImageRecord[]> {
+  const rows = await db
+    .select()
+    .from(tradingCatalogImages)
+    .where(eq(tradingCatalogImages.catalogId, catalogId))
+    .orderBy(tradingCatalogImages.sortOrder, desc(tradingCatalogImages.createdAt));
+
+  return rows.map((r) => ({
+    id: r.id,
+    catalogId: r.catalogId,
+    imageUrl: r.imageUrl,
+    thumbnailUrl: r.thumbnailUrl || undefined,
+    title: r.title || undefined,
+    isPrimary: r.isPrimary,
+    sortOrder: r.sortOrder,
+    createdAt: r.createdAt?.toISOString(),
+  }));
+}
+
+export async function addTradingCatalogImage(
+  params: {
+    catalogId: string;
+    imageUrl: string;
+    thumbnailUrl?: string;
+    title?: string;
+    isPrimary?: boolean;
+    sortOrder?: number;
+  },
+  companyCode = "PRINTGOO"
+): Promise<TradingCatalogImageRecord> {
+  const companyId = await resolveCompanyId(companyCode);
+
+  if (params.isPrimary) {
+    await db
+      .update(tradingCatalogImages)
+      .set({ isPrimary: false })
+      .where(eq(tradingCatalogImages.catalogId, params.catalogId));
+
+    await db
+      .update(tradingCatalog)
+      .set({ imageUrl: params.imageUrl, updatedAt: new Date() })
+      .where(eq(tradingCatalog.id, params.catalogId));
+  }
+
+  const [inserted] = await db
+    .insert(tradingCatalogImages)
+    .values({
+      companyId,
+      catalogId: params.catalogId,
+      imageUrl: params.imageUrl,
+      thumbnailUrl: params.thumbnailUrl || null,
+      title: params.title || null,
+      isPrimary: params.isPrimary ?? false,
+      sortOrder: params.sortOrder ?? 0,
+    })
+    .returning();
+
+  return {
+    id: inserted.id,
+    catalogId: inserted.catalogId,
+    imageUrl: inserted.imageUrl,
+    thumbnailUrl: inserted.thumbnailUrl || undefined,
+    title: inserted.title || undefined,
+    isPrimary: inserted.isPrimary,
+    sortOrder: inserted.sortOrder,
+    createdAt: inserted.createdAt?.toISOString(),
+  };
+}
+
+export async function deleteTradingCatalogImage(
+  imageId: string
+): Promise<boolean> {
+  const [deleted] = await db
+    .delete(tradingCatalogImages)
+    .where(eq(tradingCatalogImages.id, imageId))
+    .returning();
+
+  return Boolean(deleted);
 }

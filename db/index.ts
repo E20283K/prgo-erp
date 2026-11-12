@@ -29,6 +29,9 @@ export const db: PostgresJsDatabase<typeof schema> = drizzle(pgClient, {
   schema,
 });
 
+/** `db` yoki `db.transaction(tx => ...)` ichidagi `tx` — ikkalasini qabul qiluvchi servislar uchun */
+export type DbExec = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * PostgreSQL bazasining holati va kechikish vaqtini (latency) tekshirish
  */

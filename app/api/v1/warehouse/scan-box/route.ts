@@ -5,7 +5,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const barcode = String(body.barcode || "").trim();
-    const companyCode = body.companyCode || "PRINTGOO";
+    // companyCode kod yoki UUID bo'lishi mumkin (getCompanyIdByCode ikkalasini ham qabul qiladi)
+    const companyCode = body.companyCode || body.companyId || "PRINTGOO";
 
     if (!barcode) {
       return NextResponse.json(

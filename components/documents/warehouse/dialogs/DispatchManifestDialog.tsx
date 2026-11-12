@@ -107,7 +107,7 @@ export function DispatchManifestDialog({
         setSelectedShipmentIds([initialShipmentId]);
       } else {
         const readyOnes = warehouseShipments
-          .filter((s) => (s.status === "Packed" || s.status === "Draft") && !s.manifestId)
+          .filter((s) => (s.status === "Packed" || s.status === "Draft" || s.status === "Reserved" || s.status === "Picking") && !s.manifestId)
           .map((s) => s.id);
         setSelectedShipmentIds(readyOnes);
       }
@@ -524,7 +524,7 @@ export function DispatchManifestDialog({
                             </TableCell>
                             <TableCell className="px-2 py-1 text-center">
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-medium">
-                                {s.status === "Packed" ? "Tayyor" : s.status === "Dispatched" ? "Yo'lda" : s.status}
+                                {s.status === "Packed" ? "Tayyor" : s.status === "Reserved" ? "Band" : s.status === "Picking" ? "Terilmoqda" : s.status === "Dispatched" ? "Yo'lda" : s.status}
                               </Badge>
                             </TableCell>
                           </TableRow>

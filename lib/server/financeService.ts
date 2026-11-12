@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db, type DbExec } from "@/db";
 import {
   deliveryActs,
   deliveryActItems,
@@ -39,6 +39,7 @@ export async function getDeliveryActs(companyCode: string = "PRINTGOO"): Promise
       pending_signature: "Pending Signature",
       signed: "Signed & Stamped",
       disputed: "Disputed",
+      cancelled: "Cancelled",
     };
 
     const clientCurr = (act.client?.currency || act.currency || "UZS").toUpperCase();
@@ -117,18 +118,44 @@ export async function getDeliveryActs(companyCode: string = "PRINTGOO"): Promise
   });
 }
 
-export async function upsertDeliveryAct(
-  data: Partial<DeliveryActRecord> & { clientTin?: string; exchangeRate?: number },
-  companyCode: string = "PRINTGOO"
-) {
-  const companyId = await getCompanyIdByCode(companyCode);
+export interface DeliveryActWriteOptions {
+  /** Tranzaksiya ichida chaqirilganda tx; aks holda db */
+  exec?: DbExec;
+  /** Berilsa, tashqi effektlar (bildirishnoma) tranzaksiya commit bo'lgandan keyin bajariladi */
+  afterCommit?: Array<() => Promise<void>>;
+}
 
-  // 1. Mijozni INN yoki nomi bo'yicha topish yoki yaratish
+export async function upsertDeliveryAct(
+  data: Partial<DeliveryActRecord> & {
+    clientTin?: string;
+    exchangeRate?: number;
+    clientId?: string | null;
+    /** warehouse_shipments.id (UUID) — delivery_acts.linked_shipment_id FK uchun */
+    linkedShipmentUuid?: string | null;
+  },
+  companyCode: string = "PRINTGOO",
+  opts: DeliveryActWriteOptions = {}
+) {
+  const exec = opts.exec ?? db;
+  const companyId = await getCompanyIdByCode(companyCode);
+  const linkedShipmentUuid =
+    data.linkedShipmentUuid && /^[0-9a-f-]{36}$/i.test(data.linkedShipmentUuid) ? data.linkedShipmentUuid : null;
+
+  // 1. Mijozni ID, INN yoki nomi bo'yicha topish yoki yaratish
   let targetClientId: string | null = null;
   let clientDefaultCurrency = "UZS";
+  if (data.clientId && /^[0-9a-f-]{36}$/i.test(data.clientId)) {
+    const byId = await exec.query.clients.findFirst({
+      where: and(eq(clients.companyId, companyId), eq(clients.id, data.clientId)),
+    });
+    if (byId) {
+      targetClientId = byId.id;
+      clientDefaultCurrency = byId.currency || "UZS";
+    }
+  }
   const tinToSearch = data.customerTin?.trim();
-  if (tinToSearch) {
-    const existingClient = await db.query.clients.findFirst({
+  if (!targetClientId && tinToSearch) {
+    const existingClient = await exec.query.clients.findFirst({
       where: and(eq(clients.companyId, companyId), eq(clients.tin, tinToSearch)),
     });
     if (existingClient) {
@@ -138,7 +165,7 @@ export async function upsertDeliveryAct(
   }
 
   if (!targetClientId && data.customer) {
-    const existingByName = await db.query.clients.findFirst({
+    const existingByName = await exec.query.clients.findFirst({
       where: and(eq(clients.companyId, companyId), eq(clients.name, data.customer.trim())),
     });
     if (existingByName) {
@@ -150,7 +177,7 @@ export async function upsertDeliveryAct(
   // Agar mijoz topilmasa, bazada yangi mijoz yaratamiz
   if (!targetClientId) {
     const newClientCode = `CUST-${Date.now().toString().slice(-4)}`;
-    const [insertedClient] = await db
+    const [insertedClient] = await exec
       .insert(clients)
       .values({
         companyId,
@@ -170,11 +197,12 @@ export async function upsertDeliveryAct(
       : await getNextDeliveryActNumber(companyCode);
   const date = data.date || new Date().toISOString().split("T")[0];
 
-  const dbStatusMap: Record<string, "draft" | "pending_signature" | "signed" | "disputed"> = {
+  const dbStatusMap: Record<string, "draft" | "pending_signature" | "signed" | "disputed" | "cancelled"> = {
     Draft: "draft",
     "Pending Signature": "pending_signature",
     "Signed & Stamped": "signed",
     Disputed: "disputed",
+    Cancelled: "cancelled",
   };
 
   const status = data.status ? dbStatusMap[data.status] || "draft" : "draft";
@@ -203,7 +231,7 @@ export async function upsertDeliveryAct(
   const vatUzs = isUsd ? Math.round(vatAmount * rate) : vatAmount;
 
   // Mavjud akt bormi?
-  const existingAct = await db.query.deliveryActs.findFirst({
+  const existingAct = await exec.query.deliveryActs.findFirst({
     where: and(eq(deliveryActs.companyId, companyId), eq(deliveryActs.docNo, docNo)),
   });
 
@@ -212,7 +240,7 @@ export async function upsertDeliveryAct(
   if (data.workOrderId) {
     const woKey = data.workOrderId.trim();
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(woKey);
-    const foundWo = await db.query.workOrders.findFirst({
+    const foundWo = await exec.query.workOrders.findFirst({
       where: and(
         eq(workOrders.companyId, companyId),
         isUuid ? eq(workOrders.id, woKey) : eq(workOrders.docNo, woKey)
@@ -227,7 +255,7 @@ export async function upsertDeliveryAct(
 
   if (existingAct) {
     actId = existingAct.id;
-    await db
+    await exec
       .update(deliveryActs)
       .set({
         date,
@@ -250,15 +278,16 @@ export async function upsertDeliveryAct(
         currency: effectiveCurr,
         warehouse: data.warehouse || existingAct.warehouse,
         status,
+        ...(linkedShipmentUuid ? { linkedShipmentId: linkedShipmentUuid } : {}),
         notes: data.notes || existingAct.notes,
         updatedAt: new Date(),
       })
       .where(eq(deliveryActs.id, actId));
 
     // Eski itemlarni tozalab yangilarini qo'shamiz
-    await db.delete(deliveryActItems).where(eq(deliveryActItems.actId, actId));
+    await exec.delete(deliveryActItems).where(eq(deliveryActItems.actId, actId));
   } else {
-    const [created] = await db
+    const [created] = await exec
       .insert(deliveryActs)
       .values({
         companyId,
@@ -283,6 +312,7 @@ export async function upsertDeliveryAct(
         currency: effectiveCurr,
         warehouse: data.warehouse || "Asosiy Ombor (Tayyor Mahsulot)",
         status,
+        linkedShipmentId: linkedShipmentUuid,
         notes: data.notes || null,
       })
       .returning();
@@ -310,14 +340,14 @@ export async function upsertDeliveryAct(
         sortOrder: idx,
       };
     });
-    await db.insert(deliveryActItems).values(itemRows);
+    await exec.insert(deliveryActItems).values(itemRows);
   }
 
   // 2. Client Settlements (Mijoz balansi)ni avtomatik yangilash
-  await syncClientSettlement(companyId, targetClientId, data.customer || "", data.customerTin, data.contractNo);
+  await syncClientSettlement(companyId, targetClientId, data.customer || "", data.customerTin, data.contractNo, exec);
 
-  // 3. Bildirishnoma triggeri (Schet-faktura rasmiylashtirildi)
-  try {
+  // 3. Bildirishnoma triggeri (Schet-faktura rasmiylashtirildi) — tranzaksiyada bo'lsa commit'dan keyin
+  const notify = async () => {
     await emitNotification(
       {
         dedupKey: `delivery-act:${docNo}`,
@@ -337,9 +367,46 @@ export async function upsertDeliveryAct(
       },
       companyCode
     );
-  } catch (_) {}
+  };
+  if (opts.afterCommit) {
+    opts.afterCommit.push(notify);
+  } else {
+    try {
+      await notify();
+    } catch (_) {}
+  }
 
   return { success: true, docNo, id: actId };
+}
+
+/**
+ * Schet-fakturani bekor qilish (ombor chiqimi stornosi).
+ * Imzolangan aktni bekor qilib bo'lmaydi — bunday holatda qaytarish hujjati kerak.
+ * Mijoz balansi qayta hisoblanadi (bekor qilingan aktlar qarzga kirmaydi).
+ */
+export async function cancelDeliveryAct(
+  companyId: string,
+  docNo: string,
+  exec: DbExec = db
+): Promise<{ cancelled: boolean; reason?: string }> {
+  const act = await exec.query.deliveryActs.findFirst({
+    where: and(eq(deliveryActs.companyId, companyId), eq(deliveryActs.docNo, docNo)),
+  });
+  if (!act) return { cancelled: false, reason: "not_found" };
+  if (act.status === "cancelled") return { cancelled: true };
+  if (act.status === "signed") {
+    throw new Error(
+      `${docNo} schet-fakturasi mijoz tomonidan imzolangan. Storno uchun qaytarish (vozvrat) hujjatini rasmiylashtiring.`
+    );
+  }
+  await exec
+    .update(deliveryActs)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(eq(deliveryActs.id, act.id));
+  if (act.clientId) {
+    await syncClientSettlement(companyId, act.clientId, act.clientName || "", act.clientTin || undefined, act.contractNo || undefined, exec);
+  }
+  return { cancelled: true };
 }
 
 // ─── 2. Settlements Synchronization ────────────────────────────────────────────
@@ -349,14 +416,17 @@ export async function syncClientSettlement(
   clientId: string,
   customerName: string,
   customerTin?: string,
-  contractNo?: string
+  contractNo?: string,
+  exec: DbExec = db
 ) {
-  // Mijozning barcha aktlari summasini (Debit) va to'lovlarini (Credit) hisoblash
-  const acts = await db.query.deliveryActs.findMany({
-    where: and(eq(deliveryActs.companyId, companyId), eq(deliveryActs.clientId, clientId)),
-  });
+  // Mijozning barcha amaldagi aktlari summasini (Debit) va to'lovlarini (Credit) hisoblash
+  const acts = (
+    await exec.query.deliveryActs.findMany({
+      where: and(eq(deliveryActs.companyId, companyId), eq(deliveryActs.clientId, clientId)),
+    })
+  ).filter((a) => a.status !== "cancelled");
 
-  const payments = await db.query.clientPayments.findMany({
+  const payments = await exec.query.clientPayments.findMany({
     where: and(eq(clientPayments.companyId, companyId), eq(clientPayments.clientId, clientId)),
   });
 
@@ -372,7 +442,7 @@ export async function syncClientSettlement(
   if (closingBalanceUsd > 1) status = "debt";
   else if (closingBalanceUsd < -1) status = "advance";
 
-  const existingSettlement = await db.query.clientSettlements.findFirst({
+  const existingSettlement = await exec.query.clientSettlements.findFirst({
     where: and(eq(clientSettlements.companyId, companyId), eq(clientSettlements.clientId, clientId)),
   });
 
@@ -380,7 +450,7 @@ export async function syncClientSettlement(
     payments[0]?.date || acts[0]?.date || new Date().toISOString().split("T")[0];
 
   if (existingSettlement) {
-    await db
+    await exec
       .update(clientSettlements)
       .set({
         customer: customerName || existingSettlement.customer,
@@ -397,7 +467,7 @@ export async function syncClientSettlement(
       })
       .where(eq(clientSettlements.id, existingSettlement.id));
   } else {
-    await db.insert(clientSettlements).values({
+    await exec.insert(clientSettlements).values({
       companyId,
       clientId,
       customer: customerName,

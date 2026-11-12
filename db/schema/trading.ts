@@ -234,12 +234,15 @@ export const tradingCatalog = pgTable(
     wholesalePriceUzs: numeric("wholesale_price_uzs", { precision: 18, scale: 2 }).default("0.00").notNull(),
     retailPriceUzs: numeric("retail_price_uzs", { precision: 18, scale: 2 }).default("0.00").notNull(),
     stockQty: numeric("stock_qty", { precision: 14, scale: 3 }).default("0.000").notNull(),
+    // Ombor chiqimlari (Reserved/Picking/Packed) tomonidan band qilingan miqdor
+    reservedQty: numeric("reserved_qty", { precision: 14, scale: 3 }).default("0.000").notNull(),
     minStockLevel: numeric("min_stock_level", { precision: 14, scale: 3 }).default("0.000").notNull(),
     origin: varchar("origin", { length: 128 }),
     material: varchar("material", { length: 128 }),
     colorCode: varchar("color_code", { length: 64 }),
     dimensions: varchar("dimensions", { length: 128 }),
     supplier: varchar("supplier", { length: 255 }),
+    imageUrl: text("image_url"),
     isActive: boolean("is_active").default(true).notNull(),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -249,6 +252,32 @@ export const tradingCatalog = pgTable(
     uniqueIndex("trading_catalog_company_sku_uq").on(table.companyId, table.sku),
     index("trading_catalog_company_idx").on(table.companyId),
     index("trading_catalog_category_idx").on(table.category),
+  ]
+);
+
+// ─── 6b. Trading Catalog Images (Aksessuarlar Rasmlari Jadvali) ───────────────
+
+export const tradingCatalogImages = pgTable(
+  "trading_catalog_images",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    catalogId: uuid("catalog_id")
+      .notNull()
+      .references(() => tradingCatalog.id, { onDelete: "cascade" }),
+    imageUrl: text("image_url").notNull(),
+    thumbnailUrl: text("thumbnail_url"),
+    title: varchar("title", { length: 255 }),
+    isPrimary: boolean("is_primary").default(false).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("trading_catalog_images_catalog_idx").on(table.catalogId),
+    index("trading_catalog_images_company_idx").on(table.companyId),
   ]
 );
 
@@ -428,12 +457,29 @@ export const tradingImportItemsRelations = relations(tradingImportItems, ({ one 
   }),
 }));
 
-export const tradingCatalogRelations = relations(tradingCatalog, ({ one }) => ({
+export const tradingCatalogRelations = relations(tradingCatalog, ({ one, many }) => ({
   company: one(companies, {
     fields: [tradingCatalog.companyId],
     references: [companies.id],
   }),
+  images: many(tradingCatalogImages),
 }));
+
+export const tradingCatalogImagesRelations = relations(tradingCatalogImages, ({ one }) => ({
+  catalog: one(tradingCatalog, {
+    fields: [tradingCatalogImages.catalogId],
+    references: [tradingCatalog.id],
+  }),
+  company: one(companies, {
+    fields: [tradingCatalogImages.companyId],
+    references: [companies.id],
+  }),
+}));
+
+export type TradingCatalogItem = typeof tradingCatalog.$inferSelect;
+export type NewTradingCatalogItem = typeof tradingCatalog.$inferInsert;
+export type TradingCatalogImage = typeof tradingCatalogImages.$inferSelect;
+export type NewTradingCatalogImage = typeof tradingCatalogImages.$inferInsert;
 
 export const tradingSettlementsRelations = relations(tradingSettlements, ({ one }) => ({
   company: one(companies, {
