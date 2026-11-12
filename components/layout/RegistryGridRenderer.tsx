@@ -53,6 +53,9 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("wms") || tab.id.includes("topology")) return <WarehouseWmsView tab={tab} />;
     if (tab.id.includes("requirements") || tab.id.includes("deficits")) return <WarehouseGrid type="requirements" />;
     if (tab.id.includes("finished-goods")) return <WarehouseGrid type="finished-goods" />;
+    if (tab.id.includes("trading-catalog") || tab.id.includes("accessories")) return <TradingGrid type="catalog" />;
+    if (tab.id.includes("trading-imports") || tab.id.includes("imports")) return <TradingGrid type="imports" />;
+    if (tab.id.includes("manifests")) return <WarehouseGrid type="manifests" />;
     if (tab.id.includes("stock-balance")) return <WarehouseGrid type="stock-balance" />;
     if (tab.id.includes("production-issue")) return <WarehouseGrid type="production-issue" />;
     if (tab.id.includes("write-offs")) return <WarehouseGrid type="write-offs" />;
@@ -86,12 +89,8 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("payroll")) return <PayrollGrid />;
     return <EmployeesGrid />;
   } else if (tab.module === "trading") {
-    if (tab.id.includes("trading-orders")) return <TradingGrid type="orders" />;
-    if (tab.id.includes("trading-ytt-limits")) return <TradingGrid type="ytt-limits" />;
-    if (tab.id.includes("trading-settlements")) return <TradingGrid type="settlements" />;
-    if (tab.id.includes("trading-imports")) return <TradingGrid type="imports" />;
-    if (tab.id.includes("trading-catalog")) return <TradingGrid type="catalog" />;
-    return <TradingGrid type="sales" />;
+    if (tab.id.includes("trading-imports") || tab.id.includes("imports")) return <TradingGrid type="imports" />;
+    return <TradingGrid type="catalog" />;
   }
   return <DataGrid />;
 }

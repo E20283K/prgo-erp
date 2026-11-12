@@ -481,7 +481,7 @@ export function TradingGrid({ type }: TradingGridProps) {
           id: row.id || row.batchNo || `imp-${Date.now()}`,
           title: `${row.batchNo || "Partiya"}`,
           type: "trading-import",
-          module: "trading",
+          module: "warehouse",
           documentData: row,
         });
       } else if (type === "catalog") {
@@ -489,7 +489,7 @@ export function TradingGrid({ type }: TradingGridProps) {
           id: row.sku || row.id || `cat-${Date.now()}`,
           title: `${row.sku}: ${row.name}`,
           type: "trading-catalog",
-          module: "trading",
+          module: "warehouse",
           documentData: row,
         });
       } else if (type === "ytt-limits") {
@@ -631,7 +631,7 @@ export function TradingGrid({ type }: TradingGridProps) {
         id: newId,
         title: `${newId} (Yangi Import)`,
         type: "trading-import",
-        module: "trading",
+        module: "warehouse",
         isUnsaved: false,
         documentData: {
           id: newId,
@@ -691,7 +691,7 @@ export function TradingGrid({ type }: TradingGridProps) {
         id: newSku,
         title: `${newSku} (Yangi Tovar)`,
         type: "trading-catalog",
-        module: "trading",
+        module: "warehouse",
         isUnsaved: false,
         documentData: {
           id: newSku,

@@ -155,7 +155,21 @@ export function Workspace({ children }: { children: React.ReactNode }) {
     }
     if (tab.title) {
       // Strip legacy verbose prefixes like "Sotuv:", "Buyurtma:", "Akt-Sverka:", "Import:"
-      return tab.title.replace(/^(Sotuv|Buyurtma|Akt-Sverka|Import):\s*/i, "");
+      let title = tab.title.replace(/^(Sotuv|Buyurtma|Akt-Sverka|Import):\s*/i, "");
+      // Clean up internal draft tab titles so users never see cryptic "draft-shp-1794478466657..."
+      if (title.startsWith("draft-shp-")) {
+        const parts = title.split(":");
+        title = parts.length > 1 && parts[1].trim()
+          ? `Yangi chiqim: ${parts[1].trim()}`
+          : "Yangi ombor chiqimi";
+      } else if (title.startsWith("draft-wo-")) {
+        title = "Yangi buyruq";
+      } else if (title.startsWith("draft-rcv-")) {
+        title = "Yangi kirim";
+      } else if (title.startsWith("draft-")) {
+        title = "Yangi hujjat";
+      }
+      return title;
     }
     return tab.title;
   };

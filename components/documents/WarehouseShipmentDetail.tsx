@@ -38,6 +38,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { PickFinishedGoodsDialog } from "@/components/documents/warehouse/dialogs/PickFinishedGoodsDialog";
 import { PickTradingCatalogDialog } from "@/components/documents/warehouse/dialogs/PickTradingCatalogDialog";
 import { DispatchManifestDialog } from "@/components/documents/warehouse/dialogs/DispatchManifestDialog";
+import { TradingPackageLabelModal } from "@/components/documents/trading/TradingPackageLabelModal";
 import { PackageCheck } from "lucide-react";
 import {
   Popover,
@@ -1045,6 +1046,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     upsertWarehouseShipment,
     upsertWarehouseShipmentAsync,
     replaceTabId,
+    updateTabData,
     productionQueue,
     upsertProductionQueueItem,
     crmCustomers,
@@ -1071,6 +1073,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     loadFinishedGoods,
     addNotification,
     activeCompanyId,
+    tradingYttEntities,
+    loadTradingData,
   } = useWorkspaceStore();
 
   const isDark = theme === "dark";
@@ -1082,6 +1086,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     }
     if (warehousesList.length === 0 && loadWarehouses) {
       loadWarehouses();
+    }
+    if ((!tradingYttEntities || tradingYttEntities.length === 0) && loadTradingData) {
+      loadTradingData("ytt-limits");
     }
     if (plants.length === 0 && fetchPlants) {
       fetchPlants();
@@ -1265,8 +1272,16 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const [isStockPickerOpen, setIsStockPickerOpen] = useState(false);
   const [isFgPickerOpen, setIsFgPickerOpen] = useState(false);
   const [isTradingPickerOpen, setIsTradingPickerOpen] = useState(false);
+  const [isTradingLabelModalOpen, setIsTradingLabelModalOpen] = useState(false);
   const isLocked = doc.status === "Delivered" || doc.status === "Dispatched" || doc.status === "In Transit";
   const [isManifestDialogOpen, setIsManifestDialogOpen] = useState(false);
+
+  const tradingItems = useMemo(() => {
+    return (doc.items || []).filter(
+      (it) => it.accountCode === "2910" || it.tradingCatalogId || it.palletNo?.includes("2910")
+    );
+  }, [doc.items]);
+  const hasTradingItems = tradingItems.length > 0;
 
   const activeCompany = useMemo(() => {
     return (
@@ -1941,6 +1956,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       customer: newCustomer,
     }));
     setTabUnsaved(tab.id, true);
+    if (isDraft) {
+      updateTabData(tab.id, { customer: newCustomer }, newCustomer ? `Yangi chiqim: ${newCustomer}` : "Yangi ombor chiqimi");
+    }
   };
 
   const handleSelectCarrierProfile = (profile: CarrierProfile) => {
@@ -2501,6 +2519,20 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             <span>Chop etish</span>
           </Button>
 
+          {/* Thermal Sticker for 2910 accessories */}
+          {hasTradingItems && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsTradingLabelModalOpen(true)}
+              className="h-7 px-2 text-xs gap-1.5 border-border"
+              title="Aksessuarlar (2910) quti termo stikeri"
+            >
+              <QrCode className="size-3.5 text-muted-foreground" />
+              <span>Stiker (2910)</span>
+            </Button>
+          )}
+
           {/* Save Draft */}
           {!isLocked && (
             <Button
@@ -2620,12 +2652,36 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 <SelectValue placeholder="Tashkilot..." />
               </SelectTrigger>
               <SelectContent>
-                {(companiesList || []).map((c: any) => (
-                  <SelectItem key={c.id} value={c.id} className="text-xs">
-                    <span className="font-medium">{c.name}</span>
-                    {c.inn && <span className="ml-1 text-[10px] text-muted-foreground font-mono">({c.inn})</span>}
-                  </SelectItem>
-                ))}
+                {(companiesList || []).map((c: any) => {
+                  const yttMatch = (tradingYttEntities || []).find(
+                    (y: any) => y.id === c.id || y.inn === c.inn || y.code === c.code || y.name === c.name
+                  );
+                  const limitPct =
+                    yttMatch && Number(yttMatch.annualLimit) > 0
+                      ? Number(((Number(yttMatch.currentTurnover) / Number(yttMatch.annualLimit)) * 100).toFixed(1))
+                      : null;
+
+                  return (
+                    <SelectItem key={c.id} value={c.id} className="text-xs">
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span className="font-medium truncate">{c.name}</span>
+                        {limitPct !== null && (
+                          <span
+                            className={`text-[9px] font-mono px-1 py-0.2 rounded shrink-0 ${
+                              limitPct >= 95
+                                ? "bg-red-500/15 text-red-600 font-bold"
+                                : limitPct >= 80
+                                ? "bg-amber-500/15 text-amber-600 font-bold"
+                                : "bg-emerald-500/15 text-emerald-600"
+                            }`}
+                          >
+                            YTT {limitPct}%
+                          </span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           )}
@@ -3471,6 +3527,31 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         onOpenChange={setIsManifestDialogOpen}
         manifest={linkedManifest}
         initialShipmentId={doc.id || tab.id}
+      />
+
+      {/* ─── 2910 Aksessuarlar Quti Termal Stikeri Modal ─── */}
+      <TradingPackageLabelModal
+        isOpen={isTradingLabelModalOpen}
+        onOpenChange={setIsTradingLabelModalOpen}
+        sale={{
+          docNo: doc.tradingSaleId || doc.id || "SHP-BOX",
+          customer: doc.customer || "Mijoz",
+          date: doc.date,
+          sellerEntityName: (activeCompany?.name || doc.companyName) ?? undefined,
+          items: tradingItems.map((it) => ({
+            id: it.id,
+            sku: it.sku,
+            name: it.name,
+            quantity: Number(it.shippedQty) || 0,
+            unit: it.unit || "dona",
+            unitPrice: Number(it.unitPrice) || 0,
+            unitPriceUZS: Number(it.unitPrice) || 0,
+            unitPriceUSD: 0,
+            totalAmount: Number(it.totalPrice) || 0,
+            totalUSD: 0,
+            category: "Furnitura" as const,
+          })),
+        }}
       />
 
       {/* ─── Boshqa mijoz qutisini yo'naltirish (Cross-Customer Barcode Scan) Dialogi ─── */}

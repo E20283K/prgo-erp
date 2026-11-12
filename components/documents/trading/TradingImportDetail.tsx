@@ -292,7 +292,7 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
       title: "Partiya saqlandi",
       description: `${batchNo} import partiyasi ma'lumotlari bazaga muvaffaqiyatli saqlandi.`,
       severity: "success",
-      link: { module: "trading", subModule: "trading-imports" },
+      link: { module: "warehouse", subModule: "trading-imports" },
     });
   };
 
@@ -326,7 +326,7 @@ export function TradingImportDetail({ tab }: { tab: DocumentTab }) {
         title: "Omborga kirim qilindi",
         description: `${batchNo} partiyasidagi ${items.length} ta pozitsiya markaziy savdo ombor zaxirasiga kirim qilindi.`,
         severity: "success",
-        link: { module: "trading", subModule: "trading-catalog" },
+        link: { module: "warehouse", subModule: "trading-catalog" },
       });
       closeTab(tab.id);
     } catch (err: any) {

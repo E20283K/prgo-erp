@@ -146,7 +146,9 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const [isCarrierDialogOpen, setIsCarrierDialogOpen] = useState(false);
   const [isPendingFgDialogOpen, setIsPendingFgDialogOpen] = useState(false);
   const [isDispatchManifestDialogOpen, setIsDispatchManifestDialogOpen] = useState(false);
-  const [shipmentViewTab, setShipmentViewTab] = useState<"ALL" | "READY" | "MANIFESTS">("ALL");
+  const [shipmentViewTab, setShipmentViewTab] = useState<"ALL" | "READY" | "MANIFESTS">(
+    type === "manifests" ? "MANIFESTS" : "ALL"
+  );
   const [activeManifestRecord, setActiveManifestRecord] = useState<any | null>(null);
   const [manifestInitialShipmentIds, setManifestInitialShipmentIds] = useState<string[] | undefined>(undefined);
   const [carrierModalData, setCarrierModalData] = useState<Partial<CarrierProfile> | undefined>(undefined);
@@ -334,6 +336,12 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       setIsCarrierDialogOpen(true);
       return;
     }
+    if (type === "manifests") {
+      setActiveManifestRecord(null);
+      setManifestInitialShipmentIds(undefined);
+      setIsDispatchManifestDialogOpen(true);
+      return;
+    }
     if (type === "shipments") {
       const draftId = `draft-shp-${Date.now()}`;
       openTab({
@@ -516,16 +524,19 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       });
       return;
     }
-    if (type === "shipments") {
-      if (shipmentViewTab === "MANIFESTS" || String(record.id || "").startsWith("MNF-")) {
+    if (type === "shipments" || type === "manifests") {
+      if (type === "manifests" || shipmentViewTab === "MANIFESTS" || String(record.id || "").startsWith("MNF-")) {
         setActiveManifestRecord(record);
         setManifestInitialShipmentIds(undefined);
         setIsDispatchManifestDialogOpen(true);
         return;
       }
+      const isDraftId = String(record.id || "").startsWith("draft-");
       openTab({
         id: record.id,
-        title: `${record.id}: ${record.customer || "Ombor Chiqimi"}`,
+        title: isDraftId
+          ? (record.customer ? `Yangi chiqim: ${record.customer}` : "Yangi ombor chiqimi")
+          : `${record.id}: ${record.customer || "Ombor Chiqimi"}`,
         type: "warehouse-shipment",
         module: "warehouse",
         documentData: record,
@@ -737,8 +748,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         { id: 'receivedBy', title: 'Received By', width: 140, icon: GridColumnIcon.HeaderString },
         { id: 'status', title: 'Status', width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
-    } else if (type === 'shipments') {
-      if (shipmentViewTab === 'MANIFESTS') {
+    } else if (type === 'shipments' || type === 'manifests') {
+      if (type === 'manifests' || shipmentViewTab === 'MANIFESTS') {
         cols = [
           { id: 'id', title: 'Reys №', width: 130, icon: GridColumnIcon.HeaderReference },
           { id: 'date', title: 'Sana', width: 105, icon: GridColumnIcon.HeaderDate },
@@ -801,7 +812,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     if (type === 'finished-goods') {
       loadFinishedGoods();
       loadPendingFinishedGoods();
-    } else if (type === 'shipments') {
+    } else if (type === 'shipments' || type === 'manifests') {
       loadWarehouseShipments();
       loadDispatchManifests();
       loadCarriers();
@@ -862,8 +873,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       setRowsData(defs);
     } else if (type === 'finished-goods') {
       setRowsData(finishedGoods);
-    } else if (type === 'shipments') {
-      if (shipmentViewTab === 'MANIFESTS') {
+    } else if (type === 'shipments' || type === 'manifests') {
+      if (type === 'manifests' || shipmentViewTab === 'MANIFESTS') {
         setRowsData(dispatchManifests || []);
       } else if (shipmentViewTab === 'READY') {
         setRowsData(
@@ -1427,6 +1438,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     "inventory": "inventory counts",
     "receipts": "receipts",
     "shipments": "shipments",
+    "manifests": "reyslar va manifestlar",
     "locations": "locations",
     "production-issue": "sexga berish",
     "write-offs": "hisobdan chiqarish",
@@ -1535,7 +1547,18 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 </>
               )}
 
-              {type !== 'requirements' && type !== 'finished-goods' && (type !== 'shipments' || shipmentViewTab !== 'MANIFESTS') && (
+              {type === 'manifests' && (
+                <Button 
+                  size="sm" 
+                  onClick={handleCreateNew}
+                  className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
+                >
+                  <Plus className="size-3.5" />
+                  <span>Yangi reys</span>
+                </Button>
+              )}
+
+              {type !== 'requirements' && type !== 'finished-goods' && type !== 'manifests' && (type !== 'shipments' || shipmentViewTab !== 'MANIFESTS') && (
                 <Button 
                   size="sm" 
                   onClick={handleCreateNew}
@@ -1817,10 +1840,10 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   placeholder={
-                    type === "shipments"
-                      ? shipmentViewTab === "MANIFESTS"
-                        ? "Reyslarni qidirish..."
-                        : "Chiqimlarni qidirish..."
+                    type === "manifests" || (type === "shipments" && shipmentViewTab === "MANIFESTS")
+                      ? "Reyslarni qidirish..."
+                      : type === "shipments"
+                      ? "Chiqimlarni qidirish..."
                       : `Search ${typeLabels[type] || type}...`
                   }
                   className="pl-7 h-7 text-xs bg-background border-input rounded"

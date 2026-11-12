@@ -44,6 +44,7 @@ import {
   MapPin,
   PackageCheck,
   AlertTriangle,
+  Route,
   // Finance icons
   Calculator,
   CreditCard,
@@ -119,43 +120,6 @@ export const MODULE_NAV: ModuleDef[] = [
     ],
   },
   {
-    id: "trading",
-    label: "Savdo",
-    icon: ShoppingCart,
-    sections: [
-      {
-        id: "trading-sales-sec",
-        label: "Savdo",
-        icon: FileText,
-        defaultOpen: true,
-        items: [
-          { id: "trading-sales", label: "Sotuvlar", icon: Receipt },
-          { id: "trading-orders", label: "Buyurtmalar", icon: ShoppingBag },
-        ],
-      },
-      {
-        id: "trading-entities-sec",
-        label: "Tashkilotlar",
-        icon: Building2,
-        defaultOpen: true,
-        items: [
-          { id: "trading-ytt-limits", label: "YTT limitlari", icon: Scale },
-          { id: "trading-settlements", label: "Akt-sverka", icon: Calculator },
-        ],
-      },
-      {
-        id: "trading-procurement-sec",
-        label: "Xaridlar",
-        icon: Truck,
-        defaultOpen: true,
-        items: [
-          { id: "trading-imports", label: "Import", icon: Ship },
-          { id: "trading-catalog", label: "Katalog", icon: Tag },
-        ],
-      },
-    ],
-  },
-  {
     id: "production",
     label: "Production",
     icon: Factory,
@@ -195,22 +159,25 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Boxes,
         defaultOpen: true,
         items: [
-          { id: "wms-map", label: "Ombor boshqaruvi (WMS)", icon: MapPin },
           { id: "stock-balance", label: "Stock Balance", icon: Layers },
-          { id: "requirements", label: "Requirements", icon: AlertTriangle },
           { id: "finished-goods", label: "Finished Goods", icon: PackageCheck },
-          { id: "movements", label: "Movements", icon: ArrowLeftRight },
-          { id: "inventory", label: "Stocktaking", icon: ClipboardList },
+          { id: "trading-catalog", label: "Aksessuarlar (2910)", icon: Tag },
+          { id: "requirements", label: "Requirements", icon: AlertTriangle },
+          { id: "wms-map", label: "Ombor boshqaruvi (WMS)", icon: MapPin },
         ],
       },
       {
         id: "warehouse-ops",
-        label: "Operations",
-        icon: Cpu,
+        label: "Documents",
+        icon: FileText,
         defaultOpen: true,
         items: [
+          { id: "receipts", label: "Receipts", icon: ArrowDownToLine },
+          { id: "shipments", label: "Shipments", icon: Send },
           { id: "production-issue", label: "Production Issue", icon: PlayCircle },
+          { id: "movements", label: "Movements", icon: ArrowLeftRight },
           { id: "write-offs", label: "Write-offs", icon: AlertOctagon },
+          { id: "inventory", label: "Stocktaking", icon: ClipboardList },
         ],
       },
       {
@@ -219,8 +186,8 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: Truck,
         defaultOpen: true,
         items: [
-          { id: "receipts", label: "Receipts", icon: ArrowDownToLine },
-          { id: "shipments", label: "Shipments", icon: Send },
+          { id: "manifests", label: "Reyslar va Manifestlar", icon: Route },
+          { id: "trading-imports", label: "Import va Kargo", icon: Ship },
           { id: "carriers", label: "Carriers", icon: Truck },
         ],
       },

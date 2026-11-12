@@ -33,6 +33,7 @@ import {
   Check,
   Warehouse,
   History,
+  Truck,
 } from "lucide-react";
 import { TradingCatalogItemRecord, TRADING_UNITS } from "./types";
 
@@ -324,22 +325,24 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
       title: "Mahsulot saqlandi",
       description: `${sku}: ${name} narxlari va parametrlari bazaga muvaffaqiyatli saqlandi.`,
       severity: "success",
-      link: { module: "trading", subModule: "trading-catalog" },
+      link: { module: "warehouse", subModule: "trading-catalog" },
     });
     return true;
   };
 
-  const handleCreateSale = () => {
-    const newDocId = `TRD-${Date.now().toString().slice(-4)}`;
+  const handleCreateShipment = () => {
+    const draftId = `draft-shp-${Date.now()}`;
     openTab({
-      id: newDocId,
-      title: `${newDocId} (${sku})`,
-      type: "trading-sale",
-      module: "trading",
-      isUnsaved: false,
+      id: draftId,
+      title: `Yangi ombor chiqimi (${sku})`,
+      type: "warehouse-shipment",
+      module: "warehouse",
+      isUnsaved: true,
       documentData: {
-        id: newDocId,
-        docNo: newDocId,
+        id: draftId,
+        shipmentNumber: "",
+        date: new Date().toISOString().split("T")[0],
+        status: "Draft",
         items: [
           {
             id: `item-${Date.now()}`,
@@ -347,12 +350,13 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
             name: name,
             category: category,
             unit: unit,
-            quantity: 10000,
+            shippedQty: 1000,
+            orderQty: 1000,
             unitPrice: priceUZS,
-            unitPriceUZS: priceUZS,
-            unitPriceUSD: priceUSD,
-            totalAmount: 10000 * priceUZS,
-            totalUSD: (10000 * priceUZS) / exchangeRate,
+            totalPrice: 1000 * priceUZS,
+            accountCode: "2910",
+            tradingCatalogId: sku,
+            notes: "2910 Aksessuarlar katalogidan yuklangan",
           },
         ],
       },
@@ -372,11 +376,11 @@ export function TradingCatalogDetail({ tab }: { tab: DocumentTab }) {
             <Button
               size="sm"
               variant="outline"
-              onClick={handleCreateSale}
+              onClick={handleCreateShipment}
               className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
             >
-              <Tag className="w-3.5 h-3.5 text-primary" />
-              <span className="hidden sm:inline">+ Sotuv Hujjati</span>
+              <Truck className="w-3.5 h-3.5 text-primary" />
+              <span className="hidden sm:inline">Chiqimga chiqarish</span>
             </Button>
 
             <Button
