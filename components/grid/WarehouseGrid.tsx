@@ -36,6 +36,9 @@ import {
 
 import { useWorkspaceStore, generateNextMaterialSku } from "@/store/workspaceStore";
 import { ReturnOffcutDialog } from "./ReturnOffcutDialog";
+import { PendingFgReceiptsDialog } from "@/components/documents/warehouse/dialogs/PendingFgReceiptsDialog";
+import { DispatchManifestDialog } from "@/components/documents/warehouse/dialogs/DispatchManifestDialog";
+import { PackageCheck } from "lucide-react";
 import { CarrierDialog, type CarrierProfile } from "@/components/documents/WarehouseShipmentDetail";
 import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
@@ -121,6 +124,10 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     deliveryActs,
     openTab,
     productionQueue,
+    pendingFinishedGoodsReceipts,
+    loadPendingFinishedGoods,
+    dispatchManifests,
+    loadDispatchManifests,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
 
@@ -135,6 +142,11 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState<boolean>(false);
   const [uploadTargetRecord, setUploadTargetRecord] = useState<any | null>(null);
   const [isCarrierDialogOpen, setIsCarrierDialogOpen] = useState(false);
+  const [isPendingFgDialogOpen, setIsPendingFgDialogOpen] = useState(false);
+  const [isDispatchManifestDialogOpen, setIsDispatchManifestDialogOpen] = useState(false);
+  const [shipmentViewTab, setShipmentViewTab] = useState<"ALL" | "READY" | "MANIFESTS">("ALL");
+  const [activeManifestRecord, setActiveManifestRecord] = useState<any | null>(null);
+  const [manifestInitialShipmentIds, setManifestInitialShipmentIds] = useState<string[] | undefined>(undefined);
   const [carrierModalData, setCarrierModalData] = useState<Partial<CarrierProfile> | undefined>(undefined);
 
   const comboboxFields: Record<string, ComboboxOption[]> = useMemo(() => {
@@ -502,6 +514,12 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       return;
     }
     if (type === "shipments") {
+      if (shipmentViewTab === "MANIFESTS" || String(record.id || "").startsWith("MNF-")) {
+        setActiveManifestRecord(record);
+        setManifestInitialShipmentIds(undefined);
+        setIsDispatchManifestDialogOpen(true);
+        return;
+      }
       openTab({
         id: record.id,
         title: `${record.id}: ${record.customer || "Ombor Chiqimi"}`,
@@ -717,20 +735,37 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         { id: 'status', title: 'Status', width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
     } else if (type === 'shipments') {
-      cols = [
-        { id: 'id', title: 'Shipment ID', width: 110, icon: GridColumnIcon.HeaderReference },
-        { id: 'date', title: 'Date', width: 105, icon: GridColumnIcon.HeaderDate },
-        { id: 'shipmentType', title: 'Chiqim turi', width: 155, icon: GridColumnIcon.HeaderLookup },
-        { id: 'deliveryActId', title: 'Schet-faktura / TTN', width: 135, icon: GridColumnIcon.HeaderReference },
-        { id: 'customer', title: 'Qabul qiluvchi', width: 210, icon: GridColumnIcon.HeaderString },
-        { id: 'workOrder', title: 'Buyurtma / Asos', width: 130, icon: GridColumnIcon.HeaderReference },
-        { id: 'product', title: 'Mahsulot / Yuk', width: 230, icon: GridColumnIcon.HeaderString },
-        { id: 'quantity', title: 'Miqdor', width: 95, icon: GridColumnIcon.HeaderNumber },
-        { id: 'from', title: 'Chiqaruvchi ombor', width: 200, icon: GridColumnIcon.HeaderString },
-        { id: 'carrier', title: 'Tashuvchi', width: 160, icon: GridColumnIcon.HeaderString },
-        { id: 'trackingNo', title: 'Tracking No', width: 120, icon: GridColumnIcon.HeaderString },
-        { id: 'status', title: 'Status', width: 110, icon: GridColumnIcon.HeaderSingleValue },
-      ];
+      if (shipmentViewTab === 'MANIFESTS') {
+        cols = [
+          { id: 'id', title: 'Reys №', width: 130, icon: GridColumnIcon.HeaderReference },
+          { id: 'date', title: 'Sana', width: 105, icon: GridColumnIcon.HeaderDate },
+          { id: 'vehiclePlate', title: 'Davlat raqami', width: 125, icon: GridColumnIcon.HeaderString },
+          { id: 'vehicleModel', title: 'Mashina rusumi', width: 175, icon: GridColumnIcon.HeaderString },
+          { id: 'driverName', title: 'Haydovchi', width: 180, icon: GridColumnIcon.HeaderString },
+          { id: 'driverPhone', title: 'Telefon', width: 145, icon: GridColumnIcon.HeaderPhone },
+          { id: 'destinationRoute', title: 'Yo\'nalish', width: 240, icon: GridColumnIcon.HeaderString },
+          { id: 'totalShipmentsCount', title: 'Yuk xatlari', width: 105, icon: GridColumnIcon.HeaderNumber },
+          { id: 'totalPackages', title: 'Qutilar', width: 95, icon: GridColumnIcon.HeaderNumber },
+          { id: 'totalWeightKg', title: 'Vazn (kg)', width: 100, icon: GridColumnIcon.HeaderNumber },
+          { id: 'departureTime', title: 'Jo\'nash', width: 95, icon: GridColumnIcon.HeaderString },
+          { id: 'status', title: 'Holati', width: 120, icon: GridColumnIcon.HeaderSingleValue },
+        ];
+      } else {
+        cols = [
+          { id: 'id', title: 'Chiqim №', width: 115, icon: GridColumnIcon.HeaderReference },
+          { id: 'date', title: 'Sana', width: 100, icon: GridColumnIcon.HeaderDate },
+          { id: 'shipmentType', title: 'Chiqim turi', width: 140, icon: GridColumnIcon.HeaderLookup },
+          { id: 'deliveryActId', title: 'Schet-faktura', width: 125, icon: GridColumnIcon.HeaderReference },
+          { id: 'customer', title: 'Qabul qiluvchi', width: 200, icon: GridColumnIcon.HeaderString },
+          { id: 'workOrder', title: 'Buyurtma', width: 130, icon: GridColumnIcon.HeaderReference },
+          { id: 'product', title: 'Mahsulot / Yuk', width: 220, icon: GridColumnIcon.HeaderString },
+          { id: 'quantity', title: 'Miqdor', width: 95, icon: GridColumnIcon.HeaderNumber },
+          { id: 'manifestNumber', title: 'Reys №', width: 120, icon: GridColumnIcon.HeaderReference },
+          { id: 'carrier', title: 'Tashuvchi', width: 165, icon: GridColumnIcon.HeaderString },
+          { id: 'from', title: 'Chiqaruvchi ombor', width: 185, icon: GridColumnIcon.HeaderString },
+          { id: 'status', title: 'Holati', width: 110, icon: GridColumnIcon.HeaderSingleValue },
+        ];
+      }
     } else if (type === 'carriers') {
       cols = [
         { id: 'name', title: 'Tashuvchi / Kompaniya', width: 220, icon: GridColumnIcon.HeaderString },
@@ -755,15 +790,18 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       ];
     }
     return cols;
-  }, [type]);
+  }, [type, shipmentViewTab]);
 
   // 1. Data Fetching Effect: ONLY runs when 'type' changes or on mount (NEVER loops)
   useEffect(() => {
     loadWarehouses();
     if (type === 'finished-goods') {
       loadFinishedGoods();
+      loadPendingFinishedGoods();
     } else if (type === 'shipments') {
       loadWarehouseShipments();
+      loadDispatchManifests();
+      loadCarriers();
     } else if (type === 'stock-balance') {
       loadWarehouseStock();
     } else if (type === 'movements' || type === 'production-issue' || type === 'write-offs') {
@@ -821,7 +859,17 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     } else if (type === 'finished-goods') {
       setRowsData(finishedGoods);
     } else if (type === 'shipments') {
-      setRowsData(warehouseShipments);
+      if (shipmentViewTab === 'MANIFESTS') {
+        setRowsData(dispatchManifests || []);
+      } else if (shipmentViewTab === 'READY') {
+        setRowsData(
+          (warehouseShipments || []).filter(
+            (s) => (s.status === 'Packed' || s.status === 'Draft') && !s.manifestId
+          )
+        );
+      } else {
+        setRowsData(warehouseShipments || []);
+      }
     } else if (type === 'stock-balance') {
       setRowsData(warehouseStock);
     } else if (type === 'movements') {
@@ -869,6 +917,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     inventoryCounts,
     warehousesList,
     carriersList,
+    dispatchManifests,
+    shipmentViewTab,
   ]);
 
   const [searchFilter, setSearchFilter] = useState("");
@@ -900,7 +950,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         } else if (categoryFilter === "Transfers") {
           matchesCategory = r.movementType === "Transfer" || !r.movementType;
         }
-      } else if (type === 'shipments' && categoryFilter !== "ALL") {
+      } else if (type === 'shipments' && shipmentViewTab !== 'MANIFESTS' && categoryFilter !== "ALL") {
         if (categoryFilter === "CustomerDelivery") {
           matchesCategory = !r.shipmentType || r.shipmentType === "CustomerDelivery";
         } else {
@@ -909,7 +959,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       }
       return matchesSearch && matchesStatus && matchesCategory;
     });
-  }, [rowsData, searchFilter, statusFilter, categoryFilter, type]);
+  }, [rowsData, searchFilter, statusFilter, categoryFilter, type, shipmentViewTab]);
 
   useEffect(() => {
     const selectedRowsCount = selection.rows.length;
@@ -1310,6 +1360,60 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     return otherMovementFilters.find((item) => item.key === categoryFilter);
   }, [otherMovementFilters, categoryFilter]);
 
+  const shipmentCounts = useMemo(() => {
+    let customerDelivery = 0;
+    let branchTransfer = 0;
+    let outsourcing = 0;
+    let vendorReturn = 0;
+    let materialSale = 0;
+
+    for (const s of warehouseShipments) {
+      if (!s.shipmentType || s.shipmentType === "CustomerDelivery") {
+        customerDelivery++;
+      } else if (s.shipmentType === "BranchTransfer") {
+        branchTransfer++;
+      } else if (s.shipmentType === "Outsourcing") {
+        outsourcing++;
+      } else if (s.shipmentType === "VendorReturn") {
+        vendorReturn++;
+      } else if (s.shipmentType === "MaterialSale") {
+        materialSale++;
+      }
+    }
+
+    return { customerDelivery, branchTransfer, outsourcing, vendorReturn, materialSale };
+  }, [warehouseShipments]);
+
+  const otherShipmentFilters = useMemo(
+    () => [
+      {
+        key: "BranchTransfer",
+        label: "Filiallarga",
+        count: shipmentCounts.branchTransfer,
+      },
+      {
+        key: "Outsourcing",
+        label: "Subpudrat",
+        count: shipmentCounts.outsourcing,
+      },
+      {
+        key: "VendorReturn",
+        label: "Qaytarish",
+        count: shipmentCounts.vendorReturn,
+      },
+      {
+        key: "MaterialSale",
+        label: "Xomashyo sotuvi",
+        count: shipmentCounts.materialSale,
+      },
+    ],
+    [shipmentCounts]
+  );
+
+  const activeOtherShipment = useMemo(() => {
+    return otherShipmentFilters.find((item) => item.key === categoryFilter);
+  }, [otherShipmentFilters, categoryFilter]);
+
   const typeLabels: Record<string, string> = {
     "finished-goods": "finished goods (mijoz zaxirasi)",
     "stock-balance": "stock",
@@ -1329,6 +1433,109 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
           {/* Toolbar */}
           <div className="h-10 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-1.5">
+              {type === 'finished-goods' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsPendingFgDialogOpen(true)}
+                  className="h-7 px-2.5 text-xs font-medium gap-1.5 rounded border-blue-500/30 text-blue-600 bg-blue-50/40 hover:bg-blue-50 dark:bg-blue-950/30"
+                >
+                  <PackageCheck className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Kutilayotgan qabullar</span>
+                  {(pendingFinishedGoodsReceipts?.length ?? 0) > 0 && (
+                    <Badge className="h-4 px-1 text-[10px] bg-blue-600 text-white rounded-full">
+                      {pendingFinishedGoodsReceipts?.length}
+                    </Badge>
+                  )}
+                </Button>
+              )}
+
+              {type === 'shipments' && (
+                <>
+                  {/* 3-View Switcher: Barcha chiqimlar | Tayyor yuklar | Reyslar */}
+                  <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium mr-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShipmentViewTab("ALL");
+                        setSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
+                      }}
+                      className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                        shipmentViewTab === "ALL"
+                          ? "bg-background text-foreground font-semibold shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <span>Barcha chiqimlar</span>
+                      <span className="px-1 rounded-full text-[9px] bg-muted-foreground/15 font-mono">
+                        {(warehouseShipments || []).length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShipmentViewTab("READY");
+                        setSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
+                      }}
+                      className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                        shipmentViewTab === "READY"
+                          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 font-semibold shadow-xs border border-amber-500/30"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <span>Tayyor yuklar</span>
+                      <span className="px-1 rounded-full text-[9px] bg-amber-500/20 text-amber-800 dark:text-amber-200 font-mono">
+                        {(warehouseShipments || []).filter((s) => (s.status === "Packed" || s.status === "Draft") && !s.manifestId).length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShipmentViewTab("MANIFESTS");
+                        setSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
+                      }}
+                      className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                        shipmentViewTab === "MANIFESTS"
+                          ? "bg-blue-500/15 text-blue-700 dark:text-blue-300 font-semibold shadow-xs border border-blue-500/30"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Truck className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                      <span>Reyslar</span>
+                      <span className="px-1 rounded-full text-[9px] bg-blue-500/20 text-blue-800 dark:text-blue-200 font-mono">
+                        {(dispatchManifests || []).length}
+                      </span>
+                    </button>
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setActiveManifestRecord(null);
+                      if (shipmentViewTab !== "MANIFESTS" && selection.rows.toArray().length > 0) {
+                        const selIds = selection.rows
+                          .toArray()
+                          .map((idx) => filteredRows[idx]?.id)
+                          .filter(Boolean);
+                        setManifestInitialShipmentIds(selIds);
+                      } else {
+                        setManifestInitialShipmentIds(undefined);
+                      }
+                      setIsDispatchManifestDialogOpen(true);
+                    }}
+                    className="h-7 px-2.5 text-xs font-medium gap-1.5 rounded border-blue-500/30 text-blue-600 bg-blue-50/40 hover:bg-blue-50 dark:bg-blue-950/30 cursor-pointer"
+                  >
+                    <Truck className="w-3.5 h-3.5 text-blue-600" />
+                    <span>
+                      {shipmentViewTab !== "MANIFESTS" && selection.rows.toArray().length > 0
+                        ? `Reysga biriktirish (${selection.rows.toArray().length})`
+                        : "Reys tuzish"}
+                    </span>
+                  </Button>
+                </>
+              )}
+
               {type !== 'requirements' && type !== 'finished-goods' && (
                 <Button 
                   size="sm" 
@@ -1515,50 +1722,71 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               )}
 
               {/* Shipments Type Filters */}
-              {type === 'shipments' && (
+              {type === 'shipments' && shipmentViewTab !== 'MANIFESTS' && (
                 <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
                   <button
+                    type="button"
                     onClick={() => setCategoryFilter("ALL")}
-                    className={`px-2 py-0.5 rounded transition-colors ${categoryFilter === "ALL" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                    className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                      categoryFilter === "ALL"
+                        ? "bg-background text-foreground font-semibold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                   >
                     Barchasi
                   </button>
                   <button
+                    type="button"
                     onClick={() => setCategoryFilter("CustomerDelivery")}
-                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "CustomerDelivery" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                      categoryFilter === "CustomerDelivery"
+                        ? "bg-background text-foreground font-semibold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                   >
                     <span>Mijozlarga</span>
-                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-muted-foreground/15">
-                      {warehouseShipments.filter((s) => !s.shipmentType || s.shipmentType === "CustomerDelivery").length}
+                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-muted-foreground/15 font-mono">
+                      {shipmentCounts.customerDelivery}
                     </span>
                   </button>
-                  <button
-                    onClick={() => setCategoryFilter("BranchTransfer")}
-                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "BranchTransfer" ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 font-semibold shadow-xs border border-sky-500/30" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    <span>Filiallarga</span>
-                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-sky-500/20 text-sky-800 dark:text-sky-200">
-                      {warehouseShipments.filter((s) => s.shipmentType === "BranchTransfer").length}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => setCategoryFilter("Outsourcing")}
-                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "Outsourcing" ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 font-semibold shadow-xs border border-purple-500/30" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    <span>Subpudrat</span>
-                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-purple-500/20 text-purple-800 dark:text-purple-200">
-                      {warehouseShipments.filter((s) => s.shipmentType === "Outsourcing").length}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => setCategoryFilter("VendorReturn")}
-                    className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${categoryFilter === "VendorReturn" ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 font-semibold shadow-xs border border-rose-500/30" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    <span>Qaytarish</span>
-                    <span className="ml-0.5 px-1 rounded-full text-[9px] bg-rose-500/20 text-rose-800 dark:text-rose-200">
-                      {warehouseShipments.filter((s) => s.shipmentType === "VendorReturn").length}
-                    </span>
-                  </button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer outline-none ${
+                        activeOtherShipment
+                          ? "bg-background text-foreground font-semibold shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="Boshqa chiqim turlari"
+                    >
+                      <span>{activeOtherShipment ? activeOtherShipment.label : "Boshqa"}</span>
+                      {activeOtherShipment && (
+                        <span className="ml-0.5 px-1 rounded-full text-[9px] bg-muted-foreground/15 font-mono">
+                          {activeOtherShipment.count}
+                        </span>
+                      )}
+                      <ChevronDown className="w-3 h-3 opacity-60 ml-0.5" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="min-w-36 p-1 text-xs">
+                      {otherShipmentFilters.map(({ key, label, count }) => (
+                        <DropdownMenuItem
+                          key={key}
+                          onClick={() => setCategoryFilter(categoryFilter === key ? "ALL" : key)}
+                          className={`flex items-center justify-between px-2 py-1.5 cursor-pointer text-xs rounded ${
+                            categoryFilter === key ? "bg-accent font-semibold text-accent-foreground" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span>{label}</span>
+                            <span className="px-1 rounded-full text-[9px] bg-muted text-muted-foreground font-mono">
+                              {count}
+                            </span>
+                          </div>
+                          {categoryFilter === key && <Check className="w-3.5 h-3.5 text-primary ml-2" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               )}
 
@@ -2045,6 +2273,24 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
             });
           }
         }}
+      />
+
+      <PendingFgReceiptsDialog
+        open={isPendingFgDialogOpen}
+        onOpenChange={setIsPendingFgDialogOpen}
+      />
+
+      <DispatchManifestDialog
+        open={isDispatchManifestDialogOpen}
+        onOpenChange={(open) => {
+          setIsDispatchManifestDialogOpen(open);
+          if (!open) {
+            setActiveManifestRecord(null);
+            setManifestInitialShipmentIds(undefined);
+          }
+        }}
+        manifest={activeManifestRecord}
+        initialShipmentIds={manifestInitialShipmentIds}
       />
     </ContextMenu>
   );

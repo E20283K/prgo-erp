@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
       webhookUrl: body.webhookUrl,
       defaultNotificationLanguage: body.defaultNotificationLanguage,
       autoCreateLeadsFromUnknownGroups: body.autoCreateLeadsFromUnknownGroups,
+      ordersChatId: body.ordersChatId,
+      ordersChatTitle: body.ordersChatTitle,
+      autoSendNewOrders: body.autoSendNewOrders,
     });
 
     return NextResponse.json({ ok: true, data: updated });

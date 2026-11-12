@@ -44,6 +44,7 @@ export interface TradingSaleRecord {
   paymentMethod: "Bank Wire (Hisob-raqam)" | "Corporate Card" | "Cash / Cash Register";
   status: "Draft" | "Posted" | "Cancelled";
   items: TradingSaleItem[];
+  linkedShipmentId?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;

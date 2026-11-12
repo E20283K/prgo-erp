@@ -311,6 +311,13 @@ export const productionSpecifications = pgTable(
 
 // ─── 3. Work Orders (Ishlab chiqarish buyruqlari) ──────────────────────────────
 
+export interface WorkOrderTelegramMeta {
+  chatId?: string;
+  messageId?: number;
+  lastSentAt?: string;
+  channelTitle?: string;
+}
+
 export const workOrders = pgTable(
   "work_orders",
   {
@@ -394,6 +401,8 @@ export const workOrders = pgTable(
     sampleData: jsonb("sample_data").$type<Record<string, unknown>>().default({}).notNull(),
     packagingData: jsonb("packaging_data").$type<Record<string, unknown>>().default({}).notNull(),
     deliveryBatches: jsonb("delivery_batches").$type<any[]>().default([]).notNull(),
+
+    telegramMeta: jsonb("telegram_meta").$type<WorkOrderTelegramMeta>(),
 
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/dialog";
 import { SmartCombobox } from "@/components/ui/smart-combobox";
 import {
+  Truck,
+  QrCode,
   Printer,
   Save,
   Check,
@@ -56,6 +58,7 @@ import {
 } from "./types";
 import { INITIAL_YTT_ENTITIES, INITIAL_TRADING_CATALOG } from "./data";
 import { AktSverkaPrintModal } from "../customer/components/AktSverkaPrintModal";
+import { TradingPackageLabelModal } from "./TradingPackageLabelModal";
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
@@ -123,6 +126,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     rawData.status || "Draft"
   );
   const [notes, setNotes] = useState<string>(rawData.notes || "");
+  const [linkedShipmentId, setLinkedShipmentId] = useState<string | undefined>(rawData.linkedShipmentId);
 
   const availableEntities = useMemo(() => {
     if (tradingYttEntities && tradingYttEntities.length > 0) {
@@ -172,6 +176,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
   );
 
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [isLabelModalOpen, setIsLabelModalOpen] = useState(false);
   const [isWarehousePickerOpen, setIsWarehousePickerOpen] = useState(false);
   const [warehouseSearch, setWarehouseSearch] = useState("");
   const [selectedCatalogItem, setSelectedCatalogItem] = useState<TradingCatalogItemRecord | null>(null);
@@ -471,6 +476,61 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     });
   };
 
+  const handleCreateOrOpenShipment = () => {
+    if (linkedShipmentId) {
+      openTab({
+        id: linkedShipmentId,
+        title: `Chiqim: ${linkedShipmentId}`,
+        type: "warehouse-shipment",
+        module: "warehouse",
+      });
+      return;
+    }
+
+    const draftId = `draft-shp-${Date.now()}`;
+    const shipmentItems = items.map((it, idx) => ({
+      id: `shp-item-${Date.now()}-${idx}`,
+      sku: it.sku,
+      name: it.name,
+      accountCode: "2910" as const,
+      tradingCatalogId: it.sku,
+      orderQty: it.quantity,
+      shippedQty: it.quantity,
+      unit: it.unit || "dona",
+      unitPrice: it.unitPriceUZS || (currency === "UZS" ? it.unitPrice : it.unitPrice * exchangeRate),
+      totalPrice: it.totalAmount,
+      packageCount: 1,
+      packageType: "Gofroquti",
+      palletNo: "2910 Aksessuarlar ombori",
+      notes: `Savdo hujjati ${docNo} dan yuklangan`,
+    }));
+
+    openTab({
+      id: draftId,
+      title: `Ombor chiqimi (${customer || "Mijoz"})`,
+      type: "warehouse-shipment",
+      module: "warehouse",
+      documentData: {
+        id: draftId,
+        shipmentNumber: "",
+        date: new Date().toISOString().split("T")[0],
+        status: "Draft",
+        customer: customer || "Mijoz",
+        tradingSaleId: docNo,
+        notes: `Savdo hujjati ${docNo} bo'yicha aksessuarlar chiqimi`,
+        items: shipmentItems,
+      },
+    });
+
+    setLinkedShipmentId(draftId);
+    setTabUnsaved(tab.id, true);
+    addNotification({
+      title: "Ombor chiqim hujjati shakllantirildi",
+      description: `${items.length} ta savdo aksessuari yangi chiqim hujjatiga o'tkazildi`,
+      severity: "success",
+    });
+  };
+
   const handleSave = async () => {
     const payload: Partial<TradingSaleRecord> = {
       id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
@@ -489,6 +549,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
       paymentMethod,
       status: "Draft",
       notes,
+      linkedShipmentId: linkedShipmentId || undefined,
       items,
     };
     await upsertTradingSaleAsync(payload);
@@ -560,6 +621,17 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
         status={status === "Posted" ? "Completed" : "Active"}
         actions={
           <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsLabelModalOpen(true)}
+              className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
+              title="Quti yoki qopga yopishtiriladigan termo stiker (Markirovka)"
+            >
+              <QrCode className="w-3.5 h-3.5 text-muted-foreground" />
+              <span>Stiker</span>
+            </Button>
+
             <Button
               size="sm"
               variant="outline"
@@ -972,6 +1044,20 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 2910 Aksessuarlar uchun Termo Stiker (Markirovka) Dialogi */}
+      <TradingPackageLabelModal
+        isOpen={isLabelModalOpen}
+        onOpenChange={setIsLabelModalOpen}
+        sale={{
+          docNo,
+          date,
+          sellerEntityName: selectedEntity.name,
+          customer,
+          customerTin,
+          items,
+        }}
+      />
 
       {/* Official Printable Akt Sverka / Invoice Modal */}
       <AktSverkaPrintModal

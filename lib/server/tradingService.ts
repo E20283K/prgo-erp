@@ -223,6 +223,7 @@ export async function getTradingSales(companyCode = "PRINTGOO"): Promise<Trading
     paymentMethod: s.paymentMethod === "bank_wire" ? "Bank Wire (Hisob-raqam)" : s.paymentMethod === "corporate_card" ? "Corporate Card" : "Cash / Cash Register",
     status: s.status as any,
     items: itemsBySale.get(s.id) || [],
+    linkedShipmentId: (s as any).linkedShipmentId || undefined,
     notes: s.notes || "",
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
@@ -306,6 +307,7 @@ export async function upsertTradingSale(
     totalUzs: String(totalUzs),
     paymentMethod: paymentMethodDb as any,
     status: (payload.status || "Draft") as any,
+    linkedShipmentId: payload.linkedShipmentId || null,
     notes: payload.notes || "",
     updatedAt: new Date(),
   };

@@ -124,6 +124,12 @@ export interface ShipmentLineItem {
   orderQty: number;
   shippedQty: number;
   unit: string;
+  unitPrice?: number;
+  totalPrice?: number;
+  accountCode?: "2810" | "2910" | "1010";
+  tradingCatalogId?: string;
+  finishedGoodId?: string;
+  sourceWorkOrderId?: string;
   packageCount?: number;
   packageType?: string;
   palletNo?: string;
@@ -146,11 +152,30 @@ export interface CarrierRecord {
   updatedAt?: string;
 }
 
+export interface ScannedBoxEntry {
+  id: string;
+  boxNumber: number;
+  boxCode: string;
+  barcode: string;
+  quantity: number;
+  grossWeightKg: number;
+  workOrderNo: string;
+  productName: string;
+  customerName: string;
+  sizeCode?: string;
+  model?: string;
+}
+
 export interface WarehouseShipmentRecord {
   id: string;
+  dbId?: string;
+  companyId?: string | null;
+  companyName?: string | null;
+  warehouseId?: string | null;
   date: string;
   customer: string;
   deliveryActId: string;
+  tradingSaleId?: string;
   workOrder: string;
   product: string;
   quantity: number;
@@ -169,6 +194,10 @@ export interface WarehouseShipmentRecord {
   notes?: string;
   batchId?: string;
   batchNo?: number;
+  manifestId?: string;
+  manifestNumber?: string;
+  deliveryMode?: "manifest" | "dedicated" | "self" | "courier";
+  scannedBoxes?: ScannedBoxEntry[];
   status: "Draft" | "Packed" | "Dispatched" | "In Transit" | "Delivered";
   shipmentType?: ShipmentType;
   items?: ShipmentLineItem[];
@@ -844,6 +873,19 @@ interface WorkspaceState {
   upsertFinishedGoodAsync: (item: any, companyCode?: string) => Promise<boolean>;
   upsertFinishedGood: (item: FinishedGoodStockRecord) => void;
   shipFromFinishedGood: (id: string, shipQty: number, shipmentDocNo?: string) => void;
+
+  // ── Finished Goods Pending Receipts & Multi-Customer Reallocation & Manifests ──
+  pendingFinishedGoodsReceipts: any[];
+  isPendingFgLoading: boolean;
+  loadPendingFinishedGoods: (companyCode?: string) => Promise<void>;
+  confirmFinishedGoodReceiptAsync: (fgId: string, confirmedQty?: number, locationShelf?: string, companyCode?: string) => Promise<boolean>;
+  availableFinishedGoodsForShipment: any[];
+  loadAvailableFinishedGoods: (companyCode?: string) => Promise<any[]>;
+  checkAndTriggerReorderAsync: (payload: { originalWorkOrderId: string; divertedQty: number; buyerCustomerName: string; notes?: string }, companyCode?: string) => Promise<any>;
+  dispatchManifests: any[];
+  isDispatchManifestsLoading: boolean;
+  loadDispatchManifests: (companyCode?: string) => Promise<void>;
+  upsertDispatchManifestAsync: (manifest: any, companyCode?: string) => Promise<boolean>;
 
   // ── Workshop Equipment Registry & Specifications ─────────────────────────
   masterSpecifications: MasterSpecificationRecord[];
@@ -1658,6 +1700,128 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return false;
     } catch (e) {
       console.error("Failed to save finished good:", e);
+      return false;
+    }
+  },
+
+  pendingFinishedGoodsReceipts: [],
+  isPendingFgLoading: false,
+  loadPendingFinishedGoods: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isPendingFgLoading: true });
+      const res = await fetch("/api/v1/warehouse/pending-receipts?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ pendingFinishedGoodsReceipts: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load pending finished goods:", e);
+    } finally {
+      set({ isPendingFgLoading: false });
+    }
+  },
+
+  confirmFinishedGoodReceiptAsync: async (fgId: string, confirmedQty?: number, locationShelf?: string, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/pending-receipts?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fgId, confirmedQty, locationShelf }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadPendingFinishedGoods(companyCode);
+          get().loadFinishedGoods(companyCode);
+          get().loadWarehouseStock(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to confirm finished good receipt:", e);
+      return false;
+    }
+  },
+
+  availableFinishedGoodsForShipment: [],
+  loadAvailableFinishedGoods: async (companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/available-fg?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ availableFinishedGoodsForShipment: json.data });
+          return json.data;
+        }
+      }
+      return [];
+    } catch (e) {
+      console.error("Failed to load available finished goods:", e);
+      return [];
+    }
+  },
+
+  checkAndTriggerReorderAsync: async (payload: { originalWorkOrderId: string; divertedQty: number; buyerCustomerName: string; notes?: string }, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/reorder-check?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          get().loadProductionQueue(companyCode);
+          return json.data;
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to check and trigger reorder:", e);
+      return null;
+    }
+  },
+
+  dispatchManifests: [],
+  isDispatchManifestsLoading: false,
+  loadDispatchManifests: async (companyCode = "PRINTGOO") => {
+    try {
+      set({ isDispatchManifestsLoading: true });
+      const res = await fetch("/api/v1/warehouse/manifests?company=" + encodeURIComponent(companyCode));
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          set({ dispatchManifests: json.data });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load dispatch manifests:", e);
+    } finally {
+      set({ isDispatchManifestsLoading: false });
+    }
+  },
+
+  upsertDispatchManifestAsync: async (manifest: any, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/manifests?company=" + encodeURIComponent(companyCode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(manifest),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          get().loadDispatchManifests(companyCode);
+          get().loadWarehouseShipments(companyCode);
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to save dispatch manifest:", e);
       return false;
     }
   },

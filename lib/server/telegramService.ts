@@ -16,10 +16,13 @@ import {
   type QuickReplyTemplate,
   type TelegramCompanySettings,
   type TelegramChatSettings,
+  type WorkOrderTelegramMeta,
 } from "@/db/schema";
 import { eq, desc, asc, and, sql, or, ilike, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
+import { generateTechCardImage } from "./techCardGenerator";
+import { generateJobTicketPdf } from "./jobTicketPdfGenerator";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
@@ -59,6 +62,18 @@ function ensureFilesCacheDir() {
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function workOrderMatchWhere(idOrDocNo: string) {
+  return UUID_REGEX.test(idOrDocNo)
+    ? or(eq(workOrders.id, idOrDocNo), eq(workOrders.docNo, idOrDocNo))
+    : eq(workOrders.docNo, idOrDocNo);
+}
+
+function supplierOrderMatchWhere(idOrOrderNo: string) {
+  return UUID_REGEX.test(idOrOrderNo)
+    ? or(eq(supplierOrders.id, idOrOrderNo), eq(supplierOrders.orderNo, idOrOrderNo))
+    : eq(supplierOrders.orderNo, idOrOrderNo);
+}
 
 function chatMatchWhere(idOrChatId: string) {
   return UUID_REGEX.test(idOrChatId)
@@ -749,6 +764,8 @@ export interface SendTelegramMessageParams {
   photoUrl?: string; // Image URL or local path
   documentUrl?: string; // Document/PDF URL
   fileName?: string;
+  mediaBuffer?: Buffer;
+  isPhoto?: boolean;
 }
 
 function resolveMediaBuffer(
@@ -812,7 +829,14 @@ export async function sendTelegramMessage(
   const token = await getEffectiveTelegramBotToken();
 
   let storedMediaUrl = params.photoUrl || params.documentUrl || null;
-  const mediaBufferInfo = resolveMediaBuffer(params.photoUrl || params.documentUrl, params.fileName);
+  const mediaBufferInfo = params.mediaBuffer
+    ? {
+        buffer: params.mediaBuffer,
+        mimeType: params.isPhoto ? "image/png" : "application/octet-stream",
+        fileName: params.fileName || "tech_card.png",
+        isPhoto: params.isPhoto !== false,
+      }
+    : resolveMediaBuffer(params.photoUrl || params.documentUrl, params.fileName);
 
   if (mediaBufferInfo && storedMediaUrl && storedMediaUrl.startsWith("data:")) {
     ensureFilesCacheDir();
@@ -1100,7 +1124,7 @@ export async function sendWorkOrderToTelegram(params: {
   const companyId = await getCompanyIdByCode(companyCode);
 
   const order = await db.query.workOrders.findFirst({
-    where: and(eq(workOrders.companyId, companyId), or(eq(workOrders.id, params.workOrderId), eq(workOrders.docNo, params.workOrderId))),
+    where: and(eq(workOrders.companyId, companyId), workOrderMatchWhere(params.workOrderId)),
     with: {
       client: true,
     },
@@ -1170,12 +1194,469 @@ export async function sendWorkOrderToTelegram(params: {
 /**
  * 4.5 Yetkazib beruvchiga buyurtma (PO - CTP, Shtamp, Xomashyo) ni inline tugmalar bilan jo'natish
  */
+/**
+ * Poligrafik jarayon bosqichlari uchun vizual Stepper yasash
+ */
+export function buildProductionStepper(currentStage: string, currentStatus: string): string {
+  const steps = [
+    { key: "prepress", label: "Prepress" },
+    { key: "print", label: "Chop etish" },
+    { key: "finishing", label: "Shtamp/Ishlov" },
+    { key: "packaging", label: "Qadoqlash" },
+    { key: "completed", label: "Tayyor" },
+  ];
+
+  let activeIndex = 0;
+  if (currentStage === "Queue") activeIndex = 0;
+  else if (currentStage === "Ready to Print") activeIndex = 0;
+  else if (currentStage === "In Production") activeIndex = 1;
+  else if (currentStage === "Post-press") activeIndex = 2;
+  else if (currentStage === "Packaging") activeIndex = 3;
+  else if (currentStage === "Completed") activeIndex = 4;
+
+  const renderedSteps = steps.map((s, idx) => {
+    if (idx < activeIndex) return `[✓ ${s.label}]`;
+    if (idx === activeIndex) return `[▶ ${s.label}]`;
+    return `[○ ${s.label}]`;
+  });
+
+  return renderedSteps.join(" ➔ ");
+}
+
+export function escapeTelegramHtml(str: string): string {
+  return (str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Telegram guruh uchun professional spetsifikatsiya va Stepper matnini shakllantirish
+ */
+export function formatWorkOrderTelegramCaption(order: any, customNote?: string): string {
+  const orderNo = order.docNo || "ZAKAZ";
+  const clientName = (order.client?.name || order.customerName || "MIJOZ").toUpperCase();
+  const productName = order.productName || "Poligrafiya mahsuloti";
+  const paperStock = order.paperStock || "Standart";
+
+  const embellishments: string[] = [];
+  if (order.coating) embellishments.push(order.coating);
+  if (order.lamination) embellishments.push(order.lamination);
+  if (order.embellishment) embellishments.push(order.embellishment);
+  const finishingStr = embellishments.length > 0 ? embellishments.join(", ") : "Standart";
+
+  let dimStr = "Standart";
+  const dims = order.dimensions as any;
+  if (dims?.width && dims?.height) {
+    const w = Number(dims.width);
+    const h = Number(dims.height);
+    const unit = dims.dimensionUnit || "mm";
+    if (unit === "mm") {
+      dimStr = `${(h / 10).toFixed(1)} x ${(w / 10).toFixed(1)} cm (${h}x${w} mm)`;
+    } else {
+      dimStr = `${h} x ${w} ${unit}`;
+    }
+  }
+
+  const quantity = Number(order.quantity || 0).toLocaleString("uz-UZ");
+  const unit = order.unit || "dona";
+  const deadline = order.deadline || "Kelishilmoqda";
+  const statusLabel = order.status || "Active";
+  const stageLabel = order.stage || "Queue";
+
+  const stepper = buildProductionStepper(stageLabel, statusLabel);
+
+  const now = new Date();
+  const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")} ${String(now.getDate()).padStart(2, "0")}.${String(now.getMonth() + 1).padStart(2, "0")}.${now.getFullYear()}`;
+
+  const escapeHtml = escapeTelegramHtml;
+
+  const lines = [
+    `🏭 <b>* ${escapeHtml(clientName)} *</b>`,
+    `📋 <b>BUYURTMA: ${escapeHtml(orderNo)}</b>`,
+    ``,
+    `🔄 <b>Jarayon:</b> ${stepper}`,
+    `📌 <b>Holati:</b> ${escapeHtml(statusLabel)} (${escapeHtml(stageLabel)})`,
+    ``,
+    `📦 <b>Mahsulot:</b> ${escapeHtml(productName)}`,
+    `📄 <b>Material:</b> ${escapeHtml(paperStock)}`,
+    `✨ <b>Ishlov:</b> ${escapeHtml(finishingStr)}`,
+    `📐 <b>O'lchami:</b> ${escapeHtml(dimStr)}`,
+    `🔢 <b>Tiraj:</b> ${quantity} ${escapeHtml(unit)}`,
+    `📅 <b>Topshirish:</b> ${escapeHtml(deadline)}`,
+  ];
+
+  if (customNote?.trim()) {
+    lines.push(``);
+    lines.push(`💬 <i>Izoh: ${escapeHtml(customNote.trim())}</i>`);
+  }
+
+  lines.push(``);
+  lines.push(`🕒 <i>Yangilandi: ${timeStr} | PrintGoo ERP</i>`);
+
+  return lines.join("\n");
+}
+
+/**
+ * Buyurtmani markaziy 'Buyurtmalar guruhi'ga (yoki tanlangan guruhga)
+ * yuqori sifatli kompozit rasm va Stepper-status bilan jo'natish
+ */
+export async function sendWorkOrderToOrdersGroup(params: {
+  workOrderId: string;
+  chatId?: string;
+  customNote?: string;
+  companyCode?: string;
+  sendCardImage?: boolean;
+  alertReply?: boolean;
+}): Promise<{
+  success: boolean;
+  message?: TelegramMessage;
+  telegramMeta?: WorkOrderTelegramMeta;
+  error?: string;
+}> {
+  const companyCode = params.companyCode || "PRINTGOO";
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  const order = await db.query.workOrders.findFirst({
+    where: and(
+      eq(workOrders.companyId, companyId),
+      workOrderMatchWhere(params.workOrderId)
+    ),
+    with: {
+      client: true,
+      attachments: true,
+    },
+  });
+
+  if (!order) {
+    return { success: false, error: "Ish buyurtmasi topilmadi" };
+  }
+
+  const comp = await db.query.companies.findFirst({
+    where: eq(companies.id, companyId),
+  });
+
+  let targetChatRecord: TelegramChat | null = null;
+  const requestedChatId = params.chatId || comp?.settings?.telegram?.ordersChatId;
+
+  if (requestedChatId) {
+    const found = await db.query.telegramChats.findFirst({
+      where: and(eq(telegramChats.companyId, companyId), chatMatchWhere(requestedChatId)),
+    });
+    if (found) targetChatRecord = found;
+  }
+
+  if (!targetChatRecord && order.clientId) {
+    const clientChat = await db.query.telegramChats.findFirst({
+      where: and(
+        eq(telegramChats.companyId, companyId),
+        eq(telegramChats.clientId, order.clientId),
+        eq(telegramChats.status, "active")
+      ),
+    });
+    if (clientChat) targetChatRecord = clientChat;
+  }
+
+  if (!targetChatRecord) {
+    return {
+      success: false,
+      error: "Biriktirilgan Telegram guruh topilmadi. Avval Sozlamalardan 'Markaziy Buyurtmalar guruhi'ni belgilang yoki mijozga guruh biriktiring.",
+    };
+  }
+
+  const caption = formatWorkOrderTelegramCaption(order, params.customNote);
+
+  const dims = order.dimensions as any;
+  const embellishments: string[] = [];
+  if (order.coating) embellishments.push(order.coating);
+  if (order.lamination) embellishments.push(order.lamination);
+  if (order.embellishment) embellishments.push(order.embellishment);
+
+  // Rasmiy A4 PDF Texnik Pasport (Job Ticket) generatsiyasi
+  const pdfResult = await generateJobTicketPdf({
+    docNo: order.docNo,
+    clientName: order.client?.name || order.customerName || "Mijoz",
+    productName: order.productName || "Poligrafiya mahsuloti",
+    quantity: order.quantity,
+    unit: order.unit,
+    department: order.department,
+    site: order.site || undefined,
+    pressMachine: order.pressMachine || undefined,
+    orderDate: order.orderDate || undefined,
+    deadline: order.deadline || undefined,
+    paperStock: order.paperStock || undefined,
+    coating: order.coating || undefined,
+    lamination: order.lamination || undefined,
+    embellishment: order.embellishment || undefined,
+    width: dims?.width ? Number(dims.width) : undefined,
+    height: dims?.height ? Number(dims.height) : undefined,
+    status: order.status,
+    stage: order.stage,
+    priority: order.priority,
+    operations: (order as any).operations || [],
+    notes: order.notes || undefined,
+  });
+
+  const messageText = params.alertReply
+    ? `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\n\n${caption}`
+    : caption;
+
+  const sendResult = await sendTelegramMessage({
+    chatId: targetChatRecord.id,
+    text: messageText,
+    senderName: "PrintGoo ERP",
+    mediaBuffer: pdfResult.buffer,
+    fileName: pdfResult.fileName,
+    documentUrl: pdfResult.publicUrl,
+    isPhoto: false,
+    replyToTelegramMessageId:
+      params.alertReply && order.telegramMeta?.messageId ? order.telegramMeta.messageId : undefined,
+    parseMode: "HTML",
+  });
+
+  if (sendResult.success && sendResult.message) {
+    const updatedMeta: WorkOrderTelegramMeta = {
+      chatId: targetChatRecord.id,
+      messageId: sendResult.message.telegramMessageId,
+      lastSentAt: new Date().toISOString(),
+      channelTitle: targetChatRecord.title,
+    };
+
+    await db
+      .update(workOrders)
+      .set({
+        telegramMeta: updatedMeta,
+        updatedAt: new Date(),
+      })
+      .where(eq(workOrders.id, order.id));
+
+    await db
+      .update(telegramMessages)
+      .set({
+        workOrderId: order.id,
+        isAttachedToOrder: true,
+      })
+      .where(eq(telegramMessages.id, sendResult.message.id));
+
+    return {
+      ...sendResult,
+      telegramMeta: updatedMeta,
+    };
+  }
+
+  return sendResult;
+}
+
+/**
+ * Buyurtmaning bosqichi yoki statusi o'zgarganda guruhdagi mavjud Telegram xabarini
+ * 'editMessageCaption' (yoki replacePdf=true bo'lganda 'editMessageMedia') orqali jonli yangilash
+ */
+export async function updateTelegramOrderCardStatus(
+  workOrderId: string,
+  companyCode: string = "PRINTGOO",
+  replacePdf: boolean = false,
+  alertReply?: boolean,
+  alertComment?: string
+): Promise<{
+  success: boolean;
+  updated?: boolean;
+  mediaReplaced?: boolean;
+  alertSent?: boolean;
+  telegramMeta?: WorkOrderTelegramMeta;
+  error?: string;
+}> {
+  try {
+    const companyId = await getCompanyIdByCode(companyCode);
+
+    const order = await db.query.workOrders.findFirst({
+      where: and(
+        eq(workOrders.companyId, companyId),
+        workOrderMatchWhere(workOrderId)
+      ),
+      with: {
+        client: true,
+      },
+    });
+
+    if (!order) {
+      return { success: false, error: "Buyurtma topilmadi" };
+    }
+
+    const meta = order.telegramMeta;
+    if (!meta?.messageId || !meta?.chatId) {
+      return { success: true, updated: false };
+    }
+
+    const chatRecord = await db.query.telegramChats.findFirst({
+      where: and(eq(telegramChats.companyId, companyId), chatMatchWhere(meta.chatId)),
+    });
+
+    if (!chatRecord) {
+      return { success: false, error: "Biriktirilgan Telegram chat topilmadi" };
+    }
+
+    const token = await getEffectiveTelegramBotToken(companyCode);
+    if (!token) {
+      return { success: false, error: "Telegram bot token topilmadi" };
+    }
+
+    const updatedCaption = formatWorkOrderTelegramCaption(order);
+    const dims = order.dimensions as any;
+
+    if (replacePdf) {
+      try {
+        const pdfResult = await generateJobTicketPdf({
+          docNo: order.docNo,
+          clientName: order.client?.name || order.customerName || "Mijoz",
+          productName: order.productName || "Poligrafiya mahsuloti",
+          quantity: order.quantity,
+          unit: order.unit,
+          department: order.department,
+          site: order.site || undefined,
+          pressMachine: order.pressMachine || undefined,
+          orderDate: order.orderDate || undefined,
+          deadline: order.deadline || undefined,
+          paperStock: order.paperStock || undefined,
+          coating: order.coating || undefined,
+          lamination: order.lamination || undefined,
+          embellishment: order.embellishment || undefined,
+          width: dims?.width ? Number(dims.width) : undefined,
+          height: dims?.height ? Number(dims.height) : undefined,
+          status: order.status,
+          stage: order.stage,
+          priority: order.priority,
+          operations: (order as any).operations || [],
+          notes: order.notes || undefined,
+        });
+
+        const form = new FormData();
+        form.append("chat_id", chatRecord.chatId);
+        form.append("message_id", String(meta.messageId));
+        form.append(
+          "media",
+          JSON.stringify({
+            type: "document",
+            media: "attach://document",
+            caption: updatedCaption,
+            parse_mode: "HTML",
+          })
+        );
+        const blob = new Blob([new Uint8Array(pdfResult.buffer)], { type: "application/pdf" });
+        form.append("document", blob, pdfResult.fileName);
+
+        const mediaRes = await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageMedia`, {
+          method: "POST",
+          body: form,
+        });
+        const mediaJson = await mediaRes.json();
+        if (mediaJson.ok) {
+          const updatedMeta: WorkOrderTelegramMeta = {
+            ...meta,
+            lastSentAt: new Date().toISOString(),
+          };
+
+          await db
+            .update(workOrders)
+            .set({
+              telegramMeta: updatedMeta,
+              updatedAt: new Date(),
+            })
+            .where(eq(workOrders.id, order.id));
+
+          let alertSent = false;
+          if (alertReply && meta.messageId) {
+            try {
+              const alertText = alertComment?.trim()
+                ? `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\nBuyurtma raqami: <b>#${escapeTelegramHtml(order.docNo)}</b>\nIzoh: <i>${escapeTelegramHtml(alertComment.trim())}</i>`
+                : `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\nBuyurtma raqami: <b>#${escapeTelegramHtml(order.docNo)}</b>\nYangi PDF texnik pasport yuklandi va spetsifikatsiyalar yangilandi.`;
+
+              await sendTelegramMessage({
+                chatId: chatRecord.id,
+                text: alertText,
+                senderName: "PrintGoo ERP",
+                replyToTelegramMessageId: meta.messageId,
+                parseMode: "HTML",
+              });
+              alertSent = true;
+            } catch (replyErr) {
+              console.warn("[updateTelegramOrderCardStatus] alertReply warning:", replyErr);
+            }
+          }
+
+          return { success: true, updated: true, mediaReplaced: true, alertSent, telegramMeta: updatedMeta };
+        } else {
+          console.warn("[updateTelegramOrderCardStatus] editMessageMedia warning:", mediaJson);
+        }
+      } catch (mediaErr) {
+        console.warn("[updateTelegramOrderCardStatus] editMessageMedia error, falling back to caption:", mediaErr);
+      }
+    }
+
+    const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageCaption`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatRecord.chatId,
+        message_id: meta.messageId,
+        caption: updatedCaption,
+        parse_mode: "HTML",
+      }),
+    });
+
+    const data = await response.json();
+    if (data.ok) {
+      const updatedMeta: WorkOrderTelegramMeta = {
+        ...meta,
+        lastSentAt: new Date().toISOString(),
+      };
+
+      await db
+        .update(workOrders)
+        .set({
+          telegramMeta: updatedMeta,
+          updatedAt: new Date(),
+        })
+        .where(eq(workOrders.id, order.id));
+
+      let alertSent = false;
+      if (alertReply && meta.messageId) {
+        try {
+          const alertText = alertComment?.trim()
+            ? `⚠️ <b>DIQQAT: BUYURTMA STATUSI YANGILANDI!</b>\nBuyurtma raqami: <b>#${escapeTelegramHtml(order.docNo)}</b>\nIzoh: <i>${escapeTelegramHtml(alertComment.trim())}</i>`
+            : `⚠️ <b>DIQQAT: BUYURTMA STATUSI YANGILANDI!</b>\nBuyurtma raqami: <b>#${escapeTelegramHtml(order.docNo)}</b>\nStatus: <b>${escapeTelegramHtml(order.status || "")}</b> | Bosqich: <b>${escapeTelegramHtml(order.stage || "")}</b>`;
+
+          await sendTelegramMessage({
+            chatId: chatRecord.id,
+            text: alertText,
+            senderName: "PrintGoo ERP",
+            replyToTelegramMessageId: meta.messageId,
+            parseMode: "HTML",
+          });
+          alertSent = true;
+        } catch (replyErr) {
+          console.warn("[updateTelegramOrderCardStatus] alertReply warning:", replyErr);
+        }
+      }
+
+      return { success: true, updated: true, alertSent, telegramMeta: updatedMeta };
+    } else {
+      console.warn("[updateTelegramOrderCardStatus] editMessageCaption response:", data);
+      return { success: false, error: data.description || "Tahrirlashda xatolik" };
+    }
+  } catch (err: any) {
+    console.error("[updateTelegramOrderCardStatus] Error:", err);
+    return { success: false, error: err?.message || "Server xatoligi" };
+  }
+}
+
 export async function sendPurchaseOrderToTelegram(params: {
   supplierOrderId: string;
   customNote?: string;
   companyCode?: string;
   fileUrl?: string;
   fileName?: string;
+  mediaBuffer?: Buffer;
+  isPhoto?: boolean;
 }): Promise<{ success: boolean; message?: TelegramMessage; error?: string }> {
   const companyCode = params.companyCode || "PRINTGOO";
   const companyId = await getCompanyIdByCode(companyCode);
@@ -1183,7 +1664,7 @@ export async function sendPurchaseOrderToTelegram(params: {
   const order = await db.query.supplierOrders.findFirst({
     where: and(
       eq(supplierOrders.companyId, companyId),
-      or(eq(supplierOrders.id, params.supplierOrderId), eq(supplierOrders.orderNo, params.supplierOrderId))
+      supplierOrderMatchWhere(params.supplierOrderId)
     ),
     with: {
       supplier: true,

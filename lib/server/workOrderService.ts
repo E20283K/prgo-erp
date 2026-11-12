@@ -52,6 +52,10 @@ import {
 } from "./workOrderAuditService";
 import { s3Client, S3_BUCKETS, deleteStorageObject } from "@/lib/server/storage";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  updateTelegramOrderCardStatus,
+  sendWorkOrderToOrdersGroup,
+} from "./telegramService";
 
 /**
  * Vaqtinchalik Flexo Imposition keshidagi faylni (qirqilgan SKU PDF yoki generatsiya qilingan film/prevyu)
@@ -869,6 +873,38 @@ export async function upsertWorkOrder(
     console.error("[WorkOrder] Supplier orders bog'lashda xatolik:", poErr);
   }
 
+  // Telegram guruhidagi statusni yangilash yoki avtomatik yangi buyurtmani yuborish
+  try {
+    const specsChanged = Boolean(
+      existingOrder?.telegramMeta && (
+        existingOrder.quantity !== payload.quantity ||
+        existingOrder.paperStock !== payload.paperStock ||
+        existingOrder.coating !== payload.coating ||
+        existingOrder.lamination !== payload.lamination ||
+        existingOrder.embellishment !== payload.embellishment ||
+        JSON.stringify(existingOrder.dimensions) !== JSON.stringify(payload.dimensions)
+      )
+    );
+
+    updateTelegramOrderCardStatus(targetId, companyCode, specsChanged).catch(() => {});
+
+    const comp = await db.query.companies.findFirst({
+      where: eq(companies.id, companyId),
+    });
+    if (
+      comp?.settings?.telegram?.autoSendNewOrders &&
+      comp?.settings?.telegram?.ordersChatId &&
+      !existingOrder?.telegramMeta &&
+      (statusVal === "Active" || statusVal === "In Production")
+    ) {
+      sendWorkOrderToOrdersGroup({
+        workOrderId: targetId,
+        companyCode,
+      }).catch((e) => console.warn("[WorkOrder] Auto send to telegram failed:", e));
+    }
+  } catch (_) {
+  }
+
   return {
     success: true,
     workOrder: {
@@ -948,6 +984,11 @@ export async function deleteWorkOrder(
           : existingOrder.recipeCode,
       })
       .where(eq(workOrders.id, existingOrder.id));
+
+    // Telegram guruhidagi xabarni avtomatik yangilash
+    try {
+      updateTelegramOrderCardStatus(existingOrder.id, companyCode).catch(() => {});
+    } catch (_) {}
 
     const safeAuthor = {
       id: currentAuthor.id || "system",
@@ -1117,6 +1158,11 @@ export async function updateWorkOrderReadiness(
       .update(workOrders)
       .set(patchPayload)
       .where(eq(workOrders.id, existingOrder.id));
+
+    // Telegram guruhidagi xabarni avtomatik yangilash
+    try {
+      updateTelegramOrderCardStatus(existingOrder.id, companyCode).catch(() => {});
+    } catch (_) {}
 
     return {
       success: true,

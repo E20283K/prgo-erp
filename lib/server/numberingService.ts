@@ -5,6 +5,7 @@ import {
   warehouseMovements,
   warehouseInventoryCounts,
   warehouseStockBalances,
+  warehouseDispatchManifests,
   productionSpecifications,
   clients,
 } from "@/db/schema";
@@ -245,4 +246,27 @@ export async function getNextInventoryCountNumber(
     );
 
   return calculateNextNumber("INV", rows.map((r) => r.num), yearSuffix);
+}
+
+/**
+ * Yuk Marshruti / Reys Manifesti uchun navbatdagi unikal raqam: MNF-26-XXXX
+ */
+export async function getNextManifestNumber(
+  companyCode: string = "PRINTGOO"
+): Promise<string> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const yearSuffix = getCurrentYearSuffix();
+  const searchPattern = `MNF-${yearSuffix}-%`;
+
+  const rows = await db
+    .select({ num: warehouseDispatchManifests.manifestNumber })
+    .from(warehouseDispatchManifests)
+    .where(
+      and(
+        eq(warehouseDispatchManifests.companyId, companyId),
+        ilike(warehouseDispatchManifests.manifestNumber, searchPattern)
+      )
+    );
+
+  return calculateNextNumber("MNF", rows.map((r) => r.num), yearSuffix);
 }

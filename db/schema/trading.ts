@@ -118,6 +118,7 @@ export const tradingSales = pgTable(
     totalUzs: numeric("total_uzs", { precision: 18, scale: 2 }).default("0.00").notNull(),
     paymentMethod: tradingPaymentMethodEnum("payment_method").default("bank_wire").notNull(),
     status: tradingDocStatusEnum("status").default("Draft").notNull(),
+    linkedShipmentId: varchar("linked_shipment_id", { length: 128 }),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

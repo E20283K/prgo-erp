@@ -58,6 +58,9 @@ export interface TelegramSettingsData {
   isWebhookActive: boolean;
   defaultNotificationLanguage: "uz" | "ru" | "en";
   autoCreateLeadsFromUnknownGroups: boolean;
+  ordersChatId?: string;
+  ordersChatTitle?: string;
+  autoSendNewOrders?: boolean;
 }
 
 interface TelegramChatRecord {
@@ -94,6 +97,9 @@ export function TelegramSettingsView() {
     isWebhookActive: false,
     defaultNotificationLanguage: "uz",
     autoCreateLeadsFromUnknownGroups: false,
+    ordersChatId: "",
+    ordersChatTitle: "",
+    autoSendNewOrders: false,
   });
 
   const [botStatus, setBotStatus] = useState<{
@@ -601,6 +607,66 @@ export function TelegramSettingsView() {
                       setSettings({ ...settings, autoCreateLeadsFromUnknownGroups: checked })
                     }
                   />
+                </div>
+
+                {/* Markaziy Buyurtmalar guruhi (Sex / Ishlab chiqarish nazorati) */}
+                <div className="p-3 rounded border border-border bg-muted/20 space-y-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <Send className="size-3.5 text-primary" />
+                    <Label className="text-xs font-semibold">
+                      Markaziy Buyurtmalar guruhi
+                    </Label>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-normal">
+                    Ishlab chiqarish va sex nazorati uchun asosiy Telegram guruhi. Barcha tasdiqlangan buyurtmalar ushbu guruhga texnik pasport rasmi va jonli yangilanuvchi bosqichlar zanjiri bilan jo&apos;natiladi.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium">Asosiy guruhni tanlang</Label>
+                      <Select
+                        value={settings.ordersChatId || "none"}
+                        onValueChange={(val) => {
+                          const selected = chats.find((c) => c.chatId === val || c.id === val);
+                          setSettings({
+                            ...settings,
+                            ordersChatId: !val || val === "none" ? undefined : val,
+                            ordersChatTitle: selected?.title || undefined,
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Guruh tanlanmagan" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Biriktirilmagan (Tanlanmagan)</SelectItem>
+                          {chats.map((c) => (
+                            <SelectItem key={c.id} value={c.chatId}>
+                              {c.title} {c.clientName ? `(${c.clientName})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded border border-border bg-background">
+                      <div className="space-y-0.5 pr-2">
+                        <Label className="text-[11px] font-medium cursor-pointer" htmlFor="auto-orders-switch">
+                          Avtomatik jo&apos;natish
+                        </Label>
+                        <p className="text-[9px] text-muted-foreground">
+                          Buyurtma tasdiqlanganda darhol guruhga yuborish.
+                        </p>
+                      </div>
+                      <Switch
+                        id="auto-orders-switch"
+                        checked={Boolean(settings.autoSendNewOrders)}
+                        onCheckedChange={(checked) =>
+                          setSettings({ ...settings, autoSendNewOrders: checked })
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

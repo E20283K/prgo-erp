@@ -57,6 +57,24 @@ class FlexoPdfRequest(BaseModel):
     saveToS3: bool = False
     s3Key: Optional[str] = None
 
+class TechCardRequest(BaseModel):
+    clientName: str = "BIRYUZA GROUP"
+    orderNo: str = "1470 ZAKAZ"
+    productName: Optional[str] = "KARTON ETIKETKA"
+    frontImageUrl: Optional[str] = None
+    backImageUrl: Optional[str] = None
+    frontImageBase64: Optional[str] = None
+    backImageBase64: Optional[str] = None
+    shapeType: str = "chamfer"  # "chamfer", "rectangle", "rounded"
+    widthMm: float = 50.0
+    heightMm: float = 125.0
+    cornerCutMm: float = 8.0
+    holeDiameterMm: float = 4.0
+    hasHole: bool = True
+    embellishments: List[str] = Field(default_factory=list)
+    paperStock: Optional[str] = None
+    finishing: Optional[str] = None
+    quantity: Optional[str] = None
 class TableExportRequest(BaseModel):
     title: str = "PrintGoo ERP Report"
     subtitle: Optional[str] = None

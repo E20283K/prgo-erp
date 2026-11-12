@@ -31,6 +31,8 @@ import {
   BookmarkPlus,
   Loader2,
   Trash2,
+  Truck,
+  Send,
 } from "lucide-react";
 import {
   Dialog,
@@ -96,6 +98,7 @@ import {
   getInitialOperations,
   getNextWorkOrderNo,
   type WorkOrderDepartment,
+  type WorkOrderDeliveryBatch,
 } from "./types";
 import { EXAMPLE_ATTACHMENTS } from "@/components/file-viewer/file-utils";
 import { OverviewTab, getDisplayImageUrl } from "./tabs/OverviewTab";
@@ -108,6 +111,7 @@ import { FinancialsTab } from "./tabs/FinancialsTab";
 import { FilesTab } from "../common/FilesTab";
 import { LayoutCalcTab } from "./tabs/LayoutCalcTab";
 import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
+import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
@@ -115,6 +119,7 @@ import { DowntimeLogDialog } from "./dialogs/DowntimeLogDialog";
 import { PalletTagPrintDialog } from "./dialogs/PalletTagPrintDialog";
 import { JobTicketDialog } from "./dialogs/JobTicketDialog";
 import { PackagingDialog } from "./dialogs/PackagingDialog";
+import { TelegramOrdersGroupModal } from "./TelegramOrdersGroupModal";
 import { BoxLabelPrintModal } from "./dialogs/BoxLabelPrintModal";
 import { SaveSpecDialog } from "./dialogs/SaveSpecDialog";
 import {
@@ -1437,6 +1442,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [isPackagingOpen, setIsPackagingOpen] = useState(false);
+  const [isTelegramOrdersModalOpen, setIsTelegramOrdersModalOpen] = useState(false);
   const [isLabelPrintOpen, setIsLabelPrintOpen] = useState(false);
 
   const handleSavePackaging = (summary: WorkOrderPackagingSummary, markComplete: boolean) => {
@@ -1456,6 +1462,29 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           id: targetWoId,
           stage: "Completed",
           completedSheets: summary.totalPackedQty,
+        });
+
+        // 2810 Tayyor Mahsulot Omboriga Kutilayotgan Qabul yaratish
+        useWorkspaceStore.getState().upsertFinishedGoodAsync({
+          workOrderId: targetWoId,
+          orderNo: (data as any).clientOrderId || (formData as any).clientOrderId || null,
+          productName: (formData as any).productName || (data as any).product || (data as any).productName || "Tayyor Mahsulot",
+          sku: `FG-${targetWoId}`,
+          customerName: (formData as any).customer || (formData as any).customerName || (data as any).customer || (data as any).customerName || "Mijoz",
+          clientId: (data as any).clientId || null,
+          quantity: summary.totalPackedQty,
+          reservedQuantity: 0,
+          unit: formData.unit || (data as any).unit || "pcs",
+          receiptStatus: "PendingReceipt",
+          allocationStatus: "Dedicated",
+          status: "In Stock",
+          locationName: "Tayyor mahsulotlar ombori",
+          locationShelf: "FG-Staging",
+          costPricePerUnit: Number(formData.priceTotal || (data as any).priceTotal || 0) > 0 && summary.totalPackedQty > 0
+            ? (Number(formData.priceTotal || (data as any).priceTotal) / summary.totalPackedQty).toFixed(2)
+            : 0,
+          totalStockValue: formData.priceTotal || (data as any).priceTotal || 0,
+          notes: `${summary.totalBoxes} ta quti qadoqlandi. Smena qabuli kutilmoqda.`,
         });
       }
 
@@ -2447,6 +2476,106 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setFormData,
     updateTabData,
   ]);
+
+  const handleCreateShipmentForBatch = useCallback(
+    async (batch: WorkOrderDeliveryBatch, allocatedBoxIds?: string[]) => {
+      const { warehouseShipments, upsertWarehouseShipmentAsync } = useWorkspaceStore.getState();
+      const nextNum = 6010 + (warehouseShipments?.length || 0);
+      const newShipmentId = `SHP-${nextNum}`;
+      const qty = Number(batch.packedQty || batch.quantity) || 0;
+      const currentDocNo = docNo || data.docNo || tab.id;
+
+      const shipmentData = {
+        id: newShipmentId,
+        shipmentNumber: newShipmentId,
+        date: new Date().toISOString().split("T")[0],
+        status: "Draft",
+        customerName: formData.customer,
+        workOrderId: currentDocNo,
+        workOrder: currentDocNo,
+        batchNo: String(batch.batchNo),
+        quantity: qty,
+        unit: formData.unit || "dona",
+        notes: `Work Order ${currentDocNo} — Partiya #${batch.batchNo} (${qty.toLocaleString()} ${formData.unit || "dona"})`,
+        items: [
+          {
+            id: `item-${Date.now()}`,
+            sku: (formData.sizes?.[0] as any)?.skuCode || (formData.sizes?.[0] as any)?.size || formData.sizes?.[0]?.id || `WO-${currentDocNo}`,
+            name: formData.product,
+            quantity: qty,
+            unit: formData.unit || "dona",
+            unitPrice: Number(formData.quantity) > 0 ? Number(((Number(formData.priceTotal) || 0) / Number(formData.quantity)).toFixed(4)) : 0,
+            totalPrice: Number((qty * (Number(formData.quantity) > 0 ? (Number(formData.priceTotal) || 0) / Number(formData.quantity) : 0)).toFixed(2)),
+          },
+        ],
+      };
+
+      if (upsertWarehouseShipmentAsync) {
+        await upsertWarehouseShipmentAsync(shipmentData);
+      }
+
+      const currentBatches = formData.deliveryBatches || [];
+      const updatedBatches = currentBatches.map((b) =>
+        b.id === batch.id
+          ? {
+              ...b,
+              linkedShipmentId: newShipmentId,
+              linkedShipmentNo: newShipmentId,
+              dispatchedQty: qty,
+              status: "dispatched" as const,
+            }
+          : b
+      );
+      handleFieldChange("deliveryBatches", updatedBatches);
+      setTabUnsaved(tab.id, true);
+
+      openTab({
+        id: newShipmentId,
+        title: `${newShipmentId}: Chiqim`,
+        type: "warehouse-shipment",
+        module: "warehouse",
+        isUnsaved: false,
+        documentData: shipmentData,
+      });
+
+      addNotification({
+        title: "Chiqim hujjati yaratildi",
+        description: `${newShipmentId} shakllantirildi.`,
+        severity: "success",
+      });
+    },
+    [docNo, data.docNo, tab.id, formData, handleFieldChange, setTabUnsaved, openTab, addNotification]
+  );
+
+  const handleOpenShipmentTab = useCallback(
+    (shipmentId: string) => {
+      const existing = (useWorkspaceStore.getState().warehouseShipments || []).find(
+        (s) => s.id === shipmentId || (s as any).shipmentNumber === shipmentId || (s as any).docNo === shipmentId
+      );
+      openTab({
+        id: shipmentId,
+        title: `${shipmentId}: Chiqim`,
+        type: "warehouse-shipment",
+        module: "warehouse",
+        documentData: existing || { id: shipmentId, shipmentNumber: shipmentId },
+      });
+    },
+    [openTab]
+  );
+
+  const handleOpenDeliveryActTab = useCallback(
+    (actId: string) => {
+      openTab({
+        id: actId,
+        title: `${actId}: Dalolatnoma`,
+        type: "delivery-act",
+        module: "finance",
+        documentData: { id: actId },
+      });
+    },
+    [openTab]
+  );
+
   const activePrintPlan = React.useMemo(
     () =>
       calculatePrintPlanning({
@@ -2964,6 +3093,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onClick={() => setIsJobTicketOpen(true)}
               />
 
+              {/* Telegram Buyurtmalar guruhiga yuborish */}
+              <HeaderIconAction
+                icon={Send}
+                label="Telegram guruhga yuborish"
+                variant="outline"
+                onClick={() => setIsTelegramOrdersModalOpen(true)}
+              />
+
               {/* 2. Packaging (Icon button with badge if boxes packed) */}
               <Tooltip>
                 <TooltipTrigger
@@ -3066,6 +3203,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     <Printer className="w-3.5 h-3.5" />
                     <span>{tOrder("jobTicket")}</span>
                     <DropdownMenuShortcut>Ctrl+P</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem onClick={() => setIsTelegramOrdersModalOpen(true)} className="gap-2 cursor-pointer">
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Telegram guruhga yuborish</span>
                   </DropdownMenuItem>
 
                   <DropdownMenuItem onClick={() => setIsPackagingOpen(true)} className="gap-2 cursor-pointer">
@@ -3309,6 +3451,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 label: tOrder("tabTimeline"),
                 icon: Clock,
                 badge: `${operations.filter((o) => o.status === "Finished").length}/${operations.length}`,
+              },
+              {
+                id: "shipments",
+                label: tOrder("tabShipments"),
+                icon: Truck,
+                badge: (formData.deliveryBatches || []).length || null,
               },
               ...(!isOperator
                 ? [
@@ -3787,6 +3935,29 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               />
             )}
 
+                        {/* Tab: Shipments & Deliveries */}
+            {visitedTabs.has("shipments") && (
+              <ShipmentsTab
+                formData={formData}
+                docNo={docNo || data.docNo || tab.id}
+                operations={operations}
+                shiftEvents={shiftEvents}
+                onUpdateBatches={(newBatches) => {
+                  handleFieldChange("deliveryBatches", newBatches);
+                  setTabUnsaved(tab.id, true);
+                }}
+                onCreateShipment={handleCreateShipmentForBatch}
+                onOpenShipment={handleOpenShipmentTab}
+                onOpenDeliveryAct={handleOpenDeliveryActTab}
+                onOpenPackaging={() => setIsPackagingOpen(true)}
+                onOpenPrintLabels={() => setIsLabelPrintOpen(true)}
+                onUpdatePackaging={(summary) => {
+                  handleFieldChange("packagingData", summary);
+                  setTabUnsaved(tab.id, true);
+                }}
+              />
+            )}
+
             {/* Tab 8: History */}
             {visitedTabs.has("history") && (
               <HistoryTab
@@ -3904,6 +4075,35 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               severity: "success",
             })
           }
+        />
+      )}
+
+      {/* Telegram Buyurtmalar Guruhi Dialog */}
+      {isTelegramOrdersModalOpen && (
+        <TelegramOrdersGroupModal
+          isOpen={isTelegramOrdersModalOpen}
+          onClose={() => setIsTelegramOrdersModalOpen(false)}
+          workOrderId={data.id || data.docNo || tab.id}
+          orderNumber={data.docNo || tab.id}
+          customerName={formData.customer}
+          productName={formData.product}
+          quantity={formData.quantity}
+          unit={formData.unit}
+          paperStock={formData.paperStock}
+          coating={formData.coating}
+          lamination={formData.lamination}
+          embellishment={formData.embellishment}
+          width={formData.width}
+          height={formData.height}
+          status={formData.status}
+          stage={formData.stage}
+          deadline={formData.deadline}
+          telegramMeta={(data as any).telegramMeta}
+          onSuccess={(meta) => {
+            if (meta) {
+              updateTabData(tab.id, { telegramMeta: meta });
+            }
+          }}
         />
       )}
 

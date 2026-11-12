@@ -45,6 +45,14 @@ export const warehouseShipmentStatusEnum = pgEnum("warehouse_shipment_status", [
   "Cancelled",   // Bekor qilingan
 ]);
 
+export const warehouseDispatchManifestStatusEnum = pgEnum("warehouse_manifest_status", [
+  "Draft",       // Qoralama
+  "Loading",     // Yuklanmoqda
+  "Dispatched",  // Jo'natilgan / Yo'lda
+  "Delivered",   // Yetkazildi
+  "Cancelled",   // Bekor qilingan
+]);
+
 export const warehouseMovementStatusEnum = pgEnum("warehouse_movement_status", [
   "Pending",     // Kutilmoqda
   "In Transit",  // Yo'lda
@@ -188,6 +196,8 @@ export const warehouseReceiptItems = pgTable(
       .notNull()
       .references(() => warehouseReceipts.id, { onDelete: "cascade" }),
     itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+    finishedGoodId: uuid("finished_good_id").references(() => warehouseFinishedGoods.id, { onDelete: "set null" }),
+    sourceWorkOrderId: varchar("source_work_order_id", { length: 128 }),
     sku: varchar("sku", { length: 64 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     category: varchar("category", { length: 64 }).default("Paper & Board").notNull(),
@@ -227,6 +237,11 @@ export const warehouseShipments = pgTable(
     customerName: varchar("customer_name", { length: 255 }).notNull(),
     workOrderId: varchar("work_order_id", { length: 128 }),
     deliveryActId: varchar("delivery_act_id", { length: 128 }),
+    tradingSaleId: varchar("trading_sale_id", { length: 128 }),
+    manifestId: uuid("manifest_id").references(() => warehouseDispatchManifests.id, {
+      onDelete: "set null",
+    }),
+    originSource: varchar("origin_source", { length: 64 }).default("WorkOrder").notNull(),
     fromLocationName: varchar("from_location_name", { length: 255 }),
     status: warehouseShipmentStatusEnum("status").default("Draft").notNull(),
     carrier: varchar("carrier", { length: 255 }),
@@ -252,6 +267,10 @@ export const warehouseShipmentItems = pgTable(
       .notNull()
       .references(() => warehouseShipments.id, { onDelete: "cascade" }),
     itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+    finishedGoodId: uuid("finished_good_id"),
+    tradingCatalogId: varchar("trading_catalog_id", { length: 128 }),
+    accountCode: varchar("account_code", { length: 16 }).default("2810").notNull(),
+    sourceWorkOrderId: varchar("source_work_order_id", { length: 64 }),
     sku: varchar("sku", { length: 64 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     quantity: numeric("quantity", { precision: 15, scale: 3 }).notNull(),
@@ -406,6 +425,10 @@ export const warehouseFinishedGoods = pgTable(
     batchNo: varchar("batch_no", { length: 64 }),
     producedAt: timestamp("produced_at", { withTimezone: true }).defaultNow().notNull(),
     status: finishedGoodStatusEnum("status").default("In Stock").notNull(),
+    allocationStatus: varchar("allocation_status", { length: 32 }).default("Dedicated").notNull(),
+    receiptStatus: varchar("receipt_status", { length: 32 }).default("Received").notNull(),
+    costPricePerUnit: numeric("cost_price_per_unit", { precision: 15, scale: 2 }).default("0").notNull(),
+    totalStockValue: numeric("total_stock_value", { precision: 15, scale: 2 }).default("0").notNull(),
     locationShelf: varchar("location_shelf", { length: 128 }),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -415,6 +438,39 @@ export const warehouseFinishedGoods = pgTable(
     uniqueIndex("finished_goods_company_sku_batch_uq").on(table.companyId, table.sku, table.workOrderId),
     index("finished_goods_company_idx").on(table.companyId),
     index("finished_goods_customer_idx").on(table.companyId, table.customerName),
+  ]
+);
+
+
+// ─── 8. Warehouse Dispatch Manifests (Yuk Marshruti / Reys Manifesti) ──────────
+
+export const warehouseDispatchManifests = pgTable(
+  "warehouse_dispatch_manifests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    manifestNumber: varchar("manifest_number", { length: 64 }).notNull(), // Masalan: "MNF-2026-001"
+    manifestDate: timestamp("manifest_date", { withTimezone: true }).defaultNow().notNull(),
+    vehiclePlate: varchar("vehicle_plate", { length: 64 }), // Masalan: "01 A 777 AA"
+    vehicleModel: varchar("vehicle_model", { length: 128 }), // Masalan: "Isuzu 5t"
+    driverName: varchar("driver_name", { length: 255 }),
+    driverPhone: varchar("driver_phone", { length: 64 }),
+    destinationRoute: text("destination_route"),
+    status: warehouseDispatchManifestStatusEnum("status").default("Draft").notNull(),
+    totalShipmentsCount: integer("total_shipments_count").default(0).notNull(),
+    totalPackages: integer("total_packages").default(0).notNull(),
+    totalWeightKg: numeric("total_weight_kg", { precision: 12, scale: 2 }).default("0").notNull(),
+    departureTime: varchar("departure_time", { length: 32 }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("manifests_company_number_uq").on(table.companyId, table.manifestNumber),
+    index("manifests_company_date_idx").on(table.companyId, table.manifestDate),
+    index("manifests_status_idx").on(table.companyId, table.status),
   ]
 );
 
@@ -460,6 +516,15 @@ export const warehouseReceiptItemsRelations = relations(warehouseReceiptItems, (
   }),
 }));
 
+
+export const warehouseDispatchManifestsRelations = relations(warehouseDispatchManifests, ({ one, many }) => ({
+  company: one(companies, {
+    fields: [warehouseDispatchManifests.companyId],
+    references: [companies.id],
+  }),
+  shipments: many(warehouseShipments),
+}));
+
 export const warehouseShipmentsRelations = relations(warehouseShipments, ({ one, many }) => ({
   company: one(companies, {
     fields: [warehouseShipments.companyId],
@@ -472,6 +537,10 @@ export const warehouseShipmentsRelations = relations(warehouseShipments, ({ one,
   client: one(clients, {
     fields: [warehouseShipments.clientId],
     references: [clients.id],
+  }),
+  manifest: one(warehouseDispatchManifests, {
+    fields: [warehouseShipments.manifestId],
+    references: [warehouseDispatchManifests.id],
   }),
   items: many(warehouseShipmentItems),
 }));

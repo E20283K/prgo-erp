@@ -18,11 +18,14 @@ import {
   DocumentTab,
   WarehouseShipmentRecord,
   ShipmentLineItem,
+  ScannedBoxEntry,
   ShipmentType,
   ProductionQueueItem,
   CrmCustomerRecord,
   WarehouseStockRecord,
 } from "@/store/workspaceStore";
+import { toast } from "@/components/ui/toast";
+import { Checkbox } from "@/components/ui/checkbox";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -32,6 +35,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { DatePicker } from "@/components/ui/date-picker";
+import { PickFinishedGoodsDialog } from "@/components/documents/warehouse/dialogs/PickFinishedGoodsDialog";
+import { PickTradingCatalogDialog } from "@/components/documents/warehouse/dialogs/PickTradingCatalogDialog";
+import { DispatchManifestDialog } from "@/components/documents/warehouse/dialogs/DispatchManifestDialog";
+import { PackageCheck } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -93,6 +100,9 @@ import {
   RotateCcw,
   User,
   ShoppingBag,
+  QrCode,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 
 const DataEditor = dynamic(
@@ -419,7 +429,7 @@ function StockMaterialDialog({
             <span>Ombordan xomashyo yoki material tanlash</span>
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-            Mavjud qog'oz, bo'yoq, plyonka yoki delovoy otxod qoldiqlaridan qatorga qo'shish (F4)
+            Mavjud qog'oz, bo'yoq, plyonka yoki delovoy otxod qoldiqlaridan qatorga qo'shish (Shift+F4)
           </DialogDescription>
         </DialogHeader>
         <Command className="w-full">
@@ -941,6 +951,8 @@ export function CarrierDialog({
 
 export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const {
+    companiesList,
+    loadCompanies,
     warehouseShipments,
     upsertWarehouseShipment,
     upsertWarehouseShipmentAsync,
@@ -963,12 +975,20 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     closeTab,
     setTabUnsaved,
     theme,
+    dispatchManifests,
+    loadDispatchManifests,
+    checkAndTriggerReorderAsync,
+    finishedGoods,
+    loadFinishedGoods,
   } = useWorkspaceStore();
 
   const isDark = theme === "dark";
 
   // Auto-fetch plants, warehouses, carriers and suppliers if not yet in store
   useEffect(() => {
+    if ((!companiesList || companiesList.length === 0) && loadCompanies) {
+      loadCompanies();
+    }
     if (warehousesList.length === 0 && loadWarehouses) {
       loadWarehouses();
     }
@@ -980,6 +1000,12 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     }
     if (carriersList.length === 0 && loadCarriers) {
       loadCarriers();
+    }
+    if ((!dispatchManifests || dispatchManifests.length === 0) && loadDispatchManifests) {
+      loadDispatchManifests();
+    }
+    if ((!finishedGoods || finishedGoods.length === 0) && loadFinishedGoods) {
+      loadFinishedGoods();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1055,29 +1081,42 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     const defaultProduct = d.product || "";
     const defaultQty = Number(d.quantity) || 0;
     const defaultUnit = d.unit || "pcs";
-    const defaultCustomer = d.customer || crmCustomers[0]?.name || "";
-    const defaultWo = d.workOrder || "";
+    const defaultCustomer = d.customer || d.customerName || "";
+    const defaultWo = d.workOrder || d.workOrderId || "";
     const defaultShipmentType: ShipmentType = d.shipmentType || "CustomerDelivery";
+    const defaultCompanyId = d.companyId || (companiesList && companiesList[0]?.id) || "";
+    const defaultCompanyName = d.companyName || (companiesList && companiesList.find((c: any) => c.id === defaultCompanyId)?.name) || "PrintGoo LLC";
 
-    const defaultItems: ShipmentLineItem[] = d.items && d.items.length > 0
+    const defaultItems: ShipmentLineItem[] = Array.isArray(d.items) && d.items.length > 0
       ? d.items
-      : [
+      : defaultProduct && defaultQty > 0
+      ? [
           {
-            id: "ship-item-1",
-            sku: "PRN-JOB-01",
+            id: `ship-item-${Date.now()}`,
+            sku: defaultWo ? `PRN-${defaultWo}` : `PRN-ITEM-1`,
             name: defaultProduct,
             orderQty: defaultQty,
             shippedQty: defaultQty,
             unit: defaultUnit,
-            packageCount: Math.ceil(defaultQty / 500) || 10,
+            unitPrice: Number(d.unitPrice) || 0,
+            totalPrice: Number((defaultQty * (Number(d.unitPrice) || 0)).toFixed(2)),
+            packageCount: Math.ceil(defaultQty / 500) || 1,
             packageType: "Gofroquti",
-            palletNo: "Pallet P-01",
-            notes: "To'liq adad qadoqlandi",
+            palletNo: "2810 Ombor",
+            notes: "",
           },
-        ];
+        ]
+      : [];
+
+    const totalPkg = defaultItems.reduce((acc, it) => acc + (Number(it.packageCount) || 0), 0);
+    const totalWt = defaultItems.reduce((acc, it) => acc + (Number(it.shippedQty) * 0.045 || 0), 0);
 
     return {
       id: d.id || tab.id,
+      dbId: d.dbId || undefined,
+      companyId: defaultCompanyId,
+      companyName: defaultCompanyName,
+      warehouseId: d.warehouseId || undefined,
       date: d.date || new Date().toISOString().split("T")[0],
       customer: defaultCustomer,
       deliveryActId: d.deliveryActId || "",
@@ -1087,18 +1126,22 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       unit: defaultUnit,
       from: d.from || availableWarehouses[0]?.name || "Asosiy ombor",
       carrier: d.carrier || DEFAULT_CARRIERS[0].name,
-      trackingNo: d.trackingNo || `TRK${Math.floor(900000 + Math.random() * 99999)}`,
+      trackingNo: d.trackingNo || "",
       driverName: d.driverName || DEFAULT_CARRIERS[0].driverName,
       driverPhone: d.driverPhone || DEFAULT_CARRIERS[0].driverPhone,
       vehicleNo: d.vehicleNo || DEFAULT_CARRIERS[0].vehicleNo,
-      recipientName: d.recipientName || "Mijoz vakili (Ishonchnoma asosida)",
-      powerOfAttorney: d.powerOfAttorney || "№ 184 / 12.10.2026 dan",
-      packagesCount: d.packagesCount || Math.ceil(defaultQty / 500) || 10,
-      grossWeightKg: d.grossWeightKg || Math.round(defaultQty * 0.045) || 145,
-      volumeM3: d.volumeM3 || 0.85,
+      recipientName: d.recipientName || "",
+      powerOfAttorney: d.powerOfAttorney || "",
+      packagesCount: Number(d.packagesCount) || totalPkg,
+      grossWeightKg: Number(d.grossWeightKg) || Math.round(totalWt),
+      volumeM3: Number(d.volumeM3) || 0,
       notes: d.notes || "",
       batchId: d.batchId || undefined,
       batchNo: d.batchNo !== undefined ? Number(d.batchNo) : undefined,
+      manifestId: d.manifestId || undefined,
+      manifestNumber: d.manifestNumber || undefined,
+      deliveryMode: d.deliveryMode || (d.manifestId ? "manifest" : (d.carrier || "").includes("Samovyvoz") ? "self" : ((d.carrier || "").includes("BTS") || (d.carrier || "").includes("Express") || (d.carrier || "").includes("Yandex")) ? "courier" : "dedicated"),
+      scannedBoxes: Array.isArray(d.scannedBoxes) ? d.scannedBoxes : [],
       status: d.status || "Draft",
       shipmentType: defaultShipmentType,
       items: defaultItems,
@@ -1126,8 +1169,490 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const [carrierModalData, setCarrierModalData] = useState<Partial<CarrierProfile> | undefined>(undefined);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isStockPickerOpen, setIsStockPickerOpen] = useState(false);
+  const [isFgPickerOpen, setIsFgPickerOpen] = useState(false);
+  const [isTradingPickerOpen, setIsTradingPickerOpen] = useState(false);
+  const isLocked = doc.status === "Delivered" || doc.status === "Dispatched" || doc.status === "In Transit";
+  const [isManifestDialogOpen, setIsManifestDialogOpen] = useState(false);
 
-  const isLocked = doc.status === "Delivered" || doc.status === "Dispatched";
+  const activeCompany = useMemo(() => {
+    return (
+      (companiesList || []).find((c: any) => c.id === doc.companyId || c.name === doc.companyName) ||
+      companiesList[0] ||
+      null
+    );
+  }, [companiesList, doc.companyId, doc.companyName]);
+
+  const linkedManifest = useMemo(() => {
+    if (!doc.manifestId) return null;
+    return (dispatchManifests || []).find(
+      (m: any) => m.dbId === doc.manifestId || m.id === doc.manifestId || m.manifestNumber === doc.manifestId
+    );
+  }, [dispatchManifests, doc.manifestId]);
+
+  const totalAmount = useMemo(() => {
+    return (doc.items || []).reduce(
+      (acc, it) =>
+        acc + (Number(it.totalPrice) || ((Number(it.shippedQty) || 0) * (Number(it.unitPrice) || 0)) || 0),
+      0
+    );
+  }, [doc.items]);
+  const [scannerMode, setScannerMode] = useState(true);
+  const [isScanning, setIsScanning] = useState(false);
+
+  const [divertModalData, setDivertModalData] = useState<{
+    open: boolean;
+    scanData: any;
+    newBoxes: ScannedBoxEntry[];
+    unitPrice: string;
+    createReorder: boolean;
+  }>({
+    open: false,
+    scanData: null,
+    newBoxes: [],
+    unitPrice: "0",
+    createReorder: true,
+  });
+
+  const applyScannedBoxesToDoc = useCallback(
+    (scanData: any, boxesToAdd: ScannedBoxEntry[], confirmedUnitPrice: number, autoFillCustomer: boolean) => {
+      if (!boxesToAdd || boxesToAdd.length === 0) return;
+      const addedQty = boxesToAdd.reduce((s, b) => s + (Number(b.quantity) || 0), 0);
+      const addedWeight = boxesToAdd.reduce((s, b) => s + (Number(b.grossWeightKg) || 0), 0);
+      const addedPackages = boxesToAdd.length;
+
+      setDoc((prev) => {
+        const existingBoxes = prev.scannedBoxes || [];
+        const nextScannedBoxes = [...existingBoxes, ...boxesToAdd];
+
+        const currentItems = [...(prev.items || [])];
+        // Check if currentItems has only 1 blank placeholder item
+        const hasOnlyBlankPlaceholder =
+          currentItems.length === 1 &&
+          !currentItems[0].name?.trim() &&
+          (Number(currentItems[0].shippedQty) || 0) === 0;
+
+        const targetSku = scanData.sku || `FG-${scanData.workOrderNo}`;
+        const existingIdx = hasOnlyBlankPlaceholder
+          ? -1
+          : currentItems.findIndex(
+              (it) =>
+                (it.sku && it.sku.toLowerCase() === targetSku.toLowerCase()) ||
+                (it.sourceWorkOrderId &&
+                  it.sourceWorkOrderId.toLowerCase() === String(scanData.workOrderNo).toLowerCase() &&
+                  it.name.toLowerCase() === String(scanData.productName).toLowerCase())
+            );
+
+        let nextItems: ShipmentLineItem[];
+        if (scanData.mode === "trading_sale_package" && Array.isArray(scanData.items)) {
+          const tradingLines: ShipmentLineItem[] = scanData.items.map((it: any, idx: number) => ({
+            id: `trd-scan-${Date.now()}-${idx}`,
+            sku: it.sku || `SKU-${idx + 1}`,
+            name: it.name,
+            accountCode: "2910" as const,
+            tradingCatalogId: it.tradingCatalogId || it.sku,
+            orderQty: Number(it.quantity) || 0,
+            shippedQty: Number(it.quantity) || 0,
+            unit: it.unit || "dona",
+            unitPrice: Number(it.unitPrice) || 0,
+            totalPrice: Number(it.totalPrice) || 0,
+            packageCount: 1,
+            packageType: "Gofroquti",
+            palletNo: `2910 [${scanData.workOrderNo || "Savdo"}]`,
+            notes: it.notes || "Savdo hujjati stikeri orqali",
+          }));
+
+          nextItems = hasOnlyBlankPlaceholder
+            ? tradingLines
+            : [...currentItems, ...tradingLines];
+        } else if (existingIdx >= 0) {
+          const item = currentItems[existingIdx];
+          const newShipped = (Number(item.shippedQty) || 0) + addedQty;
+          const newOrderQty = Math.max(Number(item.orderQty) || 0, newShipped);
+          const uPrice = confirmedUnitPrice || Number(item.unitPrice) || 0;
+          currentItems[existingIdx] = {
+            ...item,
+            orderQty: newOrderQty,
+            shippedQty: newShipped,
+            unitPrice: uPrice,
+            totalPrice: Number((newShipped * uPrice).toFixed(2)),
+            packageCount: (Number(item.packageCount) || 0) + addedPackages,
+            finishedGoodId: item.finishedGoodId || scanData.finishedGoodId || undefined,
+            sourceWorkOrderId: item.sourceWorkOrderId || scanData.workOrderNo,
+            notes: `${nextScannedBoxes.filter((b) => b.workOrderNo === scanData.workOrderNo).length} ta quti skanerlandi`,
+          };
+          nextItems = currentItems;
+        } else {
+          const newLine: ShipmentLineItem = {
+            id: `scan-item-${Date.now()}`,
+            sku: targetSku,
+            name: scanData.productName || "Tayyor mahsulot",
+            orderQty: addedQty,
+            shippedQty: addedQty,
+            unit: scanData.unit || "pcs",
+            unitPrice: confirmedUnitPrice,
+            totalPrice: Number((addedQty * confirmedUnitPrice).toFixed(2)),
+            finishedGoodId: scanData.finishedGoodId || undefined,
+            sourceWorkOrderId: scanData.workOrderNo,
+            packageCount: addedPackages,
+            packageType: "Gofroquti",
+            palletNo: boxesToAdd[0]?.boxCode || (scanData.accountCode === "2910" ? "2910 Aksessuarlar" : "Quti pasporti"),
+            accountCode: scanData.accountCode || (scanData.tradingCatalogId ? "2910" : "2810"),
+            tradingCatalogId: scanData.tradingCatalogId || undefined,
+            notes: `Shtrix-kod orqali (${addedPackages} quti)`,
+          };
+          nextItems = hasOnlyBlankPlaceholder ? [newLine] : [...currentItems, newLine];
+        }
+
+        const totalPkg = nextItems.reduce((acc, it) => acc + (Number(it.packageCount) || 0), 0);
+        const totalQty = nextItems.reduce((acc, it) => acc + (Number(it.shippedQty) || 0), 0);
+
+        return {
+          ...prev,
+          customer: autoFillCustomer ? scanData.customerName || prev.customer : prev.customer,
+          workOrder:
+            autoFillCustomer || !prev.workOrder || prev.workOrder.startsWith("—")
+              ? scanData.workOrderNo || prev.workOrder
+              : prev.workOrder,
+          tradingSaleId: prev.tradingSaleId || scanData.tradingSaleId || undefined,
+          product: prev.product || scanData.productName,
+          quantity: totalQty,
+          packagesCount: totalPkg,
+          grossWeightKg: Number(((Number(prev.grossWeightKg) || 0) + addedWeight).toFixed(2)),
+          scannedBoxes: nextScannedBoxes,
+          items: nextItems,
+        };
+      });
+
+      setTabUnsaved(tab.id, true);
+      toast.add({
+        title: scanData.mode === "trading_sale_package"
+          ? `Savdo aksessuarlari stikeri o'qildi: ${scanData.workOrderNo}`
+          : boxesToAdd.length > 1
+          ? `${boxesToAdd.length} ta quti qo'shildi`
+          : `Quti qo'shildi: ${boxesToAdd[0].boxCode}`,
+        description: scanData.mode === "trading_sale_package"
+          ? `${scanData.items?.length || 1} ta pozitsiya (2910) chiqimga biriktirildi`
+          : `${scanData.productName} — +${addedQty.toLocaleString()} ${scanData.unit || "pcs"}`,
+        type: "success",
+      });
+    },
+    [setTabUnsaved, tab.id]
+  );
+
+  const handleRemoveScannedBox = useCallback(
+    (barcodeToRemove: string) => {
+      if (isLocked) return;
+      setDoc((prev) => {
+        const existingBoxes = prev.scannedBoxes || [];
+        const targetBox = existingBoxes.find((b) => b.barcode === barcodeToRemove || b.boxCode === barcodeToRemove);
+        if (!targetBox) return prev;
+
+        const nextScannedBoxes = existingBoxes.filter((b) => b.barcode !== barcodeToRemove && b.boxCode !== barcodeToRemove);
+        const nextItems = (prev.items || [])
+          .map((it) => {
+            if (
+              it.sourceWorkOrderId === targetBox.workOrderNo ||
+              it.name.toLowerCase() === targetBox.productName.toLowerCase()
+            ) {
+              const nextQty = Math.max(0, (Number(it.shippedQty) || 0) - (Number(targetBox.quantity) || 0));
+              const nextPkg = Math.max(0, (Number(it.packageCount) || 1) - 1);
+              return {
+                ...it,
+                shippedQty: nextQty,
+                orderQty: nextQty,
+                packageCount: nextPkg,
+                totalPrice: Number((nextQty * (Number(it.unitPrice) || 0)).toFixed(2)),
+              };
+            }
+            return it;
+          })
+          .filter((it) => Number(it.shippedQty) > 0);
+
+        return {
+          ...prev,
+          scannedBoxes: nextScannedBoxes,
+          grossWeightKg: Math.max(0, Number(((Number(prev.grossWeightKg) || 0) - (Number(targetBox.grossWeightKg) || 0)).toFixed(2))),
+          items: nextItems.length > 0 ? nextItems : prev.items,
+        };
+      });
+      setTabUnsaved(tab.id, true);
+
+    },
+    [isLocked, setTabUnsaved, tab.id]
+  );
+
+  const executeBarcodeScan = useCallback(
+    async (rawCode: string) => {
+      const code = (rawCode || "").trim();
+      if (!code || isLocked || isScanning) return;
+
+      try {
+        setIsScanning(true);
+        const res = await fetch("/api/v1/warehouse/scan-box", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ barcode: code }),
+        });
+        const data = await res.json();
+
+        if (!data.found) {
+          toast.add({
+            title: "Shtrix-kod topilmadi",
+            description: data.message || `"${code}" bo'yicha quti yoki buyurtma topilmadi.`,
+            type: "error",
+          });
+          return;
+        }
+
+        if (data.alreadyDispatched) {
+          toast.add({
+            title: "Quti allaqachon chiqarilgan",
+            description: data.dispatchedShipmentId
+              ? `Ushbu quti avval ${data.dispatchedShipmentId} hujjati bilan jo'natilgan.`
+              : "Ushbu buyurtmaning barcha qutilari jo'natib bo'lingan.",
+            type: "error",
+          });
+          return;
+        }
+
+        const existingCodes = new Set(
+          (doc.scannedBoxes || []).flatMap((b) => [b.barcode.toUpperCase(), b.boxCode.toUpperCase()])
+        );
+
+        const newBoxes: ScannedBoxEntry[] = (data.boxes || [])
+          .filter(
+            (b: any) =>
+              !existingCodes.has(String(b.barcode || "").toUpperCase()) &&
+              !existingCodes.has(String(b.boxCode || "").toUpperCase())
+          )
+          .map((b: any) => ({
+            id: b.id,
+            boxNumber: b.boxNumber,
+            boxCode: b.boxCode,
+            barcode: b.barcode,
+            quantity: Number(b.quantity) || 0,
+            grossWeightKg: Number(b.grossWeightKg) || 0,
+            workOrderNo: data.workOrderNo,
+            productName: data.productName,
+            customerName: data.customerName,
+            sizeCode: b.sizeCode,
+            model: b.model,
+          }));
+
+        if (newBoxes.length === 0) {
+          toast.add({
+            title: "Quti allaqachon qo'shilgan",
+            description: `"${code}" ushbu chiqim hujjatiga avval skanerlangan.`,
+            type: "warning",
+          });
+          return;
+        }
+
+        const currentCustomer = (doc.customer || "").trim();
+        const boxOwner = (data.customerName || "").trim();
+        const isEmptyCustomer = !currentCustomer || currentCustomer.startsWith("—");
+        const isSameCustomer =
+          !isEmptyCustomer && currentCustomer.toLowerCase() === boxOwner.toLowerCase();
+
+        if (isEmptyCustomer || isSameCustomer || (doc.shipmentType && doc.shipmentType !== "CustomerDelivery")) {
+          applyScannedBoxesToDoc(data, newBoxes, Number(data.unitPrice) || 0, isEmptyCustomer);
+        } else {
+          // Cross-customer box diversion prompt!
+          setDivertModalData({
+            open: true,
+            scanData: data,
+            newBoxes,
+            unitPrice: String(data.unitPrice || 0),
+            createReorder: true,
+          });
+        }
+      } catch (err) {
+        console.error("Barcode scan error:", err);
+        toast.add({
+          title: "Xatolik",
+          description: "Shtrix-kodni tekshirishda tarmoq xatoligi yuz berdi.",
+          type: "error",
+        });
+      } finally {
+        setIsScanning(false);
+      }
+    },
+    [applyScannedBoxesToDoc, doc.customer, doc.scannedBoxes, doc.shipmentType, isLocked, isScanning]
+  );
+
+  // Global Hardware USB Barcode Scanner HID listener
+  useEffect(() => {
+    if (!scannerMode || isLocked) return;
+
+    let buffer = "";
+    let lastKeyTime = 0;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName;
+      const isInputActive = activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT";
+
+      const now = Date.now();
+      const elapsed = now - lastKeyTime;
+      lastKeyTime = now;
+
+      // Hardware scanners type characters very quickly (< 45ms).
+      // If delay is longer than 250ms, it is human manual typing, so reset buffer.
+      if (elapsed > 250) {
+        buffer = "";
+      }
+
+      if (e.key === "Enter") {
+        if (buffer.length >= 4) {
+          e.preventDefault();
+          e.stopPropagation();
+          const code = buffer.trim();
+          buffer = "";
+          executeBarcodeScan(code);
+        }
+        return;
+      }
+
+      // Collect alphanumeric characters and dashes
+      if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        // If user is actively typing in a form input and typing slowly, don't hijack
+        if (isInputActive && elapsed > 100 && buffer.length === 0) {
+          return;
+        }
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalKeyDown, true);
+    };
+  }, [scannerMode, isLocked, executeBarcodeScan]);
+
+  const handleConfirmDivertScan = async () => {
+    const { scanData, newBoxes, unitPrice, createReorder } = divertModalData;
+    if (!scanData || newBoxes.length === 0) return;
+
+    const totalDivertedQty = newBoxes.reduce((s, b) => s + (Number(b.quantity) || 0), 0);
+    const parsedPrice = Number(unitPrice) || 0;
+
+    if (createReorder && checkAndTriggerReorderAsync) {
+      await checkAndTriggerReorderAsync({
+        originalWorkOrderId: scanData.workOrderNo,
+        divertedQty: totalDivertedQty,
+        buyerCustomerName: doc.customer,
+        notes: `Shtrix-kod skaneri orqali ${newBoxes.length} ta quti ${doc.customer} ga yo'naltirildi`,
+      });
+    }
+
+    applyScannedBoxesToDoc(scanData, newBoxes, parsedPrice, false);
+    setDivertModalData((prev) => ({ ...prev, open: false }));
+  };
+
+  const handleSelectTradingItems = (
+    items: Array<{
+      tradingCatalogId?: string;
+      sku: string;
+      name: string;
+      quantity: number;
+      unit: string;
+      unitPrice: number;
+      totalPrice: number;
+      accountCode: "2910";
+      notes?: string;
+    }>,
+    linkedSaleId?: string
+  ) => {
+    if (isLocked || items.length === 0) return;
+
+    setDoc((prev) => {
+      const currentItems = [...(prev.items || [])];
+      const hasOnlyBlankPlaceholder =
+        currentItems.length === 1 &&
+        !currentItems[0].name?.trim() &&
+        (Number(currentItems[0].shippedQty) || 0) === 0;
+
+      const newLines: ShipmentLineItem[] = items.map((it, idx) => ({
+        id: `trd-item-${Date.now()}-${idx}`,
+        sku: it.sku,
+        name: it.name,
+        accountCode: "2910",
+        tradingCatalogId: it.tradingCatalogId,
+        orderQty: it.quantity,
+        shippedQty: it.quantity,
+        unit: it.unit || "dona",
+        unitPrice: it.unitPrice,
+        totalPrice: it.totalPrice,
+        packageCount: 1,
+        packageType: "Gofroquti",
+        palletNo: "2910 Aksessuarlar ombori",
+        notes: it.notes || "",
+      }));
+
+      const nextItems = hasOnlyBlankPlaceholder
+        ? newLines
+        : [...currentItems, ...newLines];
+
+      return {
+        ...prev,
+        tradingSaleId: prev.tradingSaleId || linkedSaleId || undefined,
+        items: nextItems,
+      };
+    });
+
+    setTabUnsaved(tab.id, true);
+    toast.add({
+      title: "Savdo aksessuarlari qo'shildi",
+      description: `${items.length} ta pozitsiya (Hisob 2910) chiqim jadvaliga biriktirildi`,
+      type: "success",
+    });
+  };
+
+  const handleSelectFinishedGoodItem = (fgData: {
+    finishedGoodId: string;
+    sku: string;
+    name: string;
+    quantity: number;
+    unit: string;
+    unitPrice: number;
+    totalPrice: number;
+    sourceWorkOrderId?: string;
+    notes?: string;
+  }) => {
+    if (isLocked) return;
+    setDoc((prev) => {
+      const currentItems = [...(prev.items || [])];
+      const hasOnlyBlankPlaceholder =
+        currentItems.length === 1 &&
+        !currentItems[0].name?.trim() &&
+        (Number(currentItems[0].shippedQty) || 0) === 0;
+
+      const newLine: ShipmentLineItem = {
+        id: `fg-item-${Date.now()}`,
+        sku: fgData.sku,
+        name: fgData.name,
+        orderQty: fgData.quantity,
+        shippedQty: fgData.quantity,
+        unit: fgData.unit || "pcs",
+        unitPrice: fgData.unitPrice,
+        totalPrice: fgData.totalPrice,
+        finishedGoodId: fgData.finishedGoodId,
+        sourceWorkOrderId: fgData.sourceWorkOrderId,
+        packageCount: Math.max(1, Math.ceil(fgData.quantity / 500)),
+        packageType: "Gofroquti",
+        palletNo: "2810 Ombor",
+        notes: fgData.notes || "",
+      };
+
+      const nextItems = hasOnlyBlankPlaceholder ? [newLine] : [...currentItems, newLine];
+      return {
+        ...prev,
+        workOrder: prev.workOrder || fgData.sourceWorkOrderId || "",
+        product: prev.product || fgData.name,
+        items: nextItems,
+      };
+    });
+    setTabUnsaved(tab.id, true);
+  };
 
   const totalShippedQty = useMemo(() => {
     return (doc.items || []).reduce((acc, it) => acc + (Number(it.shippedQty) || 0), 0);
@@ -1496,11 +2021,14 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
 
   const columns = useMemo<GridColumn[]>(
     () => [
+      { id: "accountCode", title: "Hisob", width: 95, icon: GridColumnIcon.HeaderLookup },
       { id: "sku", title: "SKU / Artikul", width: 120, icon: GridColumnIcon.HeaderReference },
       { id: "name", title: "Mahsulot / Xomashyo tavsifi", width: 300, icon: GridColumnIcon.HeaderString },
       { id: "orderQty", title: "Reja miqdori", width: 120, icon: GridColumnIcon.HeaderNumber },
       { id: "shippedQty", title: "Jo'natilayotgan soni", width: 130, icon: GridColumnIcon.HeaderNumber },
       { id: "unit", title: "Birligi", width: 80, icon: GridColumnIcon.HeaderString },
+      { id: "unitPrice", title: "Narxi (dona)", width: 110, icon: GridColumnIcon.HeaderNumber },
+      { id: "totalPrice", title: "Jami summa", width: 130, icon: GridColumnIcon.HeaderNumber },
       { id: "packageCount", title: "Qadoqlar soni", width: 110, icon: GridColumnIcon.HeaderNumber },
       { id: "packageType", title: "Qadoq turi", width: 150, icon: GridColumnIcon.HeaderLookup },
       { id: "palletNo", title: "Poddon / Joylashuvi", width: 130, icon: GridColumnIcon.HeaderString },
@@ -1520,6 +2048,21 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       const column = columns[col];
       const val = item[column.id as keyof ShipmentLineItem];
 
+      if (column.id === "accountCode") {
+        const acc = item.accountCode || (item.tradingCatalogId ? "2910" : "2810");
+        const displayLabel = acc === "2910" ? "2910 (Savdo)" : acc === "1010" ? "1010 (Xomashyo)" : "2810 (Tayyor)";
+        return {
+          kind: GridCellKind.Text,
+          data: acc,
+          displayData: displayLabel,
+          allowOverlay: false,
+          themeOverride: {
+            textDark: acc === "2910" ? "#3b82f6" : acc === "1010" ? "#8b5cf6" : "#10b981",
+            baseFontStyle: "600 11px monospace",
+          },
+        };
+      }
+
       if (column.id === "shippedQty" || column.id === "orderQty") {
         const numVal = Number(val) || 0;
         return {
@@ -1532,6 +2075,17 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             textDark: isDark ? "#60a5fa" : "#2563eb",
             baseFontStyle: "600 12px sans-serif",
           } : undefined,
+        };
+      }
+
+      if (column.id === "unitPrice" || column.id === "totalPrice") {
+        const numVal = Number(val) || 0;
+        return {
+          kind: GridCellKind.Number,
+          data: numVal,
+          displayData: numVal.toLocaleString(),
+          allowOverlay: !isLocked,
+          contentAlign: "right",
         };
       }
 
@@ -1567,15 +2121,28 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         const updated = [...(prev.items || [])];
         const rowItem = { ...updated[row] };
 
-        if (key === "shippedQty" || key === "orderQty" || key === "packageCount") {
+        if (key === "shippedQty" || key === "orderQty" || key === "packageCount" || key === "unitPrice" || key === "totalPrice") {
           const num = parseFloat((newVal as any).data ?? 0);
-          (rowItem as any)[key] = isNaN(num) ? 0 : num;
+          const cleanNum = isNaN(num) ? 0 : num;
+          (rowItem as any)[key] = cleanNum;
+          if (key === "shippedQty" || key === "unitPrice") {
+            const q = key === "shippedQty" ? cleanNum : Number(rowItem.shippedQty) || 0;
+            const p = key === "unitPrice" ? cleanNum : Number(rowItem.unitPrice) || 0;
+            rowItem.totalPrice = Number((q * p).toFixed(2));
+          }
         } else {
           (rowItem as any)[key] = (newVal as any).data ?? "";
         }
 
         updated[row] = rowItem;
-        return { ...prev, items: updated };
+        const nextTotalQty = updated.reduce((s, it) => s + (Number(it.shippedQty) || 0), 0);
+        const nextTotalPkg = updated.reduce((s, it) => s + (Number(it.packageCount) || 0), 0);
+        return {
+          ...prev,
+          quantity: nextTotalQty,
+          packagesCount: nextTotalPkg,
+          items: updated,
+        };
       });
       setTabUnsaved(tab.id, true);
     },
@@ -1651,7 +2218,24 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     } else if (e.key === "Delete" && (doc.items || []).length > 1) {
       e.preventDefault();
       handleRemoveLine();
-    } else if (e.key === "F4") {
+    } else if (e.key === "F2") {
+      e.preventDefault();
+      setScannerMode((prev) => {
+        const next = !prev;
+        toast.add({
+          title: next ? "Skaner rejimi yoqildi" : "Skaner rejimi o'chirildi",
+          description: next ? "Skaner apparatdan o'qilgan qutilar avtomatik qabul qilinadi" : "Avtomatik skanerlash to'xtatildi",
+          type: "info",
+        });
+        return next;
+      });
+    } else if (e.key === "F4" && !e.shiftKey) {
+      e.preventDefault();
+      setIsFgPickerOpen(true);
+    } else if (e.key === "F5") {
+      e.preventDefault();
+      setIsTradingPickerOpen(true);
+    } else if ((e.key === "F4" && e.shiftKey) || e.key === "F3") {
       e.preventDefault();
       setIsStockPickerOpen(true);
     } else if (e.key === "F9") {
@@ -1724,6 +2308,27 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Linked Trading Sale Link */}
+          {doc.tradingSaleId && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                openTab({
+                  id: doc.tradingSaleId!,
+                  title: `Savdo: ${doc.tradingSaleId}`,
+                  type: "trading-sale",
+                  module: "trading",
+                });
+              }}
+              className="h-7 px-2 text-xs gap-1 border-blue-500/30 text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/15"
+              title="Bog'langan savdo hujjati (2910)"
+            >
+              <ShoppingBag className="size-3 text-blue-600" />
+              <span>{doc.tradingSaleId}</span>
+            </Button>
+          )}
+
           {/* Work Order Link */}
           {doc.workOrder && doc.workOrder !== "-" && !doc.workOrder.startsWith("—") && (
             <Button
@@ -1742,6 +2347,20 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             >
               <ExternalLink className="size-3 text-muted-foreground" />
               <span>{doc.workOrder}</span>
+            </Button>
+          )}
+
+          {/* Linked Reys / Manifest Link */}
+          {doc.manifestId && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsManifestDialogOpen(true)}
+              className="h-7 px-2 text-xs gap-1 border-blue-500/30 text-blue-700 dark:text-blue-300 bg-blue-500/5 hover:bg-blue-500/10"
+              title="Biriktirilgan reysni ko'rish"
+            >
+              <Truck className="size-3 text-blue-600" />
+              <span>{doc.manifestNumber || doc.manifestId}</span>
             </Button>
           )}
 
@@ -1794,26 +2413,67 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </Button>
           )}
 
+          {/* Revert Packed to Draft */}
+          {doc.status === "Packed" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => saveShipmentInternal("Draft")}
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+              title="Qoralama holatiga qaytarish"
+            >
+              <RotateCcw className="size-3" />
+              <span>Qoralama</span>
+            </Button>
+          )}
+
+          {/* Mark as Packed / Shipment Ready */}
+          {doc.status === "Draft" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => saveShipmentInternal("Packed")}
+              className="h-7 px-2.5 text-xs gap-1.5 border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20"
+            >
+              <PackageCheck className="size-3.5" />
+              <span>Tayyor yuk</span>
+            </Button>
+          )}
+
           {/* Dispatch / Post Button */}
-          {doc.status !== "Dispatched" && doc.status !== "Delivered" && (
+          {doc.status !== "Dispatched" && doc.status !== "Delivered" && doc.status !== "In Transit" && (
             <Button
               size="sm"
               onClick={handleDispatch}
               className="h-7 px-3 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-none"
             >
               <Send className="size-3.5" />
-              <span>Ombordan chiqarish</span>
+              <span>Chiqarish</span>
             </Button>
           )}
 
-          {doc.status === "Dispatched" && (
+          {/* Revert Dispatched / In Transit back to Packed if dispatched by mistake */}
+          {(doc.status === "Dispatched" || doc.status === "In Transit") && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => saveShipmentInternal("Packed")}
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+              title="Qadoqlangan holatiga qaytarish"
+            >
+              <RotateCcw className="size-3" />
+              <span>Qaytarish</span>
+            </Button>
+          )}
+
+          {(doc.status === "Dispatched" || doc.status === "In Transit") && (
             <Button
               size="sm"
               onClick={handleMarkDelivered}
               className="h-7 px-3 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-none"
             >
               <Check className="size-3.5" />
-              <span>Yetkazildi deb belgilash</span>
+              <span>Yetkazildi</span>
             </Button>
           )}
 
@@ -1828,10 +2488,50 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         </div>
       </div>
 
-      {/* ─── Document Requisites (Non-overlapping spacious columns) ─── */}
+      {/* ─── Document Requisites (6 ta muvozanatli teng ustun) ─── */}
       <div className="p-2.5 bg-card border-b border-border grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-12 gap-2.5 shrink-0 text-xs">
-        {/* Col 1 (span 3): Chiqim turi */}
-        <div className="sm:col-span-1 md:col-span-1 lg:col-span-3 space-y-1">
+        {/* Col 1 (span 2): Tashkilot (Yuridik shaxs / Sotuvchi) */}
+        <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
+          <Label className="text-[11px] text-muted-foreground font-medium">
+            Tashkilot (Yuridik shaxs)
+          </Label>
+          {isLocked ? (
+            <Input
+              value={activeCompany?.name || doc.companyName || "Asosiy korxona"}
+              readOnly
+              className="h-7 text-xs bg-muted/40 font-medium w-full"
+            />
+          ) : (
+            <Select
+              value={doc.companyId || (companiesList[0]?.id ?? "")}
+              disabled={isLocked}
+              onValueChange={(compVal) => {
+                const found = (companiesList || []).find((c: any) => c.id === compVal);
+                setDoc((prev) => ({
+                  ...prev,
+                  companyId: compVal,
+                  companyName: found?.name || prev.companyName,
+                }));
+                setTabUnsaved(tab.id, true);
+              }}
+            >
+              <SelectTrigger className="h-7 w-full text-xs bg-background">
+                <SelectValue placeholder="Tashkilot..." />
+              </SelectTrigger>
+              <SelectContent>
+                {(companiesList || []).map((c: any) => (
+                  <SelectItem key={c.id} value={c.id} className="text-xs">
+                    <span className="font-medium">{c.name}</span>
+                    {c.inn && <span className="ml-1 text-[10px] text-muted-foreground font-mono">({c.inn})</span>}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Col 2 (span 2): Chiqim turi */}
+        <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
           <Label className="text-[11px] text-muted-foreground font-medium">
             Chiqim turi
           </Label>
@@ -1860,7 +2560,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           )}
         </div>
 
-        {/* Col 2 (span 2): Hujjat raqami */}
+        {/* Col 3 (span 2): Hujjat raqami */}
         <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
           <Label className="text-[11px] text-muted-foreground font-medium">Hujjat raqami</Label>
           <Input
@@ -1870,7 +2570,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           />
         </div>
 
-        {/* Col 3 (span 2): Hujjat sanasi (shadcn UI Calendar) */}
+        {/* Col 4 (span 2): Hujjat sanasi */}
         <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
           <Label className="text-[11px] text-muted-foreground font-medium">Hujjat sanasi</Label>
           <DatePicker
@@ -1882,11 +2582,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           />
         </div>
 
-        {/* Col 4 (span 2): Asos / Buyurtma */}
+        {/* Col 5 (span 2): Asos / Buyurtma */}
         <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
           <div className="flex items-center justify-between">
             <Label className="text-[11px] text-muted-foreground font-medium">
-              {doc.shipmentType === "BranchTransfer" ? "Ichki talabnoma / Asos" : "Buyurtma"}
+              {doc.shipmentType === "BranchTransfer" ? "Asos hujjati" : "Buyurtma"}
             </Label>
             {doc.workOrder && !doc.workOrder.startsWith("—") && (
               <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono font-medium">
@@ -1911,7 +2611,6 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               onSelect={handleWorkOrderSelect}
             />
           )}
-
 
           {(() => {
             const currentWo = productionQueue.find((w) => w.id === doc.workOrder);
@@ -1940,11 +2639,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               </div>
             );
           })()}
-
         </div>
 
-        {/* Col 5 (span 3): Qabul qiluvchi */}
-        <div className="sm:col-span-2 md:col-span-2 lg:col-span-3 space-y-1">
+        {/* Col 6 (span 2): Qabul qiluvchi */}
+        <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
           <div className="flex items-center justify-between">
             <Label className="text-[11px] text-muted-foreground font-medium truncate">
               {doc.shipmentType === "BranchTransfer"
@@ -1958,7 +2656,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             {doc.shipmentType === "CustomerDelivery" && doc.workOrder && !doc.workOrder.startsWith("—") && (
               <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1">
                 <Link2 className="size-3" />
-                <span>{doc.workOrder} ga bog&apos;langan</span>
+                <span>{doc.workOrder}</span>
               </span>
             )}
           </div>
@@ -1976,116 +2674,224 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         </div>
       </div>
 
-      {/* ─── Contextual Transport Strip (Ixcham va faqat kerakli ma'lumotlar) ─── */}
-      <div className="px-3 py-2 bg-muted/20 border-b border-border flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-4 sm:gap-6 flex-wrap">
-          {/* Dispatch Warehouse */}
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[11px] text-muted-foreground font-medium shrink-0">Chiqaruvchi ombor:</span>
+      {/* ─── Contextual Transport Strip (Ultra-ixcham va to'liq sinxronlangan) ─── */}
+      <div className="h-9 px-3 bg-muted/20 border-b border-border flex items-center justify-between gap-2.5 text-xs shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {/* 1. Chiqaruvchi ombor */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[11px] text-muted-foreground font-medium shrink-0">Ombor:</span>
             {isLocked ? (
-              <span className="font-medium text-foreground text-xs">{doc.from}</span>
+              <span className="font-medium text-foreground text-xs truncate max-w-[160px]">{doc.from}</span>
             ) : (
               <WarehouseSelect
                 value={doc.from}
-                onValueChange={(val: WarehouseSelectValue) => handleFieldChange("from", val.warehouseName)}
-                className="w-[210px] sm:w-[260px] shrink-0 h-7"
+                onValueChange={(val: WarehouseSelectValue) => {
+                  setDoc((prev) => ({
+                    ...prev,
+                    from: val.warehouseName,
+                    warehouseId: val.warehouseId,
+                    companyId: prev.companyId || val.companyId || undefined,
+                    companyName: prev.companyName || val.companyName || undefined,
+                  }));
+                  setTabUnsaved(tab.id, true);
+                }}
+                className="w-[160px] sm:w-[190px] shrink-0 h-7 text-xs"
                 disabled={isLocked}
               />
             )}
           </div>
 
-          <Separator orientation="vertical" className="h-4 hidden sm:block shrink-0 mx-1" />
+          <Separator orientation="vertical" className="h-3.5 shrink-0" />
 
-          {/* Unified Carrier & Driver Combobox */}
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[11px] text-muted-foreground font-medium shrink-0">Tashuvchi:</span>
-            {isLocked ? (
-              <span className="font-medium text-foreground text-xs flex items-center gap-1.5">
-                <span>{doc.carrier}</span>
-                {doc.vehicleNo && doc.vehicleNo !== "—" && (
-                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted/60 font-bold">
-                    {doc.vehicleNo}
-                  </span>
-                )}
-                {doc.driverName && doc.driverName !== "—" && (
-                  <span className="text-muted-foreground">• {doc.driverName}</span>
-                )}
-              </span>
-            ) : (
-              <div className="flex items-center gap-1.5 shrink-0">
-                <CarrierCombobox
-                  carrier={doc.carrier}
-                  vehicleNo={doc.vehicleNo}
-                  driverName={doc.driverName}
-                  driverPhone={doc.driverPhone}
-                  carriers={resolvedCarriers}
-                  onSelect={handleSelectCarrierProfile}
-                  onAddNew={() => {
-                    setCarrierModalData({
-                      name: "PrintGoo Fleet",
-                      vehicleModel: "",
-                      vehicleNo: "",
-                      driverName: "",
-                      driverPhone: "",
-                      type: "fleet",
-                    });
-                    setIsCarrierModalOpen(true);
-                  }}
-                  onOpenCatalog={() => {
-                    openTab({
-                      id: "tab-warehouse-carriers",
-                      title: "Carriers",
-                      type: "registry",
-                      module: "warehouse",
-                    });
-                  }}
-                  className="w-[240px] sm:w-[270px] shrink-0"
-                  disabled={isLocked}
-                />
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setCarrierModalData({
-                      name: doc.carrier || "PrintGoo Fleet #1",
-                      vehicleModel: doc.carrier.includes("(") ? doc.carrier.split("(")[1]?.replace(")", "") || "" : "Furgon",
-                      vehicleNo: doc.vehicleNo || "",
-                      driverName: doc.driverName || "",
-                      driverPhone: doc.driverPhone || "",
-                      type: (doc.carrier.includes("BTS") || doc.carrier.includes("Express") || doc.carrier.includes("Yandex")) ? "courier" : doc.carrier.includes("Samovyvoz") ? "self" : "fleet",
-                    });
-                    setIsCarrierModalOpen(true);
-                  }}
-                  className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1 border border-border/50 bg-background/50 hover:bg-muted shrink-0"
-                  title="Tashuvchi, avto raqami, haydovchi va telefonni bitta joyda tahrirlash"
-                >
-                  <Pencil className="size-3" />
-                  <span className="hidden sm:inline">Tahrirlash</span>
-                </Button>
-              </div>
-            )}
+          {/* 2. Yetkazish usuli */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[11px] text-muted-foreground font-medium shrink-0">Yetkazish:</span>
+            <Select
+              value={doc.deliveryMode || (doc.manifestId ? "manifest" : "dedicated")}
+              disabled={isLocked}
+              onValueChange={(val) => {
+                if (!val) return;
+                const mode = val as "manifest" | "dedicated" | "self" | "courier";
+                setDoc((prev) => {
+                  const updates: Partial<WarehouseShipmentRecord> = { deliveryMode: mode };
+                  if (mode === "self") {
+                    updates.carrier = "Mijoz olib ketadi (Samovyvoz)";
+                    updates.vehicleNo = "—";
+                    updates.driverName = "Mijoz vakili";
+                    updates.manifestId = undefined;
+                    updates.manifestNumber = undefined;
+                  } else if (mode === "courier") {
+                    const firstCourier = resolvedCarriers.find((c) => c.type === "courier") || resolvedCarriers[3] || {
+                      name: "BTS Express Pochta",
+                      vehicleNo: "01 B 707 TS",
+                      driverName: "BTS Kuryer",
+                    };
+                    updates.carrier = firstCourier.name;
+                    updates.vehicleNo = firstCourier.vehicleNo || "—";
+                    updates.driverName = firstCourier.driverName || "Kuryer";
+                    updates.manifestId = undefined;
+                    updates.manifestNumber = undefined;
+                  } else if (mode === "dedicated") {
+                    const firstFleet = resolvedCarriers.find((c) => c.type === "fleet") || resolvedCarriers[0] || {
+                      name: "PrintGoo Fleet #1 (ISUZU)",
+                      vehicleNo: "01 A 772 BB",
+                      driverName: "Rustam Ismoilov",
+                    };
+                    updates.carrier = firstFleet.name;
+                    updates.vehicleNo = firstFleet.vehicleNo;
+                    updates.driverName = firstFleet.driverName;
+                    updates.manifestId = undefined;
+                    updates.manifestNumber = undefined;
+                  } else if (mode === "manifest" && (!prev.status || prev.status === "Draft")) {
+                    updates.status = "Packed";
+                  }
+                  return { ...prev, ...updates };
+                });
+                setTabUnsaved(tab.id, true);
+              }}
+            >
+              <SelectTrigger className="h-7 w-[124px] text-xs bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dedicated" className="text-xs">Alohida mashina</SelectItem>
+                <SelectItem value="manifest" className="text-xs">Reys orqali</SelectItem>
+                <SelectItem value="self" className="text-xs">Mijoz olib ketadi</SelectItem>
+                <SelectItem value="courier" className="text-xs">Kuryer</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Conditional: Courier tracking */}
-          {(doc.carrier.includes("Logistics") || doc.carrier.includes("Pochta") || doc.carrier.includes("Yandex")) && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">Yuk xati №:</span>
-              <Input
-                value={doc.trackingNo || ""}
-                readOnly={isLocked}
-                onChange={(e) => handleFieldChange("trackingNo", e.target.value)}
-                placeholder="TRK..."
-                className="h-6 w-36 text-xs font-mono bg-background text-primary font-semibold"
-              />
+          <Separator orientation="vertical" className="h-3.5 shrink-0" />
+
+          {/* 3. Kontekstual Tashuvchi / Reys / Ishonchnoma (Faqat tegishlisi ko'rinadi) */}
+
+          {/* A. Reys orqali tanlanganda */}
+          {doc.deliveryMode === "manifest" && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] text-muted-foreground font-medium shrink-0">Reys:</span>
+              <Select
+                value={doc.manifestId || "PENDING_MANIFEST"}
+                disabled={isLocked}
+                onValueChange={(mId) => {
+                  if (!mId || mId === "PENDING_MANIFEST") {
+                    setDoc((prev) => ({
+                      ...prev,
+                      manifestId: undefined,
+                      manifestNumber: undefined,
+                    }));
+                    setTabUnsaved(tab.id, true);
+                    return;
+                  }
+                  const foundMnf = (dispatchManifests || []).find(
+                    (m: any) => m.dbId === mId || m.id === mId || m.manifestNumber === mId
+                  );
+                  if (foundMnf) {
+                    setDoc((prev) => ({
+                      ...prev,
+                      manifestId: foundMnf.dbId || foundMnf.id,
+                      manifestNumber: foundMnf.manifestNumber || foundMnf.id,
+                      carrier: `${foundMnf.vehicleModel || "Reys"} (${foundMnf.vehiclePlate || ""})`.trim(),
+                      vehicleNo: foundMnf.vehiclePlate || prev.vehicleNo,
+                      driverName: foundMnf.driverName || prev.driverName,
+                      driverPhone: foundMnf.driverPhone || prev.driverPhone,
+                      trackingNo: foundMnf.manifestNumber || foundMnf.id,
+                    }));
+                    setTabUnsaved(tab.id, true);
+                  }
+                }}
+              >
+                <SelectTrigger className="h-7 w-[190px] text-xs font-mono bg-blue-500/5 border-blue-500/30 text-blue-700 dark:text-blue-300">
+                  <SelectValue placeholder="Reysga biriktiriladi..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PENDING_MANIFEST" className="text-xs">
+                    Tayyor yuk (Reysga biriktiriladi)
+                  </SelectItem>
+                  {(dispatchManifests || []).map((m: any) => (
+                    <SelectItem key={m.dbId || m.id} value={m.dbId || m.id} className="text-xs font-mono">
+                      {m.manifestNumber || m.id} • {m.vehiclePlate || m.vehicleModel || "Avto"} ({m.driverName || "Haydovchi"})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 
-          {/* Conditional: Customer Self-Pickup (Samovyvoz -> Ishonchnoma) */}
-          {doc.carrier.includes("Samovyvoz") && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1">
+          {/* B. Alohida mashina (Fleet) tanlanganda */}
+          {doc.deliveryMode === "dedicated" && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] text-muted-foreground font-medium shrink-0">Tashuvchi:</span>
+              {isLocked ? (
+                <span className="font-medium text-foreground text-xs flex items-center gap-1">
+                  <span>{doc.carrier}</span>
+                  {doc.vehicleNo && doc.vehicleNo !== "—" && (
+                    <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-muted font-bold">
+                      {doc.vehicleNo}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <div className="flex items-center gap-1 shrink-0">
+                  <CarrierCombobox
+                    carrier={doc.carrier}
+                    vehicleNo={doc.vehicleNo}
+                    driverName={doc.driverName}
+                    driverPhone={doc.driverPhone}
+                    carriers={resolvedCarriers.filter((c) => c.type !== "courier" && c.type !== "self")}
+                    onSelect={handleSelectCarrierProfile}
+                    onAddNew={() => {
+                      setCarrierModalData({
+                        name: "PrintGoo Fleet",
+                        vehicleModel: "",
+                        vehicleNo: "",
+                        driverName: "",
+                        driverPhone: "",
+                        type: "fleet",
+                      });
+                      setIsCarrierModalOpen(true);
+                    }}
+                    onOpenCatalog={() => {
+                      openTab({
+                        id: "tab-warehouse-carriers",
+                        title: "Carriers",
+                        type: "registry",
+                        module: "warehouse",
+                      });
+                    }}
+                    className="w-[190px] sm:w-[220px] shrink-0"
+                    disabled={isLocked}
+                  />
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setCarrierModalData({
+                        name: doc.carrier || "PrintGoo Fleet #1",
+                        vehicleModel: doc.carrier.includes("(") ? doc.carrier.split("(")[1]?.replace(")", "") || "" : "Furgon",
+                        vehicleNo: doc.vehicleNo || "",
+                        driverName: doc.driverName || "",
+                        driverPhone: doc.driverPhone || "",
+                        type: "fleet",
+                      });
+                      setIsCarrierModalOpen(true);
+                    }}
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground border border-border/50 shrink-0"
+                    title="Tashuvchini tahrirlash"
+                  >
+                    <Pencil className="size-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* C. Mijoz o'zi olib ketadi (Samovyvoz) tanlanganda */}
+          {doc.deliveryMode === "self" && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1">
                 <FileText className="size-3" />
                 Ishonchnoma:
               </span>
@@ -2093,14 +2899,45 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 value={doc.powerOfAttorney || ""}
                 readOnly={isLocked}
                 onChange={(e) => handleFieldChange("powerOfAttorney", e.target.value)}
-                placeholder="№ 184 / 12.10.2026 dan (ixtiyoriy)"
-                className="h-6 w-48 text-xs font-mono bg-background"
+                placeholder="№ 15 / 12.11.2026 dan (ixtiyoriy)"
+                className="h-7 w-[180px] text-xs font-mono bg-background"
                 title="Mijoz vakilining yuridik ishonchnomasi"
               />
             </div>
           )}
 
-          {/* Extra Details Popover (ixtiyoriy izoh, m³) */}
+          {/* D. Kuryer tanlanganda */}
+          {doc.deliveryMode === "courier" && (
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[11px] text-muted-foreground font-medium shrink-0">Kuryer:</span>
+                <CarrierCombobox
+                  carrier={doc.carrier}
+                  vehicleNo={doc.vehicleNo}
+                  driverName={doc.driverName}
+                  driverPhone={doc.driverPhone}
+                  carriers={resolvedCarriers.filter((c) => c.type === "courier")}
+                  onSelect={handleSelectCarrierProfile}
+                  className="w-[160px] shrink-0"
+                  disabled={isLocked}
+                />
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[11px] text-muted-foreground font-medium shrink-0">Trek №:</span>
+                <Input
+                  value={doc.trackingNo || ""}
+                  readOnly={isLocked}
+                  onChange={(e) => handleFieldChange("trackingNo", e.target.value)}
+                  placeholder="TRK..."
+                  className="h-7 w-[100px] text-xs font-mono bg-background text-primary font-semibold"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 4. O'ng tomon: Qo'shimcha (m³, izoh) */}
+        <div className="flex items-center gap-2 shrink-0">
           <Popover>
             <PopoverTrigger
               render={
@@ -2108,7 +2945,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground gap-1"
+                  className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1 border border-border/40 shrink-0"
                 >
                   <SlidersHorizontal className="size-3" />
                   <span>Qo'shimcha</span>
@@ -2118,7 +2955,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 </Button>
               }
             />
-            <PopoverContent className="w-80 p-3 text-xs space-y-2.5 border border-border shadow-xl" align="start">
+            <PopoverContent className="w-80 p-3 text-xs space-y-2.5 border border-border shadow-xl" align="end">
               <div className="font-semibold text-xs text-foreground pb-1 border-b border-border">
                 Ixtiyoriy qo'shimcha ma'lumotlar
               </div>
@@ -2130,7 +2967,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                   value={doc.volumeM3 || ""}
                   readOnly={isLocked}
                   onChange={(e) => handleFieldChange("volumeM3", Number(e.target.value))}
-                  placeholder="0.85 m³"
+                  placeholder="0.00 m³"
                   className="h-7 text-xs font-mono bg-background"
                 />
               </div>
@@ -2147,49 +2984,119 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </PopoverContent>
           </Popover>
         </div>
-
-        {/* Right side live summary badge */}
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-[11px] font-normal gap-1.5 bg-background text-foreground h-6 px-2.5 border-border shadow-xs">
-            <Package className="size-3 text-muted-foreground" />
-            <span><b className="font-mono">{totalPackages}</b> quti</span>
-            <span className="text-muted-foreground">•</span>
-            <Scale className="size-3 text-muted-foreground" />
-            <span><b className="font-mono">{doc.grossWeightKg || Math.round(totalShippedQty * 0.045)}</b> kg</span>
-          </Badge>
-        </div>
       </div>
 
-      {/* ─── Table Toolbar (Tovarlar spetsifikatsiyasi) ─── */}
-      <div className="h-8 px-3 bg-muted/50 border-b border-border flex items-center justify-between shrink-0">
+      {/* ─── Table Toolbar (Tovarlar spetsifikatsiyasi & Shtrix-kod skaneri) ─── */}
+      <div className="h-9 px-3 bg-muted/50 border-b border-border flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
             <Boxes className="size-3.5 text-muted-foreground" />
-            Jo&apos;natilayotgan tovarlar va materiallar
+            <span>Tovarlar</span>
           </span>
-          <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-background font-mono">
-            {(doc.items || []).length} pozitsiya
+          <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 bg-background font-mono">
+            {(doc.items || []).length} qator
           </Badge>
+
+          {/* Attached Scanned Boxes Popover (Always accessible) */}
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "h-6 px-2 text-[11px] gap-1 font-mono transition-colors",
+                    (doc.scannedBoxes?.length ?? 0) > 0
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"
+                      : "bg-muted/30 text-muted-foreground border-border hover:bg-muted"
+                  )}
+                >
+                  <QrCode className="size-3" />
+                  <span>Qutilar: {doc.scannedBoxes?.length ?? 0} ta</span>
+                </Button>
+              }
+            />
+            <PopoverContent className="w-96 p-2.5 text-xs border border-border shadow-xl" align="start">
+              <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-border">
+                <span className="font-semibold text-foreground">Skanerlangan qutilar ro&apos;yxati</span>
+                <span className="font-mono text-[11px] text-muted-foreground">{doc.scannedBoxes?.length ?? 0} quti</span>
+              </div>
+              {(doc.scannedBoxes?.length ?? 0) === 0 ? (
+                <div className="py-4 text-center text-xs text-muted-foreground">
+                  Hali qutilar skanerlanmagan. F2 tugmasini bosing yoki shtrix-kod kiriting.
+                </div>
+              ) : (
+                <div className="max-h-52 overflow-y-auto space-y-1">
+                  {(doc.scannedBoxes || []).map((bx) => (
+                    <div
+                      key={bx.barcode}
+                      className="flex items-center justify-between px-2 py-1 rounded bg-muted/40 border border-border/60 text-[11px]"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-mono font-semibold text-foreground flex items-center gap-1.5">
+                          <span>{bx.boxCode}</span>
+                          <span className="text-muted-foreground">({bx.barcode})</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground truncate">
+                          {bx.productName} • <b className="font-mono text-foreground">{bx.quantity.toLocaleString()}</b> dona • {bx.grossWeightKg} kg
+                        </div>
+                      </div>
+                      {!isLocked && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveScannedBox(bx.barcode)}
+                          className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
         </div>
 
-        {/* Hotkey and Context Menu hints */}
-        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="hidden sm:inline-flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] shadow-2xs font-semibold text-foreground">Ins</kbd>
-            <span>qo&apos;shish</span>
-          </span>
-          <span className="hidden sm:inline text-muted-foreground/40">•</span>
-          <span className="hidden sm:inline-flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] shadow-2xs font-semibold text-foreground">Del</kbd>
-            <span>o&apos;chirish</span>
-          </span>
-          <span className="hidden md:inline text-muted-foreground/40">•</span>
-          <span className="hidden md:inline-flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] shadow-2xs font-semibold text-foreground">F4</kbd>
-            <span>ombor</span>
-          </span>
-          <span className="hidden lg:inline text-muted-foreground/40">•</span>
-          <span className="text-[10px] text-muted-foreground/80 font-medium">O&apos;ng tugma: menyu</span>
+        {/* Scanner Hardware Auto-detect Toggle (F2) */}
+        <div className="flex items-center gap-1.5">
+          {!isLocked && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setScannerMode((prev) => {
+                  const next = !prev;
+                  toast.add({
+                    title: next ? "Skaner rejimi yoqildi" : "Skaner rejimi o'chirildi",
+                    description: next ? "Skaner apparatdan o'qilgan qutilar avtomatik qabul qilinadi" : "Avtomatik skanerlash to'xtatildi",
+                    type: "info",
+                  });
+                  return next;
+                });
+              }}
+              className={cn(
+                "h-7 px-2.5 text-xs gap-1.5 transition-colors cursor-pointer select-none",
+                scannerMode
+                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"
+                  : "bg-background text-muted-foreground border-border hover:bg-muted"
+              )}
+              title="Skaner apparatdan to'g'ridan-to'g'ri qabul qilish rejimi (F2)"
+            >
+              <QrCode className={cn("size-3.5", scannerMode ? "text-emerald-600 animate-pulse" : "text-muted-foreground")} />
+              <span className="font-medium">
+                {scannerMode ? "Skaner faol" : "Skaner rejimi"}
+              </span>
+              {scannerMode && (
+                <span className="size-1.5 rounded-full bg-emerald-500 animate-ping" />
+              )}
+              <kbd className="text-[10px] font-mono opacity-60">F2</kbd>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -2237,13 +3144,23 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </ContextMenuItem>
 
             <ContextMenuItem
+              onClick={() => setIsFgPickerOpen(true)}
+              disabled={isLocked}
+              className="gap-2 cursor-pointer"
+            >
+              <PackageCheck className="size-3.5 text-emerald-600" />
+              <span>Tayyor mahsulot qo'shish...</span>
+              <ContextMenuShortcut>F4</ContextMenuShortcut>
+            </ContextMenuItem>
+
+            <ContextMenuItem
               onClick={() => setIsStockPickerOpen(true)}
               disabled={isLocked}
               className="gap-2 cursor-pointer"
             >
-              <Boxes className="size-3.5 text-emerald-600" />
-              <span>Ombordan xomashyo qo'shish...</span>
-              <ContextMenuShortcut>F4</ContextMenuShortcut>
+              <Boxes className="size-3.5 text-indigo-500" />
+              <span>Xomashyo omboridan qo'shish...</span>
+              <ContextMenuShortcut>Shift+F4</ContextMenuShortcut>
             </ContextMenuItem>
 
             <ContextMenuItem
@@ -2269,6 +3186,19 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
+
+        {/* Empty state hint when 0 rows */}
+        {(doc.items || []).length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center pointer-events-none bg-background/50">
+            <div className="size-9 rounded bg-muted flex items-center justify-center text-muted-foreground mb-1.5">
+              <Boxes className="size-4 opacity-60" />
+            </div>
+            <p className="text-xs font-semibold text-foreground">Chiqim jadvali bo&apos;sh</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5 max-w-sm">
+              Shtrix-kod skanerlang (F2), tayyor mahsulot (F4) yoki xomashyo (Shift+F4) qo&apos;shing
+            </p>
+          </div>
+        )}
       </div>
 
       {/* ─── Footer Summary Bar ─── */}
@@ -2287,11 +3217,20 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-[11px]">Jami chiqarilayotgan adad:</span>
-          <span className="text-sm font-semibold font-mono text-blue-600 dark:text-blue-400">
-            {totalShippedQty.toLocaleString()} {doc.unit || "birlik"}
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-muted-foreground text-[11px]">Jami qiymat:</span>
+            <span className="text-sm font-semibold font-mono text-foreground">
+              {totalAmount.toLocaleString()} so'm
+            </span>
+          </div>
+          <Separator orientation="vertical" className="h-4" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-muted-foreground text-[11px]">Chiqarilayotgan adad:</span>
+            <span className="text-sm font-semibold font-mono text-blue-600 dark:text-blue-400">
+              {totalShippedQty.toLocaleString()} {doc.unit || "dona"}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -2320,25 +3259,33 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           <div className="p-6 bg-white text-zinc-950 font-sans text-xs space-y-4 max-h-[70vh] overflow-y-auto">
             <div className="flex items-start justify-between border-b pb-3">
               <div>
-                <h1 className="text-base font-black tracking-tight">PRINTGOO POLIGRAFIYA MCHJ</h1>
-                <p className="text-[11px] text-zinc-600">Toshkent sh., Chilonzor tumani, Sanoat hududi 12</p>
-                <p className="text-[11px] text-zinc-600">Tel: +998 71 200-00-00 | STIR: 305841920</p>
+                <h1 className="text-base font-black tracking-tight uppercase">
+                  {activeCompany?.name || activeCompany?.legalName || doc.companyName || "PRINTGOO POLIGRAFIYA MCHJ"}
+                </h1>
+                <p className="text-[11px] text-zinc-600">
+                  {activeCompany?.address || "Toshkent sh., Chilonzor tumani, Sanoat hududi 12"}
+                </p>
+                <p className="text-[11px] text-zinc-600 font-mono">
+                  Tel: {activeCompany?.phone || "+998 71 200-00-00"} | STIR: {activeCompany?.inn || "305841920"}
+                  {activeCompany?.bankName ? ` | Bank: ${activeCompany.bankName}` : ""}
+                </p>
               </div>
               <div className="text-right">
                 <div className="text-xs font-bold font-mono">Hujjat № {doc.id}</div>
                 <div className="text-[11px] text-zinc-600 font-mono">Sana: {doc.date}</div>
-                <div className="text-[10px] text-zinc-500 font-mono">Yuk xati: {doc.trackingNo}</div>
+                <div className="text-[10px] text-zinc-500 font-mono">Yuk xati: {doc.trackingNo || doc.id}</div>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-[11px] p-2.5 rounded bg-zinc-50 border border-zinc-200">
               <div>
-                <p><b className="text-zinc-700">Yuk jo'natuvchi:</b> {doc.from}</p>
+                <p><b className="text-zinc-700">Chiqaruvchi tashkilot:</b> <span className="font-semibold text-zinc-900">{activeCompany?.name || doc.companyName || "Asosiy korxona"}</span></p>
+                <p><b className="text-zinc-700">Jismoniy ombor:</b> {doc.from}</p>
                 <p><b className="text-zinc-700">Tashuvchi:</b> {doc.carrier}</p>
                 <p><b className="text-zinc-700">Haydovchi:</b> {doc.driverName} ({doc.vehicleNo}) {doc.driverPhone && doc.driverPhone !== "—" ? `• Tel: ${doc.driverPhone}` : ""}</p>
               </div>
               <div>
-                <p><b className="text-zinc-700">Qabul qiluvchi:</b> {doc.customer}</p>
+                <p><b className="text-zinc-700">Qabul qiluvchi mijoz:</b> <span className="font-semibold text-zinc-900">{doc.customer}</span></p>
                 <p><b className="text-zinc-700">Buyurtma / Asos:</b> {doc.workOrder}</p>
                 <p><b className="text-zinc-700">Ishonchnoma:</b> {doc.powerOfAttorney || "Talab etilmaydi (Firma yetkazmasi)"}</p>
               </div>
@@ -2350,31 +3297,45 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 <tr className="bg-zinc-100 border-b border-zinc-300">
                   <th className="p-1.5 border-r border-zinc-300 w-8 text-center">№</th>
                   <th className="p-1.5 border-r border-zinc-300">Mahsulot / Xomashyo nomi</th>
-                  <th className="p-1.5 border-r border-zinc-300 w-24 text-right">Jo'natildi</th>
-                  <th className="p-1.5 border-r border-zinc-300 w-16 text-center">Birligi</th>
-                  <th className="p-1.5 border-r border-zinc-300 w-20 text-center">Qadoq</th>
-                  <th className="p-1.5 text-center w-24">Joylashuvi</th>
+                  <th className="p-1.5 border-r border-zinc-300 w-20 text-right">Miqdori</th>
+                  <th className="p-1.5 border-r border-zinc-300 w-14 text-center">Birligi</th>
+                  <th className="p-1.5 border-r border-zinc-300 w-20 text-right">Narxi</th>
+                  <th className="p-1.5 border-r border-zinc-300 w-24 text-right">Summasi</th>
+                  <th className="p-1.5 border-r border-zinc-300 w-16 text-center">Qadoq</th>
+                  <th className="p-1.5 text-center w-20">Joylashuvi</th>
                 </tr>
               </thead>
               <tbody>
-                {(doc.items || []).map((it, idx) => (
-                  <tr key={it.id} className="border-b border-zinc-200">
-                    <td className="p-1.5 border-r border-zinc-200 text-center font-mono">{idx + 1}</td>
-                    <td className="p-1.5 border-r border-zinc-200 font-medium">{it.name}</td>
-                    <td className="p-1.5 border-r border-zinc-200 text-right font-mono font-bold">
-                      {Number(it.shippedQty).toLocaleString()}
-                    </td>
-                    <td className="p-1.5 border-r border-zinc-200 text-center">{it.unit}</td>
-                    <td className="p-1.5 border-r border-zinc-200 text-center font-mono">{it.packageCount || 1} quti</td>
-                    <td className="p-1.5 text-center font-mono text-[10px]">{it.palletNo || "-"}</td>
-                  </tr>
-                ))}
+                {(doc.items || []).map((it, idx) => {
+                  const uPrice = Number(it.unitPrice) || 0;
+                  const rowSum = Number(it.totalPrice) || ((Number(it.shippedQty) || 0) * uPrice);
+                  return (
+                    <tr key={it.id} className="border-b border-zinc-200">
+                      <td className="p-1.5 border-r border-zinc-200 text-center font-mono">{idx + 1}</td>
+                      <td className="p-1.5 border-r border-zinc-200 font-medium">{it.name}</td>
+                      <td className="p-1.5 border-r border-zinc-200 text-right font-mono font-bold">
+                        {Number(it.shippedQty).toLocaleString()}
+                      </td>
+                      <td className="p-1.5 border-r border-zinc-200 text-center">{it.unit}</td>
+                      <td className="p-1.5 border-r border-zinc-200 text-right font-mono">
+                        {uPrice > 0 ? uPrice.toLocaleString() : "—"}
+                      </td>
+                      <td className="p-1.5 border-r border-zinc-200 text-right font-mono font-semibold">
+                        {rowSum > 0 ? rowSum.toLocaleString() : "—"}
+                      </td>
+                      <td className="p-1.5 border-r border-zinc-200 text-center font-mono">{it.packageCount || 1} quti</td>
+                      <td className="p-1.5 text-center font-mono text-[10px]">{it.palletNo || "-"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr className="bg-zinc-50 font-bold border-t border-zinc-300">
                   <td colSpan={2} className="p-1.5 text-right border-r border-zinc-300">Jami:</td>
                   <td className="p-1.5 text-right font-mono text-blue-700">{totalShippedQty.toLocaleString()}</td>
                   <td className="p-1.5 text-center">{doc.unit}</td>
+                  <td className="p-1.5 text-center font-mono text-zinc-500">—</td>
+                  <td className="p-1.5 text-right font-mono text-blue-700">{totalAmount.toLocaleString()}</td>
                   <td className="p-1.5 text-center font-mono">{totalPackages} quti</td>
                   <td className="p-1.5 text-center font-mono text-[10px]">{doc.grossWeightKg} kg</td>
                 </tr>
@@ -2440,6 +3401,115 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         initialData={carrierModalData}
         onSave={handleSaveCarrierProfile}
       />
+
+      {/* ─── 2810 Tayyor Mahsulot Omboridan tanlash Dialogi ─── */}
+      <PickFinishedGoodsDialog
+        open={isFgPickerOpen}
+        onOpenChange={setIsFgPickerOpen}
+        buyerCustomer={doc.customer}
+        onSelectFgItem={handleSelectFinishedGoodItem}
+      />
+
+      {/* ─── 2910 Savdo Aksessuarlari Omboridan tanlash Dialogi ─── */}
+      <PickTradingCatalogDialog
+        open={isTradingPickerOpen}
+        onOpenChange={setIsTradingPickerOpen}
+        buyerCustomer={doc.customer}
+        onSelectItems={handleSelectTradingItems}
+      />
+
+      {/* ─── Biriktirilgan Reys / Manifest Dialogi ─── */}
+      <DispatchManifestDialog
+        open={isManifestDialogOpen}
+        onOpenChange={setIsManifestDialogOpen}
+        manifest={linkedManifest}
+      />
+
+      {/* ─── Boshqa mijoz qutisini yo'naltirish (Cross-Customer Barcode Scan) Dialogi ─── */}
+      <Dialog
+        open={divertModalData.open}
+        onOpenChange={(open) => setDivertModalData((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="sm:max-w-md p-0 gap-0 border border-border bg-card">
+          <DialogHeader className="px-4 py-3 border-b border-border bg-amber-500/10">
+            <DialogTitle className="text-xs font-semibold text-foreground flex items-center gap-2">
+              <AlertTriangle className="size-4 text-amber-600" />
+              <span>Boshqa mijoz zaxirasidan yo&apos;naltirish</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          {divertModalData.scanData && (
+            <div className="p-4 space-y-3 text-xs">
+              <div className="p-2.5 rounded border border-border bg-muted/30 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Asl buyurtmachi:</span>
+                  <span className="font-semibold text-foreground">{divertModalData.scanData.customerName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Qabul qiluvchi mijoz:</span>
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">{doc.customer}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Mahsulot:</span>
+                  <span className="font-medium text-foreground">{divertModalData.scanData.productName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Skanerlangan qutilar:</span>
+                  <span className="font-mono font-semibold text-foreground">
+                    {divertModalData.newBoxes.length} quti ({divertModalData.newBoxes.reduce((s, b) => s + b.quantity, 0).toLocaleString()} {divertModalData.scanData.unit || "pcs"})
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">
+                  {doc.customer} uchun sotuv narxi (1 dona uchun)
+                </Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={divertModalData.unitPrice}
+                  onChange={(e) => setDivertModalData((prev) => ({ ...prev, unitPrice: e.target.value }))}
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
+
+              <label className="flex items-start gap-2 p-2 rounded border border-border bg-muted/20 cursor-pointer">
+                <Checkbox
+                  checked={divertModalData.createReorder}
+                  onCheckedChange={(checked) =>
+                    setDivertModalData((prev) => ({ ...prev, createReorder: Boolean(checked) }))
+                  }
+                  className="mt-0.5"
+                />
+                <span className="text-[11px] text-foreground leading-tight">
+                  <b>{divertModalData.scanData.customerName}</b> uchun kamaygan miqdorga avtomatik qayta ishlab chiqarish buyrug&apos;i (Re-order) qoralamasini yaratish
+                </span>
+              </label>
+            </div>
+          )}
+
+          <DialogFooter className="px-4 py-2.5 border-t border-border bg-muted/20 flex items-center justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDivertModalData((prev) => ({ ...prev, open: false }))}
+              className="h-7 text-xs"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleConfirmDivertScan}
+              className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Tasdiqlash va biriktirish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

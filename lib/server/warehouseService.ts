@@ -9,14 +9,18 @@ import {
   warehouseInventoryCounts,
   warehouseStockBalances,
   warehouseFinishedGoods,
+  warehouseDispatchManifests,
+  workOrders,
   carriers,
   companies,
   branches,
   wmsBins,
   wmsBinItems,
+  tradingCatalog,
+  tradingSales,
 } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
-import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber } from "./numberingService";
+import { eq, desc, and, or } from "drizzle-orm";
+import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber, getNextManifestNumber } from "./numberingService";
 import { emitNotification } from "./notificationService";
 
 /**
@@ -481,18 +485,66 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
 
 export async function getWarehouseShipments(companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  return db.query.warehouseShipments.findMany({
+  const rows = await db.query.warehouseShipments.findMany({
     where: eq(warehouseShipments.companyId, companyId),
     with: {
       items: true,
       warehouse: true,
+      manifest: true,
     },
     orderBy: [desc(warehouseShipments.shipmentDate)],
+  });
+
+  return rows.map((s) => {
+    const items = (s.items || []).map((it) => ({
+      ...it,
+      id: it.id,
+      sku: it.sku,
+      name: it.name,
+      quantity: Number(it.quantity) || 0,
+      orderQty: Number(it.quantity) || 0,
+      shippedQty: Number(it.quantity) || 0,
+      unit: it.unit || "pcs",
+      unitPrice: Number(it.unitPrice) || 0,
+      totalPrice: Number(it.totalPrice) || 0,
+      finishedGoodId: it.finishedGoodId || undefined,
+      tradingCatalogId: (it as any).tradingCatalogId || undefined,
+      accountCode: ((it as any).accountCode as "2810" | "2910" | "1010") || "2810",
+      sourceWorkOrderId: it.sourceWorkOrderId || undefined,
+      notes: it.notes || "",
+    }));
+    const totalQty = items.reduce((sum, it) => sum + it.shippedQty, 0);
+    const productSummary =
+      items.length > 0
+        ? items.map((it) => it.name).join(", ")
+        : "Bosma mahsulot";
+
+    return {
+      ...s,
+      id: s.shipmentNumber || s.id,
+      dbId: s.id,
+      companyId: s.companyId,
+      companyName: (s as any).company?.name || undefined,
+      warehouseId: s.warehouseId || undefined,
+      date: s.shipmentDate ? new Date(s.shipmentDate).toISOString().split("T")[0] : "",
+      customer: s.customerName || "Mijoz",
+      workOrder: s.workOrderId || "—",
+      tradingSaleId: s.tradingSaleId || undefined,
+      product: productSummary,
+      quantity: totalQty,
+      unit: items[0]?.unit || "pcs",
+      from: s.fromLocationName || "Asosiy ombor",
+      carrier: s.carrier || "PrintGoo Fleet #1",
+      trackingNo: s.trackingNo || "",
+      manifestId: s.manifestId || undefined,
+      manifestNumber: (s as any).manifest?.manifestNumber || undefined,
+      items,
+    };
   });
 }
 
 export async function upsertWarehouseShipment(payload: any, companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+  const companyId = payload.companyId || (await getCompanyIdByCode(companyCode));
   const rawNo = (payload.shipmentNumber || payload.id || "").trim();
   const isDraft = !rawNo || rawNo.startsWith("draft-") || rawNo.startsWith("SHP-NEW-") || rawNo.startsWith("tab-") || rawNo === "NEW" || rawNo.includes("Qoralama") || rawNo.includes("Yangi");
   const shipmentNumber = isDraft ? await getNextShipmentNumber(companyCode) : rawNo;
@@ -502,6 +554,8 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
   const shipmentValues = {
     companyId,
     warehouseId: payload.warehouseId || null,
+    manifestId: payload.manifestId || null,
+    originSource: payload.originSource || "direct",
     shipmentNumber,
     shipmentDate: payload.shipmentDate || payload.date ? new Date(payload.shipmentDate || payload.date) : new Date(),
     shipmentType: payload.shipmentType || "CustomerDelivery",
@@ -509,6 +563,7 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
     customerName: payload.customerName || payload.customer || "Mijoz",
     workOrderId: payload.workOrderId || payload.workOrder || null,
     deliveryActId: payload.deliveryActId || null,
+    tradingSaleId: payload.tradingSaleId || null,
     fromLocationName,
     status: status as any,
     carrier: payload.carrier || null,
@@ -533,13 +588,17 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
     await db.delete(warehouseShipmentItems).where(eq(warehouseShipmentItems.shipmentId, shipmentRecord.id));
 
     for (const item of itemsList) {
-      const qty = Number(item.quantity) || 0;
+      const qty = Number(item.quantity ?? item.shippedQty) || 0;
       const unitPrice = Number(item.unitPrice) || 0;
       const totalPrice = qty * unitPrice;
 
       await db.insert(warehouseShipmentItems).values({
         shipmentId: shipmentRecord.id,
         itemId: item.itemId || null,
+        finishedGoodId: item.finishedGoodId || null,
+        tradingCatalogId: item.tradingCatalogId || null,
+        accountCode: item.accountCode || (item.tradingCatalogId ? "2910" : "2810"),
+        sourceWorkOrderId: item.sourceWorkOrderId || payload.workOrderId || payload.workOrder || null,
         sku: item.sku || `SKU-${Date.now().toString().slice(-4)}`,
         name: item.name || item.product || "Mahsulot",
         quantity: qty.toString(),
@@ -549,17 +608,133 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
         notes: item.notes || null,
       });
 
-      // 1C Jamg'arish Registri: Agar jo'natilgan bo'lsa (Dispatched/Delivered), qoldiqni kamaytirish
+      // 1C Jamg'arish Registri: Agar jo'natilgan bo'lsa (Dispatched/Delivered), tegishli hisob raqam omboridan qoldiqni kamaytirish
       if (status === "Dispatched" || status === "Delivered") {
-        await applyStockBalanceDelta({
-          companyId,
-          locationName: fromLocationName,
-          sku: item.sku,
-          name: item.name || item.product,
-          deltaQty: -qty,
-          unit: item.unit,
-        });
+        const itemAccount = item.accountCode || (item.tradingCatalogId ? "2910" : "2810");
+
+        if (itemAccount === "2910" || item.tradingCatalogId) {
+          // 2910 Savdo tovarlari (aksessuarlar) omboridan kamaytirish
+          let catRow = null;
+          if (item.tradingCatalogId) {
+            catRow = await db.query.tradingCatalog.findFirst({
+              where: and(
+                eq(tradingCatalog.companyId, companyId),
+                eq(tradingCatalog.id, item.tradingCatalogId)
+              ),
+            });
+          }
+          if (!catRow && item.sku) {
+            catRow = await db.query.tradingCatalog.findFirst({
+              where: and(
+                eq(tradingCatalog.companyId, companyId),
+                eq(tradingCatalog.sku, item.sku)
+              ),
+            });
+          }
+          if (catRow) {
+            const currentCatQty = Number(catRow.stockQty) || 0;
+            const newCatQty = Math.max(0, currentCatQty - qty);
+            await db
+              .update(tradingCatalog)
+              .set({
+                stockQty: newCatQty.toString(),
+                updatedAt: new Date(),
+              })
+              .where(eq(tradingCatalog.id, catRow.id));
+          }
+        } else if (itemAccount === "2810") {
+          // 2810 Tayyor mahsulot zaxirasidan kamaytirish
+          if (item.finishedGoodId) {
+            const fgRow = await db.query.warehouseFinishedGoods.findFirst({
+              where: and(
+                eq(warehouseFinishedGoods.companyId, companyId),
+                eq(warehouseFinishedGoods.id, item.finishedGoodId)
+              ),
+            });
+            if (fgRow) {
+              const newFgQty = Math.max(0, (Number(fgRow.quantity) || 0) - qty);
+              await db
+                .update(warehouseFinishedGoods)
+                .set({
+                  quantity: newFgQty.toString(),
+                  status: newFgQty <= 0 ? ("Out of Stock" as any) : ("In Stock" as any),
+                  updatedAt: new Date(),
+                })
+                .where(eq(warehouseFinishedGoods.id, fgRow.id));
+            }
+          }
+        } else if (itemAccount === "1010") {
+          // 1010 Xomashyo omboridan kamaytirish
+          await applyStockBalanceDelta({
+            companyId,
+            locationName: fromLocationName,
+            sku: item.sku,
+            name: item.name || item.product,
+            deltaQty: -qty,
+            unit: item.unit,
+          });
+        }
       }
+    }
+  }
+
+  // Agar shtrix-kod skaneri orqali qutilar biriktirilgan bo'lsa va chiqim qilinsa, qutilar statusini yangilash
+  if ((status === "Dispatched" || status === "Delivered") && Array.isArray(payload.scannedBoxes) && payload.scannedBoxes.length > 0) {
+    const scannedBarcodes = new Set(
+      payload.scannedBoxes.map((b: any) => (typeof b === "string" ? b : b.barcode || b.boxCode || "").trim().toUpperCase())
+    );
+    const allWos = await db.query.workOrders.findMany({
+      where: eq(workOrders.companyId, companyId),
+    });
+    for (const wo of allWos) {
+      const pkg = wo.packagingData as any;
+      if (pkg && Array.isArray(pkg.boxes)) {
+        let changed = false;
+        const updatedBoxes = pkg.boxes.map((box: any) => {
+          const bCode = String(box.barcode || "").trim().toUpperCase();
+          const bxCode = String(box.boxCode || "").trim().toUpperCase();
+          if (scannedBarcodes.has(bCode) || scannedBarcodes.has(bxCode)) {
+            changed = true;
+            return {
+              ...box,
+              status: "dispatched",
+              shipmentId: shipmentNumber,
+            };
+          }
+          return box;
+        });
+        if (changed) {
+          await db
+            .update(workOrders)
+            .set({
+              packagingData: { ...pkg, boxes: updatedBoxes },
+              updatedAt: new Date(),
+            })
+            .where(eq(workOrders.id, wo.id));
+        }
+      }
+    }
+  }
+
+    if (payload.tradingSaleId) {
+    try {
+      await db
+        .update(tradingSales)
+        .set({
+          linkedShipmentId: shipmentRecord.shipmentNumber,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(tradingSales.companyId, companyId),
+            or(
+              eq(tradingSales.docNo, payload.tradingSaleId),
+              eq(tradingSales.id, payload.tradingSaleId)
+            )
+          )
+        );
+    } catch (e) {
+      console.warn("Failed to back-sync trading sale linkedShipmentId:", e);
     }
   }
 
@@ -1073,4 +1248,653 @@ export async function deleteCarrier(id: string, companyCode: string = "PRINTGOO"
     .where(and(eq(carriers.id, id), eq(carriers.companyId, companyId)))
     .returning();
   return deleted;
+}
+
+// ─── 8. Pending Finished Goods Receipts (Ishlab chiqarishdan qabul) ───────────
+
+export async function getPendingFinishedGoodsReceipts(companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const rows = await db.query.warehouseFinishedGoods.findMany({
+    where: and(
+      eq(warehouseFinishedGoods.companyId, companyId),
+      eq(warehouseFinishedGoods.receiptStatus, "PendingReceipt")
+    ),
+    orderBy: [desc(warehouseFinishedGoods.createdAt)],
+  });
+
+  return rows.map((fg) => ({
+    ...fg,
+    id: fg.id,
+    quantity: Number(fg.quantity) || 0,
+    costPricePerUnit: Number(fg.costPricePerUnit) || 0,
+    totalStockValue: Number(fg.totalStockValue) || 0,
+    createdDate: fg.createdAt ? new Date(fg.createdAt).toISOString().split("T")[0] : "",
+  }));
+}
+
+export async function confirmFinishedGoodsReceipt(
+  fgId: string,
+  confirmedQty?: number,
+  locationShelf?: string,
+  companyCode: string = "PRINTGOO"
+) {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const existing = await db.query.warehouseFinishedGoods.findFirst({
+    where: and(
+      eq(warehouseFinishedGoods.companyId, companyId),
+      eq(warehouseFinishedGoods.id, fgId)
+    ),
+  });
+
+  if (!existing) {
+    throw new Error("Kutilayotgan tayyor mahsulot topilmadi");
+  }
+
+  const finalQty = confirmedQty !== undefined ? confirmedQty : Number(existing.quantity);
+  const shelf = locationShelf || existing.locationShelf || "FG-01";
+
+  const [updated] = await db
+    .update(warehouseFinishedGoods)
+    .set({
+      quantity: finalQty.toString(),
+      receiptStatus: "Received",
+      status: "In Stock",
+      locationShelf: shelf,
+      updatedAt: new Date(),
+    })
+    .where(eq(warehouseFinishedGoods.id, fgId))
+    .returning();
+
+  // 1C Jamg'arish Registrida qoldiqni oshirish
+  await applyStockBalanceDelta({
+    companyId,
+    locationName: existing.locationName || "Tayyor mahsulotlar ombori",
+    sku: existing.sku,
+    name: existing.productName,
+    deltaQty: finalQty,
+    unit: existing.unit,
+  });
+
+  return updated;
+}
+
+// ─── 9. Available Finished Goods Stock for Multi-customer Shipment ─────────────
+
+export async function getAvailableFinishedGoodsForShipment(companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const rows = await db.query.warehouseFinishedGoods.findMany({
+    where: and(
+      eq(warehouseFinishedGoods.companyId, companyId),
+      eq(warehouseFinishedGoods.receiptStatus, "Received")
+    ),
+    orderBy: [desc(warehouseFinishedGoods.producedAt)],
+  });
+
+  return rows
+    .map((fg) => {
+      const totalQty = Number(fg.quantity) || 0;
+      const reserved = Number(fg.reservedQuantity) || 0;
+      const availableQty = Math.max(0, totalQty - reserved);
+      return {
+        id: fg.id,
+        dbId: fg.id,
+        sku: fg.sku,
+        productName: fg.productName,
+        customerName: fg.customerName,
+        clientId: fg.clientId,
+        workOrderId: fg.workOrderId,
+        batchNo: fg.batchNo,
+        totalQty,
+        reservedQty: reserved,
+        availableQty,
+        unit: fg.unit,
+        unitCost: Number(fg.costPricePerUnit) || 0,
+        location: [fg.locationName, fg.locationShelf].filter(Boolean).join(" — ") || "Tayyor Mahsulot Ombori",
+        allocationStatus: fg.allocationStatus,
+        status: fg.status,
+      };
+    })
+    .filter((item) => item.availableQty > 0);
+}
+
+// ─── 10. Inter-Customer Stock Re-allocation & Auto-Reorder Trigger ────────────
+
+export async function checkAndTriggerReorder(params: {
+  originalWorkOrderId: string;
+  divertedQty: number;
+  buyerCustomerName: string;
+  notes?: string;
+  companyCode?: string;
+}) {
+  const companyCode = params.companyCode || "PRINTGOO";
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  // Asl buyurtmani topish
+  const originalWo = await db.query.workOrders.findFirst({
+    where: and(
+      eq(workOrders.companyId, companyId),
+      eq(workOrders.docNo, params.originalWorkOrderId)
+    ),
+  });
+
+  if (!originalWo) {
+    return {
+      triggered: false,
+      message: "Asl ishlab chiqarish buyrug'i topilmadi.",
+    };
+  }
+
+  // Agar xaridor mijoz asl mijoz bilan bir xil bo'lsa, reorder talab qilinmaydi
+  if (originalWo.customerName.trim().toLowerCase() === params.buyerCustomerName.trim().toLowerCase()) {
+    return {
+      triggered: false,
+      message: "Mijozlar bir xil. Reorder talab etilmaydi.",
+    };
+  }
+
+  // Yangi Reorder Work Order qoralamasini yaratish
+  const today = new Date().toISOString().split("T")[0];
+  const newDocNo = `WO-REORDER-${Date.now().toString().slice(-4)}`;
+
+  const [newReorder] = await db
+    .insert(workOrders)
+    .values({
+      companyId,
+      clientId: originalWo.clientId,
+      docNo: newDocNo,
+      clientOrderId: originalWo.clientOrderId || null,
+      customerName: originalWo.customerName,
+      productName: originalWo.productName,
+      department: originalWo.department,
+      site: originalWo.site,
+      pressMachine: originalWo.pressMachine,
+      recipeCode: originalWo.recipeCode,
+      quantity: params.divertedQty.toString(),
+      unit: originalWo.unit,
+      status: "Draft",
+      priority: "High",
+      stage: "Queue",
+      orderType: "Production",
+      orderDate: today,
+      paperStock: originalWo.paperStock,
+      coating: originalWo.coating,
+      lamination: originalWo.lamination,
+      embellishment: originalWo.embellishment,
+      dimensions: originalWo.dimensions,
+      colorsConfig: originalWo.colorsConfig,
+      priceTotal: (Number(originalWo.priceTotal) * (params.divertedQty / (Number(originalWo.quantity) || 1))).toFixed(2),
+      currency: originalWo.currency,
+      operator: null,
+    })
+    .returning();
+
+  await emitNotification({
+    category: "production",
+    eventType: "wo_reorder_created",
+    severity: "warning",
+    title: `Reorder yaratildi: ${originalWo.customerName}`,
+    description: `${params.divertedQty} dona ${originalWo.productName} mahsuloti ${params.buyerCustomerName} ga o'tkazilgani sababli yangi ${newDocNo} buyurtmasi shakllantirildi.`,
+  }, companyCode);
+
+  return {
+    triggered: true,
+    reorderDocNo: newDocNo,
+    reorderId: newReorder.id,
+    originalCustomer: originalWo.customerName,
+    divertedQty: params.divertedQty,
+    message: `${originalWo.customerName} uchun ${params.divertedQty} dona yangi qayta ishlab chiqarish buyrug'i (${newDocNo}) qoralamasi yaratildi.`,
+  };
+}
+
+// ─── 11. Warehouse Dispatch Manifests (Yuk Marshruti / Reys Manifesti) ──────────
+
+export async function getDispatchManifests(companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const rows = await db.query.warehouseDispatchManifests.findMany({
+    where: eq(warehouseDispatchManifests.companyId, companyId),
+    with: {
+      shipments: true,
+    },
+    orderBy: [desc(warehouseDispatchManifests.manifestDate)],
+  });
+
+  return rows.map((m) => ({
+    ...m,
+    id: m.manifestNumber || m.id,
+    dbId: m.id,
+    date: m.manifestDate ? new Date(m.manifestDate).toISOString().split("T")[0] : "",
+    shipments: m.shipments || [],
+    totalShipmentsCount: m.shipments ? m.shipments.length : m.totalShipmentsCount,
+  }));
+}
+
+export async function upsertDispatchManifest(payload: any, companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const rawNumber = (payload.manifestNumber || payload.id || "").trim();
+  const isDraft = !rawNumber || rawNumber.startsWith("draft-") || rawNumber.startsWith("new-");
+  const manifestNumber = isDraft ? await getNextManifestNumber(companyCode) : rawNumber;
+
+  const manifestValues = {
+    companyId,
+    manifestNumber,
+    manifestDate: payload.manifestDate || payload.date ? new Date(payload.manifestDate || payload.date) : new Date(),
+    vehiclePlate: payload.vehiclePlate || null,
+    vehicleModel: payload.vehicleModel || null,
+    driverName: payload.driverName || null,
+    driverPhone: payload.driverPhone || null,
+    destinationRoute: payload.destinationRoute || null,
+    status: (payload.status as any) || "Draft",
+    totalShipmentsCount: Number(payload.totalShipmentsCount) || (Array.isArray(payload.shipmentIds) ? payload.shipmentIds.length : 0),
+    totalPackages: Number(payload.totalPackages) || 0,
+    totalWeightKg: (Number(payload.totalWeightKg) || 0).toString(),
+    departureTime: payload.departureTime || null,
+    notes: payload.notes || null,
+    updatedAt: new Date(),
+  };
+
+  const [manifestRecord] = await db
+    .insert(warehouseDispatchManifests)
+    .values(manifestValues)
+    .onConflictDoUpdate({
+      target: [warehouseDispatchManifests.companyId, warehouseDispatchManifests.manifestNumber],
+      set: manifestValues,
+    })
+    .returning();
+
+  // Chiqim hujjatlarini ushbu manifestga biriktirish va mashina/haydovchi ma'lumotlarini tushirish
+  if (Array.isArray(payload.shipmentIds) && payload.shipmentIds.length > 0) {
+    const carrierSummary = [
+      manifestValues.vehicleModel || "Reys transporti",
+      manifestValues.vehiclePlate ? `(${manifestValues.vehiclePlate})` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    for (const shpId of payload.shipmentIds) {
+      const updateFields: Record<string, any> = {
+        manifestId: manifestRecord.id,
+        carrier: carrierSummary,
+        driverName: manifestValues.driverName || null,
+        trackingNo: manifestNumber,
+        updatedAt: new Date(),
+      };
+      if (manifestValues.status === "InTransit") {
+        updateFields.status = "Dispatched";
+      } else if (manifestValues.status === "Completed") {
+        updateFields.status = "Delivered";
+      }
+
+      await db
+        .update(warehouseShipments)
+        .set(updateFields)
+        .where(
+          and(
+            eq(warehouseShipments.companyId, companyId),
+            or(eq(warehouseShipments.id, shpId), eq(warehouseShipments.shipmentNumber, shpId))
+          )
+        );
+    }
+  }
+
+  const allManifests = await getDispatchManifests(companyCode);
+  return {
+    success: true,
+    manifest: manifestRecord,
+    manifestNumber: manifestRecord.manifestNumber,
+    allManifests,
+  };
+}
+
+// ─── 12. Box Barcode & Product Passport Scanner Lookup ─────────────────────────
+
+export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const code = (rawCode || "").trim().toUpperCase();
+  if (!code) {
+    throw new Error("Shtrix-kod kiritilmadi");
+  }
+
+  const allWos = await db.query.workOrders.findMany({
+    where: eq(workOrders.companyId, companyId),
+  });
+  const allFg = await db.query.warehouseFinishedGoods.findMany({
+    where: eq(warehouseFinishedGoods.companyId, companyId),
+  });
+
+  // Helper: find matching FG record for a work order
+  const findFgForWo = (docNo: string) =>
+    allFg.find(
+      (fg) =>
+        (fg.workOrderId && fg.workOrderId.trim().toUpperCase() === docNo.trim().toUpperCase()) ||
+        (fg.sku && fg.sku.trim().toUpperCase() === code) ||
+        (fg.batchNo && fg.batchNo.trim().toUpperCase() === code)
+    );
+
+  // 1) Check exact box barcode or boxCode inside workOrders.packagingData.boxes
+  for (const wo of allWos) {
+    const pkg = wo.packagingData as any;
+    if (pkg && Array.isArray(pkg.boxes)) {
+      const matchedBox = pkg.boxes.find(
+        (b: any) =>
+          String(b.barcode || "").trim().toUpperCase() === code ||
+          String(b.boxCode || "").trim().toUpperCase() === code
+      );
+      if (matchedBox) {
+        const fg = findFgForWo(wo.docNo);
+        const totalWoQty = Math.max(1, Number(wo.quantity) || 1);
+        const unitPrice =
+          Number(fg?.costPricePerUnit) ||
+          Number(((Number(wo.priceTotal) || 0) / totalWoQty).toFixed(4)) ||
+          0;
+        const unitWeightGrams = Number(pkg.unitWeightGrams) || Number(matchedBox.unitWeightGrams) || 15;
+        const boxQty = Number(matchedBox.quantity) || 500;
+        const boxWeightKg =
+          Number(matchedBox.grossWeightKg) ||
+          Number(((boxQty * unitWeightGrams) / 1000).toFixed(2));
+
+        return {
+          found: true,
+          mode: "single_box" as const,
+          alreadyDispatched: matchedBox.status === "dispatched",
+          dispatchedShipmentId: matchedBox.shipmentId || null,
+          workOrderNo: wo.docNo,
+          customerName: wo.customerName,
+          clientId: wo.clientId,
+          productName: wo.productName,
+          sku: fg?.sku || `FG-${wo.docNo}`,
+          finishedGoodId: fg?.id || null,
+          unit: wo.unit || fg?.unit || "pcs",
+          unitPrice,
+          boxes: [
+            {
+              id: matchedBox.id || `box-${matchedBox.boxNumber || 1}`,
+              boxNumber: Number(matchedBox.boxNumber) || 1,
+              boxCode: matchedBox.boxCode || `BX-${wo.docNo}-01`,
+              barcode: matchedBox.barcode || code,
+              quantity: boxQty,
+              grossWeightKg: boxWeightKg,
+              sizeCode: matchedBox.sizeCode || undefined,
+              model: matchedBox.model || undefined,
+            },
+          ],
+        };
+      }
+    }
+  }
+
+  // 2) Check if code is a synthesized box pattern like "WO-OF-26-0001-B01", "WOOF260001-B01", or "BX-WOOF260001-01"
+  const boxSuffixMatch = code.match(/^(?:BX-)?(.+?)-(?:B)?(d{1,3})$/);
+  if (boxSuffixMatch) {
+    const rawWoPart = boxSuffixMatch[1].replace(/[^A-Z0-9]/g, "");
+    const boxNum = parseInt(boxSuffixMatch[2], 10) || 1;
+
+    const matchedWo = allWos.find(
+      (wo) => wo.docNo.toUpperCase().replace(/[^A-Z0-9]/g, "") === rawWoPart
+    );
+    const matchedFg =
+      (matchedWo ? findFgForWo(matchedWo.docNo) : undefined) ||
+      allFg.find(
+        (fg) =>
+          (fg.workOrderId || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === rawWoPart ||
+          (fg.sku || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === rawWoPart
+      );
+
+    if (matchedWo || matchedFg) {
+      const woNo = matchedWo?.docNo || matchedFg?.workOrderId || rawWoPart;
+      const customerName = matchedWo?.customerName || matchedFg?.customerName || "Mijoz";
+      const productName = matchedWo?.productName || matchedFg?.productName || "Tayyor mahsulot";
+      const totalQty = Number(matchedFg?.quantity) || Number(matchedWo?.quantity) || 5000;
+      const stdCap = Number((matchedWo?.packagingData as any)?.standardBoxCapacity) || Math.min(5000, totalQty);
+      const totalBoxes = Math.max(1, Math.ceil(totalQty / stdCap));
+      const boxQty = boxNum === totalBoxes ? totalQty - (totalBoxes - 1) * stdCap : stdCap;
+      const unitPrice =
+        Number(matchedFg?.costPricePerUnit) ||
+        (matchedWo ? Number(((Number(matchedWo.priceTotal) || 0) / Math.max(1, Number(matchedWo.quantity) || 1)).toFixed(4)) : 0);
+
+      const cleanWo = woNo.replace(/[^A-Z0-9_-]/gi, "");
+      const padNum = String(boxNum).padStart(2, "0");
+
+      return {
+        found: true,
+        mode: "single_box" as const,
+        alreadyDispatched: false,
+        dispatchedShipmentId: null,
+        workOrderNo: woNo,
+        customerName,
+        clientId: matchedWo?.clientId || matchedFg?.clientId || null,
+        productName,
+        sku: matchedFg?.sku || `FG-${woNo}`,
+        finishedGoodId: matchedFg?.id || null,
+        unit: matchedWo?.unit || matchedFg?.unit || "pcs",
+        unitPrice,
+        boxes: [
+          {
+            id: `box-${cleanWo}-${padNum}`,
+            boxNumber: boxNum,
+            boxCode: `BX-${cleanWo}-${padNum}`,
+            barcode: `${cleanWo}-B${padNum}`,
+            quantity: Math.max(1, boxQty),
+            grossWeightKg: Number((Math.max(1, boxQty) * 0.008).toFixed(2)),
+          },
+        ],
+      };
+    }
+  }
+
+  // 3) Check if code matches a whole Work Order (WO-...) or Finished Good SKU / BatchNo
+  const cleanTarget = code.replace(/[^A-Z0-9]/g, "");
+  const matchedWo = allWos.find(
+    (wo) =>
+      wo.docNo.toUpperCase() === code ||
+      wo.docNo.toUpperCase().replace(/[^A-Z0-9]/g, "") === cleanTarget
+  );
+  const matchedFg =
+    (matchedWo ? findFgForWo(matchedWo.docNo) : undefined) ||
+    allFg.find(
+      (fg) =>
+        (fg.sku || "").toUpperCase() === code ||
+        (fg.batchNo || "").toUpperCase() === code ||
+        (fg.workOrderId || "").toUpperCase() === code ||
+        (fg.workOrderId || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === cleanTarget
+    );
+
+  if (matchedWo || matchedFg) {
+    const woNo = matchedWo?.docNo || matchedFg?.workOrderId || code;
+    const customerName = matchedWo?.customerName || matchedFg?.customerName || "Mijoz";
+    const productName = matchedWo?.productName || matchedFg?.productName || "Tayyor mahsulot";
+    const unitPrice =
+      Number(matchedFg?.costPricePerUnit) ||
+      (matchedWo ? Number(((Number(matchedWo.priceTotal) || 0) / Math.max(1, Number(matchedWo.quantity) || 1)).toFixed(4)) : 0);
+
+    const pkg = matchedWo?.packagingData as any;
+    let readyBoxes: any[] = [];
+
+    if (pkg && Array.isArray(pkg.boxes) && pkg.boxes.length > 0) {
+      readyBoxes = pkg.boxes
+        .filter((b: any) => b.status !== "dispatched")
+        .map((b: any, idx: number) => ({
+          id: b.id || `box-${idx + 1}`,
+          boxNumber: Number(b.boxNumber) || idx + 1,
+          boxCode: b.boxCode || `BX-${woNo}-${String(idx + 1).padStart(2, "0")}`,
+          barcode: b.barcode || `${woNo}-B${String(idx + 1).padStart(2, "0")}`,
+          quantity: Number(b.quantity) || 500,
+          grossWeightKg: Number(b.grossWeightKg) || Number(((Number(b.quantity) || 500) * 0.008).toFixed(2)),
+          sizeCode: b.sizeCode,
+          model: b.model,
+        }));
+    } else {
+      const availQty =
+        Math.max(0, (Number(matchedFg?.quantity) || 0) - (Number(matchedFg?.reservedQuantity) || 0)) ||
+        Number(matchedWo?.quantity) ||
+        1000;
+      const cap = Math.min(5000, Math.max(500, Math.ceil(availQty / 4)));
+      const boxCount = Math.max(1, Math.ceil(availQty / cap));
+      const cleanWo = woNo.replace(/[^A-Z0-9_-]/gi, "");
+
+      for (let i = 1; i <= boxCount; i++) {
+        const bQty = i === boxCount ? availQty - (boxCount - 1) * cap : cap;
+        const pad = String(i).padStart(2, "0");
+        readyBoxes.push({
+          id: `box-${cleanWo}-${pad}`,
+          boxNumber: i,
+          boxCode: `BX-${cleanWo}-${pad}`,
+          barcode: `${cleanWo}-B${pad}`,
+          quantity: Math.max(1, bQty),
+          grossWeightKg: Number((Math.max(1, bQty) * 0.008).toFixed(2)),
+        });
+      }
+    }
+
+    return {
+      found: true,
+      mode: "work_order_batch" as const,
+      alreadyDispatched: readyBoxes.length === 0,
+      dispatchedShipmentId: null,
+      workOrderNo: woNo,
+      customerName,
+      clientId: matchedWo?.clientId || matchedFg?.clientId || null,
+      productName,
+      sku: matchedFg?.sku || `FG-${woNo}`,
+      finishedGoodId: matchedFg?.id || null,
+      unit: matchedWo?.unit || matchedFg?.unit || "pcs",
+      unitPrice,
+      boxes: readyBoxes,
+    };
+  }
+
+  // 4) Check if code matches a Trading Sale sticker / package (TRD-..., TR-SALE-..., TRD-BOX-...)
+  const allSales = await db.query.tradingSales.findMany({
+    where: eq(tradingSales.companyId, companyId),
+    with: { items: true },
+  });
+
+  const matchedSale = allSales.find((s) => {
+    const sDoc = (s.docNo || "").toUpperCase();
+    const cleanSDoc = sDoc.replace(/[^A-Z0-9]/g, "");
+    return (
+      sDoc === code ||
+      cleanSDoc === cleanTarget ||
+      code.startsWith(sDoc) ||
+      code.startsWith(cleanSDoc) ||
+      (s.id && s.id.toUpperCase() === code)
+    );
+  });
+
+  if (matchedSale) {
+    const saleItems = (matchedSale.items || []).map((it) => {
+      const qty = Number(it.quantity) || 0;
+      const price = Number(it.unitPriceUzs) || Number(it.unitPrice) || 0;
+      return {
+        id: it.id,
+        sku: it.sku || "",
+        name: it.name,
+        category: it.category,
+        quantity: qty,
+        unit: it.unit || "dona",
+        unitPrice: price,
+        totalPrice: Number(it.totalAmount) || qty * price,
+        accountCode: "2910" as const,
+        tradingCatalogId: it.sku,
+        notes: `Savdo hujjati ${matchedSale.docNo} stikeri orqali skanerlandi`,
+      };
+    });
+
+    const totalQty = saleItems.reduce((acc, it) => acc + it.quantity, 0);
+    const totalWeightKg = Number((totalQty * 0.005).toFixed(2)) || 5;
+
+    return {
+      found: true,
+      mode: "trading_sale_package" as const,
+      accountCode: "2910" as const,
+      alreadyDispatched: !!matchedSale.linkedShipmentId,
+      dispatchedShipmentId: matchedSale.linkedShipmentId || null,
+      workOrderNo: matchedSale.docNo,
+      docNo: matchedSale.docNo,
+      customerName: matchedSale.customer,
+      clientId: matchedSale.clientId || null,
+      productName: saleItems.length > 0 ? saleItems.map((it) => it.name).join(", ") : "Savdo aksessuarlari",
+      sku: saleItems[0]?.sku || `TRD-${matchedSale.docNo}`,
+      unit: saleItems[0]?.unit || "dona",
+      unitPrice: saleItems[0]?.unitPrice || 0,
+      tradingSaleId: matchedSale.docNo,
+      items: saleItems,
+      boxes: [
+        {
+          id: `trd-box-${matchedSale.docNo}`,
+          boxNumber: 1,
+          boxCode: `BX-${matchedSale.docNo}`,
+          barcode: matchedSale.docNo,
+          quantity: totalQty,
+          grossWeightKg: totalWeightKg,
+          productName: "Savdo aksessuarlari to'plami (2910)",
+          customerName: matchedSale.customer,
+          workOrderNo: matchedSale.docNo,
+        },
+      ],
+    };
+  }
+
+  // 5) Check if code matches an individual Trading Catalog item SKU / Barcode (2910)
+  const allCatalog = await db.query.tradingCatalog.findMany({
+    where: eq(tradingCatalog.companyId, companyId),
+  });
+
+  const matchedCatalogItem = allCatalog.find(
+    (c) =>
+      (c.sku || "").toUpperCase() === code ||
+      (c.sku || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === cleanTarget
+  );
+
+  if (matchedCatalogItem) {
+    const stdQty = Math.min(1000, Math.max(1, Number(matchedCatalogItem.stockQty) || 100));
+    const price = Number(matchedCatalogItem.wholesalePriceUzs) || Number(matchedCatalogItem.priceUzs) || 0;
+
+    return {
+      found: true,
+      mode: "trading_catalog_item" as const,
+      accountCode: "2910" as const,
+      alreadyDispatched: false,
+      dispatchedShipmentId: null,
+      workOrderNo: "",
+      customerName: "",
+      productName: matchedCatalogItem.name,
+      sku: matchedCatalogItem.sku,
+      finishedGoodId: null,
+      tradingCatalogId: matchedCatalogItem.id,
+      unit: matchedCatalogItem.unit || "dona",
+      unitPrice: price,
+      items: [
+        {
+          id: `item-${matchedCatalogItem.sku}-${Date.now()}`,
+          sku: matchedCatalogItem.sku,
+          name: matchedCatalogItem.name,
+          quantity: stdQty,
+          unit: matchedCatalogItem.unit || "dona",
+          unitPrice: price,
+          totalPrice: stdQty * price,
+          accountCode: "2910" as const,
+          tradingCatalogId: matchedCatalogItem.id,
+          notes: `Savdo katalogi (${matchedCatalogItem.category}) shtrix-kodi skanerlandi`,
+        },
+      ],
+      boxes: [
+        {
+          id: `cat-box-${matchedCatalogItem.sku}`,
+          boxNumber: 1,
+          boxCode: `BX-${matchedCatalogItem.sku}`,
+          barcode: matchedCatalogItem.sku,
+          quantity: stdQty,
+          grossWeightKg: Number((stdQty * 0.005).toFixed(2)),
+          productName: matchedCatalogItem.name,
+          customerName: "",
+          workOrderNo: "",
+        },
+      ],
+    };
+  }
+
+  return {
+    found: false,
+    message: `"${code}" shtrix-kodi bo'yicha quti yoki buyurtma topilmadi.`,
+  };
 }

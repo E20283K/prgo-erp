@@ -40,6 +40,9 @@ export interface TelegramCompanySettings {
   isWebhookActive?: boolean;
   defaultNotificationLanguage?: "uz" | "ru" | "en";
   autoCreateLeadsFromUnknownGroups?: boolean;
+  ordersChatId?: string;
+  ordersChatTitle?: string;
+  autoSendNewOrders?: boolean;
 }
 
 export interface NotificationRulesConfig {

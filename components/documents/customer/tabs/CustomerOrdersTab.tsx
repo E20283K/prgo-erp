@@ -495,6 +495,24 @@ export function CustomerOrdersTab({
         status: "Draft",
         shipmentType: "CustomerDelivery",
         notes: targetQty > 0 ? `Tayyor mahsulot zaxirasidan chiqarildi (${targetQty} dona).` : "",
+        items: [
+          {
+            id: `item-${Date.now()}`,
+            sku: (selectedItem as any)?.sku || (customerFinishedGoods[0] as any)?.sku || customerFinishedGoods[0]?.id || `FG-${selectedItem?.docId || "01"}`,
+            name: targetProduct,
+            orderQty: targetQty,
+            shippedQty: targetQty,
+            unit: selectedItem?.unit || customerFinishedGoods[0]?.unit || "pcs",
+            packageCount: Math.ceil(targetQty / 500) || 1,
+            packageType: "Gofroquti",
+            palletNo: "Pallet P-01",
+            unitPrice: (selectedItem as any)?.unitPrice || 0,
+            totalPrice: ((selectedItem as any)?.unitPrice || 0) * targetQty,
+            finishedGoodId: (selectedItem as any)?.dbId || customerFinishedGoods[0]?.id || undefined,
+            sourceWorkOrderId: selectedItem?.docId || customerFinishedGoods[0]?.workOrderId || undefined,
+            notes: targetQty > 0 ? `Tayyor mahsulot zaxirasidan (${targetQty} dona)` : "",
+          }
+        ],
       },
     });
   };
