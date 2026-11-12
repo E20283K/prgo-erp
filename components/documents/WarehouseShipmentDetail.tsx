@@ -1571,6 +1571,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         !currentItems[0].name?.trim() &&
         (Number(currentItems[0].shippedQty) || 0) === 0;
 
+      const boxCode = linkedSaleId ? `TRD-BOX-${linkedSaleId}` : `TRD-BOX-${Date.now().toString().slice(-4)}`;
+      const totalBoxQty = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+      const boxWeightKg = Number((totalBoxQty * 0.005).toFixed(2)) || 5;
+
       const newLines: ShipmentLineItem[] = items.map((it, idx) => ({
         id: `trd-item-${Date.now()}-${idx}`,
         sku: it.sku,
@@ -1584,9 +1588,26 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         totalPrice: it.totalPrice,
         packageCount: 1,
         packageType: "Gofroquti",
-        palletNo: "2910 Aksessuarlar ombori",
-        notes: it.notes || "",
+        palletNo: boxCode,
+        notes: it.notes || "Savdo aksessuarlari to'plami",
       }));
+
+      const newBoxEntry: ScannedBoxEntry = {
+        id: `box-${boxCode}`,
+        boxNumber: (prev.scannedBoxes || []).length + 1,
+        boxCode: boxCode,
+        barcode: linkedSaleId || boxCode,
+        quantity: totalBoxQty,
+        grossWeightKg: boxWeightKg,
+        workOrderNo: linkedSaleId || "TRD",
+        productName: items.map((it) => it.name).slice(0, 2).join(", "),
+        customerName: prev.customer,
+      };
+
+      const existingBoxes = prev.scannedBoxes || [];
+      const hasBoxAlready = existingBoxes.some((b) => b.barcode === (linkedSaleId || boxCode));
+      const nextBoxes = hasBoxAlready ? existingBoxes : [...existingBoxes, newBoxEntry];
+      const nextWeight = Number(((Number(prev.grossWeightKg) || 0) + (hasBoxAlready ? 0 : boxWeightKg)).toFixed(2));
 
       const nextItems = hasOnlyBlankPlaceholder
         ? newLines
@@ -1595,14 +1616,17 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       return {
         ...prev,
         tradingSaleId: prev.tradingSaleId || linkedSaleId || undefined,
+        scannedBoxes: nextBoxes,
+        packagesCount: nextBoxes.length,
+        grossWeightKg: nextWeight,
         items: nextItems,
       };
     });
 
     setTabUnsaved(tab.id, true);
     toast.add({
-      title: "Savdo aksessuarlari qo'shildi",
-      description: `${items.length} ta pozitsiya (Hisob 2910) chiqim jadvaliga biriktirildi`,
+      title: "Savdo aksessuarlari to'plami biriktirildi",
+      description: `${items.length} ta pozitsiya (Hisob 2910) chiqim jadvaliga qo'shildi`,
       type: "success",
     });
   };

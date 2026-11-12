@@ -215,6 +215,7 @@ export function TradingGrid({ type }: TradingGridProps) {
         { id: "totalAmountFormatted", title: "Jami Summa", width: 140, icon: GridColumnIcon.HeaderNumber },
         { id: "currency", title: "Valyuta", width: 90, icon: GridColumnIcon.HeaderSingleValue },
         { id: "paymentMethod", title: "To'lov Shakli", width: 180, icon: GridColumnIcon.HeaderLookup },
+        { id: "shipmentStatus", title: "Ombor Chiqimi", width: 170, icon: GridColumnIcon.HeaderLookup },
         { id: "status", title: "Holat", width: 130, icon: GridColumnIcon.HeaderSingleValue },
       ];
       const salesSource = activeCompany
@@ -228,6 +229,7 @@ export function TradingGrid({ type }: TradingGridProps) {
         : (tradingSales || []);
       rawRows = salesSource.map((s) => ({
         ...s,
+        shipmentStatus: s.linkedShipmentId ? `Yuklangan (${s.linkedShipmentId})` : "Omborda kutilmoqda",
         totalAmountFormatted:
           s.currency === "UZS"
             ? `${(Number(s.totalUZS) || Number(s.totalAmount) || 0).toLocaleString()} UZS`
@@ -416,6 +418,21 @@ export function TradingGrid({ type }: TradingGridProps) {
 
       const col = columns[colIndex];
       const val = col?.id ? (row as any)[col.id] ?? "" : "";
+
+      if (col?.id === "shipmentStatus") {
+        const isShipped = !!(row as any).linkedShipmentId;
+        return {
+          kind: GridCellKind.Text,
+          data: String(val),
+          displayData: String(val),
+          allowOverlay: false,
+          readonly: true,
+          themeOverride: {
+            textDark: isShipped ? (isDark ? "#60a5fa" : "#2563eb") : (isDark ? "#fbbf24" : "#d97706"),
+            baseFontStyle: "600 11px sans-serif",
+          },
+        };
+      }
 
       return {
         kind: GridCellKind.Text,

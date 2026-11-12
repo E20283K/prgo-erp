@@ -8,7 +8,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -20,15 +19,14 @@ import {
 } from "@/components/ui/table";
 import {
   ShoppingBag,
-  Search,
-  Check,
-  Receipt,
-  Layers,
   ArrowRight,
-  ExternalLink,
+  Package,
+  CheckCircle2,
+  AlertCircle,
+  FileText,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
-import { TradingCatalogItemRecord, TradingSaleRecord } from "@/components/documents/trading/types";
+import { TradingSaleRecord } from "@/components/documents/trading/types";
 
 interface PickTradingCatalogDialogProps {
   open: boolean;
@@ -50,16 +48,6 @@ interface PickTradingCatalogDialogProps {
   ) => void;
 }
 
-const CATEGORIES = [
-  "Barchasi",
-  "Tugmalar",
-  "Fermuarlar",
-  "Jakkard",
-  "Iplar",
-  "Yorliqlar",
-  "Furnitura",
-] as const;
-
 export function PickTradingCatalogDialog({
   open,
   onOpenChange,
@@ -67,64 +55,22 @@ export function PickTradingCatalogDialog({
   onSelectItems,
 }: PickTradingCatalogDialogProps) {
   const {
-    tradingCatalog = [],
     tradingSales = [],
     loadTradingData,
   } = useWorkspaceStore();
 
-  const [activeTab, setActiveTab] = useState<"catalog" | "sales">("catalog");
-  const [selectedCategory, setSelectedCategory] = useState<string>("Barchasi");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedItem, setSelectedItem] = useState<TradingCatalogItemRecord | null>(null);
-  const [quantity, setQuantity] = useState<number>(1000);
-  const [unitPrice, setUnitPrice] = useState<number>(0);
-
-  // Sales import state
   const [selectedSale, setSelectedSale] = useState<TradingSaleRecord | null>(null);
 
   useEffect(() => {
     if (open) {
-      if (tradingCatalog.length === 0) {
-        loadTradingData("catalog");
-      }
       if (tradingSales.length === 0) {
         loadTradingData("sales");
       }
-      setSelectedItem(null);
       setSelectedSale(null);
-      setSearchQuery("");
-      setActiveTab("catalog");
     }
-  }, [open, loadTradingData, tradingCatalog.length, tradingSales.length]);
+  }, [open, loadTradingData, tradingSales.length]);
 
-  // When selectedItem changes, default unitPrice to wholesalePriceUZS or priceUZS
-  useEffect(() => {
-    if (selectedItem) {
-      const price = selectedItem.wholesalePriceUZS || selectedItem.priceUZS || 0;
-      setUnitPrice(price);
-      setQuantity(Math.min(1000, Math.max(1, selectedItem.stockQty || 100)));
-    }
-  }, [selectedItem]);
-
-  // Catalog filtered list
-  const filteredCatalog = useMemo(() => {
-    let list = tradingCatalog || [];
-    if (selectedCategory !== "Barchasi") {
-      list = list.filter((item) => item.category === selectedCategory);
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (item) =>
-          item.name.toLowerCase().includes(q) ||
-          item.sku.toLowerCase().includes(q) ||
-          item.category.toLowerCase().includes(q)
-      );
-    }
-    return list;
-  }, [tradingCatalog, selectedCategory, searchQuery]);
-
-  // Sales matching buyer customer
+  // Sales matching buyer customer or all ready sales
   const relevantSales = useMemo(() => {
     const list = tradingSales || [];
     if (!buyerCustomer?.trim()) return list;
@@ -133,27 +79,12 @@ export function PickTradingCatalogDialog({
     return matched.length > 0 ? matched : list;
   }, [tradingSales, buyerCustomer]);
 
-  const handleAddCatalogItem = () => {
-    if (!selectedItem) return;
-    const qty = Math.max(1, Number(quantity) || 1);
-    const price = Math.max(0, Number(unitPrice) || 0);
-    const total = qty * price;
-
-    onSelectItems([
-      {
-        tradingCatalogId: selectedItem.id,
-        sku: selectedItem.sku,
-        name: selectedItem.name,
-        quantity: qty,
-        unit: selectedItem.unit || "dona",
-        unitPrice: price,
-        totalPrice: total,
-        accountCode: "2910",
-        notes: `Savdo katalogidan (2910): ${selectedItem.category}`,
-      },
-    ]);
-    onOpenChange(false);
-  };
+  // Auto-select first sale if only one matches
+  useEffect(() => {
+    if (relevantSales.length > 0 && !selectedSale) {
+      setSelectedSale(relevantSales[0]);
+    }
+  }, [relevantSales, selectedSale]);
 
   const handleImportSale = (sale: TradingSaleRecord) => {
     if (!sale.items || sale.items.length === 0) return;
@@ -170,7 +101,7 @@ export function PickTradingCatalogDialog({
         unitPrice: price,
         totalPrice: qty * price,
         accountCode: "2910" as const,
-        notes: `Savdo hujjati ${sale.docNo} dan import`,
+        notes: `Savdo hujjati ${sale.docNo} dan yuklandi`,
       };
     });
 
@@ -181,343 +112,171 @@ export function PickTradingCatalogDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-4xl p-0 gap-0 border border-border bg-card overflow-hidden">
-        <DialogHeader className="px-4 py-3 border-b border-border bg-muted/20">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <ShoppingBag className="size-4 text-blue-600" />
-              <span>Savdo aksessuarlari ombori (2910)</span>
-            </DialogTitle>
-            <div className="flex items-center gap-1 bg-muted p-0.5 rounded border border-border">
-              <Button
-                type="button"
-                size="sm"
-                variant={activeTab === "catalog" ? "default" : "ghost"}
-                onClick={() => setActiveTab("catalog")}
-                className="h-6 px-2.5 text-xs gap-1.5"
-              >
-                <Layers className="size-3" />
-                <span>Katalogdan tanlash</span>
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={activeTab === "sales" ? "default" : "ghost"}
-                onClick={() => setActiveTab("sales")}
-                className="h-6 px-2.5 text-xs gap-1.5"
-              >
-                <Receipt className="size-3" />
-                <span>Sotuv hujjatidan import</span>
-              </Button>
-            </div>
-          </div>
+        <DialogHeader className="px-4 py-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
+          <DialogTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <ShoppingBag className="size-4 text-blue-600" />
+            <span>Tayyor savdo aksessuarlari to&apos;plami (2910)</span>
+          </DialogTitle>
+          <Badge variant="outline" className="font-mono text-[11px] text-muted-foreground bg-background">
+            Savdo yetakchi (TRD-BOX)
+          </Badge>
         </DialogHeader>
 
-        {activeTab === "catalog" ? (
-          <div className="flex flex-col h-[520px]">
-            {/* Filter and Search Bar */}
-            <div className="p-3 border-b border-border bg-background space-y-2 shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Artikul (SKU) yoki nom bo'yicha qidirish..."
-                    className="h-8 pl-8 text-xs bg-card border-border"
-                  />
-                </div>
-              </div>
-
-              {/* Category Pills */}
-              <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
-                {CATEGORIES.map((cat) => (
-                  <Button
-                    key={cat}
-                    type="button"
-                    variant={selectedCategory === cat ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setSelectedCategory(cat)}
-                    className="h-6 px-2 text-[11px] shrink-0"
-                  >
-                    {cat}
-                  </Button>
-                ))}
-              </div>
+        <div className="flex flex-col h-[480px]">
+          {/* Customer Context Info Header */}
+          <div className="px-4 py-2 border-b border-border bg-muted/10 flex items-center justify-between shrink-0 text-xs text-muted-foreground">
+            <div>
+              {buyerCustomer ? (
+                <span>
+                  Mijoz: <b className="text-foreground">{buyerCustomer}</b> uchun tayyorlangan aksessuarlar to&apos;plamlari
+                </span>
+              ) : (
+                <span>Barcha tayyor savdo to&apos;plamlari ro&apos;yxati</span>
+              )}
             </div>
+            <span className="font-mono text-[11px]">{relevantSales.length} ta tayyor hujjat</span>
+          </div>
 
-            {/* Catalog Grid Table */}
-            <div className="flex-1 overflow-y-auto min-h-0 border-b border-border">
-              <Table>
-                <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
-                  <TableRow className="h-7 text-[11px]">
-                    <TableHead className="w-24 font-semibold">SKU</TableHead>
-                    <TableHead className="font-semibold">Mahsulot tavsifi</TableHead>
-                    <TableHead className="w-24 font-semibold">Kategoriya</TableHead>
-                    <TableHead className="w-20 text-right font-semibold">Zaxira</TableHead>
-                    <TableHead className="w-16 font-semibold">Birligi</TableHead>
-                    <TableHead className="w-28 text-right font-semibold">Ulgurji narx</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredCatalog.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="h-40 text-center text-xs text-muted-foreground">
-                        Katalogda aksessuarlar topilmadi.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredCatalog.map((item) => {
-                      const isSelected = selectedItem?.id === item.id;
-                      const isOutOfStock = (item.stockQty || 0) <= 0;
-                      return (
-                        <TableRow
-                          key={item.id}
-                          onClick={() => setSelectedItem(item)}
-                          className={`h-8 text-xs cursor-pointer transition-colors ${
-                            isSelected
-                              ? "bg-blue-500/10 hover:bg-blue-500/15"
-                              : "hover:bg-muted/40"
+          <div className="grid grid-cols-1 md:grid-cols-2 flex-1 min-h-0 divide-x divide-border">
+            {/* Left Column: Sales Packages List */}
+            <div className="overflow-y-auto p-3 space-y-2">
+              {relevantSales.length === 0 ? (
+                <div className="h-48 flex flex-col items-center justify-center p-6 text-center text-xs text-muted-foreground space-y-2">
+                  <AlertCircle className="size-6 text-muted-foreground opacity-50" />
+                  <p>Mijoz uchun Savdo modulida hali aksessuarlar sotuv hujjati shakllantirilmagan.</p>
+                  <p className="text-[11px]">Avval Savdo modulida sotuv hujjatini rasmiylashtiring.</p>
+                </div>
+              ) : (
+                relevantSales.map((sale) => {
+                  const isSelected = selectedSale?.id === sale.id;
+                  const isShipped = !!sale.linkedShipmentId;
+                  const itemsCount = sale.items?.length || 0;
+                  const totalQty = (sale.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+
+                  return (
+                    <div
+                      key={sale.id}
+                      onClick={() => setSelectedSale(sale)}
+                      className={`p-3 rounded border transition-colors cursor-pointer text-xs space-y-1.5 ${
+                        isSelected
+                          ? "bg-blue-500/10 border-blue-500/40 shadow-sm"
+                          : "bg-background border-border hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Package className="size-3.5 text-blue-600" />
+                          <span className="font-mono font-bold text-foreground">
+                            TRD-BOX [{sale.docNo}]
+                          </span>
+                        </div>
+                        <Badge
+                          variant={isShipped ? "secondary" : "default"}
+                          className={`text-[10px] px-1.5 py-0 h-4 font-mono ${
+                            isShipped
+                              ? "bg-muted text-muted-foreground"
+                              : "bg-emerald-600 text-white"
                           }`}
                         >
-                          <TableCell className="font-mono text-muted-foreground font-medium py-1">
-                            {item.sku}
-                          </TableCell>
-                          <TableCell className="font-medium text-foreground py-1 truncate max-w-[280px]">
-                            {item.name}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground py-1">
-                            {item.category}
-                          </TableCell>
-                          <TableCell className="text-right py-1 font-mono font-medium">
-                            <span
-                              className={
-                                isOutOfStock
-                                  ? "text-destructive"
-                                  : (item.stockQty || 0) < 500
-                                  ? "text-amber-600"
-                                  : "text-foreground"
-                              }
-                            >
-                              {(item.stockQty || 0).toLocaleString()}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground py-1">
-                            {item.unit}
-                          </TableCell>
-                          <TableCell className="text-right py-1 font-mono">
-                            {(item.wholesalePriceUZS || item.priceUZS || 0).toLocaleString()}{" "}
-                            <span className="text-[10px] text-muted-foreground">so&apos;m</span>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
+                          {isShipped ? `Yuklangan (${sale.linkedShipmentId})` : "Omborda tayyor"}
+                        </Badge>
+                      </div>
+
+                      <div className="text-foreground font-medium truncate">
+                        {sale.customer}
+                      </div>
+
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        Sotuvchi: {sale.sellerEntityName}
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border/50 text-muted-foreground font-mono">
+                        <span>{sale.date}</span>
+                        <span>
+                          {itemsCount} ta tovar ({totalQty.toLocaleString()} dona)
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            {/* Bottom Add Action Bar */}
-            <div className="p-3 bg-muted/10 shrink-0 flex items-center justify-between gap-3">
-              {selectedItem ? (
-                <div className="flex items-center gap-4 flex-1">
-                  <div className="min-w-0 max-w-[240px]">
-                    <div className="text-[11px] font-mono text-blue-600 truncate">
-                      [{selectedItem.sku}]
+            {/* Right Column: Selected Package Items Preview */}
+            <div className="flex flex-col h-full bg-background overflow-hidden">
+              {selectedSale ? (
+                <div className="flex flex-col h-full">
+                  <div className="p-3 border-b border-border bg-muted/20 shrink-0 flex items-center justify-between">
+                    <div>
+                      <div className="font-mono font-bold text-xs text-foreground flex items-center gap-1.5">
+                        <FileText className="size-3.5 text-blue-600" />
+                        <span>{selectedSale.docNo} tovarlari</span>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        Quti stikeri: TRD-BOX-{selectedSale.docNo}
+                      </div>
                     </div>
-                    <div className="text-xs font-semibold text-foreground truncate">
-                      {selectedItem.name}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground">
-                      Mavjud zaxira: {(selectedItem.stockQty || 0).toLocaleString()} {selectedItem.unit}
-                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => handleImportSale(selectedSale)}
+                      className="h-7 px-3 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      <ArrowRight className="size-3.5" />
+                      <span>Chiqimga yuklash</span>
+                    </Button>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <div>
-                      <span className="text-[10px] text-muted-foreground block">Miqdor:</span>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={quantity}
-                        onChange={(e) => setQuantity(Number(e.target.value) || 0)}
-                        className="h-7 w-24 text-xs font-mono"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-muted-foreground block">Narx (dona):</span>
-                      <Input
-                        type="number"
-                        min={0}
-                        value={unitPrice}
-                        onChange={(e) => setUnitPrice(Number(e.target.value) || 0)}
-                        className="h-7 w-28 text-xs font-mono"
-                      />
-                    </div>
-                    <div className="pl-2">
-                      <span className="text-[10px] text-muted-foreground block">Jami:</span>
-                      <span className="text-xs font-mono font-bold text-foreground">
-                        {(quantity * unitPrice).toLocaleString()} so&apos;m
-                      </span>
-                    </div>
+                  <div className="flex-1 overflow-y-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
+                        <TableRow className="h-7 text-[10px]">
+                          <TableHead className="font-semibold">Nomi / Artikul</TableHead>
+                          <TableHead className="text-right font-semibold">Miqdor</TableHead>
+                          <TableHead className="text-right font-semibold">Narx</TableHead>
+                          <TableHead className="text-right font-semibold">Jami</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(selectedSale.items || []).map((it, idx) => (
+                          <TableRow key={idx} className="h-7 text-xs">
+                            <TableCell className="py-1">
+                              <div className="font-medium text-foreground truncate max-w-[180px]">{it.name}</div>
+                              <div className="text-[10px] font-mono text-muted-foreground">{it.sku}</div>
+                            </TableCell>
+                            <TableCell className="text-right font-mono py-1">
+                              {Number(it.quantity).toLocaleString()} {it.unit}
+                            </TableCell>
+                            <TableCell className="text-right font-mono py-1">
+                              {Number(it.unitPriceUZS || it.unitPrice).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right font-mono font-medium py-1">
+                              {Number(it.totalAmount).toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* Summary Bar */}
+                  <div className="p-2.5 border-t border-border bg-muted/20 shrink-0 flex items-center justify-between text-xs font-mono">
+                    <span className="text-muted-foreground text-[11px]">
+                      Jami: {(selectedSale.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0).toLocaleString()} dona
+                    </span>
+                    <span className="font-bold text-foreground">
+                      {(Number(selectedSale.totalUZS || selectedSale.totalAmount) || 0).toLocaleString()} so&apos;m
+                    </span>
                   </div>
                 </div>
               ) : (
-                <div className="text-xs text-muted-foreground">
-                  Chiqim qilish uchun jadvaldan aksessuarni tanlang.
+                <div className="h-full flex items-center justify-center p-6 text-center text-xs text-muted-foreground">
+                  Tovarlar tarkibini ko&apos;rish va biriktirish uchun chapdan to&apos;plamni tanlang.
                 </div>
               )}
-
-              <div className="flex items-center gap-2 shrink-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onOpenChange(false)}
-                  className="h-7 px-3 text-xs"
-                >
-                  Bekor qilish
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={!selectedItem || quantity <= 0}
-                  onClick={handleAddCatalogItem}
-                  className="h-7 px-3 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <Check className="size-3.5" />
-                  <span>Chiqimga qo&apos;shish</span>
-                </Button>
-              </div>
             </div>
           </div>
-        ) : (
-          /* Tab 2: Import from Trading Sale */
-          <div className="flex flex-col h-[520px]">
-            <div className="p-3 border-b border-border bg-background flex items-center justify-between shrink-0">
-              <div className="text-xs text-muted-foreground">
-                {buyerCustomer ? (
-                  <span>
-                    Mijoz: <b className="text-foreground">{buyerCustomer}</b> bo&apos;yicha shakllantirilgan savdo hujjatlari
-                  </span>
-                ) : (
-                  <span>Mavjud barcha savdo hujjatlari</span>
-                )}
-              </div>
-              <Badge variant="outline" className="font-mono text-[10px]">
-                {relevantSales.length} ta hujjat
-              </Badge>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 flex-1 min-h-0 divide-x divide-border">
-              {/* Left Column: Sales Documents List */}
-              <div className="overflow-y-auto p-2 space-y-1.5">
-                {relevantSales.length === 0 ? (
-                  <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">
-                    Savdo hujjatlari topilmadi.
-                  </div>
-                ) : (
-                  relevantSales.map((sale) => {
-                    const isSelected = selectedSale?.id === sale.id;
-                    const itemsCount = sale.items?.length || 0;
-                    return (
-                      <div
-                        key={sale.id}
-                        onClick={() => setSelectedSale(sale)}
-                        className={`p-2.5 rounded border transition-colors cursor-pointer text-xs space-y-1 ${
-                          isSelected
-                            ? "bg-blue-500/10 border-blue-500/40"
-                            : "bg-background border-border hover:bg-muted/40"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono font-semibold text-foreground">
-                            {sale.docNo}
-                          </span>
-                          <Badge
-                            variant={sale.status === "Posted" ? "default" : "secondary"}
-                            className="text-[10px] px-1.5 py-0 h-4"
-                          >
-                            {sale.status === "Posted" ? "O'tkazilgan" : "Qoralama"}
-                          </Badge>
-                        </div>
-                        <div className="text-muted-foreground truncate">
-                          {sale.customer}
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border/50 text-muted-foreground font-mono">
-                          <span>{sale.date}</span>
-                          <span>{itemsCount} ta tovar • {Number(sale.totalUZS || sale.totalAmount).toLocaleString()} UZS</span>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Right Column: Selected Sale Items Preview */}
-              <div className="flex flex-col h-full bg-background overflow-hidden">
-                {selectedSale ? (
-                  <div className="flex flex-col h-full">
-                    <div className="p-3 border-b border-border bg-muted/20 shrink-0 flex items-center justify-between">
-                      <div>
-                        <div className="font-mono font-bold text-xs text-foreground">
-                          {selectedSale.docNo} tovarlari
-                        </div>
-                        <div className="text-[10px] text-muted-foreground">
-                          {selectedSale.sellerEntityName}
-                        </div>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => handleImportSale(selectedSale)}
-                        className="h-7 px-3 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                      >
-                        <ArrowRight className="size-3.5" />
-                        <span>Barchasini yuklash</span>
-                      </Button>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto">
-                      <Table>
-                        <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm">
-                          <TableRow className="h-7 text-[10px]">
-                            <TableHead className="font-semibold">Nomi</TableHead>
-                            <TableHead className="text-right font-semibold">Miqdor</TableHead>
-                            <TableHead className="text-right font-semibold">Narx</TableHead>
-                            <TableHead className="text-right font-semibold">Jami</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {(selectedSale.items || []).map((it, idx) => (
-                            <TableRow key={idx} className="h-7 text-xs">
-                              <TableCell className="py-1">
-                                <div className="font-medium truncate max-w-[160px]">{it.name}</div>
-                                <div className="text-[10px] font-mono text-muted-foreground">{it.sku}</div>
-                              </TableCell>
-                              <TableCell className="text-right font-mono py-1">
-                                {Number(it.quantity).toLocaleString()} {it.unit}
-                              </TableCell>
-                              <TableCell className="text-right font-mono py-1">
-                                {Number(it.unitPriceUZS || it.unitPrice).toLocaleString()}
-                              </TableCell>
-                              <TableCell className="text-right font-mono font-medium py-1">
-                                {Number(it.totalAmount).toLocaleString()}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="h-full flex items-center justify-center p-6 text-center text-xs text-muted-foreground">
-                    Tovarlar tarkibini ko&apos;rish va import qilish uchun chapdan savdo hujjatini tanlang.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        </div>
       </DialogContent>
     </Dialog>
   );
