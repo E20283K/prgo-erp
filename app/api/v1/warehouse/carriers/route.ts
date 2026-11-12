@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "PRINTGOO";
+    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "ALL";
 
     const data = await getCarriers(companyCode);
     return NextResponse.json({
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { searchParams } = new URL(request.url);
-    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "PRINTGOO";
+    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "ALL";
 
     const result = await upsertCarrier(body, companyCode);
     return NextResponse.json({
@@ -51,7 +51,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
-    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "PRINTGOO";
+    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "ALL";
 
     if (!id) {
       return NextResponse.json({ success: false, error: "ID ko'rsatilmagan" }, { status: 400 });

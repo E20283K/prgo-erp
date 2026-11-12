@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "PRINTGOO";
+    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "ALL";
 
     const data = await getDispatchManifests(companyCode);
     return NextResponse.json({
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { searchParams } = new URL(request.url);
-    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "PRINTGOO";
+    const companyCode = searchParams.get("company") || searchParams.get("companyCode") || "ALL";
 
     const result = await upsertDispatchManifest(body, companyCode);
     return NextResponse.json({

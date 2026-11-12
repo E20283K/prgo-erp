@@ -12,6 +12,16 @@ import type {
  * Korxona kodi bo'yicha korxona ID sini topish (default: PRINTGOO)
  */
 export async function getCompanyIdByCode(code: string = "PRINTGOO"): Promise<string> {
+  if (code) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(code);
+    if (isUuid) {
+      const compById = await db.query.companies.findFirst({
+        where: eq(companies.id, code),
+      });
+      if (compById) return compById.id;
+    }
+  }
+
   const comp = await db.query.companies.findFirst({
     where: eq(companies.code, code),
   });

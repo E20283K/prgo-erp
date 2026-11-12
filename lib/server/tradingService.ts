@@ -372,24 +372,22 @@ export async function upsertTradingSale(
   return all.find((s) => s.id === savedSaleId) || (payload as TradingSaleRecord);
 }
 
-async function applySalePostedEffects(
+export async function applySalePostedEffects(
   companyId: string,
   saleId: string,
   sale: any,
   items: TradingSaleItem[]
 ) {
-  // 1. Deduct stock from trading_catalog
-  for (const it of items) {
-    if (it.sku && it.quantity > 0) {
-      await db
-        .update(tradingCatalog)
-        .set({
-          stockQty: sql`GREATEST(0, ${tradingCatalog.stockQty} - ${it.quantity})`,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(tradingCatalog.companyId, companyId), eq(tradingCatalog.sku, it.sku)));
-    }
-  }
+  // Eslatma: 2910 ombor qoldig'i (stockQty) faqat Ombor Chiqimi (Shipment -> Chiqarish) bosilganda 1 marta kamayadi.
+
+  // 1. Check if already posted to settlements (idempotency guard)
+  const existingStl = await db
+    .select({ id: tradingSettlements.id })
+    .from(tradingSettlements)
+    .where(and(eq(tradingSettlements.companyId, companyId), eq(tradingSettlements.docNo, sale.docNo)))
+    .limit(1);
+
+  if (existingStl.length > 0) return;
 
   // 2. Increase YTT turnover
   if (sale.sellerEntityId) {
@@ -403,31 +401,22 @@ async function applySalePostedEffects(
       })
       .where(eq(tradingYttEntities.id, sale.sellerEntityId));
   }
-
   // 3. Add to trading_settlements
-  const existingStl = await db
-    .select({ id: tradingSettlements.id })
-    .from(tradingSettlements)
-    .where(and(eq(tradingSettlements.companyId, companyId), eq(tradingSettlements.docNo, sale.docNo)))
-    .limit(1);
-
-  if (existingStl.length === 0) {
-    await db.insert(tradingSettlements).values({
-      companyId,
-      docNo: sale.docNo,
-      date: sale.date,
-      docType: "Sotuv Hujjati",
-      sellerEntityId: sale.sellerEntityId,
-      sellerEntityName: sale.sellerEntityName,
-      clientId: sale.clientId,
-      customer: sale.customer,
-      debit: sale.totalAmount,
-      credit: "0.00",
-      currency: sale.currency,
-      balance: sale.totalAmount, // Customer debt increases
-      notes: `Sotuv hujjati bo'yicha mahsulot topshirildi (${items.length} xil pozitsiya)`,
-    });
-  }
+  await db.insert(tradingSettlements).values({
+    companyId,
+    docNo: sale.docNo,
+    date: sale.date,
+    docType: "Sotuv Hujjati",
+    sellerEntityId: sale.sellerEntityId,
+    sellerEntityName: sale.sellerEntityName,
+    clientId: sale.clientId,
+    customer: sale.customer,
+    debit: sale.totalAmount,
+    credit: "0.00",
+    currency: sale.currency,
+    balance: sale.totalAmount, // Customer debt increases
+    notes: `Sotuv hujjati bo'yicha mahsulot topshirildi (${items.length} xil pozitsiya)`,
+  });
 }
 
 export async function deleteTradingSale(id: string, companyCode = "PRINTGOO"): Promise<boolean> {

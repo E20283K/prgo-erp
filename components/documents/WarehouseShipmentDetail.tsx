@@ -1070,6 +1070,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     finishedGoods,
     loadFinishedGoods,
     addNotification,
+    activeCompanyId,
   } = useWorkspaceStore();
 
   const isDark = theme === "dark";
@@ -1177,7 +1178,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     const defaultCustomer = d.customer || d.customerName || "";
     const defaultWo = d.workOrder || d.workOrderId || "";
     const defaultShipmentType: ShipmentType = d.shipmentType || "CustomerDelivery";
-    const defaultCompanyId = d.companyId || (companiesList && companiesList[0]?.id) || "";
+    const defaultCompanyId = d.companyId || (activeCompanyId && activeCompanyId !== "ALL" ? activeCompanyId : undefined) || companiesList?.find((c: any) => c.code === "PRINTGOO")?.id || companiesList?.[0]?.id || "";
     const defaultCompanyName = d.companyName || (companiesList && companiesList.find((c: any) => c.id === defaultCompanyId)?.name) || "PrintGoo LLC";
 
     const defaultItems: ShipmentLineItem[] = Array.isArray(d.items) && d.items.length > 0
@@ -2026,13 +2027,28 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     const res = await upsertWarehouseShipmentAsync(payload);
     if (res && res.shipmentNumber) {
       const realId = res.shipmentNumber;
-      const updated = { ...doc, id: realId, status, quantity: totalShippedQty };
+      const generatedActId = res.deliveryActId || res.shipment?.deliveryActId || doc.deliveryActId;
+      const updated = {
+        ...doc,
+        id: realId,
+        status,
+        quantity: totalShippedQty,
+        deliveryActId: generatedActId,
+      };
       setDoc(updated);
       upsertWarehouseShipment(updated);
       replaceTabId(tab.id, realId, `${realId}: ${updated.customer || "Chiqim"}`, updated);
       addNotification({
-        title: "Ombor chiqimi saqlandi",
-        description: `Hujjat raqami: ${realId} (${status === "Dispatched" ? "Yuborilgan" : "Saqlangan"})`,
+        title:
+          status === "Dispatched"
+            ? "Ombor chiqimi yuborildi"
+            : status === "Packed"
+            ? "Tayyor yuk sifatida saqlandi"
+            : "Ombor chiqimi saqlandi",
+        description:
+          generatedActId && status === "Dispatched"
+            ? `Hujjat: ${realId} • Schet-faktura: ${generatedActId}`
+            : `Hujjat raqami: ${realId}`,
         severity: "success",
       });
     } else {
@@ -2081,6 +2097,15 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleDispatch = () => {
+    if (doc.deliveryMode === "manifest" && (!doc.manifestId || doc.manifestId === "PENDING_MANIFEST")) {
+      addNotification({
+        title: "Reys biriktirilmagan",
+        description:
+          "«Reys orqali» yetkazish tanlangan. Avval «Tayyor yuk» tugmasini bosing (so'ng Reyslar oynasida mashinaga biriktiring) yoki ro'yxatdan mavjud Reysni tanlang.",
+        severity: "warning",
+      });
+      return;
+    }
     saveShipmentInternal("Dispatched");
   };
 
@@ -3445,6 +3470,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         open={isManifestDialogOpen}
         onOpenChange={setIsManifestDialogOpen}
         manifest={linkedManifest}
+        initialShipmentId={doc.id || tab.id}
       />
 
       {/* ─── Boshqa mijoz qutisini yo'naltirish (Cross-Customer Barcode Scan) Dialogi ─── */}

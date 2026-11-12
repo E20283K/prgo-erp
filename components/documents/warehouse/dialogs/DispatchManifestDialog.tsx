@@ -58,6 +58,8 @@ export function DispatchManifestDialog({
     upsertDispatchManifestAsync,
     dispatchManifests = [],
     carriersList = [],
+    addNotification,
+    activeCompanyId,
   } = useWorkspaceStore();
 
   const [selectedShipmentIds, setSelectedShipmentIds] = useState<string[]>([]);
@@ -173,13 +175,20 @@ export function DispatchManifestDialog({
   };
 
   const handleSaveManifest = async (overrideStatus?: string) => {
-    if (selectedShipmentIds.length === 0) return;
+    if (selectedShipmentIds.length === 0) {
+      addNotification({
+        title: "Yuk tanlanmagan",
+        description: "Reysga biriktirish uchun ro'yxatdan kamida bitta yukni (chiqimni) belgilang.",
+        severity: "warning",
+      });
+      return;
+    }
     try {
       setIsSubmitting(true);
       const finalStatus = overrideStatus || status || "Loading";
       const manifestPayload = {
-        id: manifest?.id,
-        manifestNumber: activeManifestNo,
+        id: manifest?.dbId || manifest?.id,
+        manifestNumber: manifest ? (manifest.manifestNumber || manifest.id) : "",
         date: manifest?.date || new Date().toISOString().split("T")[0],
         vehiclePlate,
         vehicleModel,
@@ -193,12 +202,34 @@ export function DispatchManifestDialog({
         totalWeightKg,
         notes,
         shipmentIds: selectedShipmentIds,
+        companyId: manifest?.companyId || selectedShipments[0]?.companyId || (activeCompanyId !== "ALL" ? activeCompanyId : undefined),
       };
 
-      await upsertDispatchManifestAsync(manifestPayload);
-      onOpenChange(false);
+      const res = await upsertDispatchManifestAsync(manifestPayload);
+      const isSuccess = typeof res === "boolean" ? res : Boolean(res?.success);
+      if (isSuccess) {
+        const savedNo = (typeof res === "object" && res?.manifestNumber) || manifestPayload.manifestNumber || activeManifestNo;
+        addNotification({
+          title: "Reys saqlandi",
+          description: `${savedNo} reysiga ${selectedShipments.length} ta yuk muvaffaqiyatli biriktirildi.`,
+          severity: "success",
+        });
+        onOpenChange(false);
+      } else {
+        const errDesc = (typeof res === "object" && res?.error) ? res.error : "Reysni saqlashda server xatoligi yuz berdi. Iltimos qayta urinib ko'ring.";
+        addNotification({
+          title: "Saqlashda xatolik",
+          description: errDesc,
+          severity: "error",
+        });
+      }
     } catch (err) {
       console.error(err);
+      addNotification({
+        title: "Saqlashda xatolik",
+        description: err instanceof Error ? err.message : "Reysni saqlashda xatolik yuz berdi.",
+        severity: "error",
+      });
     } finally {
       setIsSubmitting(false);
     }

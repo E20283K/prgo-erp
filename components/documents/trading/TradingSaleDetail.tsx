@@ -48,6 +48,7 @@ import {
   Building2,
   CreditCard,
   Calendar,
+  PackageCheck,
 } from "lucide-react";
 import {
   TradingSaleRecord,
@@ -81,6 +82,9 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     loadCrmCustomers,
     loadTradingData,
     upsertTradingSaleAsync,
+    warehouseShipments,
+    loadWarehouseShipments,
+    upsertWarehouseShipment,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const rawData: Partial<TradingSaleRecord> = tab.documentData || {};
@@ -98,6 +102,9 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     }
     if (!tradingCatalog || tradingCatalog.length === 0) {
       loadTradingData("catalog");
+    }
+    if (!warehouseShipments || warehouseShipments.length === 0) {
+      loadWarehouseShipments();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -476,18 +483,19 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     });
   };
 
-  const handleCreateOrOpenShipment = () => {
-    if (linkedShipmentId) {
+  const handleCreateOrOpenShipment = async () => {
+    if (linkedShipmentId && !linkedShipmentId.startsWith("draft-")) {
+      const existingLinked = warehouseShipments.find((s) => s.id === linkedShipmentId);
       openTab({
         id: linkedShipmentId,
-        title: `Chiqim: ${linkedShipmentId}`,
+        title: `${linkedShipmentId}: ${customer || "Chiqim"}`,
         type: "warehouse-shipment",
         module: "warehouse",
+        documentData: existingLinked,
       });
       return;
     }
 
-    const draftId = `draft-shp-${Date.now()}`;
     const shipmentItems = items.map((it, idx) => ({
       id: `shp-item-${Date.now()}-${idx}`,
       sku: it.sku,
@@ -504,6 +512,95 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
       palletNo: "2910 Aksessuarlar ombori",
       notes: `Savdo hujjati ${docNo} dan yuklangan`,
     }));
+
+    // Shu mijozning ochiq (Draft yoki Packed) Shipment hujjati borligini tekshiramiz
+    const normCust = (customer || "").trim().toLowerCase();
+    const existingCustomerShipment = normCust
+      ? warehouseShipments.find(
+          (s) =>
+            s.customer?.trim().toLowerCase() === normCust &&
+            (s.status === "Draft" || s.status === "Packed")
+        )
+      : undefined;
+
+    if (existingCustomerShipment) {
+      const currentItems = existingCustomerShipment.items || [];
+      const existingSkus = new Set(
+        currentItems
+          .filter((i) => i.accountCode === "2910")
+          .map((i) => i.sku)
+      );
+      const newItemsToAppend = shipmentItems.filter((ni) => !existingSkus.has(ni.sku));
+      const mergedItems = [...currentItems, ...newItemsToAppend];
+      const mergedShipment = {
+        ...existingCustomerShipment,
+        tradingSaleId: docNo,
+        items: mergedItems,
+        quantity: mergedItems.reduce((acc, it) => acc + (Number(it.shippedQty) || 0), 0),
+      };
+
+      upsertWarehouseShipment(mergedShipment);
+      setLinkedShipmentId(existingCustomerShipment.id);
+
+      await upsertTradingSaleAsync({
+        id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+        docNo,
+        date,
+        sellerEntityId,
+        sellerEntityName: selectedEntity.name,
+        customer,
+        customerTin,
+        contractNo,
+        currency,
+        exchangeRate,
+        totalAmount,
+        totalUSD,
+        totalUZS,
+        paymentMethod,
+        status: "Draft",
+        notes,
+        linkedShipmentId: existingCustomerShipment.id,
+        items,
+      });
+
+      openTab({
+        id: existingCustomerShipment.id,
+        title: `${existingCustomerShipment.id}: ${customer}`,
+        type: "warehouse-shipment",
+        module: "warehouse",
+        documentData: mergedShipment,
+      });
+
+      addNotification({
+        title: "Mavjud ombor chiqimiga biriktirildi",
+        description: `${docNo} aksessuarlari mijozning ochiq ${existingCustomerShipment.id} chiqim hujjatiga qo'shildi.`,
+        severity: "success",
+      });
+      return;
+    }
+
+    const draftId = `draft-shp-${Date.now()}`;
+
+    await upsertTradingSaleAsync({
+      id: rawData.id && !rawData.id.startsWith("draft-") ? rawData.id : undefined,
+      docNo,
+      date,
+      sellerEntityId,
+      sellerEntityName: selectedEntity.name,
+      customer,
+      customerTin,
+      contractNo,
+      currency,
+      exchangeRate,
+      totalAmount,
+      totalUSD,
+      totalUZS,
+      paymentMethod,
+      status: "Draft",
+      notes,
+      linkedShipmentId: draftId,
+      items,
+    });
 
     openTab({
       id: draftId,
@@ -523,7 +620,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
     });
 
     setLinkedShipmentId(draftId);
-    setTabUnsaved(tab.id, true);
+    setTabUnsaved(tab.id, false);
     addNotification({
       title: "Ombor chiqim hujjati shakllantirildi",
       description: `${items.length} ta savdo aksessuari yangi chiqim hujjatiga o'tkazildi`,
@@ -583,20 +680,20 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
       totalUSD,
       totalUZS,
       paymentMethod,
-      status: "Posted",
+      status: "Draft",
       notes,
+      linkedShipmentId: linkedShipmentId || undefined,
       items,
     };
     await upsertTradingSaleAsync(payload);
-    setStatus("Posted");
     setTabUnsaved(tab.id, false);
+    setIsLabelModalOpen(true);
     addNotification({
-      title: "Sotuv o'tkazildi (Проведено)",
-      description: `${docNo} muvaffaqiyatli o'tkazildi. Ombor zaxirasidan kamaytirildi va YTT aylanmasi yangilandi.`,
+      title: "Qadoqlandi (Omborga tayyor)",
+      description: `${docNo} ombor navbatiga tayyorlandi. Quti stikerini chop eting yoki ombor chiqimiga (Shipment) biriktiring.`,
       severity: "success",
       link: { module: "trading", subModule: "trading-sales" },
     });
-    closeTab(tab.id);
   };
 
   const filteredCatalogItems = useMemo(() => {
@@ -615,7 +712,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
       {/* 1C Standard Document Header (Sales Emerald/Blue Style) */}
       <DocumentHeader
         icon={Receipt}
-        title={`Sotuv Hujjati (Hisob-faktura / Realizatsiya): ${customer}`}
+        title={`Savdo Buyurtmasi va Qadoqlash (2910): ${customer}`}
         docNo={docNo}
         date={date}
         status={status === "Posted" ? "Completed" : "Active"}
@@ -635,12 +732,12 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setIsPrintModalOpen(true)}
-              className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer"
-              title="Elektron hisob-faktura va yuk xati (PDF)"
+              onClick={handleCreateOrOpenShipment}
+              className="h-7 px-2.5 text-xs gap-1.5 font-medium cursor-pointer border-blue-500/30 text-blue-700 dark:text-blue-400 bg-blue-500/5 hover:bg-blue-500/15"
+              title="Mijozning ombor chiqimi (Shipment) hujjatiga qo'shish yoki ochish"
             >
-              <Printer className="w-3.5 h-3.5 text-muted-foreground" />
-              <span className="hidden sm:inline">Chop etish (PDF)</span>
+              <Truck className="w-3.5 h-3.5" />
+              <span>{linkedShipmentId && !linkedShipmentId.startsWith("draft-") ? `Chiqim: ${linkedShipmentId}` : "Chiqimga biriktirish"}</span>
             </Button>
 
             <Button
@@ -659,8 +756,8 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
               disabled={status === "Posted"}
               className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 font-medium shadow-none cursor-pointer"
             >
-              <Check className="w-3.5 h-3.5" />
-              <span>O&apos;tkazish va yopish</span>
+              <PackageCheck className="w-3.5 h-3.5" />
+              <span>{status === "Posted" ? "Chiqim qilingan" : "Qadoqlandi (Omborga tayyor)"}</span>
             </Button>
           </>
         }

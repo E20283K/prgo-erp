@@ -22,6 +22,8 @@ import {
 import { eq, desc, and, or } from "drizzle-orm";
 import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber, getNextManifestNumber } from "./numberingService";
 import { emitNotification } from "./notificationService";
+import { upsertDeliveryAct } from "./financeService";
+import { applySalePostedEffects } from "./tradingService";
 
 /**
  * Korxona kodi bo'yicha korxona ID sini olish
@@ -483,14 +485,20 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
 
 // ─── 4. Warehouse Shipments (Chiqim Orderlari) ─────────────────────────────────
 
-export async function getWarehouseShipments(companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+export async function getWarehouseShipments(companyCode: string = "ALL") {
+  let whereClause = undefined;
+  if (companyCode && companyCode !== "ALL") {
+    const companyId = await getCompanyIdByCode(companyCode);
+    whereClause = eq(warehouseShipments.companyId, companyId);
+  }
+
   const rows = await db.query.warehouseShipments.findMany({
-    where: eq(warehouseShipments.companyId, companyId),
+    where: whereClause,
     with: {
       items: true,
       warehouse: true,
       manifest: true,
+      company: true,
     },
     orderBy: [desc(warehouseShipments.shipmentDate)],
   });
@@ -528,7 +536,7 @@ export async function getWarehouseShipments(companyCode: string = "PRINTGOO") {
       warehouseId: s.warehouseId || undefined,
       date: s.shipmentDate ? new Date(s.shipmentDate).toISOString().split("T")[0] : "",
       customer: s.customerName || "Mijoz",
-      workOrder: s.workOrderId || "—",
+      workOrder: s.workOrderId || "-",
       tradingSaleId: s.tradingSaleId || undefined,
       product: productSummary,
       quantity: totalQty,
@@ -543,34 +551,49 @@ export async function getWarehouseShipments(companyCode: string = "PRINTGOO") {
   });
 }
 
-export async function upsertWarehouseShipment(payload: any, companyCode: string = "PRINTGOO") {
-  const companyId = payload.companyId || (await getCompanyIdByCode(companyCode));
+export async function upsertWarehouseShipment(payload: any, companyCode: string = "ALL") {
+  const effectiveCompanyCode = companyCode && companyCode !== "ALL" ? companyCode : "PRINTGOO";
+  const companyId = payload.companyId || (await getCompanyIdByCode(effectiveCompanyCode));
   const rawNo = (payload.shipmentNumber || payload.id || "").trim();
   const isDraft = !rawNo || rawNo.startsWith("draft-") || rawNo.startsWith("SHP-NEW-") || rawNo.startsWith("tab-") || rawNo === "NEW" || rawNo.includes("Qoralama") || rawNo.includes("Yangi");
-  const shipmentNumber = isDraft ? await getNextShipmentNumber(companyCode) : rawNo;
+  const shipmentNumber = isDraft ? await getNextShipmentNumber(effectiveCompanyCode) : rawNo;
   const status = payload.status || "Draft";
   const fromLocationName = payload.fromLocationName || payload.from || "Asosiy ombor";
+
+  // Oldin bazada ushbu chiqim "Dispatched" yoki "Delivered" bo'lganligini tekshiramiz (qoldiq ikki marta yechilmasligi uchun)
+  const existingShipment = !isDraft
+    ? await db.query.warehouseShipments.findFirst({
+        where: and(
+          eq(warehouseShipments.companyId, companyId),
+          eq(warehouseShipments.shipmentNumber, shipmentNumber)
+        ),
+      })
+    : null;
+  const wasAlreadyDispatched =
+    existingShipment?.status === "Dispatched" || existingShipment?.status === "Delivered";
+  const isNowDispatched = status === "Dispatched" || status === "Delivered";
+  const shouldTriggerDispatchEffects = isNowDispatched && !wasAlreadyDispatched;
 
   const shipmentValues = {
     companyId,
     warehouseId: payload.warehouseId || null,
-    manifestId: payload.manifestId || null,
-    originSource: payload.originSource || "direct",
+    manifestId: payload.manifestId || existingShipment?.manifestId || null,
+    originSource: payload.originSource || existingShipment?.originSource || "direct",
     shipmentNumber,
     shipmentDate: payload.shipmentDate || payload.date ? new Date(payload.shipmentDate || payload.date) : new Date(),
-    shipmentType: payload.shipmentType || "CustomerDelivery",
-    clientId: payload.clientId || null,
-    customerName: payload.customerName || payload.customer || "Mijoz",
-    workOrderId: payload.workOrderId || payload.workOrder || null,
-    deliveryActId: payload.deliveryActId || null,
-    tradingSaleId: payload.tradingSaleId || null,
+    shipmentType: payload.shipmentType || existingShipment?.shipmentType || "CustomerDelivery",
+    clientId: payload.clientId || existingShipment?.clientId || null,
+    customerName: payload.customerName || payload.customer || existingShipment?.customerName || "Mijoz",
+    workOrderId: payload.workOrderId || payload.workOrder || existingShipment?.workOrderId || null,
+    deliveryActId: payload.deliveryActId || existingShipment?.deliveryActId || null,
+    tradingSaleId: payload.tradingSaleId || existingShipment?.tradingSaleId || null,
     fromLocationName,
     status: status as any,
-    carrier: payload.carrier || null,
-    driverName: payload.driverName || null,
-    trackingNo: payload.trackingNo || null,
-    shippedBy: payload.shippedBy || null,
-    notes: payload.notes || null,
+    carrier: payload.carrier || existingShipment?.carrier || null,
+    driverName: payload.driverName || existingShipment?.driverName || null,
+    trackingNo: payload.trackingNo || existingShipment?.trackingNo || null,
+    shippedBy: payload.shippedBy || existingShipment?.shippedBy || null,
+    notes: payload.notes || existingShipment?.notes || null,
     updatedAt: new Date(),
   };
 
@@ -608,8 +631,8 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
         notes: item.notes || null,
       });
 
-      // 1C Jamg'arish Registri: Agar jo'natilgan bo'lsa (Dispatched/Delivered), tegishli hisob raqam omboridan qoldiqni kamaytirish
-      if (status === "Dispatched" || status === "Delivered") {
+      // 1C Jamg'arish Registri: Faqat ilk marta Dispatched/Delivered bo'lganda tegishli ombordan 1 marta qoldiqni kamaytirish
+      if (shouldTriggerDispatchEffects) {
         const itemAccount = item.accountCode || (item.tradingCatalogId ? "2910" : "2810");
 
         if (itemAccount === "2910" || item.tradingCatalogId) {
@@ -716,13 +739,15 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
     }
   }
 
-    if (payload.tradingSaleId) {
+  const linkedTradingSaleKey = shipmentValues.tradingSaleId;
+  if (linkedTradingSaleKey) {
     try {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(payload.tradingSaleId).trim());
-      await db
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(linkedTradingSaleKey).trim());
+      const [updatedSale] = await db
         .update(tradingSales)
         .set({
           linkedShipmentId: shipmentRecord.shipmentNumber,
+          ...(isNowDispatched ? { status: "Posted" as const } : {}),
           updatedAt: new Date(),
         })
         .where(
@@ -730,14 +755,82 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
             eq(tradingSales.companyId, companyId),
             isUuid
               ? or(
-                  eq(tradingSales.docNo, payload.tradingSaleId),
-                  eq(tradingSales.id, payload.tradingSaleId)
+                  eq(tradingSales.docNo, linkedTradingSaleKey),
+                  eq(tradingSales.id, linkedTradingSaleKey)
                 )
-              : eq(tradingSales.docNo, payload.tradingSaleId)
+              : eq(tradingSales.docNo, linkedTradingSaleKey)
           )
-        );
+        )
+        .returning();
+
+      if (isNowDispatched && updatedSale) {
+        await applySalePostedEffects(companyId, updatedSale.id, updatedSale, itemsList as any);
+      }
     } catch (e) {
       console.warn("Failed to back-sync trading sale linkedShipmentId:", e);
+    }
+  }
+
+  // Avtomatik yagona Schet-faktura (Delivery Act / SF-...) yaratish (CustomerDelivery yoki MaterialSale Dispatched bo'lganda)
+  let finalDeliveryActId = shipmentRecord.deliveryActId || null;
+  if (
+    isNowDispatched &&
+    !finalDeliveryActId &&
+    itemsList.length > 0 &&
+    (shipmentValues.shipmentType === "CustomerDelivery" || shipmentValues.shipmentType === "MaterialSale")
+  ) {
+    try {
+      const invoiceItems = itemsList.map((it: any, idx: number) => {
+        const q = Number(it.quantity ?? it.shippedQty) || 0;
+        const p = Number(it.unitPrice) || 0;
+        return {
+          id: `act-item-${idx + 1}`,
+          sku: it.sku || `SKU-${idx + 1}`,
+          name: it.name || it.product || "Mahsulot",
+          unit: it.unit || "dona",
+          quantity: q,
+          unitPrice: p,
+          totalPrice: q * p,
+          vatRate: 0,
+          vatAmount: 0,
+        };
+      });
+      const totalInvoiceAmount = invoiceItems.reduce((acc: number, it: any) => acc + it.totalPrice, 0);
+
+      const generatedAct = await upsertDeliveryAct(
+        {
+          date: new Date(shipmentValues.shipmentDate).toISOString().split("T")[0],
+          workOrderId: shipmentValues.workOrderId || undefined,
+          customer: shipmentValues.customerName,
+          product: invoiceItems.map((i: any) => i.name).join(", "),
+          quantity: invoiceItems.reduce((acc: number, i: any) => acc + i.quantity, 0),
+          unit: invoiceItems[0]?.unit || "dona",
+          subtotal: totalInvoiceAmount,
+          vatRate: 0,
+          vatAmount: 0,
+          totalAmount: totalInvoiceAmount,
+          currency: "UZS",
+          warehouse: shipmentValues.fromLocationName,
+          carrier: shipmentValues.carrier || undefined,
+          driverName: shipmentValues.driverName || undefined,
+          status: "Pending Signature",
+          linkedShipmentId: shipmentRecord.shipmentNumber,
+          notes: `Ombor chiqimi ${shipmentRecord.shipmentNumber} asosida avtomatik shakllantirildi`,
+          items: invoiceItems,
+        },
+        effectiveCompanyCode
+      );
+
+      if (generatedAct && generatedAct.id) {
+        finalDeliveryActId = generatedAct.id;
+        await db
+          .update(warehouseShipments)
+          .set({ deliveryActId: finalDeliveryActId, updatedAt: new Date() })
+          .where(eq(warehouseShipments.id, shipmentRecord.id));
+        shipmentRecord.deliveryActId = finalDeliveryActId;
+      }
+    } catch (e) {
+      console.warn("Failed to auto-generate DeliveryAct for shipment:", e);
     }
   }
 
@@ -746,6 +839,7 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
     success: true,
     shipment: shipmentRecord,
     shipmentNumber: shipmentRecord.shipmentNumber,
+    deliveryActId: finalDeliveryActId,
     allShipments,
   };
 }
@@ -1189,10 +1283,14 @@ async function applyStockBalanceDelta(params: {
 
 // ─── 8. Carriers (Tashuvchilar va Avtopark Katalogi) ──────────────────────────
 
-export async function getCarriers(companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+export async function getCarriers(companyCode: string = "ALL") {
+  let whereClause = undefined;
+  if (companyCode && companyCode !== "ALL") {
+    const companyId = await getCompanyIdByCode(companyCode);
+    whereClause = eq(carriers.companyId, companyId);
+  }
   const list = await db.query.carriers.findMany({
-    where: eq(carriers.companyId, companyId),
+    where: whereClause,
     orderBy: [desc(carriers.createdAt)],
   });
 
@@ -1451,12 +1549,17 @@ export async function checkAndTriggerReorder(params: {
 
 // ─── 11. Warehouse Dispatch Manifests (Yuk Marshruti / Reys Manifesti) ──────────
 
-export async function getDispatchManifests(companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+export async function getDispatchManifests(companyCode: string = "ALL") {
+  let whereClause = undefined;
+  if (companyCode && companyCode !== "ALL") {
+    const companyId = await getCompanyIdByCode(companyCode);
+    whereClause = eq(warehouseDispatchManifests.companyId, companyId);
+  }
   const rows = await db.query.warehouseDispatchManifests.findMany({
-    where: eq(warehouseDispatchManifests.companyId, companyId),
+    where: whereClause,
     with: {
       shipments: true,
+      company: true,
     },
     orderBy: [desc(warehouseDispatchManifests.manifestDate)],
   });
@@ -1471,11 +1574,42 @@ export async function getDispatchManifests(companyCode: string = "PRINTGOO") {
   }));
 }
 
-export async function upsertDispatchManifest(payload: any, companyCode: string = "PRINTGOO") {
-  const companyId = await getCompanyIdByCode(companyCode);
+export async function upsertDispatchManifest(payload: any, companyCode: string = "ALL") {
+  let companyId = payload.companyId;
+  if (!companyId && Array.isArray(payload.shipmentIds) && payload.shipmentIds.length > 0) {
+    const firstShpId = String(payload.shipmentIds[0]);
+    const isFirstUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(firstShpId);
+    const firstShp = await db.query.warehouseShipments.findFirst({
+      where: isFirstUuid
+        ? or(eq(warehouseShipments.id, firstShpId), eq(warehouseShipments.shipmentNumber, firstShpId))
+        : eq(warehouseShipments.shipmentNumber, firstShpId),
+    });
+    if (firstShp) {
+      companyId = firstShp.companyId;
+    }
+  }
+  if (!companyId) {
+    companyId = await getCompanyIdByCode(companyCode && companyCode !== "ALL" ? companyCode : "PRINTGOO");
+  }
+
   const rawNumber = (payload.manifestNumber || payload.id || "").trim();
-  const isDraft = !rawNumber || rawNumber.startsWith("draft-") || rawNumber.startsWith("new-");
-  const manifestNumber = isDraft ? await getNextManifestNumber(companyCode) : rawNumber;
+  let isDraft = !rawNumber || rawNumber.startsWith("draft-") || rawNumber.startsWith("new-") || rawNumber.startsWith("MNF-NEW");
+
+  // Yangi reys yaratilayotganda (payload.id va payload.dbId yo'q bo'lsa), raqam to'qnashuvini oldini olish
+  const isNew = !payload.id && !payload.dbId;
+  if (isNew && !isDraft) {
+    const existing = await db.query.warehouseDispatchManifests.findFirst({
+      where: and(
+        eq(warehouseDispatchManifests.companyId, companyId),
+        eq(warehouseDispatchManifests.manifestNumber, rawNumber)
+      ),
+    });
+    if (existing) {
+      isDraft = true;
+    }
+  }
+
+  const manifestNumber = isDraft ? await getNextManifestNumber(companyId) : rawNumber;
 
   const manifestValues = {
     companyId,
@@ -1514,28 +1648,96 @@ export async function upsertDispatchManifest(payload: any, companyCode: string =
       .join(" ");
 
     for (const shpId of payload.shipmentIds) {
-      const updateFields: Record<string, any> = {
-        manifestId: manifestRecord.id,
-        carrier: carrierSummary,
-        driverName: manifestValues.driverName || null,
-        trackingNo: manifestNumber,
-        updatedAt: new Date(),
-      };
-      if (manifestValues.status === "InTransit") {
-        updateFields.status = "Dispatched";
-      } else if (manifestValues.status === "Completed") {
-        updateFields.status = "Delivered";
-      }
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(shpId));
+      const targetShp = await db.query.warehouseShipments.findFirst({
+        where: isUuid
+          ? or(eq(warehouseShipments.id, shpId), eq(warehouseShipments.shipmentNumber, shpId))
+          : eq(warehouseShipments.shipmentNumber, shpId),
+        with: {
+          items: true,
+        },
+      });
 
+      const nextStatus =
+        manifestValues.status === "InTransit" || manifestValues.status === "Dispatched"
+          ? "Dispatched"
+          : manifestValues.status === "Delivered"
+          ? "Delivered"
+          : undefined;
+
+      if (targetShp && nextStatus && targetShp.status !== "Dispatched" && targetShp.status !== "Delivered") {
+        // Reys jo'natilganda unga biriktirilgan chiqimlarni rasmiy ravishda o'tkazamiz (qoldiq kamayishi + SF- faktura yaratilishi)
+        await upsertWarehouseShipment(
+          {
+            companyId: targetShp.companyId,
+            shipmentNumber: targetShp.shipmentNumber,
+            shipmentDate: targetShp.shipmentDate,
+            shipmentType: targetShp.shipmentType,
+            clientId: targetShp.clientId,
+            customerName: targetShp.customerName,
+            workOrderId: targetShp.workOrderId,
+            deliveryActId: targetShp.deliveryActId,
+            tradingSaleId: targetShp.tradingSaleId,
+            fromLocationName: targetShp.fromLocationName,
+            manifestId: manifestRecord.id,
+            carrier: carrierSummary,
+            driverName: manifestValues.driverName || targetShp.driverName,
+            trackingNo: manifestNumber,
+            status: nextStatus,
+            notes: targetShp.notes,
+            items: (targetShp.items || []).map((it: any) => ({
+              itemId: it.itemId,
+              finishedGoodId: it.finishedGoodId,
+              tradingCatalogId: it.tradingCatalogId,
+              accountCode: it.accountCode,
+              sourceWorkOrderId: it.sourceWorkOrderId,
+              sku: it.sku,
+              name: it.name,
+              quantity: Number(it.quantity) || 0,
+              unit: it.unit,
+              unitPrice: Number(it.unitPrice) || 0,
+              totalPrice: Number(it.totalPrice) || 0,
+              notes: it.notes,
+            })),
+          },
+          companyCode
+        );
+      } else {
+        const updateFields: Record<string, any> = {
+          manifestId: manifestRecord.id,
+          carrier: carrierSummary,
+          driverName: manifestValues.driverName || null,
+          trackingNo: manifestNumber,
+          updatedAt: new Date(),
+        };
+        if (nextStatus) {
+          updateFields.status = nextStatus;
+        }
+        await db
+          .update(warehouseShipments)
+          .set(updateFields)
+          .where(
+            isUuid
+              ? or(eq(warehouseShipments.id, shpId), eq(warehouseShipments.shipmentNumber, shpId))
+              : eq(warehouseShipments.shipmentNumber, shpId)
+          );
+      }
+    }
+  }
+
+  // Agar mavjud reysdan ayrim chiqimlar olib tashlangan bo'lsa, ularni reysdan bo'shatamiz
+  const allLinked = await db.query.warehouseShipments.findMany({
+    where: eq(warehouseShipments.manifestId, manifestRecord.id),
+  });
+  for (const linked of allLinked) {
+    const stillSelected = Array.isArray(payload.shipmentIds) && payload.shipmentIds.some(
+      (id: string) => id === linked.id || id === linked.shipmentNumber
+    );
+    if (!stillSelected) {
       await db
         .update(warehouseShipments)
-        .set(updateFields)
-        .where(
-          and(
-            eq(warehouseShipments.companyId, companyId),
-            or(eq(warehouseShipments.id, shpId), eq(warehouseShipments.shipmentNumber, shpId))
-          )
-        );
+        .set({ manifestId: null, trackingNo: null, updatedAt: new Date() })
+        .where(eq(warehouseShipments.id, linked.id));
     }
   }
 

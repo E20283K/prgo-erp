@@ -32,6 +32,13 @@ async function main() {
       "created_at" timestamp with time zone DEFAULT now() NOT NULL,
       "updated_at" timestamp with time zone DEFAULT now() NOT NULL
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS "manifests_company_number_uq" 
+    ON "warehouse_dispatch_manifests" ("company_id", "manifest_number");
+    CREATE INDEX IF NOT EXISTS "manifests_company_date_idx" 
+    ON "warehouse_dispatch_manifests" ("company_id", "manifest_date");
+    CREATE INDEX IF NOT EXISTS "manifests_status_idx" 
+    ON "warehouse_dispatch_manifests" ("company_id", "status");
   `);
 
   await db.execute(sql`

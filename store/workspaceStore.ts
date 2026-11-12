@@ -885,7 +885,7 @@ interface WorkspaceState {
   dispatchManifests: any[];
   isDispatchManifestsLoading: boolean;
   loadDispatchManifests: (companyCode?: string) => Promise<void>;
-  upsertDispatchManifestAsync: (manifest: any, companyCode?: string) => Promise<boolean>;
+  upsertDispatchManifestAsync: (manifest: any, companyCode?: string) => Promise<any>;
 
   // ── Workshop Equipment Registry & Specifications ─────────────────────────
   masterSpecifications: MasterSpecificationRecord[];
@@ -1497,11 +1497,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   isWarehouseShipmentsLoading: false,
 
-  loadWarehouseShipments: async (companyCode = "PRINTGOO") => {
+  loadWarehouseShipments: async (companyCode?: string) => {
     if (get().isWarehouseShipmentsLoading) return;
     try {
       set({ isWarehouseShipmentsLoading: true });
-      const res = await fetch("/api/v1/warehouse/shipments?company=" + encodeURIComponent(companyCode));
+      const targetCompany = companyCode || (get().activeCompanyId && get().activeCompanyId !== "ALL" ? get().activeCompanyId : "ALL");
+      const res = await fetch("/api/v1/warehouse/shipments?company=" + encodeURIComponent(targetCompany));
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
@@ -1515,9 +1516,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  upsertWarehouseShipmentAsync: async (shipment: any, companyCode = "PRINTGOO") => {
+  upsertWarehouseShipmentAsync: async (shipment: any, companyCode?: string) => {
     try {
-      const res = await fetch("/api/v1/warehouse/shipments?company=" + encodeURIComponent(companyCode), {
+      const targetCompany = companyCode || shipment.companyId || (get().activeCompanyId && get().activeCompanyId !== "ALL" ? get().activeCompanyId : "ALL");
+      const res = await fetch("/api/v1/warehouse/shipments?company=" + encodeURIComponent(targetCompany), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(shipment),
@@ -1525,12 +1527,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (res.ok) {
         const json = await res.json();
         if (json.success) {
-          get().loadWarehouseShipments(companyCode);
-          get().loadWarehouseStock(companyCode);
+          await get().loadWarehouseShipments();
+          await get().loadWarehouseStock();
+          get().loadFinanceData();
+          get().loadTradingData("sales");
+          get().loadTradingData("catalog");
           return {
             success: true,
             shipment: json.shipment,
             shipmentNumber: json.shipmentNumber || json.shipment?.shipmentNumber,
+            deliveryActId: json.deliveryActId || json.shipment?.deliveryActId,
           };
         }
       }
@@ -1605,11 +1611,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   carriersList: [],
   isCarriersLoading: false,
 
-  loadCarriers: async (companyCode = "PRINTGOO") => {
+  loadCarriers: async (companyCode?: string) => {
     if (get().isCarriersLoading) return;
     try {
       set({ isCarriersLoading: true });
-      const res = await fetch("/api/v1/warehouse/carriers?company=" + encodeURIComponent(companyCode));
+      const targetCompany = companyCode || (get().activeCompanyId && get().activeCompanyId !== "ALL" ? get().activeCompanyId : "ALL");
+      const res = await fetch("/api/v1/warehouse/carriers?company=" + encodeURIComponent(targetCompany));
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
@@ -1623,9 +1630,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  upsertCarrierAsync: async (carrier: Partial<CarrierRecord>, companyCode = "PRINTGOO") => {
+  upsertCarrierAsync: async (carrier: Partial<CarrierRecord>, companyCode?: string) => {
     try {
-      const res = await fetch("/api/v1/warehouse/carriers?company=" + encodeURIComponent(companyCode), {
+      const targetCompany = companyCode || (carrier as any).companyId || (get().activeCompanyId && get().activeCompanyId !== "ALL" ? get().activeCompanyId : "ALL");
+      const res = await fetch("/api/v1/warehouse/carriers?company=" + encodeURIComponent(targetCompany), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(carrier),
@@ -1633,7 +1641,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
-          await get().loadCarriers(companyCode);
+          await get().loadCarriers();
           return json.data;
         }
       }
@@ -1787,10 +1795,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   dispatchManifests: [],
   isDispatchManifestsLoading: false,
-  loadDispatchManifests: async (companyCode = "PRINTGOO") => {
+  loadDispatchManifests: async (companyCode?: string) => {
     try {
       set({ isDispatchManifestsLoading: true });
-      const res = await fetch("/api/v1/warehouse/manifests?company=" + encodeURIComponent(companyCode));
+      const targetCompany = companyCode || (get().activeCompanyId && get().activeCompanyId !== "ALL" ? get().activeCompanyId : "ALL");
+      const res = await fetch("/api/v1/warehouse/manifests?company=" + encodeURIComponent(targetCompany));
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
@@ -1804,25 +1813,38 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  upsertDispatchManifestAsync: async (manifest: any, companyCode = "PRINTGOO") => {
+  upsertDispatchManifestAsync: async (manifest: any, companyCode?: string) => {
     try {
-      const res = await fetch("/api/v1/warehouse/manifests?company=" + encodeURIComponent(companyCode), {
+      const targetCompany = companyCode || manifest.companyId || (get().activeCompanyId && get().activeCompanyId !== "ALL" ? get().activeCompanyId : "ALL");
+      const res = await fetch("/api/v1/warehouse/manifests?company=" + encodeURIComponent(targetCompany), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(manifest),
       });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success) {
-          get().loadDispatchManifests(companyCode);
-          get().loadWarehouseShipments(companyCode);
-          return true;
-        }
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        await get().loadDispatchManifests();
+        await get().loadWarehouseShipments();
+        get().loadWarehouseStock();
+        get().loadFinanceData();
+        get().loadTradingData("sales");
+        get().loadTradingData("catalog");
+        return {
+          success: true,
+          data: json.data,
+          manifestNumber: json.data?.manifestNumber || manifest.manifestNumber,
+        };
       }
-      return false;
-    } catch (e) {
+      return {
+        success: false,
+        error: json?.error || `Server xatoligi (${res.status})`,
+      };
+    } catch (e: any) {
       console.error("Failed to save dispatch manifest:", e);
-      return false;
+      return {
+        success: false,
+        error: e?.message || "Tarmoq xatoligi",
+      };
     }
   },
 
