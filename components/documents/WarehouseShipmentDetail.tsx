@@ -1069,6 +1069,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     checkAndTriggerReorderAsync,
     finishedGoods,
     loadFinishedGoods,
+    addNotification,
   } = useWorkspaceStore();
 
   const isDark = theme === "dark";
@@ -2029,10 +2030,18 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       setDoc(updated);
       upsertWarehouseShipment(updated);
       replaceTabId(tab.id, realId, `${realId}: ${updated.customer || "Chiqim"}`, updated);
+      addNotification({
+        title: "Ombor chiqimi saqlandi",
+        description: `Hujjat raqami: ${realId} (${status === "Dispatched" ? "Yuborilgan" : "Saqlangan"})`,
+        severity: "success",
+      });
     } else {
-      const updated = { ...doc, status, quantity: totalShippedQty };
-      setDoc(updated);
-      upsertWarehouseShipment(updated);
+      addNotification({
+        title: "Saqlashda xatolik",
+        description: "Serverga ma'lumotlarni saqlashda xatolik yuz berdi. Iltimos qayta urinib ko'ring.",
+        severity: "error",
+      });
+      return;
     }
     // Live sync with Work Order delivery batches
     if (doc.workOrder && (status === "Dispatched" || status === "Delivered")) {

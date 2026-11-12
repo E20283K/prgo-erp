@@ -718,6 +718,7 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
 
     if (payload.tradingSaleId) {
     try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(payload.tradingSaleId).trim());
       await db
         .update(tradingSales)
         .set({
@@ -727,10 +728,12 @@ export async function upsertWarehouseShipment(payload: any, companyCode: string 
         .where(
           and(
             eq(tradingSales.companyId, companyId),
-            or(
-              eq(tradingSales.docNo, payload.tradingSaleId),
-              eq(tradingSales.id, payload.tradingSaleId)
-            )
+            isUuid
+              ? or(
+                  eq(tradingSales.docNo, payload.tradingSaleId),
+                  eq(tradingSales.id, payload.tradingSaleId)
+                )
+              : eq(tradingSales.docNo, payload.tradingSaleId)
           )
         );
     } catch (e) {
