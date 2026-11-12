@@ -103,6 +103,7 @@ import {
   ShoppingBag,
   QrCode,
   AlertTriangle,
+  Route,
   X,
 } from "lucide-react";
 
@@ -1241,7 +1242,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       batchNo: d.batchNo !== undefined ? Number(d.batchNo) : undefined,
       manifestId: d.manifestId || undefined,
       manifestNumber: d.manifestNumber || undefined,
-      deliveryMode: d.deliveryMode || (d.manifestId ? "manifest" : (d.carrier || "").includes("Samovyvoz") ? "self" : ((d.carrier || "").includes("BTS") || (d.carrier || "").includes("Express") || (d.carrier || "").includes("Yandex")) ? "courier" : "dedicated"),
+      deliveryMode: d.deliveryMode || ((d.carrier || "").includes("Samovyvoz") ? "self" : ((d.carrier || "").includes("BTS") || (d.carrier || "").includes("Express") || (d.carrier || "").includes("Yandex")) ? "courier" : "dedicated"),
       scannedBoxes: Array.isArray(d.scannedBoxes) ? d.scannedBoxes : [],
       status: d.status || "Draft",
       shipmentType: defaultShipmentType,
@@ -2115,15 +2116,6 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleDispatch = () => {
-    if (doc.deliveryMode === "manifest" && (!doc.manifestId || doc.manifestId === "PENDING_MANIFEST")) {
-      addNotification({
-        title: "Reys biriktirilmagan",
-        description:
-          "«Reys orqali» yetkazish tanlangan. Avval «Tayyor yuk» tugmasini bosing (so'ng Reyslar oynasida mashinaga biriktiring) yoki ro'yxatdan mavjud Reysni tanlang.",
-        severity: "warning",
-      });
-      return;
-    }
     saveShipmentInternal("Dispatched");
   };
 
@@ -2800,19 +2792,17 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           <div className="flex items-center gap-1.5 shrink-0">
             <span className="text-[11px] text-muted-foreground font-medium shrink-0">Yetkazish:</span>
             <Select
-              value={doc.deliveryMode || (doc.manifestId ? "manifest" : "dedicated")}
+              value={doc.deliveryMode === "self" ? "self" : doc.deliveryMode === "courier" ? "courier" : "dedicated"}
               disabled={isLocked}
               onValueChange={(val) => {
                 if (!val) return;
-                const mode = val as "manifest" | "dedicated" | "self" | "courier";
+                const mode = val as "dedicated" | "self" | "courier";
                 setDoc((prev) => {
                   const updates: Partial<WarehouseShipmentRecord> = { deliveryMode: mode };
                   if (mode === "self") {
                     updates.carrier = "Mijoz olib ketadi (Samovyvoz)";
                     updates.vehicleNo = "—";
                     updates.driverName = "Mijoz vakili";
-                    updates.manifestId = undefined;
-                    updates.manifestNumber = undefined;
                   } else if (mode === "courier") {
                     const firstCourier = resolvedCarriers.find((c) => c.type === "courier") || resolvedCarriers[3] || {
                       name: "BTS Express Pochta",
@@ -2822,9 +2812,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                     updates.carrier = firstCourier.name;
                     updates.vehicleNo = firstCourier.vehicleNo || "—";
                     updates.driverName = firstCourier.driverName || "Kuryer";
-                    updates.manifestId = undefined;
-                    updates.manifestNumber = undefined;
-                  } else if (mode === "dedicated") {
+                  } else {
                     const firstFleet = resolvedCarriers.find((c) => c.type === "fleet") || resolvedCarriers[0] || {
                       name: "PrintGoo Fleet #1 (ISUZU)",
                       vehicleNo: "01 A 772 BB",
@@ -2833,150 +2821,107 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                     updates.carrier = firstFleet.name;
                     updates.vehicleNo = firstFleet.vehicleNo;
                     updates.driverName = firstFleet.driverName;
-                    updates.manifestId = undefined;
-                    updates.manifestNumber = undefined;
-                  } else if (mode === "manifest" && (!prev.status || prev.status === "Draft")) {
-                    updates.status = "Packed";
                   }
                   return { ...prev, ...updates };
                 });
                 setTabUnsaved(tab.id, true);
               }}
             >
-              <SelectTrigger className="h-7 w-[124px] text-xs bg-background">
+              <SelectTrigger className="h-7 w-[130px] text-xs bg-background">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="dedicated" className="text-xs">Alohida mashina</SelectItem>
-                <SelectItem value="manifest" className="text-xs">Reys orqali</SelectItem>
+                <SelectItem value="dedicated" className="text-xs">Avtotransport</SelectItem>
                 <SelectItem value="self" className="text-xs">Mijoz olib ketadi</SelectItem>
-                <SelectItem value="courier" className="text-xs">Kuryer</SelectItem>
+                <SelectItem value="courier" className="text-xs">Kuryer (BTS/Yandex)</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <Separator orientation="vertical" className="h-3.5 shrink-0" />
 
-          {/* 3. Kontekstual Tashuvchi / Reys / Ishonchnoma (Faqat tegishlisi ko'rinadi) */}
+          {/* 3. Kontekstual Tashuvchi / Ishonchnoma */}
 
-          {/* A. Reys orqali tanlanganda */}
-          {doc.deliveryMode === "manifest" && (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="text-[11px] text-muted-foreground font-medium shrink-0">Reys:</span>
-              <Select
-                value={doc.manifestId || "PENDING_MANIFEST"}
-                disabled={isLocked}
-                onValueChange={(mId) => {
-                  if (!mId || mId === "PENDING_MANIFEST") {
-                    setDoc((prev) => ({
-                      ...prev,
-                      manifestId: undefined,
-                      manifestNumber: undefined,
-                    }));
-                    setTabUnsaved(tab.id, true);
-                    return;
-                  }
-                  const foundMnf = (dispatchManifests || []).find(
-                    (m: any) => m.dbId === mId || m.id === mId || m.manifestNumber === mId
-                  );
-                  if (foundMnf) {
-                    setDoc((prev) => ({
-                      ...prev,
-                      manifestId: foundMnf.dbId || foundMnf.id,
-                      manifestNumber: foundMnf.manifestNumber || foundMnf.id,
-                      carrier: `${foundMnf.vehicleModel || "Reys"} (${foundMnf.vehiclePlate || ""})`.trim(),
-                      vehicleNo: foundMnf.vehiclePlate || prev.vehicleNo,
-                      driverName: foundMnf.driverName || prev.driverName,
-                      driverPhone: foundMnf.driverPhone || prev.driverPhone,
-                      trackingNo: foundMnf.manifestNumber || foundMnf.id,
-                    }));
-                    setTabUnsaved(tab.id, true);
-                  }
-                }}
-              >
-                <SelectTrigger className="h-7 w-[190px] text-xs font-mono bg-blue-500/5 border-blue-500/30 text-blue-700 dark:text-blue-300">
-                  <SelectValue placeholder="Reysga biriktiriladi..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="PENDING_MANIFEST" className="text-xs">
-                    Tayyor yuk (Reysga biriktiriladi)
-                  </SelectItem>
-                  {(dispatchManifests || []).map((m: any) => (
-                    <SelectItem key={m.dbId || m.id} value={m.dbId || m.id} className="text-xs font-mono">
-                      {m.manifestNumber || m.id} • {m.vehiclePlate || m.vehicleModel || "Avto"} ({m.driverName || "Haydovchi"})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          {/* A. Avtotransport tanlanganda: Tashuvchi combobox + Reys pill (agar Logistika biriktirgan bo'lsa) */}
+          {doc.deliveryMode !== "self" && doc.deliveryMode !== "courier" && (
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[11px] text-muted-foreground font-medium shrink-0">Tashuvchi:</span>
+                {isLocked ? (
+                  <span className="font-medium text-foreground text-xs flex items-center gap-1">
+                    <span>{doc.carrier}</span>
+                    {doc.vehicleNo && doc.vehicleNo !== "—" && (
+                      <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-muted font-bold">
+                        {doc.vehicleNo}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <CarrierCombobox
+                      carrier={doc.carrier}
+                      vehicleNo={doc.vehicleNo}
+                      driverName={doc.driverName}
+                      driverPhone={doc.driverPhone}
+                      carriers={resolvedCarriers.filter((c) => c.type !== "courier" && c.type !== "self")}
+                      onSelect={handleSelectCarrierProfile}
+                      onAddNew={() => {
+                        setCarrierModalData({
+                          name: "PrintGoo Fleet",
+                          vehicleModel: "",
+                          vehicleNo: "",
+                          driverName: "",
+                          driverPhone: "",
+                          type: "fleet",
+                        });
+                        setIsCarrierModalOpen(true);
+                      }}
+                      onOpenCatalog={() => {
+                        openTab({
+                          id: "tab-warehouse-carriers",
+                          title: "Carriers",
+                          type: "registry",
+                          module: "warehouse",
+                        });
+                      }}
+                      className="w-[190px] sm:w-[220px] shrink-0"
+                      disabled={isLocked}
+                    />
 
-          {/* B. Alohida mashina (Fleet) tanlanganda */}
-          {doc.deliveryMode === "dedicated" && (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="text-[11px] text-muted-foreground font-medium shrink-0">Tashuvchi:</span>
-              {isLocked ? (
-                <span className="font-medium text-foreground text-xs flex items-center gap-1">
-                  <span>{doc.carrier}</span>
-                  {doc.vehicleNo && doc.vehicleNo !== "—" && (
-                    <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-muted font-bold">
-                      {doc.vehicleNo}
-                    </span>
-                  )}
-                </span>
-              ) : (
-                <div className="flex items-center gap-1 shrink-0">
-                  <CarrierCombobox
-                    carrier={doc.carrier}
-                    vehicleNo={doc.vehicleNo}
-                    driverName={doc.driverName}
-                    driverPhone={doc.driverPhone}
-                    carriers={resolvedCarriers.filter((c) => c.type !== "courier" && c.type !== "self")}
-                    onSelect={handleSelectCarrierProfile}
-                    onAddNew={() => {
-                      setCarrierModalData({
-                        name: "PrintGoo Fleet",
-                        vehicleModel: "",
-                        vehicleNo: "",
-                        driverName: "",
-                        driverPhone: "",
-                        type: "fleet",
-                      });
-                      setIsCarrierModalOpen(true);
-                    }}
-                    onOpenCatalog={() => {
-                      openTab({
-                        id: "tab-warehouse-carriers",
-                        title: "Carriers",
-                        type: "registry",
-                        module: "warehouse",
-                      });
-                    }}
-                    className="w-[190px] sm:w-[220px] shrink-0"
-                    disabled={isLocked}
-                  />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setCarrierModalData({
+                          name: doc.carrier || "PrintGoo Fleet #1",
+                          vehicleModel: doc.carrier.includes("(") ? doc.carrier.split("(")[1]?.replace(")", "") || "" : "Furgon",
+                          vehicleNo: doc.vehicleNo || "",
+                          driverName: doc.driverName || "",
+                          driverPhone: doc.driverPhone || "",
+                          type: "fleet",
+                        });
+                        setIsCarrierModalOpen(true);
+                      }}
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground border border-border/50 shrink-0"
+                      title="Tashuvchini tahrirlash"
+                    >
+                      <Pencil className="size-3" />
+                    </Button>
+                  </div>
+                )}
+              </div>
 
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setCarrierModalData({
-                        name: doc.carrier || "PrintGoo Fleet #1",
-                        vehicleModel: doc.carrier.includes("(") ? doc.carrier.split("(")[1]?.replace(")", "") || "" : "Furgon",
-                        vehicleNo: doc.vehicleNo || "",
-                        driverName: doc.driverName || "",
-                        driverPhone: doc.driverPhone || "",
-                        type: "fleet",
-                      });
-                      setIsCarrierModalOpen(true);
-                    }}
-                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground border border-border/50 shrink-0"
-                    title="Tashuvchini tahrirlash"
-                  >
-                    <Pencil className="size-3" />
-                  </Button>
-                </div>
+              {/* Linked Reys Badge (faqat agar Logistika bo'limi tomonidan biriktirilgan bo'lsa ko'rinadi) */}
+              {doc.manifestNumber && (
+                <Badge
+                  variant="outline"
+                  className="h-6 px-2 text-xs font-mono font-medium gap-1 bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-300"
+                  title="Biriktirilgan reys"
+                >
+                  <Route className="size-3 text-blue-600" />
+                  <span>Reys: {doc.manifestNumber}</span>
+                </Badge>
               )}
             </div>
           )}
