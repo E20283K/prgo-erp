@@ -1678,6 +1678,17 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
+  const attachedWorkOrders = useMemo(() => {
+    const list = (doc.items || [])
+      .map((it) => it.sourceWorkOrderId)
+      .filter((w): w is string => !!w && !w.startsWith("—") && w !== "-");
+    const set = new Set(list);
+    if (doc.workOrder && !doc.workOrder.startsWith("—") && doc.workOrder !== "-") {
+      set.add(doc.workOrder);
+    }
+    return Array.from(set);
+  }, [doc.items, doc.workOrder]);
+
   const totalShippedQty = useMemo(() => {
     return (doc.items || []).reduce((acc, it) => acc + (Number(it.shippedQty) || 0), 0);
   }, [doc.items]);
@@ -2353,15 +2364,16 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </Button>
           )}
 
-          {/* Work Order Link */}
-          {doc.workOrder && doc.workOrder !== "-" && !doc.workOrder.startsWith("—") && (
+          {/* Work Orders List / Link */}
+          {attachedWorkOrders.map((wo) => (
             <Button
+              key={wo}
               size="sm"
               variant="outline"
               onClick={() => {
                 openTab({
-                  id: doc.workOrder,
-                  title: doc.workOrder,
+                  id: wo,
+                  title: wo,
                   type: "work-order",
                   module: "production",
                 });
@@ -2370,9 +2382,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               title="Bog'langan buyurtmani ochish"
             >
               <ExternalLink className="size-3 text-muted-foreground" />
-              <span>{doc.workOrder}</span>
+              <span>{wo}</span>
             </Button>
-          )}
+          ))}
 
           {/* Linked Reys / Manifest Link */}
           {doc.manifestId && (
@@ -2512,10 +2524,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         </div>
       </div>
 
-      {/* ─── Document Requisites (6 ta muvozanatli teng ustun) ─── */}
+      {/* ─── Document Requisites (5 ta keng va muvozanatli ustun) ─── */}
       <div className="p-2.5 bg-card border-b border-border grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-12 gap-2.5 shrink-0 text-xs">
-        {/* Col 1 (span 2): Tashkilot (Yuridik shaxs / Sotuvchi) */}
-        <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
+        {/* Col 1 (span 3): Tashkilot (Yuridik shaxs / Sotuvchi) */}
+        <div className="sm:col-span-1 md:col-span-1 lg:col-span-3 space-y-1">
           <Label className="text-[11px] text-muted-foreground font-medium">
             Tashkilot (Yuridik shaxs)
           </Label>
@@ -2606,67 +2618,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           />
         </div>
 
-        {/* Col 5 (span 2): Asos / Buyurtma */}
-        <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
-          <div className="flex items-center justify-between">
-            <Label className="text-[11px] text-muted-foreground font-medium">
-              {doc.shipmentType === "BranchTransfer" ? "Asos hujjati" : "Buyurtma"}
-            </Label>
-            {doc.workOrder && !doc.workOrder.startsWith("—") && (
-              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono font-medium">
-                № {doc.workOrder}
-              </span>
-            )}
-          </div>
-          {doc.shipmentType === "BranchTransfer" || doc.shipmentType === "VendorReturn" ? (
-            <Input
-              value={doc.workOrder}
-              readOnly={isLocked}
-              onChange={(e) => handleFieldChange("workOrder", e.target.value)}
-              className="h-7 text-xs font-mono bg-background w-full"
-              placeholder="Asos hujjati..."
-            />
-          ) : (
-            <WorkOrderPicker
-              value={doc.workOrder}
-              disabled={isLocked}
-              orders={productionQueue}
-              customer={doc.customer}
-              onSelect={handleWorkOrderSelect}
-            />
-          )}
-
-          {(() => {
-            const currentWo = productionQueue.find((w) => w.id === doc.workOrder);
-            if (!currentWo || !currentWo.deliveryBatches || currentWo.deliveryBatches.length === 0) return null;
-            return (
-              <div className="mt-1">
-                <Select
-                  value={doc.batchId || "all"}
-                  disabled={isLocked}
-                  onValueChange={(val) => handleBatchSelect(val || "all")}
-                >
-                  <SelectTrigger className="h-6 text-[10px] font-mono border-dashed border-primary/40 bg-primary/5 text-primary">
-                    <SelectValue placeholder="Partiyani tanlash" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">
-                      Barcha adad (Taqsimlanmagan)
-                    </SelectItem>
-                    {currentWo.deliveryBatches.map((b) => (
-                      <SelectItem key={b.id} value={b.id} className="text-xs">
-                        {b.title} ({(Number(b.quantity) || 0).toLocaleString()} {doc.unit || "dona"}) · {b.targetDate}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Col 6 (span 2): Qabul qiluvchi */}
-        <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 space-y-1">
+        {/* Col 5 (span 3): Qabul qiluvchi */}
+        <div className="sm:col-span-1 md:col-span-1 lg:col-span-3 space-y-1">
           <div className="flex items-center justify-between">
             <Label className="text-[11px] text-muted-foreground font-medium truncate">
               {doc.shipmentType === "BranchTransfer"
@@ -2677,12 +2630,6 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                 ? "Yetkazib beruvchi"
                 : "Qabul qiluvchi"}
             </Label>
-            {doc.shipmentType === "CustomerDelivery" && doc.workOrder && !doc.workOrder.startsWith("—") && (
-              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1">
-                <Link2 className="size-3" />
-                <span>{doc.workOrder}</span>
-              </span>
-            )}
           </div>
           <RecipientCombobox
             value={doc.customer}
@@ -2693,7 +2640,6 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             subcontractors={SUBCONTRACTORS}
             vendors={vendorList}
             disabled={isLocked}
-            isAutoLinked={Boolean(doc.shipmentType === "CustomerDelivery" && doc.workOrder && !doc.workOrder.startsWith("—"))}
           />
         </div>
       </div>
