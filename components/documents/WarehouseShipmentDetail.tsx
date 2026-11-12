@@ -3149,8 +3149,18 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               className="gap-2 cursor-pointer"
             >
               <PackageCheck className="size-3.5 text-emerald-600" />
-              <span>Tayyor mahsulot qo'shish...</span>
+              <span>Tayyor mahsulot (2810)</span>
               <ContextMenuShortcut>F4</ContextMenuShortcut>
+            </ContextMenuItem>
+
+            <ContextMenuItem
+              onClick={() => setIsTradingPickerOpen(true)}
+              disabled={isLocked}
+              className="gap-2 cursor-pointer"
+            >
+              <ShoppingBag className="size-3.5 text-blue-600" />
+              <span>Savdo aksessuarlari (2910)</span>
+              <ContextMenuShortcut>F5</ContextMenuShortcut>
             </ContextMenuItem>
 
             <ContextMenuItem
@@ -3159,7 +3169,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               className="gap-2 cursor-pointer"
             >
               <Boxes className="size-3.5 text-indigo-500" />
-              <span>Xomashyo omboridan qo'shish...</span>
+              <span>Xomashyo ombori (1010)</span>
               <ContextMenuShortcut>Shift+F4</ContextMenuShortcut>
             </ContextMenuItem>
 
@@ -3195,7 +3205,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             </div>
             <p className="text-xs font-semibold text-foreground">Chiqim jadvali bo&apos;sh</p>
             <p className="text-[11px] text-muted-foreground mt-0.5 max-w-sm">
-              Shtrix-kod skanerlang (F2), tayyor mahsulot (F4) yoki xomashyo (Shift+F4) qo&apos;shing
+              Shtrix-kod skanerlang (F2), tayyor mahsulot (F4), aksessuarlar (F5) yoki xomashyo (Shift+F4) qo&apos;shing
             </p>
           </div>
         )}
