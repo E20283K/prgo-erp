@@ -153,19 +153,16 @@ export function ImageCropperDialog({
         <DialogHeader>
           <DialogTitle className="text-sm font-semibold flex items-center gap-2">
             <Crop className="w-4 h-4 text-blue-600" />
-            <span>Rasmni kvadrat formatga moslash (1:1)</span>
+            <span>Rasmni kesish</span>
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <p className="text-xs text-muted-foreground">
-            Rasmni kvadrat ramka ichida siljiting va kattalashtiring. Avatar doim kvadrat ko&apos;rinishda saqlanadi.
-          </p>
 
           {/* Viewport Canvas area */}
           <div className="flex justify-center">
             <div
-              className="relative rounded-lg overflow-hidden border-2 border-dashed border-blue-500/50 bg-black/10 dark:bg-black/40 cursor-grab active:cursor-grabbing flex items-center justify-center touch-none"
+              className="relative overflow-hidden border-2 border-dashed border-blue-500/50 bg-black/10 dark:bg-black/40 cursor-grab active:cursor-grabbing flex items-center justify-center touch-none"
               style={{ width: VIEWPORT_SIZE, height: VIEWPORT_SIZE }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
@@ -185,9 +182,9 @@ export function ImageCropperDialog({
                 />
               )}
 
-              {/* Circular avatar guideline overlay */}
+              {/* Kvadrat kesish ramkasi */}
               <div
-                className="absolute inset-0 rounded-full border border-white/60 pointer-events-none shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"
+                className="absolute inset-0 border border-white/70 pointer-events-none"
                 style={{ width: VIEWPORT_SIZE, height: VIEWPORT_SIZE }}
               />
 
@@ -201,7 +198,7 @@ export function ImageCropperDialog({
             <div className="flex items-center justify-between text-xs font-medium">
               <span className="flex items-center gap-1.5 text-muted-foreground">
                 <ZoomIn className="w-3.5 h-3.5" />
-                <span>Masshtab (Zoom)</span>
+                <span>Masshtab</span>
               </span>
               <span className="font-mono text-[11px]">{zoom.toFixed(1)}x</span>
             </div>

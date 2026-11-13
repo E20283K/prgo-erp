@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useMemo } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
   DataEditor,
   GridCell,
@@ -10,6 +10,7 @@ import {
   GridSelection,
   CompactSelection,
   GridColumnIcon,
+  GridMouseEventArgs,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { useTranslations } from "next-intl";
@@ -220,6 +221,41 @@ export function SettingsGrid({ type }: SettingsGridProps) {
     return Array.from(s);
   }, [rows]);
 
+  // Avatar ustiga sichqoncha olib borilganda katta rasm (Work Orders jadvalidagi kabi)
+  const mouseCoordsRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [hoveredPreview, setHoveredPreview] = useState<{ url: string; x: number; y: number } | null>(null);
+
+  const getPreviewPosition = useCallback((clientX: number, clientY: number) => {
+    const size = 320;
+    let x = clientX + 16;
+    let y = clientY + 12;
+    if (typeof window !== "undefined") {
+      if (x + size > window.innerWidth - 16) x = clientX - size - 16;
+      if (x < 16) x = 16;
+      if (y + size > window.innerHeight - 16) y = clientY - size - 12;
+      if (y < 16) y = 16;
+    }
+    return { x, y };
+  }, []);
+
+  const onItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      if (type === "users" && args.kind === "cell") {
+        const [col, row] = args.location;
+        if (columns[col]?.id === "avatar") {
+          const url = (filteredRows[row] as any)?.avatar;
+          if (typeof url === "string" && url) {
+            const { x, y } = getPreviewPosition(mouseCoordsRef.current.x, mouseCoordsRef.current.y);
+            setHoveredPreview({ url, x, y });
+            return;
+          }
+        }
+      }
+      setHoveredPreview(null);
+    },
+    [type, columns, filteredRows, getPreviewPosition]
+  );
+
   const getContent = useCallback(
     (cell: Item): GridCell => {
       const [col, row] = cell;
@@ -251,7 +287,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
             kind: GridCellKind.Image,
             data: [avatarUrl],
             displayData: [avatarUrl],
-            rounding: 10,
+            rounding: 3,
             allowOverlay: false,
             readonly: true,
           };
@@ -504,8 +540,19 @@ export function SettingsGrid({ type }: SettingsGridProps) {
           </div>
 
           {/* Grid */}
-          <div className="flex-1 w-full h-full relative">
+          <div
+            className="flex-1 w-full h-full relative"
+            onMouseMove={(e) => {
+              mouseCoordsRef.current = { x: e.clientX, y: e.clientY };
+              if (hoveredPreview) {
+                const { x, y } = getPreviewPosition(e.clientX, e.clientY);
+                setHoveredPreview((prev) => (prev ? { ...prev, x, y } : null));
+              }
+            }}
+            onMouseLeave={() => setHoveredPreview(null)}
+          >
             <DataEditor
+              onItemHovered={onItemHovered}
               getCellContent={getContent}
               columns={columns}
               rows={filteredRows.length}
@@ -522,6 +569,19 @@ export function SettingsGrid({ type }: SettingsGridProps) {
               rowHeight={32}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
             />
+
+            {hoveredPreview && (
+              <div
+                style={{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }}
+                className="fixed z-50 pointer-events-none rounded-md bg-popover border border-border shadow-lg p-1 flex items-center justify-center"
+              >
+                <img
+                  src={hoveredPreview.url}
+                  alt="Avatar"
+                  className="max-w-[300px] max-h-[300px] w-auto h-auto object-contain rounded-sm select-none"
+                />
+              </div>
+            )}
           </div>
 
           {/* Inspector Drawer */}

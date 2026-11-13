@@ -236,15 +236,15 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
         {/* ── Avatar Upload Banner ─────────────────────────────────── */}
         <div className="p-4 border-b border-border bg-muted/10 flex flex-col sm:flex-row items-center sm:items-start gap-4">
           <div className="relative group shrink-0">
-            <Avatar className="size-20 border-2 border-border shadow-xs">
+            <Avatar className="size-20 rounded-md after:rounded-md border border-border">
               {data.avatar && (
                 <AvatarImage
                   src={data.avatar}
                   alt={data.fullName || data.username}
-                  className="object-cover"
+                  className="object-cover rounded-md"
                 />
               )}
-              <AvatarFallback className="text-xl font-bold bg-primary/10 text-primary">
+              <AvatarFallback className="text-xl font-bold bg-primary/10 text-primary rounded-md">
                 {userInitials}
               </AvatarFallback>
             </Avatar>
