@@ -19,7 +19,7 @@ services:
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://erp.printg.uz}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://erp.printg.uz}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
-      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-admin}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?}
       NEXT_PUBLIC_S3_ENDPOINT: ${NEXT_PUBLIC_S3_ENDPOINT:-https://s3.printg.uz}
       S3_INTERNAL_ENDPOINT: http://minio:9000
       S3_REGION: ${S3_REGION:-us-east-1}
@@ -32,8 +32,9 @@ services:
       REDIS_URL: redis://redis:6379
       DOC_SERVICE_URL: http://doc-service:8000
       ISUP_GATEWAY_URL: http://isup-gateway:7662
-      GATEWAY_SECRET: ${GATEWAY_SECRET:-printgoo_isup_secret_2026}
+      GATEWAY_SECRET: ${GATEWAY_SECRET:?}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
       CBU_API_URL: ${CBU_API_URL:-https://cbu.uz/oz/arkhiv-kursov-valyut/json/}
       GEMINI_API_KEY_1: ${GEMINI_API_KEY_1:-}
       GEMINI_API_KEY_2: ${GEMINI_API_KEY_2:-}
@@ -80,6 +81,7 @@ services:
       DOC_SERVICE_URL: http://doc-service:8000
       ISUP_GATEWAY_URL: http://isup-gateway:7662
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,7 +119,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-printgoo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: ${POSTGRES_DB:-printgoo_erp}
       TZ: Asia/Tashkent
     volumes:
@@ -150,10 +152,10 @@ services:
       - "9000"
       - "9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?}
       MINIO_SERVER_URL: ${NEXT_PUBLIC_S3_ENDPOINT:-https://s3.printg.uz}
-      MINIO_API_CORS_ALLOW_ORIGIN: ${NEXT_PUBLIC_APP_URL:-https://erp.printg.uz},*
+      MINIO_API_CORS_ALLOW_ORIGIN: ${NEXT_PUBLIC_APP_URL:-https://erp.printg.uz}
     volumes:
       - miniodata_prod:/data
     healthcheck:
@@ -170,7 +172,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:-printgoo_erp}
       POSTGRES_USER: ${POSTGRES_USER:-printgoo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       SCHEDULE: "@daily"
       BACKUP_KEEP_DAYS: 14
       BACKUP_KEEP_WEEKS: 8
@@ -196,7 +198,7 @@ services:
       - ISUP_ALARM_PORT=7661
       - HTTP_PORT=7662
       - ERP_WEBHOOK_URL=http://app:3000/api/v1/hr/attendance/hikvision-event
-      - GATEWAY_SECRET=${GATEWAY_SECRET:-printgoo_isup_secret_2026}
+      - GATEWAY_SECRET=${GATEWAY_SECRET:?}
       - COMPANY_CODE=${COMPANY_CODE:-PRINTGOO}
     depends_on:
       - app

@@ -16,12 +16,14 @@ async function runMigrations() {
     await migrate(db, { migrationsFolder: "./db/migrations" });
     console.log("✅ [DB Migrate] Barcha migratsiyalar muvaffaqiyatli tatbiq qilindi!");
   } catch (err: unknown) {
+    // Xatoni yutib yubormaymiz: aks holda keyingi migratsiyalar jimgina qo'llanmay qoladi.
     const pgCode = (err as { cause?: { code?: string }; code?: string })?.cause?.code || (err as { code?: string })?.code;
     if (pgCode === "42710" || pgCode === "42P07") {
-      console.log("ℹ️ [DB Migrate] Baza jadvallari va turlari allaqachon mavjud.");
-    } else {
-      throw err;
+      console.error(
+        "❌ [DB Migrate] Obyekt allaqachon mavjud. Baza `db:push` bilan yaratilgan bo'lsa, drizzle.__drizzle_migrations jadvalini migratsiyalar bilan moslashtiring."
+      );
     }
+    throw err;
   } finally {
     await migrationClient.end();
   }

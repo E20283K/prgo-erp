@@ -61,7 +61,12 @@ export async function seedDefaultUsersIfEmpty(): Promise<void> {
   }
 
   // 1. Asosiy Administrator
-  const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD || "admin";
+  const initialAdminPassword =
+    process.env.INITIAL_ADMIN_PASSWORD ||
+    (process.env.NODE_ENV === "production" ? "" : "admin");
+  if (!initialAdminPassword || (process.env.NODE_ENV === "production" && initialAdminPassword === "admin")) {
+    throw new Error("INITIAL_ADMIN_PASSWORD production uchun kuchli qiymat bilan o'rnatilishi shart");
+  }
   const adminHash = hashPassword(initialAdminPassword);
   const adminRole = ROLE_TEMPLATES.admin;
   await db.insert(users).values({

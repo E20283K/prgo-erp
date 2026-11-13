@@ -35,9 +35,12 @@ export async function POST(request: NextRequest) {
     const companyCode = searchParams.get("company") ?? "PRINTGOO";
 
     // 1. Gateway Secret Himoyasi
-    const expectedSecret = process.env.GATEWAY_SECRET || "printgoo_isup_secret_2026";
+    // Route login talab qilmaydi (proxy.ts), shuning uchun secret majburiy
+    const expectedSecret =
+      process.env.GATEWAY_SECRET ||
+      (process.env.NODE_ENV === "production" ? "" : "printgoo_isup_secret_2026");
     const incomingSecret = request.headers.get("x-gateway-secret");
-    if (incomingSecret && incomingSecret !== expectedSecret) {
+    if (!expectedSecret || incomingSecret !== expectedSecret) {
       return NextResponse.json(
         { success: false, message: "Noto'g'ri gateway maxfiy kaliti (Unauthorized)" },
         { status: 403 }

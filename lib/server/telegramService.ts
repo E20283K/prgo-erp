@@ -514,7 +514,12 @@ export async function configureTelegramWebhook(
       const res = await fetch(`${TELEGRAM_API_BASE}/bot${token}/setWebhook`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: webhookUrl }),
+        body: JSON.stringify({
+          url: webhookUrl,
+          ...(process.env.TELEGRAM_WEBHOOK_SECRET
+            ? { secret_token: process.env.TELEGRAM_WEBHOOK_SECRET }
+            : {}),
+        }),
       });
       const data = await res.json();
       return { ok: !!data.ok, description: data.description };

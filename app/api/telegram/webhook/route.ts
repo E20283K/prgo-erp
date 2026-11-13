@@ -8,6 +8,12 @@ export const dynamic = "force-dynamic";
  * Telegram Botdan keladigan har qanday xabar, hujjat yoki guruh hodisasini qabul qiladi
  */
 export async function POST(request: NextRequest) {
+  // Route login talab qilmaydi (proxy.ts). Secret sozlangan bo'lsa, Telegram uni har so'rovda yuboradi.
+  const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (expectedSecret && request.headers.get("x-telegram-bot-api-secret-token") !== expectedSecret) {
+    return NextResponse.json({ ok: false }, { status: 403 });
+  }
+
   try {
     const update = await request.json();
     const { searchParams } = new URL(request.url);
