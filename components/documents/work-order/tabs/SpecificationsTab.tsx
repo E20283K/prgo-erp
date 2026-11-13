@@ -56,6 +56,7 @@ import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
 import { searchPantoneColors } from "@/lib/pantone-catalog";
 import { extractSvgDimensions } from "../utils/svgContour";
+import { TermoSpecSection } from "./TermoSpecSection";
 import { useLookupStore } from "@/store/lookupStore";
 import { useWorkspaceStore, generateNextMaterialSku } from "@/store/workspaceStore";
 import {
@@ -622,9 +623,10 @@ export function SpecificationsTab({
   };
 
   // Department technology flags
-  const isFlexo = formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false);
-  const isJacquard = formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false);
-  const isOffset = !isFlexo && !isJacquard;
+  const isTermo = formData.department === "Termo";
+  const isFlexo = !isTermo && (formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false));
+  const isJacquard = !isTermo && (formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false));
+  const isOffset = !isFlexo && !isJacquard && !isTermo;
   const isTextileRibbon = isFlexo && (
     formData.labelMaterialType === "polyester_satin_white" ||
     formData.labelMaterialType === "polyester_satin_black" ||
@@ -1093,6 +1095,7 @@ export function SpecificationsTab({
       </Dialog>
 
       {/* ── First Section: Model & O'lchamlar taqsimoti (Size & Model Matrix) ── */}
+      {!isTermo && (
       <SizeMatrixCard
         sizes={sizes}
         unit={formData.unit || "pcs"}
@@ -1103,7 +1106,7 @@ export function SpecificationsTab({
         skuArtworks={skuArtworks || formData.skuArtworks || []}
         orderAttachments={orderAttachments}
         setOrderAttachments={setOrderAttachments}
-        isStickerMode={isFlexo || isSticker}
+        isStickerMode={isFlexo || isSticker || isTermo}
         onSkuArtworksChange={(artworks) => {
           if (onSkuArtworksChange) {
             onSkuArtworksChange(artworks);
@@ -1129,8 +1132,8 @@ export function SpecificationsTab({
           onMarkUnsaved();
         }}
         onSwitchTab={isJacquard ? undefined : onSwitchTab}
-        impositionTabKey={isFlexo ? "flexo" : "layout"}
-        impositionLabel={isFlexo ? "Flexo Imposition (Silindr & Tasma)" : "Spusk / Qoliplarga bo'lish (Imposition)"}
+        impositionTabKey={isFlexo ? "flexo" : isTermo ? "die" : "layout"}
+        impositionLabel={isFlexo ? "Flexo Imposition (Silindr & Tasma)" : isTermo ? "Pichoq maketi" : "Spusk / Qoliplarga bo'lish (Imposition)"}
         orderType={formData.orderType}
         sampleTargetSize={sampleData?.sampleTargetSize || formData.sampleTargetSize}
         onSampleTargetSizeChange={(size) => {
@@ -1153,7 +1156,7 @@ export function SpecificationsTab({
               handleFieldChange("quantity", total);
             }
           }
-          if (isSticker && nextSizes.length > 0 && nextSizes[0].width && nextSizes[0].height) {
+          if ((isSticker || isTermo) && nextSizes.length > 0 && nextSizes[0].width && nextSizes[0].height) {
             handleFieldChange({
               width: nextSizes[0].width,
               height: nextSizes[0].height,
@@ -1163,6 +1166,7 @@ export function SpecificationsTab({
           onMarkUnsaved();
         }}
       />
+      )}
 
       {/* 2-Column Responsive Grid Layout */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 items-start">
@@ -1171,6 +1175,15 @@ export function SpecificationsTab({
           {/* ════════════════════════════════════════════════════════════════
               1. FLEXO TEXTILE & RIBBON LABEL CARDS (NYLON, SATIN, COTTON)
           ════════════════════════════════════════════════════════════════ */}
+          {isTermo && (
+            <TermoSpecSection
+              formData={formData}
+              handleFieldChange={handleFieldChange}
+              onMarkUnsaved={onMarkUnsaved}
+              isOperator={isOperator}
+            />
+          )}
+
           {isFlexo && (
             <div className="p-2.5 bg-card border border-border rounded-lg flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-foreground">
@@ -3084,7 +3097,7 @@ export function SpecificationsTab({
         {/* Right Column: Visual Die-Line / Textile Label Preview, Print Inks & Sizes */}
         <div className="space-y-3">
           {/* Visual Preview: 2D Die-Line (Offset & Sticker) OR Textile Care Label Preview (Flexo Ribbon / Jacquard) */}
-          {(isOffset || isSticker) ? (
+          {(isOffset || isSticker || isTermo) ? (
             <DieLinePreview
               width={formData.width ?? 50}
               height={formData.height ?? 90}
@@ -3182,6 +3195,7 @@ export function SpecificationsTab({
           )}
 
           {/* Card 3: Color Stations & Inks */}
+          {!isTermo && (
           <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
             <div className="flex items-center justify-between pb-1.5 border-b border-border">
               <div className="flex items-center gap-1.5">
@@ -3551,6 +3565,7 @@ export function SpecificationsTab({
               </div>
             </div>
           </div>
+          )}
         </div>
       </div>
     </TabsContent>

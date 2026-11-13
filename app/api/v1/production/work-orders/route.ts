@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getWorkOrders, upsertWorkOrder } from "@/lib/server/workOrderService";
+import { getWorkOrders, upsertWorkOrder, WorkOrderValidationError } from "@/lib/server/workOrderService";
 import { validateSession } from "@/lib/server/authService";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +55,9 @@ export async function POST(request: NextRequest) {
     const result = await upsertWorkOrder(body, companyCode);
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof WorkOrderValidationError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 422 });
+    }
     return NextResponse.json(
       {
         success: false,

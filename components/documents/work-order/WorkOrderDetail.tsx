@@ -111,6 +111,7 @@ import { FinancialsTab } from "./tabs/FinancialsTab";
 import { FilesTab } from "../common/FilesTab";
 import { LayoutCalcTab } from "./tabs/LayoutCalcTab";
 import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
+import { DieLayoutTab } from "./tabs/die-layout/DieLayoutTab";
 import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
@@ -126,7 +127,12 @@ import {
   BomItem,
   normalizeBomItem,
 } from "../BomMaterialsGrid";
-import { WorkOrderPackagingSummary, WorkOrderToolingItem } from "./types";
+import { WorkOrderPackagingSummary, WorkOrderToolingItem, ensurePackagingStep } from "./types";
+import {
+  calculateWorkOrderFinancials,
+  DEFAULT_OVERHEAD_PERCENT,
+  getWorkOrderMaterialReturns,
+} from "./utils/financialsEngine";
 import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
 import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEngine";
 import { WarehouseStockRecord } from "@/store/workspaceStore";
@@ -234,7 +240,7 @@ export function syncBomWithSpecs(
   const paperName = form.paperStock?.trim();
   const targetQty = Number(form.quantity) || 0;
   const targetSheets = Number((form as any).plannedSheets) || 0;
-  const requiredPaperSheets = targetSheets > 0 ? targetSheets : Math.ceil(targetQty * 1.05);
+  let requiredPaperSheets = targetSheets > 0 ? targetSheets : Math.ceil(targetQty * 1.05);
 
   if (paperName && targetQty > 0) {
     const ws = stockList.find(
@@ -250,17 +256,64 @@ export function syncBomWithSpecs(
         i.category === "Offcuts & Scraps"
     );
 
-    const sheetFormat =
-      ws?.sheetFormat ||
-      (form.parentSheetW && form.parentSheetH
-        ? `${form.parentSheetW}×${form.parentSheetH}`
-        : "700×1000");
+    // Roll stock (flexo/termo labels) is consumed in running metres, not one sheet per piece.
+    const stockCategory = ws?.category || (paperIdx >= 0 ? items[paperIdx].category : undefined);
+    const stockUnit = (ws?.unit || (paperIdx >= 0 ? items[paperIdx].unit : "") || "").toLowerCase();
+    const isRollStock = stockCategory === "Roll & Label";
+    const labelW = Number(form.width) || 0;
+    const labelH = Number(form.height) || 0;
+    const webWidth = Number(form.flexoWebWidth) || 100;
+    if (isRollStock && labelW > 0 && labelH > 0) {
+      const gapX = Number(form.flexoGapX ?? 3) || 0;
+      const gapY = Number(form.flexoGapY ?? 3) || 0;
+      const maxLanes = Math.max(1, Math.floor((webWidth + gapX) / (labelW + gapX)));
+      const lanes = Math.min(maxLanes, Math.max(1, Math.floor(Number(form.flexoLanes) || 1)));
+      const wastePct = Number(form.runWastePercent ?? 5) || 0;
+      const meters = (Math.ceil(targetQty / lanes) * (labelH + gapY)) / 1000 * (1 + wastePct / 100);
+      const isArea = stockUnit.includes("m²") || stockUnit.includes("m2") || stockUnit.includes("kv");
+      const required = isArea ? (meters * webWidth) / 1000 : meters;
+      requiredPaperSheets = Number(required.toFixed(2));
+    }
+
+    const sheetFormat = isRollStock
+      ? `${webWidth} mm`
+      : ws?.sheetFormat ||
+        (form.parentSheetW && form.parentSheetH
+          ? `${form.parentSheetW}×${form.parentSheetH}`
+          : "700×1000");
     const grammage = ws?.grammage || (form as any).paperDensity || 150;
-    const unitPrice = ws?.unitPriceUsd
-      ? Number(ws.unitPriceUsd)
+
+    // BOM unit prices are kept in the order currency (same as BomMaterialsGrid / financialsEngine).
+    const orderCur = (form.currency || "UZS").toUpperCase();
+    const fx = Number(form.exchangeRate) || 12850;
+    let wsPrice: { unitPrice: number; originalUnitPrice: number; originalCurrency: "USD" | "UZS" } | null = null;
+    if (ws) {
+      const stockCur: "USD" | "UZS" =
+        (ws as any).currency || ((ws as any).unitPriceUzs && !ws.unitPriceUsd ? "UZS" : "USD");
+      const orig = Number(
+        stockCur === "UZS"
+          ? (ws as any).unitPriceUzs || (ws as any).unitPrice || 0
+          : ws.unitPriceUsd || (ws as any).unitPrice || 0
+      );
+      if (orig > 0) {
+        const converted =
+          stockCur === "USD" && orderCur === "UZS"
+            ? Number((orig * fx).toFixed(2))
+            : stockCur === "UZS" && orderCur === "USD"
+            ? Number((orig / fx).toFixed(4))
+            : orig;
+        wsPrice = { unitPrice: converted, originalUnitPrice: orig, originalCurrency: stockCur };
+      }
+    }
+    const unitPrice = wsPrice
+      ? wsPrice.unitPrice
       : paperIdx >= 0 && items[paperIdx].unitPrice > 0
       ? items[paperIdx].unitPrice
       : 0;
+    const priceMeta = wsPrice
+      ? { originalUnitPrice: wsPrice.originalUnitPrice, originalCurrency: wsPrice.originalCurrency }
+      : {};
+    const specText = isRollStock ? `${sheetFormat} rulon` : `${grammage} g/m², ${sheetFormat}`;
 
     if (paperIdx >= 0) {
       const existing = items[paperIdx];
@@ -274,14 +327,17 @@ export function syncBomWithSpecs(
       items[paperIdx] = {
         ...existing,
         name: paperName,
-        spec: `${grammage} g/m², ${sheetFormat}`,
+        spec: specText,
+        category: ws?.category || existing.category,
         sheetFormat,
         grammage,
+        ...(isRollStock ? { rollWidthMm: webWidth } : {}),
         planQty,
         actualQty,
         qty: actualQty,
         unit: ws?.unit || existing.unit || "Sheets",
         unitPrice,
+        ...priceMeta,
         totalPrice,
         supplier: existing.supplier || "Ombor",
         availability: ws?.status === "Critical" ? "Low Stock" : (ws?.status || existing.availability || "In Stock"),
@@ -300,16 +356,18 @@ export function syncBomWithSpecs(
       const newPaper: BomItem = {
         id: ws?.sku || `MAT-PAP-${Date.now().toString().slice(-4)}`,
         name: paperName,
-        spec: `${grammage} g/m², ${sheetFormat}`,
-        category: "Paper & Board",
+        spec: specText,
+        category: ws?.category || "Paper & Board",
         sheetFormat,
         grammage,
+        ...(isRollStock ? { rollWidthMm: webWidth } : {}),
         planQty: requiredPaperSheets,
         actualQty: requiredPaperSheets,
         wasteQty: 0,
         qty: requiredPaperSheets,
         unit: ws?.unit || "Sheets",
         unitPrice,
+        ...priceMeta,
         totalPrice: Number((requiredPaperSheets * unitPrice).toFixed(2)),
         supplier: ws?.supplier || "Ombor",
         availability: ws?.status === "Critical" ? "Low Stock" : (ws?.status || "In Stock"),
@@ -1425,6 +1483,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     data.operations || []
   );
 
+  // Every non-empty route ends with one typed packaging step, whatever built it (template, plan, manual edits).
+  useEffect(() => {
+    const normalized = ensurePackagingStep(operations, Number(formData.quantity) || 0);
+    if (normalized !== operations) setOperations(normalized);
+  }, [operations, formData.quantity]);
+
   const prevRecipeRef = React.useRef(formData.recipe);
 
   const [opSelection, setOpSelection] = useState<GridSelection>({
@@ -1480,13 +1544,63 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleSavePackaging = (summary: WorkOrderPackagingSummary, markComplete: boolean) => {
     handleFieldChange("packagingData", summary);
 
+    // Boxes consumed by packaging become a BOM line, unless packaging materials are already listed by hand.
+    const boxLineId = "bom-pack-boxes";
+    const hasManualPackaging = currentBomItems.some(
+      (i) => i.id !== boxLineId && /pack|box|qadoq/i.test(i.category || "")
+    );
+    let nextMaterials = currentBomItems;
+    if (summary.totalBoxes > 0 && !hasManualPackaging) {
+      const existingBox = currentBomItems.find((i) => i.id === boxLineId);
+      const boxUnitPrice = Number(existingBox?.unitPrice) || 0;
+      const boxLine = normalizeBomItem({
+        ...existingBox,
+        id: boxLineId,
+        name: summary.boxType || existingBox?.name || "Karobka",
+        spec: `${summary.standardBoxCapacity} dona/quti`,
+        category: "Packaging",
+        planQty: summary.totalBoxes,
+        actualQty: summary.totalBoxes,
+        qty: summary.totalBoxes,
+        unit: "dona",
+        unitPrice: boxUnitPrice,
+        totalPrice: Number((summary.totalBoxes * boxUnitPrice).toFixed(2)),
+        supplier: existingBox?.supplier || "",
+        availability: existingBox?.availability || "In Stock",
+      });
+      nextMaterials = existingBox
+        ? currentBomItems.map((i) => (i.id === boxLineId ? boxLine : i))
+        : [...currentBomItems, boxLine];
+      setCurrentBomItems(nextMaterials);
+      handleFieldChange("materials", nextMaterials);
+    }
+
     if (markComplete) {
       setOperations((prev) =>
-        prev.map((op) => {
-          const isPackOp = /qadoq|pack|finishing/i.test(op.name);
-          return isPackOp ? { ...op, status: "Finished", qtyCompleted: String(summary.totalPackedQty) } : op;
-        })
+        prev.map((op) =>
+          op.kind === "packaging"
+            ? { ...op, status: "Finished", qtyCompleted: String(summary.totalPackedQty) }
+            : op
+        )
       );
+
+      // Finished goods are received at their real production cost, not at the selling price.
+      const fgCosts = calculateWorkOrderFinancials({
+        quantity: Number(formData.quantity) || 0,
+        currency: formData.currency || "UZS",
+        exchangeRate: Number(formData.exchangeRate) || 12850,
+        materials: nextMaterials,
+        toolingItems: formData.toolingItems,
+        operations,
+        shiftEvents,
+        machines: storeMachines,
+        overheadPercent: formData.financials?.overheadPercent ?? DEFAULT_OVERHEAD_PERCENT,
+        packagingData: { ...summary, isCompleted: true },
+        materialReturns: getWorkOrderMaterialReturns(
+          useWorkspaceStore.getState().warehouseMovements,
+          data.docNo || tab.id
+        ),
+      });
 
       const targetWoId = data.docNo || tab.id;
       if (!targetWoId.startsWith("draft-") && !targetWoId.startsWith("temp-")) {
@@ -1512,10 +1626,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           status: "In Stock",
           locationName: "Tayyor mahsulotlar ombori",
           locationShelf: "FG-Staging",
-          costPricePerUnit: Number(formData.priceTotal || (data as any).priceTotal || 0) > 0 && summary.totalPackedQty > 0
-            ? (Number(formData.priceTotal || (data as any).priceTotal) / summary.totalPackedQty).toFixed(2)
-            : 0,
-          totalStockValue: formData.priceTotal || (data as any).priceTotal || 0,
+          costPricePerUnit: fgCosts.unitBaseCost,
+          totalStockValue: fgCosts.totalBaseCost,
           notes: `${summary.totalBoxes} ta quti qadoqlandi. Smena qabuli kutilmoqda.`,
         });
       }
@@ -1813,7 +1925,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     () => {
       const fromDb = (allDbMachines || []).filter((m: any) => {
         if (!m.department) return false;
-        if (m.department.toLowerCase() === formData.department.toLowerCase()) return true;
+        const md = m.department.toLowerCase();
+        if (md === formData.department.toLowerCase()) return true;
+        if (formData.department === "Termo" && (md.includes("post") || md.includes("pardoz") || md.includes("kesish"))) return true;
         return false;
       });
       if (fromDb.length > 0) return fromDb;
@@ -2677,6 +2791,19 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   }, []);
 
   // Operation Dialog Handlers
+  // Route money fields are stored in USD (see financialsEngine / OperationsTab), but the
+  // dialog edits them in the order currency. Convert at the dialog boundary.
+  const opDialogFx =
+    (formData.currency || "UZS").toUpperCase() === "USD" ? 1 : Number(formData.exchangeRate) || 12850;
+  const convertOpMoney = <T extends Partial<RouteStep>>(op: T, factor: number): T => ({
+    ...op,
+    rateUsd: Number(((Number(op.rateUsd) || 0) * factor).toFixed(6)),
+    setupFeeUsd: Number(((Number(op.setupFeeUsd) || 0) * factor).toFixed(6)),
+    pieceworkRateUsd: Number(((Number(op.pieceworkRateUsd) || 0) * factor).toFixed(6)),
+    plannedCostUsd: Number(((Number(op.plannedCostUsd) || 0) * factor).toFixed(6)),
+    pieceworkTotalUsd: Number(((Number(op.pieceworkTotalUsd) || 0) * factor).toFixed(6)),
+  });
+
   const handleOpenAddOperation = () => {
     setEditingOpIndex(null);
     const nextStepNum = (operations.length + 1) * 10;
@@ -2726,22 +2853,28 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       tariffCode: item.tariffCode,
       calcUnit: item.calcUnit,
       unitDivisor: item.unitDivisor,
-      rateUsd: item.rateUsd,
-      setupFeeUsd: item.setupFeeUsd,
-      pieceworkRateUsd: item.pieceworkRateUsd,
-      plannedCostUsd: item.plannedCostUsd,
-      pieceworkTotalUsd: item.pieceworkTotalUsd,
+      ...convertOpMoney(
+        {
+          rateUsd: item.rateUsd,
+          setupFeeUsd: item.setupFeeUsd,
+          pieceworkRateUsd: item.pieceworkRateUsd,
+          plannedCostUsd: item.plannedCostUsd,
+          pieceworkTotalUsd: item.pieceworkTotalUsd,
+        },
+        opDialogFx
+      ),
     });
     setIsOpDialogOpen(true);
   };
 
   const handleSaveOperationDialog = () => {
+    const savedForm = convertOpMoney(opDialogForm, 1 / opDialogFx);
     let nextOps: RouteStep[];
     if (editingOpIndex !== null) {
       const updated = [...operations];
       updated[editingOpIndex] = {
         ...updated[editingOpIndex],
-        ...opDialogForm,
+        ...savedForm,
       };
       nextOps = updated;
     } else {
@@ -2749,7 +2882,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         ...operations,
         {
           id: String(Date.now()),
-          ...opDialogForm,
+          ...savedForm,
         },
       ];
     }
@@ -2763,7 +2896,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const selectedRows = opSelection.rows.toArray();
     if (selectedRows.length === 0) return;
     const remaining = operations
-      .filter((_, idx) => !selectedRows.includes(idx))
+      .filter((op, idx) => !selectedRows.includes(idx) || op.kind === "packaging")
       .map((op, idx) => ({
         ...op,
         stepNumber: (idx + 1) * 10,
@@ -3049,9 +3182,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setIsLogEventDialogOpen(false);
   };
 
-  const isFlexo = formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false);
-  const isJacquard = formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false);
-  const isOffset = !isFlexo && !isJacquard;
+  const isTermo = formData.department === "Termo";
+  const isFlexo = !isTermo && (formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false));
+  const isJacquard = !isTermo && (formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false));
+  const isOffset = !isFlexo && !isJacquard && !isTermo;
 
   const rawActiveTab = tab.activeLevel3Tab || "overview";
   const activeTab = (isOperator && rawActiveTab === "financials")
@@ -3059,6 +3193,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     : (!isOffset && rawActiveTab === "layout")
     ? "specs"
     : (!isFlexo && rawActiveTab === "flexo")
+    ? "specs"
+    : (!isTermo && rawActiveTab === "die")
     ? "specs"
     : rawActiveTab;
 
@@ -3439,6 +3575,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               },
               ...(isOffset ? [{ id: "layout", label: tOrder("tabPlanning"), icon: LayoutTemplate }] : []),
               ...(isFlexo ? [{ id: "flexo", label: "Flexo Imposition", icon: Disc }] : []),
+              ...(isTermo ? [{ id: "die", label: "Pichoq", icon: Stamp }] : []),
               {
                 id: "prepress-tooling",
                 label: tOrder("tabPrepressTooling"),
@@ -3683,6 +3820,33 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               </TabsContent>
             )}
 
+            {/* Tab: Termo flat-bed die layout */}
+            {isTermo && (
+              <TabsContent value="die" keepMounted={false} className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
+                {activeTab === "die" && (
+                  <DieLayoutTab
+                    formData={formData}
+                    docNo={data.docNo || tab.id}
+                    isOperator={isOperator}
+                    handleFieldChange={handleFieldChange}
+                    onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
+                    onAddTooling={(item) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        toolingItems: [
+                          ...(prev.toolingItems || []).filter(
+                            (it) => !(it.id.startsWith("TL-DIE-TERMO-") && it.status === "Draft" && !it.purchaseOrderNo)
+                          ),
+                          item,
+                        ],
+                      }));
+                      setTabUnsaved(tab.id, true);
+                    }}
+                  />
+                )}
+              </TabsContent>
+            )}
+
             {/* Tab: Flexo Imposition & Cylinder Repeat */}
             {isFlexo && (
               <TabsContent value="flexo" keepMounted={false} className="flex-1 overflow-y-auto p-3 m-0 no-scrollbar">
@@ -3901,6 +4065,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             {visitedTabs.has("operations") && (
               <OperationsTab
                 workOrderId={data.docNo || tab.id}
+                currency={formData.currency || "UZS"}
+                exchangeRate={Number(formData.exchangeRate) || 12850}
+                onOpenPackaging={() => setIsPackagingOpen(true)}
                 fallbackData={readinessFallbackData}
                 operations={operations}
                 setOperations={setOperations}
@@ -3968,6 +4135,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 operations={operations}
                 materials={currentBomItems}
                 docNo={data.docNo || tab.id}
+                onFinancialsChange={(fin) => handleFieldChange("financials", fin)}
                 onPriceChange={(newPrice, fin) => {
                   handleFieldChange("priceTotal", newPrice);
                   if (fin) {

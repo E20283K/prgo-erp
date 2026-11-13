@@ -136,7 +136,7 @@ export function evaluateOrderReadiness(
     } else {
       // Raqamli chop etish (Digital) yoki Post-press bo'lsa CTP plitasi kerak emas
       const dept = String(order.department || "");
-      if (dept === "Digital" || dept === "Post-press") {
+      if (dept === "Digital" || dept === "Post-press" || dept === "Termo") {
         platesReady = true;
       } else if (order.platesRequired === false || order.noPlatesNeeded === true) {
         platesReady = true;

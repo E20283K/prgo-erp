@@ -337,6 +337,7 @@ export function generateRouteStepsFromPlan(
     pieceworkRateUsd: 1.5,
     plannedCostUsd: ctpCost,
     pieceworkTotalUsd: Number((ctpPlates * 1.5).toFixed(2)),
+    kind: "prepress",
   });
   stepCounter += 10;
 
@@ -563,6 +564,7 @@ export function generateRouteStepsFromPlan(
     pieceworkRateUsd: 1.5,
     plannedCostUsd: Number((pcsUnits * 3.5).toFixed(2)),
     pieceworkTotalUsd: Number((pcsUnits * 1.5).toFixed(2)),
+    kind: "packaging",
   });
 
   return steps;

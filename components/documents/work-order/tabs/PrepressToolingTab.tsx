@@ -447,7 +447,7 @@ export function PrepressToolingTab({
       }
 
       if (column.id === "name") {
-        const nameDisplay = item.isRemake ? `[Remake] ${item.name}` : item.name;
+        const nameDisplay = `${item.isRemake ? "[Remake] " : ""}${item.phase === "sample" ? "[Namuna] " : ""}${item.name}`;
         return {
           kind: GridCellKind.Text,
           data: nameDisplay,
@@ -715,6 +715,7 @@ export function PrepressToolingTab({
       isRemake: editingItem.isRemake || false,
       remakeReason: editingItem.remakeReason,
       faultParty: editingItem.faultParty || "none",
+      phase: editingItem.phase || "production",
       createdAt: editingItem.createdAt || new Date().toISOString(),
     };
 
@@ -1925,6 +1926,25 @@ export function PrepressToolingTab({
                   placeholder="Stanok operatori yoki pudratchiga maxsus talablar, rezina turi, resurs..."
                   className="h-14 text-xs bg-background resize-none"
                 />
+              </div>
+
+              {/* Cost phase: sample vs production run */}
+              <div className="space-y-1.5">
+                <Label className="text-[11px] text-muted-foreground font-medium">Bosqich</Label>
+                <Select
+                  value={editingItem.phase || "production"}
+                  onValueChange={(val: any) => setEditingItem((prev) => ({ ...prev, phase: val }))}
+                >
+                  <SelectTrigger className="h-8 text-xs bg-background">
+                    <SelectValue>
+                      {(val) => (val === "sample" ? "Namuna" : "Ishlab chiqarish")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="production" className="text-xs">Ishlab chiqarish</SelectItem>
+                    <SelectItem value="sample" className="text-xs">Namuna</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Remake Party (if remake) */}

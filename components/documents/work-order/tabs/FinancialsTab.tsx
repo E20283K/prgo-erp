@@ -45,7 +45,23 @@ import { formatMoney } from "../../common/DocumentShell";
 import { BomItem } from "../../BomMaterialsGrid";
 import {
   calculateWorkOrderFinancials,
+  DEFAULT_OVERHEAD_PERCENT,
+  getWorkOrderMaterialReturns,
+  type CostGroup,
+  type FinancialCostResult,
 } from "../utils/financialsEngine";
+
+const GROUP_COLORS: Partial<Record<CostGroup, { dark: string; light: string }>> = {
+  material: { dark: "#60a5fa", light: "#2563eb" },
+  packaging: { dark: "#22d3ee", light: "#0891b2" },
+  tooling: { dark: "#c084fc", light: "#7c3aed" },
+  sample: { dark: "#c084fc", light: "#7c3aed" },
+  machine: { dark: "#fbbf24", light: "#d97706" },
+  labor: { dark: "#34d399", light: "#059669" },
+  defect: { dark: "#f87171", light: "#dc2626" },
+  recharge: { dark: "#a1a1aa", light: "#64748b" },
+  claim: { dark: "#a1a1aa", light: "#64748b" },
+};
 
 interface FinancialsTabProps {
   shiftEvents: ShiftEvent[];
@@ -71,11 +87,21 @@ export function FinancialsTab({
   onPriceChange,
   onFinancialsChange,
 }: FinancialsTabProps) {
-  const { theme, machines } = useWorkspaceStore(
+  const { theme, machines, warehouseMovements } = useWorkspaceStore(
     useShallow((s) => ({
       theme: s.theme,
       machines: s.machines,
+      warehouseMovements: s.warehouseMovements,
     }))
+  );
+  // Offcut returns (RET documents) reduce the order cost, so they must be loaded.
+  useEffect(() => {
+    const s = useWorkspaceStore.getState();
+    if (s.warehouseMovements.length === 0) s.loadWarehouseMovements();
+  }, []);
+  const materialReturns = useMemo(
+    () => getWorkOrderMaterialReturns(warehouseMovements, docNo),
+    [warehouseMovements, docNo]
   );
   const addNotification = useWorkspaceStore((s) => s.addNotification);
   const isDark = theme === "dark";
@@ -87,71 +113,84 @@ export function FinancialsTab({
   const isUsd = currency.toUpperCase() === "USD";
 
 
-  // ─── 3. BUILD GRANULAR 100% REAL COST BREAKDOWN ROWS VIA UNIFIED ENGINE ──────
-  const {
-    rawCostRows,
-    totalBaseCost,
-    unitBaseCost,
-    wasteLossCost,
-    materialCost,
-    toolingCost,
-    machineCost,
-    laborCost,
-  } = useMemo(() => {
-    return calculateWorkOrderFinancials({
-      quantity: targetQty,
+  // ─── 3. COST BREAKDOWN VIA UNIFIED ENGINE ────────────────────────────────────
+  const [overheadPercent, setOverheadPercent] = useState<number>(
+    formData?.financials?.overheadPercent ?? DEFAULT_OVERHEAD_PERCENT
+  );
+
+  const computeCosts = useCallback(
+    (pct: number) =>
+      calculateWorkOrderFinancials({
+        quantity: targetQty,
+        currency,
+        exchangeRate,
+        materials,
+        toolingItems: formData?.toolingItems,
+        operations,
+        shiftEvents,
+        machines,
+        overheadPercent: pct,
+        packagingData: formData?.packagingData,
+        materialReturns,
+      }),
+    [
+      materialReturns,
+      targetQty,
       currency,
       exchangeRate,
       materials,
-      toolingItems: formData?.toolingItems,
+      formData?.toolingItems,
+      formData?.packagingData,
       operations,
       shiftEvents,
       machines,
-    });
-  }, [
-    targetQty,
-    currency,
-    exchangeRate,
-    materials,
-    formData?.toolingItems,
-    operations,
-    shiftEvents,
-    machines,
-  ]);
+    ]
+  );
 
-  // Auto-propagate calculated financials to parent WorkOrderDetail
-  useEffect(() => {
-    if (onFinancialsChange && totalBaseCost > 0) {
-      if (
-        formData?.financials?.unitBaseCost !== unitBaseCost ||
-        formData?.financials?.totalBaseCost !== totalBaseCost
-      ) {
-        onFinancialsChange({
-          plannedMaterialCost: materialCost,
-          actualMaterialCost: materialCost + wasteLossCost,
-          plannedMachineCost: machineCost,
-          actualMachineCost: machineCost,
-          toolingCost: toolingCost,
-          laborCost: laborCost,
-          baseCost: totalBaseCost,
-          unitBaseCost: unitBaseCost,
-          totalBaseCost: totalBaseCost,
-          wasteCost: wasteLossCost,
-          margin: formData?.financials?.margin ?? 25,
-        });
-      }
-    }
-  }, [
-    unitBaseCost,
+  const costs = useMemo(() => computeCosts(overheadPercent), [computeCosts, overheadPercent]);
+  const {
+    rawCostRows,
+    nonCogsRows,
     totalBaseCost,
-    materialCost,
-    wasteLossCost,
-    machineCost,
-    toolingCost,
-    laborCost,
-    formData?.financials,
-    onFinancialsChange,
-  ]);
+    unitBaseCost,
+    costBasisQty,
+    wasteInfoCost,
+    returnedMaterialValue,
+    rechargeToClient,
+    supplierClaim,
+  } = costs;
+  const gridRows = useMemo(() => [...rawCostRows, ...nonCogsRows], [rawCostRows, nonCogsRows]);
+
+  const toFinancials = useCallback(
+    (c: FinancialCostResult, margin: number): NonNullable<WorkOrderFormData["financials"]> => ({
+      plannedMaterialCost: c.plannedMaterialCost,
+      actualMaterialCost: c.materialCost,
+      plannedMachineCost: c.machineCost,
+      actualMachineCost: c.machineCost,
+      toolingCost: c.toolingCost,
+      laborCost: c.laborCost,
+      baseCost: c.totalBaseCost,
+      unitBaseCost: c.unitBaseCost,
+      totalBaseCost: c.totalBaseCost,
+      wasteCost: c.wasteInfoCost,
+      margin,
+      overheadPercent: c.overheadPercent,
+      overheadCost: c.overheadCost,
+      packagingCost: c.packagingCost,
+      sampleCost: c.sampleCost,
+      defectCost: c.defectCost,
+      rechargeToClient: c.rechargeToClient,
+      supplierClaim: c.supplierClaim,
+      costBasisQty: c.costBasisQty,
+    }),
+    []
+  );
+
+  const handleOverheadChange = (valStr: string) => {
+    const pct = Math.min(100, Math.max(0, parseFloat(valStr) || 0));
+    setOverheadPercent(pct);
+    onFinancialsChange?.(toFinancials(computeCosts(pct), formData?.financials?.margin ?? 25));
+  };
 
   // ─── 4. PRICING & MARKUP CALCULATOR STATE ────────────────────────────────────
   const [markupPercent, setMarkupPercent] = useState<number>(() => {
@@ -159,6 +198,15 @@ export function FinancialsTab({
     const currentMarkup = ((currentSellingPrice - totalBaseCost) / totalBaseCost) * 100;
     return Number(Math.max(5, currentMarkup).toFixed(1));
   });
+
+  // Cost data can arrive after mount: derive the markup from the saved price once it does.
+  const [markupSynced, setMarkupSynced] = useState(totalBaseCost > 0);
+  if (!markupSynced && totalBaseCost > 0) {
+    setMarkupSynced(true);
+    if (currentSellingPrice > totalBaseCost) {
+      setMarkupPercent(Number((((currentSellingPrice - totalBaseCost) / totalBaseCost) * 100).toFixed(1)));
+    }
+  }
 
   const [customPriceInput, setCustomPriceInput] = useState<string>(String(currentSellingPrice));
 
@@ -190,34 +238,8 @@ export function FinancialsTab({
 
   const handleApplyPriceToOrder = () => {
     if (onPriceChange) {
-      const materialCost = rawCostRows
-        .filter((r) => r.category.includes("Xomashyo") || r.category.includes("Kraska") || r.category.includes("Qadoq"))
-        .reduce((s, r) => s + r.totalCost, 0);
-      const toolingCost = rawCostRows
-        .filter((r) => r.category.includes("Jihoz"))
-        .reduce((s, r) => s + r.totalCost, 0);
-      const machineCost = rawCostRows
-        .filter((r) => r.category.includes("Uskuna"))
-        .reduce((s, r) => s + r.totalCost, 0);
-      const laborCost = rawCostRows
-        .filter((r) => r.category.includes("Mehnat"))
-        .reduce((s, r) => s + r.totalCost, 0);
-      const wasteCost = rawCostRows
-        .filter((r) => r.category.includes("Nuqson") || r.category.includes("Brak"))
-        .reduce((s, r) => s + r.totalCost, 0);
-
       onPriceChange(activeSellingPrice, {
-        plannedMaterialCost: materialCost,
-        actualMaterialCost: materialCost + wasteCost,
-        plannedMachineCost: machineCost,
-        actualMachineCost: machineCost,
-        toolingCost: toolingCost,
-        laborCost: laborCost,
-        baseCost: totalBaseCost,
-        unitBaseCost: unitBaseCost,
-        totalBaseCost: totalBaseCost,
-        wasteCost: wasteCost,
-        margin: profitMarginPercent,
+        ...toFinancials(costs, profitMarginPercent),
         itemsCount: rawCostRows.length,
         calculatedAt: new Date().toISOString(),
       });
@@ -268,7 +290,7 @@ export function FinancialsTab({
   const getCellContent = useCallback(
     (cell: Item): GridCell => {
       const [col, row] = cell;
-      const item = rawCostRows[row];
+      const item = gridRows[row];
       const column = costColumns[col];
 
       if (!item || !column) {
@@ -281,11 +303,9 @@ export function FinancialsTab({
         };
       }
 
-      const isWaste = item.category.includes("Nuqson") || item.category.includes("Brak");
-      const isLabor = item.category.includes("Mehnat");
-      const isMachine = item.category.includes("Uskuna");
-      const isTooling = item.category.includes("Jihoz");
-      const isMaterial = item.category.includes("Xomashyo") || item.category.includes("Kraska");
+      const isWaste = item.group === "defect";
+      const isExcluded = item.group === "recharge" || item.group === "claim";
+      const groupColor = GROUP_COLORS[item.group];
 
       if (column.id === "category") {
         return {
@@ -294,16 +314,8 @@ export function FinancialsTab({
           displayData: item.category,
           allowOverlay: false,
           readonly: true,
-          themeOverride: isWaste
-            ? { textDark: isDark ? "#f87171" : "#dc2626", baseFontStyle: "600 12px sans-serif" }
-            : isLabor
-            ? { textDark: isDark ? "#34d399" : "#059669", baseFontStyle: "600 12px sans-serif" }
-            : isMachine
-            ? { textDark: isDark ? "#fbbf24" : "#d97706", baseFontStyle: "600 12px sans-serif" }
-            : isTooling
-            ? { textDark: isDark ? "#c084fc" : "#7c3aed", baseFontStyle: "600 12px sans-serif" }
-            : isMaterial
-            ? { textDark: isDark ? "#60a5fa" : "#2563eb", baseFontStyle: "600 12px sans-serif" }
+          themeOverride: groupColor
+            ? { textDark: isDark ? groupColor.dark : groupColor.light, baseFontStyle: "600 12px sans-serif" }
             : undefined,
         };
       }
@@ -354,6 +366,8 @@ export function FinancialsTab({
             baseFontStyle: "700 12px monospace",
             textDark: isWaste
               ? (isDark ? "#f87171" : "#dc2626")
+              : isExcluded
+              ? (isDark ? "#a1a1aa" : "#64748b")
               : (isDark ? "#f4f4f5" : "#0f172a"),
           },
         };
@@ -363,7 +377,7 @@ export function FinancialsTab({
         return {
           kind: GridCellKind.Number,
           data: item.share,
-          displayData: `${item.share}%`,
+          displayData: isExcluded ? "—" : `${item.share}%`,
           allowOverlay: false,
           readonly: true,
           contentAlign: "right",
@@ -396,7 +410,7 @@ export function FinancialsTab({
         readonly: true,
       };
     },
-    [rawCostRows, costColumns, currency, isDark]
+    [gridRows, costColumns, currency, isDark]
   );
 
   return (
@@ -494,10 +508,31 @@ export function FinancialsTab({
               </button>
             ))}
           </div>
+          <Separator orientation="vertical" className="h-4 mx-1" />
+          <span className="text-[11px] text-muted-foreground font-medium whitespace-nowrap">Umumzavod:</span>
+          <div className="relative w-16">
+            <MoneyInput
+              decimalScale={1}
+              value={overheadPercent}
+              onValueChange={(values) => handleOverheadChange(values.value)}
+              className="h-6.5 text-xs font-mono font-bold pl-1.5 pr-5 bg-background"
+            />
+            <Percent className="size-3 text-muted-foreground absolute right-1.5 top-2 pointer-events-none" />
+          </div>
         </div>
 
         {/* Right: Manual Price Input & Apply Button */}
         <div className="flex items-center gap-2">
+          {rechargeToClient > 0 && (
+            <Badge variant="outline" className="text-[9px] h-5 px-1.5 py-0 font-mono">
+              Mijozga hisob: +{formatMoney(rechargeToClient, currency)}
+            </Badge>
+          )}
+          {supplierClaim > 0 && (
+            <Badge variant="outline" className="text-[9px] h-5 px-1.5 py-0 font-mono">
+              Da&apos;vo: {formatMoney(supplierClaim, currency)}
+            </Badge>
+          )}
           {activeSellingPrice !== currentSellingPrice && (
             <Badge variant="outline" className="text-[9px] h-5 px-1.5 py-0 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-mono">
               Farq: {formatMoney(activeSellingPrice - currentSellingPrice, currency)}
@@ -545,8 +580,14 @@ export function FinancialsTab({
 
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
           <span>Tiraj: <strong className="text-foreground font-mono">{targetQty.toLocaleString()} {formData?.unit || "dona"}</strong></span>
+          {costBasisQty !== targetQty && (
+            <>
+              <Separator orientation="vertical" className="h-3" />
+              <span>Qadoqlangan: <strong className="text-foreground font-mono">{costBasisQty.toLocaleString()}</strong></span>
+            </>
+          )}
           <Separator orientation="vertical" className="h-3" />
-          <span>Moddalar: <strong className="text-foreground">{rawCostRows.length} ta</strong></span>
+          <span>Moddalar: <strong className="text-foreground">{gridRows.length} ta</strong></span>
         </div>
       </div>
 
@@ -560,7 +601,7 @@ export function FinancialsTab({
             <DataEditor
               getCellContent={getCellContent}
               columns={costColumns}
-              rows={rawCostRows.length}
+              rows={gridRows.length}
               gridSelection={selection}
               onGridSelectionChange={setSelection}
               onColumnResize={handleColumnResize}
@@ -574,7 +615,7 @@ export function FinancialsTab({
               rowHeight={32}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
             />
-            {rawCostRows.length === 0 && (
+            {gridRows.length === 0 && (
               <div className="absolute inset-0 top-7 flex flex-col items-center justify-center bg-background/60 z-10 select-none gap-2">
                 <Layers className="size-8 text-muted-foreground/30" />
                 <span className="text-xs text-muted-foreground">Xarajatlar kiritilmagan (BOM yoki marshrut operatsiyalarini kiriting)</span>
@@ -614,10 +655,15 @@ export function FinancialsTab({
           <span>
             1 dona bazaviy tannarxi: <strong className="font-mono text-foreground">{formatMoney(unitBaseCost, currency, 3)}</strong>
           </span>
-          {wasteLossCost > 0 && (
+          {wasteInfoCost > 0 && (
             <Badge variant="outline" className="text-[9.5px] h-4.5 px-1.5 py-0 bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 gap-1 font-mono">
               <AlertCircle className="size-2.5" />
-              Brak ziyonlari: +{formatMoney(wasteLossCost, currency)}
+              Shundan brak: {formatMoney(wasteInfoCost, currency)}
+            </Badge>
+          )}
+          {returnedMaterialValue > 0 && (
+            <Badge variant="outline" className="text-[9.5px] h-4.5 px-1.5 py-0 font-mono">
+              Omborga qaytim: −{formatMoney(returnedMaterialValue, currency)}
             </Badge>
           )}
         </div>

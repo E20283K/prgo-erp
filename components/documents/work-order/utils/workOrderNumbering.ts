@@ -7,24 +7,26 @@
  *   - Jacquard: WOJC-26-0001
  *
  * Rules:
- *   1. Departments allowed for Work Order: "Offset", "Flexo", "Jacquard".
+ *   1. Departments allowed for Work Order: "Offset", "Flexo", "Jacquard", "Termo" (roll cutting, WOTM).
  *      (Post-press is strictly a route operation / finishing phase, not a standalone Work Order tech).
  *   2. Independent incremental sequence per department, resets annually to 0001 on Jan 1st.
  *   3. Strict auto-generation (Read-only on client).
  */
 
-export type WorkOrderDepartment = "Offset" | "Flexo" | "Jacquard";
+export type WorkOrderDepartment = "Offset" | "Flexo" | "Jacquard" | "Termo";
 
 export const WO_DEPT_PREFIXES: Record<WorkOrderDepartment, string> = {
   Offset: "WOOF",
   Flexo: "WOFL",
   Jacquard: "WOJC",
+  Termo: "WOTM",
 };
 
 export const WO_PREFIX_TO_DEPT: Record<string, WorkOrderDepartment> = {
   WOOF: "Offset",
   WOFL: "Flexo",
   WOJC: "Jacquard",
+  WOTM: "Termo",
 };
 
 // In-memory counter cache seeded with default active sequence numbers for 2026
@@ -32,6 +34,7 @@ const sequenceCounters: Record<string, number> = {
   "Offset-26": 351,
   "Flexo-26": 120,
   "Jacquard-26": 80,
+  "Termo-26": 0,
 };
 
 /**
@@ -47,6 +50,7 @@ export function getCurrentYearSuffix(): string {
 export function normalizeDepartment(dept?: string | null): WorkOrderDepartment {
   if (!dept) return "Offset";
   const lower = dept.toLowerCase().trim();
+  if (lower.includes("termo") || lower.includes("thermo")) return "Termo";
   if (lower.includes("flex")) return "Flexo";
   if (lower.includes("jacq") || lower.includes("damask") || lower.includes("weav")) return "Jacquard";
   return "Offset";
@@ -92,7 +96,7 @@ export function parseWorkOrderNo(docNo?: string | null): {
   seq: number;
 } | null {
   if (!docNo) return null;
-  const match = docNo.match(/^WO(OF|FL|JC)-(\d{2})-(\d{4,})$/i);
+  const match = docNo.match(/^WO(OF|FL|JC|TM)-(\d{2})-(\d{4,})$/i);
   if (!match) return null;
   const deptCode = `WO${match[1].toUpperCase()}`;
   const department = WO_PREFIX_TO_DEPT[deptCode] || "Offset";
@@ -112,7 +116,7 @@ export function migrateLegacyWorkOrderNo(
   fallbackDept: WorkOrderDepartment = "Offset"
 ): string {
   if (!legacyId) return formatWorkOrderNo(fallbackDept, 1);
-  if (/^WO(OF|FL|JC)-\d{2}-\d{4}$/i.test(legacyId)) return legacyId;
+  if (/^WO(OF|FL|JC|TM)-\d{2}-\d{4}$/i.test(legacyId)) return legacyId;
 
   // Extract any existing numerical portion
   const numMatch = legacyId.match(/\d+/);

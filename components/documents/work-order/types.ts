@@ -454,6 +454,61 @@ export interface RouteStep {
   downtimeMinutes?: number;
   curingRequiredHours?: number;
   curingStartedAt?: string;
+  kind?: RouteStepKind;
+}
+
+export type RouteStepKind = "prepress" | "print" | "finishing" | "packaging";
+
+const PACKAGING_STEP_NAME_RE = /qadoq|upakov|pack/i;
+
+/**
+ * Guarantees the route ends with exactly one typed packaging step.
+ * Legacy steps are migrated by name once; returns the same array when nothing changes.
+ */
+export function ensurePackagingStep(ops: RouteStep[], quantity = 0): RouteStep[] {
+  if (!ops || ops.length === 0) return ops;
+
+  let packIdx = -1;
+  for (let i = ops.length - 1; i >= 0; i--) {
+    if (ops[i].kind === "packaging") {
+      packIdx = i;
+      break;
+    }
+  }
+  if (packIdx === ops.length - 1) return ops;
+
+  let next = [...ops];
+  if (packIdx === -1) {
+    let legacyIdx = -1;
+    for (let i = next.length - 1; i >= 0; i--) {
+      if (PACKAGING_STEP_NAME_RE.test(next[i].name || "")) {
+        legacyIdx = i;
+        break;
+      }
+    }
+    if (legacyIdx >= 0) {
+      const [legacy] = next.splice(legacyIdx, 1);
+      next.push({ ...legacy, kind: "packaging" });
+    } else {
+      next.push({
+        id: `op-pack-${Date.now()}`,
+        stepNumber: 0,
+        name: "Qadoqlash",
+        machine: "Manual",
+        operator: "",
+        duration: 1,
+        qtyCompleted: `0 / ${Math.max(0, Number(quantity) || 0).toLocaleString()}`,
+        status: "Queued",
+        kind: "packaging",
+      });
+    }
+  } else {
+    const [pack] = next.splice(packIdx, 1);
+    next.push(pack);
+  }
+
+  next = next.map((op, idx) => ({ ...op, stepNumber: (idx + 1) * 10 }));
+  return next;
 }
 
 export interface ShiftEvent {
@@ -611,6 +666,7 @@ export interface WorkOrderToolingItem {
   isRemake?: boolean;
   remakeReason?: string;
   faultParty?: "none" | "prepress" | "production" | "client" | "supplier";
+  phase?: "sample" | "production";
   jobTicketPrinted?: boolean;
   location?: string;
   imageUrl?: string;
@@ -678,6 +734,14 @@ export interface WorkOrderFormData {
     margin: number;
     unitBaseCost?: number;
     totalBaseCost?: number;
+    overheadPercent?: number;
+    overheadCost?: number;
+    packagingCost?: number;
+    sampleCost?: number;
+    defectCost?: number;
+    rechargeToClient?: number;
+    supplierClaim?: number;
+    costBasisQty?: number;
   };
   // Physical Item Specifications from planned Client Order
   itemCategory?: string;
@@ -734,6 +798,14 @@ export interface WorkOrderFormData {
   flexoOrientation?: string;
   flexoGapX?: number;
   flexoGapY?: number;
+  termoCornerRadius?: number;
+  termoDieSource?: "size" | "file";
+  termoDieMarginMm?: number;
+  termoDieRows?: number;
+  flexoLanes?: number;
+  flexoRollsCount?: number;
+  flexoLabelsPerRoll?: number;
+  flexoCoreDiameter?: number;
   flexoColors?: number;
   // Textile & Flexo / Jacquard Ribbon Label Specifics
   labelFoldType?: "straight_cut" | "center_fold" | "end_fold" | "mitre_fold" | "manhattan_fold" | "roll";
@@ -804,12 +876,19 @@ export const MACHINE_MAP: Record<string, string[]> = {
   Offset: ["Heidelberg XL 106", "Komori Lithrone G40", "Heidelberg SX 74"],
   Flexo: ["Mark Andy Performance", "Nilpeter FA-Line", "Gallus ECS 340"],
   Jacquard: ["Staubli Jacquard Loom", "Muller Martini Loom", "Dornier PTV"],
-  "Post-press": ["Meiguang Sheet Laminator", "Kolbus BF 513", "Bobst Novacut 106"]
+  "Post-press": ["Meiguang Sheet Laminator", "Kolbus BF 513", "Bobst Novacut 106"],
+  Termo: ["Yassi pichoqli kesish stanogi"]
 };
 
 export const RECIPE_MATERIALS: Record<string, { name: string; req: number; unit: string; stock: number }[]> = {};
 
 export const RECIPE_ROUTES: Record<string, { name: string; machineStr: string }[]> = {
+  "TERMO_ROLL_CUT_V1": [
+    { name: "Jumbo rulonni ombordan berish", machineStr: "Ombor" },
+    { name: "Yassi pichoq bilan kesish", machineStr: "PRESS_MACHINE" },
+    { name: "Rulonlarga o'rash", machineStr: "PRESS_MACHINE" },
+    { name: "OTK va qadoqlash", machineStr: "Qadoqlash liniyasi" }
+  ],
   "OFFSET_STD_V1": [
     { name: "Prepress va CTP qolip tayyorlash", machineStr: "Screen PlateRite 8600" },
     { name: "4+0 Ofset bosma", machineStr: "PRESS_MACHINE" },
@@ -995,6 +1074,14 @@ export const TECHNOLOGY_OPTIONS: TechOption[] = [
     equipmentCount: 0,
   },
   {
+    id: "Termo",
+    name: "Termo stiker kesish",
+    code: "TECH-TRM",
+    description: "Termo rulonni yassi pichoq bilan kesish va qayta o'rash",
+    badgeClass: "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200",
+    equipmentCount: 0,
+  },
+  {
     id: "Post-press",
     name: "Post-press va yig'uv liniyalari",
     code: "TECH-PST",
@@ -1014,7 +1101,7 @@ export const getInitialOperations = (
 ): RouteStep[] => {
   const targetQty = Math.max(0, Number(quantity) || 0);
   const qtyLabel = `0 / ${targetQty.toLocaleString()}`;
-  const route = RECIPE_ROUTES[recipeId];
+  const route = RECIPE_ROUTES[recipeId] || (department === "Termo" ? RECIPE_ROUTES["TERMO_ROLL_CUT_V1"] : undefined);
   if (route) {
     return route.map((step, index) => ({
       id: `op-init-${index + 1}`,

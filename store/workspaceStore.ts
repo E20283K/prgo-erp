@@ -351,7 +351,7 @@ export interface MasterSpecificationRecord {
   code: string;
   name: string;
   category?: string;
-  department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  department: "Offset" | "Flexo" | "Jacquard" | "Post-press" | "Termo";
   status?: string;
   version?: string;
   basePrice?: number | string;
@@ -441,6 +441,12 @@ export interface MovementLineItem {
   receivedQty: number;
   unit: string;
   notes?: string;
+  /** CuttingReturn: share of the offcut's proportional value it is received at, 0–100 (default 100). */
+  valuationPercent?: number;
+  /** CuttingReturn, set by the server on completion: value credited against the work order cost. */
+  creditUsd?: number;
+  unitPriceUsd?: number;
+  offcutSku?: string;
 }
 
 export interface WarehouseMovementRecord {
@@ -805,17 +811,6 @@ interface WorkspaceState {
   loadWarehouseMovements: (companyCode?: string) => Promise<void>;
   upsertWarehouseMovementAsync: (mov: any, companyCode?: string) => Promise<any>;
   addWarehouseMovement: (movement: WarehouseMovementRecord) => void;
-  returnOffcutToStock: (payload: {
-    parentSku: string;
-    parentName: string;
-    cutDimensions: string;
-    quantity: number;
-    unit?: "sheets" | "rolls" | "kg" | "pcs" | "m²";
-    location?: string;
-    workOrderId?: string;
-    operator?: string;
-    unitPriceUsd?: number;
-  }) => void;
   reserveMaterialsForWorkOrder: (
     orderDocNo: string,
     materials: Array<{
@@ -3644,90 +3639,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((state) => ({
       warehouseMovements: [movement, ...state.warehouseMovements],
     })),
-
-  returnOffcutToStock: (payload) =>
-    set((state) => {
-      const today = new Date().toISOString().split("T")[0];
-      const offcutSku = `${payload.parentSku}-OFF`;
-      const offcutName = `${payload.parentName} (${payload.cutDimensions}) [Delovoy otxod]`;
-      const targetLocation = payload.location || "Rack A-01-B (Offcuts / Qoldiqlar zonasi)";
-      const existing = state.warehouseStock.find((s) => s.sku === offcutSku);
-
-      let updatedStockList: WarehouseStockRecord[];
-      if (existing) {
-        const newStockLevel = existing.stockLevel + payload.quantity;
-        const newAvailable = Math.max(0, newStockLevel - existing.reserved);
-        const updatedOffcut: WarehouseStockRecord = {
-          ...existing,
-          stockLevel: newStockLevel,
-          available: newAvailable,
-          lastReceived: today,
-          status: newAvailable <= existing.reorder * 0.5 ? "Critical" : newAvailable <= existing.reorder ? "Low Stock" : "In Stock",
-        };
-        updatedStockList = state.warehouseStock.map((s) => (s.sku === offcutSku ? updatedOffcut : s));
-      } else {
-        const newOffcut: WarehouseStockRecord = {
-          sku: offcutSku,
-          name: offcutName,
-          category: "Offcuts & Scraps",
-          sheetFormat: payload.cutDimensions,
-          unit: payload.unit || "sheets",
-          location: targetLocation,
-          stockLevel: payload.quantity,
-          reserved: 0,
-          available: payload.quantity,
-          reorder: Math.max(200, Math.round(payload.quantity * 0.2)),
-          unitPriceUsd: payload.unitPriceUsd || 0.12,
-          lastReceived: today,
-          status: "In Stock",
-          isOffcut: true,
-          parentMaterialSku: payload.parentSku,
-          cutDimensions: payload.cutDimensions,
-          sourceWorkOrder: payload.workOrderId,
-          imageUrl: undefined,
-        };
-        updatedStockList = [newOffcut, ...state.warehouseStock];
-      }
-
-      const nextMovId = `MOV-${4016 + state.warehouseMovements.length}`;
-      const newMovement: WarehouseMovementRecord = {
-        id: nextMovId,
-        date: today,
-        material: offcutName,
-        materialSku: offcutSku,
-        sheetFormat: payload.cutDimensions,
-        quantity: payload.quantity,
-        receivedQty: payload.quantity,
-        unit: payload.unit || "sheets",
-        from: "Cutting Section — Guillotine (Rezka sexi)",
-        to: targetLocation,
-        reason: `Kesimdan qolgan qog'oz (Delovoy otxod) kirimi — ${payload.workOrderId || "Rezka"}`,
-        status: "Completed",
-        operator: payload.operator || "D. Karimov",
-        isOffcut: true,
-        movementType: "CuttingReturn",
-        parentMaterialSku: payload.parentSku,
-        cutDimensions: payload.cutDimensions,
-        workOrderId: payload.workOrderId,
-      };
-
-      return {
-        warehouseStock: updatedStockList,
-        warehouseMovements: [newMovement, ...state.warehouseMovements],
-        notifications: [
-          {
-            id: `notif-${Date.now()}`,
-            title: `Delovoy otxod kirim qilindi (${offcutSku})`,
-            description: `${offcutName}: ${payload.quantity.toLocaleString()} ${payload.unit || "varaq"} omborga qo'shildi.`,
-            severity: "info",
-            timestamp: Date.now(),
-            read: false,
-            link: { module: "warehouse", subModule: "stock-balance" },
-          },
-          ...state.notifications,
-        ],
-      };
-    }),
 
   reserveMaterialsForWorkOrder: (orderDocNo, materials) =>
     set((state) => {

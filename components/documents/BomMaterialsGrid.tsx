@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
+import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -223,6 +224,44 @@ export function normalizeBomItem(item: any): BomItem {
     acquisitionSource: item.acquisitionSource || (item.supplier?.toLowerCase().includes("mijoz") ? "client" : item.availability === "On Order" || item.sourceType === "procurement" ? "procurement" : "warehouse"),
     sourceType: item.sourceType || (item.supplier?.toLowerCase().includes("mijoz") ? "client" : item.availability === "On Order" ? "procurement" : "warehouse"),
   };
+}
+
+/** Units of measure a BOM line can use. `value` is the stored code, `label` is what the user sees. */
+export const MATERIAL_UNIT_OPTIONS: ComboboxOption[] = [
+  { value: "sheets", label: "list" },
+  { value: "pcs", label: "dona" },
+  { value: "kg", label: "kg" },
+  { value: "rolls", label: "rulon" },
+  { value: "m", label: "m" },
+  { value: "m2", label: "m²" },
+  { value: "l", label: "litr" },
+  { value: "box", label: "quti" },
+  { value: "pack", label: "pachka" },
+];
+
+const MATERIAL_UNIT_ALIASES: Record<string, string> = {
+  sheet: "sheets", list: "sheets", varaq: "sheets", "лист": "sheets",
+  pc: "pcs", piece: "pcs", pieces: "pcs", dona: "pcs", "шт": "pcs",
+  "кг": "kg", kilogram: "kg",
+  roll: "rolls", rulon: "rolls", "рулон": "rolls",
+  metr: "m", "м": "m",
+  "m²": "m2", "м2": "m2", "kv.m": "m2",
+  litr: "l", liter: "l", "л": "l",
+  quti: "box", karobka: "box", boxes: "box",
+  pachka: "pack", "пачка": "pack",
+};
+
+/** Maps free-text / legacy spellings onto a stored unit code; unknown units are kept as typed. */
+export function normalizeMaterialUnit(raw?: string): string {
+  const clean = (raw || "").trim();
+  const lower = clean.toLowerCase();
+  if (MATERIAL_UNIT_OPTIONS.some((o) => o.value === lower)) return lower;
+  return MATERIAL_UNIT_ALIASES[lower] || clean;
+}
+
+export function getMaterialUnitLabel(raw?: string): string {
+  const code = normalizeMaterialUnit(raw);
+  return MATERIAL_UNIT_OPTIONS.find((o) => o.value === code)?.label || code;
 }
 
 export const OFFSET_BOM_ITEMS: BomItem[] = [];
@@ -874,7 +913,7 @@ export function BomMaterialsGrid({
           return {
             kind: GridCellKind.Text,
             data: item.unit,
-            displayData: item.unit,
+            displayData: getMaterialUnitLabel(item.unit),
             allowOverlay: !isOperator,
             contentAlign: "center",
             themeOverride: {
@@ -1129,7 +1168,7 @@ export function BomMaterialsGrid({
             } else if (column.id === "notes") {
               updated.notes = String(newValue.data ?? "");
             } else if (column.id === "unit") {
-              updated.unit = String(newValue.data ?? "");
+              updated.unit = normalizeMaterialUnit(String(newValue.data ?? "")) || updated.unit;
             } else if (column.id === "supplier") {
               updated.supplier = String(newValue.data ?? "");
             } else if (column.id === "availability") {
@@ -2511,12 +2550,16 @@ export function BomMaterialsGrid({
                 )}
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-0.5">Birlik</label>
-                  <Input
-                    value={formState.unit}
-                    disabled={isOperator}
-                    onChange={(e) => setFormState((p) => ({ ...p, unit: e.target.value }))}
+                  {/* A material picked from stock keeps the unit of its warehouse card. */}
+                  <ComboboxSelect
+                    items={MATERIAL_UNIT_OPTIONS}
+                    value={normalizeMaterialUnit(formState.unit)}
+                    disabled={isOperator || Boolean(selectedStockItem)}
+                    onValueChange={(val) => {
+                      if (val) setFormState((p) => ({ ...p, unit: val }));
+                    }}
                     className="h-8 text-xs"
-                    placeholder="sheets..."
+                    placeholder="Birlik"
                   />
                 </div>
                 {!isOperator && (

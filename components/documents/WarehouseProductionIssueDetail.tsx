@@ -567,38 +567,9 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
             available: targetItem.available + qty,
           });
         }
-      } else if (doc.operationType === "CuttingReturn") {
-        // Delovoy otxod (kesim qoldig'i) kirim qilinganda
-        const offcutSku = line.sku.endsWith("-OFF") ? line.sku : `${line.sku}-OFF`;
-        const offcutName = `${line.name} (${line.sheetFormat || "Kesim"}) [Delovoy otxod]`;
-        const existingOffcut = warehouseStock.find((s) => s.sku === offcutSku);
-
-        if (existingOffcut) {
-          upsertWarehouseStock({
-            ...existingOffcut,
-            stockLevel: existingOffcut.stockLevel + qty,
-            available: existingOffcut.available + qty,
-          });
-        } else {
-          upsertWarehouseStock({
-            sku: offcutSku,
-            name: offcutName,
-            category: "Offcuts & Scraps",
-            sheetFormat: line.sheetFormat,
-            grammage: line.grammage,
-            unit: (line.unit as any) || "sheets",
-            location: doc.warehouse,
-            stockLevel: qty,
-            reserved: 0,
-            available: qty,
-            reorder: 100,
-            unitPriceUsd: 0.1,
-            status: "In Stock",
-            lastReceived: new Date().toISOString().split("T")[0],
-            isOffcut: true,
-          });
-        }
       }
+      // CuttingReturn: the server receives the offcut into its own "-OFF" card and values it;
+      // the stock list is reloaded after the document is posted.
     });
 
 
@@ -1154,6 +1125,23 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
                   />
                 </div>
               </div>
+
+              {doc.operationType === "CuttingReturn" && (
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">Qoldiq bahosi, %</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={lineFormData.valuationPercent ?? 100}
+                    onChange={(e) => {
+                      const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                      setLineFormData((prev) => (prev ? { ...prev, valuationPercent: v } : null));
+                    }}
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">

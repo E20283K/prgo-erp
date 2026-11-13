@@ -134,7 +134,7 @@ export interface OrderRow {
   rawOrder?: any;
   sampleStage: "mass_production" | "sample_pending" | "sample_review" | "sample_revision" | "sample_approved_mass";
   sampleStatusLabel: string;
-  department: "Offset" | "Flexo" | "Jacquard" | "Post-press";
+  department: "Offset" | "Flexo" | "Jacquard" | "Post-press" | "Termo";
   site: "Building 1" | "Building 2";
   customer: string;
   product: string;
@@ -333,6 +333,7 @@ export function DataGrid() {
       { key: "Offset", label: "Ofset" },
       { key: "Flexo", label: "Flexo" },
       { key: "Jacquard", label: "Jakard" },
+      { key: "Termo", label: "Termo" },
       { key: "Post-press", label: "Post-press" },
     ],
     []

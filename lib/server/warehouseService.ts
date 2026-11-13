@@ -1108,6 +1108,13 @@ export async function getWarehouseMovements(companyCode: string = "PRINTGOO") {
   });
 }
 
+/** "700×1000", "700x1000 mm", "70*100" → maydon; o'qib bo'lmasa 0. */
+function parseSheetArea(format?: string | null): number {
+  const m = (format || "").match(/(\d+(?:[.,]\d+)?)\s*[x×х*]\s*(\d+(?:[.,]\d+)?)/i);
+  if (!m) return 0;
+  return Number(m[1].replace(",", ".")) * Number(m[2].replace(",", "."));
+}
+
 export async function upsertWarehouseMovement(payload: any, companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
   const rawCandidate = (payload.movementNumber || payload.id || "").trim();
@@ -1212,11 +1219,13 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
     if (status !== "Completed") return record;
 
     const lines = itemsList
-      .map((line) => {
+      .map((line, sourceIndex) => {
         const lineQty = Number(line.quantity) || 0;
         const hasRcv = line.receivedQty !== undefined && line.receivedQty !== null && line.receivedQty !== "";
         const rcv = Number(line.receivedQty);
         return {
+          sourceIndex,
+          valuationPercent: line.valuationPercent,
           sku: String(line.sku || values.materialSku || ""),
           name: line.name || values.materialName,
           unit: line.unit || values.unit,
@@ -1238,6 +1247,78 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
     // Chiqim tomonida bo'sh qoldiq (stock - reserved) yetarliligini oldindan tekshirish
     if (isOutgoing) {
       await assertStockAvailable(tx, companyId, values.fromLocationName, sumBySku(lines, (l) => l.qty));
+    }
+
+    // Delovoy otxod: asl materialga emas, alohida "-OFF" kartasiga, asl narx × kesim nisbati × baho bilan kiradi
+    if (movementType === "CuttingReturn") {
+      const valuedItems = [...itemsList];
+      for (const line of lines) {
+        if (line.rcvQty <= 0) continue;
+        const parentSku = line.sku.replace(/-OFF$/i, "");
+        const offcutSku = `${parentSku}-OFF`;
+        const parentRows = await tx
+          .select({ p: warehouseStockBalances.unitPriceUsd, f: warehouseStockBalances.sheetFormat })
+          .from(warehouseStockBalances)
+          .where(and(eq(warehouseStockBalances.companyId, companyId), eq(warehouseStockBalances.sku, parentSku)));
+        const parent = parentRows.find((r) => Number(r.p) > 0) || parentRows[0];
+        const parentPrice = Number(parent?.p) || 0;
+
+        // Varaqli materialda qoldiq narxi maydon nisbatiga qarab; boshqa birliklarda (kg, m) narx o'zgarmaydi
+        let areaRatio = 1;
+        const parentArea = parseSheetArea(parent?.f);
+        if (parentArea > 0) {
+          const offcutArea = parseSheetArea(line.sheetFormat);
+          if (offcutArea <= 0) {
+            throw new Error(
+              `"${line.name}" qoldig'i uchun kesim formati kiritilmagan (masalan 500×700). Asl format: ${parent?.f}.`
+            );
+          }
+          if (offcutArea > parentArea + 1e-6) {
+            throw new Error(
+              `"${line.name}" qoldig'i formati (${line.sheetFormat}) asl formatdan (${parent?.f}) katta bo'lishi mumkin emas.`
+            );
+          }
+          areaRatio = offcutArea / parentArea;
+        }
+
+        const rawValuation = Number(line.valuationPercent);
+        const valuationPercent = Number.isFinite(rawValuation) && line.valuationPercent !== undefined && line.valuationPercent !== ""
+          ? Math.min(100, Math.max(0, rawValuation))
+          : 100;
+        const unitPriceUsd = parentPrice * areaRatio * (valuationPercent / 100);
+        const creditUsd = Number((unitPriceUsd * line.rcvQty).toFixed(2));
+
+        await applyStockBalanceDelta({
+          exec: tx,
+          companyId,
+          locationName: values.toLocationName,
+          sku: offcutSku,
+          name: /delovoy otxod/i.test(line.name) ? line.name : `${line.name} (${line.sheetFormat || "Kesim"}) [Delovoy otxod]`,
+          deltaQty: line.rcvQty,
+          category: "Offcuts & Scraps",
+          unit: line.unit,
+          sheetFormat: line.sheetFormat,
+          unitPriceUsd: unitPriceUsd > 0 ? unitPriceUsd : undefined,
+        });
+
+        valuedItems[line.sourceIndex] = {
+          ...valuedItems[line.sourceIndex],
+          parentSku,
+          offcutSku,
+          areaRatio: Number(areaRatio.toFixed(4)),
+          valuationPercent,
+          unitPriceUsd: Number(unitPriceUsd.toFixed(4)),
+          creditUsd,
+        };
+      }
+
+      // Baholangan qatorlar hujjatda saqlanadi — buyurtma tannarxi shu summaga kamayadi
+      const [valued] = await tx
+        .update(warehouseMovements)
+        .set({ reason: JSON.stringify({ ...JSON.parse(values.reason), items: valuedItems }) })
+        .where(eq(warehouseMovements.id, record.id))
+        .returning();
+      return valued || record;
     }
 
     for (const line of lines) {

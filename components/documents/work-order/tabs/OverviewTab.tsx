@@ -524,6 +524,7 @@ export function OverviewTab({
         if (tid === "offset") return dept.includes("offset") || dept.includes("ofset");
         if (tid === "flexo") return dept.includes("flexo") || dept.includes("flekso");
         if (tid === "jacquard") return dept.includes("jacquard") || dept.includes("jakkard") || dept.includes("to'quv");
+        if (tid === "termo") return dept.includes("termo") || dept.includes("post") || dept.includes("pardoz") || dept.includes("kesish");
         if (tid === "post-press") return dept.includes("post") || dept.includes("pardoz") || dept.includes("kesish") || dept.includes("packag") || dept.includes("qadoq");
         return dept.includes(tid);
       }).length;
@@ -574,9 +575,10 @@ export function OverviewTab({
   const tEnhance = useTranslations("OverviewEnhancements");
 
   // Department technology flags
-  const isFlexo = formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false);
-  const isJacquard = formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false);
-  const isOffset = !isFlexo && !isJacquard;
+  const isTermo = formData.department === "Termo";
+  const isFlexo = !isTermo && (formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false));
+  const isJacquard = !isTermo && (formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false));
+  const isOffset = !isFlexo && !isJacquard && !isTermo;
 
   // Dynamic Inks & Printing Stations (Read-only summary derived from Specs & Drawing)
   const frontColors: SideColorConfig = formData.frontColors || { c: false, m: false, y: false, k: false };

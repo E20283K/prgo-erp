@@ -70,6 +70,8 @@ import { formatMoney } from "@/components/documents/common/DocumentShell";
 interface OperationsTabProps {
   workOrderId?: string;
   currency?: string;
+  exchangeRate?: number;
+  onOpenPackaging?: () => void;
   fallbackData?: {
     customer?: string;
     product?: string;
@@ -107,6 +109,8 @@ const STATUS_LABELS: Record<RouteStep["status"], string> = {
 export function OperationsTab({
   workOrderId,
   currency = "UZS",
+  exchangeRate = 12850,
+  onOpenPackaging,
   fallbackData,
   operations,
   setOperations,
@@ -127,6 +131,10 @@ export function OperationsTab({
 }: OperationsTabProps) {
   const selectedOpRow = opSelection.rows.first();
   const hasSelectedOp = selectedOpRow !== undefined && operations[selectedOpRow] !== undefined;
+  // The packaging step is the fixed last step of every route: it cannot be moved, copied or deleted.
+  const isPackagingSelected = hasSelectedOp && operations[selectedOpRow].kind === "packaging";
+  const isNextPackaging =
+    hasSelectedOp && operations[selectedOpRow + 1] !== undefined && operations[selectedOpRow + 1].kind === "packaging";
 
   const { masterSpecifications, loadSpecificationsAsync } = useWorkspaceStore();
   const [isSpecPickerOpen, setIsSpecPickerOpen] = useState(false);
@@ -139,6 +147,8 @@ export function OperationsTab({
 
   const isUsd = (currency || "UZS").toUpperCase() === "USD";
   const currencyLabel = isUsd ? "$" : "so'm";
+  // Route amounts are stored in USD; show them in the order currency like the cost engine does.
+  const fxRate = isUsd ? 1 : Number(exchangeRate) || 12850;
 
   const totalDuration = useMemo(() => {
     return Number(
@@ -147,12 +157,12 @@ export function OperationsTab({
   }, [operations]);
 
   const totalPlannedCost = useMemo(() => {
-    return operations.reduce((sum, op) => sum + (Number(op.plannedCostUsd) || 0), 0);
-  }, [operations]);
+    return operations.reduce((sum, op) => sum + (Number(op.plannedCostUsd) || 0), 0) * fxRate;
+  }, [operations, fxRate]);
 
   const totalPiecework = useMemo(() => {
-    return operations.reduce((sum, op) => sum + (Number(op.pieceworkTotalUsd) || 0), 0);
-  }, [operations]);
+    return operations.reduce((sum, op) => sum + (Number(op.pieceworkTotalUsd) || 0), 0) * fxRate;
+  }, [operations, fxRate]);
 
   const finishedCount = useMemo(() => {
     return operations.filter((op) => op.status === "Finished").length;
@@ -180,7 +190,7 @@ export function OperationsTab({
     }
 
     return cols;
-  }, [isOperator]);
+  }, [isOperator, currencyLabel]);
 
   const [colWidths, setColWidths] = useState<Record<string, number>>({});
 
@@ -200,6 +210,7 @@ export function OperationsTab({
       if (!hasSelectedOp || selectedOpRow === undefined) return;
       const targetIdx = direction === "up" ? selectedOpRow - 1 : selectedOpRow + 1;
       if (targetIdx < 0 || targetIdx >= operations.length) return;
+      if (operations[selectedOpRow].kind === "packaging" || operations[targetIdx].kind === "packaging") return;
 
       const updated = [...operations];
       const [moved] = updated.splice(selectedOpRow, 1);
@@ -223,7 +234,7 @@ export function OperationsTab({
   const handleDuplicateOperation = useCallback(() => {
     if (!hasSelectedOp || selectedOpRow === undefined) return;
     const source = operations[selectedOpRow];
-    if (!source) return;
+    if (!source || source.kind === "packaging") return;
 
     const duplicated: RouteStep = {
       ...source,
@@ -421,7 +432,7 @@ export function OperationsTab({
         case "rate": {
           const rateText =
             op.rateUsd !== undefined && op.rateUsd > 0
-              ? `${formatMoney(op.rateUsd, currency, isUsd ? 2 : 0)} / ${op.calcUnit || "birlik"}`
+              ? `${formatMoney(op.rateUsd * fxRate, currency, isUsd ? 2 : 0)} / ${op.calcUnit || "birlik"}`
               : "—";
           return {
             kind: GridCellKind.Text,
@@ -436,7 +447,7 @@ export function OperationsTab({
           };
         }
         case "plannedCost": {
-          const val = op.plannedCostUsd || 0;
+          const val = Number(((op.plannedCostUsd || 0) * fxRate).toFixed(2));
           return {
             kind: GridCellKind.Number,
             data: val,
@@ -450,7 +461,7 @@ export function OperationsTab({
           };
         }
         case "piecework": {
-          const val = op.pieceworkTotalUsd || 0;
+          const val = Number(((op.pieceworkTotalUsd || 0) * fxRate).toFixed(2));
           return {
             kind: GridCellKind.Number,
             data: val,
@@ -467,7 +478,7 @@ export function OperationsTab({
           return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
       }
     },
-    [operations, opColumns, isDark, isOperator, fallbackData?.quantity]
+    [operations, opColumns, isDark, isOperator, fallbackData?.quantity, currency, isUsd, fxRate]
   );
 
   const onOpCellEdited = useCallback(
@@ -493,16 +504,16 @@ export function OperationsTab({
       } else if (column.id === "duration" && newValue.kind === GridCellKind.Number && !isOperator) {
         nextOp.duration = Math.max(0.1, Number(newValue.data) || 0.5);
       } else if (column.id === "plannedCost" && newValue.kind === GridCellKind.Number && !isOperator) {
-        nextOp.plannedCostUsd = Math.max(0, Number(newValue.data) || 0);
+        nextOp.plannedCostUsd = Number((Math.max(0, Number(newValue.data) || 0) / fxRate).toFixed(4));
       } else if (column.id === "piecework" && newValue.kind === GridCellKind.Number && !isOperator) {
-        nextOp.pieceworkTotalUsd = Math.max(0, Number(newValue.data) || 0);
+        nextOp.pieceworkTotalUsd = Number((Math.max(0, Number(newValue.data) || 0) / fxRate).toFixed(4));
       }
 
       updated[row] = nextOp;
       setOperations(updated);
       onMarkUnsaved();
     },
-    [operations, opColumns, isOperator, setOperations, onMarkUnsaved]
+    [operations, opColumns, isOperator, setOperations, onMarkUnsaved, fxRate]
   );
 
   return (
@@ -588,7 +599,7 @@ export function OperationsTab({
                       render={
                         <Button
                           onClick={() => handleMoveOperation("up")}
-                          disabled={selectedOpRow === 0}
+                          disabled={selectedOpRow === 0 || isPackagingSelected}
                           variant="outline"
                           size="icon-sm"
                           className="h-6.5 w-6.5 p-0 rounded cursor-pointer disabled:opacity-40"
@@ -607,7 +618,7 @@ export function OperationsTab({
                       render={
                         <Button
                           onClick={() => handleMoveOperation("down")}
-                          disabled={selectedOpRow === operations.length - 1}
+                          disabled={selectedOpRow === operations.length - 1 || isPackagingSelected || isNextPackaging}
                           variant="outline"
                           size="icon-sm"
                           className="h-6.5 w-6.5 p-0 rounded cursor-pointer disabled:opacity-40"
@@ -626,9 +637,10 @@ export function OperationsTab({
                       render={
                         <Button
                           onClick={handleDuplicateOperation}
+                          disabled={isPackagingSelected}
                           variant="outline"
                           size="icon-sm"
-                          className="h-6.5 w-6.5 p-0 rounded cursor-pointer text-indigo-600 dark:text-indigo-400"
+                          className="h-6.5 w-6.5 p-0 rounded cursor-pointer text-indigo-600 dark:text-indigo-400 disabled:opacity-40"
                         >
                           <Copy className="w-3 h-3" />
                         </Button>
@@ -654,7 +666,7 @@ export function OperationsTab({
                 </Button>
               )}
 
-              {!isOperator && (
+              {!isOperator && !isPackagingSelected && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -724,7 +736,7 @@ export function OperationsTab({
               if (!isOperator && e.key === "Insert") {
                 e.preventDefault();
                 onOpenAddOperation();
-              } else if (!isOperator && e.key === "Delete" && hasSelectedOp) {
+              } else if (!isOperator && e.key === "Delete" && hasSelectedOp && !isPackagingSelected) {
                 e.preventDefault();
                 onDeleteSelectedOperation();
               } else if (!isOperator && e.altKey && e.key === "ArrowUp" && hasSelectedOp) {
@@ -756,7 +768,9 @@ export function OperationsTab({
               }}
               onCellActivated={(cell) => {
                 const [, row] = cell;
-                if (isOperator) {
+                if (operations[row]?.kind === "packaging" && onOpenPackaging) {
+                  onOpenPackaging();
+                } else if (isOperator) {
                   if (onOpenInTimeline && operations[row]) {
                     onOpenInTimeline(operations[row].id);
                   }
@@ -824,10 +838,12 @@ export function OperationsTab({
                 <span className="ml-auto text-[10px] text-muted-foreground font-mono">Enter</span>
               </ContextMenuItem>
 
-              <ContextMenuItem onClick={handleDuplicateOperation} className="gap-2 cursor-pointer">
-                <Copy className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Nusxalash</span>
-              </ContextMenuItem>
+              {!isPackagingSelected && (
+                <ContextMenuItem onClick={handleDuplicateOperation} className="gap-2 cursor-pointer">
+                  <Copy className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Nusxalash</span>
+                </ContextMenuItem>
+              )}
 
               <ContextMenuSeparator />
 
@@ -868,7 +884,7 @@ export function OperationsTab({
             </>
           )}
 
-          {hasSelectedOp && !isOperator && (
+          {hasSelectedOp && !isOperator && !isPackagingSelected && (
             <>
               <ContextMenuSeparator />
               <ContextMenuItem

@@ -58,7 +58,7 @@ export interface WorkOrdersRegistryPDFProps {
   labels: WorkOrdersRegistryPdfLabels;
 }
 
-const DEPT_ORDER = ["Offset", "Flexo", "Jacquard", "Post-press", "Digital"];
+const DEPT_ORDER = ["Offset", "Flexo", "Jacquard", "Termo", "Post-press", "Digital"];
 
 const styles = StyleSheet.create({
   page: {

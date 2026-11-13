@@ -320,6 +320,14 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       flexoOrientation: dims.flexoOrientation,
       flexoGapX: dims.flexoGapX,
       flexoGapY: dims.flexoGapY,
+      termoCornerRadius: dims.termoCornerRadius,
+      termoDieSource: dims.termoDieSource,
+      termoDieMarginMm: dims.termoDieMarginMm,
+      termoDieRows: dims.termoDieRows,
+      flexoLanes: dims.flexoLanes,
+      flexoRollsCount: dims.flexoRollsCount,
+      flexoLabelsPerRoll: dims.flexoLabelsPerRoll,
+      flexoCoreDiameter: dims.flexoCoreDiameter,
       flexoColors: dims.flexoColors,
 
       financials: dims.financials,
@@ -422,6 +430,14 @@ export async function getNextWorkOrderNoFromDb(
 /**
  * Yangi ishlab chiqarish buyrug'ini yaratish yoki mavjudini to'liq saqlash (Upsert)
  */
+/** Biznes-qoida buzilishi (status o'tishi va h.k.) — API 422 qaytaradi. */
+export class WorkOrderValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkOrderValidationError";
+  }
+}
+
 export async function upsertWorkOrder(
   data: Partial<WorkOrderFormData> & {
     docNo?: string;
@@ -607,6 +623,14 @@ export async function upsertWorkOrder(
       flexoOrientation: data.flexoOrientation,
       flexoGapX: data.flexoGapX,
       flexoGapY: data.flexoGapY,
+      termoCornerRadius: data.termoCornerRadius,
+      termoDieSource: data.termoDieSource,
+      termoDieMarginMm: data.termoDieMarginMm,
+      termoDieRows: data.termoDieRows,
+      flexoLanes: data.flexoLanes,
+      flexoRollsCount: data.flexoRollsCount,
+      flexoLabelsPerRoll: data.flexoLabelsPerRoll,
+      flexoCoreDiameter: data.flexoCoreDiameter,
       flexoColors: data.flexoColors,
       financials: data.financials,
     },
@@ -672,6 +696,44 @@ export async function upsertWorkOrder(
     role: data.author?.role || data.user?.role || "Operator",
     initials: data.author?.initials || data.user?.initials,
   };
+
+  // Status o'tishlarini himoyalash: faqat status o'zgarganda tekshiriladi (eski yozuvlarni saqlashga xalaqit bermaydi)
+  if (statusVal !== existingOrder?.status) {
+    if (statusVal === "In Production") {
+      const c = payload.checks || {};
+      const gateLabels: Record<string, string> = {
+        designReady: "Dizayn",
+        paperReady: "Xomashyo",
+        platesReady: "Formalar",
+        toolingReady: "Shtamp",
+      };
+      const pending = Object.keys(gateLabels).filter((k) => !c[k]);
+      if (pending.length > 0) {
+        throw new WorkOrderValidationError(
+          `Ishlab chiqarishga o'tkazib bo'lmaydi: tayyor emas — ${pending.map((k) => gateLabels[k]).join(", ")}`
+        );
+      }
+    } else if (statusVal === "Completed") {
+      let ops: any[] = Array.isArray(data.operations) ? data.operations : [];
+      if (!Array.isArray(data.operations) && existingOrder) {
+        ops = await db.query.workOrderOperations.findMany({
+          where: (op, { eq }) => eq(op.workOrderId, existingOrder.id),
+        });
+      }
+      const isFinished = (s: unknown) => /^(finished|completed|done)$/i.test(String(s || "").trim());
+      const unfinished = ops.filter((op) => !isFinished(op.status));
+      if (ops.length === 0 || unfinished.length > 0) {
+        throw new WorkOrderValidationError(
+          ops.length === 0
+            ? "Yakunlab bo'lmaydi: marshrut bosqichlari kiritilmagan"
+            : `Yakunlab bo'lmaydi: ${unfinished.length} ta bosqich tugallanmagan (${unfinished
+                .map((op) => op.name)
+                .slice(0, 3)
+                .join(", ")})`
+        );
+      }
+    }
+  }
 
   if (existingOrder) {
     targetId = existingOrder.id;

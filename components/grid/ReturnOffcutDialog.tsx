@@ -32,8 +32,15 @@ interface ReturnOffcutDialogProps {
 
 const COMMON_OFFCUT_SIZES = ["470×700", "350×700", "500×700", "320×450", "250×700"];
 
+/** "700×1000", "700x1000 mm" → area; 0 when it cannot be read. */
+function parseSheetArea(format?: string | null): number {
+  const m = (format || "").match(/(\d+(?:[.,]\d+)?)\s*[x×х*]\s*(\d+(?:[.,]\d+)?)/i);
+  if (!m) return 0;
+  return Number(m[1].replace(",", ".")) * Number(m[2].replace(",", "."));
+}
+
 export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogProps) {
-  const { warehouseStock, productionQueue, returnOffcutToStock } = useWorkspaceStore();
+  const { warehouseStock, productionQueue, upsertWarehouseMovementAsync } = useWorkspaceStore();
 
   // Filter paper substrates that can be cut
   const paperSubstrates = useMemo(() => {
@@ -57,38 +64,65 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
     return warehouseStock.find((s) => s.sku === selectedParentSku);
   }, [warehouseStock, selectedParentSku]);
 
-  // Estimate unit price based on area proportion if parent sheetFormat is known
+  const [valuationPercent, setValuationPercent] = useState<string>("100");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Preview only: the server computes the posted value the same way
+  // (parent price × area ratio × valuation) when the document is completed.
   const estimatedUnitPrice = useMemo(() => {
-    if (!parentMaterial?.unitPriceUsd) return 0.12;
-    const parentDims = parentMaterial.sheetFormat?.split("×") || ["700", "1000"];
-    const parentArea = (parseFloat(parentDims[0]) || 700) * (parseFloat(parentDims[1]) || 1000);
-    const cutDims = cutDimensions.split("×");
-    const cutArea = (parseFloat(cutDims[0]) || 470) * (parseFloat(cutDims[1]) || 700);
-    const ratio = Math.min(1, Math.max(0.1, cutArea / Math.max(1, parentArea)));
-    return Number((parentMaterial.unitPriceUsd * ratio).toFixed(3));
-  }, [parentMaterial, cutDimensions]);
+    const parentPrice = Number(parentMaterial?.unitPriceUsd) || 0;
+    const parentArea = parseSheetArea(parentMaterial?.sheetFormat);
+    const cutArea = parseSheetArea(cutDimensions);
+    const ratio = parentArea > 0 ? (cutArea > 0 ? Math.min(1, cutArea / parentArea) : 0) : 1;
+    const valuation = Math.min(100, Math.max(0, parseFloat(valuationPercent) || 0)) / 100;
+    return Number((parentPrice * ratio * valuation).toFixed(3));
+  }, [parentMaterial, cutDimensions, valuationPercent]);
 
   const offcutSku = `${selectedParentSku}-OFF`;
   const offcutName = `${parentMaterial?.name || "Paper Substrate"} (${cutDimensions}) [Delovoy otxod]`;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const qty = parseInt(quantity, 10);
-    if (!qty || qty <= 0 || !parentMaterial) return;
+    if (!qty || qty <= 0 || !parentMaterial || !location.trim() || isSubmitting) return;
 
-    returnOffcutToStock({
-      parentSku: parentMaterial.sku,
-      parentName: parentMaterial.name,
-      cutDimensions: cutDimensions.trim(),
-      quantity: qty,
-      unit: parentMaterial.unit || "sheets",
-      location: location.trim(),
-      workOrderId: selectedWorkOrder,
+    const unit = parentMaterial.unit || "sheets";
+    const workOrderId = selectedWorkOrder && selectedWorkOrder !== "WO-DIRECT" ? selectedWorkOrder : "";
+    setIsSubmitting(true);
+    // Posted as a completed "CuttingReturn" warehouse document: the server receives the offcut
+    // into its "-OFF" card, values it, and the amount is credited to the work order cost.
+    const result = await upsertWarehouseMovementAsync({
+      movementNumber: "",
+      movementType: "CuttingReturn",
+      status: "Completed",
+      from: "Kesish sexi",
+      to: location.trim(),
+      workOrderId,
       operator: operator.trim(),
-      unitPriceUsd: estimatedUnitPrice,
+      reason: `Delovoy otxod kirimi${workOrderId ? ` — ${workOrderId}` : ""}`,
+      materialSku: parentMaterial.sku,
+      materialName: parentMaterial.name,
+      sheetFormat: cutDimensions.trim(),
+      quantity: qty,
+      receivedQty: qty,
+      unit,
+      items: [
+        {
+          id: `item-${Date.now()}`,
+          sku: parentMaterial.sku,
+          name: parentMaterial.name,
+          sheetFormat: cutDimensions.trim(),
+          quantity: qty,
+          receivedQty: qty,
+          unit,
+          valuationPercent: Math.min(100, Math.max(0, parseFloat(valuationPercent) || 0)),
+        },
+      ],
     });
+    setIsSubmitting(false);
 
-    onOpenChange(false);
+    // On failure the store has already shown the server's error; keep the dialog open.
+    if (result) onOpenChange(false);
   };
 
   return (
@@ -244,6 +278,18 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
               </div>
             </div>
 
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-foreground">Qoldiq bahosi, %</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                value={valuationPercent}
+                onChange={(e) => setValuationPercent(e.target.value)}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+
             {/* Operator & Price */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -303,6 +349,7 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
             <Button
               type="submit"
               size="sm"
+              disabled={isSubmitting || !location.trim() || !parentMaterial}
               className="bg-amber-600 hover:bg-amber-700 text-white h-8 text-xs gap-1.5 shadow-none"
             >
               <Check className="size-3.5" />
