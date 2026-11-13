@@ -371,7 +371,11 @@
     "toggleTheme": "Сменить тему оформления",
     "refreshAllData": "Обновить данные рабочего места",
     "openAiCopilot": "Открыть чат с ИИ-Ассистентом",
-    "signOut": "Выйти из системы"
+    "signOut": "Выйти из системы",
+    "toggleDevMode": "Переключить Dev-режим (статус-бар)",
+    "toggleInspector": "Переключить инспектор элементов (AI)",
+    "enabled": "Вкл",
+    "disabled": "Выкл"
   },
   "Modules": {
     "production": "Производство",

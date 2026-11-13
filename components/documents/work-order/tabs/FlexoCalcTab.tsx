@@ -75,6 +75,7 @@ interface Props {
   setOrderAttachments?: React.Dispatch<React.SetStateAction<OrderAttachment[]>>;
   onAuditLog?: (action: string, detail: string) => void;
   onFlexoSave?: (gearTeeth: number) => void;
+  onFlexoFilmAttached?: (payload: { colorCount: number; filename: string; gearTeeth?: number }) => void;
   onSwitchTab?: (tabKey: string) => void;
   onMarkUnsaved?: () => void;
 }
@@ -86,6 +87,7 @@ export function FlexoCalcTab({
   setOrderAttachments,
   onAuditLog,
   onFlexoSave,
+  onFlexoFilmAttached,
   onSwitchTab,
   onMarkUnsaved,
 }: Props) {
@@ -400,9 +402,33 @@ export function FlexoCalcTab({
       };
 
       setOrderAttachments((prev) => [newAttachment, ...prev]);
+      const uniqueColors = new Set<string>();
+      if (generateData?.items?.length) {
+        generateData.items.forEach((item) => {
+          (item.colors || []).forEach((c) => {
+            if (c && c.trim()) uniqueColors.add(c.trim().toLowerCase());
+          });
+        });
+      }
+      if (uniqueColors.size === 0 && analyzeData?.designs?.length) {
+        analyzeData.designs.forEach((d) => {
+          (d.colors || []).forEach((c) => {
+            const key = (c.name || c.hex_code || String(c.color_id)).trim().toLowerCase();
+            if (key) uniqueColors.add(key);
+          });
+        });
+      }
+      const actualColorCount = Math.max(1, uniqueColors.size);
+      const firstDesign = analyzeData?.designs?.[0];
+      const activeGear = firstDesign ? (gearOverrides[firstDesign.item_key] || firstDesign.suggested_gear) : undefined;
+      onFlexoFilmAttached?.({
+        colorCount: actualColorCount,
+        filename: activeOutputFile.filename,
+        gearTeeth: activeGear,
+      });
       onMarkUnsaved?.();
       setAttachSuccessMsg(t("attachedSuccess"));
-      onAuditLog?.("Flexo Film Attached", `${activeOutputFile.filename}`);
+      onAuditLog?.("Flexo Film Attached", `${activeOutputFile.filename} (${actualColorCount} rang)`);
     } catch (err: any) {
       console.error("Attach failed:", err);
       alert(`Biriktirishda xatolik: ${err?.message || err}`);

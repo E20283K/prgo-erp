@@ -34,16 +34,19 @@ export function parseGrammageFromStock(stock?: string, fallback = 300): number {
 export function getDefaultKashirovkaLayers(
   mode: KashirovkaMode,
   baseStock = "Coated Cardboard 300g/m²",
-  baseCoating = "Soft-Touch Matte + Spot UV"
+  baseCoating = "Soft-Touch Matte + Spot UV",
+  explicitBaseGsm?: number
 ): SubstrateLayer[] {
   if (mode === "none") return [];
-  const baseGsm = parseGrammageFromStock(baseStock, 300);
+  const parsedGsm = explicitBaseGsm && explicitBaseGsm > 0 ? explicitBaseGsm : parseGrammageFromStock(baseStock, 300);
+  const baseGsm = explicitBaseGsm && explicitBaseGsm > 0 ? Math.max(parsedGsm, 100) : parsedGsm;
+  const useBaseDirect = Boolean(explicitBaseGsm && explicitBaseGsm > 0) || baseGsm >= 250;
   const topLayer: SubstrateLayer = {
     id: "layer-top",
     role: "top_liner",
     label: "Face Liner (Front / Лицо)",
-    paperStock: baseGsm >= 250 ? baseStock : "Coated Cardboard 300g/m²",
-    grammage: baseGsm >= 250 ? baseGsm : 300,
+    paperStock: useBaseDirect ? baseStock : "Coated Cardboard 300g/m²",
+    grammage: useBaseDirect ? baseGsm : 300,
     colors: "4+0",
     coating: baseCoating || "Matte Lamination (1S)",
   };
@@ -51,8 +54,8 @@ export function getDefaultKashirovkaLayers(
     id: "layer-bottom",
     role: "bottom_liner",
     label: "Back Liner (Reverse / Оборот)",
-    paperStock: baseGsm >= 250 ? baseStock : "Coated Cardboard 300g/m²",
-    grammage: baseGsm >= 250 ? baseGsm : 300,
+    paperStock: useBaseDirect ? baseStock : "Coated Cardboard 300g/m²",
+    grammage: useBaseDirect ? baseGsm : 300,
     colors: "4+0",
     coating: "Matte Lamination (1S)",
   };
@@ -61,8 +64,8 @@ export function getDefaultKashirovkaLayers(
       id: "layer-core",
       role: "core_board",
       label: "Inner Core Filler (Вставка)",
-      paperStock: "Colorplan Ebony Black Core 300g/m²",
-      grammage: 300,
+      paperStock: useBaseDirect ? baseStock : "Colorplan Ebony Black Core 300g/m²",
+      grammage: useBaseDirect ? baseGsm : 300,
       colors: "0+0",
       coating: "None / Uncoated",
     };
@@ -642,6 +645,7 @@ export interface WorkOrderFormData {
   actualEndDate?: string;
   paperStock: string;
   paperDensity?: number;
+  targetGsm?: number;
   grammage?: number;
   coating: string;
   coatingZone?: string;

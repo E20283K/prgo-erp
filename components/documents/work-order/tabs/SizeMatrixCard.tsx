@@ -185,7 +185,7 @@ export function SizeMatrixCard({
           (m) =>
             !m.toLowerCase().startsWith("stiker #") &&
             !m.toLowerCase().startsWith("sticker #") &&
-            !m.toLowerCase().startsWith("stiker ")
+            true
         )
       : rawModels;
     return cleanModels.length > 0 ? cleanModels : ["Model 1"];
@@ -196,7 +196,7 @@ export function SizeMatrixCard({
       new Set(parsedItems.map((i) => i.resolvedSize).filter(Boolean))
     );
     const cleanCols = isSticker
-      ? rawCols.filter((c) => !c.toLowerCase().endsWith("mm"))
+      ? rawCols
       : rawCols;
     return cleanCols.length > 0
       ? cleanCols
@@ -213,7 +213,7 @@ export function SizeMatrixCard({
           (m) =>
             !m.toLowerCase().startsWith("stiker #") &&
             !m.toLowerCase().startsWith("sticker #") &&
-            !m.toLowerCase().startsWith("stiker ")
+            true
         )
       : rawModels;
 
@@ -221,7 +221,7 @@ export function SizeMatrixCard({
       new Set(parsedItems.map((i) => i.resolvedSize).filter(Boolean))
     );
     const cleanCols = isSticker
-      ? rawCols.filter((c) => !c.toLowerCase().endsWith("mm"))
+      ? rawCols
       : rawCols;
 
     if (cleanModels.length > 0) {
@@ -1762,7 +1762,7 @@ export function SizeMatrixCard({
                 <span>Stikerlar ro&apos;yxati</span>
               </button>
             )}
-            {!isSticker && (
+            {/* Available in all technologies including Flexo */ true && (
               <>
                 <button
                   type="button"

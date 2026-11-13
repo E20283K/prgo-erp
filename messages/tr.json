@@ -371,7 +371,11 @@
     "toggleTheme": "Temayı Değiştir",
     "refreshAllData": "Verileri Yenile ve Eşitle",
     "openAiCopilot": "AI Asistan Sohbetini Aç",
-    "signOut": "Oturumu Kapat"
+    "signOut": "Oturumu Kapat",
+    "toggleDevMode": "Geliştirici Modunu Aç / Kapat",
+    "toggleInspector": "Öğe Denetleyicisini Aç / Kapat (AI)",
+    "enabled": "Açık",
+    "disabled": "Kapalı"
   },
   "Modules": {
     "production": "Üretim",

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Factory,
   Layers,
@@ -20,7 +20,7 @@ import {
   Hourglass,
   Gauge,
   Pencil,
-  SlidersHorizontal,
+  SlidersHorizontal, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RouteStep, ShiftEvent } from "../types";
+
+export function formatElapsedHMS(totalSeconds: number) { const s = Math.max(0, Math.floor(totalSeconds)); const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60); const sec = s % 60; return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`; }
 
 export function parseQtyString(qtyStr: string, fallbackTarget = 0) {
   const parts = (qtyStr || "").split("/");
@@ -126,6 +128,47 @@ export function ShiftTimelineTab({
   const [searchQuery, setSearchQuery] = useState("");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const hasOperation = operations.length > 0 && Boolean(selectedOp.id);
+  const hasActiveRunningOp = operations.some((op) => op.status === "In Progress");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasActiveRunningOp) return;
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [hasActiveRunningOp]);
+  const { totalElapsedSeconds, totalPlannedHours } = useMemo(() => {
+    let elapsed = 0;
+    let planned = 0;
+    for (const op of operations) {
+      planned += Number(op.duration) || 0;
+      if (op.actualDurationMinutes != null && op.actualDurationMinutes > 0 && op.status !== "In Progress") {
+        elapsed += Math.round(op.actualDurationMinutes * 60);
+      } else if (op.startedAt) {
+        const start = new Date(op.startedAt).getTime();
+        const end = op.completedAt
+          ? new Date(op.completedAt).getTime()
+          : op.status === "In Progress"
+          ? nowMs
+          : op.pausedAt
+          ? new Date(op.pausedAt).getTime()
+          : start;
+        if (!isNaN(start) && !isNaN(end) && end > start) {
+          elapsed += Math.floor((end - start) / 1000);
+        }
+      }
+    }
+    return { totalElapsedSeconds: elapsed, totalPlannedHours: Math.round(planned * 10) / 10 };
+  }, [operations, nowMs]);
+  const timeRatio = totalPlannedHours > 0 ? totalElapsedSeconds / (totalPlannedHours * 3600) : 0;
+  const timerBadgeClass =
+    timeRatio > 1
+      ? "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30"
+      : timeRatio >= 0.85
+      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+      : hasActiveRunningOp
+      ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30"
+      : "bg-muted/50 text-muted-foreground border-border";
 
   const { completed, target, unitSuffix, percent } = useMemo(
     () => parseQtyString(selectedOp.qtyCompleted),
@@ -360,6 +403,19 @@ export function ShiftTimelineTab({
             <span className="text-[10px] font-mono text-muted-foreground">
               ({finishedStepsCount}/{operations.length})
             </span>
+            <Badge
+              variant="outline"
+              className={cn(
+                "font-mono text-[10px] h-5 px-1.5 flex items-center gap-1",
+                timerBadgeClass
+              )}
+            >
+              <Clock className="size-3" />
+              <span>{formatElapsedHMS(totalElapsedSeconds)}</span>
+              {totalPlannedHours > 0 && (
+                <span className="opacity-75">/ {totalPlannedHours}h</span>
+              )}
+            </Badge>
           </div>
         </div>
 
@@ -537,7 +593,7 @@ export function ShiftTimelineTab({
           <div className="flex items-center gap-2 flex-wrap">
             {onChangeStepStatus && (
               <Select
-                value={selectedOp.status}
+                value={selectedOp.status} disabled={!hasOperation}
                 onValueChange={(val: string | null) => {
                   if (
                     val === "Queued" ||
@@ -586,7 +642,7 @@ export function ShiftTimelineTab({
               <Button
                 type="button"
                 size="sm"
-                onClick={() => onStartStep(selectedOp.id)}
+                onClick={() => onStartStep(selectedOp.id)} disabled={!hasOperation}
                 className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold flex items-center gap-1.5"
               >
                 <Play className="size-3.5 fill-current" />
@@ -656,7 +712,7 @@ export function ShiftTimelineTab({
             {onOpenQuickPalletLog && (
               <Button
                 type="button"
-                onClick={onOpenQuickPalletLog}
+                onClick={onOpenQuickPalletLog} disabled={!hasOperation}
                 className="h-8 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 text-xs shadow-xs"
               >
                 <Plus className="size-3.5" />

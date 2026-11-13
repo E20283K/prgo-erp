@@ -1,47 +1,178 @@
+/* ==========================================================================
+   PrintGoo WorkOrder Timeline (SVAR Gantt Theme Optimization)
+   Strictly adheres to Anti-AI-Slop & Linear/1C Enterprise Industrial Standard
+   ========================================================================== */
+
+/* 1. Base Variables for Light Theme */
 .wo-timeline .wx-willow-theme,
-.wo-timeline .wx-willow-dark-theme {
-  --wx-font-family: inherit;
+.wo-timeline {
+  --wx-font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   --wx-font-size: 12px;
   --wx-font-size-sm: 11px;
   --wx-line-height: 18px;
   --wx-line-height-sm: 14px;
-  --wx-background: var(--background);
-  --wx-background-alt: var(--muted);
-  --wx-background-hover: var(--accent);
-  --wx-color-font: var(--foreground);
-  --wx-color-font-alt: var(--muted-foreground);
-  --wx-color-secondary-font: var(--muted-foreground);
-  --wx-border-color: var(--border);
-  --wx-border: 1px solid var(--border);
-  --wx-border-medium: 1px solid var(--border);
-  --wx-gantt-border-color: var(--border);
-  --wx-gantt-border: 1px solid var(--border);
+
+  /* Surfaces & Backgrounds */
+  --wx-background: #ffffff;
+  --wx-background-alt: #f8fafc;
+  --wx-background-hover: #f1f5f9;
+
+  /* Typography */
+  --wx-color-font: #0f172a;
+  --wx-color-font-alt: #64748b;
+  --wx-color-secondary-font: #64748b;
+  --wx-color-primary: #2563eb;
+
+  /* Borders: MUST BE STRICT HEX FORMAT FOR SVAR CANVAS SUBSTRING EXTRACTION */
+  --wx-border-color: #e2e8f0;
+  --wx-border: 1px solid #e2e8f0;
+  --wx-border-medium: 1px solid #e2e8f0;
+  --wx-gantt-border-color: #e2e8f0;
+  --wx-gantt-border: 1px solid #e2e8f0;
+
+  /* Body & Timescale */
+  --wx-grid-body-row-border: 1px solid #f1f5f9;
+  --wx-grid-body-cell-border: 1px solid #f1f5f9;
+  --wx-timescale-border: 1px solid #e2e8f0;
+  --wx-timescale-font: 600 11px var(--font-sans, inherit);
+  --wx-timescale-font-color: #475569;
+  --wx-timescale-shadow: none;
+
+  /* Table / Grid */
+  --wx-grid-header-font: 600 11px var(--font-sans, inherit);
+  --wx-grid-header-font-color: #475569;
+  --wx-grid-header-shadow: none;
+  --wx-grid-body-font: 400 12px var(--font-sans, inherit);
+  --wx-grid-body-font-color: #0f172a;
+  --wx-grid-cell-padding-x: 10px;
+
+  /* Gantt Specific */
   --wx-gantt-bar-shadow: none;
   --wx-gantt-bar-border-radius: 3px;
   --wx-gantt-bar-font: 500 10px var(--font-sans, inherit);
-  --wx-gantt-holiday-background: color-mix(in oklch, var(--muted) 45%, transparent);
-  --wx-gantt-holiday-color: var(--muted-foreground);
-  --wx-gantt-select-color: color-mix(in oklch, var(--accent) 60%, transparent);
-  --wx-gantt-marker-color: var(--primary);
-  --wx-grid-header-font: 600 11px var(--font-sans, inherit);
-  --wx-grid-header-font-color: var(--muted-foreground);
-  --wx-grid-header-shadow: none;
-  --wx-grid-body-font: 400 12px var(--font-sans, inherit);
-  --wx-grid-body-font-color: var(--foreground);
-  --wx-grid-body-row-border: 1px solid var(--border);
-  --wx-grid-cell-padding-x: 8px;
-  --wx-timescale-font: 500 11px var(--font-sans, inherit);
-  --wx-timescale-font-color: var(--muted-foreground);
-  --wx-timescale-shadow: none;
-  --wx-timescale-border: 1px solid var(--border);
+  --wx-gantt-holiday-background: rgba(241, 245, 249, 0.7);
+  --wx-gantt-holiday-color: #94a3b8;
+  --wx-gantt-select-color: #f1f5f9;
+  --wx-gantt-marker-color: #2563eb;
+
   height: 100%;
   width: 100%;
 }
 
-.wo-timeline .wx-gantt {
-  background: var(--background);
+/* 2. Base Variables for Dark Theme */
+.dark .wo-timeline .wx-willow-theme,
+.dark .wo-timeline .wx-willow-dark-theme,
+.wo-timeline .wx-willow-dark-theme {
+  --wx-background: #09090b;
+  --wx-background-alt: #18181b;
+  --wx-background-hover: #27272a;
+
+  --wx-color-font: #f4f4f5;
+  --wx-color-font-alt: #a1a1aa;
+  --wx-color-secondary-font: #a1a1aa;
+  --wx-color-primary: #3b82f6;
+
+  /* Borders: STRICT HEX FORMAT */
+  --wx-border-color: #27272a;
+  --wx-border: 1px solid #27272a;
+  --wx-border-medium: 1px solid #27272a;
+  --wx-gantt-border-color: #27272a;
+  --wx-gantt-border: 1px solid #27272a;
+
+  --wx-grid-body-row-border: 1px solid #27272a;
+  --wx-grid-body-cell-border: 1px solid #27272a;
+  --wx-timescale-border: 1px solid #27272a;
+  --wx-timescale-font-color: #a1a1aa;
+
+  --wx-grid-header-font-color: #a1a1aa;
+  --wx-grid-body-font-color: #f4f4f5;
+
+  --wx-gantt-holiday-background: rgba(39, 39, 42, 0.45);
+  --wx-gantt-holiday-color: #71717a;
+  --wx-gantt-select-color: #27272a;
+  --wx-gantt-marker-color: #3b82f6;
 }
 
+/* Gantt Chart Wrapper */
+.wo-timeline .wx-gantt {
+  background: var(--wx-background);
+}
+
+/* Left Grid Table Container */
+.wo-timeline .wx-table-container {
+  border-right: 1px solid var(--wx-border-color) !important;
+  background-color: var(--wx-background);
+}
+
+/* Left Grid Header */
+.wo-timeline .wx-table .wx-header {
+  background-color: var(--wx-background-alt) !important;
+  border-bottom: 1px solid var(--wx-border-color) !important;
+}
+
+.wo-timeline .wx-table .wx-header .wx-cell {
+  color: var(--wx-grid-header-font-color) !important;
+  font-weight: 600 !important;
+  font-size: 11px !important;
+  border-right: 1px solid var(--wx-border-color) !important;
+  background: transparent !important;
+}
+
+/* Left Grid Rows */
+.wo-timeline .wx-table .wx-body .wx-row {
+  border-bottom: 1px solid var(--wx-grid-body-row-border) !important;
+  background-color: var(--wx-background);
+  transition: background-color 0.12s ease;
+}
+
+.wo-timeline .wx-table .wx-body .wx-row:hover {
+  background-color: var(--wx-background-hover) !important;
+}
+
+.wo-timeline .wx-table .wx-body .wx-cell {
+  border-right: 1px solid var(--wx-grid-body-row-border) !important;
+  color: var(--wx-color-font) !important;
+  font-size: 11px !important;
+}
+
+/* Timescale Header in Chart */
+.wo-timeline .wx-scale {
+  background-color: var(--wx-background-alt) !important;
+  border-bottom: 1px solid var(--wx-border-color) !important;
+}
+
+.wo-timeline .wx-scale .wx-row:not(:last-child) {
+  border-bottom: 1px solid var(--wx-border-color) !important;
+}
+
+.wo-timeline .wx-scale .wx-cell {
+  border-right: 1px solid var(--wx-border-color) !important;
+  color: var(--wx-timescale-font-color) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+
+/* Resizer / Splitter */
+.wo-timeline .wx-resizer {
+  background-color: var(--wx-border-color) !important;
+  width: 3px !important;
+  transition: background-color 0.15s ease;
+}
+
+.wo-timeline .wx-resizer:hover {
+  background-color: var(--wx-color-primary) !important;
+}
+
+/* Today & Weekend Columns */
+.wo-timeline .wx-today {
+  background: color-mix(in srgb, var(--wx-color-primary) 10%, transparent) !important;
+}
+
+.wo-timeline .wx-weekend {
+  background: var(--wx-gantt-holiday-background) !important;
+}
+
+/* Reset SVAR default bar so our custom WoBar segments render cleanly */
 .wo-timeline .wx-bar:not(.wx-milestone) {
   background: transparent !important;
   border: 0 !important;
@@ -54,18 +185,11 @@
 }
 
 .wo-timeline .wx-bar.wx-milestone .wx-content {
-  background: var(--primary) !important;
+  background: var(--wx-color-primary) !important;
   border-radius: 2px;
 }
 
-.wo-timeline .wx-today {
-  background: color-mix(in oklch, var(--primary) 8%, transparent) !important;
-}
-
-.wo-timeline .wx-weekend {
-  background: color-mix(in oklch, var(--muted) 45%, transparent);
-}
-
+/* Tooltips */
 .wo-timeline .wx-tooltip-area,
 .wo-timeline .wx-gantt-tooltip {
   background: transparent !important;
@@ -74,6 +198,7 @@
   border: 0 !important;
 }
 
+/* Chart and Bar Interactions */
 .wo-timeline .wx-chart {
   cursor: grab;
 }
@@ -89,11 +214,12 @@
   cursor: grabbing !important;
 }
 
+/* Overdue diagonal striping */
 .wo-segment-overdue {
   background-image: repeating-linear-gradient(
     -45deg,
-    rgba(255, 255, 255, 0.16) 0px,
-    rgba(255, 255, 255, 0.16) 4px,
+    rgba(255, 255, 255, 0.22) 0px,
+    rgba(255, 255, 255, 0.22) 4px,
     transparent 4px,
     transparent 8px
   );

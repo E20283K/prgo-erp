@@ -371,7 +371,11 @@
     "toggleTheme": "Mavzuni o'zgartirish",
     "refreshAllData": "Barcha ma'lumotlarni yangilash",
     "openAiCopilot": "AI Yordamchi chatini ochish",
-    "signOut": "Tizimdan chiqish"
+    "signOut": "Tizimdan chiqish",
+    "toggleDevMode": "Dev rejimini yoqish / o'chirish",
+    "toggleInspector": "Element inspektorini yoqish / o'chirish",
+    "enabled": "Yoqilgan",
+    "disabled": "O'chirilgan"
   },
   "Modules": {
     "production": "Ishlab chiqarish",

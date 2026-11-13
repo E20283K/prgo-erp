@@ -30,6 +30,8 @@ import {
   Wrench,
   User,
   PlayCircle,
+  PauseCircle,
+  Clock,
   ExternalLink,
   Loader2,
   CircleDot,
@@ -244,16 +246,50 @@ export function MachineDetail({ tab }: MachineDetailProps) {
   // Find active running job for sidebar summary
   const activeJob = useMemo(() => {
     return productionQueue.find((item) => {
-      const press = (item.pressMachine || "").toLowerCase();
-      const macName = (machineData.name || "").toLowerCase();
-      const macCode = (machineData.code || "").toLowerCase();
-      return (
-        macName &&
-        (press.includes(macName) || macName.includes(press) || (macCode && press.includes(macCode))) &&
-        item.stage === "In Production"
-      );
+      const press = (item.pressMachine || "").trim().toLowerCase();
+      if (!press) return false;
+      const macName = (machineData.name || "").trim().toLowerCase();
+      const macCode = (machineData.code || "").trim().toLowerCase();
+      const matchesMachine =
+        (macName && (press.includes(macName) || macName.includes(press))) ||
+        (macCode && press.includes(macCode));
+      return matchesMachine && item.stage === "In Production";
     });
   }, [productionQueue, machineData]);
+
+  const activeJobMeta = useMemo(() => {
+    const status = machineData.status || "Idle";
+    if (status === "Running") {
+      return {
+        icon: PlayCircle,
+        label: "Ishlamoqda",
+        textClass: "text-emerald-600 dark:text-emerald-400",
+        barClass: "bg-emerald-500",
+      };
+    }
+    if (status === "Setup") {
+      return {
+        icon: Clock,
+        label: "Priladka",
+        textClass: "text-blue-600 dark:text-blue-400",
+        barClass: "bg-blue-500",
+      };
+    }
+    if (status === "Maintenance") {
+      return {
+        icon: PauseCircle,
+        label: "Ta'mirda",
+        textClass: "text-amber-600 dark:text-amber-400",
+        barClass: "bg-amber-500",
+      };
+    }
+    return {
+      icon: PauseCircle,
+      label: "Kutilmoqda",
+      textClass: "text-muted-foreground",
+      barClass: "bg-muted-foreground/40",
+    };
+  }, [machineData.status]);
 
   const handlePrint = () => {
     window.print();
@@ -287,7 +323,7 @@ export function MachineDetail({ tab }: MachineDetailProps) {
       id: "queue",
       label: "Navbat & Yuklama",
       icon: Layers,
-      badge: activeJob ? "1 Faol" : undefined,
+      badge: activeJob ? (machineData.status === "Running" ? "1 Faol" : "1 Navbat") : undefined,
     },
     {
       id: "maintenance",
@@ -485,60 +521,67 @@ export function MachineDetail({ tab }: MachineDetailProps) {
                 </div>
               </SidebarSummaryCard>
 
-              {activeJob && (
-                <SidebarSummaryCard
-                  icon={PlayCircle}
-                  title={activeJob.id}
-                  subtitle={activeJob.customer}
-                >
-
-
-                <div className="space-y-1.5 text-[11px] pt-1">
-                    <p className="font-medium text-foreground truncate">
-                      {activeJob.product}
-                    </p>
-                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                      <span>Jarayon:</span>
-                      <span className="font-mono font-semibold text-foreground">
-                        {Math.round(
-                          ((activeJob.completedSheets || 0) /
-                            (activeJob.plannedSheets || activeJob.quantity || 1)) *
-                            100
-                        )}%
-                      </span>
+              {activeJob && (() => {
+                const progressPct = Math.min(
+                  100,
+                  Math.max(
+                    0,
+                    Math.round(
+                      ((activeJob.completedSheets || 0) /
+                        (activeJob.plannedSheets || activeJob.quantity || 1)) *
+                        100
+                    )
+                  )
+                );
+                return (
+                  <SidebarSummaryCard
+                    icon={activeJobMeta.icon}
+                    title={activeJob.id}
+                    subtitle={activeJob.customer}
+                  >
+                    <div className="space-y-1.5 text-[11px] pt-1">
+                      <p className="font-medium text-foreground truncate">
+                        {activeJob.product}
+                      </p>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-muted-foreground">Holat:</span>
+                        <span className={`font-semibold ${activeJobMeta.textClass}`}>
+                          {activeJobMeta.label}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                        <span>Jarayon:</span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {progressPct}%
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${activeJobMeta.barClass}`}
+                          style={{ width: `${progressPct}%` }}
+                        />
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          openTab({
+                            id: activeJob.id,
+                            title: `${activeJob.id}`,
+                            type: "work-order",
+                            module: "production",
+                            activeLevel3Tab: "overview",
+                          })
+                        }
+                        className="w-full h-6 text-[10px] gap-1 mt-1"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Buyurtmani Ko'rish
+                      </Button>
                     </div>
-                    <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-500 rounded-full"
-                        style={{
-                          width: `${Math.round(
-                            ((activeJob.completedSheets || 0) /
-                              (activeJob.plannedSheets || activeJob.quantity || 1)) *
-                              100
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        openTab({
-                          id: activeJob.id,
-                          title: `${activeJob.id}`,
-                          type: "work-order",
-                          module: "production",
-                          activeLevel3Tab: "overview",
-                        })
-                      }
-                      className="w-full h-6 text-[10px] gap-1 mt-1"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      Buyurtmani Ko'rish
-                    </Button>
-                  </div>
-                </SidebarSummaryCard>
-              )}
+                  </SidebarSummaryCard>
+                );
+              })()}
             </div>
           }
           sectionsLabel="USKUNA BO'LIMLARI"

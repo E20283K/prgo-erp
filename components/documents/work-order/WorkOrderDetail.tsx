@@ -156,24 +156,9 @@ export function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: 
   const isUsd = (data.currency || "UZS").toUpperCase() === "USD";
 
   // 1. CTP / Polimer formalar:
-  // Offset uchun CTP formalar faqat Imposition ("Montaj / Hisob") bo'limida
-  // "Buyurtmaga qo'llash" tugmasi bosilgandan keyin haqiqiy qolip formati va soni bilan shakllanadi.
-  if (dept === "Flexo") {
-    const isDraftDocNo = !docNo || docNo.startsWith("draft-") || docNo.startsWith("temp-");
-    const cleanDocNo = !isDraftDocNo ? docNo : (data.product || "WO");
-    items.push({
-      id: `TL-FLX-${Date.now()}`,
-      category: "flexo_polymer",
-      name: `${cleanDocNo} Flexo Polimer Formalar`,
-      specDetails: `Digital Plate 1.14mm, ${data.flexoColors || 4} rang`,
-      quantity: data.flexoColors || 4,
-      unit: "dona",
-      estimatedCost: isUsd ? 35 : 450000,
-      currency: data.currency || "UZS",
-      status: "Draft",
-      createdAt: new Date().toISOString(),
-    });
-  }
+  // Offset uchun CTP formalar faqat Imposition ("Montaj / Hisob") bo'limida,
+  // Flexo uchun polimer formalar esa faqat FlexoCalcTab da yakuniy fayl biriktirilgandan keyin
+  // haqiqiy ranglar soni bilan shakllanadi.
 
   // 2. Kesish shtampi (agar shaklli kesim yoki die-cut bo'lsa)
   if (
@@ -621,7 +606,43 @@ export function recalculateRouteStepsForOrder(
   );
   const ctpCount = ctpItem ? Math.max(1, Number(ctpItem.quantity) || 1) : 4;
 
+  const isKashirovkaOrder = Boolean(form.kashirovkaMode && form.kashirovkaMode !== "none");
+  const isSeparateSheets = form.kashirovkaStrategy === "separate_sheets";
+  const layers = form.kashirovkaLayers || [];
+  const printedLinersCount =
+    layers.length > 0
+      ? layers.filter((l) => l.role !== "core_board" && l.colors !== "0+0").length
+      : 2;
+
+  const isKashirovkaOp = (op: RouteStep, matchedTariff: TariffRecord | null) =>
+    matchedTariff?.category === "Kashirovka (Mounting)" ||
+    op.calcUnit === "1,000 glue passes" ||
+    /kashir|mounting|dupleks|tripleks/i.test(op.name || "");
+
+  const findTariff = (op: RouteStep) =>
+    tariffs.find(
+      (t) =>
+        (op.tariffId && t.id === op.tariffId) ||
+        (op.tariffCode && t.code === op.tariffCode)
+    ) || null;
+
+  const kashirovkaStepIndex = steps.findIndex((op) =>
+    isKashirovkaOp(op, findTariff(op))
+  );
+
+  const isPrintOpName = (op: RouteStep) =>
+    /bosma|print|ofset/i.test(op.name || "") || op.calcUnit === "1,000 impressions";
+  const isPreFinishOpName = (op: RouteStep) =>
+    /laminat|lak|varnish|uv/i.test(op.name || "") &&
+    !/kashir|mounting|tigel|die|kesish|yelim/i.test(op.name || "");
+
+  const preSteps =
+    kashirovkaStepIndex !== -1 ? steps.slice(0, kashirovkaStepIndex) : steps;
+  const prePrintStepsCount = preSteps.filter(isPrintOpName).length;
+  const preFinishStepsCount = preSteps.filter(isPreFinishOpName).length;
+
   return steps.map((op, idx) => {
+    const matchedTariff = findTariff(op);
     const isPlateOp =
       op.calcUnit === "1 plate" || /ctp|qolip|polimer|plate/i.test(op.name || "");
     const isSheetOp =
@@ -638,20 +659,29 @@ export function recalculateRouteStepsForOrder(
       targetNum = ctpCount;
       unitSuffix = " dona";
     } else if (isSheetOp && plannedSheets > 0) {
-      targetNum = plannedSheets;
+      let sheetMultiplier = 1;
+      const isBeforeKashirovka =
+        kashirovkaStepIndex === -1 || idx < kashirovkaStepIndex;
+      if (
+        isKashirovkaOrder &&
+        isSeparateSheets &&
+        printedLinersCount > 1 &&
+        isBeforeKashirovka &&
+        !isKashirovkaOp(op, matchedTariff)
+      ) {
+        if (isPrintOpName(op) && prePrintStepsCount <= 1) {
+          sheetMultiplier = printedLinersCount;
+        } else if (isPreFinishOpName(op) && preFinishStepsCount <= 1) {
+          sheetMultiplier = printedLinersCount;
+        }
+      }
+      targetNum = plannedSheets * sheetMultiplier;
       unitSuffix = " list";
     }
 
     const doneMatch = (op.qtyCompleted || "").match(/^([\d,\s]+)\s*\//);
     const donePrefix = doneMatch ? doneMatch[1].trim() : "0";
     const nextQtyCompleted = `${donePrefix} / ${targetNum.toLocaleString()}${unitSuffix}`;
-
-    const matchedTariff =
-      tariffs.find(
-        (t) =>
-          (op.tariffId && t.id === op.tariffId) ||
-          (op.tariffCode && t.code === op.tariffCode)
-      ) || null;
 
     if (matchedTariff) {
       const est = computeTariffEstimate(matchedTariff, targetNum);
@@ -991,6 +1021,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     deadline: data.deadline || initialQueueItem?.deadline || "",
     actualEndDate: data.actualEndDate || initialQueueItem?.actualEndDate || "",
     paperStock: data.paperStock || initialQueueItem?.paperStock || "",
+    paperDensity: data.paperDensity ?? initialQueueItem?.paperDensity ?? undefined,
+    targetGsm: data.targetGsm ?? initialQueueItem?.targetGsm ?? undefined,
     coating: data.coating || initialQueueItem?.coating || "",
     coatingStockSku: data.coatingStockSku || (initialQueueItem as any)?.coatingStockSku || "",
     coatingStockName: data.coatingStockName || (initialQueueItem as any)?.coatingStockName || "",
@@ -1979,7 +2011,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const shouldSyncOperations =
       !updates.operations &&
       Object.keys(updates).some((f) =>
-        ["quantity", "plannedSheets", "toolingItems"].includes(f)
+        [
+          "quantity",
+          "plannedSheets",
+          "toolingItems",
+          "kashirovkaMode",
+          "kashirovkaStrategy",
+          "kashirovkaLayers",
+        ].includes(f)
       );
 
     const nextForm = { ...formData, ...updates };
@@ -2037,25 +2076,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleDepartmentChange = (newDept: string) => {
-    const matchedSpec = (masterSpecifications || []).find((s) => s.department === newDept);
-    const defaultRecipe = matchedSpec
-      ? matchedSpec.code
-      : newDept === "Flexo"
-      ? "FLEXO_NYLON_V1"
-      : newDept === "Jacquard"
-      ? "JACQ_WOVEN_V1"
-      : "OFFSET_STD_V1";
     const available = MACHINE_MAP[newDept] || [];
     const defaultMachine = available[0] || formData.pressMachine;
     setFormData((prev) => ({
       ...prev,
       department: newDept as any,
-      recipe: defaultRecipe,
       pressMachine: defaultMachine,
     }));
     updateTabData(tab.id, {
       department: newDept,
-      recipe: defaultRecipe,
       pressMachine: defaultMachine,
     });
     setTabUnsaved(tab.id, true);
@@ -3314,52 +3343,27 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   </div>
                 </InfoRow>
 
-                {/* 1.1 Jami Summa */}
-                <InfoRow label={tOrder("totalAmount")}>
-                  <div className="flex flex-col items-end text-right">
-                    <span className="font-mono font-bold text-foreground">
-                      {formatMoney(formData.priceTotal, formData.currency, 0)}
-                    </span>
-                    <span className="font-mono text-[10px] text-muted-foreground">
-                      ~{formatMoney(
-                        (formData.currency || "UZS").toUpperCase() === "USD"
-                          ? formData.priceTotal * (formData.exchangeRate || 12850)
-                          : ((formData.exchangeRate || 12850) > 0 ? formData.priceTotal / (formData.exchangeRate || 12850) : 0),
-                        (formData.currency || "UZS").toUpperCase() === "USD" ? "UZS" : "USD",
-                        0
-                      )}
-                    </span>
-                  </div>
-                </InfoRow>
-
-                {/* Valyuta va Kurs */}
-                <InfoRow label={tOrder("currencyLabel")}>
-                  <div className="flex items-center gap-1">
-                    <Select
-                      value={formData.currency || "UZS"}
-                      onValueChange={(val) => {
-                        if (val) handleFieldChange("currency", val);
-                      }}
-                      disabled={isOperator}
-                    >
-                      <SelectTrigger className="h-6 w-16 px-1.5 text-[11px] font-mono border-border bg-card">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="UZS">UZS</SelectItem>
-                        <SelectItem value="USD">USD</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      type="number"
-                      value={formData.exchangeRate || 12850}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange("exchangeRate", Number(e.target.value) || 12850)}
-                      disabled={isOperator}
-                      className="h-6 w-20 px-1 text-[11px] font-mono text-right"
-                      title={tOrder("exchangeRateTooltip")}
-                    />
-                  </div>
-                </InfoRow>
+                {/* 1.1 Jami Summa (faqat menejer/rahbarlar uchun, read-only) */}
+                {!isOperator && (
+                  <InfoRow label={tOrder("totalAmount")}>
+                    <div className="flex flex-col items-end text-right">
+                      <span className="font-mono font-bold text-foreground">
+                        {formatMoney(formData.priceTotal, formData.currency, 0)}
+                      </span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        ~{formatMoney(
+                          (formData.currency || "UZS").toUpperCase() === "USD"
+                            ? formData.priceTotal * (formData.exchangeRate || 12850)
+                            : ((formData.exchangeRate || 12850) > 0 ? formData.priceTotal / (formData.exchangeRate || 12850) : 0),
+                          (formData.currency || "UZS").toUpperCase() === "USD" ? "UZS" : "USD",
+                          0
+                        )}
+                        {" · "}
+                        {(formData.exchangeRate || 12850).toLocaleString()}
+                      </span>
+                    </div>
+                  </InfoRow>
+                )}
 
                 {/* 2. Qog'oz / Xomashyo */}
                 <InfoRow label={tOrder("paperLabel")} title={formData.paperStock}>
@@ -3692,6 +3696,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     defaultProdW={formData.width}
                     defaultProdH={formData.height}
                     defaultBleed={formData.bleed}
+                    orderAttachments={orderAttachments}
+                    setOrderAttachments={setOrderAttachments}
+                    onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
                     onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                     onAuditLog={() => {}}
                     onFlexoSave={(res: any) => {
@@ -3705,6 +3712,64 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                           flexoWebWidth: res.webWidth,
                         }));
                       }
+                    }}
+                    onFlexoFilmAttached={({ colorCount, filename, gearTeeth }) => {
+                      const rawDocNo = data.docNo || tab.id;
+                      const isDraftDocNo = !rawDocNo || rawDocNo.startsWith("draft-") || rawDocNo.startsWith("temp-");
+                      const cleanDocNo = !isDraftDocNo ? rawDocNo : (formData.product || "WO");
+                      const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
+                      const perPlateCost = isUsd ? 10 : 112500;
+                      const nextCost = perPlateCost * colorCount;
+                      setFormData((prev) => {
+                        const existing = prev.toolingItems || [];
+                        const draftIdx = existing.findIndex(
+                          (it) => it.category === "flexo_polymer" && it.status === "Draft" && !it.purchaseOrderNo
+                        );
+                        let nextTooling: WorkOrderToolingItem[];
+                        if (draftIdx >= 0) {
+                          nextTooling = existing.map((it, idx) =>
+                            idx === draftIdx
+                              ? {
+                                  ...it,
+                                  specDetails: `Digital Plate 1.14mm, ${colorCount} rang (${filename})`,
+                                  quantity: colorCount,
+                                  estimatedCost: nextCost,
+                                }
+                              : it
+                          );
+                        } else {
+                          nextTooling = [
+                            ...existing,
+                            {
+                              id: `TL-FLX-${Date.now()}`,
+                              category: "flexo_polymer",
+                              name: `${cleanDocNo} Flexo Polimer Formalar`,
+                              specDetails: `Digital Plate 1.14mm, ${colorCount} rang (${filename})`,
+                              quantity: colorCount,
+                              unit: "dona",
+                              estimatedCost: nextCost,
+                              currency: prev.currency || "UZS",
+                              status: "Draft",
+                              createdAt: new Date().toISOString(),
+                            },
+                          ];
+                        }
+                        const totalCost = nextTooling.reduce(
+                          (sum, it) => sum + (it.actualCost !== undefined ? it.actualCost : it.estimatedCost || 0),
+                          0
+                        );
+                        return {
+                          ...prev,
+                          flexoColors: colorCount,
+                          ...(gearTeeth ? { flexoCylinderTeeth: gearTeeth } : {}),
+                          toolingItems: nextTooling,
+                          toolingProcurementCost: totalCost,
+                          toolingProcurementNeeded: nextTooling.some(
+                            (it) => it.status === "Draft" || it.status === "Ordered"
+                          ),
+                        };
+                      });
+                      setTabUnsaved(tab.id, true);
                     }}
                   />
                 )}
@@ -3745,13 +3810,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     );
 
                     const platesReady =
-                      ctpItems.length > 0
-                        ? ctpItems.every((i) => i.status === "Ready")
-                        : true;
+                      ctpItems.length > 0 && ctpItems.every((i) => i.status === "Ready");
                     const toolingReady =
-                      dieItems.length > 0
-                        ? dieItems.every((i) => i.status === "Ready")
-                        : true;
+                      dieItems.length > 0 && dieItems.every((i) => i.status === "Ready");
 
                     const targetId = data.docNo || tab.id;
                     const currentQueueItem = useWorkspaceStore.getState().productionQueue.find((q) => {
@@ -3859,9 +3920,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   setSelectedTimelineOpId(opId);
                   setLevel3Tab(tab.id, "timeline");
                 }}
-                onOpenPackaging={() => setIsPackagingOpen(true)}
-                isPacked={formData.packagingData?.isCompleted}
-                packagesCount={formData.packagingData?.totalBoxes}
                 onStageChange={(stage) => handleFieldChange("stage", stage)}
               />
             )}
@@ -3989,6 +4047,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           onSave={handleSaveOperationDialog}
           customerName={formData.customer}
           orderQuantity={formData.quantity}
+          plannedSheets={formData.plannedSheets}
+          currency={formData.currency}
+          exchangeRate={formData.exchangeRate}
         />
       )}
 

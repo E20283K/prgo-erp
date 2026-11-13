@@ -29,8 +29,13 @@ import {
   RefreshCw,
   LogOut,
   Bell,
+  Globe,
+  Terminal,
+  Crosshair,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import { usePathname, useRouter } from "@/i18n/routing";
+import { LANGUAGES } from "@/components/layout/LanguageSwitcher";
 
 export function CommandPalette() {
   const [isMac, setIsMac] = React.useState(false);
@@ -42,6 +47,17 @@ export function CommandPalette() {
   const tCmd = useTranslations("CommandPalette");
   const tMod = useTranslations("Modules");
   const tCommon = useTranslations("Common");
+  const tLang = useTranslations("LanguageSwitcher");
+  const locale = useLocale();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const handleSelectLanguage = (nextLocale: string) => {
+    setCommandOpen(false);
+    if (nextLocale !== locale) {
+      router.replace(pathname, { locale: nextLocale });
+    }
+  };
 
   const {
     isCommandOpen,
@@ -60,6 +76,10 @@ export function CommandPalette() {
     notifications,
     setNotifPanelOpen,
     setAiChatOpen,
+    showStatusBar,
+    toggleStatusBar,
+    isInspectorActive,
+    toggleInspectorMode,
   } = useWorkspaceStore();
 
   const handleSelectModule = (modId: string) => {
@@ -203,6 +223,35 @@ export function CommandPalette() {
             <span>{tCmd("refreshAllData")}</span>
             <CommandShortcut className="text-[10px]">F5</CommandShortcut>
           </CommandItem>
+          <CommandItem
+            keywords={["dev", "dev mode", "developer", "status bar", "debug"]}
+            onSelect={() => {
+              toggleStatusBar();
+              setCommandOpen(false);
+            }}
+            className="gap-2.5"
+          >
+            <Terminal className="w-4 h-4 text-primary" />
+            <span>{tCmd("toggleDevMode")}</span>
+            <span className="ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+              {showStatusBar ? tCmd("enabled") : tCmd("disabled")}
+            </span>
+          </CommandItem>
+          <CommandItem
+            keywords={["inspect", "inspector", "dev", "element", "ai", "crosshair"]}
+            onSelect={() => {
+              setCommandOpen(false);
+              setTimeout(() => toggleInspectorMode(), 80);
+            }}
+            className="gap-2.5"
+          >
+            <Crosshair className="w-4 h-4 text-cyan-500 dark:text-cyan-400" />
+            <span>{tCmd("toggleInspector")}</span>
+            <span className="ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+              {isInspectorActive ? tCmd("enabled") : tCmd("disabled")}
+            </span>
+            <CommandShortcut className="ml-1 text-[10px]">Ctrl+Shift+C</CommandShortcut>
+          </CommandItem>
           {activeTabId && (
             <CommandItem onSelect={handleCloseActiveTab} className="gap-2.5 text-destructive">
               <X className="w-4 h-4" />
@@ -220,6 +269,33 @@ export function CommandPalette() {
             <LogOut className="w-4 h-4" />
             <span>{tCmd("signOut")}</span>
           </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        {/* Language Switcher */}
+        <CommandGroup heading={tLang("title")}>
+          {LANGUAGES.map((lang) => {
+            const isCurrent = locale === lang.code;
+            return (
+              <CommandItem
+                key={`lang-${lang.code}`}
+                value={`${tLang("title")} ${tLang(lang.code)} ${lang.label} ${lang.short}`}
+                keywords={["language", "til", "язык", "dil", lang.code, lang.label, lang.short]}
+                data-checked={isCurrent}
+                onSelect={() => handleSelectLanguage(lang.code)}
+                className="gap-2.5"
+              >
+                <Globe className={`w-4 h-4 ${isCurrent ? "text-primary" : "text-muted-foreground"}`} />
+                <span className={isCurrent ? "font-medium" : undefined}>
+                  {tLang(lang.code) || lang.label}
+                </span>
+                <span className="text-[10px] font-mono text-muted-foreground uppercase">
+                  {lang.short}
+                </span>
+              </CommandItem>
+            );
+          })}
         </CommandGroup>
 
         <CommandSeparator />

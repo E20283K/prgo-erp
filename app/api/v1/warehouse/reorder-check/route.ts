@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAndTriggerReorder } from "@/lib/server/warehouseService";
+import { requireApiUser, WAREHOUSE_WRITE } from "@/lib/server/apiAuth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
+  const auth = await requireApiUser(request, WAREHOUSE_WRITE);
+  if ("response" in auth) return auth.response;
+
   try {
     const body = await request.json();
     const { searchParams } = new URL(request.url);

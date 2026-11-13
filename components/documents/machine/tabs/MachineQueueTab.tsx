@@ -19,9 +19,10 @@ export function MachineQueueTab({ machine }: MachineQueueTabProps) {
 
   // Find all work order queue items assigned to this machine
   const machineQueue = (productionQueue || []).filter((item) => {
-    const press = (item.pressMachine || "").toLowerCase();
-    const macName = (machine.name || "").toLowerCase();
-    const macCode = (machine.code || "").toLowerCase();
+    const press = (item.pressMachine || "").trim().toLowerCase();
+    if (!press) return false;
+    const macName = (machine.name || "").trim().toLowerCase();
+    const macCode = (machine.code || "").trim().toLowerCase();
     return (
       (macName && (press.includes(macName) || macName.includes(press))) ||
       (macCode && press.includes(macCode))

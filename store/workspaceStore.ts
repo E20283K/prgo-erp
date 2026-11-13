@@ -1,5 +1,15 @@
 import { create } from "zustand";
 import { toast } from "@/components/ui/toast";
+
+/** Ombor API xatosini (masalan "qoldiq yetarli emas") foydalanuvchiga ko'rsatish */
+async function notifyWarehouseSaveError(res: Response, fallback: string) {
+  let message = fallback;
+  try {
+    const json = await res.clone().json();
+    if (json?.error) message = String(json.error);
+  } catch (_) {}
+  toast.add({ title: fallback, description: message === fallback ? undefined : message, type: "error" });
+}
 import { MachineRecord } from "@/components/documents/machine/types";
 import { PlantRecord, branchToPlantRecord, createEmptyPlant, generateNextPlantCode } from "@/components/documents/plant/types";
 import { TariffRecord, createEmptyTariff } from "@/components/documents/tariff/types";
@@ -552,6 +562,7 @@ export interface ProductionQueueItem {
   materials?: any[];
   colorsConfig?: any;
   paperStock?: string;
+  targetGsm?: number;
   coating?: string;
   lamination?: string;
   laminationSides?: "1s" | "2s";
@@ -1443,6 +1454,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           };
         }
       }
+      await notifyWarehouseSaveError(res, "Harakat hujjatini saqlab bo'lmadi");
       return false;
     } catch (e) {
       console.error("Failed to save warehouse movement:", e);
@@ -1490,6 +1502,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           };
         }
       }
+      await notifyWarehouseSaveError(res, "Kirim hujjatini saqlab bo'lmadi");
       return null;
     } catch (e) {
       console.error("Failed to save warehouse receipt:", e);
@@ -1883,9 +1896,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const json = await res.json();
         if (json.success) {
           get().loadInventoryCounts(companyCode);
+          get().loadWarehouseStock(companyCode);
           return true;
         }
       }
+      await notifyWarehouseSaveError(res, "Inventarizatsiyani saqlab bo'lmadi");
       return false;
     } catch (e) {
       console.error("Failed to save inventory count:", e);
@@ -3914,7 +3929,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         quantity: totalQty,
         receivedQty: totalQty,
         unit: lineItems[0]?.unit || "birlik",
-        from: "Asosiy xomashyo ombori",
+        from: (() => {
+          // API qatorlarida locationName, eski lokal yozuvlarda location bo'ladi
+          const src: any = state.warehouseStock.find((st) =>
+            validItems.some((m) => m.sku && m.sku.toLowerCase() === st.sku.toLowerCase())
+          );
+          return src?.locationName || src?.location || "Xomashyo ombori";
+        })(),
         to: payload.pressMachine || "Ishlab chiqarish sexi",
         reason:
           payload.reason ||
@@ -3946,13 +3967,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     // Asynchronous backend persistence
     if (typeof window !== "undefined") {
+      // Raqamni server beradi (ISSUE-NEW-* — qoralama belgisi); xato bo'lsa optimistik qoldiq qayta yuklanadi
       fetch("/api/v1/warehouse/movements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(resultRecord!),
-      }).catch((err) => {
-        console.warn("Async warehouse movement persist warning:", err);
-      });
+        body: JSON.stringify({ ...resultRecord!, id: `ISSUE-NEW-${Date.now()}`, movementNumber: undefined }),
+      })
+        .then(async (res) => {
+          if (!res.ok) await notifyWarehouseSaveError(res, "Xomashyo sarfini omborda o'tkazib bo'lmadi");
+        })
+        .catch((err) => {
+          console.warn("Async warehouse movement persist warning:", err);
+        })
+        .finally(() => {
+          get().loadWarehouseMovements();
+          get().loadWarehouseStock();
+        });
     }
 
     return resultRecord!;

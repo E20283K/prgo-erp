@@ -66,6 +66,7 @@ import {
   SubstrateLayer,
   getDefaultKashirovkaLayers,
   calculateKashirovkaTotals,
+  parseGrammageFromStock,
   WorkOrderSampleData,
   OrderAttachment,
   SkuArtwork,
@@ -318,7 +319,10 @@ export function SpecificationsTab({
       warehouseStock
         .filter(
           (w) =>
-            w.category === "Paper & Board" ||
+            ((formData.department === "Flexo" ||
+              (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false))
+              ? w.category === "Roll & Label"
+              : w.category === "Paper & Board") ||
             w.category === "Roll & Label" ||
             w.category === "Offcuts & Scraps"
         )
@@ -355,7 +359,7 @@ export function SpecificationsTab({
     }
 
     return options;
-  }, [warehouseStock, formData.paperStock]);
+  }, [warehouseStock, formData.paperStock, formData.department, formData.recipe]);
 
   const matchedStockItem = useMemo(() => {
     if (!formData.paperStock) return null;
@@ -890,7 +894,7 @@ export function SpecificationsTab({
     if (formData.kashirovkaLayers && formData.kashirovkaLayers.length > 0) {
       return formData.kashirovkaLayers;
     }
-    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating);
+    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating, formData.paperDensity);
   }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating]);
 
   const kashirovkaTotals = useMemo(
@@ -904,7 +908,7 @@ export function SpecificationsTab({
     if (mode === "none") {
       updates.kashirovkaLayers = [];
     } else {
-      const nextLayers = getDefaultKashirovkaLayers(mode, formData.paperStock, formData.coating);
+      const nextLayers = getDefaultKashirovkaLayers(mode, formData.paperStock, formData.coating, formData.paperDensity);
       updates.kashirovkaLayers = nextLayers;
       if (!formData.kashirovkaStrategy) {
         updates.kashirovkaStrategy = "split_half_sheet";
@@ -921,6 +925,48 @@ export function SpecificationsTab({
     }
     handleFieldChange(updates);
     onMarkUnsaved();
+  };
+
+  const buildKashirovkaSyncUpdates = (
+    stockName: string,
+    stockGsm: number,
+    targetGsmVal: number | undefined
+  ): Record<string, any> => {
+    if (!isOffset) return {};
+    const target = Number(targetGsmVal) || 0;
+    const gsm = Number(stockGsm) || 0;
+
+    if (target > 0 && gsm > 0) {
+      if (target > gsm) {
+        const nextMode: KashirovkaMode = target >= gsm * 2.5 ? "triplex" : "duplex";
+        const updates: Record<string, any> = {
+          kashirovkaMode: nextMode,
+          kashirovkaLayers: getDefaultKashirovkaLayers(nextMode, stockName, formData.coating, gsm),
+        };
+        if (!formData.kashirovkaStrategy) updates.kashirovkaStrategy = "split_half_sheet";
+        if (formData.kashirovkaGlueGsm === undefined) updates.kashirovkaGlueGsm = 25;
+        if (formData.kashirovkaMakeReadySheets === undefined) updates.kashirovkaMakeReadySheets = 50;
+        if (formData.kashirovkaCuringHours === undefined) updates.kashirovkaCuringHours = 12;
+        return updates;
+      }
+      if (kashirovkaMode !== "none") {
+        return { kashirovkaMode: "none", kashirovkaLayers: [] };
+      }
+      return {};
+    }
+
+    if (kashirovkaMode !== "none") {
+      return {
+        kashirovkaLayers: getDefaultKashirovkaLayers(
+          kashirovkaMode,
+          stockName,
+          formData.coating,
+          gsm > 0 ? gsm : undefined
+        ),
+      };
+    }
+
+    return {};
   };
 
   // Size Breakdown state
@@ -1125,6 +1171,192 @@ export function SpecificationsTab({
           {/* ════════════════════════════════════════════════════════════════
               1. FLEXO TEXTILE & RIBBON LABEL CARDS (NYLON, SATIN, COTTON)
           ════════════════════════════════════════════════════════════════ */}
+          {isFlexo && (
+            <div className="p-2.5 bg-card border border-border rounded-lg flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-foreground">
+                Flexo yo&apos;nalishi
+              </span>
+              <div className="inline-flex items-center bg-muted p-0.5 rounded-md border border-border">
+                <button
+                  type="button"
+                  disabled={isOperator}
+                  onClick={() => {
+                    handleFieldChange({
+                      labelMaterialType:
+                        formData.labelMaterialType &&
+                        ![
+                          "polyester_satin_white",
+                          "polyester_satin_black",
+                          "nylon_taffeta",
+                          "cotton_tape",
+                        ].includes(formData.labelMaterialType)
+                          ? formData.labelMaterialType
+                          : "bopp_white",
+                      itemCategory: "Label",
+                      ...(formData.paperStock &&
+                      (formData.paperStock.toLowerCase().includes("satin") ||
+                        formData.paperStock.toLowerCase().includes("nylon"))
+                        ? { paperStock: "" }
+                        : {}),
+                    });
+                    onMarkUnsaved();
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer",
+                    isSticker
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Rulonli stiker
+                </button>
+                <button
+                  type="button"
+                  disabled={isOperator}
+                  onClick={() => {
+                    handleFieldChange({
+                      labelMaterialType:
+                        formData.labelMaterialType &&
+                        [
+                          "polyester_satin_white",
+                          "polyester_satin_black",
+                          "nylon_taffeta",
+                          "cotton_tape",
+                        ].includes(formData.labelMaterialType)
+                          ? formData.labelMaterialType
+                          : "nylon_taffeta",
+                      itemCategory: "Label",
+                    });
+                    onMarkUnsaved();
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer",
+                    isTextileRibbon
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Tekstil lenta
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isSticker && (
+            <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between pb-1.5 border-b border-border">
+                <div className="flex items-center gap-1.5">
+                  <CircleDot className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="font-semibold text-xs text-foreground">
+                    Rulon parametrlari
+                  </span>
+                </div>
+                <Badge variant="outline" className="font-mono text-[10px]">
+                  {formData.flexoWebWidth || 100} mm
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    Etiketka materiali
+                  </label>
+                  <ComboboxSelect
+                    items={[
+                      { value: "bopp_white", label: "BOPP Oq" },
+                      { value: "bopp_clear", label: "BOPP Shaffof" },
+                      { value: "semi_gloss", label: "Yarim yaltiroq" },
+                      { value: "thermal_eco", label: "Termo EKO" },
+                      { value: "thermal_top", label: "Termo TOP" },
+                      { value: "pp_silver", label: "PP Kumush" },
+                    ]}
+                    value={formData.labelMaterialType || "bopp_white"}
+                    disabled={isOperator}
+                    onValueChange={(val) => {
+                      handleFieldChange("labelMaterialType", val);
+                      onMarkUnsaved();
+                    }}
+                    placeholder="Materialni tanlang..."
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    O&apos;rash yo&apos;nalishi
+                  </label>
+                  <ComboboxSelect
+                    items={[
+                      { value: "out_top", label: "Tashqariga, boshi yuqori" },
+                      { value: "out_bottom", label: "Tashqariga, boshi past" },
+                      { value: "in_top", label: "Ichkariga, boshi yuqori" },
+                      { value: "in_bottom", label: "Ichkariga, boshi past" },
+                    ]}
+                    value={formData.flexoOrientation || "out_top"}
+                    disabled={isOperator}
+                    onValueChange={(val) => {
+                      handleFieldChange("flexoOrientation", val);
+                      onMarkUnsaved();
+                    }}
+                    placeholder="Yo'nalishni tanlang..."
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    Rulon eni (mm)
+                  </label>
+                  <Input
+                    type="number"
+                    min={10}
+                    step={1}
+                    disabled={isOperator}
+                    value={formData.flexoWebWidth ?? 100}
+                    onChange={(e) => {
+                      handleFieldChange("flexoWebWidth", Number(e.target.value) || 0);
+                      onMarkUnsaved();
+                    }}
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    Oraliq X (mm)
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    disabled={isOperator}
+                    value={formData.flexoGapX ?? 3}
+                    onChange={(e) => {
+                      handleFieldChange("flexoGapX", Number(e.target.value) || 0);
+                      onMarkUnsaved();
+                    }}
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    Oraliq Y (mm)
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    disabled={isOperator}
+                    value={formData.flexoGapY ?? 3}
+                    onChange={(e) => {
+                      handleFieldChange("flexoGapY", Number(e.target.value) || 0);
+                      onMarkUnsaved();
+                    }}
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {isTextileRibbon && (
             <>
               {/* Flexo Card 1: Ribbon Dimensions & Label Fold */}
@@ -1143,14 +1375,32 @@ export function SpecificationsTab({
 
                 {/* Primary Ribbon Width & Presets */}
                 <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <label className="text-[11px] font-medium text-muted-foreground">
                       Tasma kengligi (Ribbon Width mm):
                     </label>
-                    <span className="text-[10px] font-mono text-muted-foreground">Standart kengliklar</span>
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="number"
+                        min={5}
+                        max={500}
+                        step={1}
+                        value={formData.width ?? 30}
+                        disabled={isOperator}
+                        onChange={(e) => {
+                          const nextW = Number(e.target.value) || 0;
+                          handleFieldChange("width", nextW);
+                          handleFieldChange("flexoWebWidth", nextW);
+                          onMarkUnsaved();
+                        }}
+                        className="h-7 w-20 text-xs bg-muted/20 font-mono font-semibold text-right"
+                        placeholder="mm"
+                      />
+                      <span className="text-[11px] font-mono text-muted-foreground">mm</span>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    {[15, 20, 25, 30, 35, 40, 50, 60, 70].map((w) => {
+                    {[15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 100].map((w) => {
                       const active = (formData.width ?? 30) === w;
                       return (
                         <button
@@ -1261,6 +1511,81 @@ export function SpecificationsTab({
                 </div>
 
                 <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
+                  <div className="@md:col-span-2">
+                    <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                      Ombordagi xomashyo (Real lenta ruloni):
+                    </label>
+                    <ComboboxSelect
+                      items={paperStockOptions}
+                      value={formData.paperStock}
+                      onValueChange={(val) => {
+                        const matched = warehouseStock.find(
+                          (w) =>
+                            w.name.toLowerCase() === val.toLowerCase() ||
+                            w.sku.toLowerCase() === val.toLowerCase()
+                        );
+                        const updates: Record<string, any> = {
+                          paperStock: val,
+                        };
+                        if (matched?.rollWidthMm && matched.rollWidthMm > 0) {
+                          updates.width = matched.rollWidthMm;
+                          updates.flexoWebWidth = matched.rollWidthMm;
+                        }
+                        if (matched?.grammage) {
+                          updates.paperDensity = matched.grammage;
+                        }
+                        handleFieldChange(updates);
+                        onMarkUnsaved();
+                      }}
+                      onAddNew={(newStock) => addPaperStock(newStock)}
+                      actionLabel="Yangi lenta qo'shish (Omborxona)"
+                      onAction={() => {
+                        const newSku = generateNextMaterialSku(warehouseStock);
+                        openTab({
+                          id: `stock-${newSku}`,
+                          title: `${newSku}: Yangi Lenta`,
+                          type: "warehouse-stock",
+                          module: "warehouse",
+                          isUnsaved: true,
+                          documentData: {
+                            sku: newSku,
+                            name: "",
+                            category: "Roll & Label",
+                            unit: "m",
+                            minStock: 0,
+                            currentStock: 0,
+                          },
+                        });
+                      }}
+                      placeholder="Ombordagi satin, neylon yoki paxta lentani tanlang..."
+                      disabled={isOperator}
+                      allowCustom={!isOperator}
+                      className="font-mono"
+                    />
+                    {formData.paperStock && (
+                      <div className="mt-1 flex items-center justify-between text-[11px] font-mono">
+                        {matchedStockItem ? (
+                          <span className="text-muted-foreground flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                            <span>
+                              Omborda:{" "}
+                              <strong className="text-foreground">
+                                {(matchedStockItem.available ?? matchedStockItem.stockLevel ?? 0).toLocaleString()}{" "}
+                                {matchedStockItem.unit || "m"}
+                              </strong>
+                              {matchedStockItem.rollWidthMm ? ` (Eni: ${matchedStockItem.rollWidthMm} mm)` : ""}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                            <span>Omborda mavjud emas / Maxsus material (BOM bo&apos;limida boshqariladi)</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Lenta turi (Ribbon Material):
@@ -1280,7 +1605,12 @@ export function SpecificationsTab({
                           self_adhesive_pp: "Self-Adhesive PP Roll Film",
                           semi_gloss_paper: "Semi-Gloss Label Paper",
                         };
-                        handleFieldChange("paperStock", labelStockMap[val] || val);
+                        const isGenericOrEmpty =
+                          !formData.paperStock ||
+                          Object.values(labelStockMap).includes(formData.paperStock);
+                        if (isGenericOrEmpty) {
+                          handleFieldChange("paperStock", labelStockMap[val] || val);
+                        }
                         onMarkUnsaved();
                       }}
                       placeholder="Lenta turini tanlang..."
@@ -1541,7 +1871,13 @@ export function SpecificationsTab({
                   {tDie("shape")}
                 </label>
                 <ComboboxSelect
-                  items={SHAPE_TYPE_OPTIONS}
+                  items={
+                    isSticker
+                      ? SHAPE_TYPE_OPTIONS.filter(
+                          (s) => s.value !== "folded" && s.value !== "carton_box"
+                        )
+                      : SHAPE_TYPE_OPTIONS
+                  }
                   value={formData.shapeType || "rectangle"}
                   disabled={isOperator}
                   onValueChange={(val) => {
@@ -1979,6 +2315,64 @@ export function SpecificationsTab({
               )}
             </div>
 
+            {/* Target GSM Row (Offset) */}
+            {isOffset && (
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground shrink-0">
+                  Maqsadli GSM
+                </label>
+                <div className="flex items-center gap-1.5">
+                  {(() => {
+                    const target = Number(formData.targetGsm) || 0;
+                    if (target <= 0) return null;
+                    const effectiveGsm =
+                      kashirovkaMode !== "none"
+                        ? kashirovkaTotals.netPaperGsm
+                        : formData.paperDensity || parseGrammageFromStock(formData.paperStock, 0);
+                    if (effectiveGsm <= 0) return null;
+                    const isMatched = effectiveGsm === target;
+                    return (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "h-6 text-[10px] font-mono",
+                          isMatched
+                            ? "text-emerald-600 dark:text-emerald-400 border-emerald-300"
+                            : "text-amber-600 dark:text-amber-400 border-amber-300"
+                        )}
+                      >
+                        Natija: {effectiveGsm} g/m²
+                      </Badge>
+                    );
+                  })()}
+                  <Input
+                    type="number"
+                    min={0}
+                    step={10}
+                    disabled={isOperator}
+                    value={formData.targetGsm || ""}
+                    onChange={(e) => {
+                      const nextTarget = e.target.value ? Number(e.target.value) : undefined;
+                      const currentGsm =
+                        formData.paperDensity || parseGrammageFromStock(formData.paperStock, 0);
+                      handleFieldChange({
+                        targetGsm: nextTarget,
+                        ...buildKashirovkaSyncUpdates(
+                          formData.paperStock || "",
+                          currentGsm,
+                          nextTarget
+                        ),
+                      });
+                      onMarkUnsaved();
+                    }}
+                    placeholder="600"
+                    className="h-7 w-24 text-xs font-mono text-right"
+                  />
+                  <span className="text-[11px] font-mono text-muted-foreground">g/m²</span>
+                </div>
+              </div>
+            )}
+
             {/* Paper Stock Row */}
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-1">
@@ -1988,7 +2382,18 @@ export function SpecificationsTab({
                 items={paperStockOptions}
                 value={formData.paperStock}
                 onValueChange={(val) => {
-                  const updates: Record<string, any> = { paperStock: val };
+                  const matchedForGsm = warehouseStock.find(
+                    (w) =>
+                      w.name.toLowerCase() === val.toLowerCase() ||
+                      w.sku.toLowerCase() === val.toLowerCase()
+                  );
+                  const resolvedGsm =
+                    matchedForGsm?.grammage || parseGrammageFromStock(val, 0);
+                  const updates: Record<string, any> = {
+                    paperStock: val,
+                    ...(resolvedGsm > 0 ? { paperDensity: resolvedGsm } : {}),
+                    ...buildKashirovkaSyncUpdates(val, resolvedGsm, formData.targetGsm),
+                  };
                   const matched = warehouseStock.find(
                     (w) =>
                       w.name.toLowerCase() === val.toLowerCase() ||
@@ -2579,6 +2984,45 @@ export function SpecificationsTab({
                   </div>
                 </div>
 
+                {/* Kashirovka Imposition Strategy */}
+                <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                  <span className="text-muted-foreground font-medium">Bosma usuli:</span>
+                  <div className="inline-flex items-center bg-muted p-0.5 rounded-full border border-border">
+                    <button
+                      type="button"
+                      disabled={isOperator}
+                      onClick={() => {
+                        handleFieldChange("kashirovkaStrategy", "split_half_sheet");
+                        onMarkUnsaved();
+                      }}
+                      className={cn(
+                        "px-2 py-0.5 rounded-full text-[10px] font-medium transition-all cursor-pointer",
+                        (formData.kashirovkaStrategy || "split_half_sheet") === "split_half_sheet"
+                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      1-CTP (Yarim list)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isOperator}
+                      onClick={() => {
+                        handleFieldChange("kashirovkaStrategy", "separate_sheets");
+                        onMarkUnsaved();
+                      }}
+                      className={cn(
+                        "px-2 py-0.5 rounded-full text-[10px] font-medium transition-all cursor-pointer",
+                        formData.kashirovkaStrategy === "separate_sheets"
+                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      2-CTP (Alohida listlar)
+                    </button>
+                  </div>
+                </div>
+
                 {/* Substrate Layers Breakdown */}
                 <div className="pt-2 border-t border-border/50 space-y-1.5">
                   <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
@@ -2600,7 +3044,25 @@ export function SpecificationsTab({
                           <span>{layer.grammage} gsm</span>
                           <span className="text-border">|</span>
                           <Badge variant="outline" className="h-3.5 px-1 text-[9px]">
-                            {layer.colors}
+                            <select
+                              aria-label={`${layer.label} rang rejimi`}
+                              disabled={isOperator}
+                              value={layer.colors}
+                              onChange={(e) => {
+                                const nextColor = e.target.value as SubstrateLayer["colors"];
+                                const nextLayers = kashirovkaLayers.map((l, i) =>
+                                  i === idx ? { ...l, colors: nextColor } : l
+                                );
+                                handleFieldChange("kashirovkaLayers", nextLayers);
+                                onMarkUnsaved();
+                              }}
+                              className="bg-transparent text-[10px] font-mono text-foreground outline-none cursor-pointer"
+                            >
+                              <option value="4+0">4+0</option>
+                              <option value="1+0">1+0</option>
+                              <option value="4+4">4+4</option>
+                              <option value="0+0">0+0 (Bo&apos;sh)</option>
+                            </select>
                           </Badge>
                         </div>
                       </div>

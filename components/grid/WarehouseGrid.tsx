@@ -84,6 +84,39 @@ const DEFAULT_UNITS: ComboboxOption[] = [
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+/** Reysga yuklashga tayyor: qadoqlangan va hali reysga biriktirilmagan chiqim */
+const isReadyToLoad = (s: { status?: string; manifestId?: string | null }) =>
+  s.status === "Packed" && !s.manifestId;
+
+/** Hujjat holatlarining o'zbekcha nomlari (filtr va jadval uchun); qiymat o'zi filtrda saqlanadi */
+const STATUS_LABELS: Record<string, string> = {
+  Draft: "Qoralama",
+  Reserved: "Band",
+  Picking: "Terilmoqda",
+  Packed: "Qadoqlangan",
+  Loading: "Yuklanmoqda",
+  Dispatched: "Jo'natilgan",
+  "In Transit": "Yo'lda",
+  Delivered: "Yetkazilgan",
+  Cancelled: "Bekor",
+  Pending: "Kutilmoqda",
+  Completed: "Yakunlangan",
+  Inspecting: "Nazoratda",
+  Quarantine: "Karantin",
+  Accepted: "Qabul qilingan",
+  Matched: "Mos",
+  Surplus: "Ortiqcha",
+  Shortage: "Kamomad",
+  "In Stock": "Zaxirada",
+  "Low Stock": "Kam qolgan",
+  Critical: "Kritik",
+  "Out of Stock": "Tugagan",
+  Shipped: "Jo'natilgan",
+  Scrapped: "Yaroqsiz",
+  Deficit: "Defitsit",
+};
+const statusLabel = (s: unknown) => STATUS_LABELS[String(s)] || String(s ?? "");
+
 interface WarehouseGridProps {
   type: string; // "stock-balance" | "requirements" | "movements" | "inventory" | "receipts" | "shipments" | "locations" | "finished-goods"
 }
@@ -146,9 +179,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const [isCarrierDialogOpen, setIsCarrierDialogOpen] = useState(false);
   const [isPendingFgDialogOpen, setIsPendingFgDialogOpen] = useState(false);
   const [isDispatchManifestDialogOpen, setIsDispatchManifestDialogOpen] = useState(false);
-  const [shipmentViewTab, setShipmentViewTab] = useState<"ALL" | "READY" | "MANIFESTS">(
-    type === "manifests" ? "MANIFESTS" : "ALL"
-  );
+  const [shipmentViewTab, setShipmentViewTab] = useState<"ALL" | "READY">("ALL");
   const [activeManifestRecord, setActiveManifestRecord] = useState<any | null>(null);
   const [manifestInitialShipmentIds, setManifestInitialShipmentIds] = useState<string[] | undefined>(undefined);
   const [carrierModalData, setCarrierModalData] = useState<Partial<CarrierProfile> | undefined>(undefined);
@@ -525,7 +556,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       return;
     }
     if (type === "shipments" || type === "manifests") {
-      if (type === "manifests" || shipmentViewTab === "MANIFESTS" || String(record.id || "").startsWith("MNF-")) {
+      if (type === "manifests" || String(record.id || "").startsWith("MNF-")) {
         setActiveManifestRecord(record);
         setManifestInitialShipmentIds(undefined);
         setIsDispatchManifestDialogOpen(true);
@@ -749,9 +780,10 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         { id: 'status', title: 'Status', width: 110, icon: GridColumnIcon.HeaderSingleValue },
       ];
     } else if (type === 'shipments' || type === 'manifests') {
-      if (type === 'manifests' || shipmentViewTab === 'MANIFESTS') {
+      if (type === 'manifests') {
         cols = [
           { id: 'id', title: 'Reys №', width: 130, icon: GridColumnIcon.HeaderReference },
+          { id: 'companyName', title: 'Tashkilot', width: 190, icon: GridColumnIcon.HeaderString },
           { id: 'date', title: 'Sana', width: 105, icon: GridColumnIcon.HeaderDate },
           { id: 'vehiclePlate', title: 'Davlat raqami', width: 125, icon: GridColumnIcon.HeaderString },
           { id: 'vehicleModel', title: 'Mashina rusumi', width: 175, icon: GridColumnIcon.HeaderString },
@@ -767,6 +799,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       } else {
         cols = [
           { id: 'id', title: 'Chiqim №', width: 115, icon: GridColumnIcon.HeaderReference },
+          { id: 'companyName', title: 'Tashkilot', width: 190, icon: GridColumnIcon.HeaderString },
           { id: 'date', title: 'Sana', width: 100, icon: GridColumnIcon.HeaderDate },
           { id: 'shipmentType', title: 'Chiqim turi', width: 140, icon: GridColumnIcon.HeaderLookup },
           { id: 'deliveryActId', title: 'Schet-faktura', width: 125, icon: GridColumnIcon.HeaderReference },
@@ -774,7 +807,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
           { id: 'workOrder', title: 'Buyurtma', width: 130, icon: GridColumnIcon.HeaderReference },
           { id: 'product', title: 'Mahsulot / Yuk', width: 220, icon: GridColumnIcon.HeaderString },
           { id: 'quantity', title: 'Miqdor', width: 95, icon: GridColumnIcon.HeaderNumber },
-          { id: 'manifestNumber', title: 'Reys №', width: 120, icon: GridColumnIcon.HeaderReference },
+          { id: 'manifestNumber', title: 'Reys', width: 120, icon: GridColumnIcon.HeaderReference },
           { id: 'carrier', title: 'Tashuvchi', width: 165, icon: GridColumnIcon.HeaderString },
           { id: 'from', title: 'Chiqaruvchi ombor', width: 185, icon: GridColumnIcon.HeaderString },
           { id: 'status', title: 'Holati', width: 110, icon: GridColumnIcon.HeaderSingleValue },
@@ -874,14 +907,10 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     } else if (type === 'finished-goods') {
       setRowsData(finishedGoods);
     } else if (type === 'shipments' || type === 'manifests') {
-      if (type === 'manifests' || shipmentViewTab === 'MANIFESTS') {
+      if (type === 'manifests') {
         setRowsData(dispatchManifests || []);
       } else if (shipmentViewTab === 'READY') {
-        setRowsData(
-          (warehouseShipments || []).filter(
-            (s) => (s.status === 'Packed' || s.status === 'Draft') && !s.manifestId
-          )
-        );
+        setRowsData((warehouseShipments || []).filter(isReadyToLoad));
       } else {
         setRowsData(warehouseShipments || []);
       }
@@ -965,7 +994,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         } else if (categoryFilter === "Transfers") {
           matchesCategory = r.movementType === "Transfer" || !r.movementType;
         }
-      } else if (type === 'shipments' && shipmentViewTab !== 'MANIFESTS' && categoryFilter !== "ALL") {
+      } else if (type === 'shipments' && categoryFilter !== "ALL") {
         if (categoryFilter === "CustomerDelivery") {
           matchesCategory = !r.shipmentType || r.shipmentType === "CustomerDelivery";
         } else {
@@ -1014,9 +1043,21 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         }
         return;
       }
+      // Chiqimlar ro'yxatida "Reys" katagi — biriktirilgan reysni ochadi
+      if (type === "shipments" && column?.id === "manifestNumber" && rowData.manifestId) {
+        const manifest = (dispatchManifests || []).find(
+          (m: any) => m.dbId === rowData.manifestId || m.id === rowData.manifestId || m.manifestNumber === rowData.manifestNumber
+        );
+        if (manifest) {
+          setActiveManifestRecord(manifest);
+          setManifestInitialShipmentIds(undefined);
+          setIsDispatchManifestDialogOpen(true);
+          return;
+        }
+      }
       handleOpenSheet(rowData);
     }
-  }, [filteredRows, columns]);
+  }, [filteredRows, columns, type, dispatchManifests]);
 
   const handleConfirm = () => {
     if (!selectedRecord) return;
@@ -1082,7 +1123,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       return {
         kind: GridCellKind.Text,
         data: String(val),
-        displayData: String(val),
+        displayData: statusLabel(val),
         allowOverlay: false,
         themeOverride: { textDark: color, baseFontStyle: "600 12px sans-serif" },
       };
@@ -1470,7 +1511,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
               {type === 'shipments' && (
                 <>
-                  {/* 3-View Switcher: Barcha chiqimlar | Tayyor yuklar | Reyslar */}
+                  {/* Ko'rinish: Barcha chiqimlar | Yuklashga tayyor (reyslar — Logistika → Reyslar registrida) */}
                   <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium shrink-0 mr-1">
                     <button
                       type="button"
@@ -1501,31 +1542,14 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      <span>Tayyor yuklar</span>
+                      <span>Yuklashga tayyor</span>
                       <span className="px-1 rounded-full text-[9px] bg-amber-500/20 text-amber-800 dark:text-amber-200 font-mono leading-none flex items-center justify-center">
-                        {(warehouseShipments || []).filter((s) => (s.status === "Packed" || s.status === "Draft" || s.status === "Reserved" || s.status === "Picking") && !s.manifestId).length}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShipmentViewTab("MANIFESTS");
-                        setSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
-                      }}
-                      className={`h-6 px-2.5 rounded transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
-                        shipmentViewTab === "MANIFESTS"
-                          ? "bg-blue-500/15 text-blue-700 dark:text-blue-300 font-semibold shadow-xs border border-blue-500/30"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      <span>Reyslar</span>
-                      <span className="px-1 rounded-full text-[9px] bg-blue-500/20 text-blue-800 dark:text-blue-200 font-mono leading-none flex items-center justify-center">
-                        {(dispatchManifests || []).length}
+                        {(warehouseShipments || []).filter(isReadyToLoad).length}
                       </span>
                     </button>
                   </div>
 
-                  {shipmentViewTab !== "MANIFESTS" && selection.rows.toArray().length > 0 && (
+                  {selection.rows.toArray().length > 0 && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -1558,7 +1582,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 </Button>
               )}
 
-              {type !== 'requirements' && type !== 'finished-goods' && type !== 'manifests' && (type !== 'shipments' || shipmentViewTab !== 'MANIFESTS') && (
+              {type !== 'requirements' && type !== 'finished-goods' && type !== 'manifests' && (
                 <Button 
                   size="sm" 
                   onClick={handleCreateNew}
@@ -1744,7 +1768,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               )}
 
               {/* Shipments Type Filters */}
-              {type === 'shipments' && shipmentViewTab !== 'MANIFESTS' && (
+              {type === 'shipments' && (
                 <div className="flex items-center bg-muted p-0.5 rounded text-[11px] font-medium">
                   <button
                     type="button"
@@ -1818,7 +1842,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                     onClick={() => setStatusFilter("ALL")}
                     className={`px-2 py-0.5 rounded transition-colors ${statusFilter === "ALL" ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    ALL
+                    Barcha holat
                   </button>
                   {availableStatuses.map((status) => (
                     <button
@@ -1826,7 +1850,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                       onClick={() => setStatusFilter(status)}
                       className={`px-2 py-0.5 rounded transition-colors ${statusFilter === status ? "bg-background text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
                     >
-                      {status}
+                      {statusLabel(status)}
                     </button>
                   ))}
                 </div>
@@ -1840,7 +1864,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   placeholder={
-                    type === "manifests" || (type === "shipments" && shipmentViewTab === "MANIFESTS")
+                    type === "manifests"
                       ? "Reyslarni qidirish..."
                       : type === "shipments"
                       ? "Chiqimlarni qidirish..."

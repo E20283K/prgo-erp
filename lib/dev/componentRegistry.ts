@@ -46,7 +46,9 @@ export interface ActiveComponentResolution {
   status?: string;
 }
 
-export const WORKSPACE_ROOT = "d:/Soft Projects/printgo_erp";
+export const WORKSPACE_ROOT =
+  process.env.NEXT_PUBLIC_WORKSPACE_ROOT ||
+  "c:/Users/ThinkPad X1/Documents/PROJECTS/printgoo_ecosystem";
 
 // ── Master Component Registry with real line counts ──
 export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lookupBoxOrWorkOrderBarcode } from "@/lib/server/warehouseService";
+import { requireApiUser, WAREHOUSE_READ } from "@/lib/server/apiAuth";
 
 export async function POST(req: NextRequest) {
+  const auth = await requireApiUser(req, WAREHOUSE_READ);
+  if ("response" in auth) return auth.response;
+
   try {
     const body = await req.json();
     const barcode = String(body.barcode || "").trim();

@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const LANGUAGES = [
+export const LANGUAGES = [
   { code: "en", label: "English", short: "EN" },
   { code: "ru", label: "Русский", short: "RU" },
   { code: "uz", label: "O'zbekcha", short: "UZ" },

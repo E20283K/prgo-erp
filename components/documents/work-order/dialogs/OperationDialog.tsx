@@ -60,8 +60,31 @@ interface OperationDialogProps {
   onSave: () => void;
   customerName?: string;
   orderQuantity?: number;
+  plannedSheets?: number;
   currency?: string;
   exchangeRate?: number;
+}
+
+const SHEET_BASED_UNITS = new Set([
+  "1,000 sheets",
+  "1,000 impressions",
+  "1,000 strokes",
+  "1,000 glue passes",
+]);
+
+function resolveCalcBaseQty(
+  calcUnit: string | undefined,
+  orderQuantity: number,
+  plannedSheets: number,
+  duration: number
+): number {
+  if (calcUnit === "1 hour") {
+    return Math.max(0, duration || 0);
+  }
+  if (calcUnit && SHEET_BASED_UNITS.has(calcUnit) && plannedSheets > 0) {
+    return plannedSheets;
+  }
+  return Math.max(0, orderQuantity || 0);
 }
 
 interface OperatorItem {
@@ -126,7 +149,8 @@ export function OperationDialog({
   form,
   setForm,
   onSave,
-  orderQuantity = 1000,
+  orderQuantity = 0,
+  plannedSheets = 0,
   currency = "UZS",
   exchangeRate = 12850,
 }: OperationDialogProps) {
@@ -144,6 +168,15 @@ export function OperationDialog({
     }))
   );
   const anchor = useComboboxAnchor();
+  const [stepNumberInput, setStepNumberInput] = React.useState(String(form.stepNumber ?? 10));
+  const [durationInput, setDurationInput] = React.useState(String(form.duration ?? 1));
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setStepNumberInput(String(form.stepNumber ?? 10));
+      setDurationInput(String(form.duration ?? 1));
+    }
+  }, [isOpen, form.stepNumber, form.duration]);
 
   React.useEffect(() => {
     const s = useWorkspaceStore.getState();
@@ -222,14 +255,16 @@ export function OperationDialog({
     }));
   }, []);
 
-  // Recalculate costs whenever rate, setup, or piecework changes
+  // Recalculate costs whenever rate, setup, unit, duration, or piecework changes
   const handleRecalculateCosts = (overrides: Partial<RouteStep>) => {
     const activeRate = overrides.rateUsd !== undefined ? overrides.rateUsd : form.rateUsd ?? 0;
     const activeSetup = overrides.setupFeeUsd !== undefined ? overrides.setupFeeUsd : form.setupFeeUsd ?? 0;
     const activePiecework = overrides.pieceworkRateUsd !== undefined ? overrides.pieceworkRateUsd : form.pieceworkRateUsd ?? 0;
     const activeDivisor = overrides.unitDivisor !== undefined ? overrides.unitDivisor : form.unitDivisor ?? 1000;
+    const activeUnit = overrides.calcUnit !== undefined ? overrides.calcUnit : form.calcUnit;
+    const activeDuration = overrides.duration !== undefined ? overrides.duration : form.duration;
 
-    const qty = Math.max(0, orderQuantity || 1000);
+    const qty = resolveCalcBaseQty(activeUnit, orderQuantity, plannedSheets, activeDuration);
     const divisor = activeDivisor > 0 ? activeDivisor : 1;
     const chargeableUnits = qty / divisor;
 
@@ -252,7 +287,19 @@ export function OperationDialog({
       return;
     }
 
-    const estimate = computeTariffEstimate(selected, orderQuantity || 1000);
+    // Calculate estimated duration if norm is available
+    let estimatedDuration = form.duration;
+    if (selected.normOutputPerShift > 0) {
+      const shiftHours = 8;
+      const baseForNorm = SHEET_BASED_UNITS.has(selected.unit) && plannedSheets > 0
+        ? plannedSheets
+        : orderQuantity;
+      const hours = baseForNorm / (selected.normOutputPerShift / shiftHours);
+      estimatedDuration = Math.max(0.5, Number(hours.toFixed(1)));
+    }
+
+    const baseQty = resolveCalcBaseQty(selected.unit, orderQuantity, plannedSheets, estimatedDuration);
+    const estimate = computeTariffEstimate(selected, baseQty);
 
     const tCur = (selected.currency || "USD").toUpperCase();
     let effectiveRate = estimate.effectiveRate;
@@ -269,21 +316,12 @@ export function OperationDialog({
       pieceworkRate = Number((pieceworkRate / exchangeRate).toFixed(3));
     }
 
-    const qty = Math.max(0, orderQuantity || 1000);
     const divisor = selected.unitDivisor > 0 ? selected.unitDivisor : 1;
-    const chargeableUnits = qty / divisor;
+    const chargeableUnits = baseQty / divisor;
 
     const runCost = isUsd ? Number((chargeableUnits * effectiveRate).toFixed(2)) : Math.round(chargeableUnits * effectiveRate);
     const plannedCostUsd = isUsd ? Number((effectiveSetup + runCost).toFixed(2)) : Math.round(effectiveSetup + runCost);
     const pieceworkTotalUsd = isUsd ? Number((chargeableUnits * pieceworkRate).toFixed(2)) : Math.round(chargeableUnits * pieceworkRate);
-
-    // Calculate estimated duration if norm is available
-    let estimatedDuration = form.duration;
-    if (selected.normOutputPerShift > 0) {
-      const shiftHours = 8;
-      const hours = (orderQuantity || 1000) / (selected.normOutputPerShift / shiftHours);
-      estimatedDuration = Math.max(0.5, Number(hours.toFixed(1)));
-    }
 
     setForm((p) => ({
       ...p,
@@ -399,7 +437,13 @@ export function OperationDialog({
               <span className="text-[11px] text-muted-foreground font-mono flex items-center gap-1">
                 <span>Adad:</span>
                 <strong className="text-foreground">{formatNumberWithSpaces(orderQuantity)}</strong>
-                <FieldInfoTooltip text="Buyurtmaning umumiy ishlab chiqarish tiraji (adadi). Operatsiya tannarxi va me'yoriy vaqt ushbu adad asosida hisoblanadi." />
+                {plannedSheets > 0 && (
+                  <>
+                    <span className="text-muted-foreground/50">|</span>
+                    <span>Varaq:</span>
+                    <strong className="text-foreground">{formatNumberWithSpaces(plannedSheets)}</strong>
+                  </>
+                )}
               </span>
             </div>
             <FieldCombobox
@@ -416,22 +460,33 @@ export function OperationDialog({
           {/* Row 1: Step # & Operation Description */}
           <div className="grid grid-cols-4 gap-2.5">
             <div>
-              <label className="text-xs font-medium flex items-center gap-1 mb-1">
-                <span>Tartib #</span>
-                <FieldInfoTooltip text="Texnologik marshrutdagi bosqich ketma-ketlik raqami (masalan: 10, 20, 30). Ishlarning bajarilish tartibini belgilaydi." />
+              <label className="text-xs font-medium block mb-1">
+                Tartib #
               </label>
               <Input
                 type="number"
                 step="10"
-                value={form.stepNumber}
-                onChange={(e) => setForm((p) => ({ ...p, stepNumber: parseInt(e.target.value) || 10 }))}
+                value={stepNumberInput}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setStepNumberInput(raw);
+                  const parsed = parseInt(raw, 10);
+                  if (!Number.isNaN(parsed) && parsed > 0) {
+                    setForm((p) => ({ ...p, stepNumber: parsed }));
+                  }
+                }}
+                onBlur={() => {
+                  const parsed = parseInt(stepNumberInput, 10);
+                  const valid = !Number.isNaN(parsed) && parsed > 0 ? parsed : 10;
+                  setStepNumberInput(String(valid));
+                  setForm((p) => ({ ...p, stepNumber: valid }));
+                }}
                 className="h-8 text-xs font-mono"
               />
             </div>
             <div className="col-span-3">
-              <label className="text-xs font-medium flex items-center gap-1 mb-1">
-                <span>Operatsiya nomi *</span>
-                <FieldInfoTooltip text="Ishlab chiqarishda bajariladigan texnologik operatsiya nomi (masalan: 4+4 Ofset bosma, UF laklash, Tigel kesish)." />
+              <label className="text-xs font-medium block mb-1">
+                Operatsiya nomi *
               </label>
               <Input
                 value={form.name}
@@ -445,9 +500,8 @@ export function OperationDialog({
           {/* Row 2: Assigned Machine & Planned Duration */}
           <div className="grid grid-cols-3 gap-2.5">
             <div className="col-span-2 space-y-1">
-              <label className="text-xs font-medium flex items-center gap-1">
-                <span>Uskuna / Ish markazi *</span>
-                <FieldInfoTooltip text="Operatsiya amalga oshiriladigan stanok yoki ish joyi. Uskunaga biriktirilgan bosh operator avtomatik tarzda mas'ul xodimlarga qo'shiladi." />
+              <label className="text-xs font-medium block">
+                Uskuna / Ish markazi *
               </label>
               <FieldCombobox
                 value={form.machine}
@@ -477,15 +531,36 @@ export function OperationDialog({
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium flex items-center gap-1">
-                <span>Me&apos;yoriy vaqt (soat)</span>
-                <FieldInfoTooltip text="Ushbu buyurtma tirajini bajarish uchun rejalashtirilgan mashina vaqti (soatda). Smena jurnali va umumiy ishlab chiqarish muddatiga asos bo'ladi." />
+              <label className="text-xs font-medium block">
+                Me&apos;yoriy vaqt (soat)
               </label>
               <Input
                 type="number"
                 step="0.1"
-                value={form.duration}
-                onChange={(e) => setForm((p) => ({ ...p, duration: parseFloat(e.target.value) || 1 }))}
+                min="0.1"
+                value={durationInput}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setDurationInput(raw);
+                  const parsed = parseFloat(raw);
+                  if (!Number.isNaN(parsed) && parsed > 0) {
+                    if (form.calcUnit === "1 hour") {
+                      handleRecalculateCosts({ duration: parsed });
+                    } else {
+                      setForm((p) => ({ ...p, duration: parsed }));
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  const parsed = parseFloat(durationInput);
+                  const valid = !Number.isNaN(parsed) && parsed > 0 ? parsed : 0.5;
+                  setDurationInput(String(valid));
+                  if (form.calcUnit === "1 hour") {
+                    handleRecalculateCosts({ duration: valid });
+                  } else {
+                    setForm((p) => ({ ...p, duration: valid }));
+                  }
+                }}
                 className="h-8 text-xs font-mono"
               />
             </div>
@@ -768,7 +843,7 @@ export function OperationDialog({
           </div>
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t border-border/60">
+        <DialogFooter className="gap-2 pt-2 border-t border-border/60">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="h-8 text-xs">
             Bekor qilish
           </Button>

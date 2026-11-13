@@ -43,6 +43,13 @@
       "when": 1794499378043,
       "tag": "0005_shipment_reservation",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794510000000,
+      "tag": "0006_warehouse_fk_dedup",
+      "breakpoints": true
     }
   ]
 }

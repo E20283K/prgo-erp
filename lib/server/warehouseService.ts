@@ -372,110 +372,132 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
   const status = payload.status || "Draft";
   const locationName = payload.locationName || payload.location || "Asosiy ombor";
 
-  // Idempotentlik: hujjat avval "Accepted" bo'lgan bo'lsa, qoldiq qayta oshirilmaydi
-  const existingReceipt = !isDraft
-    ? await db.query.warehouseReceipts.findFirst({
-        where: and(eq(warehouseReceipts.companyId, companyId), eq(warehouseReceipts.receiptNumber, receiptNumber)),
-      })
-    : null;
-  if (existingReceipt?.status === "Accepted" && status !== "Accepted") {
-    throw new Error(`${receiptNumber} kirimi allaqachon qabul qilingan va qoldiqqa o'tkazilgan. Uni qoralamaga qaytarib bo'lmaydi.`);
+  const itemsList: any[] = Array.isArray(payload.items) ? payload.items : [];
+  const badSku = itemsList.find((i) => isPlaceholderSku(i?.sku));
+  if (badSku) {
+    throw new Error(`"${badSku.name || badSku.sku}" qatori uchun material katalogdan tanlanmagan (SKU: ${badSku.sku}).`);
   }
-  const shouldPostStock = status === "Accepted" && existingReceipt?.status !== "Accepted";
-
-  // Calculate total amount from items
-  const itemsList = Array.isArray(payload.items) ? payload.items : [];
-  let totalAmount = 0;
-  for (const item of itemsList) {
-    const qty = Number(item.quantity) || 0;
-    const price = Number(item.unitPrice || item.unitPriceUsd) || 0;
-    totalAmount += qty * price;
-  }
-
-  const receiptValues = {
-    companyId,
-    warehouseId: payload.warehouseId || null,
-    receiptNumber,
-    receiptDate: payload.receiptDate || payload.date ? new Date(payload.receiptDate || payload.date) : new Date(),
-    supplierName: payload.supplierName || payload.supplier || "Noma'lum yetkazib beruvchi",
-    poNumber: payload.poNumber || null,
-    locationName,
-    status: status as any,
-    receivedBy: payload.receivedBy || null,
-    notes: payload.notes || null,
-    totalAmount: totalAmount.toString(),
-    currency: payload.currency || "UZS",
-    updatedAt: new Date(),
-  };
-
-  let receiptRecord;
-  if (!isDraft && payload.id && !payload.id.startsWith("RCV-NEW-") && !payload.id.startsWith("tab-")) {
-    const [existing] = await db
-      .update(warehouseReceipts)
-      .set(receiptValues)
-      .where(and(eq(warehouseReceipts.receiptNumber, receiptNumber), eq(warehouseReceipts.companyId, companyId)))
-      .returning();
-    receiptRecord = existing;
-  }
-
-  if (!receiptRecord) {
-    const [inserted] = await db
-      .insert(warehouseReceipts)
-      .values(receiptValues)
-      .onConflictDoUpdate({
-        target: [warehouseReceipts.companyId, warehouseReceipts.receiptNumber],
-        set: receiptValues,
-      })
-      .returning();
-    receiptRecord = inserted;
-  }
-
-  // Insert or update line items
-  if (itemsList.length > 0) {
-    await db.delete(warehouseReceiptItems).where(eq(warehouseReceiptItems.receiptId, receiptRecord.id));
-
-    for (const item of itemsList) {
-      const qty = Number(item.quantity) || 0;
-      const unitPrice = Number(item.unitPrice || item.unitPriceUsd) || 0;
-      const totalPrice = qty * unitPrice;
-
-      await db.insert(warehouseReceiptItems).values({
-        receiptId: receiptRecord.id,
-        itemId: item.itemId || null,
-        sku: item.sku || `SKU-${Date.now().toString().slice(-4)}`,
-        name: item.name || "Noma'lum tovar",
-        category: item.category || "Paper & Board",
-        quantity: qty.toString(),
-        unit: item.unit || "sheets",
-        unitPrice: unitPrice.toString(),
-        totalPrice: totalPrice.toString(),
-        sheetFormat: item.sheetFormat || null,
-        grammage: item.grammage ? Number(item.grammage) : null,
-        batchNumber: item.batchNumber || null,
-        notes: item.notes || null,
-      });
-
-      // 1C Jamg'arish Registri: hujjat birinchi marta tasdiqlanganda (Accepted) qoldiqni oshirish
-      if (shouldPostStock) {
-        await applyStockBalanceDelta({
-          companyId,
-          locationName,
-          sku: item.sku,
-          name: item.name,
-          category: item.category,
-          deltaQty: qty,
-          unit: item.unit,
-          unitPriceUsd: unitPrice,
-          sheetFormat: item.sheetFormat,
-          grammage: item.grammage,
-        });
-      }
+  if (status === "Accepted") {
+    if (itemsList.length === 0) throw new Error("Qabul qilish uchun kamida bitta qator bo'lishi kerak.");
+    const bad = itemsList.filter((i) => !i?.sku || !(Number(i.quantity) > 0));
+    if (bad.length > 0) {
+      throw new Error(`Qabul qilish uchun har bir qatorda SKU va 0 dan katta miqdor bo'lishi kerak: ${bad.map((b) => b?.name || "?").join(", ")}`);
     }
   }
 
-  // Biznes bildirishnoma triggeri (Ombor kirimi)
-  try {
-    if (shouldPostStock) {
+  const { receiptRecord, posted } = await db.transaction(async (tx) => {
+    // Hujjat qatori qulflanadi: parallel "Qabul qilish" qoldiqni ikki marta oshira olmaydi
+    const [existingReceipt] = !isDraft
+      ? await tx
+          .select()
+          .from(warehouseReceipts)
+          .where(and(eq(warehouseReceipts.companyId, companyId), eq(warehouseReceipts.receiptNumber, receiptNumber)))
+          .for("update")
+          .limit(1)
+      : [];
+    const wasAccepted = existingReceipt?.status === "Accepted";
+    if (wasAccepted && status !== "Accepted") {
+      throw new Error(`${receiptNumber} kirimi allaqachon qabul qilingan va qoldiqqa o'tkazilgan. Uni qoralamaga qaytarib bo'lmaydi.`);
+    }
+
+    // Qabul qilingan hujjatning qatorlari qoldiq bilan bog'langan — faqat izohlar yangilanadi
+    if (wasAccepted) {
+      const [updated] = await tx
+        .update(warehouseReceipts)
+        .set({
+          notes: payload.notes ?? existingReceipt.notes,
+          receivedBy: payload.receivedBy ?? existingReceipt.receivedBy,
+          updatedAt: new Date(),
+        })
+        .where(eq(warehouseReceipts.id, existingReceipt.id))
+        .returning();
+      return { receiptRecord: updated, posted: false };
+    }
+
+    let totalAmount = 0;
+    for (const item of itemsList) {
+      totalAmount += (Number(item.quantity) || 0) * (Number(item.unitPrice || item.unitPriceUsd) || 0);
+    }
+
+    const receiptValues = {
+      companyId,
+      warehouseId: payload.warehouseId || null,
+      receiptNumber,
+      receiptDate: payload.receiptDate || payload.date ? new Date(payload.receiptDate || payload.date) : new Date(),
+      supplierName: payload.supplierName || payload.supplier || "Noma'lum yetkazib beruvchi",
+      poNumber: payload.poNumber || null,
+      locationName,
+      status: status as any,
+      receivedBy: payload.receivedBy || null,
+      notes: payload.notes || null,
+      totalAmount: totalAmount.toFixed(2),
+      currency: payload.currency || "UZS",
+      updatedAt: new Date(),
+    };
+
+    const [record] = existingReceipt
+      ? await tx.update(warehouseReceipts).set(receiptValues).where(eq(warehouseReceipts.id, existingReceipt.id)).returning()
+      : await tx
+          .insert(warehouseReceipts)
+          .values(receiptValues)
+          .onConflictDoUpdate({
+            target: [warehouseReceipts.companyId, warehouseReceipts.receiptNumber],
+            set: receiptValues,
+          })
+          .returning();
+
+    const shouldPostStock = status === "Accepted";
+    if (itemsList.length > 0) {
+      await tx.delete(warehouseReceiptItems).where(eq(warehouseReceiptItems.receiptId, record.id));
+
+      for (const item of itemsList) {
+        const qty = Number(item.quantity) || 0;
+        const unitPrice = Number(item.unitPrice || item.unitPriceUsd) || 0;
+        const sku = item.sku || `SKU-${Date.now().toString().slice(-4)}`;
+
+        await tx.insert(warehouseReceiptItems).values({
+          receiptId: record.id,
+          itemId: item.itemId || null,
+          finishedGoodId: item.finishedGoodId && UUID_RE.test(item.finishedGoodId) ? item.finishedGoodId : null,
+          sourceWorkOrderId: item.sourceWorkOrderId || null,
+          sku,
+          name: item.name || "Noma'lum tovar",
+          category: item.category || "Paper & Board",
+          quantity: qty.toString(),
+          unit: item.unit || "sheets",
+          unitPrice: unitPrice.toString(),
+          totalPrice: (qty * unitPrice).toFixed(2),
+          sheetFormat: item.sheetFormat || null,
+          grammage: item.grammage ? Number(item.grammage) : null,
+          batchNumber: item.batchNumber || null,
+          notes: item.notes || null,
+        });
+
+        // 1C Jamg'arish Registri: hujjat birinchi marta tasdiqlanganda (Accepted) qoldiqni oshirish
+        if (shouldPostStock) {
+          await applyStockBalanceDelta({
+            exec: tx,
+            companyId,
+            locationName,
+            sku,
+            name: item.name,
+            category: item.category,
+            deltaQty: qty,
+            unit: item.unit,
+            unitPriceUsd: unitPrice,
+            sheetFormat: item.sheetFormat,
+            grammage: item.grammage ? Number(item.grammage) : undefined,
+          });
+        }
+      }
+    }
+
+    return { receiptRecord: record, posted: shouldPostStock };
+  });
+
+  // Biznes bildirishnoma triggeri (Ombor kirimi) — tranzaksiya muvaffaqiyatli yakunlangandan keyin
+  if (posted) {
+    try {
       await emitNotification(
         {
           dedupKey: `receipt-posted:${receiptNumber}`,
@@ -495,8 +517,8 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
         },
         companyCode
       );
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
   const allReceipts = await getWarehouseReceipts(companyCode);
   return {
@@ -1110,18 +1132,6 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
   const movementNumber = isDraft ? await getNextMovementNumber(prefix, companyCode) : rawCandidate;
   const status = payload.status || "Pending";
 
-  const existingMovement = !isDraft
-    ? await db.query.warehouseMovements.findFirst({
-        where: and(eq(warehouseMovements.companyId, companyId), eq(warehouseMovements.movementNumber, movementNumber)),
-      })
-    : null;
-  if (existingMovement?.status === "Completed") {
-    if (status !== "Completed") {
-      throw new Error(`${movementNumber} harakati allaqachon yakunlangan va qoldiqqa o'tkazilgan. Uni o'zgartirib bo'lmaydi.`);
-    }
-    // Yakunlangan hujjat qayta yuborilsa — qoldiqqa takroran ta'sir qilmasdan qaytaramiz
-    return { ...existingMovement, movementNumber: existingMovement.movementNumber };
-  }
   const qty = Number(payload.quantity) || 0;
   const receivedQty = Number(payload.receivedQty) || (status === "Completed" ? qty : 0);
   const itemsList: any[] = Array.isArray(payload.items) && payload.items.length > 0 ? payload.items : [
@@ -1162,66 +1172,118 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
     updatedAt: new Date(),
   };
 
-  const [movementRecord] = await db
-    .insert(warehouseMovements)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [warehouseMovements.companyId, warehouseMovements.movementNumber],
-      set: values,
-    })
-    .returning();
+  const badSku = itemsList.find((l) => isPlaceholderSku(l?.sku));
+  if (badSku) {
+    throw new Error(`"${badSku.name || badSku.sku}" qatori uchun material katalogdan tanlanmagan (SKU: ${badSku.sku}).`);
+  }
+  const isOutgoing = movementType === "Transfer" || movementType === "ProductionIssue" || movementType === "WriteOff";
+  const isIncoming = movementType === "Transfer" || movementType === "ProductionReturn" || movementType === "CuttingReturn";
+  if (movementType === "Transfer" && status === "Completed" && values.fromLocationName === values.toLocationName) {
+    throw new Error("Ko'chirishda jo'natuvchi va qabul qiluvchi ombor bir xil bo'lishi mumkin emas.");
+  }
 
-  // Ombor balansi deltalarini hisoblash
-  if (status === "Completed") {
-    for (const line of itemsList) {
-      const lineQty = Number(line.quantity) || 0;
-      const lineRcvQty = Number(line.receivedQty) || lineQty;
-      const sku = line.sku || values.materialSku;
-      const name = line.name || values.materialName;
-      const unit = line.unit || values.unit;
+  const movementRecord = await db.transaction(async (tx) => {
+    // Hujjat qatorini qulflash: parallel "Yakunlash" qoldiqni ikki marta o'zgartira olmaydi
+    const [existingMovement] = !isDraft
+      ? await tx
+          .select()
+          .from(warehouseMovements)
+          .where(and(eq(warehouseMovements.companyId, companyId), eq(warehouseMovements.movementNumber, movementNumber)))
+          .for("update")
+          .limit(1)
+      : [];
+    if (existingMovement?.status === "Completed") {
+      if (status !== "Completed") {
+        throw new Error(`${movementNumber} harakati allaqachon yakunlangan va qoldiqqa o'tkazilgan. Uni o'zgartirib bo'lmaydi.`);
+      }
+      // Yakunlangan hujjat qayta yuborilsa — qoldiqqa takroran ta'sir qilmasdan qaytaramiz
+      return existingMovement;
+    }
 
-      if (!sku) continue;
+    const [record] = await tx
+      .insert(warehouseMovements)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [warehouseMovements.companyId, warehouseMovements.movementNumber],
+        set: values,
+      })
+      .returning();
 
-      if (movementType === "Transfer") {
+    if (status !== "Completed") return record;
+
+    const lines = itemsList
+      .map((line) => {
+        const lineQty = Number(line.quantity) || 0;
+        const hasRcv = line.receivedQty !== undefined && line.receivedQty !== null && line.receivedQty !== "";
+        const rcv = Number(line.receivedQty);
+        return {
+          sku: String(line.sku || values.materialSku || ""),
+          name: line.name || values.materialName,
+          unit: line.unit || values.unit,
+          sheetFormat: line.sheetFormat,
+          qty: lineQty,
+          // receivedQty berilmagan bo'lsa — to'liq qabul qilingan deb hisoblanadi
+          rcvQty: hasRcv && Number.isFinite(rcv) ? rcv : lineQty,
+        };
+      })
+      .filter((l) => l.sku && (l.qty > 0 || l.rcvQty > 0));
+
+    if (lines.length === 0) {
+      throw new Error("Hujjatda yakunlash uchun SKU va miqdori ko'rsatilgan qator yo'q.");
+    }
+    if (movementType === "Transfer" && lines.some((l) => l.rcvQty > l.qty + 1e-9)) {
+      throw new Error("Qabul qilingan miqdor jo'natilgan miqdordan ko'p bo'lishi mumkin emas.");
+    }
+
+    // Chiqim tomonida bo'sh qoldiq (stock - reserved) yetarliligini oldindan tekshirish
+    if (isOutgoing) {
+      await assertStockAvailable(tx, companyId, values.fromLocationName, sumBySku(lines, (l) => l.qty));
+    }
+
+    for (const line of lines) {
+      if (isOutgoing && line.qty > 0) {
         await applyStockBalanceDelta({
+          exec: tx,
           companyId,
           locationName: values.fromLocationName,
-          sku,
-          name,
-          deltaQty: -lineQty,
-          unit,
+          sku: line.sku,
+          name: line.name,
+          deltaQty: -line.qty,
+          unit: line.unit,
         });
+      }
+      if (isIncoming && line.rcvQty > 0) {
+        // Ko'chirishda manba ombordagi tannarx qabul qiluvchi omborga o'tadi
+        let unitPriceUsd: number | undefined;
+        if (movementType === "Transfer") {
+          const [src] = await tx
+            .select({ p: warehouseStockBalances.unitPriceUsd })
+            .from(warehouseStockBalances)
+            .where(
+              and(
+                eq(warehouseStockBalances.companyId, companyId),
+                eq(warehouseStockBalances.locationName, values.fromLocationName),
+                eq(warehouseStockBalances.sku, line.sku)
+              )
+            )
+            .limit(1);
+          unitPriceUsd = Number(src?.p) || undefined;
+        }
         await applyStockBalanceDelta({
+          exec: tx,
           companyId,
           locationName: values.toLocationName,
-          sku,
-          name,
-          deltaQty: lineRcvQty,
-          unit,
+          sku: line.sku,
+          name: line.name,
+          deltaQty: line.rcvQty,
+          unit: line.unit,
           sheetFormat: line.sheetFormat,
-        });
-      } else if (movementType === "ProductionIssue" || movementType === "WriteOff") {
-        await applyStockBalanceDelta({
-          companyId,
-          locationName: values.fromLocationName,
-          sku,
-          name,
-          deltaQty: -lineQty,
-          unit,
-        });
-      } else if (movementType === "ProductionReturn" || movementType === "CuttingReturn") {
-        await applyStockBalanceDelta({
-          companyId,
-          locationName: values.toLocationName,
-          sku,
-          name,
-          deltaQty: lineRcvQty,
-          unit,
-          sheetFormat: line.sheetFormat,
+          unitPriceUsd,
         });
       }
     }
-  }
+    return record;
+  });
 
   return {
     ...movementRecord,
@@ -1246,14 +1308,6 @@ export async function upsertInventoryCount(payload: any, companyCode: string = "
     !rawCount || /^(draft-|new-|tab-|IC-NEW)/i.test(rawCount) || rawCount.includes("NEW") || rawCount.includes("Yangi");
   const countNumber = isDraftCount ? await getNextInventoryCountNumber(companyCode) : rawCount;
 
-  const existingCount = !isDraftCount
-    ? await db.query.warehouseInventoryCounts.findFirst({
-        where: and(eq(warehouseInventoryCounts.companyId, companyId), eq(warehouseInventoryCounts.countNumber, countNumber)),
-      })
-    : null;
-  if (existingCount?.status === "Completed") {
-    throw new Error(`${countNumber} inventarizatsiyasi yakunlangan va qoldiqqa o'tkazilgan. Uni o'zgartirib bo'lmaydi.`);
-  }
   const systemQty = Number(payload.systemQty) || 0;
   const actualQty = Number(payload.actualQty) || 0;
   const variance = actualQty - systemQty;
@@ -1288,37 +1342,97 @@ export async function upsertInventoryCount(payload: any, companyCode: string = "
     updatedAt: new Date(),
   };
 
-  const [record] = await db
-    .insert(warehouseInventoryCounts)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [warehouseInventoryCounts.companyId, warehouseInventoryCounts.countNumber],
-      set: values,
-    })
-    .returning();
+  return db.transaction(async (tx) => {
+    const [existingCount] = !isDraftCount
+      ? await tx
+          .select()
+          .from(warehouseInventoryCounts)
+          .where(and(eq(warehouseInventoryCounts.companyId, companyId), eq(warehouseInventoryCounts.countNumber, countNumber)))
+          .for("update")
+          .limit(1)
+      : [];
+    if (existingCount?.status === "Completed") {
+      throw new Error(`${countNumber} inventarizatsiyasi yakunlangan va qoldiqqa o'tkazilgan. Uni o'zgartirib bo'lmaydi.`);
+    }
 
-  // Agar yakunlangan bo'lsa (Completed), ombor balansini haqiqiy qoldiqqa tenglashtirish (applyStockBalanceDelta)
-  if (status === "Completed") {
-    for (const item of itemsList) {
-      const itemVariance = Number(item.variance) || (Number(item.actualQty) - Number(item.systemQty)) || 0;
-      const sku = item.sku || values.materialSku;
-      const name = item.name || values.materialName;
-      const unit = item.unit || values.unit;
+    // Yakunlashda registrdagi JORIY qoldiq haqiqiy sanoqqa tenglashtiriladi.
+    // Farq = haqiqiy - joriy registr qoldig'i (mijoz yuborgan, eskirgan bo'lishi mumkin bo'lgan systemQty emas).
+    let postedSystem = systemQty;
+    let postedVariance = variance;
+    if (status === "Completed") {
+      const lines = itemsList
+        .map((item) => ({
+          sku: String(item.sku || values.materialSku || ""),
+          name: item.name || values.materialName,
+          unit: item.unit || values.unit,
+          actual: Number(item.actualQty),
+        }))
+        .filter((l) => l.sku && Number.isFinite(l.actual) && l.actual >= 0);
+      if (lines.length === 0) {
+        throw new Error("Yakunlash uchun SKU va haqiqiy miqdori kiritilgan qator yo'q.");
+      }
+      const badSku = lines.find((l) => isPlaceholderSku(l.sku));
+      if (badSku) throw new Error(`Noto'g'ri SKU "${badSku.sku}" — material katalogdan tanlanmagan.`);
 
-      if (sku && itemVariance !== 0) {
-        await applyStockBalanceDelta({
-          companyId,
-          locationName: values.locationName,
-          sku,
-          name,
-          deltaQty: itemVariance,
-          unit,
-        });
+      postedSystem = 0;
+      postedVariance = 0;
+      for (const line of lines) {
+        const [row] = await tx
+          .select()
+          .from(warehouseStockBalances)
+          .where(
+            and(
+              eq(warehouseStockBalances.companyId, companyId),
+              eq(warehouseStockBalances.locationName, values.locationName),
+              eq(warehouseStockBalances.sku, line.sku)
+            )
+          )
+          .for("update")
+          .limit(1);
+        const current = row ? Number(row.stockLevel) : 0;
+        const reservedQty = row ? Number(row.reserved) : 0;
+        if (line.actual + 1e-9 < reservedQty) {
+          throw new Error(
+            `${line.sku}: haqiqiy qoldiq (${fmtQty(line.actual)}) chiqim hujjatlari band qilgan miqdordan (${fmtQty(reservedQty)}) kam. Avval rezervlarni bekor qiling.`
+          );
+        }
+        const delta = line.actual - current;
+        postedSystem += current;
+        postedVariance += delta;
+        if (Math.abs(delta) > 1e-9) {
+          await applyStockBalanceDelta({
+            exec: tx,
+            companyId,
+            locationName: values.locationName,
+            sku: line.sku,
+            name: line.name,
+            deltaQty: delta,
+            unit: line.unit,
+          });
+        }
       }
     }
-  }
 
-  return record;
+    const finalValues =
+      status === "Completed"
+        ? {
+            ...values,
+            systemQty: postedSystem.toString(),
+            actualQty: (postedSystem + postedVariance).toString(),
+            variance: postedVariance.toString(),
+          }
+        : values;
+
+    const [record] = await tx
+      .insert(warehouseInventoryCounts)
+      .values(finalValues)
+      .onConflictDoUpdate({
+        target: [warehouseInventoryCounts.companyId, warehouseInventoryCounts.countNumber],
+        set: finalValues,
+      })
+      .returning();
+    return record;
+  });
 }
 
 // ─── 7. Finished Goods (Tayyor Mahsulot Zaxirasi) ──────────────────────────────
@@ -1362,10 +1476,11 @@ export async function getFinishedGoods(companyCode: string = "PRINTGOO") {
       orderedQty: qty,
       producedQty: qty,
       shippedQty: reservedQty,
+      reservedQty,
       stockQty,
       unit: fg.unit || "pcs",
-      costPricePerUnit: 0,
-      totalStockValue: 0,
+      costPricePerUnit: Number(fg.costPricePerUnit) || 0,
+      totalStockValue: Number(fg.totalStockValue) || qty * (Number(fg.costPricePerUnit) || 0),
       location,
       daysInStock,
       status: (fg.status as any) || "In Stock",
@@ -1409,23 +1524,97 @@ export async function upsertFinishedGood(payload: any, companyCode: string = "PR
     updatedAt: new Date(),
   };
 
-  const [record] = await db
-    .insert(warehouseFinishedGoods)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [
-        warehouseFinishedGoods.companyId,
-        warehouseFinishedGoods.sku,
-        warehouseFinishedGoods.workOrderId,
-      ],
-      set: values,
-    })
-    .returning();
+  // reserved_quantity faqat chiqim dvigateli (shipmentEngine) tomonidan boshqariladi —
+  // mavjud yozuvni tahrirlashda UI dan kelgan qiymat bilan rezervni ustidan yozmaymiz.
+  const { reservedQuantity: _ignoredReserved, ...updateValues } = values;
+  void _ignoredReserved;
 
-  return record;
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(warehouseFinishedGoods)
+      .where(
+        and(
+          eq(warehouseFinishedGoods.companyId, companyId),
+          eq(warehouseFinishedGoods.sku, values.sku),
+          eq(warehouseFinishedGoods.workOrderId, values.workOrderId)
+        )
+      )
+      .for("update")
+      .limit(1);
+    if (current && qty + 1e-9 < Number(current.reservedQuantity)) {
+      throw new Error(
+        `${values.sku}: miqdor (${fmtQty(qty)}) chiqim hujjatlarida band qilingan miqdordan (${fmtQty(Number(current.reservedQuantity))}) kam bo'lishi mumkin emas.`
+      );
+    }
+
+    const [record] = await tx
+      .insert(warehouseFinishedGoods)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [
+          warehouseFinishedGoods.companyId,
+          warehouseFinishedGoods.sku,
+          warehouseFinishedGoods.workOrderId,
+        ],
+        set: updateValues,
+      })
+      .returning();
+    return record;
+  });
 }
 
 // ─── Helper: 1C Qoldiqlar Registri Deltasi (Accumulation Register Updater) ──────
+
+/** Vaqtinchalik UI identifikatorlari (tab-*, draft-*) SKU sifatida registrga tushmasligi kerak */
+const isPlaceholderSku = (sku: unknown) => /^(tab-|draft-|new-)/i.test(String(sku || ""));
+
+const fmtQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 3 });
+
+/** Hujjatdagi SKU larni bir xil joy bo'yicha yig'ish (bir hujjatda bir SKU ikki qatorda bo'lsa) */
+function sumBySku<T extends { sku?: string }>(lines: T[], qtyOf: (l: T) => number) {
+  const out = new Map<string, number>();
+  for (const l of lines) {
+    if (!l.sku) continue;
+    out.set(l.sku, (out.get(l.sku) || 0) + qtyOf(l));
+  }
+  return out;
+}
+
+/**
+ * Chiqim turidagi hujjatlar (sexga berish, hisobdan chiqarish, ko'chirish) uchun bo'sh qoldiqni tekshirish.
+ * Bo'sh qoldiq = stock_level - reserved (chiqim hujjatlari band qilgan miqdorga tegilmaydi).
+ */
+async function assertStockAvailable(
+  exec: DbExec,
+  companyId: string,
+  locationName: string,
+  required: Map<string, number>
+) {
+  const problems: string[] = [];
+  for (const [sku, qty] of required) {
+    if (!(qty > 0)) continue;
+    const [row] = await exec
+      .select()
+      .from(warehouseStockBalances)
+      .where(
+        and(
+          eq(warehouseStockBalances.companyId, companyId),
+          eq(warehouseStockBalances.locationName, locationName),
+          eq(warehouseStockBalances.sku, sku)
+        )
+      )
+      .for("update")
+      .limit(1);
+    const free = row ? Number(row.stockLevel) - Number(row.reserved) : 0;
+    if (qty > free + 1e-9) {
+      problems.push(`${sku}${row ? ` — ${row.name}` : ""}: kerak ${fmtQty(qty)}, bo'sh qoldiq ${fmtQty(Math.max(0, free))}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`"${locationName}" omborida qoldiq yetarli emas. ${problems.join("; ")}`);
+  }
+}
 
 async function applyStockBalanceDelta(params: {
   companyId: string;
@@ -1440,24 +1629,54 @@ async function applyStockBalanceDelta(params: {
   grammage?: number;
   /** true bo'lsa, registrda qator bo'lmasa hech narsa yaratilmaydi */
   onlyIfExists?: boolean;
+  /** Tranzaksiya ichida chaqirilganda `tx` */
+  exec?: DbExec;
 }) {
   const { companyId, locationName, sku, name, deltaQty } = params;
+  const exec = params.exec ?? db;
   if (!sku || !deltaQty) return;
+  if (isPlaceholderSku(sku)) {
+    throw new Error(`Noto'g'ri SKU "${sku}" — material katalogdan tanlanmagan.`);
+  }
 
-  const existing = await db.query.warehouseStockBalances.findFirst({
-    where: and(
-      eq(warehouseStockBalances.companyId, companyId),
-      eq(warehouseStockBalances.locationName, locationName),
-      eq(warehouseStockBalances.sku, sku)
-    ),
-  });
+  // Qatorni qulflab o'qiymiz: parallel hujjatlar bir-birining o'zgarishini yo'qotmasin
+  const [existing] = await exec
+    .select()
+    .from(warehouseStockBalances)
+    .where(
+      and(
+        eq(warehouseStockBalances.companyId, companyId),
+        eq(warehouseStockBalances.locationName, locationName),
+        eq(warehouseStockBalances.sku, sku)
+      )
+    )
+    .for("update")
+    .limit(1);
   if (!existing && params.onlyIfExists) return;
+  if (!existing && deltaQty < 0) {
+    throw new Error(`"${locationName}" omborida ${sku} qoldig'i yo'q — ${fmtQty(-deltaQty)} birlikni yechib bo'lmaydi.`);
+  }
 
   const currentLevel = existing ? Number(existing.stockLevel) : 0;
   const currentReserved = existing ? Number(existing.reserved) : 0;
+  if (deltaQty < 0 && currentLevel + deltaQty < -1e-9) {
+    throw new Error(
+      `"${locationName}" omborida ${sku} qoldig'i yetarli emas: mavjud ${fmtQty(currentLevel)}, yechilmoqda ${fmtQty(-deltaQty)}.`
+    );
+  }
   const newLevel = Math.max(0, currentLevel + deltaQty);
   const newAvailable = Math.max(0, newLevel - currentReserved);
   const reorder = existing ? Number(existing.reorder) : 1000;
+
+  // Kirimda o'rtacha tannarx (o'rtacha tortilgan narx); chiqimda narx o'zgarmaydi
+  const currentPrice = Number(existing?.unitPriceUsd) || 0;
+  let nextPrice = currentPrice;
+  if (deltaQty > 0 && params.unitPriceUsd !== undefined && params.unitPriceUsd > 0) {
+    nextPrice =
+      currentLevel > 0 && currentPrice > 0
+        ? (currentLevel * currentPrice + deltaQty * params.unitPriceUsd) / (currentLevel + deltaQty)
+        : params.unitPriceUsd;
+  }
 
   let computedStatus: "In Stock" | "Low Stock" | "Critical" | "Out of Stock" = "In Stock";
   if (newLevel <= 0) computedStatus = "Out of Stock";
@@ -1477,13 +1696,13 @@ async function applyStockBalanceDelta(params: {
     available: newAvailable.toString(),
     unit: params.unit || existing?.unit || "sheets",
     reorder: reorder.toString(),
-    unitPriceUsd: (params.unitPriceUsd !== undefined ? params.unitPriceUsd : (Number(existing?.unitPriceUsd) || 0)).toString(),
+    unitPriceUsd: nextPrice.toFixed(2),
     status: computedStatus,
     lastReceived: deltaQty > 0 ? new Date() : (existing?.lastReceived || new Date()),
     updatedAt: new Date(),
   };
 
-  await db
+  await exec
     .insert(warehouseStockBalances)
     .values(values)
     .onConflictDoUpdate({
@@ -1595,46 +1814,56 @@ export async function confirmFinishedGoodsReceipt(
   companyCode: string = "PRINTGOO"
 ) {
   const companyId = await getCompanyIdByCode(companyCode);
-  const existing = await db.query.warehouseFinishedGoods.findFirst({
-    where: and(
-      eq(warehouseFinishedGoods.companyId, companyId),
-      eq(warehouseFinishedGoods.id, fgId)
-    ),
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(warehouseFinishedGoods)
+      .where(and(eq(warehouseFinishedGoods.companyId, companyId), eq(warehouseFinishedGoods.id, fgId)))
+      .for("update")
+      .limit(1);
+
+    if (!existing) {
+      throw new Error("Kutilayotgan tayyor mahsulot topilmadi");
+    }
+    if (existing.receiptStatus === "Received") {
+      throw new Error(`${existing.sku} allaqachon omborga qabul qilingan.`);
+    }
+
+    const finalQty = confirmedQty !== undefined && confirmedQty !== null ? Number(confirmedQty) : Number(existing.quantity);
+    if (!Number.isFinite(finalQty) || finalQty <= 0) {
+      throw new Error("Qabul qilinadigan miqdor 0 dan katta bo'lishi kerak.");
+    }
+    const shelf = locationShelf || existing.locationShelf || "FG-01";
+    const unitCost = Number(existing.costPricePerUnit) || 0;
+
+    const [updated] = await tx
+      .update(warehouseFinishedGoods)
+      .set({
+        quantity: finalQty.toString(),
+        receiptStatus: "Received",
+        status: "In Stock",
+        locationShelf: shelf,
+        totalStockValue: (finalQty * unitCost).toFixed(2),
+        updatedAt: new Date(),
+      })
+      .where(eq(warehouseFinishedGoods.id, fgId))
+      .returning();
+
+    // 1C Jamg'arish Registrida qoldiqni oshirish (shipmentEngine shu ko'zgu qatorini sinxronlaydi)
+    await applyStockBalanceDelta({
+      exec: tx,
+      companyId,
+      locationName: existing.locationName || "Tayyor mahsulotlar ombori",
+      sku: existing.sku,
+      name: existing.productName,
+      category: "Finished Goods",
+      deltaQty: finalQty,
+      unit: existing.unit,
+      unitPriceUsd: unitCost || undefined,
+    });
+
+    return updated;
   });
-
-  if (!existing) {
-    throw new Error("Kutilayotgan tayyor mahsulot topilmadi");
-  }
-  if (existing.receiptStatus === "Received") {
-    throw new Error(`${existing.sku} allaqachon omborga qabul qilingan.`);
-  }
-
-  const finalQty = confirmedQty !== undefined ? confirmedQty : Number(existing.quantity);
-  const shelf = locationShelf || existing.locationShelf || "FG-01";
-
-  const [updated] = await db
-    .update(warehouseFinishedGoods)
-    .set({
-      quantity: finalQty.toString(),
-      receiptStatus: "Received",
-      status: "In Stock",
-      locationShelf: shelf,
-      updatedAt: new Date(),
-    })
-    .where(eq(warehouseFinishedGoods.id, fgId))
-    .returning();
-
-  // 1C Jamg'arish Registrida qoldiqni oshirish
-  await applyStockBalanceDelta({
-    companyId,
-    locationName: existing.locationName || "Tayyor mahsulotlar ombori",
-    sku: existing.sku,
-    name: existing.productName,
-    deltaQty: finalQty,
-    unit: existing.unit,
-  });
-
-  return updated;
 }
 
 // ─── 9. Available Finished Goods Stock for Multi-customer Shipment ─────────────
@@ -1787,6 +2016,7 @@ export async function getDispatchManifests(companyCode: string = "ALL") {
     id: m.manifestNumber || m.id,
     dbId: m.id,
     date: m.manifestDate ? new Date(m.manifestDate).toISOString().split("T")[0] : "",
+    companyName: m.company?.name || undefined,
     shipments: m.shipments || [],
     totalShipmentsCount: m.shipments ? m.shipments.length : m.totalShipmentsCount,
   }));

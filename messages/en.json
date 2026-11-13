@@ -371,7 +371,11 @@
     "toggleTheme": "Toggle Dark / Light Theme",
     "refreshAllData": "Refresh Workspace & Sync",
     "openAiCopilot": "Open AI Copilot Chat",
-    "signOut": "Sign Out from System"
+    "signOut": "Sign Out from System",
+    "toggleDevMode": "Toggle Dev Mode (Status Bar)",
+    "toggleInspector": "Toggle Inspect Element (AI)",
+    "enabled": "Enabled",
+    "disabled": "Disabled"
   },
   "Modules": {
     "production": "Production",

@@ -8,7 +8,6 @@ import {
   Clock,
   Sparkles,
   ArrowUpRight,
-  Package,
   ArrowUp,
   ArrowDown,
   Copy,
@@ -95,9 +94,6 @@ interface OperationsTabProps {
   recipe?: string;
   activeSpec?: any;
   onOpenInTimeline?: (opId: string) => void;
-  onOpenPackaging?: () => void;
-  isPacked?: boolean;
-  packagesCount?: number;
   onStageChange?: (stage: any) => void;
 }
 
@@ -127,8 +123,6 @@ export function OperationsTab({
   recipe,
   activeSpec,
   onOpenInTimeline,
-  onOpenPackaging,
-  packagesCount,
   onStageChange,
 }: OperationsTabProps) {
   const selectedOpRow = opSelection.rows.first();
@@ -571,24 +565,6 @@ export function OperationsTab({
                 <span>Shablon biriktirish</span>
               </Button>
             )
-          )}
-
-          {onOpenPackaging && (
-            <Button
-              onClick={onOpenPackaging}
-              variant="outline"
-              size="sm"
-              className="h-6.5 px-2.5 text-xs font-medium gap-1 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 rounded cursor-pointer"
-              title="Mahsulotni qutilarga taqsimlash va quti pasportlarini chop etish"
-            >
-              <Package className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Qadoqlash</span>
-              {packagesCount !== undefined && packagesCount > 0 && (
-                <Badge variant="secondary" className="h-4 px-1 text-[10px] font-mono ml-0.5">
-                  {packagesCount} quti
-                </Badge>
-              )}
-            </Button>
           )}
 
           {hasSelectedOp && (

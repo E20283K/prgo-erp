@@ -1,6 +1,24 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from 'next-intl/plugin';
+import { execSync } from "node:child_process";
 import withPWAInit from "@ducanh2912/next-pwa";
+import pkg from "./package.json";
+
+function getGitBranch(): string {
+  try {
+    return execSync("git rev-parse --abbrev-ref HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim() || "master";
+  } catch {
+    return "master";
+  }
+}
+
+function getMajorVersion(version: string | undefined, fallback: string): string {
+  if (!version) return fallback;
+  const match = version.match(/\d+/);
+  return match ? match[0] : fallback;
+}
 
 const withNextIntl = createNextIntlPlugin();
 
@@ -53,6 +71,12 @@ const withPWA = withPWAInit({
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  env: {
+    NEXT_PUBLIC_WORKSPACE_ROOT: process.cwd().replace(/\\/g, "/"),
+    NEXT_PUBLIC_GIT_BRANCH: getGitBranch(),
+    NEXT_PUBLIC_NEXT_VERSION: getMajorVersion(pkg.dependencies?.next, "16"),
+    NEXT_PUBLIC_REACT_VERSION: getMajorVersion(pkg.dependencies?.react, "19"),
+  },
   async headers() {
     return [
       {

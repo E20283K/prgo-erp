@@ -263,6 +263,7 @@ export const warehouseShipments = pgTable(
     uniqueIndex("shipments_company_number_uq").on(table.companyId, table.shipmentNumber),
     index("shipments_company_date_idx").on(table.companyId, table.shipmentDate),
     index("shipments_warehouse_idx").on(table.warehouseId),
+    index("shipments_manifest_idx").on(table.manifestId),
   ]
 );
 

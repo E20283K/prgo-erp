@@ -776,17 +776,27 @@ export function PrepressToolingTab({
     setEditingItem(null);
   };
 
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState<WorkOrderToolingItem | null>(null);
+
   const handleDeleteItem = (id: string) => {
-    if (confirm("Haqiqatan ham ushbu jihozni o'chirmoqchimisiz?")) {
-      const updated = items.filter((it) => it.id !== id);
-      onUpdateTooling(updated);
-      if (setOrderAttachments) {
-        const imgAttId = `att-tool-img-${id}`;
-        const fileAttId = `att-tool-file-${id}`;
-        setOrderAttachments((prev) => prev.filter((att) => att.id !== imgAttId && att.id !== fileAttId));
-      }
-      onMarkUnsaved();
+    const target = items.find((it) => it.id === id) || null;
+    if (target) {
+      setDeleteConfirmItem(target);
     }
+  };
+
+  const confirmDeleteItem = () => {
+    if (!deleteConfirmItem) return;
+    const id = deleteConfirmItem.id;
+    const updated = items.filter((it) => it.id !== id);
+    onUpdateTooling(updated);
+    if (setOrderAttachments) {
+      const imgAttId = `att-tool-img-${id}`;
+      const fileAttId = `att-tool-file-${id}`;
+      setOrderAttachments((prev) => prev.filter((att) => att.id !== imgAttId && att.id !== fileAttId));
+    }
+    onMarkUnsaved();
+    setDeleteConfirmItem(null);
   };
 
   const handleUpdateItemStatus = (item: WorkOrderToolingItem, newStatus: ToolingStatus) => {
@@ -2114,6 +2124,38 @@ export function PrepressToolingTab({
               className="h-7 text-xs"
             >
               Yopish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={Boolean(deleteConfirmItem)} onOpenChange={(open) => { if (!open) setDeleteConfirmItem(null); }}>
+        <DialogContent className="sm:max-w-[400px] p-4">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold">Jihozni o&apos;chirish</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground pt-1">
+              <span className="font-medium text-foreground">{deleteConfirmItem?.name}</span> ni buyurtma jihozlari ro&apos;yxatidan o&apos;chirishni tasdiqlaysizmi?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-2 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteConfirmItem(null)}
+              className="h-7 text-xs"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={confirmDeleteItem}
+              className="h-7 text-xs"
+            >
+              O&apos;chirish
             </Button>
           </DialogFooter>
         </DialogContent>
