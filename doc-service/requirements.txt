@@ -12,4 +12,5 @@ python-multipart==0.0.20
 svglib>=2.3.0
 pypdfium2>=5.0.0
 pymupdf>=1.25.0
+requests==2.32.3
 
