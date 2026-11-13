@@ -91,6 +91,19 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async rewrites() {
+    // Ish vaqtida yuklangan fayllar (public/ ro'yxatida yo'q) app/api/files route'i orqali beriladi.
+    // fallback: build paytida mavjud public fayllar va sahifalar avval tekshiriladi.
+    return {
+      beforeFiles: [],
+      afterFiles: [],
+      fallback: [
+        { source: "/uploads/:path*", destination: "/api/files/uploads/:path*" },
+        { source: "/artwork/:path*", destination: "/api/files/artwork/:path*" },
+        { source: "/cache/:path*", destination: "/api/files/cache/:path*" },
+      ],
+    };
+  },
 };
 
 export default withNextIntl(withPWA(nextConfig));

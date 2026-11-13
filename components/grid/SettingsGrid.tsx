@@ -160,6 +160,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
       dataRows = plants as unknown as SettingsRow[];
     } else if (type === "users") {
       cols = [
+        { id: "avatar", title: "Avatar", width: 64, icon: GridColumnIcon.HeaderImage },
         { id: "fullName", title: "Employee Name", width: 220, icon: GridColumnIcon.HeaderString },
         { id: "email", title: "Login / Email", width: 200, icon: GridColumnIcon.HeaderString },
         { id: "role", title: "Position / Role", width: 200, icon: GridColumnIcon.HeaderLookup },
@@ -239,6 +240,33 @@ export function SettingsGrid({ type }: SettingsGridProps) {
           allowOverlay: false,
           themeOverride: {
             baseFontStyle: "600 12px monospace",
+          },
+        };
+      }
+
+      if (column.id === "avatar") {
+        const avatarUrl = typeof val === "string" ? val : "";
+        if (avatarUrl) {
+          return {
+            kind: GridCellKind.Image,
+            data: [avatarUrl],
+            displayData: [avatarUrl],
+            rounding: 10,
+            allowOverlay: false,
+            readonly: true,
+          };
+        }
+        // Rasm yo'q: bosh harflar
+        const initials = String((rowData as any).initials || "");
+        return {
+          kind: GridCellKind.Text,
+          data: initials,
+          displayData: initials,
+          allowOverlay: false,
+          contentAlign: "center",
+          themeOverride: {
+            textDark: isDark ? "#a1a1aa" : "#71717a",
+            baseFontStyle: "600 11px sans-serif",
           },
         };
       }
@@ -482,7 +510,7 @@ export function SettingsGrid({ type }: SettingsGridProps) {
               columns={columns}
               rows={filteredRows.length}
               rowMarkers="both"
-              freezeColumns={1}
+              freezeColumns={type === "users" ? 2 : 1}
               smoothScrollX={true}
               smoothScrollY={true}
               width="100%"
