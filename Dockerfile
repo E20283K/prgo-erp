@@ -8,7 +8,9 @@ WORKDIR /app
 # 1. Install dependencies
 FROM base AS deps
 COPY package.json package-lock.json* .npmrc* ./
-RUN npm ci --legacy-peer-deps
+# npm yuklamalari keshi deploylar orasida saqlanadi (lock fayl o'zgarganda ham tez)
+RUN --mount=type=cache,id=printgoo-npm,target=/root/.npm \
+    npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund
 
 # 2. Build the Next.js application
 FROM base AS builder
@@ -21,7 +23,9 @@ ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_S3_ENDPOINT=$NEXT_PUBLIC_S3_ENDPOINT
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
-RUN npm run build
+# Next.js build keshi (.next/cache) deploylar orasida saqlanadi: kichik o'zgarishda faqat o'zgargan qism qayta yig'iladi
+RUN --mount=type=cache,id=printgoo-next-cache,target=/app/.next/cache \
+    npm run build
 
 # 3. Production Next.js Runner (Standalone)
 FROM base AS runner

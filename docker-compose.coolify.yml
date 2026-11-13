@@ -61,10 +61,10 @@ services:
 
   # Bir martalik: har deployda yangi migratsiyalarni qo'llaydi va tugaydi.
   # app va worker faqat u muvaffaqiyatli tugagach ishga tushadi; xato bo'lsa deploy to'xtaydi.
+  # Image'ni worker servisi yig'adi; migrate o'sha image'ni qayta ishlatadi (ikki marta build qilinmaydi).
   migrate:
-    build:
-      context: .
-      target: worker
+    image: printgoo-erp-worker:${SOURCE_COMMIT:-latest}
+    pull_policy: never
     container_name: printgoo-migrate
     restart: "no"
     exclude_from_hc: true
@@ -80,6 +80,7 @@ services:
     build:
       context: .
       target: worker
+    image: printgoo-erp-worker:${SOURCE_COMMIT:-latest}
     container_name: printgoo-worker
     restart: unless-stopped
     command: ["npx", "tsx", "workers/index.ts"]
