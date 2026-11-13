@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { users, type DbUser } from "@/db/schema/users";
 import { eq, desc } from "drizzle-orm";
-import { hashPassword, sanitizeUser, type SanitizedUser, seedDefaultUsersIfEmpty } from "./authService";
+import { hashPassword, sanitizeUser, type SanitizedUser, seedDefaultUsersIfEmpty, userIdOrCodeWhere } from "./authService";
 import { getUserInitials } from "@/lib/utils";
 import type { SystemUserRecord } from "@/components/documents/user/types";
 
@@ -12,7 +12,7 @@ export async function getAllUsers(): Promise<SanitizedUser[]> {
 }
 
 export async function getUserById(id: string): Promise<SanitizedUser | null> {
-  const found = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  const found = await db.select().from(users).where(userIdOrCodeWhere(id)).limit(1);
   if (found.length === 0) return null;
   return sanitizeUser(found[0]);
 }
@@ -54,7 +54,7 @@ export async function updateUser(
   id: string,
   data: Partial<SystemUserRecord>
 ): Promise<SanitizedUser | null> {
-  const existing = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  const existing = await db.select().from(users).where(userIdOrCodeWhere(id)).limit(1);
   if (existing.length === 0) return null;
 
   const updatePayload: Record<string, any> = {
@@ -91,13 +91,13 @@ export async function updateUser(
   const [updated] = await db
     .update(users)
     .set(updatePayload)
-    .where(eq(users.id, id))
+    .where(eq(users.id, existing[0].id))
     .returning();
 
   return sanitizeUser(updated);
 }
 
 export async function deleteUser(id: string): Promise<boolean> {
-  const result = await db.delete(users).where(eq(users.id, id));
+  await db.delete(users).where(userIdOrCodeWhere(id));
   return true;
 }

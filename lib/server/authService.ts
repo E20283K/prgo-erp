@@ -156,10 +156,17 @@ export async function destroySession(token: string): Promise<boolean> {
 
 // ─── 5. Admin Password Reset ─────────────────────────────────────────────────
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Foydalanuvchini UUID yoki kod (USR-002) bo'yicha qidirish sharti. UUID bo'lmagan qiymat users.id ga berilmaydi. */
+export function userIdOrCodeWhere(idOrCode: string) {
+  return UUID_RE.test(idOrCode) ? eq(users.id, idOrCode) : eq(users.code, idOrCode);
+}
+
 export async function resetUserPassword(userId: string, newPassword: string): Promise<boolean> {
   const { hash, salt } = hashPassword(newPassword);
 
-  const existing = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const existing = await db.select().from(users).where(userIdOrCodeWhere(userId)).limit(1);
   if (existing.length === 0) return false;
 
   const updatedSecurity = {
@@ -175,7 +182,7 @@ export async function resetUserPassword(userId: string, newPassword: string): Pr
       security: updatedSecurity,
       updatedAt: new Date(),
     })
-    .where(eq(users.id, userId));
+    .where(eq(users.id, existing[0].id));
 
   return true;
 }

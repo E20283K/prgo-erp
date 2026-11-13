@@ -955,7 +955,7 @@ interface WorkspaceState {
   upsertUser: (user: SystemUserRecord) => void;
   deleteUser: (id: string) => void;
   fetchUsers: () => Promise<void>;
-  saveUserToDb: (user: SystemUserRecord) => Promise<boolean>;
+  saveUserToDb: (user: SystemUserRecord) => Promise<SystemUserRecord | null>;
   deleteUserFromDb: (id: string) => Promise<boolean>;
   resetUserPasswordInDb: (id: string, newPassword: string) => Promise<boolean>;
   checkAuthSession: () => Promise<boolean>;
@@ -3007,7 +3007,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   saveUserToDb: async (user) => {
     try {
-      const isExisting = Boolean(user.id && !user.id.startsWith("user-new-"));
+      // Bazadagi foydalanuvchining id si har doim UUID; qoralama id (user-new-*, USR-1234) yangi yozuv degani
+      const isExisting = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id || "");
       const url = isExisting
         ? `/api/v1/settings/users/${encodeURIComponent(user.id)}`
         : "/api/v1/settings/users";
@@ -3021,13 +3022,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
       const json = await res.json();
       if (json.success && json.user) {
+        // Yangi yozuv: lokal qoralama nusxasini bazadagi (UUID li) yozuv bilan almashtiramiz
+        if (!isExisting && json.user.id !== user.id) {
+          get().deleteUser(user.id);
+        }
         get().upsertUser(json.user);
-        return true;
+        return json.user as SystemUserRecord;
       }
-      return false;
+      return null;
     } catch (e) {
       console.error("[saveUserToDb error]:", e);
-      return false;
+      return null;
     }
   },
 

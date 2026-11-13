@@ -133,12 +133,15 @@ export function UserDetail({ tab }: UserDetailProps) {
     upsertUser(finalUser);
     updateTabData(tab.id, finalUser);
 
-    const success = await saveUserToDb(finalUser);
+    const saved = await saveUserToDb(finalUser);
     setIsSaving(false);
     setTabUnsaved(tab.id, false);
     setIsSaved(true);
 
-    if (success) {
+    if (saved) {
+      // Yangi foydalanuvchi bazada UUID oladi: keyingi saqlashlar PUT bo'lishi uchun tab ni yangilaymiz
+      setUserData(saved);
+      updateTabData(tab.id, saved);
       addNotification({
         title: "Foydalanuvchi muvaffaqiyatli saqlandi",
         description: `${finalUser.fullName || finalUser.username} (${finalUser.code}) ma'lumotlar bazasida yangilandi.`,

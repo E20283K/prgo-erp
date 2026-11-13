@@ -5,7 +5,7 @@ import { existsSync } from "fs";
 import { updateUser, getUserById } from "@/lib/server/userService";
 import { db } from "@/db";
 import { users } from "@/db/schema/users";
-import { eq } from "drizzle-orm";
+import { userIdOrCodeWhere } from "@/lib/server/authService";
 
 const ALLOWED_MIME_TYPES = [
   "image/jpeg",
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       const existing = await db
         .select()
         .from(users)
-        .where(eq(users.id, userId))
+        .where(userIdOrCodeWhere(userId))
         .limit(1);
 
       if (existing.length > 0) {
@@ -111,7 +111,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: "userId majburiy" }, { status: 400 });
     }
 
-    const existing = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const existing = await db.select().from(users).where(userIdOrCodeWhere(userId)).limit(1);
     if (existing.length > 0) {
       const oldAvatar = existing[0].avatar;
       if (oldAvatar && oldAvatar.startsWith("/uploads/avatars/")) {
