@@ -135,7 +135,7 @@ import {
 } from "./utils/financialsEngine";
 import { elapsedRunMinutes } from "./utils/operationCost";
 import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
-import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEngine";
+import { calculatePrintPlanning } from "./planningEngine";
 import { WarehouseStockRecord } from "@/store/workspaceStore";
 import { computeTariffEstimate, TariffRecord } from "@/components/documents/tariff/types";
 
@@ -2757,24 +2757,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     ]
   );
 
-  const handleApplyRouteFromPlan = (steps?: RouteStep[]) => {
-    const newSteps =
-      steps ||
-      generateRouteStepsFromPlan(
-        activePrintPlan,
-        formData.pressMachine,
-        formData.lamination,
-        formData.embellishment
-      );
-    setOperations(newSteps);
-    setTabUnsaved(tab.id, true);
-    addNotification({
-      title: "Texnologik marshrut yangilandi",
-      description: `${newSteps.length} ta operatsiya CTP va bosma hisobi asosida avtomatik shakllantirildi.`,
-      severity: "success",
-    });
-  };
-
   const [isJobTicketOpen, setIsJobTicketOpen] = useState(false);
 
   React.useEffect(() => {
@@ -3712,12 +3694,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     defaultProdH={formData.height}
                     defaultBleed={formData.bleed}
                     shapeType={formData.shapeType}
-                    customShape={formData.customShape}
-                    customSvgPath={formData.customSvgPath}
-                    cornerType={formData.cornerType}
-                    holeSize={formData.holeSize}
-                    holePosition={formData.holePosition}
-                    holeOffset={formData.holeOffset}
                     artworkFront={formData.artworkFront}
                     artworkBack={formData.artworkBack}
                     skuArtworks={skuArtworks}
@@ -3726,7 +3702,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     spotColors={formData.spotColorItems}
                     printMethod={formData.printMethod}
                     onPrintMethodChange={(method) => handleFieldChange("printMethod", method)}
-                    onApplyRouteToOperations={handleApplyRouteFromPlan}
                     pressMachine={formData.pressMachine}
                     activeMachine={activeMachine}
                     paperStock={formData.paperStock}
@@ -3737,29 +3712,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     pressSheetH={formData.pressSheetH}
                     plannedSheets={formData.plannedSheets}
                     appliedCtpPlates={(formData.toolingItems || []).find((t) => t.category === "ctp_plates")?.quantity}
-                    lamination={formData.lamination}
-                    embellishment={formData.embellishment}
                     isOperator={isOperator}
-                
                     onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
-                    kashirovkaMode={formData.kashirovkaMode}
-                    kashirovkaStrategy={formData.kashirovkaStrategy}
-                    kashirovkaLayers={formData.kashirovkaLayers}
-                    kashirovkaGlueGsm={formData.kashirovkaGlueGsm}
-                    kashirovkaMakeReadySheets={formData.kashirovkaMakeReadySheets}
-                    onKashirovkaChange={(patch) => {
-                      if (patch.kashirovkaMode !== undefined) {
-                        handleFieldChange("kashirovkaMode", patch.kashirovkaMode);
-                      }
-                      if (patch.kashirovkaStrategy !== undefined) {
-                        handleFieldChange("kashirovkaStrategy", patch.kashirovkaStrategy);
-                      }
-                      if (patch.kashirovkaMakeReadySheets !== undefined) {
-                        handleFieldChange("kashirovkaMakeReadySheets", patch.kashirovkaMakeReadySheets);
-                      }
+                    onAddAttachment={(att) => {
+                      setOrderAttachments((prev) => [...prev.filter((a) => a.id !== att.id && a.name !== att.name), att]);
+                      setTabUnsaved(tab.id, true);
                     }}
-                    sampleQty={sampleData.sampleQty}
-                    onSampleQtyChange={(q) => handleSampleChange("sampleQty", q)}
                     impositionState={formData.impositionState}
                     onImpositionStateChange={(impState) => {
                       setFormData((prev) => ({ ...prev, impositionState: impState }));

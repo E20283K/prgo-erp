@@ -849,32 +849,56 @@ export interface WorkOrderFormData {
   materialIssueDocNo?: string;
 }
 
+/**
+ * Sheet-fed imposition settings saved on the work order (dimensions.impositionState).
+ * Produced by the layout tab backed by doc-service /sheet-imposition. Older saved
+ * shapes (no `version`) are ignored on load.
+ */
 export interface PersistedImpositionState {
-  sheetW: number;
-  sheetH: number;
+  version: 2;
+  paperName?: string;
   parentSheetW: number;
   parentSheetH: number;
   cutDivisor: number;
-  orientation: "A" | "B";
-  gap: number;
-  gripper: number;
-  gripperEdge: "Auto" | "Bottom" | "Top" | "Left" | "Right";
+  sheetW: number;
+  sheetH: number;
   marginTop: number;
   marginBottom: number;
   marginLeft: number;
   marginRight: number;
-  overproductionMode: "percent" | "exact";
-  overproductionValue: number;
-  ctpSideRelation: "single_sided" | "shared_front_variable_back" | "independent_per_plate" | "work_and_turn";
-  optimizerGoal: "min_waste" | "min_plates";
-  plates: {
-    id: string;
-    name: string;
-    manualSlots: Record<string, number>;
-    assignedSizeIds?: string[];
-    customSheetRun?: number;
-  }[];
-  plateCalculations?: any[];
+  alignment: "center" | "gripper";
+  trimW: number;
+  trimH: number;
+  bleed: number;
+  innerBleed: number;
+  outerBleed: number;
+  gutterX: number;
+  gutterY: number;
+  cropGap: number;
+  rotation: "auto" | 0 | 90;
+  manualCols?: number;
+  manualRows?: number;
+  mode: "single_sided" | "sheetwise" | "work_and_turn";
+  strategy: "smart_no_split" | "max_economy_split" | "single_form" | "manual";
+  maxOverprintPct: number;
+  fillDirection: "col" | "row";
+  wasteSheets: number;
+  /** Manual slot counts keyed by variant key (SizeDistribution.id or "main") */
+  manualSlots: Record<string, number>;
+  category: "guillotine" | "diecut";
+  cutStyle: "single" | "double";
+  templateStyle: "standard" | "compact" | "packaging" | "offset_standard" | "digital_compact";
+  exportSeparate: boolean;
+  jobId?: string;
+  pdfUrl?: string;
+  generatedAt?: string;
+  summary?: {
+    forms: number;
+    itemsPerSheet: number;
+    pressSheets: number;
+    parentSheets: number;
+    ctpPlates: number;
+  };
 }
 
 export const FLOOR_OPERATORS: string[] = [];

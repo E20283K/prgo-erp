@@ -229,8 +229,8 @@ export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
         name: "LayoutCalcTab",
         fileName: "LayoutCalcTab.tsx",
         relativePath: "components/documents/work-order/tabs/LayoutCalcTab.tsx",
-        linesOfCode: 401,
-        description: "Sheet layout nesting calculator, plate utilization, and grain direction.",
+        linesOfCode: 32,
+        description: "Sheet-fed imposition via doc-service: parent-sheet cuts, ganged forms, preflight and vector montage PDF.",
       },
       flexo: {
         id: "flexo",

@@ -57,9 +57,19 @@ import {
   sendWorkOrderToOrdersGroup,
 } from "./telegramService";
 
+const SHEET_IMPOSITION_PREFIX = "/api/sheet-imposition/";
+
+/** doc-service imposition keshidagi (flexo yoki varaqli montaj) vaqtinchalik fayl havolasimi? */
+export function isCachedImpositionUrl(url?: string | null): url is string {
+  return (
+    typeof url === "string" &&
+    (url.includes("/api/flexo-imposition/") || url.includes(SHEET_IMPOSITION_PREFIX))
+  );
+}
+
 /**
- * Vaqtinchalik Flexo Imposition keshidagi faylni (qirqilgan SKU PDF yoki generatsiya qilingan film/prevyu)
- * MinIO S3 ga doimiy saqlab, /api/v1/storage/file havolasiga aylantiradi.
+ * Vaqtinchalik imposition keshidagi faylni (flexo: qirqilgan SKU PDF / film / prevyu;
+ * varaqli: montaj PDF) MinIO S3 ga doimiy saqlab, /api/v1/storage/file havolasiga aylantiradi.
  */
 export async function persistCachedImpositionUrlToS3(
   docNo: string,
@@ -67,14 +77,15 @@ export async function persistCachedImpositionUrlToS3(
   preferredName?: string
 ): Promise<string | undefined> {
   if (!url || typeof url !== "string") return undefined;
-  if (!url.includes("/api/flexo-imposition/")) {
+  if (!isCachedImpositionUrl(url)) {
     return url;
   }
 
   try {
     const rawFileName = preferredName || url.split("/").pop()?.split("?")[0] || "artwork.pdf";
     const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const s3Key = `PRINTGOO/orders/${docNo}/artwork/${cleanFileName}`;
+    const folder = url.includes(SHEET_IMPOSITION_PREFIX) ? "imposition" : "artwork";
+    const s3Key = `PRINTGOO/orders/${docNo}/${folder}/${cleanFileName}`;
     const ext = cleanFileName.toLowerCase().endsWith(".png") ? "image/png" : "application/pdf";
 
     // 1. Fetch file from local doc-service / Next.js proxy
@@ -906,7 +917,7 @@ export async function upsertWorkOrder(
     for (const att of inputAttachments) {
       let attUrl = att.url;
       if (!attUrl) continue;
-      if (attUrl.includes("/api/flexo-imposition/")) {
+      if (isCachedImpositionUrl(attUrl)) {
         attUrl = (await persistCachedImpositionUrlToS3(docNo, attUrl, att.name)) || attUrl;
       }
       const existing = existingAttachments.find((a) => a.url === attUrl);
