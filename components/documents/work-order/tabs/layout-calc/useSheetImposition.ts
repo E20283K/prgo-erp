@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { OrderAttachment, PersistedImpositionState } from "../../types";
+import type { OrderAttachment, PersistedImpositionState, SkuArtwork } from "../../types";
 import type { PrintMethod } from "../../planningEngine";
 import type { WarehouseStockRecord } from "@/store/workspaceStore";
 import {
@@ -59,6 +59,27 @@ function fileNameFromUrl(url: string, fallback: string): string {
   } catch {
     return fallback;
   }
+}
+
+/**
+ * Finds a variant's artwork in the Specifications SKU table. The table keys rows its own way
+ * (e.g. "size-std-1", "sku-0-std"), so after an exact skuId match fall back to model + size code;
+ * a single-product order (no size breakdown) takes the "Standart" (STD) row or the only row.
+ */
+function matchSkuArtwork(
+  arts: SkuArtwork[],
+  v: { key: string; model?: string; sizeCode?: string },
+  singleProduct: boolean
+): SkuArtwork | undefined {
+  const byId = arts.find((a) => a.skuId === v.key);
+  if (byId) return byId;
+  const norm = (s?: string) => (s || "").trim().toLowerCase();
+  if (singleProduct) return arts.find((a) => norm(a.sizeCode) === "std") ?? (arts.length === 1 ? arts[0] : undefined);
+  if (!v.sizeCode) return undefined;
+  return (
+    arts.find((a) => norm(a.sizeCode) === norm(v.sizeCode) && norm(a.model) === norm(v.model)) ??
+    arts.find((a) => norm(a.sizeCode) === norm(v.sizeCode) && !a.model)
+  );
 }
 
 /** The order's die as an upload source for /analyze (generated SVG or an existing file). */
@@ -333,17 +354,20 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
 
   const variants = useMemo<ImpositionVariant[]>(() => {
     const active = sizes.filter((s) => (s.quantity || 0) > 0);
-    const base: { key: string; name: string; skuId?: string; quantity: number }[] = active.length
-      ? active.map((s) => ({
-          key: s.id,
-          skuId: s.id,
-          name: [s.model, s.sizeCode].filter(Boolean).join(" ") || s.size || s.id,
-          quantity: s.quantity,
-        }))
-      : [{ key: "main", name: orderName || docNo || "Mahsulot", quantity: Math.max(1, defaultQuantity || 1000) }];
+    const base: { key: string; name: string; skuId?: string; quantity: number; model?: string; sizeCode?: string }[] =
+      active.length
+        ? active.map((s) => ({
+            key: s.id,
+            skuId: s.id,
+            name: [s.model, s.sizeCode].filter(Boolean).join(" ") || s.size || s.id,
+            quantity: s.quantity,
+            model: s.model,
+            sizeCode: s.sizeCode,
+          }))
+        : [{ key: "main", name: orderName || docNo || "Mahsulot", quantity: Math.max(1, defaultQuantity || 1000) }];
 
     return base.map((b) => {
-      const art = skuArtworks.find((a) => a.skuId === b.key);
+      const art = matchSkuArtwork(skuArtworks, b, active.length === 0);
       const frontUrl = isPdfUrl(art?.frontArtworkUrl) ? art!.frontArtworkUrl : isPdfUrl(artworkFront) ? artworkFront : undefined;
       const backUrl = isPdfUrl(art?.backArtworkUrl) ? art!.backArtworkUrl : isPdfUrl(artworkBack) ? artworkBack : undefined;
       const local = localFiles[b.key] || {};
