@@ -37,7 +37,7 @@ import { eq, desc, and, or, ilike, isNull } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode } from "./crmService";
-import { toShiftEvent } from "./workOrderEventService";
+import { syncStepFromJournal, toShiftEvent } from "./workOrderEventService";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { generateNextCode } from "@/lib/utils";
 import { getNextSpecNumber } from "./numberingService";
@@ -875,6 +875,18 @@ export async function upsertWorkOrder(
           };
         })
       );
+    }
+  }
+
+  // 3b. The journal wins over what the screen sent: an order tab opened before entries were logged
+  //     elsewhere (operator terminal, another tab) must not roll the steps' status back.
+  if (data.operations && Array.isArray(data.operations)) {
+    const loggedSteps = await db
+      .selectDistinct({ opId: workOrderEvents.opId })
+      .from(workOrderEvents)
+      .where(and(eq(workOrderEvents.workOrderId, targetId), isNull(workOrderEvents.deletedAt)));
+    for (const { opId } of loggedSteps) {
+      if (opId) await syncStepFromJournal(targetId, opId);
     }
   }
 

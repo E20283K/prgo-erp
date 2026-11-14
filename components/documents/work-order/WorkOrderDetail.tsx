@@ -1636,33 +1636,43 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     return saved;
   };
 
-  // Load the journal from the server; entries that so far lived only in this tab are saved once.
-  useEffect(() => {
+  /**
+   * Brings the journal in line with the server (other tabs and the operator terminal log too);
+   * entries that so far lived only in this tab are saved once.
+   */
+  const syncJournalRef = React.useRef<() => Promise<void>>(async () => {});
+  syncJournalRef.current = async () => {
     const orderNo = getSavedOrderNo();
     if (!orderNo) return;
-    let cancelled = false;
-    (async () => {
-      const store = useWorkspaceStore.getState();
-      const res = await store.loadWorkOrderEventsAsync(orderNo);
-      if (cancelled || !res.success) return;
-      if (res.schedule && res.schedule.length > 0) setShiftSchedule(res.schedule);
-      const serverEvents = res.events || [];
-      const known = new Set(serverEvents.map((ev) => ev.id));
-      const localOnly = shiftEventsRef.current.filter((ev) => !known.has(ev.id));
-      const migrated: ShiftEvent[] = [];
-      for (const ev of localOnly) {
-        const saved = await store.saveWorkOrderEventAsync(orderNo, ev);
-        if (saved.success && saved.event) migrated.push(saved.event);
-      }
-      if (cancelled) return;
-      setShiftEvents(
-        [...migrated, ...serverEvents].sort((a, b) => (b.occurredAt || "").localeCompare(a.occurredAt || ""))
-      );
-    })();
-    return () => {
-      cancelled = true;
+    const store = useWorkspaceStore.getState();
+    const res = await store.loadWorkOrderEventsAsync(orderNo);
+    if (!res.success) return;
+    if (res.schedule && res.schedule.length > 0) setShiftSchedule(res.schedule);
+    const serverEvents = res.events || [];
+    const known = new Set(serverEvents.map((ev) => ev.id));
+    const localOnly = shiftEventsRef.current.filter((ev) => !known.has(ev.id));
+    const migrated: ShiftEvent[] = [];
+    for (const ev of localOnly) {
+      const saved = await store.saveWorkOrderEventAsync(orderNo, ev);
+      if (saved.success && saved.event) migrated.push(saved.event);
+    }
+    setShiftEvents(
+      [...migrated, ...serverEvents].sort((a, b) => (b.occurredAt || "").localeCompare(a.occurredAt || ""))
+    );
+  };
+
+  // On open, and whenever the user comes back to this window.
+  useEffect(() => {
+    void syncJournalRef.current();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void syncJournalRef.current();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per saved order number
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, [docNo]);
 
   const [isLogEventDialogOpen, setIsLogEventDialogOpen] = useState(false);
@@ -2597,6 +2607,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     }
   };
   persistOrderDetailsRef.current = persistOrderDetails;
+
+  // After a save the server has re-derived the steps from the journal: refresh this tab's copy.
+  const wasSavingRef = React.useRef(false);
+  useEffect(() => {
+    if (wasSavingRef.current && !isSaving) void syncJournalRef.current();
+    wasSavingRef.current = isSaving;
+  }, [isSaving]);
 
   // Saves the order once the hand-over state has rendered (the save reads the current form data).
   React.useEffect(() => {

@@ -21,7 +21,7 @@ const PHASE_STATUS: Record<StepPhase, string> = {
  * so screens that read the route (registry, planning, operator terminal) see what the journal says
  * without the order being saved. Steps without transitions only get their reported output.
  */
-async function syncStepFromJournal(workOrderId: string, opId: string) {
+export async function syncStepFromJournal(workOrderId: string, opId: string) {
   if (!UUID_RE.test(opId)) return;
   const rows = await db.query.workOrderEvents.findMany({
     where: and(
