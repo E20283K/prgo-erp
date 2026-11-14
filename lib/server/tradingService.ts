@@ -13,6 +13,7 @@ import {
   tradingSettlements,
   companies,
   clients,
+  warehouses,
 } from "@/db/schema";
 import { eq, and, or, desc, asc, sql } from "drizzle-orm";
 import type {
@@ -54,6 +55,23 @@ async function resolveCompanyId(companyCode = "PRINTGOO"): Promise<string> {
     .returning({ id: companies.id });
 
   return created.id;
+}
+
+/** Kompaniyaning standart ombori (eng birinchi yaratilgani) — aksessuar kirimi shu omborga biriktiriladi */
+async function resolveDefaultWarehouse(companyId: string): Promise<{ id: string; name: string } | null> {
+  const [row] = await db
+    .select({ id: warehouses.id, name: warehouses.name })
+    .from(warehouses)
+    .where(eq(warehouses.companyId, companyId))
+    .orderBy(asc(warehouses.createdAt), asc(warehouses.id))
+    .limit(1);
+  return row || null;
+}
+
+async function resolveWarehouseName(warehouseId?: string | null): Promise<string | undefined> {
+  if (!warehouseId) return undefined;
+  const [row] = await db.select({ name: warehouses.name }).from(warehouses).where(eq(warehouses.id, warehouseId)).limit(1);
+  return row?.name || undefined;
 }
 
 // ─── 1. YTT & Legal Entities (YTT Limit Registri) ─────────────────────────────
@@ -890,6 +908,8 @@ export async function allocateImportToStock(
   const cargoUsd = Number(batch.internationalCargoUsd) || 0;
   const customsUzs = Number(batch.customsDutyUzs) || 0;
 
+  const receivingWarehouse = await resolveDefaultWarehouse(companyId);
+
   let itemsUpdated = 0;
   for (const item of items) {
     const qty = Number(item.quantity) || 0;
@@ -924,6 +944,9 @@ export async function allocateImportToStock(
           .update(tradingCatalog)
           .set({
             stockQty: sql`${tradingCatalog.stockQty} + ${qty}`,
+            ...(receivingWarehouse
+              ? { warehouseId: sql`coalesce(${tradingCatalog.warehouseId}, ${receivingWarehouse.id}::uuid)` }
+              : {}),
             wholesalePriceUzs: String(Number(suggestedSalePriceUzs.toFixed(2))),
             priceUzs: String(Number(suggestedSalePriceUzs.toFixed(2))),
             priceUsd: String(Number((suggestedSalePriceUzs / rate).toFixed(4))),
@@ -933,6 +956,7 @@ export async function allocateImportToStock(
       } else {
         await db.insert(tradingCatalog).values({
           companyId,
+          warehouseId: receivingWarehouse?.id ?? null,
           sku: item.sku,
           name: item.name,
           category: (item.category || "Furnitura") as any,
@@ -1101,6 +1125,12 @@ export async function getTradingCatalog(companyCode = "PRINTGOO"): Promise<Tradi
   const rows = await query;
   const catalogIds = rows.map((r) => r.id);
 
+  const warehouseNames = new Map<string, string>();
+  if (rows.some((r) => r.warehouseId)) {
+    const whRows = await db.select({ id: warehouses.id, name: warehouses.name }).from(warehouses);
+    for (const w of whRows) warehouseNames.set(w.id, w.name);
+  }
+
   let imageMap = new Map<string, TradingCatalogImageRecord[]>();
   if (catalogIds.length > 0) {
     try {
@@ -1145,6 +1175,8 @@ export async function getTradingCatalog(companyCode = "PRINTGOO"): Promise<Tradi
       retailPriceUZS: Number(r.retailPriceUzs || 0),
       stockQty: Number(r.stockQty || 0),
       minStockLevel: Number(r.minStockLevel || 0),
+      warehouseId: r.warehouseId || undefined,
+      warehouseName: (r.warehouseId && warehouseNames.get(r.warehouseId)) || undefined,
       origin: r.origin || "",
       material: r.material || undefined,
       colorCode: r.colorCode || undefined,
@@ -1185,12 +1217,24 @@ export async function upsertTradingCatalogItem(
     updatedAt: new Date(),
   };
 
+  // Ombor: aniq berilgan bo'lsa o'sha, aks holda mavjud qiymat saqlanadi yoki standart ombor biriktiriladi
+  const defaultWarehouse = await resolveDefaultWarehouse(companyId);
+  const explicitWarehouseId = isValidUuid(payload.warehouseId) ? payload.warehouseId! : null;
+  const fallbackWarehouseId = explicitWarehouseId || defaultWarehouse?.id || null;
+
   let savedItem: any = null;
 
   if (payload.id) {
     const [updated] = await db
       .update(tradingCatalog)
-      .set(values)
+      .set({
+        ...values,
+        ...(explicitWarehouseId
+          ? { warehouseId: explicitWarehouseId }
+          : fallbackWarehouseId
+          ? { warehouseId: sql`coalesce(${tradingCatalog.warehouseId}, ${fallbackWarehouseId}::uuid)` }
+          : {}),
+      })
       .where(and(eq(tradingCatalog.id, payload.id), eq(tradingCatalog.companyId, companyId)))
       .returning();
 
@@ -1200,7 +1244,10 @@ export async function upsertTradingCatalogItem(
   }
 
   if (!savedItem) {
-    const [inserted] = await db.insert(tradingCatalog).values(values).returning();
+    const [inserted] = await db
+      .insert(tradingCatalog)
+      .values({ ...values, warehouseId: fallbackWarehouseId })
+      .returning();
     savedItem = inserted;
   }
 
@@ -1272,6 +1319,8 @@ export async function upsertTradingCatalogItem(
     retailPriceUZS: Number(savedItem.retailPriceUzs || 0),
     stockQty: Number(savedItem.stockQty || 0),
     minStockLevel: Number(savedItem.minStockLevel || 0),
+    warehouseId: savedItem.warehouseId || undefined,
+    warehouseName: await resolveWarehouseName(savedItem.warehouseId),
     origin: savedItem.origin || "",
     material: savedItem.material || undefined,
     colorCode: savedItem.colorCode || undefined,

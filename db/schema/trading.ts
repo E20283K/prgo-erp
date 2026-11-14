@@ -14,6 +14,7 @@ import {
 import { relations } from "drizzle-orm";
 import { companies } from "./core";
 import { clients } from "./crm";
+import { warehouses } from "./warehouse";
 
 // ─── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -225,6 +226,8 @@ export const tradingCatalog = pgTable(
     companyId: uuid("company_id")
       .notNull()
       .references(() => companies.id, { onDelete: "restrict" }),
+    // Aksessuar kirim qilingan ombor (chiqimda ombor shu yerdan olinadi)
+    warehouseId: uuid("warehouse_id").references(() => warehouses.id, { onDelete: "set null" }),
     sku: varchar("sku", { length: 64 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     category: tradingProductCategoryEnum("category").default("Tugmalar").notNull(),
@@ -252,6 +255,7 @@ export const tradingCatalog = pgTable(
     uniqueIndex("trading_catalog_company_sku_uq").on(table.companyId, table.sku),
     index("trading_catalog_company_idx").on(table.companyId),
     index("trading_catalog_category_idx").on(table.category),
+    index("trading_catalog_warehouse_idx").on(table.warehouseId),
   ]
 );
 
@@ -461,6 +465,10 @@ export const tradingCatalogRelations = relations(tradingCatalog, ({ one, many })
   company: one(companies, {
     fields: [tradingCatalog.companyId],
     references: [companies.id],
+  }),
+  warehouse: one(warehouses, {
+    fields: [tradingCatalog.warehouseId],
+    references: [warehouses.id],
   }),
   images: many(tradingCatalogImages),
 }));

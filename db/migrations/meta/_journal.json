@@ -71,6 +71,13 @@
       "when": 1794605835163,
       "tag": "0009_operation_catalog_default_machine",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794631427051,
+      "tag": "0010_trading_catalog_warehouse",
+      "breakpoints": true
     }
   ]
 }
