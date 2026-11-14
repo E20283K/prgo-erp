@@ -1,0 +1,1 @@
+ALTER TABLE "work_order_events" ADD COLUMN "to_status" varchar(16);

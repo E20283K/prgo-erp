@@ -532,6 +532,8 @@ export const workOrderEvents = pgTable(
     palletCode: varchar("pallet_code", { length: 64 }),
     palletNumber: integer("pallet_number"),
     status: varchar("status", { length: 16 }),
+    /** Correction entries: the status the step was set to. */
+    toStatus: varchar("to_status", { length: 16 }),
     createdBy: varchar("created_by", { length: 128 }),
     updatedBy: varchar("updated_by", { length: 128 }),
     updatedAt: timestamp("updated_at", { withTimezone: true }),

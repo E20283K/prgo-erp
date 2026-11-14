@@ -66,6 +66,7 @@ export function toShiftEvent(row: EventRow): ShiftEvent {
     palletCode: row.palletCode || undefined,
     palletNumber: row.palletNumber ?? undefined,
     status: (row.status as ShiftEvent["status"]) || undefined,
+    toStatus: (row.toStatus as ShiftEvent["toStatus"]) || undefined,
     createdBy: row.createdBy || undefined,
     updatedBy: row.updatedBy || undefined,
   };
@@ -133,6 +134,7 @@ export async function saveWorkOrderEvent(
     palletCode: input.palletCode || null,
     palletNumber: int(input.palletNumber),
     status: input.status || null,
+    toStatus: input.toStatus || null,
   };
 
   if (existing) {

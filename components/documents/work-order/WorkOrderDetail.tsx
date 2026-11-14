@@ -113,7 +113,14 @@ import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
 import { DieLayoutTab } from "./tabs/die-layout/DieLayoutTab";
 import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { getProducedOutputQty, isProductionRouteFinished } from "./utils/productionOutput";
-import { DEFAULT_SHIFTS, atPlantTime, occurredAtFromTime, type ShiftInterval } from "@/lib/shiftSchedule";
+import { DEFAULT_SHIFTS, atPlantTime, occurredAtFromTime, plantClock, type ShiftInterval } from "@/lib/shiftSchedule";
+import {
+  applyTimelineToStep,
+  formatMinutes,
+  getStepTimeline,
+  isOpenDowntime,
+  stepGoodOutput,
+} from "./utils/stepTimeline";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
@@ -3092,80 +3099,161 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setIsPalletTagPrintOpen(true);
   };
 
-  const handleStartStep = (opId: string) => {
-    setOperations((prev) =>
-      prev.map((op) =>
-        op.id === opId
-          ? {
-              ...op,
-              status: "In Progress",
-              startedAt: op.startedAt || new Date().toISOString(),
-            }
-          : op
-      )
-    );
+  // ── Step state machine: every transition is a journal entry; the step's fields follow the journal ──
+  const [downtimeDialogMode, setDowntimeDialogMode] = useState<"open" | "record">("open");
+
+  const stepEventsOf = (opId: string, events: ShiftEvent[] = shiftEventsRef.current) =>
+    events.filter((ev) => ev.opId === opId);
+
+  const logStepTransition = (opId: string, type: ShiftEvent["type"], note = "", extra: Partial<ShiftEvent> = {}) => {
+    const previous = shiftEventsRef.current;
+    const at = new Date();
+    const event: ShiftEvent = {
+      id: `e_${type}_${at.getTime()}`,
+      opId,
+      type,
+      time: plantClock(at).time,
+      occurredAt: at.toISOString(),
+      note,
+      operator: "",
+      ...extra,
+    };
+    setShiftEvents([event, ...previous]);
+    void persistShiftEvent(event, previous);
     setTabUnsaved(tab.id, true);
-    addNotification({
-      title: "Bosqich boshlandi",
-      description: `Step #${selectedOp.stepNumber} (${selectedOp.name}) ishga tushirildi.`,
-      severity: "info",
-    });
   };
 
-  const handlePauseStep = (opId: string) => {
+  /**
+   * A step starts only after the previous production step has produced something.
+   * Operators are stopped; a manager may start in parallel with a reason, which goes into the journal.
+   */
+  const checkPreviousStep = (opId: string): { ok: boolean; note?: string } => {
+    const production = operations.filter((o) => o.kind !== "packaging");
+    const idx = production.findIndex((o) => o.id === opId);
+    if (idx <= 0) return { ok: true };
+    const prev = production[idx - 1];
+    if (stepGoodOutput(prev, stepEventsOf(prev.id)) > 0) return { ok: true };
+    const label = `#${prev.stepNumber} ${prev.name}`;
+    if (isOperator) {
+      addNotification({ title: "Bosqichni boshlab bo'lmaydi", description: `${label} hali chiqim bermagan.`, severity: "error" });
+      return { ok: false };
+    }
+    const reason = window.prompt(`${label} hali chiqim bermagan. Parallel boshlash sababi:`);
+    if (!reason || !reason.trim()) return { ok: false };
+    return { ok: true, note: `Oldingi bosqichsiz boshlandi: ${reason.trim()}` };
+  };
+
+  const handleStartSetup = (opId: string) => {
+    const gate = checkPreviousStep(opId);
+    if (!gate.ok) return;
+    logStepTransition(opId, "SetupStart", gate.note || "Sozlash boshlandi");
+  };
+
+  const handleStartRun = (opId: string) => {
+    const tl = getStepTimeline(stepEventsOf(opId));
+    let note = "Ish boshlandi";
+    if (tl.phase === "queued") {
+      const gate = checkPreviousStep(opId);
+      if (!gate.ok) return;
+      if (gate.note) note = gate.note;
+    }
+    logStepTransition(opId, "RunStart", note);
+  };
+
+  /** "To'xtatish": opens a downtime now; its length is measured until "Davom ettirish". */
+  const handlePauseStep = (_opId: string) => {
     setEditingDowntimeEvent(null);
+    setDowntimeDialogMode("open");
+    setIsDowntimeDialogOpen(true);
+  };
+
+  /** A downtime that already ended (recorded afterwards, with its length). */
+  const handleRecordDowntime = () => {
+    setEditingDowntimeEvent(null);
+    setDowntimeDialogMode("record");
     setIsDowntimeDialogOpen(true);
   };
 
   const handleOpenEditDowntimeEvent = (event: ShiftEvent) => {
     setEditingDowntimeEvent(event);
+    setDowntimeDialogMode(isOpenDowntime(event) ? "open" : "record");
     setIsDowntimeDialogOpen(true);
   };
 
-  const handleResumeStep = (opId: string) => {
-    setOperations((prev) =>
-      prev.map((op) =>
-        op.id === opId
-          ? {
-              ...op,
-              status: "In Progress",
-            }
-          : op
-      )
-    );
+  /** Closes the open downtime with its measured length (at least one minute). */
+  const closeOpenDowntime = (opId: string): number => {
+    const tl = getStepTimeline(stepEventsOf(opId));
+    const open = tl.openDowntime;
+    if (!open || !open.occurredAt) return 0;
+    const minutes = Math.max(1, Math.round((Date.now() - new Date(open.occurredAt).getTime()) / 60000));
+    const previous = shiftEventsRef.current;
+    const closed: ShiftEvent = { ...open, downtimeDurationMinutes: minutes };
+    setShiftEvents(previous.map((ev) => (ev.id === open.id ? closed : ev)));
+    void persistShiftEvent(closed, previous);
     setTabUnsaved(tab.id, true);
+    return minutes;
+  };
+
+  const handleResumeStep = (opId: string) => {
+    const minutes = closeOpenDowntime(opId);
+    // A step paused before the journal kept transitions has no open downtime: restart its run instead.
+    if (minutes === 0) logStepTransition(opId, "RunStart", "Davom ettirildi");
     addNotification({
-      title: "Ish davom ettirilmoqda",
-      description: `Step #${selectedOp.stepNumber} yana faol holatga keltirildi.`,
+      title: "Ish davom ettirildi",
+      description: minutes > 0 ? `To'xtalish ${formatMinutes(minutes)} davom etdi.` : undefined,
       severity: "info",
     });
   };
 
-  const handleFinishStep = (opId: string) => {
-    setOperations((prev) =>
-      prev.map((op) =>
-        op.id === opId
-          ? (() => {
-              const completedAt = new Date().toISOString();
-              // Fact run time = start → finish minus recorded downtime; correctable in the step dialog.
-              const runMinutes = elapsedRunMinutes({ ...op, completedAt });
-              return {
-                ...op,
-                status: "Finished" as const,
-                completedAt,
-                actualDurationMinutes: runMinutes ?? op.actualDurationMinutes,
-              };
-            })()
-          : op
-      )
-    );
-    setTabUnsaved(tab.id, true);
-    addNotification({
-      title: "Bosqich yakunlandi",
-      description: `Step #${selectedOp.stepNumber} muvaffaqiyatli topshirildi.`,
-      severity: "success",
-    });
+  /**
+   * Finishing needs at least one output report; short of plan it asks first.
+   * `events` lets a report that was just added count before the list re-renders.
+   */
+  const handleFinishStep = (opId: string, events: ShiftEvent[] = shiftEventsRef.current) => {
+    const op = operations.find((o) => o.id === opId);
+    if (!op) return;
+    const good = stepGoodOutput(op, stepEventsOf(opId, events));
+    if (good <= 0) {
+      addNotification({
+        title: "Yakunlab bo'lmaydi",
+        description: "Avval chiqim hisobotini (palet) kiriting.",
+        severity: "error",
+      });
+      return;
+    }
+    const plan = parseInt((op.qtyCompleted || "").split("/")[1]?.replace(/[^\d]/g, "") || "0", 10) || 0;
+    let note = "Bosqich yakunlandi";
+    if (plan > 0 && good < plan) {
+      const ok = window.confirm(
+        `Reja: ${plan.toLocaleString()}, fakt: ${good.toLocaleString()}. Bosqich qisman yakunlansinmi?`
+      );
+      if (!ok) return;
+      note = `Qisman yakunlandi: ${good.toLocaleString()} / ${plan.toLocaleString()}`;
+    }
+    closeOpenDowntime(opId);
+    logStepTransition(opId, "Finish", note);
+    addNotification({ title: "Bosqich yakunlandi", description: `#${op.stepNumber} ${op.name}`, severity: "success" });
   };
+
+  /** Manager's status fix: needs a reason and stays in the journal as its own entry. */
+  const handleCorrectStep = (opId: string, toStatus: RouteStep["status"], reason: string) => {
+    if (!reason.trim()) return;
+    if (toStatus !== "Paused") closeOpenDowntime(opId);
+    logStepTransition(opId, "Correction", reason.trim(), { toStatus });
+  };
+
+  // The steps' status, times and downtime follow the journal (steps without transitions keep their own).
+  useEffect(() => {
+    setOperations((prev) => {
+      let changed = false;
+      const next = prev.map((op) => {
+        const updated = applyTimelineToStep(op, getStepTimeline(shiftEvents.filter((ev) => ev.opId === op.id)));
+        if (updated !== op) changed = true;
+        return updated;
+      });
+      return changed ? next : prev;
+    });
+  }, [shiftEvents]);
 
   const handleSaveDowntime = (data: {
     eventId?: string;
@@ -3176,7 +3264,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     operator: string;
     note: string;
     time: string;
-    pauseStep: boolean;
+    /** Open: the step stops now and the length is measured until it resumes. */
+    open: boolean;
   }) => {
     const previous = shiftEventsRef.current;
     const existing = data.eventId ? previous.find((ev) => ev.id === data.eventId) : undefined;
@@ -3190,7 +3279,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               : existing.occurredAt,
           shift: data.shift,
           downtimeReason: data.downtimeReason,
-          downtimeDurationMinutes: data.durationMinutes,
+          downtimeDurationMinutes: isOpenDowntime(existing) ? existing.downtimeDurationMinutes : data.durationMinutes,
           note: data.note,
           operator: data.operator,
         }
@@ -3202,31 +3291,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           shift: data.shift,
           type: "Delay",
           downtimeReason: data.downtimeReason,
-          downtimeDurationMinutes: data.durationMinutes,
+          downtimeDurationMinutes: data.open ? undefined : data.durationMinutes,
           note: data.note,
           operator: data.operator,
         };
     setShiftEvents(existing ? previous.map((ev) => (ev.id === event.id ? event : ev)) : [event, ...previous]);
     void persistShiftEvent(event, previous);
 
-    if (data.pauseStep) {
-      setOperations((prev) =>
-        prev.map((op) =>
-          op.id === data.opId
-            ? {
-                ...op,
-                status: "Paused",
-                pausedAt: new Date().toISOString(),
-                downtimeMinutes: (op.downtimeMinutes || 0) + data.durationMinutes,
-              }
-            : op
-        )
-      );
-    }
     setTabUnsaved(tab.id, true);
     addNotification({
-      title: data.eventId ? "To'xtalish yangilandi" : "To'xtalish qayd etildi",
-      description: `${data.downtimeReason} (${data.durationMinutes} daqiqa)`,
+      title: data.eventId ? "To'xtalish yangilandi" : data.open ? "Bosqich to'xtatildi" : "To'xtalish qayd etildi",
+      description: data.open && !data.eventId ? data.downtimeReason : `${data.downtimeReason} (${data.durationMinutes} daqiqa)`,
       severity: "warning",
     });
   };
@@ -3294,7 +3369,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         outputPiecesQty: eventData.outputPiecesQty,
         wasteQty: totalWaste > 0 ? totalWaste : undefined,
         wasteReason: eventData.wasteReason,
-        palletNumber: shiftEvents.filter((ev) => ev.opId === selectedOp.id).length + 1,
+        palletNumber: shiftEvents.filter((ev) => ev.opId === selectedOp.id && ev.type === "Run").length + 1,
       };
       updatedEvents = [newEvent, ...shiftEvents];
     }
@@ -3315,29 +3390,19 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         if (op.id !== selectedOp.id) return op;
         const targetMatch = (op.qtyCompleted || "").match(/\/\s*(.+)$/);
         const targetStr = targetMatch ? ` / ${targetMatch[1]}` : "";
-        const nextStatus = eventData.markStepFinished ? "Finished" : op.status === "Queued" ? "In Progress" : op.status;
-        // A report starts the step's clock; finishing from the report closes it like "Yakunlash" does.
-        const now = new Date().toISOString();
-        const startedAt = op.startedAt || now;
-        const completedAt = nextStatus === "Finished" ? op.completedAt || now : op.completedAt;
-        const runMinutes =
-          nextStatus === "Finished" && !op.completedAt ? elapsedRunMinutes({ ...op, startedAt, completedAt }) : null;
         return {
           ...op,
           qtyCompleted: `${totalGood.toLocaleString()}${targetStr}`,
-          status: nextStatus,
           operator: eventData.operator,
-          startedAt,
-          completedAt,
-          actualDurationMinutes: runMinutes ?? op.actualDurationMinutes,
         };
       })
     );
 
     setTabUnsaved(tab.id, true);
+    if (eventData.markStepFinished) handleFinishStep(selectedOp.id, updatedEvents);
 
     addNotification({
-      title: eventData.markStepFinished ? "Bosqich yakunlandi" : "Palet hisoboti saqlandi",
+      title: "Palet hisoboti saqlandi",
       description: `${selectedOp.name}: ${eventData.batchLabel} (${eventData.goodQty.toLocaleString()} list) qayd etildi.`,
       severity: "success",
     });
@@ -4255,22 +4320,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onOpenQuickPalletLog={handleOpenLogEvent}
                 onOpenPackaging={() => setIsPackagingOpen(true)}
                 onOpenEditPalletLog={handleOpenEditPalletEvent}
-                onOpenDowntimeLog={() => {
-                  setEditingDowntimeEvent(null);
-                  setIsDowntimeDialogOpen(true);
-                }}
+                onOpenDowntimeLog={handleRecordDowntime}
                 onOpenEditDowntimeLog={handleOpenEditDowntimeEvent}
                 onOpenPalletTagPrint={handleOpenPalletTagPrint}
-                onStartStep={handleStartStep}
+                onStartSetup={handleStartSetup}
+                onStartStep={handleStartRun}
                 onPauseStep={handlePauseStep}
                 onResumeStep={handleResumeStep}
-                onFinishStep={handleFinishStep}
-                onChangeStepStatus={(opId, status) => {
-                  setOperations((prev) =>
-                    prev.map((op) => (op.id === opId ? { ...op, status } : op))
-                  );
-                  setTabUnsaved(tab.id, true);
-                }}
+                onFinishStep={(opId) => handleFinishStep(opId)}
+                onCorrectStep={isOperator ? undefined : handleCorrectStep}
                 onDeleteEvent={handleDeleteShiftEvent}
                 piecesPerSheet={activePrintPlan.piecesPerSheet}
               />
@@ -4399,14 +4457,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             const idx = operations.findIndex((o) => o.id === selectedOp.id);
             if (idx <= 0) return 0;
             const prev = operations[idx - 1];
-            const prevEvents = shiftEvents.filter((ev) => ev.opId === prev.id);
-            if (prevEvents.length > 0) {
-              return prevEvents.reduce((sum, ev) => sum + (ev.goodQty || 0), 0);
-            }
-            const parsed = (prev.qtyCompleted || "").split("/");
-            return parseInt(parsed[0]?.replace(/[^\d]/g, "") || "0", 10);
+            return stepGoodOutput(prev, shiftEvents.filter((ev) => ev.opId === prev.id));
           })()}
-          existingOpEvents={selectedOpEvents}
+          existingOpEvents={selectedOpEvents.filter((ev) => ev.type === "Run")}
           piecesPerSheet={activePrintPlan.piecesPerSheet}
           editingEvent={editingPalletEvent}
           onSaveEvent={handleSavePalletEvent}
@@ -4425,6 +4478,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           }}
           selectedOp={selectedOp}
           editingDowntime={editingDowntimeEvent}
+          mode={downtimeDialogMode}
           onSaveDowntime={handleSaveDowntime}
         />
       )}

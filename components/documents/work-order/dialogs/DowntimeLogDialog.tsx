@@ -6,7 +6,6 @@ import {
   Clock,
   User,
   Wrench,
-  CheckCircle2,
   FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,7 +30,6 @@ import { RouteStep, ShiftEvent, DOWNTIME_REASONS, FLOOR_OPERATORS } from "../typ
 import { DEFAULT_SHIFTS, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
 
 type ShiftName = NonNullable<ShiftEvent["shift"]>;
-import { cn } from "@/lib/utils";
 
 interface DowntimeLogDialogProps {
   isOpen: boolean;
@@ -47,8 +45,11 @@ interface DowntimeLogDialogProps {
     operator: string;
     note: string;
     time: string;
-    pauseStep: boolean;
+    /** The step stops now; the length is measured until it resumes. */
+    open: boolean;
   }) => void;
+  /** open: stop the step now (reason only). record: a downtime that already ended, with its length. */
+  mode?: "open" | "record";
   /** Plant shifts: the current one is preselected. */
   shiftSchedule?: ShiftInterval[];
 }
@@ -60,7 +61,9 @@ export function DowntimeLogDialog({
   editingDowntime = null,
   onSaveDowntime,
   shiftSchedule = DEFAULT_SHIFTS,
+  mode = "record",
 }: DowntimeLogDialogProps) {
+  const isOpenMode = mode === "open";
   const shiftOptions = shiftSchedule.length > 0 ? shiftSchedule : DEFAULT_SHIFTS;
   const defaultTime = plantClock(new Date()).time;
   const defaultShift = shiftAt(defaultTime, shiftOptions) as ShiftName;
@@ -90,7 +93,6 @@ export function DowntimeLogDialog({
   );
   const [time, setTime] = useState<string>(defaultTime);
   const [note, setNote] = useState<string>("");
-  const [pauseStep, setPauseStep] = useState<boolean>(true);
 
   useEffect(() => {
     if (isOpen) {
@@ -104,7 +106,6 @@ export function DowntimeLogDialog({
         setOperator(editingDowntime.operator || selectedOp.operator || FLOOR_OPERATORS[0]);
         setTime(editingDowntime.time || defaultTime);
         setNote(editingDowntime.note || "");
-        setPauseStep(selectedOp.status === "Paused");
       } else {
         setSelectedReasonCode(DOWNTIME_REASONS[0].code);
         setDurationMinutes(DOWNTIME_REASONS[0].defaultDurationMinutes);
@@ -112,7 +113,6 @@ export function DowntimeLogDialog({
         setOperator(selectedOp.operator || FLOOR_OPERATORS[0]);
         setTime(defaultTime);
         setNote("");
-        setPauseStep(true);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the dialog opens, not as the clock ticks
@@ -140,8 +140,8 @@ export function DowntimeLogDialog({
       durationMinutes: Math.max(1, durationMinutes || 15),
       operator: operator || selectedOp.operator || FLOOR_OPERATORS[0],
       note: cleanNote || selectedReason.label,
-      time: time || defaultTime,
-      pauseStep,
+      time: isOpenMode && !editingDowntime ? plantClock(new Date()).time : time || defaultTime,
+      open: isOpenMode,
     });
     onOpenChange(false);
   };
@@ -157,7 +157,9 @@ export function DowntimeLogDialog({
               </div>
               <div>
                 <DialogTitle className="text-xs font-bold text-foreground flex items-center gap-2">
-                  <span>{editingDowntime ? "To'xtalishni tahrirlash" : "To'xtalish kiritish"}</span>
+                  <span>
+                    {editingDowntime ? "To'xtalishni tahrirlash" : isOpenMode ? "Bosqichni to'xtatish" : "To'xtalish kiritish"}
+                  </span>
                   <Badge variant="outline" className="font-mono text-[10px] py-0 h-4">
                     #{selectedOp.stepNumber}
                   </Badge>
@@ -219,6 +221,7 @@ export function DowntimeLogDialog({
             </Select>
           </div>
 
+          {!isOpenMode && (
           <div className="grid grid-cols-2 gap-3">
             {/* Duration */}
             <div className="space-y-1">
@@ -250,6 +253,7 @@ export function DowntimeLogDialog({
               />
             </div>
           </div>
+          )}
 
           {/* Operator */}
           <div className="space-y-1">
@@ -291,33 +295,6 @@ export function DowntimeLogDialog({
             />
           </div>
 
-          {/* Pause checkbox card */}
-          <div
-            onClick={() => setPauseStep(!pauseStep)}
-            className={cn(
-              "p-2.5 rounded-md border flex items-center justify-between cursor-pointer transition-colors",
-              pauseStep
-                ? "bg-amber-500/5 border-amber-500/30 text-amber-900 dark:text-amber-300"
-                : "bg-muted/30 border-border text-muted-foreground"
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <div
-                className={cn(
-                  "size-4 rounded flex items-center justify-center border",
-                  pauseStep ? "bg-amber-500 border-amber-600 text-white" : "border-border"
-                )}
-              >
-                {pauseStep && <CheckCircle2 className="size-3" />}
-              </div>
-              <span className="text-xs font-medium">
-                Bosqichni to&apos;xtatib turish
-              </span>
-            </div>
-            <Badge variant="outline" className="text-[10px] font-mono">
-              {pauseStep ? "To'xtatilgan" : "Faol"}
-            </Badge>
-          </div>
         </div>
 
         <DialogFooter className="p-3 bg-muted/30 border-t border-border flex items-center justify-between sm:justify-between">
@@ -336,7 +313,7 @@ export function DowntimeLogDialog({
             onClick={handleSave}
             className="h-8 text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold"
           >
-            Saqlash
+            {isOpenMode && !editingDowntime ? "To'xtatish" : "Saqlash"}
           </Button>
         </DialogFooter>
       </DialogContent>

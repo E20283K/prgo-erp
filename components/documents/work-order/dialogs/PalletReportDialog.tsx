@@ -118,12 +118,24 @@ export function PalletReportDialog({
       return remaining > 0 ? remaining : previousOpGoodOutput;
     }
     // Fallback: parse target from qtyCompleted
-    const match = (selectedOp.qtyCompleted || "").match(/\/s*([d,]+)/);
+    const match = (selectedOp.qtyCompleted || "").match(/\/\s*([\d,\s]+)/);
     if (match) {
-      return parseInt(match[1].replace(/,/g, ""), 10) || 1000;
+      return parseInt(match[1].replace(/[^\d]/g, ""), 10) || 1000;
     }
     return 1000;
   }, [previousOpGoodOutput, existingOpEvents, selectedOp.qtyCompleted]);
+
+  // What the previous step has produced and this step has not taken in yet.
+  const availableFromPrevious =
+    previousOpGoodOutput > 0
+      ? Math.max(
+          0,
+          previousOpGoodOutput -
+            existingOpEvents
+              .filter((ev) => ev.id !== editingEvent?.id)
+              .reduce((sum, ev) => sum + (ev.inputQty || 0), 0)
+        )
+      : null;
 
   const employees = useWorkspaceStore((s) => s.employees);
 
@@ -232,7 +244,10 @@ export function PalletReportDialog({
     return clean.slice(0, 2).toUpperCase();
   };
 
+  const overInput = availableFromPrevious !== null && inputQty > availableFromPrevious;
+
   const handleSave = (markStepFinished: boolean) => {
+    if (overInput) return;
     const noteText = isMultipiece && multiplier > 1
       ? `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} l. | Priladka: ${makeReadyQty} | Brak: ${defectQty} | Sof: ${calculatedGoodQty.toLocaleString()} l. (${outputPieces.toLocaleString()} dona)`
       : `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} l. | Priladka: ${makeReadyQty} | Brak: ${defectQty} | Chiqish: ${calculatedGoodQty.toLocaleString()} l.`;
@@ -296,16 +311,16 @@ export function PalletReportDialog({
         {/* Body Content */}
         <div className="p-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
           {/* Discrepancy Warning Banner */}
-          {previousOpGoodOutput > 0 && inputQty > previousOpGoodOutput && (
+          {availableFromPrevious !== null && inputQty > availableFromPrevious && (
             <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between text-rose-700 dark:text-rose-400">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="size-4 shrink-0 text-rose-600" />
                 <span className="text-[11px] font-semibold">
-                  Hajm tafovuti (Discrepancy Warning): Kirayotgan miqdor oldingi bosqich toza qoldig&apos;idan ({previousOpGoodOutput.toLocaleString()} list) ko&apos;p!
+                  Kirish oldingi bosqich qoldig&apos;idan ({availableFromPrevious.toLocaleString()}) ko&apos;p
                 </span>
               </div>
               <span className="font-mono text-xs font-bold shrink-0">
-                +{(inputQty - previousOpGoodOutput).toLocaleString()} list ortiqcha
+                +{(inputQty - availableFromPrevious).toLocaleString()}
               </span>
             </div>
           )}
@@ -658,6 +673,7 @@ export function PalletReportDialog({
               variant="outline"
               size="sm"
               onClick={() => handleSave(false)}
+              disabled={overInput}
               className="h-8 text-xs border-border bg-card hover:bg-muted font-medium cursor-pointer shrink-0"
             >
               Partiyani saqlash (Davom etadi)
@@ -667,6 +683,7 @@ export function PalletReportDialog({
               type="button"
               size="sm"
               onClick={() => handleSave(true)}
+              disabled={overInput}
               className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shrink-0"
             >
               <CheckCircle2 className="w-3.5 h-3.5 mr-1" />

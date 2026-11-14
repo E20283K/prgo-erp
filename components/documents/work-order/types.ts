@@ -445,6 +445,8 @@ export interface RouteStep {
   duration: number;
   qtyCompleted: string;
   status: "Queued" | "In Progress" | "Paused" | "Finished";
+  /** While "In Progress": make-ready or the production run (derived from the shift journal). */
+  phase?: "setup" | "run";
   toolingId?: string;
   toolingName?: string;
   department?: string;
@@ -534,7 +536,23 @@ export interface ShiftEvent {
   createdBy?: string;
   updatedBy?: string;
   batchLabel?: string;
-  type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC" | "Waste";
+  /**
+   * Run = output report, Delay/Maintenance = downtime (open while it has no duration),
+   * SetupStart/RunStart/Finish = step transitions, Correction = a manager's status fix (toStatus, reason in note).
+   */
+  type:
+    | "Setup"
+    | "Run"
+    | "Delay"
+    | "Maintenance"
+    | "QC"
+    | "Waste"
+    | "SetupStart"
+    | "RunStart"
+    | "Finish"
+    | "Correction";
+  /** Correction: the status the step was set to. */
+  toStatus?: RouteStep["status"];
   note: string;
   operator: string;
   inputQty?: number;

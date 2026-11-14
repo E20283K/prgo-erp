@@ -12,9 +12,6 @@ import {
   ArrowDown,
   Copy,
   Factory,
-  CheckCircle2,
-  Play,
-  PauseCircle,
   Layers,
   Check,
 } from "lucide-react";
@@ -307,20 +304,6 @@ export function OperationsTab({
       else onOpenEditOperation(row);
     },
     [operations, onOpenPackaging, onOpenEditOperation]
-  );
-
-  const handleSetRowStatus = useCallback(
-    (status: RouteStep["status"]) => {
-      if (!hasSelectedOp || selectedOpRow === undefined) return;
-      const updated = [...operations];
-      updated[selectedOpRow] = {
-        ...updated[selectedOpRow],
-        status,
-      };
-      setOperations(updated);
-      onMarkUnsaved();
-    },
-    [hasSelectedOp, selectedOpRow, operations, setOperations, onMarkUnsaved]
   );
 
   const getOpCellContent = useCallback(
@@ -942,33 +925,6 @@ export function OperationsTab({
                 </ContextMenuItem>
               )}
 
-              {!isPackagingSelected && (
-              <>
-              <ContextMenuSeparator />
-
-              <ContextMenuItem
-                onClick={() => handleSetRowStatus("In Progress")}
-                className="gap-2 cursor-pointer"
-              >
-                <Play className="w-3.5 h-3.5 text-blue-500" />
-                <span>Holat: Jarayonda</span>
-              </ContextMenuItem>
-              <ContextMenuItem
-                onClick={() => handleSetRowStatus("Paused")}
-                className="gap-2 cursor-pointer"
-              >
-                <PauseCircle className="w-3.5 h-3.5 text-amber-500" />
-                <span>Holat: To&apos;xtalish</span>
-              </ContextMenuItem>
-              <ContextMenuItem
-                onClick={() => handleSetRowStatus("Finished")}
-                className="gap-2 cursor-pointer"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Holat: Yakunlandi</span>
-              </ContextMenuItem>
-              </>
-              )}
             </>
           )}
 
