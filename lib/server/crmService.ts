@@ -1,5 +1,14 @@
 import { db } from "@/db";
-import { clients, clientContacts, clientContracts, companies, crmIndustries } from "@/db/schema";
+import {
+  clients,
+  clientContacts,
+  clientContracts,
+  companies,
+  crmIndustries,
+  deliveryActs,
+  clientSettlements,
+  clientPayments,
+} from "@/db/schema";
 import { eq, desc, asc, sql } from "drizzle-orm";
 import { getNextCustomerCode } from "./numberingService";
 import type {
@@ -361,4 +370,31 @@ export async function getOrCreateCrmIndustry(name: string, companyCode: string =
     .returning();
 
   return created;
+}
+
+/**
+ * Mijozni o'chirish (id, code bo'yicha). Moliyaviy hujjatlari bo'lsa o'chirilmaydi.
+ */
+export async function deleteCrmClient(idOrCode: string, companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCode);
+
+  const existing = await db.query.clients.findFirst({
+    where: (t, { and, eq, or }) =>
+      and(eq(t.companyId, companyId), isUuid ? or(eq(t.id, idOrCode), eq(t.code, idOrCode)) : eq(t.code, idOrCode)),
+  });
+  if (!existing) throw new Error("Mijoz topilmadi");
+
+  const [acts, settlements, payments] = await Promise.all([
+    db.select({ n: sql<number>`count(*)::int` }).from(deliveryActs).where(eq(deliveryActs.clientId, existing.id)),
+    db.select({ n: sql<number>`count(*)::int` }).from(clientSettlements).where(eq(clientSettlements.clientId, existing.id)),
+    db.select({ n: sql<number>`count(*)::int` }).from(clientPayments).where(eq(clientPayments.clientId, existing.id)),
+  ]);
+  const linked = (acts[0]?.n ?? 0) + (settlements[0]?.n ?? 0) + (payments[0]?.n ?? 0);
+  if (linked > 0) {
+    throw new Error(`"${existing.name}" mijozida moliyaviy hujjatlar bor (${linked} ta). O'chirib bo'lmaydi — holatini "Inactive" qiling.`);
+  }
+
+  await db.delete(clients).where(eq(clients.id, existing.id));
+  return { success: true };
 }

@@ -747,6 +747,7 @@ interface WorkspaceState {
   isCrmCustomersLoading?: boolean;
   loadCrmCustomers: (companyCode?: string) => Promise<void>;
   upsertCustomerAsync: (customer: CrmCustomerRecord, companyCode?: string) => Promise<any>;
+  deleteCustomerAsync: (id: string, companyCode?: string) => Promise<void>;
   crmIndustriesList: { id: string; name: string; code?: string }[];
   isCrmIndustriesLoading?: boolean;
   isCrmIndustriesLoaded?: boolean;
@@ -757,7 +758,7 @@ interface WorkspaceState {
   isSuppliersLoading: boolean;
   loadSuppliers: (companyCode?: string) => Promise<void>;
   upsertSupplierAsync: (supplier: Partial<SupplierRecord>, companyCode?: string) => Promise<any>;
-  deleteSupplierAsync: (id: string, companyCode?: string) => Promise<boolean>;
+  deleteSupplierAsync: (id: string, companyCode?: string) => Promise<void>;
   warehouseStock: WarehouseStockRecord[];
   isWarehouseStockLoading: boolean;
   loadWarehouseStock: (companyCode?: string) => Promise<void>;
@@ -1275,6 +1276,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return json.client;
   },
 
+  deleteCustomerAsync: async (id: string, companyCode = "PRINTGOO") => {
+    const res = await fetch(`/api/v1/crm/clients/${encodeURIComponent(id)}?company=` + encodeURIComponent(companyCode), {
+      method: "DELETE",
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      throw new Error(json?.error || `Mijozni o'chirib bo'lmadi (HTTP ${res.status})`);
+    }
+    set((state) => ({ crmCustomers: state.crmCustomers.filter((c) => c.id !== id && c.dbId !== id) }));
+  },
+
   loadCrmIndustries: async (force = false) => {
     if (!force && (get().isCrmIndustriesLoading || get().isCrmIndustriesLoaded)) {
       return;
@@ -1362,19 +1374,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   deleteSupplierAsync: async (id: string, companyCode = "PRINTGOO") => {
-    try {
-      const res = await fetch(`/api/v1/crm/suppliers/${encodeURIComponent(id)}?company=` + encodeURIComponent(companyCode), {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        await get().loadSuppliers(companyCode);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.error("Failed to delete supplier:", e);
-      return false;
+    const res = await fetch(`/api/v1/crm/suppliers/${encodeURIComponent(id)}?company=` + encodeURIComponent(companyCode), {
+      method: "DELETE",
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      throw new Error(json?.error || `Ta'minotchini o'chirib bo'lmadi (HTTP ${res.status})`);
     }
+    set((state) => ({ suppliers: state.suppliers.filter((s) => s.id !== id && s.code !== id) }));
   },
   warehouseStock: INITIAL_WAREHOUSE_STOCK,
   isWarehouseStockLoading: false,

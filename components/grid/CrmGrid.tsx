@@ -23,7 +23,18 @@ import {
   Search,
   ExternalLink,
   Sparkles,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import { useWorkspaceStore, CrmCustomerRecord } from "@/store/workspaceStore";
 import { useTranslations } from "next-intl";
@@ -65,6 +76,8 @@ export function CrmGrid({ type }: CrmGridProps) {
     isSuppliersLoading,
     upsertSupplierAsync,
     deleteSupplierAsync,
+    deleteCustomerAsync,
+    closeTab,
     addNotification,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
@@ -548,20 +561,26 @@ export function CrmGrid({ type }: CrmGridProps) {
     }
   };
 
-  const handleDeleteLead = async (leadId: string) => {
+  const deleteLeadRequest = async (leadId: string) => {
+    const res = await fetch(`/api/v1/crm/leads/${encodeURIComponent(leadId)}`, { method: "DELETE" });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      throw new Error(json?.error || `Lidni o'chirib bo'lmadi (HTTP ${res.status})`);
+    }
     setLeads((prev) => prev.filter((l) => l.id !== leadId));
-    addNotification({
-      title: `Lid o'chirildi (${leadId})`,
-      severity: "info",
-    });
-    setLeadModalOpen(false);
+  };
 
+  const handleDeleteLead = async (leadId: string) => {
     try {
-      await fetch(`/api/v1/crm/leads/${encodeURIComponent(leadId)}`, {
-        method: "DELETE",
-      });
+      await deleteLeadRequest(leadId);
+      addNotification({ title: `Lid o'chirildi (${leadId})`, severity: "info" });
+      setLeadModalOpen(false);
     } catch (e) {
-      console.error("Failed to delete lead from DB:", e);
+      addNotification({
+        title: "O'chirib bo'lmadi",
+        description: e instanceof Error ? e.message : String(e),
+        severity: "error",
+      });
     }
   };
 
@@ -576,12 +595,78 @@ export function CrmGrid({ type }: CrmGridProps) {
   };
 
   const handleDeleteSupplier = async (supplierId: string) => {
-    await deleteSupplierAsync(supplierId);
-    addNotification({
-      title: "Ta'minotchi o'chirildi",
-      severity: "info",
-    });
-    setSupplierModalOpen(false);
+    try {
+      await deleteSupplierAsync(supplierId);
+      closeTab(supplierId);
+      addNotification({ title: "Ta'minotchi o'chirildi", severity: "info" });
+      setSupplierModalOpen(false);
+    } catch (e) {
+      addNotification({
+        title: "O'chirib bo'lmadi",
+        description: e instanceof Error ? e.message : String(e),
+        severity: "error",
+      });
+    }
+  };
+
+  // Grid bulk delete
+  const [deleteTargets, setDeleteTargets] = useState<any[]>([]);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const getSelectedRowData = (): any[] => {
+    let indices = selection.rows.toArray();
+    if (indices.length === 0 && selection.current?.cell) {
+      indices = [selection.current.cell[1]];
+    }
+    return indices.map((i) => filteredRows[i]).filter(Boolean);
+  };
+
+  const requestDeleteSelected = () => {
+    const targets = getSelectedRowData();
+    if (targets.length > 0) {
+      setDeleteTargets(targets);
+      setDeleteOpen(true);
+    }
+  };
+
+  const rowLabel = (r: any) =>
+    type === "leads" ? `${r.id} ${r.company || ""}`.trim() : `${r.code || r.id} ${r.name || ""}`.trim();
+
+  const handleConfirmDelete = async () => {
+    if (deleteTargets.length === 0) return;
+    setIsDeleting(true);
+    const failed: string[] = [];
+    let okCount = 0;
+    for (const r of deleteTargets) {
+      try {
+        if (type === "leads") {
+          await deleteLeadRequest(r.id);
+        } else if (type === "suppliers") {
+          await deleteSupplierAsync(r.id);
+        } else {
+          await deleteCustomerAsync(r.dbId || r.id);
+        }
+        closeTab(r.id);
+        okCount++;
+      } catch (e) {
+        failed.push(e instanceof Error ? e.message : String(e));
+      }
+    }
+    setIsDeleting(false);
+    setDeleteOpen(false);
+    setSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
+
+    if (okCount > 0) {
+      addNotification({ title: `${okCount} ta yozuv o'chirildi`, severity: "info" });
+    }
+    if (failed.length > 0) {
+      addNotification({
+        title: `${failed.length} ta yozuv o'chirilmadi`,
+        description: failed.join("; "),
+        severity: "error",
+      });
+    }
   };
 
   const handleConvertLeadToOrder = async (lead: LeadRecord) => {
@@ -713,6 +798,17 @@ export function CrmGrid({ type }: CrmGridProps) {
                     className="pl-7 h-7 text-xs bg-background border-input rounded"
                   />
                 </div>
+                {selection.rows.length > 0 && (
+                  <Button
+                    onClick={requestDeleteSelected}
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1" />
+                    <span>O&apos;chirish ({selection.rows.length})</span>
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -756,6 +852,10 @@ export function CrmGrid({ type }: CrmGridProps) {
                 gridSelection={selection}
                 onGridSelectionChange={setSelection}
                 onCellActivated={(cell) => handleOpenRow(cell[1])}
+                onDelete={() => {
+                  requestDeleteSelected();
+                  return false;
+                }}
                 onItemHovered={onItemHovered}
                 rowHeight={30}
                 headerHeight={32}
@@ -824,8 +924,48 @@ export function CrmGrid({ type }: CrmGridProps) {
               </ContextMenuItem>
             </>
           )}
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onClick={requestDeleteSelected}
+            disabled={selection.rows.length === 0 && !selection.current}
+            className="gap-2 text-destructive focus:text-destructive"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>O&apos;chirish (Del)</span>
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {type === "leads" ? "Lidni o'chirish" : type === "suppliers" ? "Ta'minotchini o'chirish" : "Mijozni o'chirish"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTargets.length === 1
+                ? `${rowLabel(deleteTargets[0])} butunlay o'chiriladi. Qaytarib bo'lmaydi.`
+                : `${deleteTargets.length} ta yozuv butunlay o'chiriladi. Qaytarib bo'lmaydi.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Bekor qilish</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90 text-white gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>O&apos;chirish</span>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Separate Compact Modal Window for Viewing and Managing Leads */}
       <LeadDetailModal

@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { crmLeads, clients } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, or } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import type { LeadRecord } from "@/components/crm/LeadDetailModal";
 
@@ -92,19 +92,15 @@ export async function upsertCrmLead(
 export async function deleteCrmLead(leadNoOrId: string, companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
 
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadNoOrId);
   const existing = await db.query.crmLeads.findFirst({
     where: and(
       eq(crmLeads.companyId, companyId),
-      eq(crmLeads.leadNo, leadNoOrId)
+      isUuid ? or(eq(crmLeads.id, leadNoOrId), eq(crmLeads.leadNo, leadNoOrId)) : eq(crmLeads.leadNo, leadNoOrId)
     ),
   });
+  if (!existing) throw new Error("Lid topilmadi");
 
-  if (existing) {
-    await db.delete(crmLeads).where(eq(crmLeads.id, existing.id));
-    return { success: true };
-  }
-
-  // fallback to id
-  await db.delete(crmLeads).where(eq(crmLeads.id, leadNoOrId));
+  await db.delete(crmLeads).where(eq(crmLeads.id, existing.id));
   return { success: true };
 }

@@ -404,21 +404,26 @@ export async function upsertSupplier(
 export async function deleteSupplier(idOrCode: string, companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
 
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCode);
   const existing = await db.query.suppliers.findFirst({
     where: and(
       eq(suppliers.companyId, companyId),
-      eq(suppliers.id, idOrCode)
+      isUuid ? or(eq(suppliers.id, idOrCode), eq(suppliers.code, idOrCode)) : eq(suppliers.code, idOrCode)
     ),
   });
+  if (!existing) throw new Error("Ta'minotchi topilmadi");
 
-  if (existing) {
-    await db.delete(suppliers).where(eq(suppliers.id, existing.id));
-    return { success: true };
+  // Buyurtma va to'lovlar cascade bilan o'chib ketmasligi uchun tekshiruv
+  const [orders, payments] = await Promise.all([
+    db.select({ n: sql<number>`count(*)::int` }).from(supplierOrders).where(eq(supplierOrders.supplierId, existing.id)),
+    db.select({ n: sql<number>`count(*)::int` }).from(supplierPayments).where(eq(supplierPayments.supplierId, existing.id)),
+  ]);
+  const linked = (orders[0]?.n ?? 0) + (payments[0]?.n ?? 0);
+  if (linked > 0) {
+    throw new Error(`"${existing.name}" ta'minotchida buyurtma yoki to'lovlar bor (${linked} ta). O'chirib bo'lmaydi — holatini "Inactive" qiling.`);
   }
 
-  await db.delete(suppliers).where(
-    and(eq(suppliers.companyId, companyId), eq(suppliers.code, idOrCode))
-  );
+  await db.delete(suppliers).where(eq(suppliers.id, existing.id));
   return { success: true };
 }
 
