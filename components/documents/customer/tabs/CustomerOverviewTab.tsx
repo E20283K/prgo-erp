@@ -241,7 +241,7 @@ export function CustomerOverviewTab({
       }
 
       onChange("logoUrl", data.url);
-      upsertCustomer({ ...form, logoUrl: data.url });
+      if (!/^(draft-|new-|CUST-NEW-)/.test(form.id || "draft-")) upsertCustomer({ ...form, logoUrl: data.url });
       addNotification({
         title: "Logotip yuklandi",
         description: "Mijoz logotipi muvaffaqiyatli saqlandi.",
@@ -264,7 +264,7 @@ export function CustomerOverviewTab({
     setIsUploadingLogo(true);
     try {
       onChange("logoUrl", "");
-      upsertCustomer({ ...form, logoUrl: "" });
+      if (!/^(draft-|new-|CUST-NEW-)/.test(form.id || "draft-")) upsertCustomer({ ...form, logoUrl: "" });
       if (currentLogo) {
         await fetch(
           `/api/v1/crm/clients/logo?clientId=${encodeURIComponent(form.dbId || form.id)}&logoUrl=${encodeURIComponent(currentLogo)}`,

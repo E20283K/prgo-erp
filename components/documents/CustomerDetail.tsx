@@ -248,7 +248,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
       }
 
       handleFieldChange("logoUrl", data.url);
-      upsertCustomer({ ...form, logoUrl: data.url });
+      if (!isDraft) upsertCustomer({ ...form, logoUrl: data.url });
       addNotification({
         title: "Logotip yuklandi",
         description: "Mijoz logotipi muvaffaqiyatli saqlandi.",
@@ -271,7 +271,7 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
     setIsUploadingLogo(true);
     try {
       handleFieldChange("logoUrl", "");
-      upsertCustomer({ ...form, logoUrl: "" });
+      if (!isDraft) upsertCustomer({ ...form, logoUrl: "" });
       if (currentLogo) {
         await fetch(
           `/api/v1/crm/clients/logo?clientId=${encodeURIComponent(form.dbId || form.id)}&logoUrl=${encodeURIComponent(currentLogo)}`,
@@ -446,35 +446,50 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
   const isDraft = !form.id || form.id.startsWith("draft-") || form.id.startsWith("new-") || form.id.startsWith("CUST-NEW-");
 
   // Actions
-  const handleSave = async () => {
-    let savedClient: any = null;
-    if (upsertCustomerAsync) {
+  // Returns the tab id the card lives under after saving, or null when nothing was saved
+  const handleSave = async (): Promise<string | null> => {
+    if (!form.name || !form.name.trim()) {
+      addNotification({
+        title: "Mijoz nomi kiritilmagan",
+        severity: "error",
+      });
+      return null;
+    }
+
+    let savedClient: any;
+    try {
       savedClient = await upsertCustomerAsync(form);
+    } catch (err: any) {
+      addNotification({
+        title: "Mijoz saqlanmadi",
+        description: err?.message || "Serverga saqlashda xatolik yuz berdi.",
+        severity: "error",
+      });
+      return null;
+    }
+
+    setForm(savedClient);
+    if (tab.id !== savedClient.id) {
+      replaceTabId(tab.id, savedClient.id, `${savedClient.id}: ${savedClient.name || "Mijoz"}`, savedClient);
     } else {
-      upsertCustomer(form);
+      setTabUnsaved(tab.id, false);
     }
-    if (savedClient && savedClient.id) {
-      setForm(savedClient);
-      if (isDraft || tab.id !== savedClient.id) {
-        replaceTabId(tab.id, savedClient.id, `${savedClient.id}: ${savedClient.name || "Mijoz"}`, savedClient);
-      }
-    }
-    setTabUnsaved(tab.id, false);
     addNotification({
       title: "Mijoz kartochkasi saqlandi",
-      description: `${form.name || "Mijoz"} rekvizitlari muvaffaqiyatli saqlandi.`,
+      description: `${savedClient.name || "Mijoz"} rekvizitlari muvaffaqiyatli saqlandi.`,
       severity: "success",
       link: { module: "crm", subModule: "customers" },
     });
+    return savedClient.id;
   };
 
   const handleSaveAndClose = async () => {
-    await handleSave();
-    closeTab(tab.id);
+    const savedTabId = await handleSave();
+    if (savedTabId) closeTab(savedTabId);
   };
 
   const handleCreateClientOrder = () => {
-    upsertCustomer(form);
+    if (!isDraft) upsertCustomer(form);
     const newWoId = `draft-wo-${Date.now()}`;
     const newCoId = `CO-${String(Math.floor(10 + Math.random() * 89)).padStart(5, "0")}`;
 

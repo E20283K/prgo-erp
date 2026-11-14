@@ -386,7 +386,9 @@ export function OverviewTab({
 
     if (clean) {
       addCustomer(clean);
-      upsertCustomerAsync(newRecord);
+      upsertCustomerAsync(newRecord).catch((e) =>
+        console.error("Failed to persist customer to database:", e)
+      );
       handleFieldChange("customer", clean);
       onMarkUnsaved();
     }

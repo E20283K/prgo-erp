@@ -1252,25 +1252,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   upsertCustomerAsync: async (customer: CrmCustomerRecord, companyCode = "PRINTGOO") => {
-    get().upsertCustomer(customer);
-    try {
-      const res = await fetch("/api/v1/crm/clients?company=" + encodeURIComponent(companyCode), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(customer),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.client) {
-          get().upsertCustomer(json.client);
-          return json.client;
-        }
-      }
-      return null;
-    } catch (e) {
-      console.error("Failed to persist customer to database:", e);
-      return null;
+    const localId = customer.id || "";
+    const isDraftId =
+      !localId || localId.startsWith("draft-") || localId.startsWith("new-") || localId.startsWith("CUST-NEW-");
+    // A draft only becomes a list row once the server has assigned its real code
+    if (!isDraftId) get().upsertCustomer(customer);
+
+    const res = await fetch("/api/v1/crm/clients?company=" + encodeURIComponent(companyCode), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(customer),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success || !json.client) {
+      throw new Error(json?.error || `Mijozni saqlab bo'lmadi (HTTP ${res.status})`);
     }
+
+    if (json.client.id !== localId) {
+      set((state) => ({ crmCustomers: state.crmCustomers.filter((c) => c.id !== localId) }));
+    }
+    get().upsertCustomer(json.client);
+    return json.client;
   },
 
   loadCrmIndustries: async (force = false) => {
