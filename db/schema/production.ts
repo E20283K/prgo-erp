@@ -191,6 +191,37 @@ export const tariffs = pgTable(
   ]
 );
 
+// ─── 0.1 Operation catalog (Operatsiyalar spravochnigi) ───────────────────────
+// Route steps pick their operation from here: name, default machine and piecework pay.
+// Tariffs are customer prices; the piece rates here are what operators earn.
+
+export const workRates = pgTable(
+  "work_rates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    code: varchar("code", { length: 64 }).notNull(), // "IT-001"
+    name: varchar("name", { length: 255 }).notNull(), // "Ofset bosma 4+0"
+    department: varchar("department", { length: 64 }),
+    defaultMachineId: uuid("default_machine_id").references(() => productionMachines.id, { onDelete: "set null" }),
+    unit: varchar("unit", { length: 64 }).default("1,000 sheets").notNull(), // TARIFF_CALC_UNITS value
+    unitDivisor: integer("unit_divisor").default(1000).notNull(),
+    currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
+    pieceRate: numeric("piece_rate", { precision: 14, scale: 4 }).default("0").notNull(), // lead operator, per unit
+    helperPieceRate: numeric("helper_piece_rate", { precision: 14, scale: 4 }).default("0").notNull(),
+    status: varchar("status", { length: 16 }).default("Active").notNull(), // Active | Archived
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("work_rates_company_code_uq").on(table.companyId, table.code),
+    index("work_rates_company_idx").on(table.companyId),
+  ]
+);
+
 // ─── 1. Production Machines (Barcha texnologiyalar uchun uskunalar/stanoklar) ───
 
 export const productionMachines = pgTable(
@@ -431,10 +462,15 @@ export const workOrderOperations = pgTable(
     tariffId: uuid("tariff_id")
       .references(() => tariffs.id, { onDelete: "set null" }),
     tariffCode: varchar("tariff_code", { length: 64 }),
+    workRateId: uuid("work_rate_id").references(() => workRates.id, { onDelete: "set null" }),
     name: varchar("name", { length: 128 }).notNull(), // Pechat, Lak, Kesim, Qadoqlash
     department: varchar("department", { length: 64 }),
     machineStr: varchar("machine_str", { length: 128 }),
+    machineId: uuid("machine_id").references(() => productionMachines.id, { onDelete: "set null" }),
     operator: varchar("operator", { length: 255 }),
+    costMode: varchar("cost_mode", { length: 16 }).default("auto").notNull(), // auto | outsourced | manual
+    manualCostUsd: numeric("manual_cost_usd", { precision: 14, scale: 2 }).default("0.00").notNull(),
+    costNote: text("cost_note"),
     durationHours: numeric("duration_hours", { precision: 10, scale: 2 }).default("1.00"),
     toolingId: varchar("tooling_id", { length: 64 }),
     toolingName: varchar("tooling_name", { length: 255 }),
@@ -449,6 +485,12 @@ export const workOrderOperations = pgTable(
     status: varchar("status", { length: 32 }).default("pending").notNull(),
     plannedQty: numeric("planned_qty", { precision: 14, scale: 2 }).default("0").notNull(),
     completedQty: numeric("completed_qty", { precision: 14, scale: 2 }).default("0").notNull(),
+    // Actuals from the shift journal (fakt)
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    downtimeMinutes: integer("downtime_minutes").default(0).notNull(),
+    actualDurationMinutes: integer("actual_duration_minutes"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -515,6 +557,13 @@ export const tariffsRelations = relations(tariffs, ({ one, many }) => ({
     references: [companies.id],
   }),
   operations: many(workOrderOperations),
+}));
+
+export const workRatesRelations = relations(workRates, ({ one }) => ({
+  company: one(companies, {
+    fields: [workRates.companyId],
+    references: [companies.id],
+  }),
 }));
 
 export const productionMachinesRelations = relations(productionMachines, ({ one }) => ({

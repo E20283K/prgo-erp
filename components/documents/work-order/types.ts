@@ -428,8 +428,15 @@ export interface RouteStep {
   stepNumber: number;
   name: string;
   machine: string;
+  /** Registry id of the machine; `machine` keeps the display name (and free-text names). */
+  machineId?: string;
   operator: string;
   operators?: string[];
+  /** auto = computed from machine + operators; outsourced / manual = `manualCostUsd`. */
+  costMode?: "auto" | "outsourced" | "manual";
+  manualCostUsd?: number;
+  /** Supplier name for outsourced steps, or the reason for a manual cost. */
+  costNote?: string;
   countingMode?: "theoretical" | "counter" | "multipiece";
   multiplier?: number;
   duration: number;
@@ -440,6 +447,8 @@ export interface RouteStep {
   department?: string;
   tariffId?: string;
   tariffCode?: string;
+  /** Work type from the work-rate list; drives the piecework fund. */
+  workRateId?: string;
   calcUnit?: string;
   unitDivisor?: number;
   rateUsd?: number;

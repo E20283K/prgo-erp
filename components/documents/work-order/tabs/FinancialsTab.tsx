@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { ShiftEvent, WorkOrderFormData, RouteStep } from "../types";
 import { PrintPlanningResult } from "../planningEngine";
+import { RouteEconomicsTable } from "./RouteEconomicsTable";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
 import { formatMoney } from "../../common/DocumentShell";
@@ -87,10 +88,11 @@ export function FinancialsTab({
   onPriceChange,
   onFinancialsChange,
 }: FinancialsTabProps) {
-  const { theme, machines, warehouseMovements } = useWorkspaceStore(
+  const { theme, machines, employees, warehouseMovements } = useWorkspaceStore(
     useShallow((s) => ({
       theme: s.theme,
       machines: s.machines,
+      employees: s.employees,
       warehouseMovements: s.warehouseMovements,
     }))
   );
@@ -98,6 +100,8 @@ export function FinancialsTab({
   useEffect(() => {
     const s = useWorkspaceStore.getState();
     if (s.warehouseMovements.length === 0) s.loadWarehouseMovements();
+    // Operators' wages drive hourly labor cost.
+    if (s.employees.length === 0 && s.loadEmployees) s.loadEmployees();
   }, []);
   const materialReturns = useMemo(
     () => getWorkOrderMaterialReturns(warehouseMovements, docNo),
@@ -129,6 +133,7 @@ export function FinancialsTab({
         operations,
         shiftEvents,
         machines,
+        employees,
         overheadPercent: pct,
         packagingData: formData?.packagingData,
         materialReturns,
@@ -144,6 +149,7 @@ export function FinancialsTab({
       operations,
       shiftEvents,
       machines,
+      employees,
     ]
   );
 
@@ -160,13 +166,15 @@ export function FinancialsTab({
     supplierClaim,
   } = costs;
   const gridRows = useMemo(() => [...rawCostRows, ...nonCogsRows], [rawCostRows, nonCogsRows]);
+  const [view, setView] = useState<"costs" | "route">("costs");
 
   const toFinancials = useCallback(
     (c: FinancialCostResult, margin: number): NonNullable<WorkOrderFormData["financials"]> => ({
       plannedMaterialCost: c.plannedMaterialCost,
       actualMaterialCost: c.materialCost,
-      plannedMachineCost: c.machineCost,
-      actualMachineCost: c.machineCost,
+      // Route = machine + labor of every step; finished steps at fact, the rest at plan.
+      plannedMachineCost: c.plannedRouteCost,
+      actualMachineCost: Number(c.routeLines.reduce((s, l) => s + (l.actualCost ?? l.plannedCost), 0).toFixed(2)),
       toolingCost: c.toolingCost,
       laborCost: c.laborCost,
       baseCost: c.totalBaseCost,
@@ -570,9 +578,24 @@ export function FinancialsTab({
       <div className="h-8 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <Layers className="size-3.5 text-primary" />
-          <span className="font-semibold text-xs text-foreground">
-            Ishlab Chiqarish Haqiqiy Xarajatlar Tarkibi (Real Cost Breakdown)
-          </span>
+          <div className="inline-flex items-center rounded-md border border-border bg-muted/40 p-0.5">
+            {([
+              ["costs", "Xarajatlar tarkibi"],
+              ["route", "Marshrut: reja va fakt"],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setView(id)}
+                className={cn(
+                  "h-5.5 px-2 rounded text-[11px] font-medium cursor-pointer",
+                  view === id ? "bg-card text-foreground border border-border" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <Badge variant="outline" className="text-[10px] font-mono h-4.5 px-1.5 py-0">
             {docNo}
           </Badge>
@@ -591,7 +614,10 @@ export function FinancialsTab({
         </div>
       </div>
 
+      {view === "route" && <RouteEconomicsTable lines={costs.routeLines} currency={currency} />}
+
       {/* 4. Full-Bleed Glide Data Grid (OperationsTab structure) */}
+      {view === "costs" && (
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div 
@@ -648,6 +674,7 @@ export function FinancialsTab({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      )}
 
       {/* 5. Footer Summary Bar */}
       <div className="h-8 border-t border-border bg-card px-3 flex items-center justify-between shrink-0 font-mono text-xs">

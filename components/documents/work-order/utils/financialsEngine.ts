@@ -10,6 +10,7 @@ import type {
 } from "../types";
 import type { MachineRecord } from "@/components/documents/machine/types";
 import { formatMoney } from "../../common/DocumentShell";
+import { computeOperationCost, computeOperationActualCost, type CostEmployee } from "./operationCost";
 
 export interface ExtendedBomItem extends BomItem {
   originalCurrency?: "USD" | "UZS";
@@ -56,6 +57,8 @@ export interface FinancialCostParams {
   operations?: RouteStep[];
   shiftEvents?: ShiftEvent[];
   machines?: MachineRecord[];
+  /** HR employees: assigned operators' wages drive hourly labor cost. */
+  employees?: CostEmployee[];
   overheadPercent?: number;
   packagingData?: WorkOrderPackagingSummary;
   materialReturns?: MaterialReturnCredit[];
@@ -90,6 +93,21 @@ export function getWorkOrderMaterialReturns(
     );
 }
 
+/** One route step: plan vs fact, next to its tariff (selling) price. Money in the order currency. */
+export interface RouteCostLine {
+  opId: string;
+  name: string;
+  status: RouteStep["status"];
+  costMode: "auto" | "outsourced" | "manual";
+  plannedHours: number;
+  actualHours: number | null;
+  plannedCost: number;
+  /** Null until the step is finished. */
+  actualCost: number | null;
+  /** Tariff price of the step (what the customer is charged for it); 0 without a tariff. */
+  tariffPrice: number;
+}
+
 export interface FinancialCostResult {
   totalBaseCost: number;
   unitBaseCost: number;
@@ -115,6 +133,9 @@ export interface FinancialCostResult {
   /** Value of reusable offcuts returned to stock; already deducted via negative material rows. */
   returnedMaterialValue: number;
   wasteSheets: number;
+  /** Route steps, plan vs fact. Finished steps enter the cost at fact, the rest at plan. */
+  routeLines: RouteCostLine[];
+  plannedRouteCost: number;
   rawCostRows: CostBreakdownRow[];
   nonCogsRows: CostBreakdownRow[];
 }
@@ -137,35 +158,6 @@ const NON_COGS_GROUPS: CostGroup[] = ["recharge", "claim"];
 const PLATE_STEP_NAME_RE = /ctp|prepress|polimer qolip/i;
 
 /**
- * Finds machine hourly costing rates from the workspace machine registry.
- * `found` is false when the machine is not in the registry — rates are then 0, never guessed.
- */
-export function getMachineHourlyRate(
-  machineName?: string,
-  machines: MachineRecord[] = []
-): { machineRate: number; operatorRate: number; found: boolean } {
-  const cleanName = (machineName || "").toLowerCase().trim();
-  if (!cleanName) return { machineRate: 0, operatorRate: 0, found: false };
-
-  const matched = (machines || []).find((m) => {
-    const mName = (m.name || "").toLowerCase().trim();
-    const mCode = ((m as unknown as { code?: string }).code || "").toLowerCase().trim();
-    return (
-      (mName !== "" && (mName.includes(cleanName) || cleanName.includes(mName))) ||
-      (mCode !== "" && mCode.includes(cleanName))
-    );
-  });
-  if (!matched) return { machineRate: 0, operatorRate: 0, found: false };
-
-  const legacyRate = Number((matched as unknown as { hourlyRate?: number }).hourlyRate) || 0;
-  return {
-    machineRate: Number(matched.costing?.standardHourlyRateUsd) || legacyRate,
-    operatorRate: Number(matched.costing?.operatorHourlyWageUsd) || 0,
-    found: true,
-  };
-}
-
-/**
  * Pure calculation engine for Work Order cost breakdown, unit base cost, and expense allocation.
  * Used by FinancialsTab and by the finished-goods receipt to write the real unit cost.
  */
@@ -178,6 +170,7 @@ export function calculateWorkOrderFinancials({
   operations = [],
   shiftEvents = [],
   machines = [],
+  employees = [],
   overheadPercent = DEFAULT_OVERHEAD_PERCENT,
   packagingData,
   materialReturns = [],
@@ -322,70 +315,94 @@ export function calculateWorkOrderFinancials({
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // C. USKUNALAR VA MEHNAT HAQI (MARSHRUT)
-  // Tarif = faqat uskuna. Ish haqi = sdelka; soatbay stavka faqat tarifsiz bosqichda.
+  // C. USKUNALAR VA MEHNAT HAQI (MARSHRUT) — computeOperationCost bilan bir xil hisob.
+  // Uskuna = soat × uskunaning soat tannarxi (ekipaj maoshisiz).
+  // Mehnat = sdelka FOT × razryad koeffitsienti, aks holda soat × operatorlar soat stavkasi
+  // (operator noma'lum bo'lsa — uskunaning ekipaj stavkasi).
+  // Autsors / qo'lda tannarx = manualCostUsd. Tarif narxi (op.plannedCostUsd) sotuv narxi — kirmaydi.
   // ──────────────────────────────────────────────────────────────────────────
+  const routeLines: RouteCostLine[] = [];
   (operations || []).forEach((op, idx) => {
-    const duration = Number(op.duration) || 0;
-    const rates = getMachineHourlyRate(op.machine, machines);
+    const ctx = { machines, employees, exchangeRate: rate };
+    const plan = computeOperationCost(op, ctx);
+    const actual = computeOperationActualCost(op, ctx);
+    const cost = actual ?? plan;
+    const isFact = actual !== null;
+    const duration = isFact ? Number(actual.hours.toFixed(2)) : Number(op.duration) || 0;
+    const factTag = isFact ? " · fakt" : "";
+    // Plates are bought/made as tooling items: do not charge the plate-making step a second time.
+    const isPlateStep = op.kind === "prepress" || (!op.kind && PLATE_STEP_NAME_RE.test(op.name || ""));
+    const coveredByTooling = isPlateStep && platesCostedAsTooling;
+    const stepTotal = (c: typeof plan) =>
+      c.mode === "auto" ? c.totalUsd - (coveredByTooling ? c.machineCostUsd : 0) : c.manualCostUsd;
+    routeLines.push({
+      opId: op.id || String(idx),
+      name: op.name,
+      status: op.status,
+      costMode: plan.mode,
+      plannedHours: Number(op.duration) || 0,
+      actualHours: isFact ? Number(actual.hours.toFixed(2)) : null,
+      plannedCost: fromUsd(stepTotal(plan)),
+      actualCost: isFact ? fromUsd(stepTotal(actual)) : null,
+      tariffPrice: fromUsd(Number(op.plannedCostUsd) || 0),
+    });
     const isPackaging = op.kind === "packaging";
-    const hasTariff = op.plannedCostUsd !== undefined && op.plannedCostUsd > 0;
     const hasMachine = Boolean(op.machine && op.machine !== "Manual" && op.machine !== "—");
     const qtyLabel = targetQty ? `${targetQty.toLocaleString()} dona` : `${duration} soat`;
+    const machineGroup: CostGroup = isPackaging ? "packaging" : "machine";
 
-    if (hasMachine || hasTariff) {
-      // Plates are bought/made as tooling items: do not charge the plate-making step a second time.
-      const isPlateStep = op.kind === "prepress" || (!op.kind && PLATE_STEP_NAME_RE.test(op.name || ""));
-      const coveredByTooling = isPlateStep && platesCostedAsTooling;
+    if (cost.mode !== "auto") {
+      const isOutsourced = cost.mode === "outsourced";
+      rows.push({
+        id: `op-ext-${op.id || idx}`,
+        group: machineGroup,
+        category: isPackaging ? GROUP_LABELS.packaging : GROUP_LABELS.machine,
+        name: `${op.name}${op.costNote ? ` — ${op.costNote}` : ""}`,
+        quantity: "1 xizmat",
+        unitRate: cost.manualCostUsd > 0 ? formatMoney(fromUsd(cost.manualCostUsd), currency, 2) : "—",
+        totalCost: fromUsd(cost.manualCostUsd),
+        share: 0,
+        type: (cost.manualCostUsd > 0 ? (isOutsourced ? "Autsors" : "Qo'lda") : "Stavka yo'q") + factTag,
+      });
+      return;
+    }
 
-      const rawMachCost = coveredByTooling
-        ? 0
-        : hasTariff
-        ? Number(op.plannedCostUsd)
-        : duration * rates.machineRate;
-      const rawMachRate = hasTariff && op.rateUsd !== undefined ? op.rateUsd : rates.machineRate;
-
-      let type = op.tariffCode ? `Tarif ${op.tariffCode}` : hasTariff ? "Tarif" : "Soatbay";
+    if (hasMachine) {
+      let type = "Soatbay";
       if (coveredByTooling) type = "Jihozlarda";
-      else if (!hasTariff && !rates.found) type = "Stavka yo'q";
+      else if (!(cost.machineRateUsd > 0)) type = "Stavka yo'q";
 
       rows.push({
         id: `op-mach-${op.id || idx}`,
-        group: isPackaging ? "packaging" : "machine",
+        group: machineGroup,
         category: isPackaging ? GROUP_LABELS.packaging : GROUP_LABELS.machine,
-        name: hasMachine ? `${op.name} (${op.machine})` : op.name,
-        quantity: hasTariff ? qtyLabel : `${duration} soat`,
-        unitRate:
-          rawMachRate > 0
-            ? `${formatMoney(fromUsd(rawMachRate), currency, 2)}/${hasTariff ? op.calcUnit || "birlik" : "soat"}`
-            : "—",
-        totalCost: fromUsd(rawMachCost),
+        name: `${op.name} (${op.machine})`,
+        quantity: `${duration} soat`,
+        unitRate: cost.machineRateUsd > 0 ? `${formatMoney(fromUsd(cost.machineRateUsd), currency, 2)}/soat` : "—",
+        totalCost: coveredByTooling ? 0 : fromUsd(cost.machineCostUsd),
         share: 0,
-        type,
+        type: type + factTag,
       });
     }
 
-    const hasPiecework = op.pieceworkTotalUsd !== undefined && op.pieceworkTotalUsd > 0;
-    if (hasPiecework || !hasTariff) {
-      const rawLabCost = hasPiecework ? Number(op.pieceworkTotalUsd) : duration * rates.operatorRate;
-      const rawLabRate =
-        hasPiecework && op.pieceworkRateUsd !== undefined ? op.pieceworkRateUsd : rates.operatorRate;
-
-      rows.push({
-        id: `op-lab-${op.id || idx}`,
-        group: isPackaging ? "packaging" : "labor",
-        category: isPackaging ? GROUP_LABELS.packaging : GROUP_LABELS.labor,
-        name: `${op.name} — ${op.operator || "Belgilanmagan"}`,
-        quantity: hasPiecework ? qtyLabel : `${duration} soat`,
-        unitRate:
-          rawLabRate > 0
-            ? `${formatMoney(fromUsd(rawLabRate), currency, 2)}/${hasPiecework ? op.calcUnit || "birlik" : "soat"}`
-            : "—",
-        totalCost: fromUsd(rawLabCost),
-        share: 0,
-        type: hasPiecework ? "Sdelka" : rawLabRate > 0 ? "Soatbay" : "Stavka yo'q",
-      });
-    }
+    const isPiecework = cost.laborBasis === "piecework";
+    const multiplierLabel = isPiecework && cost.laborMultiplier !== 1 ? ` ×${cost.laborMultiplier}` : "";
+    rows.push({
+      id: `op-lab-${op.id || idx}`,
+      group: isPackaging ? "packaging" : "labor",
+      category: isPackaging ? GROUP_LABELS.packaging : GROUP_LABELS.labor,
+      name: `${op.name} — ${op.operator || "Belgilanmagan"}`,
+      quantity: isPiecework ? qtyLabel : `${duration} soat`,
+      unitRate:
+        cost.laborRateUsd > 0
+          ? `${formatMoney(fromUsd(cost.laborRateUsd), currency, 2)}/${isPiecework ? "birlik" : "soat"}${multiplierLabel}`
+          : "—",
+      totalCost: fromUsd(cost.laborCostUsd),
+      share: 0,
+      type:
+        (isPiecework ? "Sdelka" : cost.laborBasis === "employees" ? "Soatbay" : cost.laborBasis === "crew" ? "Ekipaj" : "Stavka yo'q") +
+        factTag,
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -450,6 +467,8 @@ export function calculateWorkOrderFinancials({
     wasteInfoCost: Number(wasteInfoCost.toFixed(2)),
     returnedMaterialValue: Number(returnedMaterialValue.toFixed(2)),
     wasteSheets,
+    routeLines,
+    plannedRouteCost: Number(routeLines.reduce((sum, l) => sum + l.plannedCost, 0).toFixed(2)),
     rawCostRows: cogsRows,
     nonCogsRows,
   };

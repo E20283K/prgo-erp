@@ -133,6 +133,7 @@ import {
   DEFAULT_OVERHEAD_PERCENT,
   getWorkOrderMaterialReturns,
 } from "./utils/financialsEngine";
+import { elapsedRunMinutes } from "./utils/operationCost";
 import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
 import { calculatePrintPlanning, generateRouteStepsFromPlan } from "./planningEngine";
 import { WarehouseStockRecord } from "@/store/workspaceStore";
@@ -1594,6 +1595,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         operations,
         shiftEvents,
         machines: storeMachines,
+        employees: useWorkspaceStore.getState().employees,
         overheadPercent: formData.financials?.overheadPercent ?? DEFAULT_OVERHEAD_PERCENT,
         packagingData: { ...summary, isCompleted: true },
         materialReturns: getWorkOrderMaterialReturns(
@@ -2802,6 +2804,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     pieceworkRateUsd: Number(((Number(op.pieceworkRateUsd) || 0) * factor).toFixed(6)),
     plannedCostUsd: Number(((Number(op.plannedCostUsd) || 0) * factor).toFixed(6)),
     pieceworkTotalUsd: Number(((Number(op.pieceworkTotalUsd) || 0) * factor).toFixed(6)),
+    manualCostUsd: Number(((Number(op.manualCostUsd) || 0) * factor).toFixed(6)),
   });
 
   const handleOpenAddOperation = () => {
@@ -2825,6 +2828,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       pieceworkRateUsd: 0,
       plannedCostUsd: 0,
       pieceworkTotalUsd: 0,
+      costMode: "auto",
+      manualCostUsd: 0,
     });
     setIsOpDialogOpen(true);
   };
@@ -2837,6 +2842,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       stepNumber: item.stepNumber,
       name: item.name,
       machine: item.machine,
+      machineId: item.machineId,
+      costMode: item.costMode || "auto",
+      costNote: item.costNote,
       operator: item.operator,
       operators:
         item.operators && item.operators.length > 0
@@ -2851,6 +2859,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       toolingName: item.toolingName,
       tariffId: item.tariffId,
       tariffCode: item.tariffCode,
+      workRateId: item.workRateId,
+      actualDurationMinutes: item.actualDurationMinutes,
       calcUnit: item.calcUnit,
       unitDivisor: item.unitDivisor,
       ...convertOpMoney(
@@ -2860,6 +2870,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           pieceworkRateUsd: item.pieceworkRateUsd,
           plannedCostUsd: item.plannedCostUsd,
           pieceworkTotalUsd: item.pieceworkTotalUsd,
+          manualCostUsd: item.manualCostUsd,
         },
         opDialogFx
       ),
@@ -2988,11 +2999,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setOperations((prev) =>
       prev.map((op) =>
         op.id === opId
-          ? {
-              ...op,
-              status: "Finished",
-              completedAt: new Date().toISOString(),
-            }
+          ? (() => {
+              const completedAt = new Date().toISOString();
+              // Fact run time = start → finish minus recorded downtime; correctable in the step dialog.
+              const runMinutes = elapsedRunMinutes({ ...op, completedAt });
+              return {
+                ...op,
+                status: "Finished" as const,
+                completedAt,
+                actualDurationMinutes: runMinutes ?? op.actualDurationMinutes,
+              };
+            })()
           : op
       )
     );
@@ -4218,6 +4235,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           plannedSheets={formData.plannedSheets}
           currency={formData.currency}
           exchangeRate={formData.exchangeRate}
+          canOverrideCost={isAdmin}
         />
       )}
 

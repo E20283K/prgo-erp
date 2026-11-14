@@ -1,0 +1,2 @@
+ALTER TABLE "work_rates" ADD COLUMN "default_machine_id" uuid;--> statement-breakpoint
+ALTER TABLE "work_rates" ADD CONSTRAINT "work_rates_default_machine_id_production_machines_id_fk" FOREIGN KEY ("default_machine_id") REFERENCES "public"."production_machines"("id") ON DELETE set null ON UPDATE no action;

@@ -108,6 +108,12 @@ export async function persistCachedImpositionUrlToS3(
   }
 }
 
+const toDateOrNull = (val: unknown): Date | null => {
+  if (!val) return null;
+  const d = new Date(String(val));
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
 const isUuid = (val: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
@@ -367,12 +373,22 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
           name: op.name || `Bosqich ${idx + 1}`,
           department: op.department || "Offset",
           machine: op.machineStr || "",
+          machineId: op.machineId || undefined,
           operator: op.operator || "",
+          costMode: (op.costMode as "auto" | "outsourced" | "manual") || "auto",
+          manualCostUsd: Number(op.manualCostUsd || 0),
+          costNote: op.costNote || undefined,
           duration: Number(op.durationHours || 1),
           toolingId: op.toolingId || undefined,
           toolingName: op.toolingName || undefined,
           tariffId: op.tariffId || undefined,
           tariffCode: op.tariffCode || undefined,
+          workRateId: op.workRateId || undefined,
+          startedAt: op.startedAt ? op.startedAt.toISOString() : undefined,
+          pausedAt: op.pausedAt ? op.pausedAt.toISOString() : undefined,
+          completedAt: op.completedAt ? op.completedAt.toISOString() : undefined,
+          downtimeMinutes: Number(op.downtimeMinutes || 0),
+          actualDurationMinutes: op.actualDurationMinutes ?? undefined,
           calcUnit: op.calcUnit || undefined,
           unitDivisor: op.unitDivisor || 1000,
           rateUsd: Number(op.rateUsd || 0),
@@ -801,10 +817,15 @@ export async function upsertWorkOrder(
             workOrderId: targetId,
             tariffId: op.tariffId && op.tariffId.length > 20 ? op.tariffId : null,
             tariffCode: op.tariffCode || null,
+            workRateId: typeof op.workRateId === "string" && isUuid(op.workRateId) ? op.workRateId : null,
             name: op.name || `Bosqich ${idx + 1}`,
             department: op.department || data.department || "Offset",
             machineStr: op.machine || op.machineStr || null,
+            machineId: typeof op.machineId === "string" && isUuid(op.machineId) ? op.machineId : null,
             operator: op.operator || (Array.isArray(op.operators) ? op.operators.join(", ") : null),
+            costMode: ["outsourced", "manual"].includes(op.costMode) ? op.costMode : "auto",
+            manualCostUsd: (Math.max(0, Number(op.manualCostUsd) || 0)).toFixed(2),
+            costNote: op.costNote ? String(op.costNote).slice(0, 500) : null,
             durationHours: durationNum.toFixed(2),
             toolingId: op.toolingId || null,
             toolingName: op.toolingName || null,
@@ -818,6 +839,14 @@ export async function upsertWorkOrder(
             sequence: seqNum,
             status: op.status || "Queued",
             plannedQty: parseSafePlannedQty(op, Number(data.quantity) || 0),
+            startedAt: toDateOrNull(op.startedAt),
+            pausedAt: toDateOrNull(op.pausedAt),
+            completedAt: toDateOrNull(op.completedAt),
+            downtimeMinutes: Math.max(0, Math.round(Number(op.downtimeMinutes) || 0)),
+            actualDurationMinutes:
+              op.actualDurationMinutes !== undefined && op.actualDurationMinutes !== null && op.actualDurationMinutes !== ""
+                ? Math.max(0, Math.round(Number(op.actualDurationMinutes) || 0))
+                : null,
             completedQty: parseSafeNumeric(op.completedQty ?? op.qtyCompleted, 0),
             notes: op.notes || null,
           };

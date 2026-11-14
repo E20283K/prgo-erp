@@ -61,6 +61,7 @@ import {
   Plug,
   Code,
   Coins,
+  Hammer,
   Stamp,
   Scissors,
   Volume2,
@@ -143,6 +144,7 @@ export const MODULE_NAV: ModuleDef[] = [
         items: [
           { id: "products", label: "Products", icon: Layers },
           { id: "machines", label: "Machines", icon: Cpu },
+          { id: "operation-catalog", label: "Operation catalog", icon: Hammer },
           { id: "tooling", label: "Tooling", icon: Scissors },
         ],
       },

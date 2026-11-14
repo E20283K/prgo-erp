@@ -186,6 +186,7 @@ import { FilePreviewDialog } from "@/components/file-viewer/FilePreviewDialog";
 import { FILE_KIND_ICON, getFileKind, isPreviewable, downloadFile, ViewableFile } from "@/components/file-viewer/file-utils";
 import { useLookupStore } from "@/store/lookupStore";
 import { calculatePrintPlanning } from "../planningEngine";
+import { calculateWorkOrderFinancials } from "../utils/financialsEngine";
 
 const FOLD_TYPE_LABELS: Record<string, string> = {
   center_fold: "Markazdan buklama (Center fold)",
@@ -290,12 +291,14 @@ export function OverviewTab({
     crmCustomers,
     plants,
     machines,
+    employees,
   } = useWorkspaceStore(
     useShallow((s) => ({
       masterSpecifications: s.masterSpecifications,
       crmCustomers: s.crmCustomers,
       plants: s.plants,
       machines: s.machines,
+      employees: s.employees,
     }))
   );
   const {
@@ -2248,15 +2251,18 @@ export function OverviewTab({
             0
           );
 
-          // 2. Real Operations / Machine Cost
-          const operationsCost = (operations && operations.length > 0)
-            ? operations.reduce((sum, op) => {
-                const machine = Number(op.plannedCostUsd || 0);
-                const labor = Number(op.pieceworkTotalUsd || 0);
-                if (machine > 0 || labor > 0) return sum + machine + labor;
-                return sum + ((Number(op.duration) || 0) * 20);
-              }, 0)
-            : 0;
+          // 2. Operations cost (machine + labor) from the shared cost engine — same numbers as the Financials tab.
+          const opsCosts = calculateWorkOrderFinancials({
+            quantity: qty,
+            currency,
+            exchangeRate: Number(formData.exchangeRate) || undefined,
+            toolingItems: formData.toolingItems,
+            operations,
+            machines,
+            employees,
+            overheadPercent: 0,
+          });
+          const operationsCost = opsCosts.machineCost + opsCosts.laborCost + opsCosts.packagingCost;
 
           // 3. Direct Production Cost
           const directCost = Number((rawMaterialCost + toolingCost + operationsCost).toFixed(2));

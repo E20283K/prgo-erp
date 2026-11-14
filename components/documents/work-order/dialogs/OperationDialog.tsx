@@ -5,9 +5,8 @@ import {
   Stamp,
   Factory,
   Users,
-  Tag,
-  Calculator,
   Info,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,8 +47,13 @@ import { cn } from "@/lib/utils";
 import { RouteStep, MACHINE_MAP } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
-import { computeTariffEstimate, TARIFF_CALC_UNITS } from "@/components/documents/tariff/types";
 import { formatMoney, formatNumberWithSpaces } from "@/components/documents/common/DocumentShell";
+import {
+  computeOperationCost,
+  estimateOperationHours,
+  resolveMachine,
+  type OperationCostMode,
+} from "../utils/operationCost";
 
 interface OperationDialogProps {
   isOpen: boolean;
@@ -63,7 +67,23 @@ interface OperationDialogProps {
   plannedSheets?: number;
   currency?: string;
   exchangeRate?: number;
+  /** Lets the user replace the computed cost with a manual amount (with a reason). */
+  canOverrideCost?: boolean;
 }
+
+const THROUGHPUT_UNIT_LABEL: Record<string, string> = {
+  sheet: "varaq",
+  meter: "metr",
+  pick: "zarb",
+  cut: "kesim",
+  book: "kitob",
+};
+
+const COST_MODE_LABEL: Record<OperationCostMode, string> = {
+  auto: "Avto",
+  outsourced: "Autsors",
+  manual: "Qo'lda",
+};
 
 const SHEET_BASED_UNITS = new Set([
   "1,000 sheets",
@@ -153,18 +173,17 @@ export function OperationDialog({
   plannedSheets = 0,
   currency = "UZS",
   exchangeRate = 12850,
+  canOverrideCost = false,
 }: OperationDialogProps) {
   const isUsd = (currency || "UZS").toUpperCase() === "USD";
-  const currencyLabel = isUsd ? "$" : "so'm";
   const moneyDecimals = isUsd ? 2 : 0;
-  const pieceworkDecimals = isUsd ? 3 : 0;
 
-  const { customerTooling, employees, tariffs, machines } = useWorkspaceStore(
+  const { customerTooling, employees, machines, workRates } = useWorkspaceStore(
     useShallow((s) => ({
       customerTooling: s.customerTooling,
       employees: s.employees,
-      tariffs: s.tariffs,
       machines: s.machines,
+      workRates: s.workRates,
     }))
   );
   const anchor = useComboboxAnchor();
@@ -183,11 +202,11 @@ export function OperationDialog({
     if (s.employees.length === 0 && s.loadEmployees) {
       s.loadEmployees();
     }
-    if (s.tariffs.length === 0 && s.fetchTariffs) {
-      s.fetchTariffs();
-    }
     if (s.machines.length === 0 && s.loadMachines) {
       s.loadMachines();
+    }
+    if (s.workRates.length === 0) {
+      s.fetchWorkRates();
     }
   }, [isOpen]);
 
@@ -197,10 +216,10 @@ export function OperationDialog({
 
     if (Array.isArray(machines) && machines.length > 0) {
       machines.forEach((m) => {
-        if (!m.name || seen.has(m.name)) return;
-        seen.add(m.name);
+        if (!m.name || seen.has(m.id)) return;
+        seen.add(m.id);
         list.push({
-          value: m.name,
+          value: m.id,
           label: m.department ? `${m.name} (${m.department})` : m.name,
         });
       });
@@ -226,40 +245,198 @@ export function OperationDialog({
     }));
   }, [customerTooling]);
 
-  const tariffOptions = React.useMemo(() => {
-    return tariffs.map((t) => {
-      const tCur = (t.currency || "USD").toUpperCase();
-      let displayRate = t.rateUsd || 0;
-      let displayCur = tCur === "USD" ? "$" : "so'm";
+  // ── Planned cost (read-only): machine + operators from master data ─────────
+  // The dialog edits money in the order currency; the cost util works in USD.
+  const fx = isUsd ? 1 : Number(exchangeRate) || 12850;
+  const resolvedMachine = React.useMemo(() => resolveMachine(form, machines), [form, machines]);
+  const durationEstimate = React.useMemo(
+    () => estimateOperationHours(resolvedMachine, plannedSheets, orderQuantity),
+    [resolvedMachine, plannedSheets, orderQuantity]
+  );
+  const opCost = React.useMemo(
+    () =>
+      computeOperationCost(
+        {
+          ...form,
+          pieceworkTotalUsd: (Number(form.pieceworkTotalUsd) || 0) / fx,
+          manualCostUsd: (Number(form.manualCostUsd) || 0) / fx,
+        },
+        { machines, employees, exchangeRate }
+      ),
+    [form, machines, employees, exchangeRate, fx]
+  );
+  const costMode: OperationCostMode = form.costMode || "auto";
+  const money = (usd: number) => formatMoney(usd * fx, currency, moneyDecimals);
+  const needsReason = costMode === "manual" && !form.costNote?.trim();
+  const costBreakdownText = (() => {
+    if (costMode === "outsourced") return "Autsors: tashqi tashkilot hisobidagi summa.";
+    if (costMode === "manual") return "Qo'lda kiritilgan summa (sabab bilan).";
+    const machinePart =
+      opCost.machineRateUsd > 0
+        ? `Uskuna: ${form.duration} soat × ${money(opCost.machineRateUsd)}`
+        : resolvedMachine
+        ? "Uskuna: kartada tannarx yo'q"
+        : "Uskuna: tanlanmagan";
+    const laborPart =
+      opCost.laborBasis === "piecework"
+        ? `Mehnat: sdelka ${money((Number(form.pieceworkTotalUsd) || 0) / fx)}${
+            opCost.laborMultiplier !== 1 ? ` × ${opCost.laborMultiplier}` : ""
+          }`
+        : opCost.laborBasis === "employees"
+        ? `Mehnat: ${form.duration} soat × ${money(opCost.laborRateUsd)} (operatorlar)`
+        : opCost.laborBasis === "crew"
+        ? `Mehnat: ${form.duration} soat × ${money(opCost.laborRateUsd)} (ekipaj)`
+        : "Mehnat: stavka yo'q";
+    return `${machinePart}. ${laborPart}.`;
+  })();
 
-      if (tCur === "USD" && !isUsd) {
-        displayRate = Math.round(displayRate * exchangeRate);
-        displayCur = "so'm";
-      } else if (tCur === "UZS" && isUsd) {
-        displayRate = Number((displayRate / exchangeRate).toFixed(2));
-        displayCur = "$";
-      }
+  // Legacy steps carry only a machine name: pin the registry id once it resolves.
+  React.useEffect(() => {
+    if (isOpen && resolvedMachine && form.machineId !== resolvedMachine.id) {
+      setForm((p) => ({ ...p, machineId: resolvedMachine.id }));
+    }
+  }, [isOpen, resolvedMachine, form.machineId, setForm]);
 
-      const formattedRate = formatNumberWithSpaces(displayRate, isUsd ? 2 : 0);
-      return {
-        value: t.id,
-        label: `${t.code} — ${t.operationName} [${t.machineOrDept || t.category}] (${formattedRate} ${displayCur}/${t.unit})`,
-      };
-    });
-  }, [tariffs, isUsd, exchangeRate]);
+  const applyDuration = (hours: number) => {
+    setDurationInput(String(hours));
+    if (form.calcUnit === "1 hour") {
+      handleRecalculateCosts({ duration: hours });
+    } else {
+      setForm((p) => ({ ...p, duration: hours }));
+    }
+  };
 
-  const calcUnitOptions = React.useMemo(() => {
-    return TARIFF_CALC_UNITS.map((u) => ({
-      value: u.value,
-      label: `${u.label} (÷${formatNumberWithSpaces(u.divisor)})`,
+  // Operations added to the catalog from this dialog: they learn their default machine from the step.
+  const createdOperationIds = React.useRef<Set<string>>(new Set());
+
+  const handleSelectMachine = (val: string) => {
+    const byId = machines.find((m) => m.id === val);
+    const linkedOp = workRates.find((w) => w.id === form.workRateId);
+    if (byId && linkedOp && createdOperationIds.current.has(linkedOp.id) && linkedOp.defaultMachineId !== byId.id) {
+      void useWorkspaceStore.getState().saveWorkRate({
+        ...linkedOp,
+        defaultMachineId: byId.id,
+        department: linkedOp.department || byId.department || "",
+      });
+    }
+    const name = byId ? byId.name : val;
+    const autoOps =
+      (!form.operators || form.operators.length === 0) && !form.operator && byId?.leadOperator
+        ? [byId.leadOperator]
+        : form.operators;
+    const estimate = estimateOperationHours(byId || null, plannedSheets, orderQuantity);
+    setForm((p) => ({
+      ...p,
+      machine: name,
+      machineId: byId?.id,
+      operators: autoOps,
+      operator: autoOps && autoOps.length > 0 ? autoOps.join(", ") : p.operator,
+      ...(estimate ? { duration: estimate.hours } : {}),
     }));
-  }, []);
+    if (estimate) setDurationInput(String(estimate.hours));
+  };
 
-  // Recalculate costs whenever rate, setup, unit, duration, or piecework changes
+  // ── Piecework from the work-rate list (Ish turlari) ─────────────────────────
+  const selectedWorkRate = React.useMemo(
+    () => workRates.find((w) => w.id === form.workRateId) || null,
+    [workRates, form.workRateId]
+  );
+  // Catalog operations offered in the picker (archived ones only when already on the step).
+  const operationOptions = React.useMemo(
+    () =>
+      workRates
+        .filter((w) => w.status === "Active" || w.id === form.workRateId)
+        .map((w) => ({
+          value: w.id,
+          label: w.department ? `${w.code} — ${w.name} (${w.department})` : `${w.code} — ${w.name}`,
+        })),
+    [workRates, form.workRateId]
+  );
+
+  // Optional note appended to the catalog name: "UF lak (selektiv)".
+  const operationNote = React.useMemo(() => {
+    if (!selectedWorkRate || !form.name?.startsWith(selectedWorkRate.name)) return "";
+    const rest = form.name.slice(selectedWorkRate.name.length).trim();
+    return rest.replace(/^\((.*)\)$/, "$1");
+  }, [selectedWorkRate, form.name]);
+
+  // Legacy steps carry only a name: link the catalog operation with the same name.
+  React.useEffect(() => {
+    if (!isOpen || form.workRateId || !form.name) return;
+    const clean = form.name.trim().toLowerCase();
+    const match = workRates.find((w) => {
+      const n = w.name.trim().toLowerCase();
+      return clean === n || clean.startsWith(`${n} (`);
+    });
+    if (match) setForm((p) => ({ ...p, workRateId: match.id }));
+  }, [isOpen, form.workRateId, form.name, workRates, setForm]);
+
+  const operatorCount =
+    form.operators && form.operators.length > 0
+      ? form.operators.length
+      : (form.operator || "").split(",").filter((x) => x.trim()).length;
+
+  // Lead rate + assistant rate for every additional operator, per the work type's unit, in the order currency.
+  React.useEffect(() => {
+    if (!selectedWorkRate) return;
+    const toOrderCur = (v: number) => {
+      const rateCur = (selectedWorkRate.currency || "UZS").toUpperCase();
+      if (rateCur === "USD" && !isUsd) return v * exchangeRate;
+      if (rateCur !== "USD" && isUsd) return v / exchangeRate;
+      return v;
+    };
+    const qty = resolveCalcBaseQty(selectedWorkRate.unit, orderQuantity, plannedSheets, form.duration);
+    const units = qty / Math.max(1, selectedWorkRate.unitDivisor || 1);
+    const helpers = Math.max(0, operatorCount - 1);
+    const lead = toOrderCur(selectedWorkRate.pieceRate);
+    const total = units * (lead + helpers * toOrderCur(selectedWorkRate.helperPieceRate));
+    const rate = Number(lead.toFixed(isUsd ? 4 : 2));
+    const fund = isUsd ? Number(total.toFixed(2)) : Math.round(total);
+    if (form.pieceworkRateUsd !== rate || form.pieceworkTotalUsd !== fund) {
+      setForm((p) => ({ ...p, pieceworkRateUsd: rate, pieceworkTotalUsd: fund }));
+    }
+  }, [selectedWorkRate, form.duration, form.pieceworkRateUsd, form.pieceworkTotalUsd, operatorCount, orderQuantity, plannedSheets, isUsd, exchangeRate, setForm]);
+
+  const handleSelectOperation = (val: string) => {
+    const op = workRates.find((w) => w.id === val);
+    if (!op) {
+      // Typed name (being added to the catalog): no piecework until it is linked.
+      setForm((p) => ({ ...p, name: val, workRateId: undefined, pieceworkRateUsd: 0, pieceworkTotalUsd: 0 }));
+      return;
+    }
+    setForm((p) => ({ ...p, workRateId: op.id, name: op.name }));
+    // A new step takes the operation's default machine (and its norm hours).
+    if (op.defaultMachineId && (editingOpIndex === null || !form.machine)) {
+      handleSelectMachine(op.defaultMachineId);
+    }
+  };
+
+  const handleAddOperation = async (name: string) => {
+    const saved = await useWorkspaceStore.getState().saveWorkRate({
+      name,
+      department: resolvedMachine?.department || "",
+      defaultMachineId: resolvedMachine?.id || null,
+      unit: "1,000 sheets",
+      unitDivisor: 1000,
+      currency: "UZS",
+      pieceRate: 0,
+      helperPieceRate: 0,
+      status: "Active",
+    });
+    if (!saved) return;
+    createdOperationIds.current.add(saved.id);
+    setForm((p) => (p.name === name ? { ...p, workRateId: saved.id } : p));
+  };
+
+  const handleNoteChange = (note: string) => {
+    const base = selectedWorkRate?.name || form.name;
+    setForm((p) => ({ ...p, name: note.trim() ? `${base} (${note.trim()})` : base }));
+  };
+
+  // Keeps a template's tariff price in step with the hours when the tariff is billed per hour.
   const handleRecalculateCosts = (overrides: Partial<RouteStep>) => {
     const activeRate = overrides.rateUsd !== undefined ? overrides.rateUsd : form.rateUsd ?? 0;
     const activeSetup = overrides.setupFeeUsd !== undefined ? overrides.setupFeeUsd : form.setupFeeUsd ?? 0;
-    const activePiecework = overrides.pieceworkRateUsd !== undefined ? overrides.pieceworkRateUsd : form.pieceworkRateUsd ?? 0;
     const activeDivisor = overrides.unitDivisor !== undefined ? overrides.unitDivisor : form.unitDivisor ?? 1000;
     const activeUnit = overrides.calcUnit !== undefined ? overrides.calcUnit : form.calcUnit;
     const activeDuration = overrides.duration !== undefined ? overrides.duration : form.duration;
@@ -270,73 +447,11 @@ export function OperationDialog({
 
     const runCost = isUsd ? Number((chargeableUnits * activeRate).toFixed(2)) : Math.round(chargeableUnits * activeRate);
     const plannedCostUsd = isUsd ? Number((activeSetup + runCost).toFixed(2)) : Math.round(activeSetup + runCost);
-    const pieceworkTotalUsd = isUsd ? Number((chargeableUnits * activePiecework).toFixed(2)) : Math.round(chargeableUnits * activePiecework);
 
     setForm((p) => ({
       ...p,
       ...overrides,
       plannedCostUsd,
-      pieceworkTotalUsd,
-    }));
-  };
-
-  const handleSelectTariff = (tariffId: string) => {
-    const selected = tariffs.find((t) => t.id === tariffId);
-    if (!selected) {
-      setForm((p) => ({ ...p, tariffId: undefined, tariffCode: undefined }));
-      return;
-    }
-
-    // Calculate estimated duration if norm is available
-    let estimatedDuration = form.duration;
-    if (selected.normOutputPerShift > 0) {
-      const shiftHours = 8;
-      const baseForNorm = SHEET_BASED_UNITS.has(selected.unit) && plannedSheets > 0
-        ? plannedSheets
-        : orderQuantity;
-      const hours = baseForNorm / (selected.normOutputPerShift / shiftHours);
-      estimatedDuration = Math.max(0.5, Number(hours.toFixed(1)));
-    }
-
-    const baseQty = resolveCalcBaseQty(selected.unit, orderQuantity, plannedSheets, estimatedDuration);
-    const estimate = computeTariffEstimate(selected, baseQty);
-
-    const tCur = (selected.currency || "USD").toUpperCase();
-    let effectiveRate = estimate.effectiveRate;
-    let effectiveSetup = estimate.effectiveSetup;
-    let pieceworkRate = selected.pieceworkRateUsd || 0;
-
-    if (tCur === "USD" && !isUsd) {
-      effectiveRate = Math.round(effectiveRate * exchangeRate);
-      effectiveSetup = Math.round(effectiveSetup * exchangeRate);
-      pieceworkRate = Math.round(pieceworkRate * exchangeRate);
-    } else if (tCur === "UZS" && isUsd) {
-      effectiveRate = Number((effectiveRate / exchangeRate).toFixed(2));
-      effectiveSetup = Number((effectiveSetup / exchangeRate).toFixed(2));
-      pieceworkRate = Number((pieceworkRate / exchangeRate).toFixed(3));
-    }
-
-    const divisor = selected.unitDivisor > 0 ? selected.unitDivisor : 1;
-    const chargeableUnits = baseQty / divisor;
-
-    const runCost = isUsd ? Number((chargeableUnits * effectiveRate).toFixed(2)) : Math.round(chargeableUnits * effectiveRate);
-    const plannedCostUsd = isUsd ? Number((effectiveSetup + runCost).toFixed(2)) : Math.round(effectiveSetup + runCost);
-    const pieceworkTotalUsd = isUsd ? Number((chargeableUnits * pieceworkRate).toFixed(2)) : Math.round(chargeableUnits * pieceworkRate);
-
-    setForm((p) => ({
-      ...p,
-      tariffId: selected.id,
-      tariffCode: selected.code,
-      name: selected.operationName,
-      machine: selected.machineOrDept || p.machine,
-      calcUnit: selected.unit,
-      unitDivisor: selected.unitDivisor,
-      rateUsd: effectiveRate,
-      setupFeeUsd: effectiveSetup,
-      pieceworkRateUsd: pieceworkRate,
-      plannedCostUsd,
-      pieceworkTotalUsd,
-      duration: estimatedDuration,
     }));
   };
 
@@ -417,48 +532,12 @@ export function OperationDialog({
               <Factory className="w-4 h-4 text-primary" />
               <span>{editingOpIndex !== null ? "Bosqichni tahrirlash" : "Bosqich qo'shish"}</span>
             </span>
-            {form.tariffCode && (
-              <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-border bg-muted text-foreground">
-                {form.tariffCode}
-              </span>
-            )}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3 py-1.5">
-          {/* Quick Tariff Picker */}
-          <div className="p-2.5 rounded-md border border-border bg-muted/30 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-foreground flex items-center gap-1">
-                <Tag className="w-3.5 h-3.5 text-primary" />
-                <span>Korxona tarifi</span>
-                <FieldInfoTooltip text="Korxona bo'yicha tasdiqlangan me'yoriy tariflar spravochnigi. Tanlangan tarifdan operatsiya nomi, uskuna, stavka, pripravka va ish vaqti avtomatik yuklanadi." />
-              </label>
-              <span className="text-[11px] text-muted-foreground font-mono flex items-center gap-1">
-                <span>Adad:</span>
-                <strong className="text-foreground">{formatNumberWithSpaces(orderQuantity)}</strong>
-                {plannedSheets > 0 && (
-                  <>
-                    <span className="text-muted-foreground/50">|</span>
-                    <span>Varaq:</span>
-                    <strong className="text-foreground">{formatNumberWithSpaces(plannedSheets)}</strong>
-                  </>
-                )}
-              </span>
-            </div>
-            <FieldCombobox
-              value={form.tariffId || ""}
-              onChange={handleSelectTariff}
-              options={tariffOptions}
-              placeholder="Tarifni tanlang (masalan, TRF-OFF-01)..."
-              searchPlaceholder="Tarif kodi yoki operatsiya nomini qidiring..."
-              className="h-8 text-xs bg-card"
-              popoverClassName="w-[500px]"
-            />
-          </div>
-
           {/* Row 1: Step # & Operation Description */}
-          <div className="grid grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-6 gap-2.5">
             <div>
               <label className="text-xs font-medium block mb-1">
                 Tartib #
@@ -485,14 +564,31 @@ export function OperationDialog({
               />
             </div>
             <div className="col-span-3">
-              <label className="text-xs font-medium block mb-1">
-                Operatsiya nomi *
+              <label className="text-xs font-medium flex items-center mb-1">
+                <span>Operatsiya *</span>
+                <FieldInfoTooltip text="Operatsiyalar spravochnigidan tanlanadi: nom, standart uskuna va sdelka stavkasi shundan olinadi. Ro'yxatda yo'q bo'lsa, nomini yozib ro'yxatga qo'shing." />
               </label>
-              <Input
-                value={form.name}
-                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              <FieldCombobox
+                value={form.workRateId || form.name || ""}
+                onChange={handleSelectOperation}
+                onAddNew={handleAddOperation}
+                allowCustom
+                addCustomLabel={(v) => `Ro'yxatga qo'shish: "${v}"`}
+                options={operationOptions}
+                placeholder="Operatsiyani tanlang..."
+                searchPlaceholder="Operatsiya nomi yoki kodi..."
                 className="h-8 text-xs font-medium"
-                placeholder="Masalan: 4+4 Ofset bosma, UF laklash, Tigel kesish..."
+                popoverClassName="w-[420px]"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium block mb-1">Izoh</label>
+              <Input
+                value={operationNote}
+                disabled={!selectedWorkRate}
+                onChange={(e) => handleNoteChange(e.target.value)}
+                placeholder="Ixtiyoriy"
+                className="h-8 text-xs"
               />
             </div>
           </div>
@@ -504,24 +600,8 @@ export function OperationDialog({
                 Uskuna / Ish markazi *
               </label>
               <FieldCombobox
-                value={form.machine}
-                onChange={(val) => {
-                  const matchedMachine = machines.find((m) => m.name === val);
-                  const autoOp =
-                    !form.operator && matchedMachine?.leadOperator
-                      ? matchedMachine.leadOperator
-                      : form.operator;
-                  const autoOps =
-                    (!form.operators || form.operators.length === 0) && matchedMachine?.leadOperator
-                      ? [matchedMachine.leadOperator]
-                      : form.operators;
-                  setForm((p) => ({
-                    ...p,
-                    machine: val,
-                    operator: autoOp || "",
-                    operators: autoOps,
-                  }));
-                }}
+                value={resolvedMachine?.id || form.machine}
+                onChange={handleSelectMachine}
                 allowCustom
                 options={machineOptions}
                 placeholder="Uskunani tanlang..."
@@ -553,115 +633,64 @@ export function OperationDialog({
                 }}
                 onBlur={() => {
                   const parsed = parseFloat(durationInput);
-                  const valid = !Number.isNaN(parsed) && parsed > 0 ? parsed : 0.5;
-                  setDurationInput(String(valid));
-                  if (form.calcUnit === "1 hour") {
-                    handleRecalculateCosts({ duration: valid });
-                  } else {
-                    setForm((p) => ({ ...p, duration: valid }));
-                  }
+                  applyDuration(!Number.isNaN(parsed) && parsed > 0 ? parsed : 0.5);
                 }}
                 className="h-8 text-xs font-mono"
               />
             </div>
+            {durationEstimate && (
+              <div className="col-span-3 -mt-1 flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground font-mono">
+                <span>
+                  {durationEstimate.throughput.makeReadyMinutes} daq + {formatNumberWithSpaces(durationEstimate.qty)} ÷{" "}
+                  {formatNumberWithSpaces(durationEstimate.throughput.perHour)}{" "}
+                  {THROUGHPUT_UNIT_LABEL[durationEstimate.throughput.unit]}/soat = {durationEstimate.hours} soat
+                </span>
+                {durationEstimate.hours !== Number(form.duration) && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => applyDuration(durationEstimate.hours)}
+                          className="inline-flex items-center justify-center size-5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+                        >
+                          <RotateCcw className="size-3" />
+                        </button>
+                      }
+                    />
+                    <TooltipContent side="top" className="text-xs">
+                      Me&apos;yorni qo&apos;llash
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Row 3: Tariff Rates & Divisors */}
-          <div className="p-2.5 rounded-md border border-border bg-muted/20 space-y-2.5">
-            <div className="flex items-center justify-between text-xs font-semibold text-foreground">
-              <span className="flex items-center gap-1.5">
-                <Calculator className="w-3.5 h-3.5 text-muted-foreground" />
-                <span>Stavka va tannarx ({currencyLabel})</span>
-                <FieldInfoTooltip text="Operatsiya tannarxi buyurtma valyutasida hisoblanadi. Pripravka + (Adad ÷ Birlik) × Stavka formulasi asosida operatsiya rejaviy tannarxi va sdelka FOT fondi shakllanadi." />
-              </span>
-              <span className="text-[11px] font-mono text-muted-foreground">
-                Pripravka + (Adad ÷ Birlik) × Stavka
-              </span>
+          {form.status === "Finished" && (
+            <div className="flex items-center justify-end gap-2 -mt-1">
+              <label className="text-xs font-medium flex items-center">
+                <span>Fakt vaqt (soat)</span>
+                <FieldInfoTooltip text="Bosqich boshlanishidan tugashigacha, to'xtalishlar chiqarilgan holda. Smenalar orasidagi tanaffus kirib qolgan bo'lsa, shu yerda tuzating — fakt tannarx shundan hisoblanadi." />
+              </label>
+              <Input
+                type="number"
+                step="0.1"
+                min="0"
+                value={form.actualDurationMinutes !== undefined && form.actualDurationMinutes !== null ? String(Number((form.actualDurationMinutes / 60).toFixed(2))) : ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const hours = parseFloat(raw);
+                  setForm((p) => ({
+                    ...p,
+                    actualDurationMinutes: raw === "" || Number.isNaN(hours) ? undefined : Math.max(0, Math.round(hours * 60)),
+                  }));
+                }}
+                placeholder="—"
+                className="h-8 w-28 text-xs font-mono"
+              />
             </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <span>Hisob birligi</span>
-                  <FieldInfoTooltip text="Tarif va sdelka stavkasi qaysi hajm uchun qo'llanishi (masalan: har 1 000 varaq, 1 000 ottisk, 1 dona yoki 1 soat)." />
-                </label>
-                <FieldCombobox
-                  value={form.calcUnit || "1,000 sheets"}
-                  onChange={(val) => {
-                    const matched = TARIFF_CALC_UNITS.find((u) => u.value === val);
-                    const divisor = matched ? matched.divisor : (form.unitDivisor || 1000);
-                    handleRecalculateCosts({ calcUnit: val, unitDivisor: divisor });
-                  }}
-                  options={calcUnitOptions}
-                  className="h-7 text-xs"
-                  popoverClassName="w-[280px]"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <span>Pripravka ({currencyLabel})</span>
-                  <FieldInfoTooltip text="Stanokni sozlash, formalarni o'rnatish, bo'yoq tekislash va sinov varaqlarini chiqarish uchun fiksirlangan bir martalik xarajat summasi." />
-                </label>
-                <MoneyInput
-                  thousandSeparator=" "
-                  decimalScale={moneyDecimals}
-                  value={form.setupFeeUsd ?? 0}
-                  onValueChange={(values) => handleRecalculateCosts({ setupFeeUsd: values.floatValue ?? 0 })}
-                  className="h-7 text-xs font-mono"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <span>Stavka ({currencyLabel})</span>
-                  <FieldInfoTooltip text="Belgilangan hisob birligi (masalan, har 1 000 varaq) uchun korxona hisob-kitob narxi / tarifi." />
-                </label>
-                <MoneyInput
-                  thousandSeparator=" "
-                  decimalScale={moneyDecimals}
-                  value={form.rateUsd ?? 0}
-                  onValueChange={(values) => handleRecalculateCosts({ rateUsd: values.floatValue ?? 0 })}
-                  className="h-7 text-xs font-mono"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <span>Sdelka stavkasi ({currencyLabel})</span>
-                  <FieldInfoTooltip text="Belgilangan hisob birligi uchun operatorlarga hisoblanadigan ishbay ish haqi (FOT) stavkasi." />
-                </label>
-                <MoneyInput
-                  thousandSeparator=" "
-                  decimalScale={pieceworkDecimals}
-                  value={form.pieceworkRateUsd ?? 0}
-                  onValueChange={(values) => handleRecalculateCosts({ pieceworkRateUsd: values.floatValue ?? 0 })}
-                  className="h-7 text-xs font-mono"
-                />
-              </div>
-            </div>
-
-            {/* Live Cost Summary Bar */}
-            <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-3">
-                <span className="text-muted-foreground flex items-center gap-1">
-                  <span>Rejaviy tannarx:</span>
-                  <strong className="text-foreground font-mono">
-                    {formatMoney(form.plannedCostUsd || 0, currency, moneyDecimals)}
-                  </strong>
-                  <FieldInfoTooltip text="Ushbu operatsiya bo'yicha jami rejaviy tannarx: Pripravka + (Adad ÷ Birlik) × Stavka." />
-                </span>
-                <span className="text-muted-foreground/40">•</span>
-                <span className="text-muted-foreground flex items-center gap-1">
-                  <span>Sdelka FOT:</span>
-                  <strong className="text-emerald-600 dark:text-emerald-400 font-mono">
-                    {formatMoney(form.pieceworkTotalUsd || 0, currency, moneyDecimals)}
-                  </strong>
-                  <FieldInfoTooltip text="Operatorlar brigadasiga to'lanadigan jami ishbay ish haqi fondi: (Adad ÷ Birlik) × Sdelka stavkasi." />
-                </span>
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* Row 4: Assigned Operators */}
           <div className="space-y-1.5">
@@ -777,8 +806,8 @@ export function OperationDialog({
           </div>
 
           {/* Technological Tooling & Step Status */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-border/60">
-            <div className="sm:col-span-2 space-y-1">
+          <div className="grid grid-cols-3 gap-2.5">
+            <div className={cn("space-y-1", editingOpIndex !== null ? "col-span-2" : "col-span-3")}>
               <label className="text-xs font-medium flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-foreground">
                   <Stamp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
@@ -820,6 +849,7 @@ export function OperationDialog({
               )}
             </div>
 
+            {editingOpIndex !== null && (
             <div className="space-y-1">
               <label className="text-xs font-medium flex items-center gap-1 text-foreground">
                 <span>Bosqich holati</span>
@@ -840,6 +870,69 @@ export function OperationDialog({
                 </SelectContent>
               </Select>
             </div>
+            )}
+          </div>
+          {/* Planned cost: one read-only line; outsourced / manual only on request */}
+          <div className="rounded-md border border-border bg-muted/20 px-2.5 py-1.5 space-y-2">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="flex items-center text-muted-foreground">
+                <span>Tannarx</span>
+                <FieldInfoTooltip text={costBreakdownText} />
+              </span>
+              <span className="flex items-center gap-2 min-w-0">
+                {costMode === "auto" && opCost.totalUsd > 0 && (
+                  <span className="text-[11px] text-muted-foreground font-mono truncate">
+                    uskuna {money(opCost.machineCostUsd)} · mehnat {money(opCost.laborCostUsd)}
+                  </span>
+                )}
+                <strong className="font-mono text-foreground shrink-0">{money(opCost.totalUsd)}</strong>
+                <button
+                  type="button"
+                  onClick={() => setForm((p) => ({ ...p, costMode: costMode === "auto" ? "outsourced" : "auto" }))}
+                  className="text-[11px] text-primary hover:underline cursor-pointer shrink-0"
+                >
+                  {costMode === "auto" ? "Qo'lda" : "Avto"}
+                </button>
+              </span>
+            </div>
+
+            {costMode !== "auto" && (
+              <div className="grid grid-cols-[auto_1fr_8rem] items-end gap-2">
+                <div className="inline-flex items-center rounded-md border border-border bg-card p-0.5 h-7">
+                  {(["outsourced", "manual"] as const).map((mode) => {
+                    const locked = mode === "manual" && !canOverrideCost && costMode !== "manual";
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        disabled={locked}
+                        title={locked ? "Faqat rahbar" : undefined}
+                        onClick={() => setForm((p) => ({ ...p, costMode: mode }))}
+                        className={cn(
+                          "h-5.5 px-2 rounded text-[11px] font-medium cursor-pointer disabled:cursor-not-allowed disabled:opacity-40",
+                          costMode === mode ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {COST_MODE_LABEL[mode]}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Input
+                  value={form.costNote || ""}
+                  onChange={(e) => setForm((p) => ({ ...p, costNote: e.target.value }))}
+                  placeholder={costMode === "outsourced" ? "Yetkazib beruvchi" : "Sabab *"}
+                  className={cn("h-7 text-xs", needsReason && "border-destructive/60")}
+                />
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={moneyDecimals}
+                  value={form.manualCostUsd ?? 0}
+                  onValueChange={(values) => setForm((p) => ({ ...p, manualCostUsd: values.floatValue ?? 0 }))}
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -850,7 +943,7 @@ export function OperationDialog({
           <Button
             size="sm"
             onClick={onSave}
-            disabled={!form.name?.trim()}
+            disabled={!form.name?.trim() || needsReason}
             className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium"
           >
             {editingOpIndex !== null ? "Saqlash" : "Qo'shish"}

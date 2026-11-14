@@ -66,6 +66,8 @@ import {
 } from "@/components/ui/command";
 import { useWorkspaceStore, ProductionReadinessChecks } from "@/store/workspaceStore";
 import { formatMoney } from "@/components/documents/common/DocumentShell";
+import { useShallow } from "zustand/react/shallow";
+import { computeOperationCost } from "../utils/operationCost";
 
 interface OperationsTabProps {
   workOrderId?: string;
@@ -156,6 +158,22 @@ export function OperationsTab({
     );
   }, [operations]);
 
+  const { machines, employees } = useWorkspaceStore(
+    useShallow((s) => ({ machines: s.machines, employees: s.employees }))
+  );
+  useEffect(() => {
+    const s = useWorkspaceStore.getState();
+    if (s.machines.length === 0 && s.loadMachines) s.loadMachines();
+    if (s.employees.length === 0 && s.loadEmployees) s.loadEmployees();
+  }, []);
+
+  // Planned cost per step (USD), the same numbers the Financials tab uses.
+  const opCostsUsd = useMemo(
+    () => operations.map((op) => computeOperationCost(op, { machines, employees, exchangeRate }).totalUsd),
+    [operations, machines, employees, exchangeRate]
+  );
+  const totalOpCost = useMemo(() => opCostsUsd.reduce((s, v) => s + v, 0) * fxRate, [opCostsUsd, fxRate]);
+
   const totalPlannedCost = useMemo(() => {
     return operations.reduce((sum, op) => sum + (Number(op.plannedCostUsd) || 0), 0) * fxRate;
   }, [operations, fxRate]);
@@ -183,8 +201,9 @@ export function OperationsTab({
 
     if (!isOperator) {
       cols.push(
+        { id: "opCost", title: `Tannarx (${currencyLabel})`, width: 130, icon: GridColumnIcon.HeaderMath },
         { id: "rate", title: `Stavka (${currencyLabel})`, width: 135, icon: GridColumnIcon.HeaderNumber },
-        { id: "plannedCost", title: `Rejaviy tannarx (${currencyLabel})`, width: 145, icon: GridColumnIcon.HeaderMath },
+        { id: "plannedCost", title: `Tarif narxi (${currencyLabel})`, width: 145, icon: GridColumnIcon.HeaderMath },
         { id: "piecework", title: `Sdelka FOT (${currencyLabel})`, width: 130, icon: GridColumnIcon.HeaderMath }
       );
     }
@@ -446,6 +465,23 @@ export function OperationsTab({
             },
           };
         }
+        case "opCost": {
+          const val = Number(((opCostsUsd[row] || 0) * fxRate).toFixed(2));
+          const mode = op.costMode || "auto";
+          const suffix = mode === "outsourced" ? " · autsors" : mode === "manual" ? " · qo'lda" : "";
+          return {
+            kind: GridCellKind.Number,
+            data: val,
+            displayData: val > 0 ? `${formatMoney(val, currency, isUsd ? 2 : 0)}${suffix}` : "—",
+            allowOverlay: false,
+            readonly: true,
+            contentAlign: "right",
+            themeOverride: {
+              baseFontStyle: "600 12px monospace",
+              textDark: val > 0 ? (isDark ? "#e4e4e7" : "#0f172a") : (isDark ? "#52525b" : "#94a3b8"),
+            },
+          };
+        }
         case "plannedCost": {
           const val = Number(((op.plannedCostUsd || 0) * fxRate).toFixed(2));
           return {
@@ -478,7 +514,7 @@ export function OperationsTab({
           return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
       }
     },
-    [operations, opColumns, isDark, isOperator, fallbackData?.quantity, currency, isUsd, fxRate]
+    [operations, opColumns, isDark, isOperator, fallbackData?.quantity, currency, isUsd, fxRate, opCostsUsd]
   );
 
   const onOpCellEdited = useCallback(
@@ -495,6 +531,8 @@ export function OperationsTab({
         nextOp.name = newValue.data.toString();
       } else if (column.id === "machine" && newValue.kind === GridCellKind.Text && !isOperator) {
         nextOp.machine = newValue.data.toString();
+        // A typed name no longer matches the pinned registry machine.
+        nextOp.machineId = undefined;
       } else if (column.id === "tooling" && newValue.kind === GridCellKind.Text && !isOperator) {
         nextOp.toolingName = newValue.data.toString();
       } else if (column.id === "operator" && newValue.kind === GridCellKind.Text && !isOperator) {
@@ -701,11 +739,22 @@ export function OperationsTab({
             <Clock className="w-3 h-3 text-muted-foreground" /> Me&apos;yor:{" "}
             <strong className="text-foreground font-mono">{totalDuration} soat</strong>
           </span>
-          {!isOperator && totalPlannedCost > 0 && (
+          {!isOperator && totalOpCost > 0 && (
             <>
               <Separator orientation="vertical" className="h-3" />
               <span className="flex items-center gap-1 font-mono">
                 Tannarx:{" "}
+                <strong className="text-foreground font-semibold">
+                  {formatMoney(totalOpCost, currency, isUsd ? 2 : 0)}
+                </strong>
+              </span>
+            </>
+          )}
+          {!isOperator && totalPlannedCost > 0 && (
+            <>
+              <Separator orientation="vertical" className="h-3" />
+              <span className="flex items-center gap-1 font-mono">
+                Tarif narxi:{" "}
                 <strong className="text-blue-600 dark:text-blue-400 font-semibold">
                   {formatMoney(totalPlannedCost, currency, isUsd ? 2 : 0)}
                 </strong>

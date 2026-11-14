@@ -300,7 +300,7 @@ export const INITIAL_INDUSTRY_TARIFFS: Omit<TariffRecord, "id">[] = [
   },
 ];
 
-async function getCompanyIdByCode(companyCode: string = "PRINTGOO"): Promise<string> {
+export async function getCompanyIdByCode(companyCode: string = "PRINTGOO"): Promise<string> {
   const company = await db.query.companies.findFirst({
     where: eq(companies.code, companyCode),
   });

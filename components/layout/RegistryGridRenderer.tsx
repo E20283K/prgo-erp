@@ -12,6 +12,7 @@ const SalesGrid = dynamic(() => import("@/components/grid/SalesGrid").then((mod)
 const FinanceGrid = dynamic(() => import("@/components/grid/FinanceGrid").then((mod) => mod.FinanceGrid), { ssr: false });
 const TaskGrid = dynamic(() => import("@/components/grid/TaskGrid").then((mod) => mod.TaskGrid), { ssr: false });
 const SettingsGrid = dynamic(() => import("@/components/grid/SettingsGrid").then((mod) => mod.SettingsGrid), { ssr: false });
+const WorkRatesGrid = dynamic(() => import("@/components/documents/work-rate/WorkRatesGrid").then((mod) => mod.WorkRatesGrid), { ssr: false });
 const TradingGrid = dynamic(() => import("@/components/grid/TradingGrid").then((mod) => mod.TradingGrid), { ssr: false });
 
 // HR Standalone High-Performance Grids
@@ -42,6 +43,7 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     else if (tab.id.includes("leads")) crmType = "leads";
     return <CrmGrid type={crmType as any} />;
   } else if (tab.module === "production") {
+    if (tab.id.includes("operation-catalog")) return <WorkRatesGrid />;
     if (tab.id.includes("work-orders") || tab.id === "registry-work-orders") return <DataGrid />;
     if (tab.id.includes("planning")) return <ProductionGrid type="planning" />;
     if (tab.id.includes("machines")) return <ProductionGrid type="machines" />;

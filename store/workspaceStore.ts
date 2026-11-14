@@ -13,6 +13,7 @@ async function notifyWarehouseSaveError(res: Response, fallback: string) {
 import { MachineRecord } from "@/components/documents/machine/types";
 import { PlantRecord, branchToPlantRecord, createEmptyPlant, generateNextPlantCode } from "@/components/documents/plant/types";
 import { TariffRecord, createEmptyTariff } from "@/components/documents/tariff/types";
+import type { WorkRateRecord } from "@/components/documents/work-rate/types";
 import { useLookupStore } from "@/store/lookupStore";
 import {
   EmployeeRecord,
@@ -943,6 +944,13 @@ interface WorkspaceState {
   deleteTariffFromDb: (id: string, companyCode?: string) => Promise<boolean>;
   upsertTariff: (tariff: TariffRecord) => void;
   openNewTariffTab: () => string;
+
+  // ── Work rates (Ish turlari narxlari — sdelka) ───────────────────────────
+  workRates: WorkRateRecord[];
+  isWorkRatesLoading: boolean;
+  fetchWorkRates: (companyCode?: string) => Promise<void>;
+  saveWorkRate: (rate: Partial<WorkRateRecord>, companyCode?: string) => Promise<WorkRateRecord | null>;
+  deleteWorkRate: (id: string, companyCode?: string) => Promise<boolean>;
 
   // ── Users & Roles (Settings Module) ────────────────────────────────────────
   users: SystemUserRecord[];
@@ -2216,6 +2224,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isPlantsLoading: false,
   tariffs: [],
   isTariffsLoading: false,
+  workRates: [],
+  isWorkRatesLoading: false,
   users: INITIAL_SYSTEM_USERS,
   isUsersLoading: false,
   employees: [],
@@ -2847,6 +2857,58 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return false;
     } catch (err) {
       console.error("deletePlantFromDb error:", err);
+      return false;
+    }
+  },
+
+  // ── Work rates (Ish turlari narxlari — sdelka) ───────────────────────────
+  fetchWorkRates: async (companyCode = "PRINTGOO") => {
+    if (get().isWorkRatesLoading) return;
+    set({ isWorkRatesLoading: true });
+    try {
+      const res = await fetch(`/api/v1/settings/work-rates?companyCode=${encodeURIComponent(companyCode)}`);
+      const json = await res.json();
+      set({ workRates: json.success && Array.isArray(json.data) ? json.data : get().workRates, isWorkRatesLoading: false });
+    } catch (e) {
+      console.error("fetchWorkRates error:", e);
+      set({ isWorkRatesLoading: false });
+    }
+  },
+
+  saveWorkRate: async (rate, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(`/api/v1/settings/work-rates?companyCode=${encodeURIComponent(companyCode)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rate),
+      });
+      const json = await res.json();
+      if (!json.success || !json.workRate) return null;
+      const saved: WorkRateRecord = json.workRate;
+      set((state) => ({
+        workRates: state.workRates.some((r) => r.id === saved.id)
+          ? state.workRates.map((r) => (r.id === saved.id ? saved : r))
+          : [...state.workRates, saved].sort((a, b) => a.code.localeCompare(b.code)),
+      }));
+      return saved;
+    } catch (err) {
+      console.error("saveWorkRate error:", err);
+      return null;
+    }
+  },
+
+  deleteWorkRate: async (id, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch(
+        `/api/v1/settings/work-rates?id=${encodeURIComponent(id)}&companyCode=${encodeURIComponent(companyCode)}`,
+        { method: "DELETE" }
+      );
+      const json = await res.json();
+      if (!json.success) return false;
+      set((state) => ({ workRates: state.workRates.filter((r) => r.id !== id) }));
+      return true;
+    } catch (err) {
+      console.error("deleteWorkRate error:", err);
       return false;
     }
   },
