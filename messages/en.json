@@ -1176,6 +1176,8 @@
   },
   "DocumentShell": {
     "sections": "Sections",
+    "collapsePanel": "Collapse panel",
+    "expandPanel": "Expand panel",
     "quantity": "Quantity",
     "technology": "Technology",
     "lamination": "Lamination",

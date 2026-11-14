@@ -1176,6 +1176,8 @@
   },
   "DocumentShell": {
     "sections": "Bo'limlar",
+    "collapsePanel": "Panelni yig'ish",
+    "expandPanel": "Panelni yoyish",
     "quantity": "Tiraj / Hajm",
     "technology": "Texnologiya",
     "lamination": "Laminatsiya",

@@ -1,8 +1,9 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 import { cn } from "cn";
-import type { LucideIcon } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -180,6 +181,75 @@ export interface DocumentNavItem {
   badgeClassName?: string;
 }
 
+/*
+ * Collapsed state is one preference shared by every document view and
+ * persisted in localStorage. With no stored choice, narrow screens start
+ * collapsed. "[" toggles it while no text field has focus.
+ */
+const SIDEBAR_STORAGE_KEY = "document-sidebar-collapsed";
+const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1280;
+
+const sidebarListeners = new Set<() => void>();
+let sidebarCollapsed: boolean | null = null;
+
+function readSidebarCollapsed(): boolean {
+  if (sidebarCollapsed !== null) return sidebarCollapsed;
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+  } catch {
+    stored = null;
+  }
+  sidebarCollapsed =
+    stored === null ? window.innerWidth < SIDEBAR_AUTO_COLLAPSE_WIDTH : stored === "1";
+  return sidebarCollapsed;
+}
+
+function setSidebarCollapsed(next: boolean) {
+  sidebarCollapsed = next;
+  try {
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, next ? "1" : "0");
+  } catch {
+    // Storage unavailable: keep the in-memory value only.
+  }
+  sidebarListeners.forEach((listener) => listener());
+}
+
+function toggleSidebarCollapsed() {
+  setSidebarCollapsed(!readSidebarCollapsed());
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
+function handleSidebarShortcut(event: KeyboardEvent) {
+  if (event.key !== "[" || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.defaultPrevented || isTypingTarget(event.target)) return;
+  event.preventDefault();
+  toggleSidebarCollapsed();
+}
+
+function subscribeSidebar(listener: () => void) {
+  if (sidebarListeners.size === 0) window.addEventListener("keydown", handleSidebarShortcut);
+  sidebarListeners.add(listener);
+  return () => {
+    sidebarListeners.delete(listener);
+    if (sidebarListeners.size === 0) window.removeEventListener("keydown", handleSidebarShortcut);
+  };
+}
+
+function useSidebarCollapsed(): boolean {
+  return React.useSyncExternalStore(subscribeSidebar, readSidebarCollapsed, () => false);
+}
+
+function hasBadge(badge: DocumentNavItem["badge"]): boolean {
+  return badge !== null && badge !== undefined && badge !== "";
+}
+
 export function DocumentSidebar({
   summary,
   sectionsLabel,
@@ -195,6 +265,59 @@ export function DocumentSidebar({
   onSelect: (id: string) => void;
   footer?: React.ReactNode;
 }) {
+  const t = useTranslations("DocumentShell");
+  const collapsed = useSidebarCollapsed();
+  const toggleLabel = collapsed ? t("expandPanel") : t("collapsePanel");
+  const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
+
+  if (collapsed) {
+    return (
+      <aside className="flex w-11 shrink-0 flex-col bg-card border-r border-border select-none">
+        <nav
+          className="flex-1 min-h-0 overflow-y-auto py-2.5 flex flex-col items-center gap-0.5"
+          aria-label={sectionsLabel}
+        >
+          {items.map((item) => {
+            const isActive = activeId === item.id;
+            const Icon = item.icon;
+            const tooltip = hasBadge(item.badge) ? `${item.label} · ${item.badge}` : item.label;
+            return (
+              <Tooltip key={item.id}>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={item.label}
+                      aria-current={isActive ? "page" : undefined}
+                      onClick={() => onSelect(item.id)}
+                      className={cn(
+                        "relative h-8 w-8 cursor-pointer",
+                        isActive
+                          ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary before:absolute before:-left-1.5 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="right" sideOffset={8} className="text-xs">
+                  {tooltip}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </nav>
+
+        <div className="shrink-0 flex justify-center py-1.5 border-t border-border">
+          <HeaderIconAction icon={ToggleIcon} label={toggleLabel} onClick={toggleSidebarCollapsed} />
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="flex w-52 lg:w-60 shrink-0 flex-col bg-card border-r border-border select-none">
       <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-3">
@@ -226,7 +349,7 @@ export function DocumentSidebar({
                   <Icon className="w-4 h-4 shrink-0" />
                   <span className="truncate">{item.label}</span>
                 </span>
-                {item.badge !== null && item.badge !== undefined && item.badge !== "" && (
+                {hasBadge(item.badge) && (
                   <Badge
                     variant="secondary"
                     className={cn(
@@ -244,6 +367,10 @@ export function DocumentSidebar({
       </div>
 
       {footer && <div className="shrink-0 p-2.5 border-t border-border bg-muted/30 space-y-2">{footer}</div>}
+
+      <div className="shrink-0 flex justify-end px-1.5 py-1.5 border-t border-border">
+        <HeaderIconAction icon={ToggleIcon} label={toggleLabel} onClick={toggleSidebarCollapsed} />
+      </div>
     </aside>
   );
 }

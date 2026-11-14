@@ -1176,6 +1176,8 @@
   },
   "DocumentShell": {
     "sections": "Bölümler",
+    "collapsePanel": "Paneli daralt",
+    "expandPanel": "Paneli genişlet",
     "quantity": "Miktar",
     "technology": "Teknoloji",
     "lamination": "Laminasyon",

@@ -1176,6 +1176,8 @@
   },
   "DocumentShell": {
     "sections": "Разделы",
+    "collapsePanel": "Свернуть панель",
+    "expandPanel": "Развернуть панель",
     "quantity": "Тираж",
     "technology": "Технология",
     "lamination": "Ламинация",
