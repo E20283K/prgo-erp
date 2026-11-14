@@ -28,6 +28,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RouteStep, ShiftEvent, DOWNTIME_REASONS, FLOOR_OPERATORS } from "../types";
+import { DEFAULT_SHIFTS, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
+
+type ShiftName = NonNullable<ShiftEvent["shift"]>;
 import { cn } from "@/lib/utils";
 
 interface DowntimeLogDialogProps {
@@ -38,7 +41,7 @@ interface DowntimeLogDialogProps {
   onSaveDowntime: (data: {
     eventId?: string;
     opId: string;
-    shift: "1-smena" | "2-smena";
+    shift: ShiftName;
     downtimeReason: string;
     durationMinutes: number;
     operator: string;
@@ -46,6 +49,8 @@ interface DowntimeLogDialogProps {
     time: string;
     pauseStep: boolean;
   }) => void;
+  /** Plant shifts: the current one is preselected. */
+  shiftSchedule?: ShiftInterval[];
 }
 
 export function DowntimeLogDialog({
@@ -54,11 +59,11 @@ export function DowntimeLogDialog({
   selectedOp,
   editingDowntime = null,
   onSaveDowntime,
+  shiftSchedule = DEFAULT_SHIFTS,
 }: DowntimeLogDialogProps) {
-  const now = new Date();
-  const defaultTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  const defaultShift: "1-smena" | "2-smena" =
-    now.getHours() >= 8 && now.getHours() < 20 ? "1-smena" : "2-smena";
+  const shiftOptions = shiftSchedule.length > 0 ? shiftSchedule : DEFAULT_SHIFTS;
+  const defaultTime = plantClock(new Date()).time;
+  const defaultShift = shiftAt(defaultTime, shiftOptions) as ShiftName;
 
   const operatorOptions = useMemo(() => {
     const list = [...FLOOR_OPERATORS];
@@ -73,7 +78,7 @@ export function DowntimeLogDialog({
     return list;
   }, [selectedOp.operator, selectedOp.operators]);
 
-  const [shift, setShift] = useState<"1-smena" | "2-smena">(defaultShift);
+  const [shift, setShift] = useState<ShiftName>(defaultShift);
   const [selectedReasonCode, setSelectedReasonCode] = useState<string>(
     DOWNTIME_REASONS[0].code
   );
@@ -110,7 +115,8 @@ export function DowntimeLogDialog({
         setPauseStep(true);
       }
     }
-  }, [isOpen, editingDowntime, selectedOp.operator, selectedOp.status, defaultShift, defaultTime]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the dialog opens, not as the clock ticks
+  }, [isOpen, editingDowntime, selectedOp.operator, selectedOp.status]);
 
   const selectedReason =
     DOWNTIME_REASONS.find((r) => r.code === selectedReasonCode) ||
@@ -165,19 +171,18 @@ export function DowntimeLogDialog({
             <Select
               value={shift}
               onValueChange={(val: string | null) => {
-                if (val === "1-smena" || val === "2-smena") setShift(val);
+                if (val && shiftOptions.some((sh) => sh.name === val)) setShift(val as ShiftName);
               }}
             >
               <SelectTrigger className="h-7 text-xs w-[100px] bg-background font-medium">
                 <SelectValue>{shift}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="1-smena" className="text-xs">
-                  1-smena
-                </SelectItem>
-                <SelectItem value="2-smena" className="text-xs">
-                  2-smena
-                </SelectItem>
+                {shiftOptions.map((sh) => (
+                  <SelectItem key={sh.name} value={sh.name} className="text-xs">
+                    {sh.name} ({sh.start}–{sh.end})
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

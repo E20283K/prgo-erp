@@ -518,10 +518,31 @@ export const workOrderEvents = pgTable(
     wasteReason: varchar("waste_reason", { length: 128 }),
     grossInput: integer("gross_input"),
     goodOutput: integer("good_output"),
+    /** Id the client gave the event: saves are idempotent upserts on it. */
+    clientEventId: varchar("client_event_id", { length: 64 }),
+    /** When it happened on the floor (date and time); "time" keeps the HH:MM label. */
+    occurredAt: timestamp("occurred_at", { withTimezone: true }),
+    shift: varchar("shift", { length: 16 }),
+    batchLabel: varchar("batch_label", { length: 128 }),
+    makeReadyQty: integer("make_ready_qty"),
+    defectQty: integer("defect_qty"),
+    outputPiecesQty: integer("output_pieces_qty"),
+    downtimeReason: varchar("downtime_reason", { length: 128 }),
+    downtimeMinutes: integer("downtime_minutes"),
+    palletCode: varchar("pallet_code", { length: 64 }),
+    palletNumber: integer("pallet_number"),
+    status: varchar("status", { length: 16 }),
+    createdBy: varchar("created_by", { length: 128 }),
+    updatedBy: varchar("updated_by", { length: 128 }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+    /** Events are never hard-deleted from the journal: a delete is recorded with who did it. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: varchar("deleted_by", { length: 128 }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("work_order_events_wo_idx").on(table.workOrderId),
+    uniqueIndex("work_order_events_client_uq").on(table.workOrderId, table.clientEventId),
   ]
 );
 

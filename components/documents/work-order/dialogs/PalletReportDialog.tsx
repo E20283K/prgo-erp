@@ -34,6 +34,9 @@ import {
 import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RouteStep, ShiftEvent } from "../types";
+import { DEFAULT_SHIFTS, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
+
+type ShiftName = NonNullable<ShiftEvent["shift"]>;
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { cn } from "@/lib/utils";
 
@@ -50,7 +53,7 @@ interface PalletReportDialogProps {
   onSaveEvent: (eventData: {
     eventId?: string;
     batchLabel: string;
-    shift: "1-smena" | "2-smena";
+    shift: ShiftName;
     operator: string;
     inputQty: number;
     makeReadyQty: number;
@@ -63,6 +66,8 @@ interface PalletReportDialogProps {
     markStepFinished?: boolean;
   }) => void;
   onOpenPrintTag?: (event: ShiftEvent) => void;
+  /** Plant shifts: the current one is preselected. */
+  shiftSchedule?: ShiftInterval[];
 }
 
 const DEFECT_REASON_OPTIONS: ComboboxItem[] = [
@@ -87,10 +92,12 @@ export function PalletReportDialog({
   editingEvent = null,
   onSaveEvent,
   onOpenPrintTag,
+  shiftSchedule = DEFAULT_SHIFTS,
 }: PalletReportDialogProps) {
-  // Current time default
-  const now = new Date();
-  const defaultTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  // Plant clock: current time and the shift it falls in.
+  const shiftOptions = shiftSchedule.length > 0 ? shiftSchedule : DEFAULT_SHIFTS;
+  const defaultTime = plantClock(new Date()).time;
+  const defaultShift = shiftAt(defaultTime, shiftOptions) as ShiftName;
 
   // Next pallet number
   const nextPalletNum = useMemo(() => {
@@ -128,7 +135,7 @@ export function PalletReportDialog({
   }, [isOpen]);
 
   // Form states
-  const [shift, setShift] = useState<"1-smena" | "2-smena">("1-smena");
+  const [shift, setShift] = useState<ShiftName>(defaultShift);
   const [batchLabel, setBatchLabel] = useState<string>(`Palet #${nextPalletNum}`);
   const [selectedOperator, setSelectedOperator] = useState<string>(selectedOp.operator || "");
   const [inputQty, setInputQty] = useState<number>(suggestedInputQty);
@@ -143,7 +150,7 @@ export function PalletReportDialog({
     if (isOpen) {
       if (editingEvent) {
         setBatchLabel(editingEvent.batchLabel || `Palet #${existingOpEvents.length}`);
-        setShift(editingEvent.shift || "1-smena");
+        setShift(editingEvent.shift || defaultShift);
         setInputQty(editingEvent.inputQty || 0);
         setMakeReadyQty(editingEvent.makeReadyQty || 0);
         setDefectQty(editingEvent.defectQty || 0);
@@ -153,6 +160,8 @@ export function PalletReportDialog({
         setSelectedOperator(editingEvent.operator || selectedOp.operator || employees[0]?.fullName || "");
       } else {
         setBatchLabel(`Palet #${existingOpEvents.length + 1}`);
+        setShift(defaultShift);
+        setTime(defaultTime);
         setInputQty(suggestedInputQty);
         setMakeReadyQty(0);
         setDefectQty(0);
@@ -161,7 +170,8 @@ export function PalletReportDialog({
         setSelectedOperator(selectedOp.operator || employees[0]?.fullName || "");
       }
     }
-  }, [isOpen, editingEvent, existingOpEvents.length, suggestedInputQty, selectedOp.operator, defaultTime, employees]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the dialog opens or the edited entry changes
+  }, [isOpen, editingEvent, existingOpEvents.length, suggestedInputQty, selectedOp.operator, employees]);
 
   // Net good output calculation
   const calculatedGoodQty = useMemo(() => {
@@ -270,13 +280,14 @@ export function PalletReportDialog({
 
             <Select value={shift} onValueChange={(val: any) => { if (val) setShift(val); }}>
               <SelectTrigger className="h-7 text-xs w-[115px] bg-background font-medium">
-                <SelectValue>
-                  {shift === "1-smena" ? "1-smena (Kun)" : "2-smena (Tun)"}
-                </SelectValue>
+                <SelectValue>{shift}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="1-smena" className="text-xs">1-smena (Kun)</SelectItem>
-                <SelectItem value="2-smena" className="text-xs">2-smena (Tun)</SelectItem>
+                {shiftOptions.map((sh) => (
+                  <SelectItem key={sh.name} value={sh.name} className="text-xs">
+                    {sh.name} ({sh.start}–{sh.end})
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

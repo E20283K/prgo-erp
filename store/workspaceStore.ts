@@ -27,7 +27,8 @@ import {
 } from "@/components/documents/hr/types";
 import { getUserInitials } from "@/lib/utils";
 import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
-import type { WorkOrderDeliveryBatch } from "@/components/documents/work-order/types";
+import type { WorkOrderDeliveryBatch, ShiftEvent } from "@/components/documents/work-order/types";
+import type { ShiftInterval } from "@/lib/shiftSchedule";
 import type { SystemUserRecord } from "@/components/documents/user/types";
 import { INITIAL_SYSTEM_USERS } from "@/components/documents/user/data";
 import type { SupplierRecord } from "@/lib/server/supplierService";
@@ -1043,6 +1044,13 @@ interface WorkspaceState {
   isProductionQueueLoading?: boolean;
   loadProductionQueue: (companyCode?: string) => Promise<void>;
   upsertWorkOrderAsync: (payload: any, companyCode?: string) => Promise<any>;
+  /** Shift journal of an order (newest first) and the plant's shift schedule. */
+  loadWorkOrderEventsAsync: (
+    docNo: string
+  ) => Promise<{ success: boolean; events?: ShiftEvent[]; schedule?: ShiftInterval[]; error?: string }>;
+  /** Saves one journal entry right away; returns it as the server stored it. */
+  saveWorkOrderEventAsync: (docNo: string, event: ShiftEvent) => Promise<{ success: boolean; event?: ShiftEvent; error?: string }>;
+  deleteWorkOrderEventAsync: (docNo: string, eventId: string) => Promise<{ success: boolean; error?: string }>;
   deleteWorkOrderAsync: (
     docNoOrId: string,
     mode?: "auto" | "cancel" | "hard_delete",
@@ -1979,6 +1987,46 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       console.error("Failed to load production queue from DB:", e);
     } finally {
       set({ isProductionQueueLoading: false });
+    }
+  },
+
+  loadWorkOrderEventsAsync: async (docNo) => {
+    try {
+      const res = await fetch(`/api/v1/production/work-orders/${encodeURIComponent(docNo)}/events`);
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) return { success: true, events: json.events || [], schedule: json.schedule || [] };
+      return { success: false, error: json.error || "Smena jurnali yuklanmadi" };
+    } catch {
+      return { success: false, error: "Server bilan aloqa yo'q" };
+    }
+  },
+
+  saveWorkOrderEventAsync: async (docNo, event) => {
+    try {
+      const res = await fetch(`/api/v1/production/work-orders/${encodeURIComponent(docNo)}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) return { success: true, event: json.event };
+      return { success: false, error: json.error || "Yozuv saqlanmadi" };
+    } catch {
+      return { success: false, error: "Server bilan aloqa yo'q" };
+    }
+  },
+
+  deleteWorkOrderEventAsync: async (docNo, eventId) => {
+    try {
+      const res = await fetch(
+        `/api/v1/production/work-orders/${encodeURIComponent(docNo)}/events?eventId=${encodeURIComponent(eventId)}`,
+        { method: "DELETE" }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) return { success: true };
+      return { success: false, error: json.error || "Yozuv o'chirilmadi" };
+    } catch {
+      return { success: false, error: "Server bilan aloqa yo'q" };
     }
   },
 

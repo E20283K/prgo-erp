@@ -36,6 +36,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RouteStep, ShiftEvent } from "../types";
+import { plantClock } from "@/lib/shiftSchedule";
+
+/** "14.11" day label of an entry on the plant clock (empty for old entries without a date). */
+function eventDay(ev: ShiftEvent): string {
+  if (!ev.occurredAt) return "";
+  const d = new Date(ev.occurredAt);
+  if (Number.isNaN(d.getTime())) return "";
+  const [, m, day] = plantClock(d).day.split("-");
+  return `${day}.${m}`;
+}
 
 export function formatElapsedHMS(totalSeconds: number) { const s = Math.max(0, Math.floor(totalSeconds)); const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60); const sec = s % 60; return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`; }
 
@@ -293,7 +303,10 @@ export function ShiftTimelineTab({
   }, [previousOp, previousOpGoodOutput, stepStats.grossInput]);
 
   const filteredEvents = useMemo(() => {
-    return selectedOpEvents.filter((ev) => {
+    const ordered = [...selectedOpEvents].sort((a, b) =>
+      (b.occurredAt || "").localeCompare(a.occurredAt || "")
+    );
+    return ordered.filter((ev) => {
       const effectiveShift = ev.shift || "1-smena";
       if (shiftFilter !== "all" && effectiveShift !== shiftFilter) return false;
       if (typeFilter === "pallets" && ev.type !== "Run") return false;
@@ -324,6 +337,7 @@ export function ShiftTimelineTab({
 
   const handleExportCsv = () => {
     const headers = [
+      "Sana",
       "Vaqt",
       "Smena",
       "Bosqich",
@@ -341,6 +355,7 @@ export function ShiftTimelineTab({
     const rows = filteredEvents.map((ev) => {
       const isDt = ev.type === "Delay" || ev.type === "Maintenance";
       return [
+        ev.occurredAt ? plantClock(new Date(ev.occurredAt)).day : "",
         ev.time,
         ev.shift || "1-smena",
         `#${selectedOp.stepNumber} ${selectedOp.name}`,
@@ -1034,6 +1049,9 @@ export function ShiftTimelineTab({
                     >
                       <td className="py-2 px-3 whitespace-nowrap">
                         <div className="flex items-center gap-1.5 font-mono">
+                          {eventDay(ev) && (
+                            <span className="text-muted-foreground">{eventDay(ev)}</span>
+                          )}
                           <span className="font-semibold text-foreground">
                             {ev.time}
                           </span>
@@ -1140,7 +1158,15 @@ export function ShiftTimelineTab({
                       <td className="py-2 px-3 whitespace-nowrap">
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <User className="size-3 text-primary shrink-0" />
-                          <span className="truncate max-w-[130px] text-foreground/90">
+                          <span
+                            className="truncate max-w-[130px] text-foreground/90"
+                            title={[
+                              ev.createdBy ? `Yozdi: ${ev.createdBy}` : "",
+                              ev.updatedBy ? `Tuzatdi: ${ev.updatedBy}` : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || undefined}
+                          >
                             {effectiveOperator}
                           </span>
                         </div>

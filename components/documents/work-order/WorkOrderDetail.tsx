@@ -113,6 +113,7 @@ import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
 import { DieLayoutTab } from "./tabs/die-layout/DieLayoutTab";
 import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { getProducedOutputQty, isProductionRouteFinished } from "./utils/productionOutput";
+import { DEFAULT_SHIFTS, atPlantTime, occurredAtFromTime, type ShiftInterval } from "@/lib/shiftSchedule";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
@@ -825,6 +826,28 @@ export function buildOperationsFromSpec(
     Number(form.quantity) || 0
   );
   return recalculateRouteStepsForOrder(fallback, form, tariffs);
+}
+
+
+/**
+ * Puts a route step where its "Tartib #" says among the production steps, keeps packaging last,
+ * and renumbers the route 10, 20, 30... A step taking an existing number goes before that step,
+ * unless it is an existing step moved down the route (#20 -> 40 lands after the old #40).
+ */
+function placeRouteStep(others: RouteStep[], step: RouteStep, previousNumber?: number): RouteStep[] {
+  const packaging = others.filter((op) => op.kind === "packaging");
+  const production = others.filter((op) => op.kind !== "packaging");
+  if (step.kind === "packaging") {
+    packaging.push(step);
+  } else {
+    const target = Number(step.stepNumber) || Number.MAX_SAFE_INTEGER;
+    const movedDown = previousNumber !== undefined && target > previousNumber;
+    const at = production.findIndex((op) =>
+      movedDown ? (Number(op.stepNumber) || 0) > target : (Number(op.stepNumber) || 0) >= target
+    );
+    production.splice(at === -1 ? production.length : at, 0, step);
+  }
+  return [...production, ...packaging].map((op, idx) => ({ ...op, stepNumber: (idx + 1) * 10 }));
 }
 
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
@@ -1550,6 +1573,70 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const [shiftEvents, setShiftEvents] = useState<ShiftEvent[]>(
     data.events || data.shiftEvents || []
   );
+  const [shiftSchedule, setShiftSchedule] = useState<ShiftInterval[]>(DEFAULT_SHIFTS);
+  const shiftEventsRef = React.useRef(shiftEvents);
+  shiftEventsRef.current = shiftEvents;
+
+  /** The order's number once it exists on the server (journal entries need it). */
+  const getSavedOrderNo = () => {
+    const no = savedDocNoRef.current || docNo || "";
+    return no && !/^(draft-|temp-)/.test(no) && no !== "NEW" && no !== "[Avtomatik]" ? no : "";
+  };
+
+  /**
+   * Shift journal entries are written to the server the moment they are logged.
+   * The local list updates first; on failure it goes back to what it was.
+   */
+  const persistShiftEvent = async (event: ShiftEvent, previous: ShiftEvent[]) => {
+    const orderNo = getSavedOrderNo();
+    if (!orderNo) {
+      setShiftEvents(previous);
+      addNotification({
+        title: "Smena jurnaliga yozilmadi",
+        description: "Avval buyurtmani saqlang.",
+        severity: "error",
+      });
+      return null;
+    }
+    const res = await useWorkspaceStore.getState().saveWorkOrderEventAsync(orderNo, event);
+    if (!res.success || !res.event) {
+      setShiftEvents(previous);
+      addNotification({ title: "Smena jurnaliga yozilmadi", description: res.error, severity: "error" });
+      return null;
+    }
+    const saved = res.event;
+    setShiftEvents((prev) => prev.map((ev) => (ev.id === saved.id ? saved : ev)));
+    return saved;
+  };
+
+  // Load the journal from the server; entries that so far lived only in this tab are saved once.
+  useEffect(() => {
+    const orderNo = getSavedOrderNo();
+    if (!orderNo) return;
+    let cancelled = false;
+    (async () => {
+      const store = useWorkspaceStore.getState();
+      const res = await store.loadWorkOrderEventsAsync(orderNo);
+      if (cancelled || !res.success) return;
+      if (res.schedule && res.schedule.length > 0) setShiftSchedule(res.schedule);
+      const serverEvents = res.events || [];
+      const known = new Set(serverEvents.map((ev) => ev.id));
+      const localOnly = shiftEventsRef.current.filter((ev) => !known.has(ev.id));
+      const migrated: ShiftEvent[] = [];
+      for (const ev of localOnly) {
+        const saved = await store.saveWorkOrderEventAsync(orderNo, ev);
+        if (saved.success && saved.event) migrated.push(saved.event);
+      }
+      if (cancelled) return;
+      setShiftEvents(
+        [...migrated, ...serverEvents].sort((a, b) => (b.occurredAt || "").localeCompare(a.occurredAt || ""))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per saved order number
+  }, [docNo]);
 
   const [isLogEventDialogOpen, setIsLogEventDialogOpen] = useState(false);
   const [isPalletReportDialogOpen, setIsPalletReportDialogOpen] = useState(false);
@@ -2877,7 +2964,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const handleOpenAddOperation = () => {
     setEditingOpIndex(null);
-    const nextStepNum = (operations.length + 1) * 10;
+    // A new step goes after the last production step; packaging always stays the final step.
+    const nextStepNum = (operations.filter((op) => op.kind !== "packaging").length + 1) * 10;
     setOpDialogForm({
       stepNumber: nextStepNum,
       name: "",
@@ -2948,23 +3036,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const handleSaveOperationDialog = () => {
     const savedForm = convertOpMoney(opDialogForm, 1 / opDialogFx);
-    let nextOps: RouteStep[];
-    if (editingOpIndex !== null) {
-      const updated = [...operations];
-      updated[editingOpIndex] = {
-        ...updated[editingOpIndex],
-        ...savedForm,
-      };
-      nextOps = updated;
-    } else {
-      nextOps = [
-        ...operations,
-        {
-          id: String(Date.now()),
-          ...savedForm,
-        },
-      ];
-    }
+    const editing = editingOpIndex !== null ? operations[editingOpIndex] : undefined;
+    const step: RouteStep = editing ? { ...editing, ...savedForm } : { id: String(Date.now()), ...savedForm };
+    const nextOps = placeRouteStep(
+      operations.filter((op) => op !== editing),
+      step,
+      editing?.stepNumber
+    );
     setOperations(nextOps);
     updateTabData(tab.id, { operations: nextOps });
     setTabUnsaved(tab.id, true);
@@ -3092,7 +3170,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleSaveDowntime = (data: {
     eventId?: string;
     opId: string;
-    shift: "1-smena" | "2-smena";
+    shift: NonNullable<ShiftEvent["shift"]>;
     downtimeReason: string;
     durationMinutes: number;
     operator: string;
@@ -3100,36 +3178,36 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     time: string;
     pauseStep: boolean;
   }) => {
-    if (data.eventId) {
-      setShiftEvents((prev) =>
-        prev.map((ev) =>
-          ev.id === data.eventId
-            ? {
-                ...ev,
-                time: data.time || ev.time,
-                shift: data.shift,
-                downtimeReason: data.downtimeReason,
-                downtimeDurationMinutes: data.durationMinutes,
-                note: data.note,
-                operator: data.operator,
-              }
-            : ev
-        )
-      );
-    } else {
-      const newEvent: ShiftEvent = {
-        id: "e_dt_" + Date.now(),
-        opId: data.opId,
-        time: data.time || "15:30",
-        shift: data.shift,
-        type: "Delay",
-        downtimeReason: data.downtimeReason,
-        downtimeDurationMinutes: data.durationMinutes,
-        note: data.note,
-        operator: data.operator,
-      };
-      setShiftEvents((prev) => [newEvent, ...prev]);
-    }
+    const previous = shiftEventsRef.current;
+    const existing = data.eventId ? previous.find((ev) => ev.id === data.eventId) : undefined;
+    const event: ShiftEvent = existing
+      ? {
+          ...existing,
+          time: data.time || existing.time,
+          occurredAt:
+            existing.occurredAt && data.time && data.time !== existing.time
+              ? atPlantTime(existing.occurredAt, data.time)
+              : existing.occurredAt,
+          shift: data.shift,
+          downtimeReason: data.downtimeReason,
+          downtimeDurationMinutes: data.durationMinutes,
+          note: data.note,
+          operator: data.operator,
+        }
+      : {
+          id: "e_dt_" + Date.now(),
+          opId: data.opId,
+          time: data.time,
+          occurredAt: occurredAtFromTime(data.time),
+          shift: data.shift,
+          type: "Delay",
+          downtimeReason: data.downtimeReason,
+          downtimeDurationMinutes: data.durationMinutes,
+          note: data.note,
+          operator: data.operator,
+        };
+    setShiftEvents(existing ? previous.map((ev) => (ev.id === event.id ? event : ev)) : [event, ...previous]);
+    void persistShiftEvent(event, previous);
 
     if (data.pauseStep) {
       setOperations((prev) =>
@@ -3156,7 +3234,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleSavePalletEvent = (eventData: {
     eventId?: string;
     batchLabel: string;
-    shift: "1-smena" | "2-smena";
+    shift: NonNullable<ShiftEvent["shift"]>;
     operator: string;
     inputQty: number;
     makeReadyQty: number;
@@ -3169,6 +3247,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     markStepFinished?: boolean;
   }) => {
     const totalWaste = eventData.makeReadyQty + eventData.defectQty;
+    const previousEvents = shiftEventsRef.current;
 
     let updatedEvents: ShiftEvent[];
 
@@ -3179,6 +3258,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         return {
           ...ev,
           time: eventData.time || ev.time,
+          occurredAt:
+            ev.occurredAt && eventData.time && eventData.time !== ev.time
+              ? atPlantTime(ev.occurredAt, eventData.time)
+              : ev.occurredAt,
           shift: eventData.shift,
           batchLabel: eventData.batchLabel,
           note: eventData.note,
@@ -3197,7 +3280,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       const newEvent: ShiftEvent = {
         id: "e_" + Date.now(),
         opId: selectedOp.id,
-        time: eventData.time || "15:30",
+        time: eventData.time,
+        occurredAt: occurredAtFromTime(eventData.time),
         shift: eventData.shift,
         batchLabel: eventData.batchLabel,
         type: "Run",
@@ -3216,6 +3300,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     }
 
     setShiftEvents(updatedEvents);
+    const changed = updatedEvents.find((ev) =>
+      eventData.eventId ? ev.id === eventData.eventId : !previousEvents.includes(ev)
+    );
+    if (changed) void persistShiftEvent(changed, previousEvents);
 
     // Calculate total completed for this op including this event
     const thisOpEvents = updatedEvents.filter((ev) => ev.opId === selectedOp.id);
@@ -3225,14 +3313,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setOperations((prev) =>
       prev.map((op) => {
         if (op.id !== selectedOp.id) return op;
-        const targetMatch = (op.qtyCompleted || "").match(/\/s*([d,]+.*)$/);
+        const targetMatch = (op.qtyCompleted || "").match(/\/\s*(.+)$/);
         const targetStr = targetMatch ? ` / ${targetMatch[1]}` : "";
         const nextStatus = eventData.markStepFinished ? "Finished" : op.status === "Queued" ? "In Progress" : op.status;
+        // A report starts the step's clock; finishing from the report closes it like "Yakunlash" does.
+        const now = new Date().toISOString();
+        const startedAt = op.startedAt || now;
+        const completedAt = nextStatus === "Finished" ? op.completedAt || now : op.completedAt;
+        const runMinutes =
+          nextStatus === "Finished" && !op.completedAt ? elapsedRunMinutes({ ...op, startedAt, completedAt }) : null;
         return {
           ...op,
           qtyCompleted: `${totalGood.toLocaleString()}${targetStr}`,
           status: nextStatus,
           operator: eventData.operator,
+          startedAt,
+          completedAt,
+          actualDurationMinutes: runMinutes ?? op.actualDurationMinutes,
         };
       })
     );
@@ -3246,9 +3343,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     });
   };
 
-  const handleDeleteShiftEvent = (eventId: string) => {
-    setShiftEvents((prev) => prev.filter((ev) => ev.id !== eventId));
-    setTabUnsaved(tab.id, true);
+  const handleDeleteShiftEvent = async (eventId: string) => {
+    if (!window.confirm("Smena jurnalidagi yozuv o'chirilsinmi?")) return;
+    const previous = shiftEventsRef.current;
+    setShiftEvents(previous.filter((ev) => ev.id !== eventId));
+    const orderNo = getSavedOrderNo();
+    if (!orderNo) return;
+    const res = await useWorkspaceStore.getState().deleteWorkOrderEventAsync(orderNo, eventId);
+    if (!res.success) {
+      setShiftEvents(previous);
+      addNotification({ title: "Yozuv o'chirilmadi", description: res.error, severity: "error" });
+    }
   };
 
   const handleSaveLogEvent = () => {
@@ -3256,14 +3361,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const newEvent: ShiftEvent = {
       id: "e_" + Date.now(),
       opId: selectedOp.id,
-      time: logEventForm.time || "15:30",
+      time: logEventForm.time,
+      occurredAt: occurredAtFromTime(logEventForm.time),
       type: logEventForm.type,
       note: logEventForm.note.trim(),
       operator: selectedOp.operator,
       wasteQty: logEventForm.wasteQty,
       wasteReason: logEventForm.wasteReason,
     };
-    setShiftEvents((prev) => [newEvent, ...prev]);
+    const previous = shiftEventsRef.current;
+    setShiftEvents([newEvent, ...previous]);
+    void persistShiftEvent(newEvent, previous);
     setIsLogEventDialogOpen(false);
   };
 
@@ -4275,6 +4383,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       {/* Dialog: Floor Pallet & Step Execution Report */}
       {isPalletReportDialogOpen && (
         <PalletReportDialog
+          shiftSchedule={shiftSchedule}
           isOpen={isPalletReportDialogOpen}
           onOpenChange={(open) => {
             setIsPalletReportDialogOpen(open);
@@ -4308,6 +4417,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       {/* Dialog: Machine Downtime / Prostoy Log */}
       {isDowntimeDialogOpen && (
         <DowntimeLogDialog
+          shiftSchedule={shiftSchedule}
           isOpen={isDowntimeDialogOpen}
           onOpenChange={(open) => {
             setIsDowntimeDialogOpen(open);

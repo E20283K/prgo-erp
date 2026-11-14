@@ -85,6 +85,13 @@
       "when": 1794669049137,
       "tag": "0011_fg_pending_handover",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794672592509,
+      "tag": "0012_work_order_event_journal",
+      "breakpoints": true
     }
   ]
 }

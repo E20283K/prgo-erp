@@ -37,6 +37,8 @@ import { eq, desc, and, or, ilike, isNull } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode } from "./crmService";
+import { toShiftEvent } from "./workOrderEventService";
+import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { generateNextCode } from "@/lib/utils";
 import { getNextSpecNumber } from "./numberingService";
 import { emitNotification } from "./notificationService";
@@ -373,7 +375,11 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
         isImage: a.fileType?.startsWith("image/") || a.category === "proofs" || /\.(jpg|jpeg|png|webp|gif)$/i.test(a.name),
         url: normalizePermanentMediaUrl(a.url) || a.url,
       })) : [],
-      events: wo.events || [],
+      // Journal entries the order screen understands; removed ones stay in the table for the audit trail.
+      events: (wo.events || [])
+        .filter((ev: { deletedAt?: Date | null }) => !ev.deletedAt)
+        .map(toShiftEvent)
+        .sort((a: ShiftEvent, b: ShiftEvent) => (b.occurredAt || "").localeCompare(a.occurredAt || "")),
       operations: (wo.operations || []).map((op: any, idx: number) => {
         const completedNum = Number(op.completedQty || 0);
         const plannedNum = Number(op.plannedQty || wo.quantity || 0);
@@ -870,26 +876,8 @@ export async function upsertWorkOrder(
     }
   }
 
-  // 4. Timeline / Smena hodisalarini saqlash
-  if (data.events && Array.isArray(data.events)) {
-    await db.delete(workOrderEvents).where(eq(workOrderEvents.workOrderId, targetId));
-    if (data.events.length > 0) {
-      await db.insert(workOrderEvents).values(
-        data.events.map((ev: any) => ({
-          workOrderId: targetId,
-          opId: ev.opId ? String(ev.opId) : null,
-          time: ev.time || "12:00",
-          type: ev.type || "Run",
-          note: ev.note || "",
-          operator: ev.operator || null,
-          wasteQty: parseInt(String(ev.wasteQty || 0), 10) || 0,
-          wasteReason: ev.wasteReason || null,
-          grossInput: ev.grossInput !== undefined && ev.grossInput !== null ? parseInt(String(ev.grossInput), 10) || null : null,
-          goodOutput: ev.goodOutput !== undefined && ev.goodOutput !== null ? parseInt(String(ev.goodOutput), 10) || null : null,
-        }))
-      );
-    }
-  }
+  // 4. The shift journal is not written with the order: every event is saved on its own
+  //    through /work-orders/[id]/events the moment it is logged (workOrderEventService).
 
   // 5. Fayllar va ilovalarni (attachments) saqlash va sinxronlash
   const inputAttachments = data.attachments !== undefined ? data.attachments : (data as any).orderAttachments;

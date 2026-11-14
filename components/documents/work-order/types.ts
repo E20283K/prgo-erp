@@ -526,8 +526,13 @@ export function ensurePackagingStep(ops: RouteStep[], quantity = 0): RouteStep[]
 export interface ShiftEvent {
   id: string;
   opId: string;
+  /** "HH:MM" label on the plant clock; the full moment is occurredAt. */
   time: string;
-  shift?: "1-smena" | "2-smena";
+  /** ISO date-time the event happened (set by the server when not given). */
+  occurredAt?: string;
+  shift?: "1-smena" | "2-smena" | "3-smena";
+  createdBy?: string;
+  updatedBy?: string;
   batchLabel?: string;
   type: "Setup" | "Run" | "Delay" | "Maintenance" | "QC" | "Waste";
   note: string;
