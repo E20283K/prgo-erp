@@ -19,7 +19,7 @@ import {
   warehouseFinishedGoods,
   warehouseStockBalances,
 } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 export type { DbExec };
 
@@ -247,6 +247,24 @@ async function lockBalance(exec: DbExec, companyId: string, locationName: string
   return row || null;
 }
 
+/**
+ * 1010 qatori uchun qoldiq: avval hujjat ombori, topilmasa — SKU kirim qilingan ombor.
+ * Ombor foydalanuvchi tanlovidan emas, mahsulotning o'zidan kelib chiqadi. Bir nechta
+ * omborda bo'lsa eng eski qator olinadi (storno aynan shu qatorga qaytishi uchun barqaror tartib).
+ */
+async function lockBalanceForSku(exec: DbExec, companyId: string, preferredLocation: string, sku: string) {
+  const preferred = await lockBalance(exec, companyId, preferredLocation, sku);
+  if (preferred || !sku) return preferred;
+  const [row] = await exec
+    .select()
+    .from(warehouseStockBalances)
+    .where(and(eq(warehouseStockBalances.companyId, companyId), eq(warehouseStockBalances.sku, sku)))
+    .orderBy(asc(warehouseStockBalances.createdAt), asc(warehouseStockBalances.id))
+    .for("update")
+    .limit(1);
+  return row || null;
+}
+
 async function resolveLines(
   exec: DbExec,
   companyId: string,
@@ -266,7 +284,7 @@ async function resolveLines(
       const row = await lockFinishedGood(exec, companyId, line);
       if (row) handle = { kind: "fg", key: `2810:${row.id}`, account, label: `${row.sku} — ${row.productName}`, unit: row.unit || "", row };
     } else {
-      const row = await lockBalance(exec, companyId, fromLocationName, line.sku);
+      const row = await lockBalanceForSku(exec, companyId, fromLocationName, line.sku);
       if (row) handle = { kind: "balance", key: `1010:${row.id}`, account, label: `${row.sku} — ${row.name}`, unit: row.unit || "", row };
     }
     out.push({ line, account, handle });
@@ -303,13 +321,13 @@ function aggregate(resolved: ResolvedLine[]) {
   return { groups: Array.from(byKey.values()), missing };
 }
 
-function missingMessage(r: ResolvedLine, fromLocationName: string) {
+function missingMessage(r: ResolvedLine) {
   const where =
     r.account === "2910"
       ? "aksessuarlar katalogida (2910)"
       : r.account === "2810"
       ? "tayyor mahsulot omborida (2810, qabul qilingan)"
-      : `"${fromLocationName}" omborida (1010)`;
+      : "xomashyo qoldiqlarida (1010)";
   return `${r.line.sku || "SKU yo'q"} — ${r.line.name}: ${where} topilmadi`;
 }
 
@@ -368,7 +386,7 @@ export async function reserveLines(exec: DbExec, ctx: StockOpContext, lines: Shi
   const { groups, missing } = aggregate(resolved);
 
   if (direction === 1) {
-    const problems: string[] = missing.map((m) => missingMessage(m, ctx.fromLocationName));
+    const problems: string[] = missing.map((m) => missingMessage(m));
     for (const g of groups) {
       const free = onHandOf(g.handle) - reservedOf(g.handle);
       if (g.qty > free + 1e-9) {
@@ -394,7 +412,7 @@ export async function postLines(exec: DbExec, ctx: StockOpContext, lines: Shipme
   const { groups, missing } = aggregate(resolved);
 
   if (direction === -1) {
-    const problems: string[] = missing.map((m) => missingMessage(m, ctx.fromLocationName));
+    const problems: string[] = missing.map((m) => missingMessage(m));
     for (const g of groups) {
       const free = onHandOf(g.handle) - reservedOf(g.handle);
       if (g.qty > free + 1e-9) {

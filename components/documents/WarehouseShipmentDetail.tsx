@@ -18,6 +18,7 @@ import {
   DocumentTab,
   WarehouseShipmentRecord,
   ShipmentLineItem,
+  FinishedGoodStockRecord,
   ScannedBoxEntry,
   ShipmentType,
   ProductionQueueItem,
@@ -53,7 +54,6 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/ui/command";
-import { WarehouseSelect, type WarehouseSelectValue } from "@/components/common/WarehouseSelect";
 import {
   Select,
   SelectContent,
@@ -1077,6 +1077,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     addNotification,
     activeCompanyId,
     tradingYttEntities,
+    tradingCatalog,
     loadTradingData,
   } = useWorkspaceStore();
 
@@ -1092,6 +1093,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     }
     if ((!tradingYttEntities || tradingYttEntities.length === 0) && loadTradingData) {
       loadTradingData("ytt-limits");
+    }
+    // Aksessuar (2910) qatorlarining omborini aniqlash uchun katalog kerak
+    if (loadTradingData) {
+      loadTradingData("catalog");
     }
     if (plants.length === 0 && fetchPlants) {
       fetchPlants();
@@ -1280,6 +1285,51 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
   const isLocked =
     doc.status === "Delivered" || doc.status === "Dispatched" || doc.status === "In Transit" || doc.status === "Cancelled";
   const isHolding = doc.status === "Reserved" || doc.status === "Picking" || doc.status === "Packed";
+
+  // Ombor qo'lda tanlanmaydi: har bir satr o'z qoldig'i turgan ombordan chiqadi.
+  // Tayyor mahsulot — qadoqlanib qabul qilingan ombor, xomashyo — kirim qilingan ombor.
+  // Aksessuar (2910) — savdo katalogida kirim qilingan ombor.
+  const lineWarehouses = useMemo(() => {
+    const out: { name: string; warehouseId?: string; isMaterial: boolean }[] = [];
+    for (const it of doc.items || []) {
+      if (it.tradingCatalogId || it.accountCode === "2910") {
+        const cat = (tradingCatalog || []).find(
+          (c) => (it.tradingCatalogId && (c.id === it.tradingCatalogId || c.sku === it.tradingCatalogId)) || c.sku === it.sku
+        );
+        const catName = (cat?.warehouseName || "").trim();
+        if (catName && !out.some((o) => o.name === catName)) {
+          out.push({ name: catName, warehouseId: cat?.warehouseId, isMaterial: false });
+        }
+        continue;
+      }
+      const fg =
+        it.accountCode === "1010"
+          ? undefined
+          : (finishedGoods || []).find((f) => {
+              const rec = f as FinishedGoodStockRecord & { dbId?: string };
+              if (it.finishedGoodId) return rec.dbId === it.finishedGoodId || rec.id === it.finishedGoodId;
+              return !!it.sourceWorkOrderId && rec.workOrderId === it.sourceWorkOrderId;
+            });
+      const stock = fg || !it.sku ? undefined : warehouseStock.find((s) => s.sku === it.sku);
+      const name = (
+        (fg as (FinishedGoodStockRecord & { locationName?: string | null }) | undefined)?.locationName ||
+        stock?.location ||
+        ""
+      ).trim();
+      if (!name || out.some((o) => o.name === name)) continue;
+      out.push({ name, warehouseId: fg?.warehouseId || stock?.warehouseId, isMaterial: !fg });
+    }
+    return out;
+  }, [doc.items, finishedGoods, warehouseStock, tradingCatalog]);
+
+  // Server 1010 qoldig'ini hujjat ombori nomi bo'yicha qidiradi — xomashyo ombori ustuvor
+  const derivedWarehouse = lineWarehouses.find((w) => w.isMaterial) || lineWarehouses[0];
+  // O'tkazilgan hujjatda ombor muzlatilgan — saqlangan qiymat ko'rsatiladi
+  const effectiveFrom = isLocked || !derivedWarehouse ? doc.from : derivedWarehouse.name;
+  const effectiveWarehouseId = isLocked || !derivedWarehouse ? doc.warehouseId : derivedWarehouse.warehouseId;
+  const warehouseLabel =
+    !isLocked && lineWarehouses.length > 0 ? lineWarehouses.map((w) => w.name).join(", ") : doc.from;
+
   const [isManifestDialogOpen, setIsManifestDialogOpen] = useState(false);
 
   const tradingItems = useMemo(() => {
@@ -2053,6 +2103,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     const status = overrideStatus || doc.status;
     const payload = {
       ...doc,
+      from: effectiveFrom,
+      warehouseId: effectiveWarehouseId,
       status,
       shipmentNumber: isDraft ? "" : doc.id,
       quantity: totalShippedQty,
@@ -2063,6 +2115,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       const generatedActId = res.deliveryActId || res.shipment?.deliveryActId || doc.deliveryActId;
       const updated = {
         ...doc,
+        from: effectiveFrom,
+        warehouseId: effectiveWarehouseId,
         id: realId,
         status,
         quantity: totalShippedQty,
@@ -2865,25 +2919,12 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           {/* 1. Chiqaruvchi ombor */}
           <div className="flex items-center gap-1.5 shrink-0">
             <span className="text-[11px] text-muted-foreground font-medium shrink-0">Ombor:</span>
-            {isLocked ? (
-              <span className="font-medium text-foreground text-xs truncate max-w-[160px]">{doc.from}</span>
-            ) : (
-              <WarehouseSelect
-                value={doc.from}
-                onValueChange={(val: WarehouseSelectValue) => {
-                  setDoc((prev) => ({
-                    ...prev,
-                    from: val.warehouseName,
-                    warehouseId: val.warehouseId,
-                    companyId: prev.companyId || val.companyId || undefined,
-                    companyName: prev.companyName || val.companyName || undefined,
-                  }));
-                  setTabUnsaved(tab.id, true);
-                }}
-                className="w-[160px] sm:w-[190px] shrink-0 h-7 text-xs"
-                disabled={isLocked}
-              />
-            )}
+            <span
+              className="font-medium text-foreground text-xs truncate max-w-[220px]"
+              title={warehouseLabel}
+            >
+              {warehouseLabel}
+            </span>
           </div>
 
           <Separator orientation="vertical" className="h-3.5 shrink-0" />
@@ -3428,7 +3469,7 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
             <div className="grid grid-cols-2 gap-4 text-[11px] p-2.5 rounded bg-zinc-50 border border-zinc-200">
               <div>
                 <p><b className="text-zinc-700">Chiqaruvchi tashkilot:</b> <span className="font-semibold text-zinc-900">{activeCompany?.name || doc.companyName || "Asosiy korxona"}</span></p>
-                <p><b className="text-zinc-700">Jismoniy ombor:</b> {doc.from}</p>
+                <p><b className="text-zinc-700">Jismoniy ombor:</b> {warehouseLabel}</p>
                 <p><b className="text-zinc-700">Tashuvchi:</b> {doc.carrier}</p>
                 <p><b className="text-zinc-700">Haydovchi:</b> {doc.driverName} ({doc.vehicleNo}) {doc.driverPhone && doc.driverPhone !== "—" ? `• Tel: ${doc.driverPhone}` : ""}</p>
               </div>

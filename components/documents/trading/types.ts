@@ -124,6 +124,9 @@ export interface TradingCatalogItemRecord {
   retailPriceUZS: number;
   stockQty: number;
   minStockLevel: number;
+  /** Aksessuar kirim qilingan ombor */
+  warehouseId?: string;
+  warehouseName?: string;
   origin: string;
   material?: string;
   colorCode?: string;
