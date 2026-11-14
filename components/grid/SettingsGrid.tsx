@@ -141,7 +141,6 @@ export function SettingsGrid({ type }: SettingsGridProps) {
         { id: "legalType", title: "Yuridik Turi", width: 115, icon: GridColumnIcon.HeaderSingleValue },
         { id: "inn", title: "STIR (INN)", width: 115, icon: GridColumnIcon.HeaderReference },
         { id: "bankAccount", title: "Hisob-raqam", width: 180, icon: GridColumnIcon.HeaderReference },
-        { id: "branchesCount", title: "Sexlar / Filiallar", width: 125, icon: GridColumnIcon.HeaderNumber },
         { id: "warehousesCount", title: "Omborlar", width: 100, icon: GridColumnIcon.HeaderNumber },
         { id: "status", title: "Holati", width: 100, icon: GridColumnIcon.HeaderSingleValue },
       ];

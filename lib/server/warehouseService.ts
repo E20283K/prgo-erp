@@ -56,57 +56,29 @@ const SHIPMENT_POSTED_STATUSES = new Set(["Dispatched", "In Transit", "Delivered
 // ─── 1. Warehouses (Omborlar Katalogi & Ierarxiya) ────────────────────────────
 
 /**
- * Filiallar va YTT lar uchun standart omborlar (Xomashyo va Tayyor mahsulot)
- * mavjudligini tekshiradi va agar yo'q bo'lsa avtomatik yaratadi.
+ * Har bir kompaniyada kamida bitta ombor bo'lishini ta'minlaydi: omborsiz
+ * kompaniyaga bitta standart ombor yaratadi. Filiallar bo'yicha ombor
+ * yaratilmaydi.
  */
 export async function ensureDefaultWarehouses() {
-  const allBranches = await db.query.branches.findMany();
   const allCompanies = await db.query.companies.findMany();
   const existingWarehouses = await db.query.warehouses.findMany();
 
-  for (const branch of allBranches) {
-    const branchWhs = existingWarehouses.filter((w) => w.branchId === branch.id);
-    if (branchWhs.length === 0) {
-      await db.insert(warehouses).values({
-        companyId: branch.companyId,
-        branchId: branch.id,
-        code: `WH-RAW-${branch.code || Date.now().toString().slice(-4)}`,
-        name: "Xomashyo ombori",
-        type: "raw_materials",
-        capacity: "5000 m2",
-        zones: 3,
-        isActive: true,
-      });
-
-      await db.insert(warehouses).values({
-        companyId: branch.companyId,
-        branchId: branch.id,
-        code: `WH-FG-${branch.code || Date.now().toString().slice(-4)}`,
-        name: "Tayyor mahsulotlar ombori",
-        type: "finished_goods",
-        capacity: "3000 m2",
-        zones: 2,
-        isActive: true,
-      });
-    }
-  }
-
   for (const comp of allCompanies) {
-    if (comp.legalType === "YTT") {
-      const compWhs = existingWarehouses.filter((w) => w.companyId === comp.id);
-      if (compWhs.length === 0) {
-        await db.insert(warehouses).values({
-          companyId: comp.id,
-          branchId: null,
-          code: `WH-STORE-${comp.code || Date.now().toString().slice(-4)}`,
-          name: "Savdo ombori",
-          type: "general",
-          capacity: "1000 m2",
-          zones: 1,
-          isActive: true,
-        });
-      }
-    }
+    const compWhs = existingWarehouses.filter((w) => w.companyId === comp.id);
+    if (compWhs.length > 0) continue;
+
+    const isYtt = comp.legalType === "YTT";
+    await db.insert(warehouses).values({
+      companyId: comp.id,
+      branchId: null,
+      code: `WH-${isYtt ? "STORE" : "MAIN"}-${comp.code || Date.now().toString().slice(-4)}`,
+      name: isYtt ? "Savdo ombori" : "Asosiy ombor",
+      type: "general",
+      capacity: "1000 m2",
+      zones: 1,
+      isActive: true,
+    });
   }
 }
 

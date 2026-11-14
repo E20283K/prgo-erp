@@ -26,10 +26,8 @@ import {
 } from "@/components/ui/select";
 import {
   Building,
-  Building2,
   Scale,
   Layers,
-  Warehouse,
   FileCode2,
   Save,
   Printer,
@@ -42,9 +40,7 @@ import { cn } from "@/lib/utils";
 import { PlantOverviewTab } from "../plant/tabs/PlantOverviewTab";
 import { PlantRequisitesTab } from "../plant/tabs/PlantRequisitesTab";
 import { PlantDepartmentsTab } from "../plant/tabs/PlantDepartmentsTab";
-import { PlantWarehousesTab } from "../plant/tabs/PlantWarehousesTab";
 import { PlantIntegrationTab } from "../plant/tabs/PlantIntegrationTab";
-import { CompanyBranchesTab } from "./tabs/CompanyBranchesTab";
 
 interface CompanyDetailProps {
   tab: DocumentTab;
@@ -142,7 +138,11 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
   const [prevId, setPrevId] = useState(rawId);
   const [isSaved, setIsSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(
-    tab.activeLevel3Tab || "overview"
+    !tab.activeLevel3Tab ||
+      tab.activeLevel3Tab === "branches" ||
+      tab.activeLevel3Tab === "warehouses"
+      ? "overview"
+      : tab.activeLevel3Tab
   );
 
   if (prevId !== rawId) {
@@ -298,9 +298,12 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
 
       const saved = await upsertCompanyAsync(payload as any);
 
-      // Keep legacy plant in sync
-      if (upsertPlant) upsertPlant(plantData);
-      if (savePlantToDb) await savePlantToDb(plantData);
+      // A company is not a branch: syncing it as a plant inserted a new
+      // branches row on every save. Only real plant tabs keep the sync.
+      if (tab.type === "plant-detail") {
+        if (upsertPlant) upsertPlant(plantData);
+        if (savePlantToDb) await savePlantToDb(plantData);
+      }
 
       if (saved) {
         setPlantData((prev) => ({
@@ -369,16 +372,6 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
     }).length;
   }, [departmentsList, plantData]);
 
-  const companyBranches = useMemo(() => {
-    const cid = (plantData.id || "").toLowerCase();
-    const cCode = (plantData.code || "").toUpperCase();
-    return plants.filter((p) => {
-      if (p.companyId && p.companyId.toLowerCase() === cid) return true;
-      if (cCode === "PRINTGOO" && (!p.companyId || p.companyId.toLowerCase() === cid)) return true;
-      return false;
-    });
-  }, [plants, plantData.id, plantData.code]);
-
   const plantMachinesCount = useMemo(() => {
     const pName = (plantData.name || "").toLowerCase();
     const pShort = (plantData.shortName || "").toLowerCase();
@@ -405,12 +398,6 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
       icon: Building,
     },
     {
-      id: "branches",
-      label: "Filiallar",
-      icon: Building2,
-      badge: `${companyBranches.length}`,
-    },
-    {
       id: "requisites",
       label: "Yuridik & Bank Rekvizitlari",
       icon: Scale,
@@ -421,12 +408,6 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
       label: "Sexlar & Mashinalar",
       icon: Layers,
       badge: `${plantDeptsCount + plantMachinesCount}`,
-    },
-    {
-      id: "warehouses",
-      label: "Omborlar",
-      icon: Warehouse,
-      badge: `${plantData.warehouses?.length || 0}`,
     },
     {
       id: "integration",
@@ -558,9 +539,6 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
               <InfoRow label="Rahbar">
                 {plantData.director || "—"}
               </InfoRow>
-              <InfoRow label="Filiallar">
-                {`${companyBranches.length} ta`}
-              </InfoRow>
               <InfoRow label="Smena">
                 {plantData.shiftRegime || "—"}
               </InfoRow>
@@ -569,9 +547,6 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
               </InfoRow>
               <InfoRow label="Stanoklar">
                 {`${plantMachinesCount} ta`}
-              </InfoRow>
-              <InfoRow label="Omborlar">
-                {`${plantData.warehouses?.length || 0} ta`}
               </InfoRow>
               {plantData.legalType === "YTT" && (
                 <InfoRow label="Limit bandligi" className="font-mono font-semibold text-primary">
@@ -589,28 +564,13 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
         {/* Tab Content Panel */}
         <main className="flex-1 overflow-y-auto bg-muted/10">
           {activeTab === "overview" && (
-            <PlantOverviewTab
-              plant={plantData}
-              branches={companyBranches}
-              onUpdate={handleUpdate}
-              onNavigateToBranches={() => setActiveTab("branches")}
-            />
-          )}
-          {activeTab === "branches" && (
-            <CompanyBranchesTab
-              company={plantData}
-              branches={companyBranches}
-              onRefresh={fetchPlants}
-            />
+            <PlantOverviewTab plant={plantData} onUpdate={handleUpdate} />
           )}
           {activeTab === "requisites" && (
             <PlantRequisitesTab plant={plantData} onUpdate={handleUpdate} />
           )}
           {activeTab === "departments" && (
             <PlantDepartmentsTab plant={plantData} onUpdate={handleUpdate} />
-          )}
-          {activeTab === "warehouses" && (
-            <PlantWarehousesTab plant={plantData} onUpdate={handleUpdate} />
           )}
           {activeTab === "integration" && (
             <PlantIntegrationTab plant={plantData} onUpdate={handleUpdate} />
