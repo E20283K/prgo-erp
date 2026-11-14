@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   Plus,
-  TrendingDown,
   User,
   ArrowRight,
   Trash2,
@@ -17,8 +16,6 @@ import {
   QrCode,
   FileSpreadsheet,
   Search,
-  Hourglass,
-  Gauge,
   Pencil,
   SlidersHorizontal, Clock,
   Boxes,
@@ -37,6 +34,17 @@ import {
 } from "@/components/ui/select";
 import { RouteStep, ShiftEvent } from "../types";
 import { plantClock } from "@/lib/shiftSchedule";
+import { useShallow } from "zustand/react/shallow";
+import { useWorkspaceStore } from "@/store/workspaceStore";
+import { resolveMachine } from "../utils/operationCost";
+import { getStepKpis, pct, scoreTone, stepUnit } from "../utils/stepKpis";
+
+const TONE_TEXT = {
+  good: "text-emerald-600 dark:text-emerald-400",
+  fair: "text-amber-600 dark:text-amber-400",
+  poor: "text-rose-600 dark:text-rose-400",
+  none: "text-foreground",
+} as const;
 import {
   Dialog,
   DialogContent,
@@ -248,11 +256,29 @@ export function ShiftTimelineTab({
   const openDowntimeSeconds = selectedTimeline.openDowntime?.occurredAt
     ? Math.max(0, Math.floor((nowMs - new Date(selectedTimeline.openDowntime.occurredAt).getTime()) / 1000))
     : 0;
+  const { machines, workRates } = useWorkspaceStore(
+    useShallow((st) => ({ machines: st.machines, workRates: st.workRates }))
+  );
+  const unitOf = (op: RouteStep) =>
+    op.kind === "packaging"
+      ? "dona"
+      : stepUnit(resolveMachine(op, machines), workRates.find((w) => w.id === op.workRateId)?.unit);
+  const kpis = useMemo(
+    () =>
+      getStepKpis(
+        selectedOp,
+        allEvents.filter((ev) => ev.opId === selectedOp.id),
+        selectedTimeline,
+        resolveMachine(selectedOp, machines),
+        workRates.find((w) => w.id === selectedOp.workRateId)?.unit
+      ),
+    [selectedOp, allEvents, selectedTimeline, machines, workRates]
+  );
   const [isCorrectionOpen, setIsCorrectionOpen] = useState(false);
   const [correctionStatus, setCorrectionStatus] = useState<RouteStep["status"]>("In Progress");
   const [correctionReason, setCorrectionReason] = useState("");
 
-  const { completed, target, unitSuffix, percent } = useMemo(
+  const { completed, target } = useMemo(
     () => parseQtyString(selectedOp.qtyCompleted),
     [selectedOp.qtyCompleted]
   );
@@ -351,8 +377,6 @@ export function ShiftTimelineTab({
 
   const effectiveGrossInput =
     stepStats.grossInput > 0 ? stepStats.grossInput : completed > 0 ? completed : 0;
-  const effectiveGoodOutput =
-    stepStats.goodOutput > 0 ? stepStats.goodOutput : completed;
   const availableWipFromPrev = Math.max(0, previousOpGoodOutput - effectiveGrossInput);
 
   const discrepancy = useMemo(() => {
@@ -400,9 +424,6 @@ export function ShiftTimelineTab({
     });
   }, [selectedOpEvents, shiftFilter, typeFilter, searchQuery]);
 
-  const isMultipiece =
-    selectedOp.countingMode === "multipiece" ||
-    /shtamp|die-cut|tigel|qadoq|pack/i.test(selectedOp.name);
 
   const handleExportCsv = () => {
     const headers = [
@@ -513,7 +534,6 @@ export function ShiftTimelineTab({
             const isSelected = selectedTimelineOpId === op.id;
             const opParsed = parseQtyString(op.qtyCompleted);
             const opGoodQty = getOpGoodOutput(op);
-            const isOffset = /ofset|print|pechat|press/i.test(op.name);
             const opEvents = allEvents.filter((ev) => ev.opId === op.id);
             const opDowntimeMins = opEvents.reduce(
               (sum, ev) => sum + (ev.downtimeDurationMinutes || 0),
@@ -581,11 +601,12 @@ export function ShiftTimelineTab({
                           </span>
                         )}
                       </span>
-                      <span className="font-bold text-foreground">
+                      <span className="font-semibold text-foreground">
                         {opGoodQty.toLocaleString()}
                         {opParsed.target > 0
                           ? ` / ${opParsed.target.toLocaleString()}`
                           : ""}
+                        <span className="font-normal text-muted-foreground"> {unitOf(op)}</span>
                       </span>
                     </div>
 
@@ -607,12 +628,6 @@ export function ShiftTimelineTab({
                       />
                     </div>
 
-                    {isOffset && op.status === "Finished" && (
-                      <div className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[9px] font-mono text-amber-700 dark:text-amber-400 flex items-center gap-1">
-                        <Hourglass className="size-2.5 shrink-0" />
-                        <span className="truncate">Quritish: 4h</span>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -675,8 +690,7 @@ export function ShiftTimelineTab({
                 <span>
                   Reja:{" "}
                   <strong className="text-foreground">
-                    {target.toLocaleString()}
-                    {unitSuffix}
+                    {target.toLocaleString()} {kpis.unit}
                   </strong>
                 </span>
                 {selectedTimeline.hasTransitions && (
@@ -848,154 +862,65 @@ export function ShiftTimelineTab({
         )}
       </div>
 
-      {/* 3. Minimalist KPI Cards (Neutral Borders & Backgrounds, Icon + Value Semantic Accent) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-        {/* 1. Kirgan qog'oz */}
-        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
-              Kirgan qog&apos;oz
-            </span>
-            <Layers className="size-3.5 text-blue-500/80" />
-          </div>
-          <div className="mt-2">
-            <div className="text-xl font-black font-mono text-foreground leading-none">
-              {effectiveGrossInput.toLocaleString()}
-            </div>
-            <div className="text-[10px] text-muted-foreground mt-1.5 flex items-center justify-between font-mono">
-              <span>list</span>
-              {previousOpGoodOutput > 0 && (
-                <span className="text-blue-600 dark:text-blue-400 font-semibold">
-                  oldingi: {previousOpGoodOutput.toLocaleString()}
-                </span>
-              )}
-            </div>
-          </div>
+      {/* 3. Step indicators: plan vs fact, speed, scrap, time and OEE in the step's own unit */}
+      {selectedOp.kind !== "packaging" && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 border border-border rounded-lg bg-card divide-x divide-y lg:divide-y-0 divide-border overflow-hidden">
+          <KpiCell
+            label="Bajarildi"
+            value={`${kpis.good.toLocaleString()}${kpis.plan > 0 ? ` / ${kpis.plan.toLocaleString()}` : ""}`}
+            sub={`${kpis.unit}${kpis.plan > 0 ? ` · ${pct(kpis.completion)}` : ""}`}
+            bar={kpis.plan > 0 ? Math.min(1, kpis.completion) : undefined}
+          />
+          <KpiCell
+            label="Kirish"
+            value={kpis.input.toLocaleString()}
+            sub={previousOpGoodOutput > 0 ? `oldingi: ${previousOpGoodOutput.toLocaleString()}` : kpis.unit}
+          />
+          <KpiCell
+            label="Tezlik"
+            value={kpis.speedPerHour !== null ? `${Math.round(kpis.speedPerHour).toLocaleString()}/soat` : "—"}
+            valueClass={
+              kpis.speedPerHour !== null && kpis.normPerHour
+                ? TONE_TEXT[scoreTone(kpis.speedPerHour / kpis.normPerHour, 0.9, 0.7)]
+                : undefined
+            }
+            sub={
+              kpis.normPerHour
+                ? `norma ${kpis.normPerHour.toLocaleString()} (${kpis.normSource === "machine" ? "uskuna" : "reja"})`
+                : "norma yo'q"
+            }
+          />
+          <KpiCell
+            label="Brak"
+            value={pct(kpis.scrapRate, 1)}
+            valueClass={
+              kpis.scrapRate !== null && kpis.scrapRate > 0.05
+                ? TONE_TEXT.poor
+                : kpis.scrapRate !== null && kpis.scrapRate > 0.02
+                ? TONE_TEXT.fair
+                : undefined
+            }
+            sub={`priladka ${kpis.makeReady.toLocaleString()} · brak ${kpis.defect.toLocaleString()}`}
+          />
+          <KpiCell
+            label="Vaqt"
+            value={selectedTimeline.hasTransitions ? formatMinutes(kpis.actualMinutes) : "—"}
+            valueClass={
+              selectedTimeline.hasTransitions && kpis.plannedMinutes > 0 && kpis.actualMinutes > kpis.plannedMinutes
+                ? TONE_TEXT.poor
+                : undefined
+            }
+            sub={`reja ${formatMinutes(kpis.plannedMinutes)}`}
+          />
+          <KpiCell
+            label="OEE"
+            value={pct(kpis.oee)}
+            valueClass={TONE_TEXT[scoreTone(kpis.oee)]}
+            sub={`A ${pct(kpis.availability)} · P ${pct(kpis.performance)} · Q ${pct(kpis.quality)}`}
+            title="Mavjudlik × Unumdorlik × Sifat"
+          />
         </div>
-
-        {/* 2. Priladka (Technological Setup) */}
-        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
-              Priladka
-            </span>
-            <SlidersHorizontal className="size-3.5 text-amber-500/80" />
-          </div>
-          <div className="mt-2">
-            <div className="text-xl font-black font-mono text-foreground leading-none">
-              {stepStats.makeReady.toLocaleString()}
-            </div>
-            <span className="text-[10px] text-muted-foreground mt-1.5 block font-mono">
-              {stepStats.makeReadyPct}% sozlash
-            </span>
-          </div>
-        </div>
-
-        {/* 3. Brak (Actual Process Defect) */}
-        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
-              Brak
-            </span>
-            <TrendingDown className="size-3.5 text-rose-500/80" />
-          </div>
-          <div className="mt-2">
-            <div
-              className={cn(
-                "text-xl font-black font-mono leading-none",
-                stepStats.defect > 0
-                  ? "text-rose-600 dark:text-rose-400"
-                  : "text-foreground"
-              )}
-            >
-              {stepStats.defect.toLocaleString()}
-            </div>
-            <span
-              className={cn(
-                "text-[10px] mt-1.5 block font-mono",
-                stepStats.defect > 0
-                  ? "text-rose-600/80 dark:text-rose-400/80"
-                  : "text-muted-foreground"
-              )}
-            >
-              {stepStats.defectPct}% yaroqsiz
-            </span>
-          </div>
-        </div>
-
-        {/* 4. Sof chiqish */}
-        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
-              Sof chiqish
-            </span>
-            <CheckCircle2 className="size-3.5 text-emerald-500/80" />
-          </div>
-          <div className="mt-2">
-            <div
-              className={cn(
-                "text-xl font-black font-mono leading-none",
-                effectiveGoodOutput > 0
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-foreground"
-              )}
-            >
-              {effectiveGoodOutput.toLocaleString()}
-            </div>
-            <span className="text-[10px] text-muted-foreground mt-1.5 block font-mono">
-              {isMultipiece && stepStats.outputPieces > 0
-                ? `${stepStats.outputPieces.toLocaleString()} dona`
-                : `reja: ${target.toLocaleString()}`}
-            </span>
-          </div>
-        </div>
-
-        {/* 5. Bajarilishi */}
-        <div className="p-3 rounded-lg border border-border bg-card shadow-2xs flex flex-col justify-between col-span-2 sm:col-span-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
-              Bajarilishi
-            </span>
-            <Gauge className="size-3.5 text-primary/80" />
-          </div>
-          <div className="mt-2">
-            <div className="flex items-baseline justify-between">
-              <span className="text-xl font-black font-mono text-foreground leading-none">
-                {percent}%
-              </span>
-              <span
-                className={cn(
-                  "text-[10px] font-mono font-semibold",
-                  stepStats.downtimeTotalMinutes > 0
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-muted-foreground"
-                )}
-              >
-                {stepStats.downtimeTotalMinutes > 0
-                  ? `${stepStats.downtimeTotalMinutes}m to'xtalish`
-                  : `${selectedOp.duration}h me'yor`}
-              </span>
-            </div>
-            <div className="w-full bg-muted h-1.5 rounded-full mt-2 overflow-hidden flex">
-              <div
-                className="bg-primary h-full transition-all duration-300"
-                style={{ width: `${percent}%` }}
-              />
-              {stepStats.downtimeTotalMinutes > 0 && percent < 100 && (
-                <div
-                  className="bg-amber-500/80 h-full"
-                  style={{
-                    width: `${Math.min(
-                      100 - percent,
-                      Math.max(12, Math.round((stepStats.downtimeTotalMinutes / 60) * 25))
-                    )}%`,
-                  }}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* 4. Smena Jurnali Table */}
       <div className="border border-border rounded-lg overflow-hidden bg-card shadow-2xs">
@@ -1384,5 +1309,37 @@ export function ShiftTimelineTab({
         </Dialog>
       )}
     </TabsContent>
+  );
+}
+
+function KpiCell({
+  label,
+  value,
+  sub,
+  valueClass,
+  bar,
+  title,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  valueClass?: string;
+  /** 0..1 progress shown under the value. */
+  bar?: number;
+  title?: string;
+}) {
+  return (
+    <div className="px-3 py-2 min-w-0" title={title}>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className={cn("text-sm font-semibold font-mono leading-tight mt-0.5 truncate", valueClass || "text-foreground")}>
+        {value}
+      </div>
+      {bar !== undefined && (
+        <div className="h-1 bg-muted rounded-full overflow-hidden mt-1">
+          <div className="h-full bg-primary" style={{ width: `${Math.round(bar * 100)}%` }} />
+        </div>
+      )}
+      {sub && <div className="text-[10px] text-muted-foreground truncate mt-0.5 font-mono">{sub}</div>}
+    </div>
   );
 }
