@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ZoomIn, ZoomOut, MoveHorizontal, RotateCw, ChevronLeft, ChevronRight } from "lucide-react";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
@@ -37,7 +37,9 @@ interface PdfPageProps {
 
 function PdfPage({ doc, pageNumber, scale, rotation }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  // Page size at scale 1, so the box resizes synchronously with `scale` (keeps zoom anchoring exact)
+  const [baseSize, setBaseSize] = useState<{ w: number; h: number } | null>(null);
+  const size = baseSize ? { w: baseSize.w * scale, h: baseSize.h * scale } : null;
 
   useEffect(() => {
     let task: RenderTask | null = null;
@@ -51,7 +53,7 @@ function PdfPage({ doc, pageNumber, scale, rotation }: PdfPageProps) {
       const canvas = canvasRef.current;
       canvas.width = Math.floor(viewport.width * dpr);
       canvas.height = Math.floor(viewport.height * dpr);
-      setSize({ w: viewport.width, h: viewport.height });
+      setBaseSize({ w: viewport.width / scale, h: viewport.height / scale });
       task = page.render({
         canvas,
         viewport,
@@ -155,6 +157,42 @@ export default function PdfViewer({ url }: { url: string }) {
 
   const zoom = (factor: number) =>
     setScale((s) => Math.min(Math.max(+(s * factor).toFixed(2), MIN_SCALE), MAX_SCALE));
+
+  // Ctrl/Cmd + wheel (and trackpad pinch) zooms around the cursor; plain wheel keeps scrolling
+  const scaleRef = useRef(scale);
+  const pendingAnchor = useRef<{ x: number; y: number; cx: number; cy: number; ratio: number } | null>(null);
+
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const cur = scaleRef.current;
+      // Proportional to the delta: a mouse notch ≈ 15%, trackpad pinch stays smooth
+      const px = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      const factor = Math.exp(-Math.max(-200, Math.min(200, px)) * 0.0014);
+      const next = Math.min(Math.max(+(cur * factor).toFixed(3), MIN_SCALE), MAX_SCALE);
+      if (next === cur) return;
+      const rect = root.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      pendingAnchor.current = { x: root.scrollLeft + cx, y: root.scrollTop + cy, cx, cy, ratio: next / cur };
+      setScale(next);
+    };
+    root.addEventListener("wheel", onWheel, { passive: false });
+    return () => root.removeEventListener("wheel", onWheel);
+  }, []);
+
+  useLayoutEffect(() => {
+    scaleRef.current = scale;
+    const a = pendingAnchor.current;
+    const root = containerRef.current;
+    if (!a || !root) return;
+    pendingAnchor.current = null;
+    root.scrollLeft = a.x * a.ratio - a.cx;
+    root.scrollTop = a.y * a.ratio - a.cy;
+  }, [scale]);
 
   const numPages = doc?.numPages ?? 0;
 
