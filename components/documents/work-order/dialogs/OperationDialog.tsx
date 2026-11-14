@@ -50,6 +50,7 @@ import { useShallow } from "zustand/react/shallow";
 import { formatMoney, formatNumberWithSpaces } from "@/components/documents/common/DocumentShell";
 import {
   computeOperationCost,
+  calcUnitLabel,
   estimateOperationHours,
   resolveMachine,
   type OperationCostMode,
@@ -396,6 +397,49 @@ export function OperationDialog({
       setForm((p) => ({ ...p, pieceworkRateUsd: rate, pieceworkTotalUsd: fund }));
     }
   }, [selectedWorkRate, form.duration, form.pieceworkRateUsd, form.pieceworkTotalUsd, operatorCount, orderQuantity, plannedSheets, isUsd, exchangeRate, setForm]);
+
+  // What the piecework fund is counted from: the catalog operation's unit and the order's quantity.
+  const pieceworkBasis = React.useMemo(() => {
+    if (!selectedWorkRate) return null;
+    const unit = selectedWorkRate.unit;
+    const divisor = Math.max(1, selectedWorkRate.unitDivisor || 1);
+    const qty = resolveCalcBaseQty(unit, orderQuantity, plannedSheets, form.duration);
+    const source =
+      unit === "1 hour" ? "soat" : unit && SHEET_BASED_UNITS.has(unit) && plannedSheets > 0 ? "varaq" : "dona";
+    return { unit, unitLabel: calcUnitLabel(unit), qty, divisor, units: qty / divisor, source };
+  }, [selectedWorkRate, orderQuantity, plannedSheets, form.duration]);
+
+  // Cost formula lines shown under the total: every number the cost is made of, in the order currency.
+  const costLines = (() => {
+    if (costMode !== "auto") return [];
+    const cur = (v: number) => formatMoney(v, currency, moneyDecimals);
+    const hours = Number(form.duration) || 0;
+    const machineLine =
+      opCost.machineRateUsd > 0
+        ? { label: "Uskuna", formula: `${hours} soat × ${money(opCost.machineRateUsd)}/soat`, total: opCost.machineCostUsd }
+        : { label: "Uskuna", formula: resolvedMachine ? "kartada soatlik tannarx yo'q" : "tanlanmagan", total: 0 };
+
+    let laborFormula = "stavka yo'q";
+    if (opCost.laborBasis === "piecework") {
+      const fund = Number(form.pieceworkTotalUsd) || 0;
+      const mult = opCost.laborMultiplier !== 1 ? ` × ${opCost.laborMultiplier} (razryad)` : "";
+      if (pieceworkBasis && pieceworkBasis.units > 0) {
+        const perUnit = fund / pieceworkBasis.units;
+        const qtyPart =
+          pieceworkBasis.divisor > 1
+            ? `${formatNumberWithSpaces(pieceworkBasis.qty)} ${pieceworkBasis.source} ÷ ${formatNumberWithSpaces(pieceworkBasis.divisor)}`
+            : `${formatNumberWithSpaces(pieceworkBasis.qty, pieceworkBasis.unit === "1 hour" ? 1 : 0)} ${pieceworkBasis.source}`;
+        laborFormula = `sdelka: ${qtyPart} × ${cur(perUnit)} / ${pieceworkBasis.unitLabel}${mult}`;
+      } else {
+        laborFormula = `sdelka: ${cur(fund)}${mult}`;
+      }
+    } else if (opCost.laborBasis === "employees") {
+      laborFormula = `${hours} soat × ${money(opCost.laborRateUsd)}/soat (operatorlar maoshi)`;
+    } else if (opCost.laborBasis === "crew") {
+      laborFormula = `${hours} soat × ${money(opCost.laborRateUsd)}/soat (uskuna ekipaji)`;
+    }
+    return [machineLine, { label: "Mehnat", formula: laborFormula, total: opCost.laborCostUsd }];
+  })();
 
   const handleSelectOperation = (val: string) => {
     const op = workRates.find((w) => w.id === val);
@@ -877,14 +921,9 @@ export function OperationDialog({
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="flex items-center text-muted-foreground">
                 <span>Tannarx</span>
-                <FieldInfoTooltip text={costBreakdownText} />
+                {costMode !== "auto" && <FieldInfoTooltip text={costBreakdownText} />}
               </span>
               <span className="flex items-center gap-2 min-w-0">
-                {costMode === "auto" && opCost.totalUsd > 0 && (
-                  <span className="text-[11px] text-muted-foreground font-mono truncate">
-                    uskuna {money(opCost.machineCostUsd)} · mehnat {money(opCost.laborCostUsd)}
-                  </span>
-                )}
                 <strong className="font-mono text-foreground shrink-0">{money(opCost.totalUsd)}</strong>
                 <button
                   type="button"
@@ -895,6 +934,20 @@ export function OperationDialog({
                 </button>
               </span>
             </div>
+
+            {costLines.length > 0 && (
+              <div className="space-y-0.5 border-t border-border/60 pt-1.5">
+                {costLines.map((line) => (
+                  <div key={line.label} className="flex items-center gap-2 text-[11px] min-w-0">
+                    <span className="w-14 shrink-0 text-muted-foreground">{line.label}</span>
+                    <span className="flex-1 min-w-0 truncate font-mono text-muted-foreground" title={line.formula}>
+                      {line.formula}
+                    </span>
+                    <span className="shrink-0 font-mono text-foreground">{money(line.total)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {costMode !== "auto" && (
               <div className="grid grid-cols-[auto_1fr_8rem] items-end gap-2">

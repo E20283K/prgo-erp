@@ -67,7 +67,7 @@ import {
 import { useWorkspaceStore, ProductionReadinessChecks } from "@/store/workspaceStore";
 import { formatMoney } from "@/components/documents/common/DocumentShell";
 import { useShallow } from "zustand/react/shallow";
-import { computeOperationCost } from "../utils/operationCost";
+import { computeOperationCost, calcUnitLabel } from "../utils/operationCost";
 
 interface OperationsTabProps {
   workOrderId?: string;
@@ -158,19 +158,38 @@ export function OperationsTab({
     );
   }, [operations]);
 
-  const { machines, employees } = useWorkspaceStore(
-    useShallow((s) => ({ machines: s.machines, employees: s.employees }))
+  const { machines, employees, workRates } = useWorkspaceStore(
+    useShallow((s) => ({ machines: s.machines, employees: s.employees, workRates: s.workRates }))
   );
   useEffect(() => {
     const s = useWorkspaceStore.getState();
     if (s.machines.length === 0 && s.loadMachines) s.loadMachines();
     if (s.employees.length === 0 && s.loadEmployees) s.loadEmployees();
+    if (s.workRates.length === 0) s.fetchWorkRates();
   }, []);
 
   // Planned cost per step (USD), the same numbers the Financials tab uses.
-  const opCostsUsd = useMemo(
-    () => operations.map((op) => computeOperationCost(op, { machines, employees, exchangeRate }).totalUsd),
+  const opCosts = useMemo(
+    () => operations.map((op) => computeOperationCost(op, { machines, employees, exchangeRate })),
     [operations, machines, employees, exchangeRate]
+  );
+  const opCostsUsd = useMemo(() => opCosts.map((c) => c.totalUsd), [opCosts]);
+
+  // What each step's labor cost is counted by: hours, or the catalog operation's piecework unit.
+  const costBases = useMemo(
+    () =>
+      operations.map((op, i) => {
+        const c = opCosts[i];
+        if (!c || c.mode === "outsourced") return "autsors";
+        if (c.mode === "manual") return "qo'lda";
+        if (c.laborBasis === "piecework") {
+          const unit = workRates.find((w) => w.id === op.workRateId)?.unit;
+          return unit ? `sdelka · ${calcUnitLabel(unit)}` : "sdelka";
+        }
+        if (c.laborBasis === "employees" || c.laborBasis === "crew" || c.machineRateUsd > 0) return "soat";
+        return "—";
+      }),
+    [operations, opCosts, workRates]
   );
   const totalOpCost = useMemo(() => opCostsUsd.reduce((s, v) => s + v, 0) * fxRate, [opCostsUsd, fxRate]);
 
@@ -202,6 +221,7 @@ export function OperationsTab({
     if (!isOperator) {
       cols.push(
         { id: "opCost", title: `Tannarx (${currencyLabel})`, width: 130, icon: GridColumnIcon.HeaderMath },
+        { id: "costBasis", title: "Hisob asosi", width: 150, icon: GridColumnIcon.HeaderString },
         { id: "rate", title: `Stavka (${currencyLabel})`, width: 135, icon: GridColumnIcon.HeaderNumber },
         { id: "plannedCost", title: `Tarif narxi (${currencyLabel})`, width: 145, icon: GridColumnIcon.HeaderMath },
         { id: "piecework", title: `Sdelka FOT (${currencyLabel})`, width: 130, icon: GridColumnIcon.HeaderMath }
@@ -482,6 +502,20 @@ export function OperationsTab({
             },
           };
         }
+        case "costBasis": {
+          const basis = costBases[row] || "—";
+          return {
+            kind: GridCellKind.Text,
+            data: basis,
+            displayData: basis,
+            allowOverlay: false,
+            readonly: true,
+            themeOverride: {
+              baseFontStyle: "11px sans-serif",
+              textDark: basis !== "—" ? (isDark ? "#a1a1aa" : "#475569") : (isDark ? "#52525b" : "#94a3b8"),
+            },
+          };
+        }
         case "plannedCost": {
           const val = Number(((op.plannedCostUsd || 0) * fxRate).toFixed(2));
           return {
@@ -514,7 +548,7 @@ export function OperationsTab({
           return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
       }
     },
-    [operations, opColumns, isDark, isOperator, fallbackData?.quantity, currency, isUsd, fxRate, opCostsUsd]
+    [operations, opColumns, isDark, isOperator, fallbackData?.quantity, currency, isUsd, fxRate, opCostsUsd, costBases]
   );
 
   const onOpCellEdited = useCallback(

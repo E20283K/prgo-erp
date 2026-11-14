@@ -1,5 +1,12 @@
 import type { MachineRecord } from "@/components/documents/machine/types";
 import type { RouteStep } from "../types";
+import { TARIFF_CALC_UNITS } from "@/components/documents/tariff/types";
+
+/** Uzbek label of a catalog calc unit without the English hint: "1,000 varaq (sheets)" → "1,000 varaq". */
+export function calcUnitLabel(unit: string | undefined): string {
+  const found = TARIFF_CALC_UNITS.find((u) => u.value === unit);
+  return (found?.label || unit || "birlik").replace(/\s*\([^)]*\)\s*$/, "");
+}
 
 /**
  * Planned cost of one route step, derived from master data:
