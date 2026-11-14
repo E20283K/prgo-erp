@@ -31,6 +31,7 @@ import {
   SkuArtwork,
 } from "./types";
 import { parseSvgContour, offsetPolygon, polygonToPathD } from "./utils/svgContour";
+import { buildDielineSvg } from "./utils/dielineGeometry";
 
 interface DieLinePreviewProps {
   width: number;
@@ -1354,6 +1355,24 @@ export function DieLinePreview({
   <text x="${tX + safeW / 2}" y="${pad - 2}" text-anchor="middle" class="txt">${safeW} mm</text>
   <text x="${tX + safeW + 8}" y="${tY + safeH / 2}" text-anchor="middle" transform="rotate(90, ${tX + safeW + 8}, ${tY + safeH / 2})" class="txt">${safeH} mm</text>
 </svg>`;
+    }
+
+    // Same production geometry the imposition module uses (mm, cut contour + holes)
+    if (!svgContent) {
+      const built = buildDielineSvg({
+        width: safeW,
+        height: safeH,
+        shapeType: resolvedShape,
+        cornerType,
+        customShape,
+        customSvgPath,
+        foldType,
+        itemCategory,
+        holeSize,
+        holePosition,
+        holeOffset,
+      });
+      if (built) svgContent = built.svg;
     }
 
     if (!svgContent) {

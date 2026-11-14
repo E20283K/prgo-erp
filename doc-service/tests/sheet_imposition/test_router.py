@@ -166,6 +166,50 @@ class TestSheetImpositionRouter(unittest.TestCase):
         self.assertEqual(png.status_code, 200)
         self.assertEqual(png.headers["content-type"], "image/png")
 
+    def test_svg_dieline_analyze_and_generate(self):
+        # 90x50 trim, R3 corners, Ø4 hole; page = trim + 2 mm each side (as the ERP generates it)
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="94mm" height="54mm" viewBox="0 0 94 54">'
+            '<path d="M5 2 H89 A3 3 0 0 1 92 5 V49 A3 3 0 0 1 89 52 H5 A3 3 0 0 1 2 49 V5 A3 3 0 0 1 5 2 Z" '
+            'fill="none" stroke="#ff00ff" stroke-width="0.25"/>'
+            '<circle cx="47" cy="8" r="2" fill="none" stroke="#ff00ff" stroke-width="0.25"/></svg>'
+        ).encode()
+        files = [
+            ("files", ("card.pdf", _card_pdf("A"), "application/pdf")),
+            ("files", ("pichoq.svg", svg, "image/svg+xml")),
+        ]
+        manifest = [{"name": "A", "quantity": 2000, "front_file": 0}]
+        r = self.client.post(
+            "/sheet-imposition/analyze",
+            files=files,
+            data={"manifest": json.dumps(manifest), "dieline_file": "1"},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        an = r.json()
+        self.assertAlmostEqual(an["dieline"]["trim_w_mm"], 90, delta=0.5)
+        self.assertAlmostEqual(an["dieline"]["trim_h_mm"], 50, delta=0.5)
+        self.assertAlmostEqual(an["dieline"]["page_w_mm"], 94, delta=0.5)
+
+        gen = self.client.post(
+            f"/sheet-imposition/{an['job_id']}/generate",
+            json={**BASE_PARAMS, "job": {"category": "diecut", "style": "packaging"}},
+        )
+        self.assertEqual(gen.status_code, 200, gen.text)
+        data = gen.json()
+        self.assertTrue(data["has_dieline"])
+        self.assertTrue(any(f["label"] == "Pichoq" for f in data["files"]), data["files"])
+
+    def test_svg_rejected_as_artwork(self):
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"/>'
+        r = self.client.post("/sheet-imposition/analyze", files=[("files", ("art.svg", svg, "image/svg+xml"))])
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post(
+            "/sheet-imposition/analyze",
+            files=[("files", ("bad.svg", b"not an svg", "image/svg+xml"))],
+            data={"dieline_file": "0"},
+        )
+        self.assertEqual(r.status_code, 400)
+
     def test_analyze_without_manifest_splits_pages(self):
         r = self.client.post(
             "/sheet-imposition/analyze",

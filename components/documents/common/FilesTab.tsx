@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { TabsContent } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { categoryForFile, formatBytes, PresignUnavailableError, uploadOrderFile } from "@/lib/client/uploadOrderFile";
 import {
   Attachment,
   AttachmentGroup,
@@ -64,15 +65,6 @@ interface UploadTask {
   state: "uploading" | "processing" | "done" | "error";
   errorMessage?: string;
   cancelFn?: () => void;
-}
-
-function formatBytes(bytes: number, decimals = 1): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
 export function FilesTab({
@@ -146,19 +138,15 @@ export function FilesTab({
   // Upload runner with real percentage progress tracking and graceful fallback
   const startUpload = useCallback(
     async (file: File, taskId: string) => {
-      let category: "proofs" | "artwork" | "dieline" | "docs" = "docs";
-      const ext = file.name.toLowerCase().split(".").pop();
-      if (["dxf", "cf2", "ard"].includes(ext || "")) category = "dieline";
-      else if (["ai", "eps", "cdr"].includes(ext || "")) category = "artwork";
-      else if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext || "")) category = "proofs";
+      const category = categoryForFile(file.name);
 
       let isAborted = false;
-      let activeXhr: XMLHttpRequest | null = null;
+      const controller = new AbortController();
       let activeTimer: ReturnType<typeof setInterval> | null = null;
 
       const abortHandler = () => {
         isAborted = true;
-        if (activeXhr) activeXhr.abort();
+        controller.abort();
         if (activeTimer) clearInterval(activeTimer);
       };
 
@@ -166,78 +154,27 @@ export function FilesTab({
       updateTask(taskId, { progress: 8, state: "uploading", cancelFn: abortHandler });
 
       try {
-        // Step 1: Request presigned upload URL from API
-        const metaRes = await fetch(`/api/v1/production/work-orders/${encodeURIComponent(docNo)}/files`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            docNo,
-            fileName: file.name,
-            fileType: file.type || "application/octet-stream",
-            fileSize: formatBytes(file.size),
+        // Case A: real storage (presigned PUT) via the shared order-file uploader
+        let uploaded: OrderAttachment | null = null;
+        try {
+          uploaded = await uploadOrderFile(docNo, file, {
             category,
-          }),
-        });
+            signal: controller.signal,
+            // Scale progress from 15% to 92%
+            onProgress: (pct) => {
+              if (!isAborted) updateTask(taskId, { progress: Math.min(92, Math.max(15, Math.round(15 + pct * 0.77))), state: "uploading" });
+            },
+          });
+        } catch (e) {
+          if (!(e instanceof PresignUnavailableError)) throw e;
+        }
 
         if (isAborted) return;
 
-        let presignedData: any = null;
-        try {
-          presignedData = await metaRes.json();
-        } catch {
-          presignedData = null;
-        }
-
-        // Case A: Real presigned upload URL is available
-        if (presignedData && presignedData.success && presignedData.uploadUrl) {
-          updateTask(taskId, { progress: 15, state: "uploading" });
-
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            activeXhr = xhr;
-
-            xhr.upload.addEventListener("progress", (evt) => {
-              if (evt.lengthComputable && !isAborted) {
-                // Scale progress from 15% to 92%
-                const pct = Math.min(92, Math.max(15, Math.round(15 + (evt.loaded / evt.total) * 77)));
-                updateTask(taskId, { progress: pct, state: "uploading" });
-              }
-            });
-
-            xhr.addEventListener("load", () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                updateTask(taskId, { progress: 96, state: "processing" });
-                resolve();
-              } else {
-                reject(new Error(`Server javobi: ${xhr.status}`));
-              }
-            });
-
-            xhr.addEventListener("error", () => reject(new Error("Tarmoqda xatolik yuz berdi")));
-            xhr.addEventListener("abort", () => reject(new Error("Yuklash bekor qilindi")));
-
-            xhr.open("PUT", presignedData.uploadUrl);
-            xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-            xhr.send(file);
-          });
-
-          if (isAborted) return;
-
-          const finalUrl = presignedData.downloadUrl || URL.createObjectURL(file);
+        if (uploaded) {
           updateTask(taskId, { progress: 100, state: "done" });
-
-          const newAtt: OrderAttachment = {
-            id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            name: file.name,
-            size: formatBytes(file.size),
-            type: file.type || "Document",
-            date: new Date().toISOString().slice(0, 16).replace("T", " "),
-            isImage: file.type.startsWith("image/"),
-            url: finalUrl,
-          };
-
-          setOrderAttachments((prev) => [newAtt, ...prev]);
-          onFileUploaded?.(newAtt);
+          setOrderAttachments((prev) => [uploaded, ...prev]);
+          onFileUploaded?.(uploaded);
           onMarkUnsaved();
         } else {
           // Case B: Local development / mock simulation with realistic incremental progress

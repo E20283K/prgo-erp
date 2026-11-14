@@ -1159,6 +1159,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     pressSheetH: data.pressSheetH || (initialQueueItem as any)?.pressSheetH || (data.dimensions as any)?.pressSheetH,
     plannedSheets: (data as any).plannedSheets || (initialQueueItem as any)?.plannedSheets || (data.dimensions as any)?.plannedSheets,
     impositionState: (data as any).impositionState || (initialQueueItem as any)?.impositionState || (data.dimensions as any)?.impositionState,
+    dieline: (data as any).dieline || (initialQueueItem as any)?.dieline || (data.dimensions as any)?.dieline,
   });
 
   const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(() => {
@@ -3694,6 +3695,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     defaultProdH={formData.height}
                     defaultBleed={formData.bleed}
                     shapeType={formData.shapeType}
+                    dieSpec={{
+                      cornerType: formData.cornerType,
+                      customShape: formData.customShape,
+                      customSvgPath: formData.customSvgPath,
+                      foldType: formData.foldType,
+                      itemCategory: formData.itemCategory,
+                      holeSize: formData.holeSize,
+                      holePosition: formData.holePosition,
+                      holeOffset: formData.holeOffset,
+                    }}
+                    dieline={formData.dieline}
+                    onDielineChange={(dl) => {
+                      handleFieldChange("dieline", dl);
+                      setTabUnsaved(tab.id, true);
+                    }}
+                    orderAttachments={orderAttachments}
+                    toolingItems={formData.toolingItems}
                     artworkFront={formData.artworkFront}
                     artworkBack={formData.artworkBack}
                     skuArtworks={skuArtworks}

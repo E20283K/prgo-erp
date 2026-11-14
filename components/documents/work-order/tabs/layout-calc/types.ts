@@ -6,7 +6,9 @@ import type {
   SkuArtwork,
   PersistedImpositionState,
   OrderAttachment,
+  OrderDieline,
 } from "../../types";
+import type { DielineSpec } from "../../utils/dielineGeometry";
 import type { PrintMethod } from "../../planningEngine";
 import type { WarehouseStockRecord } from "@/store/workspaceStore";
 
@@ -66,6 +68,12 @@ export interface LayoutCalcTabProps {
   defaultProdH?: number;
   defaultBleed?: number;
   shapeType?: ProductShapeType;
+  /** Shape fields the die (noj) is generated from — see utils/dielineGeometry.ts */
+  dieSpec?: Omit<DielineSpec, "width" | "height" | "shapeType">;
+  dieline?: OrderDieline;
+  onDielineChange?: (dieline: OrderDieline) => void;
+  orderAttachments?: OrderAttachment[];
+  toolingItems?: { category?: string; name?: string; fileUrl?: string; fileName?: string }[];
   artworkFront?: string;
   artworkBack?: string;
   skuArtworks?: SkuArtwork[];

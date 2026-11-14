@@ -16,6 +16,15 @@ export function PreflightPanel({ c }: { c: SheetImpositionController }) {
   const pf = c.analysis?.preflight;
   if (!pf) return null;
 
+  // Die contour must match the product trim (either orientation) within 0.5 mm
+  const die = c.analysis?.dieline;
+  const { trimW, trimH } = c.settings;
+  const near = (a: number, b: number) => Math.abs(a - b) <= 0.5;
+  const dieMismatch =
+    !!die &&
+    !(near(die.trim_w_mm, trimW) && near(die.trim_h_mm, trimH)) &&
+    !(near(die.trim_w_mm, trimH) && near(die.trim_h_mm, trimW));
+
   return (
     <Section
       title="Preflight"
@@ -45,8 +54,9 @@ export function PreflightPanel({ c }: { c: SheetImpositionController }) {
         {c.analysis?.dieline && (
           <>
             <span className="text-muted-foreground">Pichoq</span>
-            <span className="col-span-2 font-mono">
+            <span className={cn("col-span-2 font-mono", dieMismatch && "text-amber-600 dark:text-amber-500")}>
               {c.analysis.dieline.trim_w_mm}×{c.analysis.dieline.trim_h_mm} mm
+              {dieMismatch && ` ≠ ${c.settings.trimW}×${c.settings.trimH}`}
             </span>
           </>
         )}

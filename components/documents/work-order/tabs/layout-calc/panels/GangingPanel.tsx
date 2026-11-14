@@ -69,7 +69,6 @@ function PdfSlot({
 export function GangingPanel({ c, readOnly }: { c: SheetImpositionController; readOnly?: boolean }) {
   const s = c.settings;
   const showBack = s.mode !== "single_sided";
-  const dieRef = useRef<HTMLInputElement>(null);
 
   const slotsByVariant = new Map<number, number>();
   c.calc?.forms.forEach((f) => f.allocations.forEach((a) => slotsByVariant.set(a.variant_index, (slotsByVariant.get(a.variant_index) || 0) + a.slots)));
@@ -103,35 +102,6 @@ export function GangingPanel({ c, readOnly }: { c: SheetImpositionController; re
             { value: "row", label: "Qator bo'yicha" },
           ]}
         />
-        <div className="col-span-2 flex flex-col gap-0.5">
-          <span className="text-[11px] text-muted-foreground">Pichoq PDF</span>
-          <input
-            ref={dieRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            className="hidden"
-            onChange={(e) => {
-              c.setDielineFile(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-          <div className="flex items-center gap-1 h-7">
-            <button
-              type="button"
-              disabled={readOnly}
-              onClick={() => dieRef.current?.click()}
-              className="h-7 flex-1 min-w-0 px-2 inline-flex items-center gap-1.5 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:text-foreground cursor-pointer truncate"
-            >
-              <FileUp className="size-3.5 shrink-0" />
-              <span className="truncate">{c.dielineFile?.name || "Tanlash"}</span>
-            </button>
-            {c.dielineFile && !readOnly && (
-              <button type="button" title="Olib tashlash" onClick={() => c.setDielineFile(undefined)} className="text-muted-foreground hover:text-foreground cursor-pointer">
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
       </div>
 
       <div className="border border-border rounded overflow-hidden">

@@ -85,12 +85,16 @@ export async function analyzeSheetArtwork(params: {
   const dielineIdx = dieline ? indexOf(dieline) : undefined;
 
   const files = await Promise.all(
-    sources.map(async (src) => {
-      const name = src.name.toLowerCase().endsWith(".pdf") ? src.name : `${src.name}.pdf`;
-      if (src.file) return new File([src.file], name, { type: "application/pdf" });
+    sources.map(async (src, i) => {
+      // The die may be SVG (doc-service converts it); everything else must be PDF
+      const allowSvg = i === dielineIdx;
+      const lower = src.name.toLowerCase();
+      const name = lower.endsWith(".pdf") || (allowSvg && lower.endsWith(".svg")) ? src.name : `${src.name}.pdf`;
+      const type = name.toLowerCase().endsWith(".svg") ? "image/svg+xml" : "application/pdf";
+      if (src.file) return new File([src.file], name, { type });
       const res = await fetch(src.url);
       if (!res.ok) throw new Error(`Faylni yuklab bo'lmadi: ${src.name}`);
-      return new File([await res.blob()], name, { type: "application/pdf" });
+      return new File([await res.blob()], name, { type });
     })
   );
 

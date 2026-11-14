@@ -841,12 +841,27 @@ export interface WorkOrderFormData {
   customerTin?: string;
   clientId?: string;
   impositionState?: PersistedImpositionState;
+  /** Single source of the die-cut contour (noj), shared by Specifications and Imposition */
+  dieline?: OrderDieline;
   deliveryBatches?: WorkOrderDeliveryBatch[];
   materialsReserved?: boolean;
   materialsReservedAt?: string;
   materialsConsumed?: boolean;
   materialsConsumedAt?: string;
   materialIssueDocNo?: string;
+}
+
+/**
+ * Where the order's die-cut contour (noj) comes from.
+ * - spec: generated from the Specifications shape fields (utils/dielineGeometry.ts)
+ * - file: a PDF/SVG uploaded to the order or attached to a die-cutting tooling item
+ * - none: guillotine job, no die
+ */
+export interface OrderDieline {
+  source: "spec" | "file" | "none";
+  fileUrl?: string;
+  fileName?: string;
+  origin?: "upload" | "tooling" | "attachment";
 }
 
 /**

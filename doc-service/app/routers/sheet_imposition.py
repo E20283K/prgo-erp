@@ -267,6 +267,18 @@ def _render_png(pdf_path: Path, page_index: int, target: Path, dpi: int) -> Tupl
         doc.close()
 
 
+def _svg_to_pdf(data: bytes, name: str) -> bytes:
+    """Vector SVG (mm units) -> single-page PDF via MuPDF, keeping physical size."""
+    try:
+        src = pymupdf.open(stream=data, filetype="svg")
+        try:
+            return src.convert_to_pdf()
+        finally:
+            src.close()
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"SVG pichoqni o'qib bo'lmadi ({name}): {ex}")
+
+
 def _output_label(filename: str) -> str:
     stem = Path(filename).stem
     form = ""
@@ -338,18 +350,26 @@ async def analyze_artwork(
     Stores uploaded artwork PDFs, builds design variants and runs preflight.
     `manifest` (JSON list of ManifestItemSchema) maps variants to file indexes / pages;
     without it every page of every file becomes a front-only variant.
-    `dieline_file` is the index of the die-cut PDF among `files`.
+    `dieline_file` is the index of the die-cut file among `files`; it may be PDF or SVG
+    (SVG in mm units is converted to PDF before caching).
     """
+    if dieline_file is not None and not (0 <= dieline_file < len(files)):
+        raise HTTPException(status_code=400, detail="Pichoq fayli indeksi noto'g'ri.")
+
     payload: List[Tuple[str, bytes]] = []
-    for f in files:
+    for idx, f in enumerate(files):
         name = (f.filename or "").strip()
-        if not name.lower().endswith(".pdf"):
+        lower = name.lower()
+        is_svg_dieline = idx == dieline_file and lower.endswith(".svg")
+        if not lower.endswith(".pdf") and not is_svg_dieline:
             raise HTTPException(status_code=400, detail=f"Faqat PDF fayllar qabul qilinadi: {name or '?'}")
         data = await f.read()
         if not data:
             raise HTTPException(status_code=400, detail=f"Bo'sh fayl: {name}")
         if len(data) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail=f"Fayl juda katta: {name}")
+        if is_svg_dieline:
+            name, data = f"{Path(name).stem}.pdf", _svg_to_pdf(data, name)
         payload.append((name, data))
     if not payload:
         raise HTTPException(status_code=400, detail="Kamida bitta PDF fayl yuklanishi shart.")
@@ -360,9 +380,6 @@ async def analyze_artwork(
             manifest_items = [ManifestItemSchema(**m) for m in json.loads(manifest)]
         except Exception as ex:
             raise HTTPException(status_code=400, detail=f"Manifest noto'g'ri: {ex}")
-
-    if dieline_file is not None and not (0 <= dieline_file < len(payload)):
-        raise HTTPException(status_code=400, detail="Pichoq fayli indeksi noto'g'ri.")
 
     jid, saved = sheet_imposition_cache.create_job_multi(payload, job_id=job_id)
     job_dir = sheet_imposition_cache.get_job_dir(jid)

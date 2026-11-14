@@ -52,6 +52,7 @@ import {
   type ComboboxOption,
 } from "@/components/ui/combobox";
 import { DieLinePreview } from "../DieLinePreview";
+import { DielineSourceCard } from "../dieline/DielineSourceCard";
 import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
 import { searchPantoneColors } from "@/lib/pantone-catalog";
@@ -2303,6 +2304,38 @@ export function SpecificationsTab({
               </div>
             </div>
           </div>
+
+          {/* Die (noj): one source shared with the imposition tab */}
+          {isOffset && (
+            <DielineSourceCard
+              spec={{
+                width: formData.width,
+                height: formData.height,
+                shapeType: formData.shapeType,
+                cornerType: formData.cornerType,
+                customShape: formData.customShape,
+                customSvgPath: formData.customSvgPath,
+                foldType: formData.foldType,
+                itemCategory: formData.itemCategory,
+                holeSize: formData.holeSize,
+                holePosition: formData.holePosition,
+                holeOffset: formData.holeOffset,
+              }}
+              value={formData.dieline}
+              onChange={(dl) => {
+                handleFieldChange("dieline", dl);
+                onMarkUnsaved();
+              }}
+              attachments={orderAttachments}
+              toolingItems={formData.toolingItems}
+              docNo={docNo}
+              onAddAttachment={(att) => {
+                setOrderAttachments?.((prev) => [...prev.filter((a) => a.url !== att.url), att]);
+                onMarkUnsaved();
+              }}
+              readOnly={isOperator}
+            />
+          )}
 
           {/* Card 3: Substrate Material */}
           <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">

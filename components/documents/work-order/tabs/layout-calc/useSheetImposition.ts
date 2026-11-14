@@ -27,6 +27,12 @@ import {
   resolveMachineConstraints,
 } from "./parentSheet";
 import type { ApplyImpositionPayload, ImpositionVariant, LayoutCalcTabProps, SheetCutOption } from "./types";
+import {
+  dielineFileCandidates,
+  resolveDieline,
+  type DielineSpec,
+  type ResolvedDieline,
+} from "../../utils/dielineGeometry";
 
 export type ImpositionSettings = Omit<PersistedImpositionState, "jobId" | "pdfUrl" | "generatedAt" | "summary">;
 
@@ -53,6 +59,15 @@ function fileNameFromUrl(url: string, fallback: string): string {
   } catch {
     return fallback;
   }
+}
+
+/** The order's die as an upload source for /analyze (generated SVG or an existing file). */
+function dieSource(die: ResolvedDieline): ArtworkSource | undefined {
+  if (die.source === "spec") {
+    return { file: new File([die.built.svg], "pichoq.svg", { type: "image/svg+xml" }), name: "pichoq.svg" };
+  }
+  if (die.source === "file") return { url: die.url, name: die.name };
+  return undefined;
 }
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -106,9 +121,27 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     onImpositionStateChange,
     onApplyToOrder,
     onAddAttachment,
+    dieSpec,
+    dieline,
+    onDielineChange,
+    orderAttachments,
+    toolingItems,
   } = props;
 
   const machine = useMemo(() => resolveMachineConstraints(pressMachine, activeMachine), [pressMachine, activeMachine]);
+
+  // ---------------------------------------------------------------- die (noj): one source for the order
+  const spec = useMemo<DielineSpec>(
+    () => ({ ...dieSpec, width: defaultProdW, height: defaultProdH, shapeType }),
+    [dieSpec, defaultProdW, defaultProdH, shapeType]
+  );
+  const dieCandidates = useMemo(
+    () => dielineFileCandidates(orderAttachments ?? [], toolingItems ?? []),
+    [orderAttachments, toolingItems]
+  );
+  const resolvedDie = useMemo(() => resolveDieline(dieline, spec, dieCandidates), [dieline, spec, dieCandidates]);
+  const dieKey =
+    resolvedDie.source === "spec" ? `spec:${resolvedDie.built.svg}` : resolvedDie.source === "file" ? `file:${resolvedDie.url}` : "none";
 
   // ---------------------------------------------------------------- colours
   const frontColorCount = useMemo(() => {
@@ -180,7 +213,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     const best = pickOptimalCutOption(
       calculateSheetCutOptions(pW, pH, { trimW, trimH, gutterX: 3, gutterY: 3, margins }, machine)
     );
-    const isDie = !!shapeType && shapeType !== "rectangle";
+    const isDie = resolvedDie.source !== "none";
     return {
       version: 2,
       paperName: stock?.name ?? paperStock,
@@ -237,6 +270,18 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     }
   }
 
+  // When the order's die appears or goes away, switch the job type to match (user can still override)
+  const hasDie = resolvedDie.source !== "none";
+  const [seenHasDie, setSeenHasDie] = useState(hasDie);
+  if (hasDie !== seenHasDie) {
+    setSeenHasDie(hasDie);
+    setSettings((prev) => ({
+      ...prev,
+      category: hasDie ? "diecut" : "guillotine",
+      templateStyle: hasDie ? "packaging" : "offset_standard",
+    }));
+  }
+
   // ---------------------------------------------------------------- parent sheet cuts
   const gridEstimate = useMemo(
     () => ({
@@ -285,7 +330,6 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
 
   // ---------------------------------------------------------------- variants
   const [localFiles, setLocalFiles] = useState<Record<string, { front?: File; back?: File }>>({});
-  const [dielineFile, setDielineFile] = useState<File | undefined>();
 
   const variants = useMemo<ImpositionVariant[]>(() => {
     const active = sizes.filter((s) => (s.quantity || 0) > 0);
@@ -460,10 +504,10 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     () =>
       JSON.stringify({
         v: variants.map((v) => [v.key, v.frontFile?.name ?? v.frontUrl, v.backFile?.name ?? v.backUrl, v.frontFile?.lastModified, v.backFile?.lastModified]),
-        d: dielineFile ? [dielineFile.name, dielineFile.lastModified] : null,
+        d: dieKey,
         t: [settings.trimW, settings.trimH],
       }),
-    [variants, dielineFile, settings.trimW, settings.trimH]
+    [variants, dieKey, settings.trimW, settings.trimH]
   );
   const analysisStale = !analysis || analysisKey !== sourceKey;
 
@@ -491,7 +535,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     try {
       const res = await analyzeSheetArtwork({
         variants: sources,
-        dieline: dielineFile ? { file: dielineFile, name: dielineFile.name } : undefined,
+        dieline: dieSource(resolvedDie),
         expectedTrim: { w: settings.trimW, h: settings.trimH },
       });
       setAnalysis(res);
@@ -504,7 +548,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     } finally {
       setBusy(null);
     }
-  }, [variants, dielineFile, settings.trimW, settings.trimH, sourceKey]);
+  }, [variants, resolvedDie, settings.trimW, settings.trimH, sourceKey]);
 
   const lastPersisted = useRef<string>("");
   const [pdfMeta, setPdfMeta] = useState<Pick<PersistedImpositionState, "jobId" | "pdfUrl" | "generatedAt">>({
@@ -630,8 +674,16 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     variants,
     setVariantFile,
     setManualSlots,
-    dielineFile,
-    setDielineFile,
+    resolvedDie,
+    dieCard: {
+      spec,
+      value: dieline,
+      onChange: onDielineChange,
+      attachments: orderAttachments,
+      toolingItems,
+      docNo,
+      onAddAttachment,
+    },
     hasAllArtwork,
     calc,
     calcError,
