@@ -1580,6 +1580,15 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
           return;
         }
 
+        if (data.notInStock) {
+          toast.add({
+            title: "Quti omborda emas",
+            description: "Quti hali tayyor mahsulot omboriga qabul qilinmagan.",
+            type: "error",
+          });
+          return;
+        }
+
         const existingCodes = new Set(
           (doc.scannedBoxes || []).flatMap((b) => [b.barcode.toUpperCase(), b.boxCode.toUpperCase()])
         );
@@ -2175,11 +2184,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     if (doc.workOrder && (status === "Dispatched" || status === "Delivered")) {
       const targetWo = productionQueue.find((w) => w.id === doc.workOrder || w.docNo === doc.workOrder);
       if (targetWo && targetWo.deliveryBatches && targetWo.deliveryBatches.length > 0) {
+        // Strict link only: the batch id the shipment was created for, or the shipment the batch points to.
         const batchMatch = targetWo.deliveryBatches.find(
-          (b) =>
-            (doc.batchId && b.id === doc.batchId) ||
-            (doc.batchNo && b.batchNo === doc.batchNo) ||
-            (doc.notes && doc.notes.includes(`Partiya #${b.batchNo}`))
+          (b) => (doc.batchId && b.id === doc.batchId) || b.linkedShipmentId === doc.id
         );
         if (batchMatch) {
           const nextBatches = targetWo.deliveryBatches.map((b) =>

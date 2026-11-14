@@ -21,6 +21,7 @@ import {
   Gauge,
   Pencil,
   SlidersHorizontal, Clock,
+  Boxes,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -104,6 +105,8 @@ interface ShiftTimelineTabProps {
   onChangeStepStatus?: (opId: string, status: RouteStep["status"]) => void;
   onDeleteEvent?: (eventId: string) => void;
   piecesPerSheet?: number;
+  /** The packaging step is recorded as boxes, not as shift output: it opens the packaging dialog. */
+  onOpenPackaging?: () => void;
 }
 
 export function ShiftTimelineTab({
@@ -124,6 +127,7 @@ export function ShiftTimelineTab({
   onFinishStep,
   onChangeStepStatus,
   onDeleteEvent,
+  onOpenPackaging,
 }: ShiftTimelineTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
@@ -590,6 +594,22 @@ export function ShiftTimelineTab({
             </div>
           </div>
 
+          {selectedOp.kind === "packaging" ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">{STATUS_LABELS[selectedOp.status] || selectedOp.status}</span>
+              {onOpenPackaging && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onOpenPackaging}
+                  className="h-8 text-xs gap-1.5"
+                >
+                  <Boxes className="size-3.5" />
+                  <span>Qutilar</span>
+                </Button>
+              )}
+            </div>
+          ) : (
           <div className="flex items-center gap-2 flex-wrap">
             {onChangeStepStatus && (
               <Select
@@ -720,6 +740,7 @@ export function ShiftTimelineTab({
               </Button>
             )}
           </div>
+          )}
         </div>
 
         {discrepancy && (

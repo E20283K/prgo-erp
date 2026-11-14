@@ -713,7 +713,7 @@ export async function upsertWorkOrder(
           };
     })(),
     sampleData: data.sampleData || {},
-    packagingData: data.packagingData || {},
+    packagingData: mergeWarehouseBoxStates(data.packagingData, existingOrder?.packagingData),
     deliveryBatches: data.deliveryBatches || [],
     notes: (data as any).notes || null,
     updatedAt: new Date(),
@@ -1904,4 +1904,25 @@ export async function deleteWorkOrderAttachment(params: {
   }
 
   return { success: true, deleted: found || null };
+}
+
+/**
+ * Box states the warehouse owns (received in stock, dispatched) are written by the warehouse service;
+ * an order saved from a tab opened earlier must not roll them back.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mergeWarehouseBoxStates(incoming: any, existing: any): any {
+  const next = incoming || {};
+  if (!Array.isArray(next.boxes) || !existing || !Array.isArray(existing.boxes)) return next;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stored = new Map<string, any>(existing.boxes.map((b: any) => [String(b.id), b]));
+  return {
+    ...next,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    boxes: next.boxes.map((box: any) => {
+      const db = stored.get(String(box.id));
+      if (!db || (db.status !== "in_stock" && db.status !== "dispatched")) return box;
+      return { ...box, status: db.status, shipmentId: db.shipmentId, receivedAt: db.receivedAt, handedOverAt: db.handedOverAt };
+    }),
+  };
 }

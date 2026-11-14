@@ -21,15 +21,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   WorkOrderDeliveryBatch,
-  DeliveryBatchStatus,
   DeliveryBatchSizeItem,
   SizeDistribution,
 } from "../types";
@@ -44,14 +36,6 @@ interface BatchEditDialogProps {
   sizes?: SizeDistribution[];
   onSave: (batch: WorkOrderDeliveryBatch) => void;
 }
-
-const STATUS_OPTIONS: { value: DeliveryBatchStatus; label: string }[] = [
-  { value: "scheduled", label: "Rejalashtirilgan" },
-  { value: "in_production", label: "Ishlab chiqarilmoqda" },
-  { value: "ready", label: "Tayyor (Omborda)" },
-  { value: "dispatched", label: "Jo'natilgan" },
-  { value: "delivered", label: "Yetkazib berildi" },
-];
 
 export function BatchEditDialog({
   isOpen,
@@ -69,7 +53,6 @@ export function BatchEditDialog({
   const [title, setTitle] = useState<string>("");
   const [targetDate, setTargetDate] = useState<string>("");
   const [quantity, setQuantity] = useState<number>(0);
-  const [status, setStatus] = useState<DeliveryBatchStatus>("scheduled");
   const [destination, setDestination] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [sizeItems, setSizeItems] = useState<DeliveryBatchSizeItem[]>([]);
@@ -91,7 +74,6 @@ export function BatchEditDialog({
       setTitle(batch.title || `Partiya #${batch.batchNo}`);
       setTargetDate(batch.targetDate || new Date().toISOString().split("T")[0]);
       setQuantity(batch.quantity || 0);
-      setStatus(batch.status || "scheduled");
       setDestination(batch.destination || "");
       setNotes(batch.notes || "");
 
@@ -117,7 +99,6 @@ export function BatchEditDialog({
       setTitle(`Partiya #${nextNo}`);
       setTargetDate(new Date().toISOString().split("T")[0]);
       setQuantity(remainingOrderQty);
-      setStatus("scheduled");
       setDestination("");
       setNotes("");
 
@@ -174,7 +155,8 @@ export function BatchEditDialog({
       title: title.trim() || `Partiya #${batchNo}`,
       targetDate: targetDate || new Date().toISOString().split("T")[0],
       quantity: Number(quantity) || 0,
-      status,
+      // Status is owned by the warehouse shipment; the plan only keeps what it had.
+      status: batch?.status || "scheduled",
       sizeItems: sizes.length > 0 ? sizeItems : undefined,
       destination: destination.trim() || undefined,
       notes: notes.trim() || undefined,
@@ -230,38 +212,17 @@ export function BatchEditDialog({
             </div>
           </div>
 
-          {/* Row 2: Target Date & Status */}
-          <div className="grid grid-cols-12 gap-2">
-            <div className="col-span-6 space-y-1">
-              <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
-                <Calendar className="size-3 text-muted-foreground" />
-                Muddati
-              </Label>
-              <Input
-                type="date"
-                value={targetDate}
-                onChange={(e) => setTargetDate(e.target.value)}
-                className="h-8 text-xs font-mono"
-              />
-            </div>
-            <div className="col-span-6 space-y-1">
-              <Label className="text-[11px] text-muted-foreground">Holati</Label>
-              <Select
-                value={status}
-                onValueChange={(val) => setStatus(val as DeliveryBatchStatus)}
-              >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
+              <Calendar className="size-3 text-muted-foreground" />
+              Muddati
+            </Label>
+            <Input
+              type="date"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+              className="h-8 text-xs font-mono"
+            />
           </div>
 
           {/* Row 3: Quantity */}

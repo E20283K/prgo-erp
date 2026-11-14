@@ -78,6 +78,13 @@
       "when": 1794631427051,
       "tag": "0010_trading_catalog_warehouse",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794669049137,
+      "tag": "0011_fg_pending_handover",
+      "breakpoints": true
     }
   ]
 }

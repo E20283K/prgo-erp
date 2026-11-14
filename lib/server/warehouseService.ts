@@ -664,7 +664,8 @@ async function updateWorkOrderBoxes(
           changed = true;
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { shipmentId: _omit, ...rest } = box;
-          return { ...rest, status: "ready" };
+          // Storno: the box goes back to the FG warehouse, not to the shop.
+          return { ...rest, status: "in_stock" };
         }
         return box;
       }
@@ -682,6 +683,41 @@ async function updateWorkOrderBoxes(
         .set({ packagingData: { ...pkg, boxes }, updatedAt: new Date() })
         .where(eq(workOrders.id, wo.id));
     }
+  }
+}
+
+/**
+ * Boxes the shop handed over become "in_stock" up to the quantity the warehouse confirmed;
+ * on a shortage the boxes left over go back to "ready" so the shop can recount and hand them over again.
+ */
+async function receiveWorkOrderBoxes(tx: DbExec, companyId: string, workOrderNo: string, confirmedQty: number) {
+  const wo = await tx.query.workOrders.findFirst({
+    where: and(eq(workOrders.companyId, companyId), eq(workOrders.docNo, workOrderNo)),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pkg = wo?.packagingData as any;
+  if (!wo || !pkg || !Array.isArray(pkg.boxes)) return;
+  let left = confirmedQty;
+  const now = new Date().toISOString();
+  let changed = false;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const boxes = pkg.boxes.map((box: any) => {
+    if (box.status !== "handed") return box;
+    changed = true;
+    const qty = Number(box.quantity) || 0;
+    if (left + 1e-9 >= qty) {
+      left -= qty;
+      return { ...box, status: "in_stock", receivedAt: now };
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { handedOverAt: _h, ...rest } = box;
+    return { ...rest, status: "ready" };
+  });
+  if (changed) {
+    await tx
+      .update(workOrders)
+      .set({ packagingData: { ...pkg, boxes }, updatedAt: new Date() })
+      .where(eq(workOrders.id, wo.id));
   }
 }
 
@@ -1531,6 +1567,7 @@ export async function getFinishedGoods(companyCode: string = "PRINTGOO") {
       shippedQty: reservedQty,
       reservedQty,
       stockQty,
+      pendingQty: Number(fg.pendingQuantity) || 0,
       unit: fg.unit || "pcs",
       costPricePerUnit: Number(fg.costPricePerUnit) || 0,
       totalStockValue: Number(fg.totalStockValue) || qty * (Number(fg.costPricePerUnit) || 0),
@@ -1845,21 +1882,112 @@ export async function getPendingFinishedGoodsReceipts(companyCode: string = "PRI
   const rows = await db.query.warehouseFinishedGoods.findMany({
     where: and(
       eq(warehouseFinishedGoods.companyId, companyId),
-      eq(warehouseFinishedGoods.receiptStatus, "PendingReceipt")
+      sql`${warehouseFinishedGoods.pendingQuantity} > 0`
     ),
-    orderBy: [desc(warehouseFinishedGoods.createdAt)],
+    orderBy: [desc(warehouseFinishedGoods.updatedAt)],
   });
 
+  // "quantity" here is what waits for confirmation; what is already in stock is "stockQuantity".
   return rows.map((fg) => ({
     ...fg,
     id: fg.id,
-    quantity: Number(fg.quantity) || 0,
+    quantity: Number(fg.pendingQuantity) || 0,
+    stockQuantity: Number(fg.quantity) || 0,
     costPricePerUnit: Number(fg.costPricePerUnit) || 0,
     totalStockValue: Number(fg.totalStockValue) || 0,
     createdDate: fg.createdAt ? new Date(fg.createdAt).toISOString().split("T")[0] : "",
   }));
 }
 
+/**
+ * The shop hands packed boxes over to the FG warehouse: the quantity waits as "pending"
+ * until the warehouse confirms it, and is not in stock (cannot be shipped) before that.
+ */
+export async function handOverFinishedGoods(
+  payload: {
+    workOrderId: string;
+    quantity: number;
+    productName?: string;
+    customerName?: string;
+    clientId?: string | null;
+    orderNo?: string | null;
+    unit?: string;
+    costPricePerUnit?: number;
+    locationName?: string;
+    boxCount?: number;
+  },
+  companyCode: string = "PRINTGOO"
+) {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const qty = Number(payload.quantity) || 0;
+  if (!payload.workOrderId) throw new Error("Buyurtma raqami kerak.");
+  if (!(qty > 0)) throw new Error("Topshiriladigan miqdor 0 dan katta bo'lishi kerak.");
+  const sku = `FG-${payload.workOrderId}`;
+  const unitCost = Number(payload.costPricePerUnit) || 0;
+  const unit = payload.unit || "pcs";
+  const note = `${payload.boxCount ? `${payload.boxCount} quti, ` : ""}${fmtQty(qty)} ${unit} topshirildi`;
+
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(warehouseFinishedGoods)
+      .where(
+        and(
+          eq(warehouseFinishedGoods.companyId, companyId),
+          eq(warehouseFinishedGoods.sku, sku),
+          eq(warehouseFinishedGoods.workOrderId, payload.workOrderId)
+        )
+      )
+      .for("update")
+      .limit(1);
+
+    if (current) {
+      const [updated] = await tx
+        .update(warehouseFinishedGoods)
+        .set({
+          pendingQuantity: ((Number(current.pendingQuantity) || 0) + qty).toString(),
+          receiptStatus: "PendingReceipt",
+          ...(unitCost > 0 ? { costPricePerUnit: unitCost.toString() } : {}),
+          notes: note,
+          updatedAt: new Date(),
+        })
+        .where(eq(warehouseFinishedGoods.id, current.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await tx
+      .insert(warehouseFinishedGoods)
+      .values({
+        companyId,
+        clientId: payload.clientId || null,
+        customerName: payload.customerName || "Mijoz",
+        workOrderId: payload.workOrderId,
+        orderNo: payload.orderNo || null,
+        productName: payload.productName || "Tayyor mahsulot",
+        sku,
+        quantity: "0",
+        reservedQuantity: "0",
+        pendingQuantity: qty.toString(),
+        unit,
+        status: "In Stock",
+        allocationStatus: "Dedicated",
+        receiptStatus: "PendingReceipt",
+        locationName: payload.locationName || "Tayyor mahsulotlar ombori",
+        locationShelf: "FG-Staging",
+        costPricePerUnit: unitCost.toString(),
+        totalStockValue: "0",
+        notes: note,
+      })
+      .returning();
+    return created;
+  });
+}
+
+/**
+ * The warehouse confirms a hand-over (fully or partly): the confirmed quantity goes into stock,
+ * a shortage is noted and dropped from pending, and the order's handed boxes become in_stock.
+ */
 export async function confirmFinishedGoodsReceipt(
   fgId: string,
   confirmedQty?: number,
@@ -1878,25 +2006,37 @@ export async function confirmFinishedGoodsReceipt(
     if (!existing) {
       throw new Error("Kutilayotgan tayyor mahsulot topilmadi");
     }
-    if (existing.receiptStatus === "Received") {
-      throw new Error(`${existing.sku} allaqachon omborga qabul qilingan.`);
+    const pending = Number(existing.pendingQuantity) || 0;
+    if (!(pending > 0)) {
+      throw new Error(`${existing.sku}: qabul kutilayotgan miqdor yo'q.`);
     }
 
-    const finalQty = confirmedQty !== undefined && confirmedQty !== null ? Number(confirmedQty) : Number(existing.quantity);
+    const finalQty = confirmedQty !== undefined && confirmedQty !== null ? Number(confirmedQty) : pending;
     if (!Number.isFinite(finalQty) || finalQty <= 0) {
       throw new Error("Qabul qilinadigan miqdor 0 dan katta bo'lishi kerak.");
     }
+    if (finalQty > pending + 1e-9) {
+      throw new Error(`${existing.sku}: topshirilgan ${fmtQty(pending)} dan ko'p qabul qilib bo'lmaydi.`);
+    }
+    const shortage = pending - finalQty;
     const shelf = locationShelf || existing.locationShelf || "FG-01";
     const unitCost = Number(existing.costPricePerUnit) || 0;
+    const onHand = (Number(existing.quantity) || 0) + finalQty;
+    const unit = existing.unit || "pcs";
 
     const [updated] = await tx
       .update(warehouseFinishedGoods)
       .set({
-        quantity: finalQty.toString(),
+        quantity: onHand.toString(),
+        pendingQuantity: "0",
         receiptStatus: "Received",
         status: "In Stock",
         locationShelf: shelf,
-        totalStockValue: (finalQty * unitCost).toFixed(2),
+        totalStockValue: (onHand * unitCost).toFixed(2),
+        notes:
+          shortage > 1e-9
+            ? `Qabulda kamomad: ${fmtQty(shortage)} ${unit} (topshirilgan ${fmtQty(pending)}, qabul ${fmtQty(finalQty)})`
+            : existing.notes,
         updatedAt: new Date(),
       })
       .where(eq(warehouseFinishedGoods.id, fgId))
@@ -1911,9 +2051,13 @@ export async function confirmFinishedGoodsReceipt(
       name: existing.productName,
       category: "Finished Goods",
       deltaQty: finalQty,
-      unit: existing.unit,
+      unit,
       unitPriceUsd: unitCost || undefined,
     });
+
+    if (existing.workOrderId) {
+      await receiveWorkOrderBoxes(tx, companyId, existing.workOrderId, finalQty);
+    }
 
     return updated;
   });
@@ -1924,10 +2068,8 @@ export async function confirmFinishedGoodsReceipt(
 export async function getAvailableFinishedGoodsForShipment(companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
   const rows = await db.query.warehouseFinishedGoods.findMany({
-    where: and(
-      eq(warehouseFinishedGoods.companyId, companyId),
-      eq(warehouseFinishedGoods.receiptStatus, "Received")
-    ),
+    // Stock on hand, even when another hand-over of the same order still waits for confirmation.
+    where: and(eq(warehouseFinishedGoods.companyId, companyId), sql`${warehouseFinishedGoods.quantity} > 0`),
     orderBy: [desc(warehouseFinishedGoods.producedAt)],
   });
 
@@ -2283,6 +2425,8 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
           found: true,
           mode: "single_box" as const,
           alreadyDispatched: matchedBox.status === "dispatched",
+          // Packed in the shop or handed over but not yet received: not in the FG warehouse.
+          notInStock: !matchedBox.status || matchedBox.status === "ready" || matchedBox.status === "handed",
           dispatchedShipmentId: matchedBox.shipmentId || null,
           workOrderNo: wo.docNo,
           customerName: wo.customerName,

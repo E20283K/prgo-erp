@@ -15,7 +15,9 @@ import {
   Scale,
   ArrowRight,
   Check,
+  Truck,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -103,6 +105,36 @@ interface PackagingDialogProps {
   coating?: string;
   onSavePackaging: (summary: WorkOrderPackagingSummary, markComplete: boolean) => void;
   onOpenPrintModal: (summary: WorkOrderPackagingSummary) => void;
+  /** Good output of the last production step: nothing beyond it can be packed. */
+  producedQty?: number;
+  /** Every production step is finished: only then the packaging can be completed. */
+  routeFinished?: boolean;
+  /** Hands the packed ("ready") boxes over to the FG warehouse. */
+  onHandOver?: (summary: WorkOrderPackagingSummary) => void;
+}
+
+/** Boxes past the shop (handed over, in the FG warehouse or shipped) are fixed: no edits, no deletes. */
+const isLockedBox = (b: PackagingBoxItem) => Boolean(b.status && b.status !== "ready");
+
+const BOX_STAGE_LABEL: Record<string, string> = {
+  handed: "Topshirildi",
+  in_stock: "Omborda",
+  dispatched: "Jo'natildi",
+};
+
+/** Continues box numbering and codes after the boxes already kept. */
+function renumberFrom(list: PackagingBoxItem[], start: number, workOrderNo: string): PackagingBoxItem[] {
+  const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
+  return list.map((b, i) => {
+    const n = start + i;
+    return {
+      ...b,
+      id: `${b.id}-${n}`,
+      boxNumber: n,
+      boxCode: `BX-${cleanWo}-${String(n).padStart(2, "0")}`,
+      barcode: `${cleanWo}-B${String(n).padStart(2, "0")}`,
+    };
+  });
 }
 
 export function PackagingDialog({
@@ -125,7 +157,12 @@ export function PackagingDialog({
   coating,
   onSavePackaging,
   onOpenPrintModal,
+  producedQty,
+  routeFinished = false,
+  onHandOver,
 }: PackagingDialogProps) {
+  // Without production data the plan is the ceiling (keeps legacy orders usable).
+  const packLimit = producedQty !== undefined ? Math.min(targetQuantity, Math.max(0, producedQty)) : targetQuantity;
   const [standardCapacity, setStandardCapacity] = useState<number>(500);
   const [boxType, setBoxType] = useState<string>(BOX_TYPE_OPTIONS[0].value);
   const [packerName, setPackerName] = useState<string>("N. Fedorov (Packaging)");
@@ -196,7 +233,7 @@ export function PackagingDialog({
           setStandardCapacity(initialCapacity);
           const generated = autoGeneratePackagingBoxes({
             workOrderNo,
-            targetQuantity,
+            targetQuantity: packLimit,
             standardCapacity: initialCapacity,
             sizes: hasValidSizeMatrix ? sizes : undefined,
             defaultPacker: packerName,
@@ -209,13 +246,13 @@ export function PackagingDialog({
             unitWeightGrams: theoreticalUnitWeight,
             countDeviation: 0,
           }));
-          setBoxes(filled);
+          setBoxes(packLimit > 0 ? filled : []);
           setCalibratedWeight(null);
         }
       }, 0);
     }
     prevIsOpenRef.current = isOpen;
-  }, [isOpen, existingPackaging, workOrderNo, targetQuantity, hasValidSizeMatrix, sizes, packerName, theoreticalUnitWeight]);
+  }, [isOpen, existingPackaging, workOrderNo, targetQuantity, packLimit, hasValidSizeMatrix, sizes, packerName, theoreticalUnitWeight]);
 
   // Apply Scale Sample Calibration
   const handleApplyCalibration = () => {
@@ -228,6 +265,7 @@ export function PackagingDialog({
       // Recalculate quantities for weighed boxes
       setBoxes((prev) =>
         prev.map((b) => {
+          if (isLockedBox(b)) return b;
           if (b.grossWeightKg && b.grossWeightKg > 0) {
             const calculatedQty = calculatePiecesFromWeight(b.grossWeightKg, calibratedUnit);
             return {
@@ -255,25 +293,28 @@ export function PackagingDialog({
 
   // Handle auto-split click
   const handleAutoSplit = () => {
-    const generated = autoGeneratePackagingBoxes({
+    const kept = boxes.filter(isLockedBox);
+    const keptQty = kept.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+    const rest = Math.max(0, packLimit - keptQty);
+    const generated = renumberFrom(autoGeneratePackagingBoxes({
       workOrderNo,
-      targetQuantity,
+      targetQuantity: rest,
       standardCapacity,
       sizes: hasValidSizeMatrix ? sizes : undefined,
       defaultPacker: packerName,
-    });
-    const filled = generated.map((b) => ({
+    }), kept.length + 1, workOrderNo);
+    const filled = (rest > 0 ? generated : []).map((b) => ({
       ...b,
       grossWeightKg: calculateWeightFromPieces(b.quantity, unitWeightGrams),
       unitWeightGrams,
       countDeviation: 0,
     }));
-    setBoxes(filled);
+    setBoxes([...kept, ...filled]);
   };
 
   // Add manual box
   const handleAddManualBox = () => {
-    const nextNum = boxes.length + 1;
+    const nextNum = boxes.reduce((m, b) => Math.max(m, b.boxNumber || 0), 0) + 1;
     const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
     const defaultSize = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].size : undefined;
     const defaultModel = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].model : undefined;
@@ -418,21 +459,24 @@ export function PackagingDialog({
 
   const handleDeleteBox = (boxId: string) => {
     const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
-    setBoxes((prev) =>
-      prev
-        .filter((b) => b.id !== boxId)
-        .map((b, idx) => ({
+    setBoxes((prev) => {
+      const target = prev.find((b) => b.id === boxId);
+      if (!target || isLockedBox(target)) return prev;
+      const remaining = prev.filter((b) => b.id !== boxId);
+      // Labels of boxes already handed over are printed: their codes must not change.
+      if (remaining.some(isLockedBox)) return remaining;
+      return remaining.map((b, idx) => ({
           ...b,
           boxNumber: idx + 1,
           boxCode: `BX-${cleanWo}-${String(idx + 1).padStart(2, "0")}`,
           barcode: `${cleanWo}-B${String(idx + 1).padStart(2, "0")}`,
-        }))
-    );
+        }));
+    });
   };
 
   // Bulk actions
   const handleApplyPackerToAll = () => {
-    setBoxes((prev) => prev.map((b) => ({ ...b, packerName })));
+    setBoxes((prev) => prev.map((b) => (isLockedBox(b) ? b : { ...b, packerName })));
   };
 
   // Calculations
@@ -443,6 +487,10 @@ export function PackagingDialog({
   const totalGrossWeight = useMemo(() => {
     return boxes.reduce((sum, b) => sum + (Number(b.grossWeightKg) || 0), 0);
   }, [boxes]);
+
+  const readyBoxes = useMemo(() => boxes.filter((b) => !isLockedBox(b)), [boxes]);
+  const readyQty = readyBoxes.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+  const overProducedQty = producedQty !== undefined ? Math.max(0, totalPackedQty - producedQty) : 0;
 
   const diffQty = totalPackedQty - targetQuantity;
   const isExactMatch = totalPackedQty === targetQuantity;
@@ -467,6 +515,12 @@ export function PackagingDialog({
 
   const handleSaveDraft = () => {
     onSavePackaging(currentSummary, false);
+    onOpenChange(false);
+  };
+
+  const handleHandOver = () => {
+    if (!onHandOver || readyBoxes.length === 0 || overProducedQty > 0) return;
+    onHandOver(currentSummary);
     onOpenChange(false);
   };
 
@@ -903,6 +957,13 @@ export function PackagingDialog({
                 <strong className="font-mono text-xs">{targetQuantity.toLocaleString()}</strong>
                 <span className="text-[10px] text-muted-foreground">{unit}</span>
               </div>
+              {producedQty !== undefined && (
+                <div className="flex items-baseline gap-1">
+                  <span className="text-muted-foreground text-[11px]">Ishlab chiqarildi:</span>
+                  <strong className="font-mono text-xs">{producedQty.toLocaleString()}</strong>
+                  <span className="text-[10px] text-muted-foreground">{unit}</span>
+                </div>
+              )}
               <div className="flex items-baseline gap-1">
                 <span className="text-muted-foreground text-[11px]">Qadoqlandi:</span>
                 <strong
@@ -918,6 +979,11 @@ export function PackagingDialog({
                 </strong>
                 <span className="text-[10px] text-muted-foreground">{unit}</span>
               </div>
+              {overProducedQty > 0 && (
+                <span className="text-[11px] font-medium text-destructive">
+                  Ishlab chiqarilgandan ortiq: {overProducedQty.toLocaleString()} {unit}
+                </span>
+              )}
               <div className="flex items-baseline gap-1">
                 <span className="text-muted-foreground text-[11px]">Qutilar:</span>
                 <Badge variant="secondary" className="font-mono text-[11px] h-5 px-1.5 font-bold">
@@ -1012,9 +1078,10 @@ export function PackagingDialog({
               <TableBody>
                 {boxes.map((box) => {
                   const hasDeviation = box.countDeviation !== undefined && box.countDeviation !== 0;
+                  const locked = isLockedBox(box);
 
                   return (
-                    <TableRow key={box.id} className="h-8 hover:bg-muted/40 text-xs">
+                    <TableRow key={box.id} className={cn("h-8 hover:bg-muted/40 text-xs", locked && "bg-muted/20")}>
                       {/* Box Number */}
                       <TableCell className="text-center font-mono font-bold text-muted-foreground">
                         {box.boxNumber}
@@ -1022,7 +1089,14 @@ export function PackagingDialog({
 
                       {/* Box Code */}
                       <TableCell className="font-mono font-medium text-foreground">
-                        {box.boxCode}
+                        <div className="flex items-center gap-1.5">
+                          <span>{box.boxCode}</span>
+                          {locked && (
+                            <span className="font-sans text-[10px] font-normal text-muted-foreground">
+                              {BOX_STAGE_LABEL[box.status || ""] || ""}
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
 
                       {/* Size Matrix: Model */}
@@ -1037,6 +1111,7 @@ export function PackagingDialog({
                         <TableCell>
                           <Select
                             value={box.sizeCode || "all"}
+                            disabled={locked}
                             onValueChange={(val) => handleBoxSizeCodeChange(box.id, val || "all")}
                           >
                             <SelectTrigger className="h-6 w-24 text-[11px] font-mono bg-background px-2">
@@ -1070,6 +1145,7 @@ export function PackagingDialog({
                             min="0"
                             placeholder="0.00"
                             value={box.grossWeightKg ?? ""}
+                            disabled={locked}
                             onChange={(e) =>
                               handleBoxWeightChange(
                                 box.id,
@@ -1101,6 +1177,7 @@ export function PackagingDialog({
                             type="number"
                             min="0"
                             value={box.quantity}
+                            disabled={locked}
                             onChange={(e) => handleBoxQtyChange(box.id, Number(e.target.value) || 0)}
                             className="h-6 w-20 text-right font-mono font-bold ml-auto text-xs"
                           />
@@ -1111,6 +1188,7 @@ export function PackagingDialog({
                       <TableCell>
                         <Select
                           value={box.packerName || packerName}
+                          disabled={locked}
                           onValueChange={(val) => handleBoxPackerChange(box.id, val || packerName)}
                         >
                           <SelectTrigger className="h-6 w-34 text-[11px] bg-background px-2 truncate">
@@ -1152,6 +1230,7 @@ export function PackagingDialog({
                           <Button
                             variant="ghost"
                             size="icon"
+                            disabled={locked}
                             onClick={() => handleDeleteBox(box.id)}
                             className="size-6 text-muted-foreground hover:text-destructive cursor-pointer"
                             title="O'chirish"
@@ -1201,6 +1280,7 @@ export function PackagingDialog({
               variant="outline"
               size="sm"
               onClick={handleSaveDraft}
+              disabled={overProducedQty > 0}
               className="h-8 text-xs font-medium cursor-pointer"
             >
               Qoralamani saqlash
@@ -1216,10 +1296,26 @@ export function PackagingDialog({
           </div>
 
           <div className="flex items-center gap-2">
+            {onHandOver && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleHandOver}
+                disabled={readyBoxes.length === 0 || overProducedQty > 0}
+                className="h-8 text-xs font-medium gap-1.5 cursor-pointer"
+                title="Qadoqlangan qutilarni tayyor mahsulot omboriga qabulga berish"
+              >
+                <Truck className="size-3.5" />
+                <span>
+                  Omborga topshirish{readyBoxes.length > 0 ? ` (${readyBoxes.length} quti, ${readyQty.toLocaleString()})` : ""}
+                </span>
+              </Button>
+            )}
             <Button
               size="sm"
               onClick={handleCompletePackaging}
-              disabled={boxes.length === 0}
+              disabled={boxes.length === 0 || !routeFinished || overProducedQty > 0}
+              title={routeFinished ? undefined : "Barcha ishlab chiqarish operatsiyalari yakunlanmagan"}
               className="h-8 text-xs font-medium gap-1.5 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
             >
               <CheckCircle2 className="size-3.5" />

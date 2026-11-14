@@ -488,6 +488,9 @@ export interface FinishedGoodStockRecord {
   producedQty: number; // 15000
   shippedQty: number; // 10000
   stockQty: number; // 5000 (producedQty - shippedQty)
+  /** Handed over by the shop, waiting for the warehouse to confirm. */
+  pendingQty?: number;
+  dbId?: string;
   unit: string; // "dona"
   costPricePerUnit: number; // 0.42
   totalStockValue: number; // 2100.00
@@ -889,6 +892,21 @@ interface WorkspaceState {
   isPendingFgLoading: boolean;
   loadPendingFinishedGoods: (companyCode?: string) => Promise<void>;
   confirmFinishedGoodReceiptAsync: (fgId: string, confirmedQty?: number, locationShelf?: string, companyCode?: string) => Promise<boolean>;
+  /** Shop hands packed boxes over to the FG warehouse; returns an error message on failure. */
+  handOverFinishedGoodsAsync: (
+    payload: {
+      workOrderId: string;
+      quantity: number;
+      productName?: string;
+      customerName?: string;
+      clientId?: string | null;
+      orderNo?: string | null;
+      unit?: string;
+      costPricePerUnit?: number;
+      boxCount?: number;
+    },
+    companyCode?: string
+  ) => Promise<{ success: boolean; error?: string }>;
   availableFinishedGoodsForShipment: any[];
   loadAvailableFinishedGoods: (companyCode?: string) => Promise<any[]>;
   checkAndTriggerReorderAsync: (payload: { originalWorkOrderId: string; divertedQty: number; buyerCustomerName: string; notes?: string }, companyCode?: string) => Promise<any>;
@@ -1780,6 +1798,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } catch (e) {
       console.error("Failed to confirm finished good receipt:", e);
       return false;
+    }
+  },
+
+  handOverFinishedGoodsAsync: async (payload, companyCode = "PRINTGOO") => {
+    try {
+      const res = await fetch("/api/v1/warehouse/pending-receipts?company=" + encodeURIComponent(companyCode), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        get().loadPendingFinishedGoods(companyCode);
+        get().loadFinishedGoods(companyCode);
+        return { success: true };
+      }
+      return { success: false, error: json.error || "Omborga topshirib bo'lmadi" };
+    } catch (e) {
+      console.error("Failed to hand over finished goods:", e);
+      return { success: false, error: "Server bilan aloqa yo'q" };
     }
   },
 

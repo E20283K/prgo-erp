@@ -429,6 +429,8 @@ export const warehouseFinishedGoods = pgTable(
     sku: varchar("sku", { length: 64 }).notNull(),
     quantity: numeric("quantity", { precision: 15, scale: 3 }).default("0").notNull(),
     reservedQuantity: numeric("reserved_quantity", { precision: 15, scale: 3 }).default("0").notNull(),
+    /** Handed over by the shop, not yet confirmed by the warehouse (not in stock). */
+    pendingQuantity: numeric("pending_quantity", { precision: 15, scale: 3 }).default("0").notNull(),
     unit: varchar("unit", { length: 32 }).default("pcs").notNull(),
     batchNo: varchar("batch_no", { length: 64 }),
     producedAt: timestamp("produced_at", { withTimezone: true }).defaultNow().notNull(),

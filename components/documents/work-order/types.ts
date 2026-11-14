@@ -264,7 +264,10 @@ export interface PackagingBoxItem {
   batchId?: string;
   batchNo?: number;
   shipmentId?: string;
-  status?: "ready" | "dispatched";
+  /** ready = packed in the shop; handed = given to the FG warehouse; in_stock = received there; dispatched = shipped. */
+  status?: "ready" | "handed" | "in_stock" | "dispatched";
+  handedOverAt?: string;
+  receivedAt?: string;
   unitWeightGrams?: number;
   isWeighed?: boolean;
   countDeviation?: number;

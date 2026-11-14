@@ -22,7 +22,6 @@ import {
   Paperclip,
   LayoutTemplate,
   Disc,
-  Package,
   FlaskConical,
   Stamp,
   X,
@@ -113,6 +112,7 @@ import { LayoutCalcTab } from "./tabs/LayoutCalcTab";
 import { FlexoCalcTab } from "./tabs/FlexoCalcTab";
 import { DieLayoutTab } from "./tabs/die-layout/DieLayoutTab";
 import { ShipmentsTab } from "./tabs/ShipmentsTab";
+import { getProducedOutputQty, isProductionRouteFinished } from "./utils/productionOutput";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
@@ -910,6 +910,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const savedDocNoRef = React.useRef<string>(initialDocNo);
   const isSavingRef = React.useRef<boolean>(false);
   const persistOrderDetailsRef = React.useRef<() => Promise<string>>(null!);
+  const persistAfterRenderRef = React.useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const isDraft = !docNo || tab.id.startsWith("draft-") || tab.id.startsWith("temp-");
@@ -1491,6 +1492,37 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (normalized !== operations) setOperations(normalized);
   }, [operations, formData.quantity]);
 
+  // Short box summary shown on the packaging step of the route.
+  const packagingStepInfo = React.useMemo(() => {
+    const boxes = formData.packagingData?.boxes || [];
+    if (boxes.length === 0) return "";
+    const handed = boxes
+      .filter((b) => b.status && b.status !== "ready")
+      .reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+    return handed > 0
+      ? `${boxes.length} quti · omborga ${handed.toLocaleString()}`
+      : `${boxes.length} quti`;
+  }, [formData.packagingData?.boxes]);
+
+  // The packaging step mirrors the boxes: packed quantity, and a status from the packing progress.
+  // Without boxes the step is left as it is (legacy orders closed before boxes were recorded).
+  useEffect(() => {
+    const pkg = formData.packagingData;
+    const packed = (pkg?.boxes || []).reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+    if (packed <= 0 && !pkg?.isCompleted) return;
+    const qtyText = `${packed.toLocaleString()} / ${(Number(formData.quantity) || 0).toLocaleString()}`;
+    const status: RouteStep["status"] = pkg?.isCompleted ? "Finished" : "In Progress";
+    setOperations((prev) => {
+      let changed = false;
+      const next = prev.map((op) => {
+        if (op.kind !== "packaging" || (op.qtyCompleted === qtyText && op.status === status)) return op;
+        changed = true;
+        return { ...op, qtyCompleted: qtyText, status };
+      });
+      return changed ? next : prev;
+    });
+  }, [formData.packagingData, formData.quantity, operations.length]);
+
   const prevRecipeRef = React.useRef(formData.recipe);
 
   const [opSelection, setOpSelection] = useState<GridSelection>({
@@ -1543,7 +1575,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const [isTelegramOrdersModalOpen, setIsTelegramOrdersModalOpen] = useState(false);
   const [isLabelPrintOpen, setIsLabelPrintOpen] = useState(false);
 
-  const handleSavePackaging = (summary: WorkOrderPackagingSummary, markComplete: boolean) => {
+  const handleSavePackaging = async (
+    summary: WorkOrderPackagingSummary,
+    markComplete: boolean,
+    handOver: boolean = markComplete
+  ) => {
     handleFieldChange("packagingData", summary);
 
     // Boxes consumed by packaging become a BOM line, unless packaging materials are already listed by hand.
@@ -1577,15 +1613,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       handleFieldChange("materials", nextMaterials);
     }
 
-    if (markComplete) {
-      setOperations((prev) =>
-        prev.map((op) =>
-          op.kind === "packaging"
-            ? { ...op, status: "Finished", qtyCompleted: String(summary.totalPackedQty) }
-            : op
-        )
-      );
+    const targetWoId = data.docNo || tab.id;
+    const isDraftOrder = targetWoId.startsWith("draft-") || targetWoId.startsWith("temp-");
+    let nextSummary = summary;
 
+    // Packed boxes go to the FG warehouse as a pending receipt; the warehouse confirms what arrived.
+    const readyBoxes = summary.boxes.filter((b) => !b.status || b.status === "ready");
+    const readyQty = readyBoxes.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+    if (handOver && readyQty > 0) {
+      if (isDraftOrder) {
+        addNotification({
+          title: "Omborga topshirib bo'lmadi",
+          description: "Avval buyurtmani saqlang.",
+          severity: "error",
+        });
+        setTabUnsaved(tab.id, true);
+        return;
+      }
       // Finished goods are received at their real production cost, not at the selling price.
       const fgCosts = calculateWorkOrderFinancials({
         quantity: Number(formData.quantity) || 0,
@@ -1601,53 +1645,66 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         packagingData: { ...summary, isCompleted: true },
         materialReturns: getWorkOrderMaterialReturns(
           useWorkspaceStore.getState().warehouseMovements,
-          data.docNo || tab.id
+          targetWoId
         ),
       });
+      const result = await useWorkspaceStore.getState().handOverFinishedGoodsAsync({
+        workOrderId: targetWoId,
+        orderNo: (data as any).clientOrderId || (formData as any).clientOrderId || null,
+        productName: (formData as any).productName || formData.product || (data as any).productName || "Tayyor mahsulot",
+        customerName: formData.customer || (data as any).customerName || "Mijoz",
+        clientId: (data as any).clientId || null,
+        unit: formData.unit || "pcs",
+        quantity: readyQty,
+        costPricePerUnit: fgCosts.unitBaseCost,
+        boxCount: readyBoxes.length,
+      });
+      if (!result.success) {
+        addNotification({ title: "Omborga topshirib bo'lmadi", description: result.error, severity: "error" });
+        setTabUnsaved(tab.id, true);
+        return;
+      }
+      const handedIds = new Set(readyBoxes.map((b) => b.id));
+      const now = new Date().toISOString();
+      nextSummary = {
+        ...summary,
+        boxes: summary.boxes.map((b) => (handedIds.has(b.id) ? { ...b, status: "handed" as const, handedOverAt: now } : b)),
+      };
+      handleFieldChange("packagingData", nextSummary);
+      // The hand-over is already on the server: save the order now so the boxes cannot be handed over twice.
+      persistAfterRenderRef.current = true;
+    }
 
-      const targetWoId = data.docNo || tab.id;
-      if (!targetWoId.startsWith("draft-") && !targetWoId.startsWith("temp-")) {
+    // The packaging step itself follows the boxes (see the packaging-step sync effect).
+    if (markComplete) {
+      if (!isDraftOrder) {
         upsertProductionQueueItem({
           id: targetWoId,
           stage: "Completed",
-          completedSheets: summary.totalPackedQty,
-        });
-
-        // 2810 Tayyor Mahsulot Omboriga Kutilayotgan Qabul yaratish
-        useWorkspaceStore.getState().upsertFinishedGoodAsync({
-          workOrderId: targetWoId,
-          orderNo: (data as any).clientOrderId || (formData as any).clientOrderId || null,
-          productName: (formData as any).productName || (data as any).product || (data as any).productName || "Tayyor Mahsulot",
-          sku: `FG-${targetWoId}`,
-          customerName: (formData as any).customer || (formData as any).customerName || (data as any).customer || (data as any).customerName || "Mijoz",
-          clientId: (data as any).clientId || null,
-          quantity: summary.totalPackedQty,
-          reservedQuantity: 0,
-          unit: formData.unit || (data as any).unit || "pcs",
-          receiptStatus: "PendingReceipt",
-          allocationStatus: "Dedicated",
-          status: "In Stock",
-          locationName: "Tayyor mahsulotlar ombori",
-          locationShelf: "FG-Staging",
-          costPricePerUnit: fgCosts.unitBaseCost,
-          totalStockValue: fgCosts.totalBaseCost,
-          notes: `${summary.totalBoxes} ta quti qadoqlandi. Smena qabuli kutilmoqda.`,
+          completedSheets: nextSummary.totalPackedQty,
         });
       }
-
-      addNotification({
-        title: "Qadoqlash yakunlandi",
-        description: `${summary.totalBoxes} ta quti (${summary.totalPackedQty.toLocaleString()} dona) qadoqlanib, Tayyor mahsulot omboriga qabulga tayyorlandi.`,
-        severity: "success",
-      });
-    } else {
-      addNotification({
-        title: "Qadoqlash qoralamasi saqlandi",
-        description: `${summary.totalBoxes} ta quti kiritildi.`,
-        severity: "info",
-      });
     }
+
+    addNotification(
+      handOver && readyQty > 0
+        ? {
+            title: markComplete ? "Qadoqlash yakunlandi" : "Omborga topshirildi",
+            description: `${readyBoxes.length} ta quti (${readyQty.toLocaleString()} ${formData.unit || "dona"}) ombor qabulini kutmoqda.`,
+            severity: "success",
+          }
+        : markComplete
+        ? { title: "Qadoqlash yakunlandi", description: `${summary.totalBoxes} ta quti.`, severity: "success" }
+        : { title: "Qadoqlash qoralamasi saqlandi", description: `${summary.totalBoxes} ta quti kiritildi.`, severity: "info" }
+    );
     setTabUnsaved(tab.id, true);
+  };
+
+  /** Hands the order's packed ("ready") boxes over to the FG warehouse without completing the packaging. */
+  const handleHandOverPackaging = (summary?: WorkOrderPackagingSummary) => {
+    const current = summary || formData.packagingData;
+    if (!current) return;
+    void handleSavePackaging(current, false, true);
   };
 
   // Action: Create Repeat / Reorder Work Order from current order
@@ -2427,6 +2484,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   };
   persistOrderDetailsRef.current = persistOrderDetails;
 
+  // Saves the order once the hand-over state has rendered (the save reads the current form data).
+  React.useEffect(() => {
+    if (!persistAfterRenderRef.current) return;
+    persistAfterRenderRef.current = false;
+    void persistOrderDetailsRef.current?.();
+  }, [formData.packagingData]);
+
   const handleSave = async () => {
     if (isSavingRef.current) return;
     const savedId = await persistOrderDetails();
@@ -2624,10 +2688,25 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   ]);
 
   const handleCreateShipmentForBatch = useCallback(
-    async (batch: WorkOrderDeliveryBatch, allocatedBoxIds?: string[]) => {
-      const { upsertWarehouseShipmentAsync } = useWorkspaceStore.getState();
-      const qty = Number(batch.packedQty || batch.quantity) || 0;
+    async (batch: WorkOrderDeliveryBatch) => {
+      const { upsertWarehouseShipmentAsync, loadFinishedGoods } = useWorkspaceStore.getState();
       const currentDocNo = docNo || data.docNo || tab.id;
+
+      // A batch ships only what the FG warehouse has received for this order (minus other reservations).
+      await loadFinishedGoods?.();
+      const fg = useWorkspaceStore
+        .getState()
+        .finishedGoods.find((f) => f.workOrderId === currentDocNo && f.id === `FG-${currentDocNo}`);
+      const freeQty = fg ? Math.max(0, Number(fg.stockQty) || 0) : 0;
+      if (freeQty <= 0) {
+        addNotification({
+          title: "Omborda tayyor mahsulot yo'q",
+          description: "Avval qadoqlangan qutilarni omborga topshiring va ombor qabulini tasdiqlating.",
+          severity: "error",
+        });
+        return;
+      }
+      const qty = Math.min(Number(batch.quantity) || 0, freeQty);
 
       // Raqamni server (numberingService: SHP-YY-NNNN) beradi
       const shipmentData = {
@@ -2640,6 +2719,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         customerName: formData.customer,
         workOrderId: currentDocNo,
         workOrder: currentDocNo,
+        batchId: batch.id,
         batchNo: String(batch.batchNo),
         quantity: qty,
         unit: formData.unit || "dona",
@@ -2647,7 +2727,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         items: [
           {
             id: `item-${Date.now()}`,
-            sku: (formData.sizes?.[0] as any)?.skuCode || (formData.sizes?.[0] as any)?.size || formData.sizes?.[0]?.id || `WO-${currentDocNo}`,
+            sku: `FG-${currentDocNo}`,
+            finishedGoodId: fg?.dbId,
+            sourceWorkOrderId: currentDocNo,
+            accountCode: "2810",
             name: formData.product,
             quantity: qty,
             unit: formData.unit || "dona",
@@ -2669,7 +2752,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       const newShipmentId = saved.shipmentNumber;
 
       // Chiqim hali qoralama: partiya "ready" bo'ladi; "dispatched" faqat ombor chiqarganda qo'yiladi
-      const currentBatches = formData.deliveryBatches || [];
+      // The batch may be brand new (whole order shipped as one batch): add it before linking.
+      const known = formData.deliveryBatches || [];
+      const currentBatches = known.some((b) => b.id === batch.id) ? known : [...known, batch];
       const updatedBatches = currentBatches.map((b) =>
         b.id === batch.id
           ? {
@@ -3274,39 +3359,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onClick={() => setIsTelegramOrdersModalOpen(true)}
               />
 
-              {/* 2. Packaging (Icon button with badge if boxes packed) */}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      onClick={() => setIsPackagingOpen(true)}
-                      className={cn(
-                        "h-7 w-7 relative cursor-pointer",
-                        formData.packagingData?.totalBoxes
-                          ? "text-emerald-700 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20"
-                          : ""
-                      )}
-                      aria-label={tOrder("packaging")}
-                    >
-                      <Package className="w-3.5 h-3.5" />
-                      {formData.packagingData?.totalBoxes ? (
-                        <span className="absolute -top-1 -right-1 h-3.5 min-w-3.5 px-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-mono flex items-center justify-center font-bold">
-                          {formData.packagingData.totalBoxes}
-                        </span>
-                      ) : null}
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                  {formData.packagingData?.totalBoxes
-                    ? tOrder("packagingWithCount", { count: formData.packagingData.totalBoxes })
-                    : tOrder("packBoxes")}
-                </TooltipContent>
-              </Tooltip>
-
               {/* 3. Three Vertical Dots (Dropdown Menu with secondary actions) */}
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -3381,11 +3433,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   <DropdownMenuItem onClick={() => setIsTelegramOrdersModalOpen(true)} className="gap-2 cursor-pointer">
                     <Send className="w-3.5 h-3.5" />
                     <span>Telegram guruhga yuborish</span>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem onClick={() => setIsPackagingOpen(true)} className="gap-2 cursor-pointer">
-                    <Package className="w-3.5 h-3.5" />
-                    <span>{tOrder("packBoxes")}</span>
                   </DropdownMenuItem>
 
                   <DropdownMenuSeparator />
@@ -4061,6 +4108,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 currency={formData.currency || "UZS"}
                 exchangeRate={Number(formData.exchangeRate) || 12850}
                 onOpenPackaging={() => setIsPackagingOpen(true)}
+                packagingInfo={packagingStepInfo}
                 fallbackData={readinessFallbackData}
                 operations={operations}
                 setOperations={setOperations}
@@ -4097,6 +4145,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 selectedOpEvents={selectedOpEvents}
                 allEvents={shiftEvents}
                 onOpenQuickPalletLog={handleOpenLogEvent}
+                onOpenPackaging={() => setIsPackagingOpen(true)}
                 onOpenEditPalletLog={handleOpenEditPalletEvent}
                 onOpenDowntimeLog={() => {
                   setEditingDowntimeEvent(null);
@@ -4176,12 +4225,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onCreateShipment={handleCreateShipmentForBatch}
                 onOpenShipment={handleOpenShipmentTab}
                 onOpenDeliveryAct={handleOpenDeliveryActTab}
-                onOpenPackaging={() => setIsPackagingOpen(true)}
                 onOpenPrintLabels={() => setIsLabelPrintOpen(true)}
-                onUpdatePackaging={(summary) => {
-                  handleFieldChange("packagingData", summary);
-                  setTabUnsaved(tab.id, true);
-                }}
+                onHandOver={() => handleHandOverPackaging()}
               />
             )}
 
@@ -4351,7 +4396,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           unit={formData.unit}
           sizes={formData.sizes}
           existingPackaging={formData.packagingData}
-          onSavePackaging={handleSavePackaging}
+          producedQty={getProducedOutputQty(operations, shiftEvents)}
+          routeFinished={isProductionRouteFinished(operations)}
+          onHandOver={handleHandOverPackaging}
+          onSavePackaging={(summary, markComplete) => void handleSavePackaging(summary, markComplete)}
           onOpenPrintModal={(summary) => {
             handleFieldChange("packagingData", summary);
             setIsLabelPrintOpen(true);

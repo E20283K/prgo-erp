@@ -74,6 +74,8 @@ interface OperationsTabProps {
   currency?: string;
   exchangeRate?: number;
   onOpenPackaging?: () => void;
+  /** Box summary of the packaging step, e.g. "6 quti · omborga 2 500". */
+  packagingInfo?: string;
   fallbackData?: {
     customer?: string;
     product?: string;
@@ -113,6 +115,7 @@ export function OperationsTab({
   currency = "UZS",
   exchangeRate = 12850,
   onOpenPackaging,
+  packagingInfo,
   fallbackData,
   operations,
   setOperations,
@@ -298,6 +301,14 @@ export function OperationsTab({
     onMarkUnsaved();
   }, [hasSelectedOp, selectedOpRow, operations, fallbackData?.quantity, setOperations, setOpSelection, onMarkUnsaved]);
 
+  const openRowEditor = useCallback(
+    (row: number) => {
+      if (operations[row]?.kind === "packaging" && onOpenPackaging) onOpenPackaging();
+      else onOpenEditOperation(row);
+    },
+    [operations, onOpenPackaging, onOpenEditOperation]
+  );
+
   const handleSetRowStatus = useCallback(
     (status: RouteStep["status"]) => {
       if (!hasSelectedOp || selectedOpRow === undefined) return;
@@ -350,16 +361,19 @@ export function OperationsTab({
                 : "#94a3b8",
             },
           };
-        case "name":
+        case "name": {
+          const isPack = op.kind === "packaging";
+          const label = isPack && packagingInfo ? `${op.name} · ${packagingInfo}` : op.name;
           return {
             kind: GridCellKind.Text,
             data: op.name,
-            displayData: op.name,
-            allowOverlay: !isOperator,
+            displayData: label,
+            allowOverlay: !isOperator && !isPack,
             themeOverride: {
               baseFontStyle: "500 12px sans-serif",
             },
           };
+        }
         case "machine":
           return {
             kind: GridCellKind.Text,
@@ -449,7 +463,7 @@ export function OperationsTab({
             kind: GridCellKind.Text,
             data: qText,
             displayData: qText,
-            allowOverlay: true,
+            allowOverlay: op.kind !== "packaging",
             contentAlign: "right",
             themeOverride: {
               baseFontStyle: "11px monospace",
@@ -548,7 +562,7 @@ export function OperationsTab({
           return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
       }
     },
-    [operations, opColumns, isDark, isOperator, fallbackData?.quantity, currency, isUsd, fxRate, opCostsUsd, costBases]
+    [operations, opColumns, isDark, isOperator, fallbackData?.quantity, currency, isUsd, fxRate, opCostsUsd, costBases, packagingInfo]
   );
 
   const onOpCellEdited = useCallback(
@@ -571,7 +585,7 @@ export function OperationsTab({
         nextOp.toolingName = newValue.data.toString();
       } else if (column.id === "operator" && newValue.kind === GridCellKind.Text && !isOperator) {
         nextOp.operator = newValue.data.toString();
-      } else if (column.id === "qtyCompleted" && newValue.kind === GridCellKind.Text) {
+      } else if (column.id === "qtyCompleted" && newValue.kind === GridCellKind.Text && target.kind !== "packaging") {
         nextOp.qtyCompleted = newValue.data.toString();
       } else if (column.id === "duration" && newValue.kind === GridCellKind.Number && !isOperator) {
         nextOp.duration = Math.max(0.1, Number(newValue.data) || 0.5);
@@ -657,7 +671,7 @@ export function OperationsTab({
               {!isOperator && (
                 <>
                   <Button
-                    onClick={() => onOpenEditOperation(selectedOpRow)}
+                    onClick={() => openRowEditor(selectedOpRow)}
                     variant="outline"
                     size="sm"
                     className="h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer text-amber-600 dark:text-amber-400 border-amber-500/30"
@@ -830,7 +844,7 @@ export function OperationsTab({
                 handleMoveOperation("down");
               } else if (e.key === "Enter" && hasSelectedOp && !isOperator) {
                 e.preventDefault();
-                onOpenEditOperation(selectedOpRow);
+                openRowEditor(selectedOpRow);
               }
             }}
           >
@@ -915,9 +929,9 @@ export function OperationsTab({
 
           {hasSelectedOp && !isOperator && (
             <>
-              <ContextMenuItem onClick={() => onOpenEditOperation(selectedOpRow)} className="gap-2 cursor-pointer">
+              <ContextMenuItem onClick={() => openRowEditor(selectedOpRow)} className="gap-2 cursor-pointer">
                 <Edit3 className="w-3.5 h-3.5 text-amber-500" />
-                <span>Bosqichni tahrirlash</span>
+                <span>{isPackagingSelected ? "Qutilarni ochish" : "Bosqichni tahrirlash"}</span>
                 <span className="ml-auto text-[10px] text-muted-foreground font-mono">Enter</span>
               </ContextMenuItem>
 
@@ -928,6 +942,8 @@ export function OperationsTab({
                 </ContextMenuItem>
               )}
 
+              {!isPackagingSelected && (
+              <>
               <ContextMenuSeparator />
 
               <ContextMenuItem
@@ -951,6 +967,8 @@ export function OperationsTab({
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                 <span>Holat: Yakunlandi</span>
               </ContextMenuItem>
+              </>
+              )}
             </>
           )}
 

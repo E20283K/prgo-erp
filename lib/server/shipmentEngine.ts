@@ -19,7 +19,7 @@ import {
   warehouseFinishedGoods,
   warehouseStockBalances,
 } from "@/db/schema";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 export type { DbExec };
 
@@ -222,7 +222,8 @@ async function lockFinishedGood(exec: DbExec, companyId: string, line: ShipmentS
       and(
         eq(warehouseFinishedGoods.companyId, companyId),
         eq(warehouseFinishedGoods.sku, line.sku),
-        eq(warehouseFinishedGoods.receiptStatus, "Received")
+        // Stock on hand: a later hand-over of the same order may still wait for confirmation.
+        sql`${warehouseFinishedGoods.quantity} > 0`
       )
     )
     .for("update");
