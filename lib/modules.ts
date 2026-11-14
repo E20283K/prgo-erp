@@ -9,6 +9,7 @@ import {
   Briefcase,
   // Production icons
   PlayCircle,
+  MonitorPlay,
   ClipboardList,
   Calendar,
   History,
@@ -133,6 +134,7 @@ export const MODULE_NAV: ModuleDef[] = [
         items: [
           { id: "work-orders", label: "Work Orders", icon: ClipboardList },
           { id: "planning", label: "Planning", icon: Calendar },
+          { id: "operator-terminal", label: "Operator terminal", icon: MonitorPlay },
           { id: "tooling-orders", label: "Tooling & CTP", icon: Stamp },
         ],
       },

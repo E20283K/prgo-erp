@@ -68,6 +68,8 @@ interface PalletReportDialogProps {
   onOpenPrintTag?: (event: ShiftEvent) => void;
   /** Plant shifts: the current one is preselected. */
   shiftSchedule?: ShiftInterval[];
+  /** Unit the step counts in (varaq, metr, zarba, dona...). */
+  unit?: string;
 }
 
 const DEFECT_REASON_OPTIONS: ComboboxItem[] = [
@@ -93,6 +95,7 @@ export function PalletReportDialog({
   onSaveEvent,
   onOpenPrintTag,
   shiftSchedule = DEFAULT_SHIFTS,
+  unit = "varaq",
 }: PalletReportDialogProps) {
   // Plant clock: current time and the shift it falls in.
   const shiftOptions = shiftSchedule.length > 0 ? shiftSchedule : DEFAULT_SHIFTS;
@@ -250,7 +253,7 @@ export function PalletReportDialog({
     if (overInput) return;
     const noteText = isMultipiece && multiplier > 1
       ? `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} l. | Priladka: ${makeReadyQty} | Brak: ${defectQty} | Sof: ${calculatedGoodQty.toLocaleString()} l. (${outputPieces.toLocaleString()} dona)`
-      : `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} l. | Priladka: ${makeReadyQty} | Brak: ${defectQty} | Chiqish: ${calculatedGoodQty.toLocaleString()} l.`;
+      : `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} ${unit} | Priladka: ${makeReadyQty} | Brak: ${defectQty} | Chiqish: ${calculatedGoodQty.toLocaleString()} ${unit}`;
 
     onSaveEvent({
       eventId: editingEvent?.id,
@@ -335,7 +338,7 @@ export function PalletReportDialog({
                 </div>
               </div>
               <div className="font-mono text-[11px] font-bold text-blue-700 dark:text-blue-400">
-                {previousOpGoodOutput > 0 ? `${previousOpGoodOutput.toLocaleString()} yaroqli list` : "Kutilmoqda"}
+                {previousOpGoodOutput > 0 ? `${previousOpGoodOutput.toLocaleString()} yaroqli ${unit}` : "Kutilmoqda"}
               </div>
             </div>
           )}
@@ -507,12 +510,12 @@ export function PalletReportDialog({
                     placeholder="0"
                   />
                   <span className="absolute right-3 text-xs font-semibold font-mono text-muted-foreground pointer-events-none uppercase">
-                    list
+                    {unit}
                   </span>
                 </div>
                 <span className="text-[10px] text-muted-foreground leading-tight truncate">
                   {previousOpGoodOutput > 0
-                    ? `Oldingi: ${previousOpGoodOutput.toLocaleString()} l.`
+                    ? `Oldingi: ${previousOpGoodOutput.toLocaleString()} ${unit}`
                     : "Jarayonga kirgan umumiy qog'oz"}
                 </span>
               </div>
@@ -542,7 +545,7 @@ export function PalletReportDialog({
                     placeholder="0"
                   />
                   <span className="absolute right-3 text-xs font-semibold font-mono text-amber-700/80 dark:text-amber-400 pointer-events-none uppercase">
-                    list
+                    {unit}
                   </span>
                 </div>
                 <span className="text-[10px] text-amber-700/80 dark:text-amber-400/80 leading-tight">
@@ -575,7 +578,7 @@ export function PalletReportDialog({
                     placeholder="0"
                   />
                   <span className="absolute right-3 text-xs font-semibold font-mono text-rose-600/80 dark:text-rose-400 pointer-events-none uppercase">
-                    list
+                    {unit}
                   </span>
                 </div>
                 <span className="text-[10px] text-rose-600/80 dark:text-rose-400/80 leading-tight">
@@ -620,7 +623,7 @@ export function PalletReportDialog({
                   <span className="text-muted-foreground/60">−</span>
                   <span className="text-rose-600 dark:text-rose-400 font-semibold">{defectQty.toLocaleString()} brak</span>
                   <span className="text-muted-foreground/60">=</span>
-                  <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{calculatedGoodQty.toLocaleString()} list</strong>
+                  <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{calculatedGoodQty.toLocaleString()} {unit}</strong>
                 </div>
               </div>
 
@@ -628,7 +631,7 @@ export function PalletReportDialog({
                 <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-700 dark:text-emerald-400 leading-none tracking-tight">
                   {calculatedGoodQty.toLocaleString()}{" "}
                   <span className="text-xs sm:text-sm font-semibold text-emerald-700/80 dark:text-emerald-400/80 uppercase">
-                    list
+                    {unit}
                   </span>
                 </div>
                 {isMultipiece && multiplier > 1 && (
@@ -645,7 +648,7 @@ export function PalletReportDialog({
               <div className="p-2 rounded-lg bg-muted/40 border border-border text-[11px] text-muted-foreground flex items-center justify-between font-mono">
                 <span className="flex items-center gap-1.5">
                   <Package className="w-3.5 h-3.5 text-primary" />
-                  <span>1 list = {multiplier} dona mahsulot (Imposition layout)</span>
+                  <span>1 {unit} = {multiplier} dona mahsulot</span>
                 </span>
                 <span className="font-semibold text-foreground">
                   {outputPieces.toLocaleString()} dona

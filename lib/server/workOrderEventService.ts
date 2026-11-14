@@ -1,9 +1,54 @@
 import { db } from "@/db";
-import { branches, workOrderEvents, workOrders } from "@/db/schema";
+import { branches, workOrderEvents, workOrderOperations, workOrders } from "@/db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { parseShiftSchedule, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
+import { getStepTimeline, type StepPhase } from "@/components/documents/work-order/utils/stepTimeline";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const PHASE_STATUS: Record<StepPhase, string> = {
+  queued: "Queued",
+  setup: "In Progress",
+  run: "In Progress",
+  paused: "Paused",
+  finished: "Finished",
+};
+
+/**
+ * Writes the step's status, times, downtime and good output from its journal onto the step row,
+ * so screens that read the route (registry, planning, operator terminal) see what the journal says
+ * without the order being saved. Steps without transitions only get their reported output.
+ */
+async function syncStepFromJournal(workOrderId: string, opId: string) {
+  if (!UUID_RE.test(opId)) return;
+  const rows = await db.query.workOrderEvents.findMany({
+    where: and(
+      eq(workOrderEvents.workOrderId, workOrderId),
+      eq(workOrderEvents.opId, opId),
+      isNull(workOrderEvents.deletedAt)
+    ),
+  });
+  const events = rows.map(toShiftEvent);
+  const tl = getStepTimeline(events);
+  const update: Partial<typeof workOrderOperations.$inferInsert> = {};
+  if (tl.reportedGood > 0) update.completedQty = String(tl.reportedGood);
+  if (tl.hasTransitions) {
+    update.status = PHASE_STATUS[tl.phase];
+    const started = tl.setupStartedAt || tl.runStartedAt;
+    if (started) update.startedAt = new Date(started);
+    update.completedAt = tl.finishedAt ? new Date(tl.finishedAt) : null;
+    update.pausedAt = tl.openDowntime?.occurredAt ? new Date(tl.openDowntime.occurredAt) : null;
+    update.downtimeMinutes = tl.closedDowntimeMinutes;
+    if (tl.phase === "finished" && started) update.actualDurationMinutes = tl.setupMinutes + tl.runMinutes;
+  }
+  if (Object.keys(update).length === 0) return;
+  await db
+    .update(workOrderOperations)
+    .set(update)
+    .where(and(eq(workOrderOperations.workOrderId, workOrderId), eq(workOrderOperations.id, opId)));
+}
 
 /**
  * Shift journal of a work order. Every event is written the moment it is logged (not with the order),
@@ -143,12 +188,14 @@ export async function saveWorkOrderEvent(
       .set({ ...values, updatedBy: actor.name, updatedAt: new Date() })
       .where(eq(workOrderEvents.id, existing.id))
       .returning();
+    await syncStepFromJournal(wo.id, values.opId);
     return toShiftEvent(row);
   }
   const [row] = await db
     .insert(workOrderEvents)
     .values({ ...values, workOrderId: wo.id, clientEventId: input.id, createdBy: actor.name })
     .returning();
+  await syncStepFromJournal(wo.id, values.opId);
   return toShiftEvent(row);
 }
 
@@ -170,7 +217,8 @@ export async function deleteWorkOrderEvent(
         isNull(workOrderEvents.deletedAt)
       )
     )
-    .returning({ id: workOrderEvents.id });
+    .returning({ id: workOrderEvents.id, opId: workOrderEvents.opId });
   if (!row) throw new Error("Yozuv topilmadi.");
+  if (row.opId) await syncStepFromJournal(wo.id, row.opId);
   return { id: eventId };
 }

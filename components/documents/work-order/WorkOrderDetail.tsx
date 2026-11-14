@@ -114,6 +114,8 @@ import { DieLayoutTab } from "./tabs/die-layout/DieLayoutTab";
 import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { getProducedOutputQty, isProductionRouteFinished } from "./utils/productionOutput";
 import { DEFAULT_SHIFTS, atPlantTime, occurredAtFromTime, plantClock, type ShiftInterval } from "@/lib/shiftSchedule";
+import { stepUnit } from "./utils/stepKpis";
+import { resolveMachine } from "./utils/operationCost";
 import {
   applyTimelineToStep,
   formatMinutes,
@@ -1533,6 +1535,24 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       ? `${boxes.length} quti · omborga ${handed.toLocaleString()}`
       : `${boxes.length} quti`;
   }, [formData.packagingData?.boxes]);
+
+  // Route steps carry UUIDs from the start: the server keeps them on save and journal entries point at them.
+  useEffect(() => {
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (operations.every((op) => UUID.test(op.id))) return;
+    const remap = new Map<string, string>();
+    const next = operations.map((op) => {
+      if (UUID.test(op.id)) return op;
+      const id = crypto.randomUUID();
+      remap.set(op.id, id);
+      return { ...op, id };
+    });
+    setOperations(next);
+    setShiftEvents((prev) =>
+      prev.some((ev) => remap.has(ev.opId)) ? prev.map((ev) => (remap.has(ev.opId) ? { ...ev, opId: remap.get(ev.opId)! } : ev)) : prev
+    );
+    setSelectedTimelineOpId((cur) => remap.get(cur) || cur);
+  }, [operations]);
 
   // The packaging step mirrors the boxes: packed quantity, and a status from the packing progress.
   // Without boxes the step is left as it is (legacy orders closed before boxes were recorded).
@@ -4442,6 +4462,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       {isPalletReportDialogOpen && (
         <PalletReportDialog
           shiftSchedule={shiftSchedule}
+          unit={stepUnit(
+            resolveMachine(selectedOp, storeMachines),
+            useWorkspaceStore.getState().workRates.find((r) => r.id === selectedOp.workRateId)?.unit
+          )}
           isOpen={isPalletReportDialogOpen}
           onOpenChange={(open) => {
             setIsPalletReportDialogOpen(open);

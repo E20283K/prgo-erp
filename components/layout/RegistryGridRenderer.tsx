@@ -27,6 +27,7 @@ const DevicesGrid = dynamic(() => import("@/components/documents/hr/devices/Devi
 const TelegramInbox = dynamic(() => import("@/components/documents/crm/TelegramInbox").then((mod) => mod.TelegramInbox), { ssr: false });
 const TelegramSettingsView = dynamic(() => import("@/components/documents/settings/TelegramSettingsView").then((mod) => mod.TelegramSettingsView), { ssr: false });
 const NotificationSoundSettingsView = dynamic(() => import("@/components/documents/settings/NotificationSoundSettingsView").then((mod) => mod.NotificationSoundSettingsView), { ssr: false });
+const OperatorTerminal = dynamic(() => import("@/components/documents/work-order/terminal/OperatorTerminal").then((mod) => mod.OperatorTerminal), { ssr: false });
 const ToolingOrdersGrid = dynamic(() => import("@/components/grid/ToolingOrdersGrid").then((mod) => mod.ToolingOrdersGrid), { ssr: false });
 
 export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
@@ -43,6 +44,7 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     else if (tab.id.includes("leads")) crmType = "leads";
     return <CrmGrid type={crmType as any} />;
   } else if (tab.module === "production") {
+    if (tab.id.includes("operator-terminal")) return <OperatorTerminal />;
     if (tab.id.includes("operation-catalog")) return <WorkRatesGrid />;
     if (tab.id.includes("work-orders") || tab.id === "registry-work-orders") return <DataGrid />;
     if (tab.id.includes("planning")) return <ProductionGrid type="planning" />;

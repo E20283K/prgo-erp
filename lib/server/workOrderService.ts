@@ -835,6 +835,8 @@ export async function upsertWorkOrder(
           const seqNum = parseInt(String(op.stepNumber ?? op.sequence ?? (idx + 1)), 10) || (idx + 1);
 
           return {
+            // Keep the step's id: shift-journal entries point at it.
+            ...(typeof op.id === "string" && isUuid(op.id) ? { id: op.id } : {}),
             workOrderId: targetId,
             tariffId: op.tariffId && op.tariffId.length > 20 ? op.tariffId : null,
             tariffCode: op.tariffCode || null,
