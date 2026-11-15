@@ -54,7 +54,8 @@ function jobAsStep(job: TerminalJob): RouteStep {
     machine: "",
     operator: "",
     duration: job.plannedHours,
-    qtyCompleted: `${job.goodQty.toLocaleString()} / ${job.plannedQty.toLocaleString()}`,
+    // Same shape as a stored step: the plan is in order pieces, the dialog converts it to the step's unit.
+    qtyCompleted: `${job.goodQty.toLocaleString()} / ${job.plannedPieces.toLocaleString()}`,
     status: job.phase === "paused" ? "Paused" : job.phase === "queued" ? "Queued" : "In Progress",
   };
 }
@@ -253,7 +254,7 @@ export function OperatorTerminal() {
   const scrap = job && job.inputQty > 0 ? (job.makeReadyQty + job.defectQty) / job.inputQty : null;
   const BIG = "h-12 px-5 text-sm font-semibold gap-2";
   // Quantities on this machine are counted in its speed unit (varaq, metr...).
-  const unit = stepUnit(storeMachines.find((m) => m.id === machineId) || null);
+  const unit = job?.profile.unit || stepUnit(storeMachines.find((m) => m.id === machineId) || null);
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-background">
@@ -460,7 +461,9 @@ export function OperatorTerminal() {
                   <Figure
                     label="Bajarildi"
                     value={`${job.goodQty.toLocaleString()} / ${job.plannedQty.toLocaleString()}`}
-                    sub={`${unit}${job.plannedQty > 0 ? ` · ${Math.round((job.goodQty / job.plannedQty) * 100)}%` : ""}`}
+                    sub={`${unit}${job.plannedQty > 0 ? ` · ${Math.round((job.goodQty / job.plannedQty) * 100)}%` : ""}${
+                      job.profile.piecesPerUnit > 1 ? ` · ${Math.round(job.goodQty * job.profile.piecesPerUnit).toLocaleString()} dona` : ""
+                    }`}
                   />
                   <Figure
                     label="Brak"
@@ -526,6 +529,7 @@ export function OperatorTerminal() {
           existingOpEvents={job.reports}
           shiftSchedule={schedule}
           unit={unit}
+          profile={job.profile}
           onSaveEvent={async (data) => {
             const waste = data.makeReadyQty + data.defectQty;
             const at = new Date();

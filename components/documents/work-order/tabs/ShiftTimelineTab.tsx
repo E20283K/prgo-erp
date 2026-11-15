@@ -38,6 +38,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { resolveMachine } from "../utils/operationCost";
 import { getStepKpis, pct, scoreTone, stepUnit } from "../utils/stepKpis";
+import { planInUnit, type CountingProfile } from "../utils/countingProfile";
 
 const TONE_TEXT = {
   good: "text-emerald-600 dark:text-emerald-400",
@@ -177,6 +178,8 @@ interface ShiftTimelineTabProps {
   piecesPerSheet?: number;
   /** The packaging step is recorded as boxes, not as shift output: it opens the packaging dialog. */
   onOpenPackaging?: () => void;
+  /** How each step counts (unit, pieces per unit) from the order's spec and the step's machine. */
+  profileOf?: (op: RouteStep) => CountingProfile;
 }
 
 export function ShiftTimelineTab({
@@ -200,6 +203,7 @@ export function ShiftTimelineTab({
   onCorrectStep,
   onDeleteEvent,
   onOpenPackaging,
+  profileOf,
 }: ShiftTimelineTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
@@ -262,7 +266,10 @@ export function ShiftTimelineTab({
   const unitOf = (op: RouteStep) =>
     op.kind === "packaging"
       ? "dona"
-      : stepUnit(resolveMachine(op, machines), workRates.find((w) => w.id === op.workRateId)?.unit);
+      : profileOf?.(op).unit || stepUnit(resolveMachine(op, machines), workRates.find((w) => w.id === op.workRateId)?.unit);
+  /** A step's plan in its own unit (sheets, metres...) from the order-piece plan it stores. */
+  const planOf = (op: RouteStep, orderPieces: number) =>
+    op.kind === "packaging" || !profileOf ? orderPieces : planInUnit(orderPieces, profileOf(op));
   const kpis = useMemo(
     () =>
       getStepKpis(
@@ -270,9 +277,10 @@ export function ShiftTimelineTab({
         allEvents.filter((ev) => ev.opId === selectedOp.id),
         selectedTimeline,
         resolveMachine(selectedOp, machines),
-        workRates.find((w) => w.id === selectedOp.workRateId)?.unit
+        workRates.find((w) => w.id === selectedOp.workRateId)?.unit,
+        selectedOp.kind === "packaging" ? undefined : profileOf?.(selectedOp)
       ),
-    [selectedOp, allEvents, selectedTimeline, machines, workRates]
+    [selectedOp, allEvents, selectedTimeline, machines, workRates, profileOf]
   );
   const [isCorrectionOpen, setIsCorrectionOpen] = useState(false);
   const [correctionStatus, setCorrectionStatus] = useState<RouteStep["status"]>("In Progress");
@@ -532,7 +540,13 @@ export function ShiftTimelineTab({
         <div className="flex items-stretch gap-2 overflow-x-auto pb-0.5 no-scrollbar">
           {operations.map((op, idx) => {
             const isSelected = selectedTimelineOpId === op.id;
-            const opParsed = parseQtyString(op.qtyCompleted);
+            const opParsedRaw = parseQtyString(op.qtyCompleted);
+            const opTarget = planOf(op, opParsedRaw.target);
+            const opParsed = {
+              ...opParsedRaw,
+              target: opTarget,
+              percent: opTarget > 0 ? Math.min(100, Math.round((getOpGoodOutput(op) / opTarget) * 100)) : 0,
+            };
             const opGoodQty = getOpGoodOutput(op);
             const opEvents = allEvents.filter((ev) => ev.opId === op.id);
             const opDowntimeMins = opEvents.reduce(
@@ -690,7 +704,7 @@ export function ShiftTimelineTab({
                 <span>
                   Reja:{" "}
                   <strong className="text-foreground">
-                    {target.toLocaleString()} {kpis.unit}
+                    {kpis.plan.toLocaleString()} {kpis.unit}
                   </strong>
                 </span>
                 {selectedTimeline.hasTransitions && (
@@ -868,7 +882,9 @@ export function ShiftTimelineTab({
           <KpiCell
             label="Bajarildi"
             value={`${kpis.good.toLocaleString()}${kpis.plan > 0 ? ` / ${kpis.plan.toLocaleString()}` : ""}`}
-            sub={`${kpis.unit}${kpis.plan > 0 ? ` · ${pct(kpis.completion)}` : ""}`}
+            sub={`${kpis.unit}${kpis.plan > 0 ? ` · ${pct(kpis.completion)}` : ""}${
+              kpis.piecesPerUnit > 1 ? ` · ${kpis.goodPieces.toLocaleString()} dona` : ""
+            }`}
             bar={kpis.plan > 0 ? Math.min(1, kpis.completion) : undefined}
           />
           <KpiCell

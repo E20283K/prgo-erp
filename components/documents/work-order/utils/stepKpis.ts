@@ -2,6 +2,7 @@ import type { MachineRecord } from "@/components/documents/machine/types";
 import type { RouteStep, ShiftEvent } from "../types";
 import { calcUnitLabel, getMachineThroughput } from "./operationCost";
 import type { StepTimeline } from "./stepTimeline";
+import { planInUnit, type CountingProfile } from "./countingProfile";
 
 /**
  * Shop-floor indicators of one route step, in the step's own unit:
@@ -20,6 +21,9 @@ export interface StepKpis {
   unit: string;
   plan: number;
   good: number;
+  /** Good output in finished pieces (good × pieces per unit). */
+  goodPieces: number;
+  piecesPerUnit: number;
   input: number;
   makeReady: number;
   defect: number;
@@ -57,14 +61,16 @@ export function getStepKpis(
   stepEvents: ShiftEvent[],
   timeline: StepTimeline,
   machine: MachineRecord | null,
-  catalogUnit?: string
+  catalogUnit?: string,
+  profile?: CountingProfile
 ): StepKpis {
   const reports = stepEvents.filter((ev) => ev.type === "Run");
   const sum = (pick: (ev: ShiftEvent) => number | undefined) => reports.reduce((s, ev) => s + (Number(pick(ev)) || 0), 0);
   const counter = (op.qtyCompleted || "").split("/");
   const parse = (v?: string) => parseInt((v || "").replace(/[^\d]/g, ""), 10) || 0;
 
-  const plan = parse(counter[1]);
+  // The step's stored plan is in order pieces; a sheet or metre step plans in its own unit.
+  const plan = profile ? planInUnit(parse(counter[1]), profile) : parse(counter[1]);
   const reportedGood = sum((ev) => ev.goodQty);
   const good = reportedGood > 0 ? reportedGood : parse(counter[0]);
   const makeReady = sum((ev) => ev.makeReadyQty);
@@ -89,9 +95,11 @@ export function getStepKpis(
     availability !== null && performance !== null && quality !== null ? availability * performance * quality : null;
 
   return {
-    unit: stepUnit(machine, catalogUnit),
+    unit: profile?.unit || stepUnit(machine, catalogUnit),
     plan,
     good,
+    goodPieces: Math.round(good * (profile?.piecesPerUnit || 1)),
+    piecesPerUnit: profile?.piecesPerUnit || 1,
     input,
     makeReady,
     defect,

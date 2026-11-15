@@ -4,6 +4,11 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { getStepTimeline, type StepPhase } from "@/components/documents/work-order/utils/stepTimeline";
 import { toShiftEvent } from "./workOrderEventService";
+import {
+  getCountingProfile,
+  planInUnit,
+  type CountingProfile,
+} from "@/components/documents/work-order/utils/countingProfile";
 
 /**
  * Operator terminal: the work waiting on one machine, across all active work orders.
@@ -28,7 +33,12 @@ export interface TerminalJob {
   stepNumber: number;
   opName: string;
   phase: StepPhase;
+  /** How this machine counts (unit, report container, pieces per unit). */
+  profile: CountingProfile;
+  /** Plan in the step's unit (sheets, metres...). */
   plannedQty: number;
+  /** Plan in finished pieces (the order quantity this step serves). */
+  plannedPieces: number;
   plannedHours: number;
   goodQty: number;
   makeReadyQty: number;
@@ -117,6 +127,20 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
       const sum = (pick: (ev: ShiftEvent) => number | undefined) =>
         reports.reduce((s, ev) => s + (Number(pick(ev)) || 0), 0);
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dims = (wo.dimensions || {}) as any;
+      const profile = getCountingProfile({
+        machineCategory: machine.category,
+        machineDepartment: machine.department,
+        orderDepartment: wo.department,
+        widthMm: Number(dims.width) || 0,
+        heightMm: Number(dims.height) || 0,
+        gapYMm: dims.flexoGapY ?? 3,
+        lanes: dims.flexoLanes ?? 1,
+        itemsPerSheet: Number(dims.impositionState?.summary?.itemsPerSheet) || 1,
+      });
+      const plannedPieces = Number(op.plannedQty) || Number(wo.quantity) || 0;
+
       jobs.push({
         workOrderNo: wo.docNo,
         productName: wo.productName,
@@ -129,7 +153,9 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
         stepNumber: op.sequence,
         opName: op.name,
         phase,
-        plannedQty: Number(op.plannedQty) || Number(wo.quantity) || 0,
+        profile,
+        plannedQty: planInUnit(plannedPieces, profile),
+        plannedPieces,
         plannedHours: Number(op.durationHours) || 0,
         goodQty: goodOf(stepEvents, op.completedQty),
         makeReadyQty: sum((ev) => ev.makeReadyQty),

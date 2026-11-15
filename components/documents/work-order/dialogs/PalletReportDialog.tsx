@@ -35,6 +35,7 @@ import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RouteStep, ShiftEvent } from "../types";
 import { DEFAULT_SHIFTS, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
+import { lastCounterReading, planInUnit, type CountingProfile } from "../utils/countingProfile";
 
 type ShiftName = NonNullable<ShiftEvent["shift"]>;
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -70,6 +71,8 @@ interface PalletReportDialogProps {
   shiftSchedule?: ShiftInterval[];
   /** Unit the step counts in (varaq, metr, zarba, dona...). */
   unit?: string;
+  /** How this technology counts (pallet of sheets, roll of metres, box of pieces). */
+  profile?: CountingProfile;
 }
 
 const DEFECT_REASON_OPTIONS: ComboboxItem[] = [
@@ -95,8 +98,11 @@ export function PalletReportDialog({
   onSaveEvent,
   onOpenPrintTag,
   shiftSchedule = DEFAULT_SHIFTS,
-  unit = "varaq",
+  unit: unitProp = "varaq",
+  profile,
 }: PalletReportDialogProps) {
+  const unit = profile?.unit || unitProp;
+  const container = profile?.container || "Palet";
   // Plant clock: current time and the shift it falls in.
   const shiftOptions = shiftSchedule.length > 0 ? shiftSchedule : DEFAULT_SHIFTS;
   const defaultTime = plantClock(new Date()).time;
@@ -110,7 +116,11 @@ export function PalletReportDialog({
   // Determine counting mode
   const isTheoretical = selectedOp.countingMode === "theoretical" || /kesish|gilotin|cutter|ctp|prepress/i.test(selectedOp.name);
   const isMultipiece = selectedOp.countingMode === "multipiece" || /shtamp|die-cut|tigel|qadoq|pack/i.test(selectedOp.name);
-  const multiplier = selectedOp.multiplier || (isMultipiece && piecesPerSheet > 1 ? piecesPerSheet : 1);
+  const multiplier =
+    profile && profile.piecesPerUnit > 1
+      ? profile.piecesPerUnit
+      : selectedOp.multiplier || (isMultipiece && piecesPerSheet > 1 ? piecesPerSheet : 1);
+  const showPieces = multiplier > 1;
 
   // Suggested default input quantity from previous step or planned target
   const suggestedInputQty = useMemo(() => {
@@ -123,7 +133,8 @@ export function PalletReportDialog({
     // Fallback: parse target from qtyCompleted
     const match = (selectedOp.qtyCompleted || "").match(/\/\s*([\d,\s]+)/);
     if (match) {
-      return parseInt(match[1].replace(/[^\d]/g, ""), 10) || 1000;
+      const planPieces = parseInt(match[1].replace(/[^\d]/g, ""), 10) || 1000;
+      return profile ? planInUnit(planPieces, profile) : planPieces;
     }
     return 1000;
   }, [previousOpGoodOutput, existingOpEvents, selectedOp.qtyCompleted]);
@@ -151,7 +162,7 @@ export function PalletReportDialog({
 
   // Form states
   const [shift, setShift] = useState<ShiftName>(defaultShift);
-  const [batchLabel, setBatchLabel] = useState<string>(`Palet #${nextPalletNum}`);
+  const [batchLabel, setBatchLabel] = useState<string>(`${container} #${nextPalletNum}`);
   const [selectedOperator, setSelectedOperator] = useState<string>(selectedOp.operator || "");
   const [inputQty, setInputQty] = useState<number>(suggestedInputQty);
   const [makeReadyQty, setMakeReadyQty] = useState<number>(0);
@@ -159,12 +170,23 @@ export function PalletReportDialog({
   const [wasteReason, setWasteReason] = useState<string>("");
   const [time, setTime] = useState<string>(defaultTime);
   const [customGoodQty, setCustomGoodQty] = useState<number | null>(null);
+  const [counterStart, setCounterStart] = useState<number>(0);
+  const [counterEnd, setCounterEnd] = useState<number>(0);
+  const useCounter = Boolean(profile?.counter);
+  const applyCounter = (start: number, end: number) => {
+    setCounterStart(start);
+    setCounterEnd(end);
+    if (end > start) {
+      setInputQty(end - start);
+      setCustomGoodQty(null);
+    }
+  };
 
   // Synchronize when opening
   useEffect(() => {
     if (isOpen) {
       if (editingEvent) {
-        setBatchLabel(editingEvent.batchLabel || `Palet #${existingOpEvents.length}`);
+        setBatchLabel(editingEvent.batchLabel || `${container} #${existingOpEvents.length}`);
         setShift(editingEvent.shift || defaultShift);
         setInputQty(editingEvent.inputQty || 0);
         setMakeReadyQty(editingEvent.makeReadyQty || 0);
@@ -174,7 +196,9 @@ export function PalletReportDialog({
         setCustomGoodQty(editingEvent.goodQty ?? null);
         setSelectedOperator(editingEvent.operator || selectedOp.operator || employees[0]?.fullName || "");
       } else {
-        setBatchLabel(`Palet #${existingOpEvents.length + 1}`);
+        setBatchLabel(`${container} #${existingOpEvents.length + 1}`);
+        setCounterStart(lastCounterReading(existingOpEvents.map((ev) => ev.note)) ?? 0);
+        setCounterEnd(0);
         setShift(defaultShift);
         setTime(defaultTime);
         setInputQty(suggestedInputQty);
@@ -251,9 +275,14 @@ export function PalletReportDialog({
 
   const handleSave = (markStepFinished: boolean) => {
     if (overInput) return;
-    const noteText = isMultipiece && multiplier > 1
-      ? `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} l. | Priladka: ${makeReadyQty} | Brak: ${defectQty} | Sof: ${calculatedGoodQty.toLocaleString()} l. (${outputPieces.toLocaleString()} dona)`
-      : `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} ${unit} | Priladka: ${makeReadyQty} | Brak: ${defectQty} | Chiqish: ${calculatedGoodQty.toLocaleString()} ${unit}`;
+    const counterText =
+      useCounter && counterEnd > counterStart
+        ? ` | Hisoblagich: ${counterStart.toLocaleString()} → ${counterEnd.toLocaleString()}`
+        : "";
+    const noteText =
+      `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} ${unit} | ${profile?.makeReadyLabel || "Priladka"}: ${makeReadyQty} | Brak: ${defectQty} | Chiqish: ${calculatedGoodQty.toLocaleString()} ${unit}` +
+      (showPieces ? ` (${outputPieces.toLocaleString()} dona)` : "") +
+      counterText;
 
     onSaveEvent({
       eventId: editingEvent?.id,
@@ -264,7 +293,7 @@ export function PalletReportDialog({
       makeReadyQty,
       defectQty,
       goodQty: calculatedGoodQty,
-      outputPiecesQty: isMultipiece && multiplier > 1 ? outputPieces : undefined,
+      outputPiecesQty: showPieces ? outputPieces : undefined,
       wasteReason: defectQty > 0 ? wasteReason : undefined,
       time,
       note: noteText,
@@ -343,7 +372,7 @@ export function PalletReportDialog({
             </div>
           )}
 
-          {isTheoretical && (
+          {isTheoretical && (!profile || profile.kind === "sheet") && (
             <div className="p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 flex items-center gap-2 text-amber-700 dark:text-amber-400">
               <Info className="w-3.5 h-3.5 shrink-0" />
               <span className="text-[11px]">
@@ -355,7 +384,7 @@ export function PalletReportDialog({
           {/* Row 1: Pallet Label, Time & Responsible Operator */}
           <div className="grid grid-cols-12 gap-2.5 items-center">
             <div className="col-span-5 space-y-1">
-              <label className="text-[11px] font-medium text-muted-foreground">Partiya / Palet Nomi</label>
+              <label className="text-[11px] font-medium text-muted-foreground">{container}</label>
               <Input
                 value={batchLabel}
                 onChange={(e) => setBatchLabel(e.target.value)}
@@ -484,6 +513,30 @@ export function PalletReportDialog({
             </div>
 
             {/* Enlarged 3-Column Calculator */}
+            {useCounter && (
+              <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground">Hisoblagich boshi ({unit})</label>
+                  <Input
+                    type="number"
+                    value={counterStart === 0 ? "" : counterStart}
+                    onChange={(e) => applyCounter(parseInt(e.target.value, 10) || 0, counterEnd)}
+                    className="h-8 text-xs font-mono"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground">Hisoblagich oxiri ({unit})</label>
+                  <Input
+                    type="number"
+                    value={counterEnd === 0 ? "" : counterEnd}
+                    onChange={(e) => applyCounter(counterStart, parseInt(e.target.value, 10) || 0)}
+                    className="h-8 text-xs font-mono"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* 1. Kirgan qog'oz */}
               <div className="flex flex-col gap-1.5 p-3 rounded-lg border border-border bg-background shadow-2xs">
@@ -516,7 +569,9 @@ export function PalletReportDialog({
                 <span className="text-[10px] text-muted-foreground leading-tight truncate">
                   {previousOpGoodOutput > 0
                     ? `Oldingi: ${previousOpGoodOutput.toLocaleString()} ${unit}`
-                    : "Jarayonga kirgan umumiy qog'oz"}
+                    : useCounter
+                    ? "Hisoblagich bo'yicha uzunlik"
+                    : "Jarayonga kirgan umumiy miqdor"}
                 </span>
               </div>
 
@@ -527,10 +582,7 @@ export function PalletReportDialog({
                     <span className="w-4 h-4 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-[10px] font-mono font-bold">
                       2
                     </span>
-                    Priladka
-                  </span>
-                  <span className="text-[10px] font-mono font-semibold text-amber-700/80 dark:text-amber-400/80 uppercase">
-                    Sozlash
+                    {profile?.makeReadyLabel || "Priladka"}
                   </span>
                 </div>
                 <div className="relative flex items-center mt-0.5">
@@ -634,7 +686,7 @@ export function PalletReportDialog({
                     {unit}
                   </span>
                 </div>
-                {isMultipiece && multiplier > 1 && (
+                {showPieces && (
                   <div className="text-xs font-mono font-bold text-primary mt-1 flex items-center justify-end gap-1">
                     <Package className="w-3.5 h-3.5 inline" />
                     <span>= {outputPieces.toLocaleString()} dona tayyor</span>
@@ -644,7 +696,7 @@ export function PalletReportDialog({
             </div>
 
             {/* Multi-piece conversion hint (Kesish / Tigel uchun) */}
-            {isMultipiece && multiplier > 1 && (
+            {showPieces && (
               <div className="p-2 rounded-lg bg-muted/40 border border-border text-[11px] text-muted-foreground flex items-center justify-between font-mono">
                 <span className="flex items-center gap-1.5">
                   <Package className="w-3.5 h-3.5 text-primary" />

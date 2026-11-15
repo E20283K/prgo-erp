@@ -115,6 +115,7 @@ import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { getProducedOutputQty, isProductionRouteFinished } from "./utils/productionOutput";
 import { DEFAULT_SHIFTS, atPlantTime, occurredAtFromTime, plantClock, type ShiftInterval } from "@/lib/shiftSchedule";
 import { stepUnit } from "./utils/stepKpis";
+import { getCountingProfile } from "./utils/countingProfile";
 import { useAskDialog } from "./dialogs/AskDialog";
 import { resolveMachine } from "./utils/operationCost";
 import {
@@ -2971,6 +2972,34 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     ]
   );
 
+  /** How a step counts its output: unit, report container, pieces per unit (from the spec and its machine). */
+  const profileOf = useCallback(
+    (op: RouteStep) => {
+      const machine = resolveMachine(op, storeMachines);
+      const ups = Number(formData.impositionState?.summary?.itemsPerSheet) || activePrintPlan.piecesPerSheet;
+      return getCountingProfile({
+        machineCategory: machine?.category,
+        machineDepartment: machine?.department,
+        orderDepartment: formData.department,
+        widthMm: Number(formData.width) || 0,
+        heightMm: Number(formData.height) || 0,
+        gapYMm: formData.flexoGapY ?? 3,
+        lanes: formData.flexoLanes ?? 1,
+        itemsPerSheet: ups,
+      });
+    },
+    [
+      storeMachines,
+      formData.impositionState,
+      formData.department,
+      formData.width,
+      formData.height,
+      formData.flexoGapY,
+      formData.flexoLanes,
+      activePrintPlan.piecesPerSheet,
+    ]
+  );
+
   const [isJobTicketOpen, setIsJobTicketOpen] = useState(false);
 
   React.useEffect(() => {
@@ -4369,6 +4398,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 allEvents={shiftEvents}
                 onOpenQuickPalletLog={handleOpenLogEvent}
                 onOpenPackaging={() => setIsPackagingOpen(true)}
+                profileOf={profileOf}
                 onOpenEditPalletLog={handleOpenEditPalletEvent}
                 onOpenDowntimeLog={handleRecordDowntime}
                 onOpenEditDowntimeLog={handleOpenEditDowntimeEvent}
@@ -4492,6 +4522,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       {isPalletReportDialogOpen && (
         <PalletReportDialog
           shiftSchedule={shiftSchedule}
+          profile={profileOf(selectedOp)}
           unit={stepUnit(
             resolveMachine(selectedOp, storeMachines),
             useWorkspaceStore.getState().workRates.find((r) => r.id === selectedOp.workRateId)?.unit
