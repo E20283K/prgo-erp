@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { branches, workOrderEvents, workOrderOperations, workOrders } from "@/db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
+import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 import { parseShiftSchedule, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { getStepTimeline, type StepPhase } from "@/components/documents/work-order/utils/stepTimeline";
@@ -21,6 +22,7 @@ const PHASE_STATUS: Record<StepPhase, string> = {
  * (released to the floor) are the planner's to set.
  *   any step started → In Production, every step (packaging too) finished → Completed,
  *   nothing started any more (a correction) → back to Ready to Print.
+ * The order's status follows the stage (deriveWorkOrderStatus), unless it is Draft or Cancelled.
  */
 export async function syncOrderStageFromSteps(workOrderId: string) {
   const wo = await db.query.workOrders.findFirst({
@@ -35,13 +37,15 @@ export async function syncOrderStageFromSteps(workOrderId: string) {
   if (allDone) stage = "Completed";
   else if (started) stage = "In Production";
   else if (wo.stage === "In Production" || wo.stage === "Completed") stage = "Ready to Print";
-  if (stage === wo.stage) return;
+  const status = deriveWorkOrderStatus(wo.status, stage);
+  if (stage === wo.stage && status === wo.status) return;
 
   const today = new Date().toISOString().split("T")[0];
   await db
     .update(workOrders)
     .set({
       stage,
+      status,
       actualEndDate: stage === "Completed" ? wo.actualEndDate || today : stage === "In Production" ? null : wo.actualEndDate,
       updatedAt: new Date(),
     })

@@ -187,6 +187,7 @@ import { FILE_KIND_ICON, getFileKind, isPreviewable, downloadFile, ViewableFile 
 import { useLookupStore } from "@/store/lookupStore";
 import { calculatePrintPlanning } from "../planningEngine";
 import { calculateWorkOrderFinancials } from "../utils/financialsEngine";
+import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 
 const FOLD_TYPE_LABELS: Record<string, string> = {
   center_fold: "Markazdan buklama (Center fold)",
@@ -784,12 +785,8 @@ export function OverviewTab({
               value={formData.status} 
               onValueChange={(val: any) => {
                 if (!val) return;
-                handleFieldChange("status", val);
-                if (val === "In Production") {
-                  handleFieldChange("stage", "In Production");
-                } else if (val === "Completed") {
-                  handleFieldChange("stage", "Completed");
-                }
+                // In Production / Completed come from the route steps, not from this select.
+                handleFieldChange("status", deriveWorkOrderStatus(val, formData.stage));
               }}
               disabled={isOperator}
             >
@@ -808,8 +805,8 @@ export function OverviewTab({
               <SelectContent>
                 <SelectItem value="Draft">Draft</SelectItem>
                 <SelectItem value="Active">Active</SelectItem>
-                <SelectItem value="In Production">In Production</SelectItem>
-                <SelectItem value="Completed">Completed</SelectItem>
+                <SelectItem value="In Production" disabled>In Production</SelectItem>
+                <SelectItem value="Completed" disabled>Completed</SelectItem>
                 <SelectItem value="Cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>

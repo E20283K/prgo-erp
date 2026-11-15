@@ -150,6 +150,7 @@ import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
 import { calculatePrintPlanning } from "./planningEngine";
 import { WarehouseStockRecord } from "@/store/workspaceStore";
 import { computeTariffEstimate, TariffRecord } from "@/components/documents/tariff/types";
+import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 
 export function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string): WorkOrderToolingItem[] {
   const hasAppliedImposition = Boolean((data as any).plannedSheets && Number((data as any).plannedSheets) > 0);
@@ -1360,8 +1361,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         return prev;
       });
     }
-    if (queueItem?.stage && queueItem.stage !== formData.stage) {
-      setFormData((prev) => ({ ...prev, stage: queueItem.stage }));
+    if (queueItem?.stage) {
+      const nextStage = queueItem.stage;
+      setFormData((prev) => {
+        const nextStatus = deriveWorkOrderStatus(prev.status, nextStage);
+        if (prev.stage === nextStage && prev.status === nextStatus) return prev;
+        return { ...prev, stage: nextStage, status: nextStatus };
+      });
     }
 
     if (queueItem && !tab.isUnsaved) {
@@ -3846,12 +3852,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     variant="outline"
                     className={cn(
                       "text-[10px] px-1.5 py-0 font-medium",
-                      formData.status === "In Production" || formData.status === "Active"
+                      formData.stage === "In Production"
                         ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
-                        : "bg-muted text-muted-foreground"
+                        : formData.stage === "Completed"
+                          ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30"
+                          : "bg-muted text-muted-foreground"
                     )}
                   >
-                    {formData.status}
+                    {formData.stage || "Queue"}
                   </Badge>
                 </InfoRow>
 

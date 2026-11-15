@@ -42,6 +42,7 @@ import type {
   TradingSettlementLedgerEntry,
 } from "@/components/documents/trading/types";
 import type { ToastSoundConfig } from "@/lib/sound/soundService";
+import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 import {
   INITIAL_YTT_ENTITIES,
   INITIAL_TRADING_SALES,
@@ -4509,13 +4510,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
                 ...(item.checks.audit || {}),
               },
             }
+        const mergedStage = item.stage || existing.stage;
           : existing.checks;
 
         const updatedQueue = [...state.productionQueue];
         updatedQueue[existsIndex] = {
           ...existing,
           ...item,
-          stage: item.stage || existing.stage,
+          stage: mergedStage,
+          status: deriveWorkOrderStatus(item.status ?? existing.status, mergedStage),
           checks: mergedChecks,
         } as ProductionQueueItem;
 
@@ -4532,6 +4535,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         quantity: item.quantity || 1000,
         unit: item.unit || "pcs",
         pressMachine: item.pressMachine || "Heidelberg Speedmaster XL 106-8P",
+        status: deriveWorkOrderStatus(item.status, item.stage || "Queue"),
         department: item.department || "Offset",
         priority: item.priority || "Normal",
         stage: item.stage || "Queue",

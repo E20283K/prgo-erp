@@ -40,6 +40,7 @@ import { getCompanyIdByCode } from "./crmService";
 import { syncOrderStageFromSteps, syncStepFromJournal, toShiftEvent } from "./workOrderEventService";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { generateNextCode } from "@/lib/utils";
+import { deriveWorkOrderStatus, type WorkOrderStatus } from "@/lib/workOrderStatus";
 import { getNextSpecNumber } from "./numberingService";
 import { emitNotification } from "./notificationService";
 import {
@@ -229,7 +230,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       department: wo.department || "Offset",
       priority: (wo.priority as any) || "Normal",
       stage: (wo.stage as any) || "Queue",
-      status: (wo.status as any) || "Draft",
+      status: wo.status ? deriveWorkOrderStatus(wo.status, wo.stage) : "Draft",
       // Planner's run order; orders without one go to the end in creation order.
       queueOrder: wo.queueOrder ?? 100000 + index,
       checks: {
@@ -524,20 +525,22 @@ export async function upsertWorkOrder(
   });
 
   const rawStatus = (data.status || "").trim();
-  let statusVal: "Draft" | "Active" | "In Production" | "Completed" | "Cancelled" = "Active";
-  if (rawStatus === "Draft") statusVal = "Draft";
-  else if (rawStatus === "Active") statusVal = "Active";
-  else if (rawStatus === "In Production" || rawStatus === "In_Production") statusVal = "In Production";
-  else if (rawStatus === "Completed") statusVal = "Completed";
-  else if (rawStatus === "Cancelled") statusVal = "Cancelled";
-  else statusVal = "Active";
+  let requestedStatus: WorkOrderStatus = "Active";
+  if (rawStatus === "Draft") requestedStatus = "Draft";
+  else if (rawStatus === "Active") requestedStatus = "Active";
+  else if (rawStatus === "In Production" || rawStatus === "In_Production") requestedStatus = "In Production";
+  else if (rawStatus === "Completed") requestedStatus = "Completed";
+  else if (rawStatus === "Cancelled") requestedStatus = "Cancelled";
 
   let stageVal: any = (data as any).stage || existingOrder?.stage || "Queue";
-  if (statusVal === "In Production" && (!stageVal || stageVal === "Queue")) {
+  if (requestedStatus === "In Production" && (!stageVal || stageVal === "Queue")) {
     stageVal = "In Production";
-  } else if (statusVal === "Completed") {
+  } else if (requestedStatus === "Completed") {
     stageVal = "Completed";
   }
+  // "In Production" and "Completed" follow the stage; only Draft / Active / Cancelled are set by hand.
+  const statusVal = deriveWorkOrderStatus(requestedStatus, stageVal);
+  const existingStatus = existingOrder ? deriveWorkOrderStatus(existingOrder.status, existingOrder.stage) : undefined;
 
   // Sliced SKU Artworks ichidagi kesh URL larini MinIO S3 ga doimiy saqlash
   let resolvedSkuArtworks =
@@ -736,8 +739,8 @@ export async function upsertWorkOrder(
   };
 
   // Status o'tishlarini himoyalash: faqat status o'zgarganda tekshiriladi (eski yozuvlarni saqlashga xalaqit bermaydi)
-  if (statusVal !== existingOrder?.status) {
-    if (statusVal === "In Production") {
+  if (requestedStatus !== existingStatus && requestedStatus !== existingOrder?.status) {
+    if (requestedStatus === "In Production") {
       const c = payload.checks || {};
       const gateLabels: Record<string, string> = {
         designReady: "Dizayn",
@@ -751,7 +754,7 @@ export async function upsertWorkOrder(
           `Ishlab chiqarishga o'tkazib bo'lmaydi: tayyor emas — ${pending.map((k) => gateLabels[k]).join(", ")}`
         );
       }
-    } else if (statusVal === "Completed") {
+    } else if (requestedStatus === "Completed") {
       let ops: any[] = Array.isArray(data.operations) ? data.operations : [];
       if (!Array.isArray(data.operations) && existingOrder) {
         ops = await db.query.workOrderOperations.findMany({
@@ -1222,9 +1225,6 @@ export async function updateWorkOrderReadiness(
       patchPayload.pressMachine = updates.pressMachine;
     }
 
-    if (updates.status !== undefined) {
-      patchPayload.status = updates.status;
-    }
 
     if (updates.actualEndDate !== undefined) {
       patchPayload.actualEndDate = updates.actualEndDate;
@@ -1277,6 +1277,10 @@ export async function updateWorkOrderReadiness(
         patchPayload.stage = "Queue";
       }
     }
+
+    // Only Draft / Active / Cancelled are taken from the request; production statuses follow the stage.
+    const nextStatus = deriveWorkOrderStatus(updates.status ?? existingOrder.status, patchPayload.stage ?? existingOrder.stage);
+    if (nextStatus !== existingOrder.status) patchPayload.status = nextStatus;
 
     await db
       .update(workOrders)
