@@ -5,6 +5,8 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { Sidebar } from "./Sidebar";
 import { Workspace } from "./Workspace";
 import { StatusBar } from "./StatusBar";
+import { BreadcrumbBar } from "./BreadcrumbBar";
+import { isAdminRole } from "@/lib/userRole";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { toggleAppFullscreen } from "@/lib/fullscreen";
 import { CommandPalette } from "@/components/command/CommandPalette";
@@ -25,8 +27,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     showStatusBar,
     setShowStatusBar,
     setToastSoundConfig,
+    currentUser,
   } = useWorkspaceStore();
 
+  const isAdmin = isAdminRole(currentUser?.role);
   const isPOSActive = activeTabId.includes("pos");
 
   // Real-time Telegram message notification listener with smart rules
@@ -118,7 +122,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       ) {
         e.preventDefault();
         e.stopPropagation();
-        useWorkspaceStore.getState().toggleInspectorMode();
+        if (isAdminRole(useWorkspaceStore.getState().currentUser?.role)) {
+          useWorkspaceStore.getState().toggleInspectorMode();
+        }
         return;
       }
 
@@ -320,8 +326,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {/* VS Code + 1C Document Workspace */}
         <Workspace>{children}</Workspace>
 
-        {/* High-Utility Developer Tools Status Bar */}
-        {!isPOSActive && showStatusBar && <StatusBar />}
+        {/* Developer status bar for admins, navigation breadcrumb for everyone else */}
+        {!isPOSActive && (isAdmin ? showStatusBar && <StatusBar /> : <BreadcrumbBar />)}
       </SidebarInset>
 
       {/* Global Command Palette (Ctrl+K) */}

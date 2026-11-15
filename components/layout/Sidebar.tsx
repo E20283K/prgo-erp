@@ -21,6 +21,7 @@ import {
 import { useTranslations } from "next-intl";
 import { toggleAppFullscreen } from "@/lib/fullscreen";
 import { MODULE_NAV } from "@/lib/modules";
+import { isAdminRole } from "@/lib/userRole";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { resolveActiveComponent } from "@/lib/dev/componentRegistry";
 import {
@@ -107,6 +108,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   const { state, isMobile } = useSidebar();
   const isCollapsed = state === "collapsed" && !isMobile;
+
+  const isAdmin = isAdminRole(currentUser?.role);
 
   // Filter modules based on user permissions
   const allowedModules = React.useMemo(() => {
@@ -528,6 +531,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </ContextMenuTrigger>
 
         <ContextMenuContent className="w-64 text-xs font-sans">
+          {isAdmin && (
+            <>
           <ContextMenuLabel className="font-semibold text-[11px] text-muted-foreground flex items-center justify-between py-1.5 px-2">
             <span className="flex items-center gap-1.5">
               <Terminal className="size-3.5 text-blue-500" />
@@ -642,6 +647,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </ContextMenuItem>
 
           <ContextMenuSeparator />
+            </>
+          )}
 
           <ContextMenuItem
             onClick={() => toggleTheme()}
