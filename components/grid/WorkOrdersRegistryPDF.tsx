@@ -532,7 +532,7 @@ export interface SizeBreakdownEntry {
   id?: string;
   sizeCode?: string;
   label: string;
-  quantity: number;
+  quantity: number | null;
   isMultiSize: boolean;
   artworkThumb?: string;
 }
@@ -589,14 +589,13 @@ function computeDeadlineCountdown(deadline?: string): {
 function shortenStepName(name: string): string {
   const n = (name || "").trim();
   const lower = n.toLowerCase();
-  if (lower.includes("ctp") || lower.includes("pre-press") || lower.includes("prepress") || lower.includes("qolip")) {
+  // Specific process keywords are checked before the generic "bosma" / "qolip" words,
+  // otherwise "Flexo bosma", "Folga bosma" or "Shtamp qolipi" collapse into the wrong step.
+  if (lower.includes("ctp") || lower.includes("pre-press") || lower.includes("prepress")) {
     return "CTP qolip";
   }
   if (lower.includes("guillotine") || lower.includes("gilotina")) {
     return "Gilotina kesim";
-  }
-  if (lower.includes("offset") || lower.includes("bosma")) {
-    return "Offset bosma";
   }
   if (lower.includes("flexo")) {
     return "Flexo bosma";
@@ -616,10 +615,10 @@ function shortenStepName(name: string): string {
   if (lower.includes("foil") || lower.includes("folga") || lower.includes("zarhal")) {
     return "Folga (Zar)";
   }
-  if (lower.includes("uv") || lower.includes("lak") || lower.includes("varnish")) {
+  if (/\buv\b/.test(lower) || lower.includes("lak") || lower.includes("varnish")) {
     return "UF-Lak";
   }
-  if (lower.includes("die-cut") || lower.includes("shtans") || lower.includes("vurubka")) {
+  if (lower.includes("die-cut") || lower.includes("shtans") || lower.includes("shtamp") || lower.includes("vurubka")) {
     return "Shtansovka";
   }
   if (lower.includes("slit") || lower.includes("rewind") || lower.includes("bobina")) {
@@ -631,17 +630,18 @@ function shortenStepName(name: string): string {
   if (lower.includes("pack") || lower.includes("qadoq")) {
     return "Qadoqlash";
   }
+  if (lower.includes("offset")) {
+    return "Offset bosma";
+  }
   return n.length > 18 ? n.slice(0, 16) + ".." : n;
 }
 
 /**
  * Builds the complete technological routing chain (steps) for an order row.
- * Uses saved `operations` if present; otherwise derives the realistic route from the order's
- * department, machine, lamination, coating, kashirovka, embellishment, and die-cutting specs.
+ * Uses the order's saved `operations` only; returns an empty chain when none are saved.
  */
 function buildOrderRoutingChain(row: RegistryPrintRow, targetQty: number): RouteChainItem[] {
   const raw = row.rawOrder || {};
-  const dims = raw.dimensions || {};
   const ops: any[] = Array.isArray(raw.operations) ? raw.operations : [];
   const events: any[] = Array.isArray(raw.events) ? raw.events : [];
 
@@ -688,103 +688,8 @@ function buildOrderRoutingChain(row: RegistryPrintRow, targetQty: number): Route
     });
   }
 
-  // Derive realistic technological route from order specifications
-  const dept = row.department || "Offset";
-  const stage = String(raw.stage || "Queue");
-  const checks = row.evaluatedChecks;
-  const prodLower = String(row.product || "").toLowerCase();
-  const derived: { shortName: string; machine: string }[] = [];
-
-  if (dept === "Flexo") {
-    derived.push({ shortName: "Polimer klisha", machine: "Esko CDI" });
-    derived.push({ shortName: "Flexo bosma", machine: row.machine || "Nilpeter FA-4" });
-    if (raw.lamination && raw.lamination !== "None") {
-      derived.push({ shortName: "Laminatsiya", machine: "Inline UV/Lam" });
-    }
-    derived.push({ shortName: "Rotatsion kesim", machine: "Rotary Die" });
-    derived.push({ shortName: "Bobina kesish", machine: "Rotoflex Slitter" });
-  } else if (dept === "Jacquard") {
-    derived.push({ shortName: "Jakkar to'qish", machine: row.machine || "Müller Mujet" });
-    derived.push({ shortName: "Ultrasonic kesim", machine: "Focus Cut/Fold" });
-    derived.push({ shortName: "QC va Qadoq", machine: "Qadoqlash stoli" });
-  } else if (dept === "Post-press") {
-    if (
-      (raw.kashirovkaMode && raw.kashirovkaMode !== "none") ||
-      (dims.kashirovkaMode && dims.kashirovkaMode !== "none") ||
-      prodLower.includes("triplex") ||
-      prodLower.includes("duplex")
-    ) {
-      derived.push({ shortName: "Kashirovka", machine: "Stock Laminator" });
-    }
-    if (raw.lamination && raw.lamination !== "None") {
-      derived.push({ shortName: "Laminatsiya", machine: "Autobond 76" });
-    }
-    derived.push({ shortName: "Shtansovka", machine: row.machine || "Bobst Novacut 106" });
-    derived.push({ shortName: "Yelim / Qadoq", machine: "Bobst Expertfold" });
-  } else {
-    // Offset / Digital
-    derived.push({ shortName: "CTP qolip", machine: "Screen PlateRite" });
-    derived.push({ shortName: "Gilotina kesim", machine: "Polar 115" });
-    derived.push({ shortName: "Offset bosma", machine: row.machine || "Heidelberg XL-106" });
-    if (
-      (raw.lamination && raw.lamination !== "None") ||
-      (raw.coating && raw.coating !== "None")
-    ) {
-      derived.push({ shortName: "Laminatsiya / Lak", machine: "Autobond 76" });
-    }
-    if (
-      (raw.kashirovkaMode && raw.kashirovkaMode !== "none") ||
-      (dims.kashirovkaMode && dims.kashirovkaMode !== "none") ||
-      prodLower.includes("triplex") ||
-      prodLower.includes("duplex")
-    ) {
-      derived.push({ shortName: "Kashirovka", machine: "Stock Laminator" });
-    }
-    if (raw.embellishment && raw.embellishment !== "None") {
-      derived.push({ shortName: "Folga / Zar", machine: "Tigel Press" });
-    }
-    if (
-      prodLower.includes("quti") ||
-      prodLower.includes("box") ||
-      prodLower.includes("yorliq") ||
-      raw.selectedToolingId ||
-      dims.selectedToolingId
-    ) {
-      derived.push({ shortName: "Shtansovka", machine: "Bobst Novacut 106" });
-      derived.push({ shortName: "Yelim / Qadoq", machine: "Bobst Expertfold" });
-    } else {
-      derived.push({ shortName: "Kesish / Qadoq", machine: "Polar 115" });
-    }
-  }
-
-  // Determine which step is currently active based on stage and readiness gates
-  let activeStepIdx = 0;
-  if (stage === "In Production") {
-    activeStepIdx = derived.findIndex((d) => d.shortName.includes("bosma") || d.shortName.includes("to'qish") || d.shortName.includes("Shtansovka"));
-    if (activeStepIdx < 0) activeStepIdx = Math.min(1, derived.length - 1);
-  } else if (stage === "Ready to Print" || (checks.platesReady && checks.paperReady)) {
-    activeStepIdx = Math.min(derived.length > 2 ? 2 : 1, derived.length - 1);
-  } else if (checks.designReady) {
-    activeStepIdx = 0;
-  }
-
-  const doneSheets = Number(raw.completedSheets || 0);
-  const activeDoneQty =
-    doneSheets > 0
-      ? doneSheets
-      : stage === "In Production"
-      ? Math.round(targetQty * 0.35)
-      : 0;
-
-  return derived.map((d, idx) => ({
-    index: idx + 1,
-    shortName: d.shortName,
-    fullName: d.shortName,
-    machine: d.machine,
-    state: idx < activeStepIdx ? "done" : idx === activeStepIdx ? "active" : "pending",
-    completedQty: idx < activeStepIdx ? targetQty : idx === activeStepIdx ? activeDoneQty : 0,
-    plannedQty: targetQty || 1,
-  }));
+  // No saved operations: the route is unknown, so nothing is shown rather than guessed.
+  return [];
 }
 
 /**
@@ -805,10 +710,6 @@ function extractSizeBreakdown(row: RegistryPrintRow): SizeBreakdownEntry[] {
   if (rawSizes.length > 0) {
     const withPositiveQty = rawSizes.filter((s) => Number(s.quantity) > 0);
     const sourceList = withPositiveQty.length > 0 ? withPositiveQty : rawSizes;
-    const fallbackPerItem =
-      withPositiveQty.length === 0 && Number(row.qty) > 0
-        ? Math.floor(Number(row.qty) / sourceList.length)
-        : 0;
 
     return sourceList.map((s, idx) => {
       const code = String(s.sizeCode || s.size || "STD").trim();
@@ -817,7 +718,8 @@ function extractSizeBreakdown(row: RegistryPrintRow): SizeBreakdownEntry[] {
           ? String(s.model).trim()
           : "";
       const label = model && !code.startsWith(model) ? `${model}/${code}` : code;
-      const qty = Number(s.quantity) > 0 ? Number(s.quantity) : fallbackPerItem;
+      // Unknown per-size quantity stays null (printed as "—") instead of an even split.
+      const qty = Number(s.quantity) > 0 ? Number(s.quantity) : null;
 
       const sId = String(s.id || "");
       const sCodeLower = code.toLowerCase();
@@ -870,6 +772,9 @@ function extractSizeBreakdown(row: RegistryPrintRow): SizeBreakdownEntry[] {
 interface ResolvedSideColors {
   frontCmyk: ("C" | "M" | "Y" | "K")[];
   backCmyk: ("C" | "M" | "Y" | "K")[];
+  /** Ink count per side; null when the order records no colour data at all. */
+  frontCount: number | null;
+  backCount: number | null;
   frontSpots: string[];
   backSpots: string[];
 }
@@ -885,6 +790,8 @@ function resolveFrontBackColors(raw: any): ResolvedSideColors {
 
   let frontCmyk: ("C" | "M" | "Y" | "K")[] = [];
   let backCmyk: ("C" | "M" | "Y" | "K")[] = [];
+  let frontCount: number | null = null;
+  let backCount: number | null = null;
 
   if (hasExplicitFront || hasExplicitBack) {
     if (fc.c) frontCmyk.push("C");
@@ -897,24 +804,20 @@ function resolveFrontBackColors(raw: any): ResolvedSideColors {
     if (bc.y) backCmyk.push("Y");
     if (bc.k) backCmyk.push("K");
   } else {
+    // Only a "N+M" formula is known: 4 inks means CMYK; any other count is shown as a
+    // plain number because which channels (or Pantones) are used is not recorded.
     const formula = String(
       (typeof raw?.colorsConfig === "string" ? raw.colorsConfig : raw?.colorsConfig?.formula) ||
         raw?.colors ||
-        "4+0"
+        ""
     );
     const match = formula.match(/(\d)\s*\+\s*(\d)/);
-    const fCount = match ? parseInt(match[1], 10) : 4;
-    const bCount = match ? parseInt(match[2], 10) : 0;
-
-    if (fCount >= 4) frontCmyk = ["C", "M", "Y", "K"];
-    else if (fCount === 3) frontCmyk = ["C", "M", "Y"];
-    else if (fCount === 2) frontCmyk = ["C", "K"];
-    else if (fCount === 1) frontCmyk = ["K"];
-
-    if (bCount >= 4) backCmyk = ["C", "M", "Y", "K"];
-    else if (bCount === 3) backCmyk = ["C", "M", "Y"];
-    else if (bCount === 2) backCmyk = ["C", "K"];
-    else if (bCount === 1) backCmyk = ["K"];
+    if (match) {
+      frontCount = parseInt(match[1], 10);
+      backCount = parseInt(match[2], 10);
+      if (frontCount === 4) frontCmyk = ["C", "M", "Y", "K"];
+      if (backCount === 4) backCmyk = ["C", "M", "Y", "K"];
+    }
   }
 
   const frontSpots: string[] = [];
@@ -946,7 +849,12 @@ function resolveFrontBackColors(raw: any): ResolvedSideColors {
     });
   }
 
-  return { frontCmyk, backCmyk, frontSpots, backSpots };
+  if (hasExplicitFront || hasExplicitBack) {
+    frontCount = frontCmyk.length;
+    backCount = backCmyk.length;
+  }
+
+  return { frontCmyk, backCmyk, frontCount, backCount, frontSpots, backSpots };
 }
 
 /**
@@ -1237,14 +1145,17 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
                 const sizesSum = sizeEntries.reduce((acc, s) => acc + (Number(s.quantity) || 0), 0);
                 const effectiveTotalQty = Number(row.qty) > 0 ? Number(row.qty) : sizesSum;
                 const routeChain = buildOrderRoutingChain(row, effectiveTotalQty);
-                const activeRouteStep =
-                  routeChain.find((s) => s.state === "active") || routeChain[0];
-                const activeIdx = routeChain.indexOf(activeRouteStep);
+                // null when every step is done or no route is saved; never fall back to step 1.
+                const activeRouteStep = routeChain.find((s) => s.state === "active") ?? null;
+                const activeIdx = activeRouteStep ? routeChain.indexOf(activeRouteStep) : -1;
                 const nextRouteStep =
                   activeIdx >= 0 && activeIdx + 1 < routeChain.length
                     ? routeChain[activeIdx + 1]
                     : null;
                 const doneStepsCount = routeChain.filter((s) => s.state === "done").length;
+                const isOrderCompleted =
+                  row.status === "Completed" ||
+                  (routeChain.length > 0 && doneStepsCount === routeChain.length);
                 const overallRoutePct = Math.min(
                   100,
                   Math.round(
@@ -1261,7 +1172,9 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
                 const { materialLine, finishLine } = buildMaterialAndFinishSpecs(row);
                 const fbColors = resolveFrontBackColors(raw);
                 const { blockers, toolingCode } = extractGateBlockersAndTooling(row);
-                const countdown = computeDeadlineCountdown(row.deadline);
+                const countdown = isOrderCompleted
+                  ? null
+                  : computeDeadlineCountdown(row.deadline);
                 const plannedSheets = Number(raw.plannedSheets || raw.dimensions?.plannedSheets || 0);
                 const checks = row.evaluatedChecks;
 
@@ -1377,6 +1290,9 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
 
                     {/* 5. Technological Routing (Bosqichlar Zanjiri) */}
                     <View style={[styles.tdCell, { width: colWidths.route }]}>
+                      {routeChain.length === 0 && (
+                        <Text style={styles.mutedSmall}>Marshrut yo&apos;q</Text>
+                      )}
                       <View style={styles.routeStepsWrap}>
                         {routeChain.map((step) => {
                           const boxStyle =
@@ -1391,16 +1307,9 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
                               : step.state === "active"
                               ? styles.routeStepActiveText
                               : styles.routeStepPendingText;
-                          const prefix =
-                            step.state === "done"
-                              ? "✓ "
-                              : step.state === "active"
-                              ? "► "
-                              : "";
                           return (
                             <View key={step.index} style={boxStyle}>
                               <Text style={txtStyle}>
-                                {prefix}
                                 {step.index}.{step.shortName}
                               </Text>
                             </View>
@@ -1442,7 +1351,7 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
                             ) : null}
                             <View style={styles.sizeMiniBody}>
                               <Text style={styles.sizeMiniBodyText}>
-                                {sz.quantity.toLocaleString()}
+                                {sz.quantity != null ? sz.quantity.toLocaleString() : "—"}
                               </Text>
                             </View>
                           </View>
@@ -1473,7 +1382,13 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
                             );
                           })
                         ) : (
-                          <Text style={{ fontSize: 5.2, color: "#94a3b8" }}>0</Text>
+                          <Text style={{ fontSize: 5.2, color: "#94a3b8" }}>
+                            {fbColors.frontCount == null
+                              ? "—"
+                              : fbColors.frontCount > 0
+                              ? `${fbColors.frontCount} rang`
+                              : "0"}
+                          </Text>
                         )}
                         {fbColors.frontSpots.map((sp, idx) => (
                           <Text key={idx} style={styles.spotPill}>
@@ -1500,9 +1415,15 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
                               </Text>
                             );
                           })
-                        ) : fbColors.backSpots.length === 0 ? (
-                          <Text style={{ fontSize: 5.2, color: "#64748b" }}>0 (Bosmasiz)</Text>
-                        ) : null}
+                        ) : fbColors.backCount != null && fbColors.backCount > 0 ? (
+                          <Text style={{ fontSize: 5.2, color: "#64748b" }}>
+                            {fbColors.backCount} rang
+                          </Text>
+                        ) : fbColors.backSpots.length > 0 ? null : (
+                          <Text style={{ fontSize: 5.2, color: "#64748b" }}>
+                            {fbColors.backCount === 0 ? "0 (Bosmasiz)" : "—"}
+                          </Text>
+                        )}
                         {fbColors.backSpots.map((sp, idx) => (
                           <Text key={idx} style={styles.spotPill}>
                             +{sp}
@@ -1554,28 +1475,34 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
                     {/* 10. Current WIP Operation, Progress (%) & Next Operation */}
                     <View style={[styles.tdCell, { width: colWidths.status }]}>
                       <Text style={styles.boldDark}>
-                        {activeRouteStep
+                        {isOrderCompleted
+                          ? "Tayyor"
+                          : activeRouteStep
                           ? `${activeRouteStep.index}/${routeChain.length}: ${activeRouteStep.shortName}`
-                          : "Navbatda"}
+                          : "—"}
                       </Text>
-                      <Text
-                        style={[
-                          styles.regularSlate,
-                          { fontWeight: "bold", color: "#1d4ed8" },
-                        ]}
-                      >
-                        {activeRouteStep && activeRouteStep.completedQty > 0
-                          ? `${activeRouteStep.completedQty.toLocaleString()} (${overallRoutePct}%)`
-                          : `${doneStepsCount}/${routeChain.length} bosqich (${overallRoutePct}%)`}
-                      </Text>
-                      <View style={styles.wipBarOuter}>
-                        <View
-                          style={[
-                            styles.wipBarFill,
-                            { width: `${Math.max(4, overallRoutePct)}%` },
-                          ]}
-                        />
-                      </View>
+                      {routeChain.length > 0 && (
+                        <>
+                          <Text
+                            style={[
+                              styles.regularSlate,
+                              { fontWeight: "bold", color: "#1d4ed8" },
+                            ]}
+                          >
+                            {activeRouteStep && activeRouteStep.completedQty > 0
+                              ? `${activeRouteStep.completedQty.toLocaleString()} (${overallRoutePct}%)`
+                              : `${doneStepsCount}/${routeChain.length} bosqich (${overallRoutePct}%)`}
+                          </Text>
+                          <View style={styles.wipBarOuter}>
+                            <View
+                              style={[
+                                styles.wipBarFill,
+                                { width: `${Math.max(4, overallRoutePct)}%` },
+                              ]}
+                            />
+                          </View>
+                        </>
+                      )}
                       {nextRouteStep && (
                         <Text style={styles.mutedSmall}>
                           Keyingi: {nextRouteStep.shortName}
