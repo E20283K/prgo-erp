@@ -19,7 +19,10 @@ export interface MachineImagePreviewData {
   code?: string;
   department?: string;
   category?: string;
+  /** Display label of the machine state, e.g. "Ishlamoqda". */
   status?: string;
+  /** Text color class for the state label. */
+  statusClass?: string;
   hourlyRate?: number;
   speed?: string;
   location?: string;
@@ -58,11 +61,7 @@ export function MachineImageModal({
             <Badge
               variant="outline"
               className={`absolute top-5 right-5 text-[11px] font-semibold px-2 py-0.5 shadow-xs bg-background/90 backdrop-blur-xs ${
-                data.status === "Running"
-                  ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
-                  : data.status === "Maintenance"
-                  ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
-                  : "border-blue-500/40 text-blue-600 dark:text-blue-400"
+                data.statusClass || "text-muted-foreground"
               }`}
             >
               {data.status}

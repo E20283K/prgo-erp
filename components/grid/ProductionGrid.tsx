@@ -1068,7 +1068,13 @@ export function ProductionGrid({ type }: ProductionGridProps) {
             standardHourlyRateUsd: Number(editParam1) || existing.costing.standardHourlyRateUsd,
           },
         };
-        upsertMachineAsync(updated);
+        upsertMachineAsync(updated).catch((err: unknown) => {
+          addNotification({
+            title: "Saqlashda xatolik",
+            description: err instanceof Error ? err.message : "Uskunani saqlab bo'lmadi.",
+            severity: "error",
+          });
+        });
       }
       setMachinesData((prev) =>
         prev.map((m) =>

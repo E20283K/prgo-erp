@@ -43,6 +43,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Fayl yuklash (avatarlar, maketlar, logolar, kesh) papkalarini yaratish va to'liq yozish huquqini ta'minlash
 RUN mkdir -p /app/public/uploads/avatars \
              /app/public/uploads/clients/logos \
+             /app/public/uploads/machines \
              /app/public/artwork \
              /app/public/cache/telegram/avatars && \
     chown -R nextjs:nodejs /app/public

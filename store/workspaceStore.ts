@@ -2199,36 +2199,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({ isMachinesLoading: false });
     }
   },
+  // Throws on any failure, so callers never mistake a rejected save for a saved one.
   upsertMachineAsync: async (machine: MachineRecord) => {
-    try {
-      const isExisting = Boolean(machine.id && !machine.id.startsWith("new-") && !machine.id.startsWith("MAC-NEW-"));
-      const method = isExisting ? "PUT" : "POST";
-      const url = isExisting
-        ? `/api/v1/production/machines/${machine.id}`
-        : `/api/v1/production/machines`;
+    const isExisting = Boolean(machine.id && !machine.id.startsWith("new-") && !machine.id.startsWith("MAC-NEW-"));
+    const method = isExisting ? "PUT" : "POST";
+    const url = isExisting
+      ? `/api/v1/production/machines/${machine.id}`
+      : `/api/v1/production/machines`;
 
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(machine),
-      });
-      const json = await res.json();
-      if (json.success && json.data) {
-        const savedMachine = json.data;
-        set((state) => {
-          const exists = state.machines.some((m) => m.id === savedMachine.id || (machine.id && m.id === machine.id));
-          return {
-            machines: exists
-              ? state.machines.map((m) => (m.id === savedMachine.id || m.id === machine.id ? savedMachine : m))
-              : [savedMachine, ...state.machines],
-          };
-        });
-        return savedMachine;
-      }
-    } catch (err) {
-      console.error("upsertMachineAsync error:", err);
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(machine),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success || !json.data?.id) {
+      throw new Error(json?.error || `Server xatoligi (${res.status})`);
     }
-    return null;
+    const savedMachine = json.data;
+    set((state) => {
+      const exists = state.machines.some((m) => m.id === savedMachine.id || (machine.id && m.id === machine.id));
+      return {
+        machines: exists
+          ? state.machines.map((m) => (m.id === savedMachine.id || m.id === machine.id ? savedMachine : m))
+          : [savedMachine, ...state.machines],
+      };
+    });
+    return savedMachine;
   },
   deleteMachineAsync: async (id: string) => {
     try {
@@ -4511,9 +4508,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               },
             }
           : existing.checks;
-        const mergedStage = item.stage || existing.stage;
 
         const updatedQueue = [...state.productionQueue];
+        const mergedStage = item.stage || existing.stage;
         updatedQueue[existsIndex] = {
           ...existing,
           ...item,

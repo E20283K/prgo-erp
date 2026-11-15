@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { machineSaveErrorResponse } from "@/lib/server/machineApiError";
 import {
   getProductionMachineById,
   updateProductionMachine,
@@ -40,11 +41,7 @@ export async function PUT(
     }
     return NextResponse.json({ success: true, data: machine });
   } catch (error) {
-    console.error("PUT /api/v1/production/machines/[id] error:", error);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Internal Server Error" },
-      { status: 500 }
-    );
+    return machineSaveErrorResponse(error, "PUT /api/v1/production/machines/[id]");
   }
 }
 

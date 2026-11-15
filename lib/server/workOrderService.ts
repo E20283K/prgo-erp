@@ -1336,7 +1336,8 @@ function formatMachineDbToRecord(m: any): any {
     leadOperator: m.leadOperator || "",
     assistantOperator: m.assistantOperator || "",
     shiftPattern: m.shiftPattern || "",
-    status: m.status || "Idle",
+    // The column defaults to "Available", which is not a MachineStatus.
+    status: ["Running", "Idle", "Maintenance", "Setup"].includes(m.status) ? m.status : "Idle",
     overallEfficiency: m.overallEfficiency || 90,
     totalLifetimeCounter: Number(m.totalLifetimeCounter) || 0,
     counterUnit: m.counterUnit || "sheets",

@@ -36,7 +36,10 @@ import {
   Loader2,
   CircleDot,
   Camera,
+  AlertTriangle,
+  type LucideIcon,
 } from "lucide-react";
+import type { TerminalJob } from "@/lib/server/operatorTerminalService";
 import { MachineOverviewTab } from "./machine/tabs/MachineOverviewTab";
 import { MachineEnergyTab } from "./machine/tabs/MachineEnergyTab";
 import { MachineCostingTab } from "./machine/tabs/MachineCostingTab";
@@ -47,6 +50,42 @@ import { MachineImageModal } from "./machine/MachineImageModal";
 
 export { getCleanBlankMachine as getBlankMachine };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TERMINAL_REFRESH_MS = 60_000;
+
+interface LiveState {
+  label: string;
+  icon: LucideIcon;
+  textClass: string;
+  barClass: string;
+}
+
+const LIVE_STATES = {
+  maintenance: { label: "Ta'mirda", icon: Wrench, textClass: "text-amber-600 dark:text-amber-400", barClass: "bg-amber-500" },
+  downtime: { label: "To'xtalish", icon: AlertTriangle, textClass: "text-red-600 dark:text-red-400", barClass: "bg-red-500" },
+  run: { label: "Ishlamoqda", icon: PlayCircle, textClass: "text-emerald-600 dark:text-emerald-400", barClass: "bg-emerald-500" },
+  setup: { label: "Priladka", icon: Clock, textClass: "text-blue-600 dark:text-blue-400", barClass: "bg-blue-500" },
+  idle: { label: "Kutilmoqda", icon: PauseCircle, textClass: "text-muted-foreground", barClass: "bg-muted-foreground/40" },
+} satisfies Record<string, LiveState>;
+
+/**
+ * What the machine is doing now. Maintenance is the one state set on the passport;
+ * everything else comes from the shift journal of the jobs on this machine.
+ */
+function resolveLiveState(status: MachineStatus, jobs: TerminalJob[]): { state: LiveState; job: TerminalJob | null } {
+  const downtimeJob = jobs.find((j) => j.openDowntime);
+  const runJob = jobs.find((j) => j.phase === "run");
+  const setupJob = jobs.find((j) => j.phase === "setup");
+  const pausedJob = jobs.find((j) => j.phase === "paused");
+  const job = downtimeJob || runJob || setupJob || pausedJob || null;
+
+  if (status === "Maintenance") return { state: LIVE_STATES.maintenance, job };
+  if (downtimeJob) return { state: LIVE_STATES.downtime, job };
+  if (runJob) return { state: LIVE_STATES.run, job };
+  if (setupJob) return { state: LIVE_STATES.setup, job };
+  return { state: LIVE_STATES.idle, job };
+}
+
 interface MachineDetailProps {
   tab: DocumentTab;
 }
@@ -54,7 +93,6 @@ interface MachineDetailProps {
 export function MachineDetail({ tab }: MachineDetailProps) {
   const {
     machines,
-    upsertMachine,
     upsertMachineAsync,
     loadMachines,
     companiesList,
@@ -68,7 +106,6 @@ export function MachineDetail({ tab }: MachineDetailProps) {
     loadEmployees,
     setTabUnsaved,
     updateTabData,
-    productionQueue,
     openTab,
     addNotification,
   } = useWorkspaceStore();
@@ -134,38 +171,40 @@ export function MachineDetail({ tab }: MachineDetailProps) {
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleTriggerUpload = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  // The photo is stored as a file; only its URL goes into the machine record.
+  const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      addNotification?.({
-        title: "Xatolik",
-        description: "Faqat rasm formatidagi fayllarni yuklash mumkin (PNG, JPG, WEBP).",
-        severity: "warning",
-      });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        setMachineData((prev) => ({ ...prev, imageUrl: dataUrl }));
-        setTabUnsaved(tab.id, true);
-        addNotification?.({
-          title: "Rasm biriktirildi",
-          description: "Uskuna fotosurati muvaffaqiyatli yuklandi.",
-          severity: "success",
-        });
-      }
-    };
-    reader.readAsDataURL(file);
     e.target.value = "";
+    if (!file) return;
+
+    setIsUploadingImage(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/v1/production/machines/image", { method: "POST", body });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success || !json.url) {
+        throw new Error(json?.error || `Server xatoligi (${res.status})`);
+      }
+      setMachineData((prev) => ({ ...prev, imageUrl: json.url }));
+      setTabUnsaved(tab.id, true);
+      setIsSaved(false);
+    } catch (err) {
+      addNotification?.({
+        title: "Rasm yuklanmadi",
+        description: err instanceof Error ? err.message : "Rasmni yuklab bo'lmadi.",
+        severity: "error",
+      });
+    } finally {
+      setIsUploadingImage(false);
+    }
   }, [addNotification, setTabUnsaved, tab.id]);
 
   // Sync if store updates with newly fetched database record
@@ -200,10 +239,10 @@ export function MachineDetail({ tab }: MachineDetailProps) {
   };
 
   const handleSave = async () => {
-    if (!machineData.name.trim()) {
+    if (!machineData.name.trim() || !machineData.code.trim()) {
       addNotification?.({
         title: "Xatolik",
-        description: "Iltimos, uskuna nomi va modelini kiriting.",
+        description: "Uskuna nomi va kodini kiriting.",
         severity: "warning",
       });
       return;
@@ -211,31 +250,24 @@ export function MachineDetail({ tab }: MachineDetailProps) {
 
     setIsSaving(true);
     try {
-      if (upsertMachineAsync) {
-        const saved = await upsertMachineAsync(machineData);
-        const result = saved?.id ? saved : machineData;
-        setMachineData(result);
-        updateTabData(tab.id, result, result.name || result.id);
-      } else {
-        upsertMachine(machineData);
-        updateTabData(tab.id, machineData, machineData.name || machineData.id);
-      }
-
+      // Throws when the server rejects the save, so nothing below runs on failure.
+      const saved: MachineRecord = await upsertMachineAsync(machineData);
+      setMachineData(saved);
+      updateTabData(tab.id, saved, saved.name || saved.id);
       setTabUnsaved(tab.id, false);
       setIsSaved(true);
 
       addNotification?.({
-        title: "Uskuna Parametrlari Saqlandi",
-        description: `${machineData.name} texnik ko'rsatkichlari bazada saqlandi.`,
+        title: "Saqlandi",
+        description: `${saved.name} bazada saqlandi.`,
         severity: "success",
       });
 
       setTimeout(() => setIsSaved(false), 3000);
-    } catch (err: any) {
-      console.error("Machine save error:", err);
+    } catch (err) {
       addNotification?.({
-        title: "Saqlashda Xatolik",
-        description: err?.message || "Uskunani saqlashda server xatoligi yuz berdi.",
+        title: "Saqlashda xatolik",
+        description: err instanceof Error ? err.message : "Uskunani saqlab bo'lmadi.",
         severity: "error",
       });
     } finally {
@@ -243,53 +275,40 @@ export function MachineDetail({ tab }: MachineDetailProps) {
     }
   };
 
-  // Find active running job for sidebar summary
-  const activeJob = useMemo(() => {
-    return productionQueue.find((item) => {
-      const press = (item.pressMachine || "").trim().toLowerCase();
-      if (!press) return false;
-      const macName = (machineData.name || "").trim().toLowerCase();
-      const macCode = (machineData.code || "").trim().toLowerCase();
-      const matchesMachine =
-        (macName && (press.includes(macName) || macName.includes(press))) ||
-        (macCode && press.includes(macCode));
-      return matchesMachine && item.stage === "In Production";
-    });
-  }, [productionQueue, machineData]);
+  // Jobs on this machine from the operator terminal (same source as the shift journal).
+  const persistedMachineId = UUID_RE.test(machineData.id) ? machineData.id : null;
+  const [terminalQueue, setTerminalQueue] = useState<{ machineId: string; jobs: TerminalJob[] } | null>(null);
+  const terminalJobs = useMemo(
+    () => (terminalQueue && terminalQueue.machineId === persistedMachineId ? terminalQueue.jobs : []),
+    [terminalQueue, persistedMachineId]
+  );
 
-  const activeJobMeta = useMemo(() => {
-    const status = machineData.status || "Idle";
-    if (status === "Running") {
-      return {
-        icon: PlayCircle,
-        label: "Ishlamoqda",
-        textClass: "text-emerald-600 dark:text-emerald-400",
-        barClass: "bg-emerald-500",
-      };
-    }
-    if (status === "Setup") {
-      return {
-        icon: Clock,
-        label: "Priladka",
-        textClass: "text-blue-600 dark:text-blue-400",
-        barClass: "bg-blue-500",
-      };
-    }
-    if (status === "Maintenance") {
-      return {
-        icon: PauseCircle,
-        label: "Ta'mirda",
-        textClass: "text-amber-600 dark:text-amber-400",
-        barClass: "bg-amber-500",
-      };
-    }
-    return {
-      icon: PauseCircle,
-      label: "Kutilmoqda",
-      textClass: "text-muted-foreground",
-      barClass: "bg-muted-foreground/40",
+  useEffect(() => {
+    if (!persistedMachineId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/v1/production/terminal?machineId=${encodeURIComponent(persistedMachineId)}`);
+        const json = await res.json();
+        if (!cancelled && json?.success && Array.isArray(json.jobs)) {
+          setTerminalQueue({ machineId: persistedMachineId, jobs: json.jobs });
+        }
+      } catch {
+        // Keep the last known jobs; the next refresh retries.
+      }
     };
-  }, [machineData.status]);
+    load();
+    const timer = setInterval(load, TERMINAL_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [persistedMachineId]);
+
+  const { state: liveState, job: activeJob } = useMemo(
+    () => resolveLiveState(machineData.status, terminalJobs),
+    [machineData.status, terminalJobs]
+  );
 
   const handlePrint = () => {
     window.print();
@@ -323,7 +342,7 @@ export function MachineDetail({ tab }: MachineDetailProps) {
       id: "queue",
       label: "Navbat & Yuklama",
       icon: Layers,
-      badge: activeJob ? (machineData.status === "Running" ? "1 Faol" : "1 Navbat") : undefined,
+      badge: terminalJobs.length ? `${terminalJobs.length} ta` : undefined,
     },
     {
       id: "maintenance",
@@ -340,41 +359,29 @@ export function MachineDetail({ tab }: MachineDetailProps) {
         icon={Cpu}
         title={machineData.name || "Yangi Uskuna Pasporti"}
         docNo={machineData.code || machineData.id || "DRAFT"}
-        status={machineData.status || "Idle"}
+        status={liveState.label}
         priority={machineData.department || "Offset"}
         actions={
           <div className="flex items-center gap-2">
-            {/* Quick Status Selector */}
+            {/* Only availability is set here; running/setup/downtime come from the shift journal. */}
             <Select
-              value={machineData.status || "Idle"}
-              onValueChange={(val: any) => handleStatusChange(val)}
+              value={machineData.status === "Maintenance" ? "Maintenance" : "Idle"}
+              onValueChange={(val) => handleStatusChange(val as MachineStatus)}
             >
               <SelectTrigger className="h-7 w-32 text-xs font-medium">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Running">
-                  <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    Running
-                  </div>
-                </SelectItem>
                 <SelectItem value="Idle">
-                  <div className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
-                    <span className="w-2 h-2 rounded-full bg-zinc-400" />
-                    Idle
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    Ishga tayyor
                   </div>
                 </SelectItem>
                 <SelectItem value="Maintenance">
-                  <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
+                  <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-amber-500" />
-                    Maintenance
-                  </div>
-                </SelectItem>
-                <SelectItem value="Setup">
-                  <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-medium">
-                    <span className="w-2 h-2 rounded-full bg-blue-500" />
-                    Setup / Priladka
+                    Ta&apos;mirda
                   </div>
                 </SelectItem>
               </SelectContent>
@@ -385,10 +392,15 @@ export function MachineDetail({ tab }: MachineDetailProps) {
               variant="outline"
               size="sm"
               onClick={handleTriggerUpload}
+              disabled={isUploadingImage}
               className="h-7 text-xs gap-1"
-              title="Uskuna fotosuratini yuklash yoki almashtirish"
+              title="Uskuna rasmi"
             >
-              <Camera className="w-3.5 h-3.5 text-muted-foreground" />
+              {isUploadingImage ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Camera className="w-3.5 h-3.5 text-muted-foreground" />
+              )}
               <span className="hidden sm:inline">{machineData.imageUrl ? "Almashtirish" : "Rasm"}</span>
             </Button>
 
@@ -524,29 +536,22 @@ export function MachineDetail({ tab }: MachineDetailProps) {
               {activeJob && (() => {
                 const progressPct = Math.min(
                   100,
-                  Math.max(
-                    0,
-                    Math.round(
-                      ((activeJob.completedSheets || 0) /
-                        (activeJob.plannedSheets || activeJob.quantity || 1)) *
-                        100
-                    )
-                  )
+                  Math.max(0, Math.round((activeJob.goodQty / (activeJob.plannedQty || 1)) * 100))
                 );
                 return (
                   <SidebarSummaryCard
-                    icon={activeJobMeta.icon}
-                    title={activeJob.id}
-                    subtitle={activeJob.customer}
+                    icon={liveState.icon}
+                    title={activeJob.workOrderNo}
+                    subtitle={activeJob.customerName}
                   >
                     <div className="space-y-1.5 text-[11px] pt-1">
                       <p className="font-medium text-foreground truncate">
-                        {activeJob.product}
+                        {activeJob.productName}
                       </p>
                       <div className="flex items-center justify-between text-[10px]">
-                        <span className="text-muted-foreground">Holat:</span>
-                        <span className={`font-semibold ${activeJobMeta.textClass}`}>
-                          {activeJobMeta.label}
+                        <span className="text-muted-foreground">{activeJob.opName}</span>
+                        <span className={`font-semibold ${liveState.textClass}`}>
+                          {liveState.label}
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-[10px] text-muted-foreground">
@@ -557,26 +562,34 @@ export function MachineDetail({ tab }: MachineDetailProps) {
                       </div>
                       <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
                         <div
-                          className={`h-full rounded-full ${activeJobMeta.barClass}`}
+                          className={`h-full rounded-full ${liveState.barClass}`}
                           style={{ width: `${progressPct}%` }}
                         />
                       </div>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() =>
+                        onClick={() => {
+                          // Open on the shift journal, with what the registry already loaded.
+                          const item = useWorkspaceStore
+                            .getState()
+                            .productionQueue.find(
+                              (q) => q.docNo === activeJob.workOrderNo || q.id === activeJob.workOrderNo
+                            );
                           openTab({
-                            id: activeJob.id,
-                            title: `${activeJob.id}`,
+                            id: activeJob.workOrderNo,
+                            title: `${activeJob.workOrderNo}: ${activeJob.productName}`,
                             type: "work-order",
                             module: "production",
-                            activeLevel3Tab: "overview",
-                          })
-                        }
+                            isUnsaved: false,
+                            activeLevel3Tab: "timeline",
+                            documentData: { ...(item || {}), docNo: activeJob.workOrderNo },
+                          });
+                        }}
                         className="w-full h-6 text-[10px] gap-1 mt-1"
                       >
                         <ExternalLink className="w-3 h-3" />
-                        Buyurtmani Ko'rish
+                        Buyurtma
                       </Button>
                     </div>
                   </SidebarSummaryCard>
@@ -653,7 +666,8 @@ export function MachineDetail({ tab }: MachineDetailProps) {
                 code: machineData.code,
                 department: machineData.department,
                 category: machineData.category,
-                status: machineData.status,
+                status: liveState.label,
+                statusClass: liveState.textClass,
                 hourlyRate: machineData.costing?.standardHourlyRateUsd,
                 speed: machineData.offsetSpecs?.practicalSpeedSph
                   ? `${machineData.offsetSpecs.practicalSpeedSph.toLocaleString()} varaq/soat`

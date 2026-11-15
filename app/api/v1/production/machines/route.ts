@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { machineSaveErrorResponse } from "@/lib/server/machineApiError";
 import {
   getProductionMachines,
   getNextMachineCode,
@@ -33,11 +34,7 @@ export async function POST(request: Request) {
     const machine = await createProductionMachine(body, body.companyCode || "PRINTGOO");
     return NextResponse.json({ success: true, data: machine });
   } catch (error) {
-    console.error("POST /api/v1/production/machines error:", error);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Internal Server Error" },
-      { status: 500 }
-    );
+    return machineSaveErrorResponse(error, "POST /api/v1/production/machines");
   }
 }
 
@@ -50,11 +47,7 @@ export async function PUT(request: Request) {
     const machine = await updateProductionMachine(body.id, body, body.companyCode || "PRINTGOO");
     return NextResponse.json({ success: true, data: machine });
   } catch (error) {
-    console.error("PUT /api/v1/production/machines error:", error);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Internal Server Error" },
-      { status: 500 }
-    );
+    return machineSaveErrorResponse(error, "PUT /api/v1/production/machines");
   }
 }
 
