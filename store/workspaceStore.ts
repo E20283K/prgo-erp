@@ -539,6 +539,7 @@ export interface ProductionQueueItem {
   clientId?: string;
   customer: string;
   product: string;
+  productType?: string; // Buxgalteriya uchun mahsulot turi
   quantity: number;
   unit: string;
   pressMachine: string; // e.g. "Heidelberg Speedmaster XL 106-8P"

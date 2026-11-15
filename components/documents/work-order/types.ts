@@ -714,6 +714,8 @@ export interface WorkOrderToolingItem {
 export interface WorkOrderFormData {
   customer: string;
   product: string;
+  /** Buxgalteriya uchun mahsulot turi, masalan "Satin etiketka". */
+  productType?: string;
   department: WorkOrderDepartment;
   site: string;
   recipe: string;
@@ -1314,4 +1316,3 @@ export function generateSuggestedProductName(
 
   return finalName;
 }
-

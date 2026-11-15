@@ -138,6 +138,7 @@ export interface OrderRow {
   site: "Building 1" | "Building 2";
   customer: string;
   product: string;
+  productType: string;
   machine: string;
   qty: number;
   unit: string;
@@ -158,6 +159,7 @@ const INITIAL_COLUMNS: GridColumn[] = [
   { id: "preview", title: "Eskiz", width: 80, icon: GridColumnIcon.HeaderImage, hasMenu: true },
   { id: "customer", title: "Customer Organization", width: 220, icon: GridColumnIcon.HeaderString, hasMenu: true },
   { id: "product", title: "Product / Specification", width: 260, icon: GridColumnIcon.HeaderTextTemplate, hasMenu: true },
+  { id: "productType", title: "Mahsulot turi", width: 140, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "qty", title: "Quantity", width: 110, icon: GridColumnIcon.HeaderNumber, hasMenu: true },
   { id: "readiness", title: "Tayyorgarlik", width: 85, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
   { id: "status", title: "1C Status", width: 110, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
@@ -286,6 +288,7 @@ export function DataGrid() {
         site: (plants && plants.find((p) => p.id === wo.site)?.name) || wo.site || "Bosh sex",
         customer: wo.customer,
         product: wo.product,
+        productType: wo.productType || "",
         machine: wo.pressMachine,
         qty: wo.quantity,
         unit: wo.unit || "pcs",
@@ -346,6 +349,7 @@ export function DataGrid() {
         r.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.customer.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.product.toLowerCase().includes(searchFilter.toLowerCase()) ||
+        r.productType.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.readinessLabel.toLowerCase().includes(searchFilter.toLowerCase()) ||
         r.sampleStatusLabel.toLowerCase().includes(searchFilter.toLowerCase());
 
@@ -648,6 +652,13 @@ export function DataGrid() {
           displayData: rowData.product,
           allowOverlay: true,
         };
+      case "productType":
+        return {
+          kind: GridCellKind.Text,
+          data: rowData.productType,
+          displayData: rowData.productType || "—",
+          allowOverlay: false,
+        };
       case "machine":
         return {
           kind: GridCellKind.Text,
@@ -895,7 +906,7 @@ export function DataGrid() {
 
   const handleExportCsv = useCallback(() => {
     if (!filteredRows.length) return;
-    const headers = ["Doc No", "Mijoz", "Mahsulot", "Sex", "Stanok", "Miqdor", "Birlik", "Holat", "Muddati"];
+    const headers = ["Doc No", "Mijoz", "Mahsulot", "Mahsulot turi", "Sex", "Stanok", "Miqdor", "Birlik", "Holat", "Muddati"];
     const csvRows = [
       headers.join(","),
       ...filteredRows.map((r) =>
@@ -903,6 +914,7 @@ export function DataGrid() {
           `"${r.id}"`,
           `"${(r.customer || "").replace(/"/g, '""')}"`,
           `"${(r.product || "").replace(/"/g, '""')}"`,
+          `"${(r.productType || "").replace(/"/g, '""')}"`,
           `"${r.department || ""}"`,
           `"${r.machine || ""}"`,
           r.qty || 0,

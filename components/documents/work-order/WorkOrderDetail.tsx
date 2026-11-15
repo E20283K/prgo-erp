@@ -1096,6 +1096,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const [formData, setFormData] = useState<WorkOrderFormData>({
     customer: data.customer || initialQueueItem?.customer || "",
     product: data.product || initialQueueItem?.product || "",
+    productType: data.productType || initialQueueItem?.productType || "",
     department: data.department || initialQueueItem?.department || "Offset",
     site: data.site || initialQueueItem?.site || "",
     recipe: data.recipe || initialQueueItem?.recipe || "",

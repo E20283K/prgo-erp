@@ -32,6 +32,7 @@ import {
   clients,
   deliveryActs,
   supplierOrders,
+  productTypes,
 } from "@/db/schema";
 import { eq, desc, and, or, ilike, isNull, sql } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
@@ -224,6 +225,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       clientId: wo.clientId || undefined,
       customer: wo.customerName,
       product: wo.productName,
+      productType: wo.productType || "",
       quantity: Number(wo.quantity) || 0,
       unit: wo.unit || "pcs",
       pressMachine: wo.pressMachine || "",
@@ -524,6 +526,25 @@ export async function upsertWorkOrder(
     where: (wo, { and, eq }) => and(eq(wo.companyId, companyId), eq(wo.docNo, docNo)),
   });
 
+  // Mahsulot turi faqat ma'lumotnomadan: yangi qiymat ro'yxatda bo'lishi shart.
+  const requestedProductType = data.productType?.trim();
+  if (requestedProductType && requestedProductType !== existingOrder?.productType) {
+    const known = await db
+      .select({ id: productTypes.id })
+      .from(productTypes)
+      .where(
+        and(
+          eq(productTypes.companyId, companyId),
+          eq(productTypes.name, requestedProductType),
+          eq(productTypes.isActive, true)
+        )
+      )
+      .limit(1);
+    if (!known.length) {
+      throw new WorkOrderValidationError(`"${requestedProductType}" mahsulot turi ma'lumotnomada yo'q. Avval uni yarating.`);
+    }
+  }
+
   const rawStatus = (data.status || "").trim();
   let requestedStatus: WorkOrderStatus = "Active";
   if (rawStatus === "Draft") requestedStatus = "Draft";
@@ -576,6 +597,10 @@ export async function upsertWorkOrder(
     clientOrderId: data.linkedOrderId || null,
     customerName,
     productName: data.product,
+    productType:
+      data.productType !== undefined
+        ? data.productType.trim() || null
+        : existingOrder?.productType ?? null,
     department: data.department || "Offset",
     site: data.site || null,
     pressMachine: data.pressMachine || null,

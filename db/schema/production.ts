@@ -363,6 +363,7 @@ export const workOrders = pgTable(
     clientOrderId: varchar("client_order_id", { length: 64 }), // Masalan: CO-00041
     customerName: varchar("customer_name", { length: 255 }).notNull(), // Mijoz nomi
     productName: varchar("product_name", { length: 255 }).notNull(), // Mahsulot nomi
+    productType: varchar("product_type", { length: 128 }), // Buxgalteriya uchun mahsulot turi: "Satin etiketka"
 
     department: varchar("department", { length: 64 }).default("Offset").notNull(),
     site: varchar("site", { length: 128 }),
@@ -450,6 +451,23 @@ export const workOrders = pgTable(
     index("work_orders_priority_idx").on(table.priority),
     index("work_orders_order_date_idx").on(table.orderDate),
   ]
+);
+
+// ─── 3b. Product Types (Buxgalteriya uchun mahsulot turlari ma'lumotnomasi) ────
+// work_orders.product_type shu ro'yxatdagi nomni saqlaydi.
+
+export const productTypes = pgTable(
+  "product_types",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 128 }).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("product_types_company_name_uq").on(table.companyId, table.name)]
 );
 
 // ─── 4. Work Order Operations (Texnologik marshrut operatsiyalari) ──────────────

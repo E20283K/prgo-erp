@@ -143,6 +143,7 @@ import {
   ProductNameNamingPreset,
   RouteStep,
 } from "../types";
+import { ProductTypeSelect } from "../ProductTypeSelect";
 import { BomItem } from "../../BomMaterialsGrid";
 import { formatMoney, getCurrencySymbol } from "../../common/DocumentShell";
 
@@ -1371,6 +1372,19 @@ export function OverviewTab({
                   </Button>
                 </div>
               )}
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Mahsulot turi</label>
+              <ProductTypeSelect
+                value={formData.productType || ""}
+                onChange={(val) => {
+                  handleFieldChange("productType", val);
+                  onMarkUnsaved();
+                }}
+                disabled={isOperator}
+                className="h-8 text-xs bg-muted/30 disabled:opacity-85"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
