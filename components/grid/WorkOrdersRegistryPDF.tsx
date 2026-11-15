@@ -10,6 +10,7 @@ import {
 } from "@react-pdf/renderer";
 import type { OrderRow } from "./DataGrid";
 import type { ProductionReadinessChecks } from "@/store/workspaceStore";
+import { PrintgooPdfLogo } from "./PrintgooPdfLogo";
 
 // Register local Unicode Roboto font supporting Latin, Uzbek, Turkish, and Cyrillic
 Font.register({
@@ -83,15 +84,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-  },
-  brandBadge: {
-    backgroundColor: "#0f172a",
-    color: "#ffffff",
-    fontSize: 7,
-    fontWeight: "bold",
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-    borderRadius: 1.5,
   },
   docTitle: {
     fontSize: 9.5,
@@ -948,6 +940,27 @@ function getCmykBadgeColor(ch: "C" | "M" | "Y" | "K"): { bg: string; fg: string 
   return { bg: "#0f172a", fg: "#ffffff" };
 }
 
+/**
+ * Sums order quantities per unit ("1 700 pcs • 300 m"); pcs, metres and sheets are never added together.
+ * Uses the same quantity as the row itself: order qty, or the size breakdown sum when qty is empty.
+ */
+function formatQtyTotalsByUnit(list: RegistryPrintRow[]): string {
+  const byUnit = new Map<string, number>();
+  for (const r of list) {
+    const qty =
+      Number(r.qty) > 0
+        ? Number(r.qty)
+        : extractSizeBreakdown(r).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0);
+    if (qty <= 0) continue;
+    const unit = String(r.unit || "pcs").trim() || "pcs";
+    byUnit.set(unit, (byUnit.get(unit) || 0) + qty);
+  }
+  if (byUnit.size === 0) return "0";
+  return Array.from(byUnit.entries())
+    .map(([unit, qty]) => `${qty.toLocaleString()} ${unit}`)
+    .join(" • ");
+}
+
 export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
   rows,
   orientation,
@@ -980,19 +993,15 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
 
     return sortedKeys.map((dept) => {
       const deptRows = map.get(dept) || [];
-      const totalQty = deptRows.reduce((acc, item) => acc + (Number(item.qty) || 0), 0);
       return {
         department: dept,
         rows: deptRows,
-        totalQty,
+        totalQtyText: formatQtyTotalsByUnit(deptRows),
       };
     });
   }, [rows]);
 
-  const grandTotalQty = React.useMemo(
-    () => rows.reduce((sum, r) => sum + (Number(r.qty) || 0), 0),
-    [rows]
-  );
+  const grandTotalQtyText = React.useMemo(() => formatQtyTotalsByUnit(rows), [rows]);
 
   // Column percentage widths with generous room for Technological Routing (Bosqichlar)
   const colWidths = React.useMemo(() => {
@@ -1067,14 +1076,14 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
         {/* 1-Line Compact Top Header (Fixed across pages) */}
         <View style={styles.topBar} fixed>
           <View style={styles.topLeft}>
-            <Text style={styles.brandBadge}>PRINTGOO</Text>
+            <PrintgooPdfLogo height={16} />
             <Text style={styles.docTitle}>{labels.title}</Text>
             <Text style={styles.filterSub}>{filterSummaryText}</Text>
           </View>
           <View style={styles.topRight}>
             <Text style={styles.summaryPill}>
               {labels.deptOrdersCount.replace("{count}", String(rows.length))} •{" "}
-              {labels.totalQtyLabel}: {grandTotalQty.toLocaleString()}
+              {labels.totalQtyLabel}: {grandTotalQtyText}
             </Text>
             <Text style={styles.timestampText}>{generatedAt}</Text>
           </View>
@@ -1088,7 +1097,7 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
               <Text style={styles.deptTitle}>SEX: {group.department}</Text>
               <Text style={styles.deptMeta}>
                 {labels.deptOrdersCount.replace("{count}", String(group.rows.length))} •{" "}
-                {labels.totalQtyLabel}: {group.totalQty.toLocaleString()}
+                {labels.totalQtyLabel}: {group.totalQtyText}
               </Text>
             </View>
 
@@ -1455,7 +1464,7 @@ export const WorkOrdersRegistryPDF: React.FC<WorkOrdersRegistryPDFProps> = ({
                       </View>
                       {blockers.length > 0 ? (
                         <Text style={styles.blockerBadge}>
-                          {blockers.slice(0, 2).join(", ")}
+                          {blockers.join(", ")}
                         </Text>
                       ) : (
                         <Text
