@@ -868,9 +868,9 @@ export function OverviewTab({
       <div className="grid grid-cols-1 @7xl:grid-cols-3 gap-4">
         {/* Left Column (2/3 width on xl screens) */}
         <div className="@container @7xl:col-span-2 space-y-4">
-          <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-4 items-start">
-        {/* Card 1: Order Photo & Sample Reference (Strict Square Aspect Ratio) */}
-        <div className="@container p-4 bg-card border border-border rounded-lg flex flex-col w-full aspect-square self-start">
+          <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-4 items-start @3xl:items-stretch">
+        {/* Card 1: Order Photo & Sample Reference — square when stacked, matches Requisites height side by side */}
+        <div className="@container p-4 bg-card border border-border rounded-lg flex flex-col w-full aspect-square @3xl:aspect-auto @3xl:h-0 @3xl:min-h-full">
           <div className="flex items-center justify-between pb-2 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
               <Camera className="w-4 h-4 text-primary shrink-0" />
@@ -1096,7 +1096,7 @@ export function OverviewTab({
         </div>
 
         {/* Card 2: General Requisites & Customer */}
-        <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0">
+        <div className="@container p-4 bg-card border border-border rounded-lg space-y-3 min-w-0 @3xl:self-start">
           <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
               <Tag className="w-4 h-4 text-primary shrink-0" />
