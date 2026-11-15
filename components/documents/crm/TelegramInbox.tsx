@@ -15,7 +15,6 @@ import {
   FileText,
   PlusCircle,
   RefreshCw,
-  Sparkles,
   Link2,
   MessageSquare,
   Info,
@@ -24,7 +23,6 @@ import {
   Sliders,
   Check,
   Copy,
-  Save,
   Radio,
   Activity,
   X,
@@ -36,7 +34,18 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   UserCheck,
+  UserX,
+  ChevronsUpDown,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,7 +57,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -71,7 +79,15 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandItem,
+} from "@/components/ui/command";
 import {
   MessageScrollerProvider,
   MessageScroller,
@@ -156,19 +172,35 @@ interface TelegramMessageItem {
   sentAt: string;
 }
 
-interface QuickReplyTemplate {
-  id: string;
-  code: string;
-  title: string;
-  content: string;
-  category: string;
-}
-
 interface ClientActiveOrder {
   docNo: string;
   product: string;
   stage: string;
   quantity: number;
+}
+
+function OrderStageBadge({ stage }: { stage: string }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "h-4 shrink-0 px-1 text-[10px] font-normal",
+        stage === "Completed" && "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+        stage === "In Production" && "border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400"
+      )}
+    >
+      {stage}
+    </Badge>
+  );
+}
+
+function managerInitials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
 export function TelegramInbox() {
@@ -182,18 +214,30 @@ export function TelegramInbox() {
     addNotification,
     activeTelegramChatId,
     setActiveTelegramChatId,
+    users,
+    isUsersLoading,
+    fetchUsers,
   } = useWorkspaceStore();
 
   const [chats, setChats] = useState<TelegramChatListItem[]>([]);
   const [activeChat, setActiveChat] = useState<TelegramChatListItem | null>(null);
   const [messages, setMessages] = useState<TelegramMessageItem[]>([]);
-  const [templates, setTemplates] = useState<QuickReplyTemplate[]>([]);
+  const composerRef = useRef<HTMLInputElement>(null);
   const [botInfo, setBotInfo] = useState<{ avatarUrl?: string; firstName?: string; username?: string }>({
     avatarUrl: "/cache/telegram/avatars/bot.jpg",
     firstName: "PrintGoo Support",
     username: "printgoo_supportbot",
   });
   const [clientActiveOrders, setClientActiveOrders] = useState<ClientActiveOrder[]>([]);
+  const [ordersDialogOpen, setOrdersDialogOpen] = useState(false);
+  const [ordersSearch, setOrdersSearch] = useState("");
+  const filteredActiveOrders = (() => {
+    const q = ordersSearch.trim().toLowerCase();
+    if (!q) return clientActiveOrders;
+    return clientActiveOrders.filter((o) =>
+      [o.docNo, o.product, o.stage].some((v) => v?.toLowerCase().includes(q))
+    );
+  })();
   const [filter, setFilter] = useState<"all" | "unlinked" | "sla_breach" | "active">("all");
   const [search, setSearch] = useState("");
   const [inputText, setInputText] = useState("");
@@ -213,6 +257,10 @@ export function TelegramInbox() {
     notifyPaymentReminder: false,
   });
   const [selectedManager, setSelectedManager] = useState<string>("");
+  const [managerPickerOpen, setManagerPickerOpen] = useState(false);
+  const assignedManagerUser = activeChat?.assignedUserId
+    ? users.find((u) => u.id === activeChat.assignedUserId)
+    : undefined;
   const [savingGroupSettings, setSavingGroupSettings] = useState(false);
   const [copiedChatId, setCopiedChatId] = useState(false);
   const [realtimeActive, setRealtimeActive] = useState(true);
@@ -504,19 +552,6 @@ export function TelegramInbox() {
     }
   };
 
-  // 3. Shablonlarni yuklash
-  const fetchTemplates = async () => {
-    try {
-      const res = await fetch("/api/v1/crm/telegram/templates");
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        setTemplates(json.data);
-      }
-    } catch (err) {
-      console.error("fetchTemplates error:", err);
-    }
-  };
-
   // 4. Orqa fonda jimjit sinxronizatsiya (flickersiz, loading spinnersiz)
   const syncChatMessages = useCallback(async (chatId: string) => {
     try {
@@ -571,10 +606,42 @@ export function TelegramInbox() {
 
   useEffect(() => {
     fetchChats();
-    fetchTemplates();
     loadCrmCustomers();
     loadSuppliers();
   }, [filter]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  // Faol chat almashganda kursor darrov yozish maydonida bo'lsin
+  const activeChatId = activeChat?.id;
+  useEffect(() => {
+    if (!activeChatId) return;
+    const id = requestAnimationFrame(() => composerRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [activeChatId]);
+
+  // Boshqa joyda turganda harf bosilsa — yozish maydoniga qaytaramiz
+  useEffect(() => {
+    if (!activeChatId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest("input, textarea, select, [contenteditable='true'], [role='menu'], [role='listbox']")
+      ) {
+        return;
+      }
+      if (document.querySelector("[data-slot='dialog-content'], [data-slot='popover-content']")) return;
+      const input = composerRef.current;
+      // Inbox yashirin tabda bo'lsa, boshqa modullar klaviaturasini tortib olmaymiz
+      if (!input || input.offsetParent === null) return;
+      input.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeChatId]);
 
   // ─── Real-Time Live Sync (Har 2 soniyada yangi xabarlarni avtomatik qabul qilish) ───
   useEffect(() => {
@@ -593,22 +660,31 @@ export function TelegramInbox() {
   }, [realtimeActive, activeChat?.id, syncChatList, syncChatMessages]);
 
   // Faol buyurtmalarni yuklash
+  // Faqat guruhga biriktirilgan mijozning buyurtmalari
+  const linkedClientId = activeChat?.clientId || "";
+  const linkedClientName = activeChat?.clientName || "";
   useEffect(() => {
-    if (activeChat?.clientName) {
-      fetch(`/api/v1/production/work-orders?customer=${encodeURIComponent(activeChat.clientName)}`)
-        .then((res) => res.json())
-        .then((json) => {
-          if (json.success && Array.isArray(json.data)) {
-            setClientActiveOrders(json.data);
-          } else {
-            setClientActiveOrders([]);
-          }
-        })
-        .catch(() => setClientActiveOrders([]));
-    } else {
-      setClientActiveOrders([]);
-    }
-  }, [activeChat]);
+    setClientActiveOrders([]);
+    if (!linkedClientId) return;
+
+    let cancelled = false;
+    const params = new URLSearchParams({ clientId: linkedClientId });
+    if (linkedClientName) params.set("customer", linkedClientName);
+
+    fetch(`/api/v1/production/work-orders?${params.toString()}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled) return;
+        setClientActiveOrders(json.success && Array.isArray(json.data) ? json.data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setClientActiveOrders([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [linkedClientId, linkedClientName]);
 
   // Avtomatik pastga tushish (scroll to bottom)
   useEffect(() => {
@@ -691,8 +767,14 @@ export function TelegramInbox() {
       console.error("handleSendMessage error:", err);
     } finally {
       setSendingMessage(false);
+      requestAnimationFrame(() => composerRef.current?.focus());
     }
   };
+
+  const handleSendOrderStatus = (wo: ClientActiveOrder) =>
+    handleSendMessage(
+      `📋 Buyurtma holati: #${wo.docNo}\nMahsulot: ${wo.product}\nBosqich: ${wo.stage}\nTiraj: ${wo.quantity} dona`
+    );
 
   // Guruhni mijoz yoki yetkazib beruvchiga biriktirish
   const handleLinkTarget = async () => {
@@ -1329,7 +1411,12 @@ export function TelegramInbox() {
                                       )}
                                     </Avatar>
                                     <MessageContent>
-                                      <MessageHeader className={cn("px-1 gap-1.5 items-center", m.isOutgoing && "justify-end")}>
+                                      <MessageHeader
+                                        className={cn(
+                                          "px-1 gap-1.5 items-center opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100",
+                                          m.isOutgoing && "justify-end"
+                                        )}
+                                      >
                                         {m.isOutgoing ? (
                                           <>
                                             <DropdownMenu>
@@ -1530,58 +1617,11 @@ export function TelegramInbox() {
             </div>
 
             {/* Pastki xabar yozish maydoni */}
-            <div className="p-2.5 border-t border-border bg-card shrink-0 space-y-2">
-              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 text-[10px] px-2 gap-1 cursor-pointer shrink-0 border-blue-500/30 text-blue-600 dark:text-blue-400"
-                      >
-                        <Sparkles className="w-2.5 h-2.5" />
-                        {t("quickReplies")}
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="start" className="w-72">
-                    <DropdownMenuLabel className="text-xs">
-                      {t("quickReplies")}
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {templates.map((tpl) => (
-                      <DropdownMenuItem
-                        key={tpl.id}
-                        onClick={() => handleSendMessage(tpl.content)}
-                        className="text-xs cursor-pointer flex flex-col items-start py-1.5"
-                      >
-                        <span className="font-semibold text-[11px] text-foreground">
-                          {tpl.title}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground truncate w-full">
-                          {tpl.content}
-                        </span>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {templates.slice(0, 3).map((tpl) => (
-                  <Button
-                    key={tpl.id}
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleSendMessage(tpl.content)}
-                    className="h-6 text-[10px] px-2 cursor-pointer bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground shrink-0 truncate max-w-[200px]"
-                  >
-                    {tpl.title}
-                  </Button>
-                ))}
-              </div>
-
+            <div className="p-2.5 border-t border-border bg-card shrink-0">
               <InputGroup className="h-9 bg-background focus-within:ring-1 focus-within:ring-ring border-border">
                 <InputGroupInput
+                  ref={composerRef}
+                  autoFocus
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   onKeyDown={(e) => {
@@ -1881,120 +1921,269 @@ export function TelegramInbox() {
           <div>
             <div className="flex items-center justify-between text-xs font-semibold text-foreground mb-1.5">
               <div className="flex items-center gap-1.5">
-                <UserCheck className="w-3.5 h-3.5 text-blue-500" />
+                <UserCheck className="size-3.5 text-muted-foreground" />
                 <span>{t("assignedManager")}</span>
               </div>
               {savingGroupSettings && (
-                <span className="text-[10px] text-muted-foreground flex items-center gap-1 font-normal">
-                  <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-                  Saqlanmoqda...
-                </span>
+                <RefreshCw className="size-3 animate-spin text-muted-foreground" />
               )}
             </div>
 
-            <div className="p-2.5 rounded-md bg-muted/40 border border-border space-y-2 text-xs">
-              <div className="flex items-center gap-1">
-                <Input
-                  value={selectedManager}
-                  onChange={(e) => setSelectedManager(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleUpdateManager(selectedManager)}
-                  placeholder="Menejer ismi..."
-                  className="h-7 text-xs bg-background"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleUpdateManager(selectedManager)}
-                  disabled={savingGroupSettings}
-                  className="h-7 px-2.5 text-[10px] cursor-pointer shrink-0"
-                  title="Menejerni saqlash"
-                >
-                  <Save className="w-3 h-3" />
-                </Button>
-              </div>
-              {activeChat.assignedUserId ? (
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5 border-t border-border/40">
-                  <span>Biriktirilgan:</span>
-                  <span className="font-medium text-foreground truncate max-w-[170px]">
-                    {activeChat.assignedUserId}
+            <Popover open={managerPickerOpen} onOpenChange={setManagerPickerOpen}>
+              <PopoverTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={managerPickerOpen}
+                    disabled={savingGroupSettings}
+                    className="w-full h-8 justify-between px-2 text-xs font-normal bg-background"
+                  />
+                }
+              >
+                {assignedManagerUser || activeChat.assignedUserId ? (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Avatar className="size-5">
+                      {assignedManagerUser?.avatar && (
+                        <AvatarImage src={assignedManagerUser.avatar} />
+                      )}
+                      <AvatarFallback className="text-[9px]">
+                        {managerInitials(assignedManagerUser?.fullName || activeChat.assignedUserId || "")}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="truncate text-foreground">
+                      {assignedManagerUser?.fullName || activeChat.assignedUserId}
+                    </span>
+                    {assignedManagerUser?.role && (
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {assignedManagerUser.role}
+                      </span>
+                    )}
                   </span>
-                </div>
-              ) : (
-                <p className="text-[10px] text-muted-foreground italic">
-                  Mas'ul menejer belgilanmagan
-                </p>
-              )}
-            </div>
+                ) : (
+                  <span className="text-muted-foreground">Belgilanmagan</span>
+                )}
+                <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-(--anchor-width) min-w-64 p-0">
+                <Command className="rounded-lg! p-0">
+                  <CommandInput placeholder="Menejer qidirish" className="text-xs" />
+                  <CommandList className="max-h-60 p-1">
+                    <CommandEmpty>
+                      {isUsersLoading ? "Yuklanmoqda" : "Topilmadi"}
+                    </CommandEmpty>
+                    {users
+                      .filter((u) => u.status !== "Suspended")
+                      .map((u) => {
+                        const checked = activeChat.assignedUserId === u.id;
+                        return (
+                          <CommandItem
+                            key={u.id}
+                            value={`${u.fullName} ${u.username} ${u.role} ${u.id}`}
+                            data-checked={checked}
+                            onSelect={() => {
+                              setManagerPickerOpen(false);
+                              if (!checked) {
+                                setSelectedManager(u.id);
+                                handleUpdateManager(u.id);
+                              }
+                            }}
+                            className="h-8 cursor-pointer"
+                          >
+                            <Avatar className="size-5">
+                              {u.avatar && <AvatarImage src={u.avatar} />}
+                              <AvatarFallback className="text-[9px]">
+                                {managerInitials(u.fullName || u.username)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="truncate">{u.fullName || u.username}</span>
+                            {u.role && (
+                              <span className="shrink-0 text-[11px] text-muted-foreground">
+                                {u.role}
+                              </span>
+                            )}
+                          </CommandItem>
+                        );
+                      })}
+                  </CommandList>
+                  {activeChat.assignedUserId && (
+                    <div className="border-t border-border p-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setManagerPickerOpen(false);
+                          setSelectedManager("");
+                          handleUpdateManager("");
+                        }}
+                        className="h-7 w-full justify-start gap-2 px-2 text-xs text-muted-foreground hover:text-destructive"
+                      >
+                        <UserX className="size-3.5" />
+                        Olib tashlash
+                      </Button>
+                    </div>
+                  )}
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <Separator />
 
-          {/* 4. Mijozning faol buyurtmalari & Guruhga status yuborish */}
-          <div className="flex-1 flex flex-col min-h-0">
-            <div className="flex items-center justify-between text-xs font-semibold text-foreground mb-2">
+          {/* 4. Mijozning faol buyurtmalari */}
+          <div className="flex flex-col min-h-0">
+            <div className="flex items-center justify-between text-xs font-semibold text-foreground mb-1.5">
               <div className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-blue-500" />
+                <Layers className="size-3.5 text-muted-foreground" />
                 <span>{t("activeOrders")}</span>
+                <Badge variant="secondary" className="h-4 px-1 text-[10px] font-mono tabular-nums">
+                  {clientActiveOrders.length}
+                </Badge>
               </div>
-              <Badge variant="secondary" className="h-4 text-[9px] px-1 font-mono">
-                {clientActiveOrders.length}
-              </Badge>
+              {clientActiveOrders.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setOrdersDialogOpen(true)}
+                  className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Barchasi
+                </Button>
+              )}
             </div>
 
             {clientActiveOrders.length === 0 ? (
-              <div className="p-4 text-center text-[10px] text-muted-foreground border border-dashed border-border rounded-md">
-                Faol ishlab chiqarish buyurtmalari topilmadi
+              <div className="py-3 text-center text-[11px] text-muted-foreground border border-dashed border-border rounded-md">
+                Buyurtma yo'q
               </div>
             ) : (
-              <div className="space-y-2">
-                {clientActiveOrders.slice(0, 5).map((wo: ClientActiveOrder) => (
+              <div className="rounded-md border border-border divide-y divide-border overflow-hidden">
+                {clientActiveOrders.slice(0, 3).map((wo: ClientActiveOrder) => (
                   <div
                     key={wo.docNo}
-                    className="p-2 rounded-md border border-border bg-muted/30 text-xs space-y-1"
+                    className="group/order flex h-7 items-center gap-2 px-2 text-xs hover:bg-muted/50"
+                    title={wo.product}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-semibold text-blue-600 dark:text-blue-400 text-[10px]">
-                        {wo.docNo}
-                      </span>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-[9px] h-4 px-1",
-                          wo.stage === "Completed" && "text-emerald-600 border-emerald-500/20 bg-emerald-500/10",
-                          wo.stage === "In Production" && "text-blue-600 border-blue-500/20 bg-blue-500/10"
-                        )}
-                      >
-                        {wo.stage}
-                      </Badge>
-                    </div>
-                    <p className="text-[11px] truncate text-foreground font-medium">
+                    <span className="font-mono text-[11px] font-medium text-foreground shrink-0">
+                      {wo.docNo}
+                    </span>
+                    <span className="truncate text-[11px] text-muted-foreground flex-1 min-w-0">
                       {wo.product}
-                    </p>
-                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/30">
-                      <span>{wo.quantity?.toLocaleString()} dona</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          handleSendMessage(
-                            `📋 Buyurtma holati: #${wo.docNo}\nMahsulot: ${wo.product}\nBosqich: ${wo.stage}\nTiraj: ${wo.quantity} dona`
-                          )
-                        }
-                        className="h-5 text-[9px] px-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 cursor-pointer"
-                        title="Guruhga ushbu buyurtma statusini yuborish"
-                      >
-                        <Send className="w-2.5 h-2.5 mr-1" />
-                        Status jo'natish
-                      </Button>
-                    </div>
+                    </span>
+                    <OrderStageBadge stage={wo.stage} />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleSendOrderStatus(wo)}
+                      className="size-5 shrink-0 opacity-0 group-hover/order:opacity-100 text-muted-foreground hover:text-foreground"
+                      title="Statusni guruhga yuborish"
+                    >
+                      <Send className="size-3" />
+                    </Button>
                   </div>
                 ))}
+                {clientActiveOrders.length > 3 && (
+                  <button
+                    type="button"
+                    onClick={() => setOrdersDialogOpen(true)}
+                    className="flex h-7 w-full items-center justify-center text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
+                  >
+                    +{clientActiveOrders.length - 3}
+                  </button>
+                )}
               </div>
             )}
           </div>
         </div>
         </>
       )}
+
+      {/* ─── Faol buyurtmalar Dialog (Modal) ─────────────────────────── */}
+      <Dialog
+        open={ordersDialogOpen}
+        onOpenChange={(open) => {
+          setOrdersDialogOpen(open);
+          if (!open) setOrdersSearch("");
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl gap-3 p-4">
+          <DialogHeader className="gap-1">
+            <DialogTitle className="text-sm font-semibold flex items-center gap-1.5">
+              <Layers className="size-4 text-muted-foreground" />
+              {t("activeOrders")}
+              <Badge variant="secondary" className="h-4 px-1 text-[10px] font-mono tabular-nums">
+                {clientActiveOrders.length}
+              </Badge>
+            </DialogTitle>
+            <DialogDescription className="truncate">{activeChat?.title}</DialogDescription>
+          </DialogHeader>
+
+          <InputGroup className="h-8">
+            <InputGroupAddon>
+              <Search className="size-3.5 text-muted-foreground" />
+            </InputGroupAddon>
+            <InputGroupInput
+              value={ordersSearch}
+              onChange={(e) => setOrdersSearch(e.target.value)}
+              placeholder="Raqam, mahsulot yoki bosqich"
+              className="text-xs"
+            />
+          </InputGroup>
+
+          <div className="max-h-[60vh] overflow-auto rounded-md border border-border">
+            <Table className="text-xs">
+              <TableHeader className="sticky top-0 z-10 bg-muted">
+                <TableRow className="h-7 hover:bg-transparent">
+                  <TableHead className="h-7 px-2 text-[11px]">Raqam</TableHead>
+                  <TableHead className="h-7 px-2 text-[11px]">Mahsulot</TableHead>
+                  <TableHead className="h-7 px-2 text-[11px]">Bosqich</TableHead>
+                  <TableHead className="h-7 px-2 text-[11px] text-right">Tiraj</TableHead>
+                  <TableHead className="h-7 w-8 px-2" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredActiveOrders.length === 0 ? (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">
+                      Topilmadi
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredActiveOrders.map((wo) => (
+                    <TableRow key={wo.docNo} className="group/row h-7">
+                      <TableCell className="px-2 py-1 font-mono text-[11px] font-medium whitespace-nowrap">
+                        {wo.docNo}
+                      </TableCell>
+                      <TableCell className="px-2 py-1 max-w-0 w-full truncate" title={wo.product}>
+                        {wo.product}
+                      </TableCell>
+                      <TableCell className="px-2 py-1 whitespace-nowrap">
+                        <OrderStageBadge stage={wo.stage} />
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-right tabular-nums whitespace-nowrap">
+                        {wo.quantity?.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="px-1 py-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleSendOrderStatus(wo)}
+                          disabled={sendingMessage}
+                          className="size-6 text-muted-foreground hover:text-foreground opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
+                          title="Statusni guruhga yuborish"
+                        >
+                          <Send className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Guruh Sozlamalari Dialog (Modal) ─────────────────────────── */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
@@ -2114,92 +2303,103 @@ export function TelegramInbox() {
 
       {/* ─── Kontragentga biriktirish Dialog (Modal) ─────────────────────────── */}
       <Dialog open={linkingDialogOpen} onOpenChange={setLinkingDialogOpen}>
-        <DialogContent className="max-w-md p-4">
-          <DialogHeader>
-            <DialogTitle className="text-xs font-semibold flex items-center gap-1.5">
-              <Link2 className="w-4 h-4 text-primary" />
-              <span>Guruhni biriktirish</span>
+        <DialogContent className="sm:max-w-md gap-3 p-4">
+          <DialogHeader className="gap-1">
+            <DialogTitle className="text-sm font-semibold flex items-center gap-1.5">
+              <Link2 className="size-4 text-muted-foreground" />
+              Guruhni biriktirish
             </DialogTitle>
+            <DialogDescription className="flex items-center gap-1.5 truncate">
+              <MessageSquare className="size-3.5 shrink-0" />
+              <span className="truncate font-medium text-foreground">{activeChat?.title}</span>
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-2 text-xs">
-            <p className="text-muted-foreground text-[11px]">
-              Guruh: <strong className="text-foreground">{activeChat?.title}</strong>
-            </p>
+          <Tabs
+            value={linkTargetType}
+            onValueChange={(v) => setLinkTargetType(v as "client" | "supplier")}
+            className="gap-2"
+          >
+            <TabsList className="w-full h-8">
+              <TabsTrigger value="client" className="flex-1 text-xs">
+                <Building2 className="size-3.5" />
+                Mijoz
+                <Badge variant="secondary" className="h-4 px-1 text-[10px] tabular-nums">
+                  {crmCustomers.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="supplier" className="flex-1 text-xs">
+                <Truck className="size-3.5" />
+                Yetkazib beruvchi
+                <Badge variant="secondary" className="h-4 px-1 text-[10px] tabular-nums">
+                  {suppliers.length}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-            {/* Target type switcher: Mijoz vs Yetkazib beruvchi */}
-            <div className="grid grid-cols-2 gap-1 p-0.5 bg-muted rounded-md border border-border">
-              <button
-                type="button"
-                onClick={() => setLinkTargetType("client")}
-                className={`h-7 rounded text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
-                  linkTargetType === "client"
-                    ? "bg-background text-foreground shadow-xs"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Building2 className="w-3.5 h-3.5 text-blue-500" />
-                <span>Mijoz</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setLinkTargetType("supplier")}
-                className={`h-7 rounded text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
-                  linkTargetType === "supplier"
-                    ? "bg-background text-foreground shadow-xs"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Truck className="w-3.5 h-3.5 text-purple-500" />
-                <span>Yetkazib beruvchi</span>
-              </button>
-            </div>
+          <Command
+            key={linkTargetType}
+            className="rounded-lg! border border-border bg-background p-0"
+          >
+            <CommandInput
+              placeholder={linkTargetType === "client" ? "Mijoz qidirish" : "Yetkazib beruvchi qidirish"}
+              className="text-xs"
+            />
+            <CommandList className="max-h-64 p-1">
+              <CommandEmpty>Topilmadi</CommandEmpty>
+              {linkTargetType === "client"
+                ? crmCustomers.map((c: CrmCustomerRecord) => {
+                    const id = String(c.dbId || c.id);
+                    const checked = selectedClientId === id;
+                    return (
+                      <CommandItem
+                        key={id}
+                        value={`${c.name} ${c.phone ?? ""} ${id}`}
+                        onSelect={() => setSelectedClientId(checked ? "" : id)}
+                        data-checked={checked}
+                        className="h-7 cursor-pointer"
+                      >
+                        <Building2 className="text-muted-foreground" />
+                        <span className="truncate">{c.name}</span>
+                        {c.phone && (
+                          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                            {c.phone}
+                          </span>
+                        )}
+                      </CommandItem>
+                    );
+                  })
+                : suppliers.map((s) => {
+                    const id = String(s.id);
+                    const checked = selectedSupplierId === id;
+                    return (
+                      <CommandItem
+                        key={id}
+                        value={`${s.name} ${s.code ?? ""} ${s.category ?? ""} ${id}`}
+                        onSelect={() => setSelectedSupplierId(checked ? "" : id)}
+                        data-checked={checked}
+                        className="h-7 cursor-pointer"
+                      >
+                        <Truck className="text-muted-foreground" />
+                        <span className="truncate">{s.name}</span>
+                        {(s.code || s.category) && (
+                          <span className="shrink-0 text-[11px] text-muted-foreground">
+                            {s.code || s.category}
+                          </span>
+                        )}
+                      </CommandItem>
+                    );
+                  })}
+            </CommandList>
+          </Command>
 
-            {linkTargetType === "client" ? (
-              <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-muted-foreground">
-                  {t("selectClient")}
-                </label>
-                <select
-                  value={selectedClientId}
-                  onChange={(e) => setSelectedClientId(e.target.value)}
-                  className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs focus:ring-1 focus:ring-primary"
-                >
-                  <option value="">-- Mijozni tanlang --</option>
-                  {crmCustomers.map((c: CrmCustomerRecord) => (
-                    <option key={c.id} value={c.dbId || c.id}>
-                      {c.name} {c.phone ? `(${c.phone})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-muted-foreground">
-                  Yetkazib beruvchini tanlang
-                </label>
-                <select
-                  value={selectedSupplierId}
-                  onChange={(e) => setSelectedSupplierId(e.target.value)}
-                  className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs focus:ring-1 focus:ring-primary"
-                >
-                  <option value="">-- Yetkazib beruvchini tanlang --</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.code || s.category})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="gap-1 pt-2">
+          <DialogFooter className="gap-1.5 px-4 py-2.5">
             <Button
               variant="outline"
               size="sm"
               onClick={() => setLinkingDialogOpen(false)}
-              className="h-7 text-xs cursor-pointer"
+              className="h-7 text-xs"
             >
               Bekor qilish
             </Button>
@@ -2211,8 +2411,9 @@ export function TelegramInbox() {
                   ? !selectedClientId
                   : !selectedSupplierId
               }
-              className="h-7 text-xs cursor-pointer bg-primary text-primary-foreground font-semibold"
+              className="h-7 text-xs"
             >
+              <Link2 className="size-3.5" />
               Biriktirish
             </Button>
           </DialogFooter>

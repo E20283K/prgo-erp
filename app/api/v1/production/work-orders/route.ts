@@ -10,7 +10,18 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const companyCode = searchParams.get("company") ?? "PRINTGOO";
 
-    const orders = await getWorkOrders(companyCode);
+    const clientId = searchParams.get("clientId");
+    const customer = searchParams.get("customer")?.trim().toLowerCase();
+
+    let orders = await getWorkOrders(companyCode);
+    // Mijoz bo'yicha filtr: avval clientId, clientId siz eski buyurtmalar uchun nom bo'yicha
+    if (clientId || customer) {
+      orders = orders.filter((o) =>
+        o.clientId
+          ? o.clientId === clientId
+          : !!customer && o.customer?.trim().toLowerCase() === customer
+      );
+    }
     return NextResponse.json({
       success: true,
       data: orders,
