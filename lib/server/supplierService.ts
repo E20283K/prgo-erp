@@ -772,6 +772,23 @@ export async function upsertSupplierOrder(
   return { success: true, order: savedOrder };
 }
 
+export async function deleteSupplierOrder(orderId: string, companyCode: string = "PRINTGOO") {
+  const companyId = await getCompanyIdByCode(companyCode);
+
+  const existing = await db.query.supplierOrders.findFirst({
+    where: and(eq(supplierOrders.companyId, companyId), eq(supplierOrders.id, orderId)),
+  });
+  if (!existing) throw new Error("Buyurtma topilmadi");
+
+  // Bog'langan to'lovlar FK orqali supplier_order_id = NULL bo'ladi
+  await db.delete(supplierOrders).where(eq(supplierOrders.id, existing.id));
+
+  // Ta'minotchi qarzini qayta hisoblash
+  await syncSupplierBalance(companyId, existing.supplierId);
+
+  return { success: true, orderNo: existing.orderNo };
+}
+
 // ─── 3. Supplier Payments (Chiqim to'lovlari) ──────────────────────────────────
 
 export async function getSupplierPayments(supplierIdOrCode: string, companyCode: string = "PRINTGOO"): Promise<SupplierPaymentRecord[]> {

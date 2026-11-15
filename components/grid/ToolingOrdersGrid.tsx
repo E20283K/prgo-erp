@@ -70,6 +70,7 @@ import {
   Upload,
   Send,
   MessageSquare,
+  Trash2,
 } from "lucide-react";
 
 const DataEditor = dynamic(
@@ -1203,6 +1204,35 @@ export function ToolingOrdersGrid() {
     }
   };
 
+  // Buyurtmani bazadan butunlay o'chirish
+  const handleDeleteOrder = async (order: ToolingOrderRecord) => {
+    const ok = window.confirm(
+      `${order.orderNo} buyurtmasi bazadan butunlay o'chiriladi. Bu amalni qaytarib bo'lmaydi. Davom etasizmi?`
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/v1/production/tooling-orders/${order.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.success) {
+        addNotification({
+          title: "Buyurtma o'chirildi",
+          description: order.orderNo,
+          severity: "info",
+        });
+        if (editingOrder?.id === order.id) {
+          setIsModalOpen(false);
+          setEditingOrder(null);
+        }
+        fetchOrders();
+      } else {
+        alert(json.error || "O'chirishda xatolik");
+      }
+    } catch (err) {
+      console.error("Delete tooling order error:", err);
+      alert("Buyurtmani o'chirishda xatolik yuz berdi");
+    }
+  };
+
   // Telegram guruhga buyurtma (PO) yuborish
   const handleSendToTelegram = async (order: ToolingOrderRecord) => {
     try {
@@ -1592,6 +1622,15 @@ export function ToolingOrdersGrid() {
               >
                 <AlertTriangle className="size-3.5 mr-2" />
                 <span>Bekor qilish (Cancelled)</span>
+              </ContextMenuItem>
+
+              <ContextMenuItem
+                onClick={() => selectedOrder && handleDeleteOrder(selectedOrder)}
+                disabled={!selectedOrder}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="size-3.5 mr-2" />
+                <span>O&apos;chirish</span>
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
@@ -2143,6 +2182,17 @@ export function ToolingOrdersGrid() {
 
           <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-border/40 w-full min-w-0">
             {editingOrder ? (
+              <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs px-2.5 text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5 cursor-pointer"
+                onClick={() => editingOrder && handleDeleteOrder(editingOrder)}
+              >
+                <Trash2 className="size-3.5" />
+                <span>O&apos;chirish</span>
+              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -2161,6 +2211,7 @@ export function ToolingOrdersGrid() {
                 <Send className="size-3.5" />
                 <span>Telegramga jo&apos;natish</span>
               </Button>
+              </div>
             ) : <div />}
 
             <div className="flex items-center gap-2">
