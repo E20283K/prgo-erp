@@ -4309,11 +4309,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         console.error("Failed to persist readiness checks:", err);
       });
     }
-    // "In Production" and "Completed" follow the route steps (the server derives them from the shift journal).
-    if (stage === "In Production" || stage === "Completed") return;
   },
 
   setProductionStage: (idOrWoOrCo, stage) => {
+    // "In Production" and "Completed" follow the route steps (the server derives them from the shift journal).
+    if (stage === "In Production" || stage === "Completed") return;
     let targetDocNo = "";
 
     set((state) => {
@@ -4323,11 +4323,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const updated = state.productionQueue.map((item) => {
         const isMatch =
           item.id.toLowerCase() === matchKey ||
-        // Running and finished orders are moved by their steps, not from here.
-        if (item.stage === "In Production" || item.stage === "Completed") return item;
           (item.docNo && item.docNo.toLowerCase() === matchKey) ||
           (item.clientOrderId && item.clientOrderId.toLowerCase() === matchKey);
         if (!isMatch) return item;
+        // Running and finished orders are moved by their steps, not from here.
+        if (item.stage === "In Production" || item.stage === "Completed") return item;
         changedItem = item;
         targetDocNo = item.docNo || item.id;
         return { ...item, stage };
@@ -4510,8 +4510,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
                 ...(item.checks.audit || {}),
               },
             }
-        const mergedStage = item.stage || existing.stage;
           : existing.checks;
+        const mergedStage = item.stage || existing.stage;
 
         const updatedQueue = [...state.productionQueue];
         updatedQueue[existsIndex] = {
@@ -4535,10 +4535,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         quantity: item.quantity || 1000,
         unit: item.unit || "pcs",
         pressMachine: item.pressMachine || "Heidelberg Speedmaster XL 106-8P",
-        status: deriveWorkOrderStatus(item.status, item.stage || "Queue"),
         department: item.department || "Offset",
         priority: item.priority || "Normal",
         stage: item.stage || "Queue",
+        status: deriveWorkOrderStatus(item.status, item.stage || "Queue"),
         queueOrder: state.productionQueue.filter((i) => i.pressMachine === item.pressMachine).length + 1,
         checks: item.checks || { designReady: false, paperReady: false, platesReady: false, toolingReady: false },
         orderDate: item.orderDate || new Date().toISOString().split("T")[0],
