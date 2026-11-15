@@ -14,6 +14,7 @@ import { formatMinutes, type StepPhase } from "../utils/stepTimeline";
 import { stepUnit } from "../utils/stepKpis";
 import { PalletReportDialog } from "../dialogs/PalletReportDialog";
 import { DowntimeLogDialog } from "../dialogs/DowntimeLogDialog";
+import { useAskDialog } from "../dialogs/AskDialog";
 import type { TerminalJob, TerminalMachine } from "@/lib/server/operatorTerminalService";
 
 /**
@@ -88,6 +89,7 @@ export function OperatorTerminal() {
   const [schedule, setSchedule] = useState<ShiftInterval[]>(DEFAULT_SHIFTS);
   const [isPalletOpen, setIsPalletOpen] = useState(false);
   const [downtimeMode, setDowntimeMode] = useState<"open" | "record" | null>(null);
+  const askDialog = useAskDialog();
 
   const isOperator = useMemo(() => {
     if (!currentUser) return false;
@@ -177,7 +179,7 @@ export function OperatorTerminal() {
   };
 
   /** Same rule as the order screen: no start before the previous step has output (managers may override). */
-  const startGate = (): { ok: boolean; note?: string } => {
+  const startGate = async (): Promise<{ ok: boolean; note?: string }> => {
     if (!job || job.ready) return { ok: true };
     const prev = job.previousStep;
     const label = prev ? `#${prev.stepNumber} ${prev.name}` : "Oldingi bosqich";
@@ -185,20 +187,25 @@ export function OperatorTerminal() {
       addNotification({ title: "Boshlab bo'lmaydi", description: `${label} hali chiqim bermagan.`, severity: "error" });
       return { ok: false };
     }
-    const reason = window.prompt(`${label} hali chiqim bermagan. Parallel boshlash sababi:`);
-    if (!reason || !reason.trim()) return { ok: false };
-    return { ok: true, note: `Oldingi bosqichsiz boshlandi: ${reason.trim()}` };
+    const reason = await askDialog.ask({
+      title: "Oldingi bosqich chiqim bermagan",
+      message: `${label} hali chiqim bermagan. Bosqichni parallel boshlash uchun sababini yozing.`,
+      reasonLabel: "Sabab",
+      confirmLabel: "Boshlash",
+    });
+    if (!reason) return { ok: false };
+    return { ok: true, note: `Oldingi bosqichsiz boshlandi: ${reason}` };
   };
 
   const startSetup = async () => {
-    const gate = startGate();
+    const gate = await startGate();
     if (gate.ok) await transition("SetupStart", gate.note || "Sozlash boshlandi");
   };
 
   const startRun = async () => {
     let note = "Ish boshlandi";
     if (job?.phase === "queued") {
-      const gate = startGate();
+      const gate = await startGate();
       if (!gate.ok) return;
       if (gate.note) note = gate.note;
     }
@@ -228,7 +235,12 @@ export function OperatorTerminal() {
     }
     let note = "Bosqich yakunlandi";
     if (job.plannedQty > 0 && good < job.plannedQty) {
-      if (!window.confirm(`Reja: ${job.plannedQty.toLocaleString()}, fakt: ${good.toLocaleString()}. Bosqich qisman yakunlansinmi?`)) return;
+      const ok = await askDialog.ask({
+        title: "Qisman yakunlash",
+        message: `Reja: ${job.plannedQty.toLocaleString()}, fakt: ${good.toLocaleString()}. Bosqich qisman yakunlansinmi?`,
+        confirmLabel: "Yakunlash",
+      });
+      if (ok === null) return;
       note = `Qisman yakunlandi: ${good.toLocaleString()} / ${job.plannedQty.toLocaleString()}`;
     }
     await closeDowntime();
@@ -543,6 +555,8 @@ export function OperatorTerminal() {
           }}
         />
       )}
+
+      {askDialog.dialog}
 
       {job && downtimeMode && (
         <DowntimeLogDialog

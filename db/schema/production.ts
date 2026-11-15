@@ -375,6 +375,8 @@ export const workOrders = pgTable(
     status: workOrderStatusEnum("status").default("Draft").notNull(),
     priority: workOrderPriorityEnum("priority").default("Normal").notNull(),
     stage: workOrderStageEnum("stage").default("Queue").notNull(),
+    /** The planner's run order on the shop floor (lower runs first); the operator terminal follows it. */
+    queueOrder: integer("queue_order"),
     orderType: workOrderTypeEnum("order_type").default("Production").notNull(),
 
     orderDate: varchar("order_date", { length: 32 }),

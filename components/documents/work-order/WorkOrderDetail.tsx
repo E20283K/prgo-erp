@@ -115,6 +115,7 @@ import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { getProducedOutputQty, isProductionRouteFinished } from "./utils/productionOutput";
 import { DEFAULT_SHIFTS, atPlantTime, occurredAtFromTime, plantClock, type ShiftInterval } from "@/lib/shiftSchedule";
 import { stepUnit } from "./utils/stepKpis";
+import { useAskDialog } from "./dialogs/AskDialog";
 import { resolveMachine } from "./utils/operationCost";
 import {
   applyTimelineToStep,
@@ -1802,11 +1803,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     // The packaging step itself follows the boxes (see the packaging-step sync effect).
     if (markComplete) {
       if (!isDraftOrder) {
-        upsertProductionQueueItem({
-          id: targetWoId,
-          stage: "Completed",
-          completedSheets: nextSummary.totalPackedQty,
-        });
+        upsertProductionQueueItem({ id: targetWoId, completedSheets: nextSummary.totalPackedQty });
       }
     }
 
@@ -3136,6 +3133,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setIsPalletTagPrintOpen(true);
   };
 
+  const askDialog = useAskDialog();
+
   // ── Step state machine: every transition is a journal entry; the step's fields follow the journal ──
   const [downtimeDialogMode, setDowntimeDialogMode] = useState<"open" | "record">("open");
 
@@ -3164,33 +3163,39 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
    * A step starts only after the previous production step has produced something.
    * Operators are stopped; a manager may start in parallel with a reason, which goes into the journal.
    */
-  const checkPreviousStep = (opId: string): { ok: boolean; note?: string } => {
+  const checkPreviousStep = async (opId: string): Promise<{ ok: boolean; note?: string }> => {
     const production = operations.filter((o) => o.kind !== "packaging");
     const idx = production.findIndex((o) => o.id === opId);
     if (idx <= 0) return { ok: true };
     const prev = production[idx - 1];
-    if (stepGoodOutput(prev, stepEventsOf(prev.id)) > 0) return { ok: true };
+    // A finished previous step never blocks (older steps were closed without output reports).
+    if (prev.status === "Finished" || stepGoodOutput(prev, stepEventsOf(prev.id)) > 0) return { ok: true };
     const label = `#${prev.stepNumber} ${prev.name}`;
     if (isOperator) {
       addNotification({ title: "Bosqichni boshlab bo'lmaydi", description: `${label} hali chiqim bermagan.`, severity: "error" });
       return { ok: false };
     }
-    const reason = window.prompt(`${label} hali chiqim bermagan. Parallel boshlash sababi:`);
-    if (!reason || !reason.trim()) return { ok: false };
-    return { ok: true, note: `Oldingi bosqichsiz boshlandi: ${reason.trim()}` };
+    const reason = await askDialog.ask({
+      title: "Oldingi bosqich chiqim bermagan",
+      message: `${label} hali chiqim bermagan. Bosqichni parallel boshlash uchun sababini yozing.`,
+      reasonLabel: "Sabab",
+      confirmLabel: "Boshlash",
+    });
+    if (!reason) return { ok: false };
+    return { ok: true, note: `Oldingi bosqichsiz boshlandi: ${reason}` };
   };
 
-  const handleStartSetup = (opId: string) => {
-    const gate = checkPreviousStep(opId);
+  const handleStartSetup = async (opId: string) => {
+    const gate = await checkPreviousStep(opId);
     if (!gate.ok) return;
     logStepTransition(opId, "SetupStart", gate.note || "Sozlash boshlandi");
   };
 
-  const handleStartRun = (opId: string) => {
+  const handleStartRun = async (opId: string) => {
     const tl = getStepTimeline(stepEventsOf(opId));
     let note = "Ish boshlandi";
     if (tl.phase === "queued") {
-      const gate = checkPreviousStep(opId);
+      const gate = await checkPreviousStep(opId);
       if (!gate.ok) return;
       if (gate.note) note = gate.note;
     }
@@ -3246,7 +3251,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
    * Finishing needs at least one output report; short of plan it asks first.
    * `events` lets a report that was just added count before the list re-renders.
    */
-  const handleFinishStep = (opId: string, events: ShiftEvent[] = shiftEventsRef.current) => {
+  const handleFinishStep = async (opId: string, events: ShiftEvent[] = shiftEventsRef.current) => {
     const op = operations.find((o) => o.id === opId);
     if (!op) return;
     const good = stepGoodOutput(op, stepEventsOf(opId, events));
@@ -3261,10 +3266,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const plan = parseInt((op.qtyCompleted || "").split("/")[1]?.replace(/[^\d]/g, "") || "0", 10) || 0;
     let note = "Bosqich yakunlandi";
     if (plan > 0 && good < plan) {
-      const ok = window.confirm(
-        `Reja: ${plan.toLocaleString()}, fakt: ${good.toLocaleString()}. Bosqich qisman yakunlansinmi?`
-      );
-      if (!ok) return;
+      const ok = await askDialog.ask({
+        title: "Qisman yakunlash",
+        message: `Reja: ${plan.toLocaleString()}, fakt: ${good.toLocaleString()}. Bosqich qisman yakunlansinmi?`,
+        confirmLabel: "Yakunlash",
+      });
+      if (ok === null) return;
       note = `Qisman yakunlandi: ${good.toLocaleString()} / ${plan.toLocaleString()}`;
     }
     closeOpenDowntime(opId);
@@ -3436,7 +3443,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     );
 
     setTabUnsaved(tab.id, true);
-    if (eventData.markStepFinished) handleFinishStep(selectedOp.id, updatedEvents);
+    if (eventData.markStepFinished) void handleFinishStep(selectedOp.id, updatedEvents);
 
     addNotification({
       title: "Palet hisoboti saqlandi",
@@ -3446,7 +3453,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleDeleteShiftEvent = async (eventId: string) => {
-    if (!window.confirm("Smena jurnalidagi yozuv o'chirilsinmi?")) return;
+    const ok = await askDialog.ask({
+      title: "Yozuvni o'chirish",
+      message: "Smena jurnalidagi yozuv o'chirilsinmi? Yozuv izi bazada qoladi.",
+      confirmLabel: "O'chirish",
+      destructive: true,
+    });
+    if (ok === null) return;
     const previous = shiftEventsRef.current;
     setShiftEvents(previous.filter((ev) => ev.id !== eventId));
     const orderNo = getSavedOrderNo();
@@ -4507,6 +4520,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           onOpenPrintTag={handleOpenPalletTagPrint}
         />
       )}
+
+      {askDialog.dialog}
 
       {/* Dialog: Machine Downtime / Prostoy Log */}
       {isDowntimeDialogOpen && (

@@ -33,11 +33,11 @@ import {
   deliveryActs,
   supplierOrders,
 } from "@/db/schema";
-import { eq, desc, and, or, ilike, isNull } from "drizzle-orm";
+import { eq, desc, and, or, ilike, isNull, sql } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode } from "./crmService";
-import { syncStepFromJournal, toShiftEvent } from "./workOrderEventService";
+import { syncOrderStageFromSteps, syncStepFromJournal, toShiftEvent } from "./workOrderEventService";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { generateNextCode } from "@/lib/utils";
 import { getNextSpecNumber } from "./numberingService";
@@ -230,7 +230,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       priority: (wo.priority as any) || "Normal",
       stage: (wo.stage as any) || "Queue",
       status: (wo.status as any) || "Draft",
-      queueOrder: index + 1,
+      // Planner's run order; orders without one go to the end in creation order.
+      queueOrder: wo.queueOrder ?? 100000 + index,
       checks: {
         designReady: !!checks.designReady,
         paperReady: !!checks.paperReady,
@@ -790,7 +791,14 @@ export async function upsertWorkOrder(
       console.error("[WorkOrder Audit] Diff yozishda xatolik:", auditErr);
     }
   } else {
-    const [inserted] = await db.insert(workOrders).values(payload).returning({ id: workOrders.id });
+    const [{ maxQueue }] = await db
+      .select({ maxQueue: sql<number>`coalesce(max(${workOrders.queueOrder}), 0)` })
+      .from(workOrders)
+      .where(eq(workOrders.companyId, companyId));
+    const [inserted] = await db
+      .insert(workOrders)
+      .values({ ...payload, queueOrder: Number(maxQueue) + 10 })
+      .returning({ id: workOrders.id });
     targetId = inserted.id;
 
     // Audit Log: Yangi buyurtma yaratilish hodisasi
@@ -888,6 +896,7 @@ export async function upsertWorkOrder(
     for (const { opId } of loggedSteps) {
       if (opId) await syncStepFromJournal(targetId, opId);
     }
+    await syncOrderStageFromSteps(targetId);
   }
 
   // 4. The shift journal is not written with the order: every event is saved on its own
@@ -1169,6 +1178,7 @@ export async function updateWorkOrderReadiness(
   docNoOrId: string,
   updates: {
     stage?: string;
+    queueOrder?: number;
     checks?: any;
     pressMachine?: string;
     status?: string;
@@ -1198,8 +1208,14 @@ export async function updateWorkOrderReadiness(
       updatedAt: new Date(),
     };
 
-    if (updates.stage !== undefined) {
-      patchPayload.stage = updates.stage;
+    // "In Production" and "Completed" come from the steps (shift journal), not from a click.
+    if (updates.stage === "Queue" || updates.stage === "Ready to Print") {
+      if (existingOrder.stage !== "In Production" && existingOrder.stage !== "Completed") {
+        patchPayload.stage = updates.stage;
+      }
+    }
+    if (updates.queueOrder !== undefined && Number.isFinite(Number(updates.queueOrder))) {
+      patchPayload.queueOrder = Math.round(Number(updates.queueOrder));
     }
 
     if (updates.pressMachine !== undefined) {

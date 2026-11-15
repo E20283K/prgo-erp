@@ -218,7 +218,12 @@ export function OrderReadinessRouteCard({
     setBlockerReason("");
   };
 
+  // "In Production" and "Completed" follow the route steps (shift journal); the planner only releases.
+  const isDerivedStage = (stage: ProductionQueueStage) => stage === "In Production" || stage === "Completed";
+  const stageLocked = isDerivedStage(currentStage);
+
   const handleStageChange = (stage: ProductionQueueStage) => {
+    if (isDerivedStage(stage) || stageLocked) return;
     const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     setProductionStage(targetId, stage);
@@ -552,8 +557,9 @@ export function OrderReadinessRouteCard({
                           <button
                             type="button"
                             onClick={() => handleStageChange(s.stage)}
+                            disabled={isDerivedStage(s.stage) || stageLocked}
                             className={cn(
-                              "flex items-center gap-1 py-1 px-2 rounded text-[11px] font-medium transition-all cursor-pointer",
+                              "flex items-center gap-1 py-1 px-2 rounded text-[11px] font-medium transition-all cursor-pointer disabled:cursor-default",
                               isActive
                                 ? s.stage === "Completed"
                                   ? "bg-blue-600 text-white shadow-xs font-semibold"
@@ -893,8 +899,9 @@ export function OrderReadinessRouteCard({
                         <button
                           type="button"
                           onClick={() => handleStageChange(s.stage)}
+                          disabled={isDerivedStage(s.stage) || stageLocked}
                           className={cn(
-                            "flex items-center justify-center gap-1 py-1.5 px-1 rounded text-xs font-medium transition-all cursor-pointer min-w-0",
+                            "flex items-center justify-center gap-1 py-1.5 px-1 rounded text-xs font-medium transition-all cursor-pointer disabled:cursor-default min-w-0",
                             isActive
                               ? s.stage === "Completed"
                                 ? "bg-blue-600 text-white shadow-xs font-semibold"

@@ -81,6 +81,34 @@ const getDepartmentIcon = (dept: string, className = "w-3.5 h-3.5") => {
   return <Cpu className={className} />;
 };
 
+/** A route step as the work-order list carries it. */
+interface BoardStep {
+  id: string;
+  stepNumber: number;
+  name: string;
+  machine?: string;
+  machineId?: string;
+  status: "Queued" | "In Progress" | "Paused" | "Finished" | string;
+  plannedQty?: number;
+  completedQty?: number;
+}
+
+/** An order on one machine's column, with the step that runs there. */
+type BoardEntry = ProductionQueueItem & { boardStep?: BoardStep };
+
+const PACKAGING_STEP_RE = /qadoq|upakov|pack/i;
+
+const STEP_STATUS_LABEL: Record<string, string> = {
+  Queued: "Navbatda",
+  "In Progress": "Jarayonda",
+  Paused: "To'xtalish",
+  Finished: "Yakunlandi",
+};
+
+const entryPlanned = (e: BoardEntry) =>
+  e.boardStep ? Number(e.boardStep.plannedQty) || e.quantity : e.plannedSheets || e.quantity;
+const entryDone = (e: BoardEntry) => (e.boardStep ? Number(e.boardStep.completedQty) || 0 : e.completedSheets || 0);
+
 export function MachineQueueBoard({
   searchFilter,
   statusFilter,
@@ -213,28 +241,41 @@ export function MachineQueueBoard({
     ];
   }, [realMachineFleet]);
 
-  // Filter orders for a given machine based on search and status
-  const getOrdersForMachine = (machineName: string, machineCode?: string) => {
+  /**
+   * An order as one machine sees it: the route step that runs on this machine (cutting, lamination...
+   * not only the press). Orders without a route fall back to their press machine.
+   */
+  const getOrdersForMachine = (machineName: string, machineCode?: string, machineId?: string): BoardEntry[] => {
+    const name = machineName.toLowerCase();
+    const onThisMachine = (op: BoardStep) =>
+      !PACKAGING_STEP_RE.test(op.name || "") &&
+      ((machineId && op.machineId === machineId) || (op.machine || "").trim().toLowerCase() === name);
+    const pressMatch = (item: ProductionQueueItem) =>
+      Boolean(item.pressMachine) &&
+      (item.pressMachine === machineName ||
+        (machineCode && item.pressMachine === machineCode) ||
+        (machineCode && item.pressMachine.includes(`[${machineCode}]`)) ||
+        item.pressMachine.toLowerCase() === name);
+
     return (productionQueue || [])
       .filter((item) => !item.id?.startsWith("draft-") && !item.id?.startsWith("temp-"))
-      .filter((item) => {
-        if (!item.pressMachine) return false;
-        return (
-          item.pressMachine === machineName ||
-          (machineCode && item.pressMachine === machineCode) ||
-          (machineCode && item.pressMachine.includes(`[${machineCode}]`)) ||
-          item.pressMachine.toLowerCase() === machineName.toLowerCase()
-        );
+      .flatMap((item): BoardEntry[] => {
+        const steps = (item.operations || []) as BoardStep[];
+        if (steps.length === 0) return pressMatch(item) ? [{ ...item }] : [];
+        return steps.filter(onThisMachine).map((step) => ({ ...item, boardStep: step }));
       })
       .filter((item) => {
-        // Status filter
+        // Status filter: the step's own state on this machine when there is one
         if (statusFilter !== "ALL") {
+          const stepStatus = item.boardStep?.status;
+          const running = stepStatus ? stepStatus === "In Progress" || stepStatus === "Paused" : item.stage === "In Production";
+          const done = stepStatus ? stepStatus === "Finished" : item.stage === "Completed";
           if (statusFilter === "Running") {
-            if (item.stage !== "In Production") return false;
+            if (!running) return false;
           } else if (statusFilter === "Scheduled" || statusFilter === "Ready to Print") {
-            if (item.stage !== "Queue" && item.stage !== "Ready to Print") return false;
+            if (running || done) return false;
           } else if (statusFilter === "Completed") {
-            if (item.stage !== "Completed") return false;
+            if (!done) return false;
           } else if (item.stage !== statusFilter) {
             return false;
           }
@@ -259,14 +300,18 @@ export function MachineQueueBoard({
   // Compile rich summary metadata for all real machines
   const machineFleetData = useMemo(() => {
     return realMachineFleet.map((m) => {
-      const orders = getOrdersForMachine(m.name, m.code);
-      const totalSheets = orders.reduce((sum, o) => sum + (o.plannedSheets || o.quantity), 0);
-      const completedSheets = orders.reduce((sum, o) => sum + (o.completedSheets || 0), 0);
+      const orders = getOrdersForMachine(m.name, m.code, m.id);
+      const totalSheets = orders.reduce((sum, o) => sum + entryPlanned(o), 0);
+      const completedSheets = orders.reduce((sum, o) => sum + entryDone(o), 0);
       const progressPct = totalSheets > 0 ? Math.round((completedSheets / totalSheets) * 100) : 0;
 
-      // Determine live machine status
-      const hasRunning = orders.some((o) => o.stage === "In Production");
-      const hasReady = orders.some((o) => o.stage === "Ready to Print");
+      // Live machine status from its steps (shift journal), not from the order's stage
+      const hasRunning = orders.some((o) =>
+        o.boardStep ? o.boardStep.status === "In Progress" || o.boardStep.status === "Paused" : o.stage === "In Production"
+      );
+      const hasReady = orders.some(
+        (o) => o.stage === "Ready to Print" && (!o.boardStep || o.boardStep.status === "Queued")
+      );
       let liveStatus: "running" | "ready" | "queue" | "idle" = "idle";
       if (hasRunning) {
         liveStatus = "running";
@@ -386,20 +431,20 @@ export function MachineQueueBoard({
   };
 
   // Helper to render order card
-  const renderOrderCard = (item: ProductionQueueItem, index: number, machineOrdersCount: number) => {
+  const renderOrderCard = (item: BoardEntry, index: number, machineOrdersCount: number, columnIds: string[]) => {
     const readyCount =
       (item.checks.designReady ? 1 : 0) +
       (item.checks.paperReady ? 1 : 0) +
       (item.checks.platesReady ? 1 : 0) +
       (item.checks.toolingReady ? 1 : 0);
     const isAllReady = readyCount === 4;
-    const planned = item.plannedSheets || item.quantity;
-    const completed = item.completedSheets || 0;
+    const planned = entryPlanned(item);
+    const completed = entryDone(item);
     const pct = planned > 0 ? Math.round((completed / planned) * 100) : 0;
 
     return (
       <div
-        key={item.id}
+        key={`${item.id}:${item.boardStep?.id || ""}`}
         className={cn(
           "p-3 rounded-lg border transition-all hover:shadow-xs",
           item.stage === "In Production"
@@ -421,7 +466,7 @@ export function MachineQueueBoard({
                 <button
                   type="button"
                   disabled={index === 0}
-                  onClick={() => reorderQueueOrder(item.id, "up")}
+                  onClick={() => reorderQueueOrder(item.id, "up", columnIds)}
                   className="px-1 py-0 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
                   title="Move up in queue"
                 >
@@ -430,7 +475,7 @@ export function MachineQueueBoard({
                 <button
                   type="button"
                   disabled={index === machineOrdersCount - 1}
-                  onClick={() => reorderQueueOrder(item.id, "down")}
+                  onClick={() => reorderQueueOrder(item.id, "down", columnIds)}
                   className="px-1 py-0 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed border-t border-border"
                   title="Move down in queue"
                 >
@@ -522,20 +567,6 @@ export function MachineQueueBoard({
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>{tRoute("stageReady")}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setProductionStage(item.id, "In Production")}
-                  className="gap-2 cursor-pointer font-medium text-amber-600"
-                >
-                  <Play className="w-3.5 h-3.5" />
-                  <span>{tRoute("stageInProduction")}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setProductionStage(item.id, "Completed")}
-                  className="gap-2 cursor-pointer font-medium text-blue-600"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{tRoute("stageCompleted")}</span>
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -573,11 +604,17 @@ export function MachineQueueBoard({
                 )}
               >
                 {item.sampleStatus === "approved"
-                  ? "✓ Namuna tasdiqlangan"
-                  : `🧪 Namuna (${item.sampleQty || 5} dona)`}
+                  ? "Namuna tasdiqlangan"
+                  : `Namuna (${item.sampleQty || 5} dona)`}
               </Badge>
             )}
             <div className="text-[11px] text-muted-foreground">{item.customer}</div>
+            {item.boardStep && (
+              <div className="text-[11px] text-foreground mt-0.5">
+                #{item.boardStep.stepNumber} {item.boardStep.name}
+                <span className="text-muted-foreground"> · {STEP_STATUS_LABEL[item.boardStep.status] || item.boardStep.status}</span>
+              </div>
+            )}
           </div>
 
           {/* Progress in sheets / units */}
@@ -587,7 +624,7 @@ export function MachineQueueBoard({
             </span>
             {" / "}
             <span className="font-mono">
-              {planned.toLocaleString()} {item.department === "Offset" ? "sht" : item.unit || "pcs"}
+              {planned.toLocaleString()} {item.boardStep ? "" : item.department === "Offset" ? "varaq" : item.unit || "dona"}
             </span>
             <span className="ml-1 text-muted-foreground">({pct}%)</span>
           </div>
@@ -1046,7 +1083,7 @@ export function MachineQueueBoard({
                   <div className="text-[11px] text-muted-foreground">
                     Navbatda:{" "}
                     <strong className="text-foreground">
-                      {getOrdersForMachine(activeMachineMeta.name, activeMachineMeta.code).length} ta buyurtma
+                      {getOrdersForMachine(activeMachineMeta.name, activeMachineMeta.code, activeMachineMeta.id).length} ta buyurtma
                     </strong>
                     {activeMachineMeta.totalSheets > 0 &&
                       ` • ${activeMachineMeta.totalSheets.toLocaleString()} l/o`}
@@ -1083,7 +1120,7 @@ export function MachineQueueBoard({
 
             {/* Orders Queue List */}
             {(() => {
-              const orders = getOrdersForMachine(activeMachineMeta.name, activeMachineMeta.code);
+              const orders = getOrdersForMachine(activeMachineMeta.name, activeMachineMeta.code, activeMachineMeta.id);
 
               if (orders.length === 0) {
                 return (
@@ -1104,7 +1141,7 @@ export function MachineQueueBoard({
 
               return (
                 <div className="space-y-2.5">
-                  {orders.map((item, index) => renderOrderCard(item, index, orders.length))}
+                  {orders.map((item, index) => renderOrderCard(item, index, orders.length, orders.map((o) => o.id)))}
                 </div>
               );
             })()}
@@ -1113,7 +1150,7 @@ export function MachineQueueBoard({
           /* ALL REAL MACHINES FLEET OVERVIEW */
           <div className="space-y-6">
             {filteredFleet.map((machineMeta) => {
-              const orders = getOrdersForMachine(machineMeta.name, machineMeta.code);
+              const orders = getOrdersForMachine(machineMeta.name, machineMeta.code, machineMeta.id);
 
               return (
                 <div
@@ -1197,7 +1234,7 @@ export function MachineQueueBoard({
                       </div>
                     ) : (
                       <div className="space-y-2.5">
-                        {orders.map((item, index) => renderOrderCard(item, index, orders.length))}
+                        {orders.map((item, index) => renderOrderCard(item, index, orders.length, orders.map((o) => o.id)))}
                       </div>
                     )}
                   </div>

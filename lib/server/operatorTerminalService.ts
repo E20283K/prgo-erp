@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { productionMachines, workOrders } from "@/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { getStepTimeline, type StepPhase } from "@/components/documents/work-order/utils/stepTimeline";
 import { toShiftEvent } from "./workOrderEventService";
@@ -11,7 +11,8 @@ import { toShiftEvent } from "./workOrderEventService";
  */
 
 const PACKAGING_STEP_NAME_RE = /qadoq|upakov|pack/i;
-const ACTIVE_ORDER_STATUSES = ["Active", "In Production"] as const;
+/** Orders the planner released to the floor (or already running); drafts and cancelled ones never show. */
+const FLOOR_STAGES = ["Ready to Print", "In Production"] as const;
 const PRIORITY_RANK: Record<string, number> = { Urgent: 0, High: 1, Normal: 2, Low: 3 };
 
 export interface TerminalJob {
@@ -20,6 +21,8 @@ export interface TerminalJob {
   customerName: string;
   deadline: string | null;
   priority: string;
+  /** Planner's run order (lower first). */
+  queueOrder: number;
   unit: string;
   opId: string;
   stepNumber: number;
@@ -76,7 +79,8 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
   const orders = await db.query.workOrders.findMany({
     where: and(
       eq(workOrders.companyId, machine.companyId),
-      inArray(workOrders.status, [...ACTIVE_ORDER_STATUSES])
+      inArray(workOrders.stage, [...FLOOR_STAGES]),
+      notInArray(workOrders.status, ["Draft", "Cancelled"])
     ),
     with: {
       operations: { orderBy: (ops, { asc }) => [asc(ops.sequence)] },
@@ -119,6 +123,7 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
         customerName: wo.customerName,
         deadline: wo.deadline,
         priority: wo.priority,
+        queueOrder: wo.queueOrder ?? Number.MAX_SAFE_INTEGER,
         unit: wo.unit,
         opId: op.id,
         stepNumber: op.sequence,
@@ -137,7 +142,8 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
           ? { id: tl.openDowntime.id, reason: tl.openDowntime.downtimeReason || "To'xtalish", since: tl.openDowntime.occurredAt }
           : null,
         previousStep: prev ? { name: prev.name, stepNumber: prev.sequence, goodQty: prevGood } : null,
-        ready: !prev || prevGood > 0,
+        // A finished previous step never blocks (older steps were closed without output reports).
+        ready: !prev || prevGood > 0 || prev.status === "Finished",
         recentEvents: stepEvents
           .filter((ev) => ev.type === "Run" || ev.type === "Delay" || ev.type === "Maintenance")
           .sort((a, b) => (b.occurredAt || "").localeCompare(a.occurredAt || ""))
@@ -147,12 +153,13 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
     });
   }
 
-  // Running work first, then what can start, then by deadline and priority.
+  // Running work first, then what can start, then the planner's order (deadline and priority break ties).
   const activeRank = (j: TerminalJob) => (j.phase === "queued" ? 1 : 0);
   jobs.sort(
     (a, b) =>
       activeRank(a) - activeRank(b) ||
       Number(b.ready) - Number(a.ready) ||
+      a.queueOrder - b.queueOrder ||
       (a.deadline || "9999").localeCompare(b.deadline || "9999") ||
       (PRIORITY_RANK[a.priority] ?? 2) - (PRIORITY_RANK[b.priority] ?? 2) ||
       a.stepNumber - b.stepNumber

@@ -1040,7 +1040,8 @@ interface WorkspaceState {
   ) => void;
   setProductionStage: (idOrWoOrCo: string, stage: ProductionQueueStage) => void;
   updateQueueMachine: (idOrWoOrCo: string, machine: string) => void;
-  reorderQueueOrder: (idOrWoOrCo: string, direction: "up" | "down") => void;
+  /** Moves an order in the planner's run order; `siblingIds` is the column it is moved within. */
+  reorderQueueOrder: (idOrWoOrCo: string, direction: "up" | "down", siblingIds?: string[]) => void;
   isProductionQueueLoading?: boolean;
   loadProductionQueue: (companyCode?: string) => Promise<void>;
   upsertWorkOrderAsync: (payload: any, companyCode?: string) => Promise<any>;
@@ -4307,12 +4308,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         console.error("Failed to persist readiness checks:", err);
       });
     }
+    // "In Production" and "Completed" follow the route steps (the server derives them from the shift journal).
+    if (stage === "In Production" || stage === "Completed") return;
   },
 
   setProductionStage: (idOrWoOrCo, stage) => {
     let targetDocNo = "";
-    let completedSheetsToPersist: number | undefined;
-    let actualEndDateToPersist: string | undefined;
 
     set((state) => {
       const matchKey = idOrWoOrCo.trim().toLowerCase();
@@ -4321,34 +4322,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const updated = state.productionQueue.map((item) => {
         const isMatch =
           item.id.toLowerCase() === matchKey ||
+        // Running and finished orders are moved by their steps, not from here.
+        if (item.stage === "In Production" || item.stage === "Completed") return item;
           (item.docNo && item.docNo.toLowerCase() === matchKey) ||
           (item.clientOrderId && item.clientOrderId.toLowerCase() === matchKey);
         if (!isMatch) return item;
         changedItem = item;
         targetDocNo = item.docNo || item.id;
-
-        let completedSheets = item.completedSheets;
-        if (stage === "Completed" && item.plannedSheets) {
-          completedSheets = item.plannedSheets;
-        } else if (stage === "In Production" && (!completedSheets || completedSheets === 0) && item.plannedSheets) {
-          completedSheets = Math.round(item.plannedSheets * 0.1);
-        }
-        const actualEndDate =
-          stage === "Completed"
-            ? item.actualEndDate || new Date().toISOString().split("T")[0]
-            : item.stage === "Completed"
-            ? undefined
-            : item.actualEndDate;
-
-        completedSheetsToPersist = completedSheets;
-        actualEndDateToPersist = actualEndDate;
-
-        return {
-          ...item,
-          stage,
-          completedSheets,
-          actualEndDate,
-        };
+        return { ...item, stage };
       });
 
       // Synchronize open tabs documentData for seamless consistency
@@ -4373,7 +4354,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               id: `notif-${Date.now()}`,
               title: `${changedItem.id} stage updated`,
               description: `Moved to "${stage}" on ${changedItem.pressMachine}`,
-              severity: (stage === "Completed" ? "success" : "info") as NotifSeverity,
+              severity: "info" as NotifSeverity,
               timestamp: Date.now(),
               read: false,
               link: { module: "production", subModule: "planning" },
@@ -4393,11 +4374,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       fetch(`/api/v1/production/work-orders/${encodeURIComponent(targetDocNo)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          stage,
-          completedSheets: completedSheetsToPersist,
-          actualEndDate: actualEndDateToPersist,
-        }),
+        body: JSON.stringify({ stage }),
       }).catch((err) => {
         console.error("Failed to persist production stage:", err);
       });
@@ -4454,39 +4431,54 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  reorderQueueOrder: (idOrWoOrCo, direction) =>
-    set((state) => {
-      const matchKey = idOrWoOrCo.trim().toLowerCase();
-      const targetItem = state.productionQueue.find(
-        (i) =>
-          i.id.toLowerCase() === matchKey ||
-          (i.clientOrderId && i.clientOrderId.toLowerCase() === matchKey)
-      );
-      if (!targetItem) return state;
+  reorderQueueOrder: (idOrWoOrCo, direction, siblingIds) => {
+    const state = get();
+    const matchKey = idOrWoOrCo.trim().toLowerCase();
+    const targetItem = state.productionQueue.find(
+      (i) =>
+        i.id.toLowerCase() === matchKey ||
+        (i.clientOrderId && i.clientOrderId.toLowerCase() === matchKey)
+    );
+    if (!targetItem) return;
 
-      const machineItems = state.productionQueue
-        .filter((i) => i.pressMachine === targetItem.pressMachine)
-        .sort((a, b) => a.queueOrder - b.queueOrder);
+    // The column the planner is looking at (a machine's work), else the order's press machine.
+    const column = siblingIds
+      ? siblingIds
+          .map((id) => state.productionQueue.find((i) => i.id === id))
+          .filter((i): i is ProductionQueueItem => Boolean(i))
+      : state.productionQueue
+          .filter((i) => i.pressMachine === targetItem.pressMachine)
+          .sort((a, b) => a.queueOrder - b.queueOrder);
 
-      const currentIndex = machineItems.findIndex((i) => i.id === targetItem.id);
-      if (currentIndex === -1) return state;
+    const currentIndex = column.findIndex((i) => i.id === targetItem.id);
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (currentIndex === -1 || targetIndex < 0 || targetIndex >= column.length) return;
 
-      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-      if (targetIndex < 0 || targetIndex >= machineItems.length) return state;
+    const a = column[currentIndex];
+    const b = column[targetIndex];
+    // Equal numbers cannot be swapped into an order: nudge the moved one past its neighbour.
+    let aOrder = b.queueOrder;
+    let bOrder = a.queueOrder;
+    if (aOrder === bOrder) aOrder = direction === "up" ? bOrder - 1 : bOrder + 1;
+    const next = new Map<string, number>([
+      [a.id, aOrder],
+      [b.id, bOrder],
+    ]);
+    set({
+      productionQueue: state.productionQueue.map((i) => (next.has(i.id) ? { ...i, queueOrder: next.get(i.id)! } : i)),
+    });
 
-      const currentOrder = machineItems[currentIndex].queueOrder;
-      const swapOrder = machineItems[targetIndex].queueOrder;
-
-      const swappedMap = new Map<string, number>();
-      swappedMap.set(machineItems[currentIndex].id, swapOrder);
-      swappedMap.set(machineItems[targetIndex].id, currentOrder);
-
-      return {
-        productionQueue: state.productionQueue.map((i) =>
-          swappedMap.has(i.id) ? { ...i, queueOrder: swappedMap.get(i.id)! } : i
-        ),
-      };
-    }),
+    // The run order is shared with the operator terminal: keep it on the server.
+    for (const [id, order] of next) {
+      const item = state.productionQueue.find((i) => i.id === id);
+      const docNo = item?.docNo || id;
+      fetch(`/api/v1/production/work-orders/${encodeURIComponent(docNo)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queueOrder: order }),
+      }).catch((err) => console.error("Failed to persist queue order:", err));
+    }
+  },
 
   upsertProductionQueueItem: (item) =>
     set((state) => {

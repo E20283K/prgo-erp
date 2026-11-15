@@ -17,6 +17,38 @@ const PHASE_STATUS: Record<StepPhase, string> = {
 };
 
 /**
+ * The order's production stage follows its steps; only "Queue" and "Ready to Print"
+ * (released to the floor) are the planner's to set.
+ *   any step started → In Production, every step (packaging too) finished → Completed,
+ *   nothing started any more (a correction) → back to Ready to Print.
+ */
+export async function syncOrderStageFromSteps(workOrderId: string) {
+  const wo = await db.query.workOrders.findFirst({
+    where: eq(workOrders.id, workOrderId),
+    with: { operations: true },
+  });
+  if (!wo || !wo.operations || wo.operations.length === 0) return;
+  const started = wo.operations.some((op) => ["In Progress", "Paused", "Finished"].includes(op.status));
+  const allDone = wo.operations.every((op) => op.status === "Finished");
+
+  let stage = wo.stage;
+  if (allDone) stage = "Completed";
+  else if (started) stage = "In Production";
+  else if (wo.stage === "In Production" || wo.stage === "Completed") stage = "Ready to Print";
+  if (stage === wo.stage) return;
+
+  const today = new Date().toISOString().split("T")[0];
+  await db
+    .update(workOrders)
+    .set({
+      stage,
+      actualEndDate: stage === "Completed" ? wo.actualEndDate || today : stage === "In Production" ? null : wo.actualEndDate,
+      updatedAt: new Date(),
+    })
+    .where(eq(workOrders.id, workOrderId));
+}
+
+/**
  * Writes the step's status, times, downtime and good output from its journal onto the step row,
  * so screens that read the route (registry, planning, operator terminal) see what the journal says
  * without the order being saved. Steps without transitions only get their reported output.
@@ -48,6 +80,7 @@ export async function syncStepFromJournal(workOrderId: string, opId: string) {
     .update(workOrderOperations)
     .set(update)
     .where(and(eq(workOrderOperations.workOrderId, workOrderId), eq(workOrderOperations.id, opId)));
+  await syncOrderStageFromSteps(workOrderId);
 }
 
 /**

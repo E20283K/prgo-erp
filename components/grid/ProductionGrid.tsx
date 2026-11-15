@@ -562,7 +562,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         { id: "machine", title: "Stanok / Uskuna", width: 220, icon: GridColumnIcon.HeaderLookup },
         { id: "operator", title: "Smena & Operator", width: 165, icon: GridColumnIcon.HeaderString },
         { id: "readiness", title: "Tayyorgarlik", width: 135, icon: GridColumnIcon.HeaderSingleValue },
-        { id: "progress", title: "Fakt / Reja (List)", width: 155, icon: GridColumnIcon.HeaderString },
+        { id: "progress", title: "Fakt / Reja", width: 155, icon: GridColumnIcon.HeaderString },
         { id: "orderDate", title: "Qabul sanasi", width: 115, icon: GridColumnIcon.HeaderDate },
         { id: "deadline", title: "Muddat", width: 115, icon: GridColumnIcon.HeaderDate },
         { id: "actualEndDate", title: "Faktik tugash", width: 115, icon: GridColumnIcon.HeaderDate },
@@ -577,9 +577,20 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           (item.checks.paperReady ? 1 : 0) +
           (item.checks.platesReady ? 1 : 0) +
           (item.checks.toolingReady ? 1 : 0);
-        const planned = item.plannedSheets || item.quantity;
-        const completed = item.completedSheets || 0;
+        // Progress and crew come from the route steps (shift journal): the last production step's output.
+        const steps = ((item.operations || []) as Array<{
+          name?: string;
+          status?: string;
+          operator?: string;
+          plannedQty?: number;
+          completedQty?: number;
+        }>).filter((op) => !/qadoq|upakov|pack/i.test(op.name || ""));
+        const lastStep = steps[steps.length - 1];
+        const planned = lastStep ? Number(lastStep.plannedQty) || item.quantity : item.plannedSheets || item.quantity;
+        const completed = lastStep ? Number(lastStep.completedQty) || 0 : item.completedSheets || 0;
         const pct = planned > 0 ? Math.round((completed / planned) * 100) : 0;
+        const activeStep = steps.find((op) => op.status === "In Progress" || op.status === "Paused");
+        const crew = activeStep?.operator || item.operator || "";
         return {
           id: item.id,
           queuePos: `#${item.queueOrder}`,
@@ -588,7 +599,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
           product: item.product,
           colors: item.colors ? (item.spotColors && item.spotColors.length > 0 ? `${item.colors} (+${item.spotColors.length}s)` : item.colors) : "4+4",
           machine: item.pressMachine,
-          operator: item.operator || "A. Kovalev (1-smena)",
+          operator: activeStep ? `${crew || "—"} · ${activeStep.name}` : crew || "—",
           readiness: readyCount === 4 ? "4/4 Tayyor" : `${readyCount}/4 Kutilmoqda`,
           progress: `${completed.toLocaleString()} / ${planned.toLocaleString()} (${pct}%)`,
           orderDate: item.orderDate || "—",
