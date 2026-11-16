@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useEffect } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from "react";
 import {
   DataEditor,
   GridCell,
@@ -363,6 +363,22 @@ export function BomMaterialsGrid({
   });
 
   const [items, setItems] = useState<BomItem[]>(defaultItems);
+  const itemsRef = useRef<BomItem[]>(items);
+  useLayoutEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  // Applies an update to local items and notifies the parent outside of any
+  // state updater, so the parent's setState never runs during render.
+  const commitItems = useCallback(
+    (update: (prev: BomItem[]) => BomItem[]) => {
+      const next = update(itemsRef.current);
+      itemsRef.current = next;
+      setItems(next);
+      onItemsChange?.(next);
+    },
+    [onItemsChange]
+  );
 
   const handleOpenSpisanieDialog = useCallback(() => {
     const prepared = items.map((it, idx) => {
@@ -1090,7 +1106,7 @@ export function BomMaterialsGrid({
       const targetItem = filteredItems[row];
       if (!targetItem || !column) return;
 
-      setItems((prev) => {
+      commitItems((prev) => {
         const next = prev.map((item) => {
           if (item.id === targetItem.id) {
             const updated = { ...item };
@@ -1184,7 +1200,6 @@ export function BomMaterialsGrid({
           }
           return item;
         });
-        if (onItemsChange) onItemsChange(next);
         return next;
       });
 
@@ -1192,7 +1207,7 @@ export function BomMaterialsGrid({
         setTabUnsaved(tabId, true);
       }
     },
-    [visibleColumns, filteredItems, tabId, setTabUnsaved, onItemsChange]
+    [visibleColumns, filteredItems, tabId, setTabUnsaved, commitItems]
   );
 
   // Support column resizing
@@ -1356,10 +1371,9 @@ export function BomMaterialsGrid({
     };
 
     if (editingIndex !== null) {
-      setItems((prev) => {
+      commitItems((prev) => {
         const next = [...prev];
         next[editingIndex] = itemToSave;
-        if (onItemsChange) onItemsChange(next);
         return next;
       });
       toast.add({
@@ -1368,9 +1382,8 @@ export function BomMaterialsGrid({
         type: "success",
       });
     } else {
-      setItems((prev) => {
+      commitItems((prev) => {
         const next = [...prev, itemToSave];
-        if (onItemsChange) onItemsChange(next);
         return next;
       });
       toast.add({
@@ -1436,9 +1449,8 @@ export function BomMaterialsGrid({
       name: `${target.name} (Nusxa)`,
     };
 
-    setItems((prev) => {
+    commitItems((prev) => {
       const next = [...prev, duplicated];
-      if (onItemsChange) onItemsChange(next);
       return next;
     });
     if (tabId) setTabUnsaved(tabId, true);
@@ -1448,7 +1460,7 @@ export function BomMaterialsGrid({
       description: t("toastAdded", { code: duplicated.id }),
       type: "success",
     });
-  }, [selection, filteredItems, tabId, setTabUnsaved, t, onItemsChange]);
+  }, [selection, filteredItems, tabId, setTabUnsaved, t, commitItems]);
 
   // Copy Cell / Row
   const handleCopySelection = useCallback(() => {
