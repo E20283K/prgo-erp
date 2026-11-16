@@ -70,7 +70,7 @@ def is_white_rgb(rgb: Optional[Tuple[float, float, float]], threshold: float = 0
     return rgb[0] >= threshold and rgb[1] >= threshold and rgb[2] >= threshold
 
 
-def is_black_rgb(rgb: Optional[Tuple[float, float, float]], threshold: float = 0.04) -> bool:
+def is_black_rgb(rgb: Optional[Tuple[float, float, float]], threshold: float = 0.22) -> bool:
     if rgb is None:
         return False
     return rgb[0] <= threshold and rgb[1] <= threshold and rgb[2] <= threshold
@@ -210,6 +210,22 @@ def _is_number(tok: str) -> bool:
         return False
 
 
+def _scn_to_rgb(num_ops: List[float], cs_name: str) -> Tuple[float, float, float]:
+    """
+    Resolves `sc/scn` operands to RGB. A single operand outside DeviceGray is a spot-color
+    (Separation/DeviceN) tint: any tint above 0.02 is ink (black), not white.
+    """
+    if len(num_ops) == 1:
+        if cs_name in ("/DeviceGray", "/DefaultGray", "/G"):
+            return (num_ops[0], num_ops[0], num_ops[0])
+        return (0.0, 0.0, 0.0) if num_ops[0] > 0.02 else (1.0, 1.0, 1.0)
+    if len(num_ops) == 3:
+        return (num_ops[0], num_ops[1], num_ops[2])
+    if len(num_ops) >= 4:
+        return cmyk_to_rgb(num_ops[0], num_ops[1], num_ops[2], num_ops[3])
+    return (0.0, 0.0, 0.0)
+
+
 def _extract_colors_from_stream_bytes(stream_bytes: bytes) -> List[Tuple[float, float, float]]:
     try:
         text = stream_bytes.decode("latin1")
@@ -218,12 +234,25 @@ def _extract_colors_from_stream_bytes(stream_bytes: bytes) -> List[Tuple[float, 
     tokens = [m.group(0) for m in _TOKEN_RE.finditer(text)]
     colors: List[Tuple[float, float, float]] = []
     operands: List[str] = []
+    cur_cs = "/DeviceGray"
+    cur_CS = "/DeviceGray"
     for tok in tokens:
         if _is_number(tok) or tok.startswith(("/", "(", "<", "[")):
             operands.append(tok)
         else:
             op = tok
-            if op in ("g", "G") and len(operands) >= 1 and _is_number(operands[-1]):
+            if op in ("cs", "CS") and operands and operands[-1].startswith("/"):
+                if op == "cs":
+                    cur_cs = operands[-1]
+                else:
+                    cur_CS = operands[-1]
+            elif op in ("sc", "SC", "scn", "SCN"):
+                cs_name = cur_CS if op.isupper() else cur_cs
+                num_ops = [float(x) for x in operands if _is_number(x)]
+                rgb = _scn_to_rgb(num_ops, cs_name)
+                if not is_white_rgb(rgb):
+                    colors.append(rgb)
+            elif op in ("g", "G") and len(operands) >= 1 and _is_number(operands[-1]):
                 v = float(operands[-1])
                 rgb = (v, v, v)
                 if not is_white_rgb(rgb):
@@ -267,7 +296,9 @@ def _filter_and_monochromize_stream(
     default_rgb = (0.0, 0.0, 0.0)
     fill_rgb: Tuple[float, float, float] = default_rgb
     stroke_rgb: Tuple[float, float, float] = default_rgb
-    state_stack: List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = []
+    cur_cs = "/DeviceGray"
+    cur_CS = "/DeviceGray"
+    state_stack: List[Tuple[Tuple[float, float, float], Tuple[float, float, float], str, str]] = []
 
     def matches_target(rgb: Tuple[float, float, float]) -> bool:
         if is_white_rgb(rgb):
@@ -284,13 +315,13 @@ def _filter_and_monochromize_stream(
         op = tok
         # Graphics state stack
         if op == "q":
-            state_stack.append((fill_rgb, stroke_rgb))
+            state_stack.append((fill_rgb, stroke_rgb, cur_cs, cur_CS))
             output_commands.append("q")
             operands.clear()
             continue
         if op == "Q":
             if state_stack:
-                fill_rgb, stroke_rgb = state_stack.pop()
+                fill_rgb, stroke_rgb, cur_cs, cur_CS = state_stack.pop()
             output_commands.append("Q")
             operands.clear()
             continue
@@ -360,15 +391,13 @@ def _filter_and_monochromize_stream(
             # If numeric operands exist, evaluate them as Gray/RGB/CMYK
             num_ops = [float(x) for x in operands if _is_number(x)]
             is_stroke = op.isupper()
-            if op in ("sc", "SC", "scn", "SCN"):
-                if len(num_ops) == 1:
-                    c_rgb = (num_ops[0], num_ops[0], num_ops[0])
-                elif len(num_ops) == 3:
-                    c_rgb = (num_ops[0], num_ops[1], num_ops[2])
-                elif len(num_ops) >= 4:
-                    c_rgb = cmyk_to_rgb(num_ops[0], num_ops[1], num_ops[2], num_ops[3])
+            if op in ("cs", "CS") and operands and operands[-1].startswith("/"):
+                if is_stroke:
+                    cur_CS = operands[-1]
                 else:
-                    c_rgb = (0.0, 0.0, 0.0)
+                    cur_cs = operands[-1]
+            if op in ("sc", "SC", "scn", "SCN"):
+                c_rgb = _scn_to_rgb(num_ops, cur_CS if is_stroke else cur_cs)
                 if is_stroke:
                     stroke_rgb = c_rgb
                     output_commands.append("1 G" if is_white_rgb(c_rgb) else "0 G")

@@ -101,7 +101,26 @@ def _is_rectangular_path(drawing: dict, tol_pt: float = 0.75) -> bool:
     lines = [it for it in items if it[0] == "l"]
     curves = [it for it in items if it[0] in ("c",)]
     if curves:
-        return False
+        # Illustrator sometimes draws rectangle edges as flat Bezier curves (`c`).
+        # Accept them only when every segment is collinear with one border edge.
+        if len(lines) + len(curves) != len(items) or not (4 <= len(items) <= 8):
+            return False
+        edges_hit = set()
+        for it in items:
+            pts = [it[1], it[2]] if it[0] == "l" else [it[1], it[2], it[3], it[4]]
+            seg_edges = []
+            if all(abs(p.x - rect.x0) <= tol_pt for p in pts):
+                seg_edges.append("x0")
+            if all(abs(p.x - rect.x1) <= tol_pt for p in pts):
+                seg_edges.append("x1")
+            if all(abs(p.y - rect.y0) <= tol_pt for p in pts):
+                seg_edges.append("y0")
+            if all(abs(p.y - rect.y1) <= tol_pt for p in pts):
+                seg_edges.append("y1")
+            if not seg_edges:
+                return False
+            edges_hit.update(seg_edges)
+        return edges_hit == {"x0", "x1", "y0", "y1"}
 
     if len(lines) == 4:
         for _, p1, p2 in lines:
@@ -384,6 +403,11 @@ def _isolate_sticker_and_remove_border_from_stream(
     # Text block buffering state
     in_bt = False
     bt_cmds: List[str] = []
+    bt_has_tf = False
+    # Active font (`/F56 14 Tf`) carried across BT..ET blocks: CorelDRAW/Illustrator set it
+    # only once for the first sticker, so isolated stickers need it re-injected.
+    active_font_cmd: Optional[str] = None
+    font_stack: List[Optional[str]] = []
     tm = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
     tlm = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
     bt_points: List[pymupdf.Point] = []
@@ -408,7 +432,10 @@ def _isolate_sticker_and_remove_border_from_stream(
         # Inside a BT ... ET text object
         if in_bt:
             bt_cmds.append(cmd_str)
-            if op == "Tm" and len(operands) >= 6 and all(_is_num(x) for x in operands[-6:]):
+            if op == "Tf":
+                active_font_cmd = cmd_str
+                bt_has_tf = True
+            elif op == "Tm" and len(operands) >= 6 and all(_is_num(x) for x in operands[-6:]):
                 vals = [float(x) for x in operands[-6:]]
                 tm = pymupdf.Matrix(*vals)
                 tlm = pymupdf.Matrix(*vals)
@@ -422,15 +449,23 @@ def _isolate_sticker_and_remove_border_from_stream(
                 in_bt = False
                 # Keep BT..ET only if its text position falls inside target_pdf_rect
                 if not bt_points or any(point_in_target(p, tol=3.5) for p in bt_points):
+                    # Inject the active font right after BT when the kept block has no Tf of its own
+                    if not bt_has_tf and active_font_cmd:
+                        bt_cmds.insert(1, active_font_cmd)
                     out_cmds.extend(bt_cmds)
                 bt_cmds.clear()
                 bt_points.clear()
+                bt_has_tf = False
             operands.clear()
             continue
+
+        if op == "Tf":
+            active_font_cmd = cmd_str
 
         if op == "BT":
             in_bt = True
             bt_cmds = ["BT"]
+            bt_has_tf = False
             tm = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
             tlm = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
             bt_points.clear()
@@ -513,7 +548,6 @@ def _isolate_sticker_and_remove_border_from_stream(
                 if (
                     remove_border
                     and op in ("S", "s", "B", "B*", "b", "b*")
-                    and not path_has_curves
                     and path_seg_count <= 6
                 ):
                     if (
@@ -522,7 +556,18 @@ def _isolate_sticker_and_remove_border_from_stream(
                         and abs(min_y - ty0) <= border_tol
                         and abs(max_y - ty1) <= border_tol
                     ):
-                        is_outer_border = True
+                        # Curved paths count as a border only when all points (incl. Bezier
+                        # control points) lie on the border, i.e. Illustrator's flat curves.
+                        if not path_has_curves or all(
+                            (
+                                abs(p.x - tx0) <= border_tol
+                                or abs(p.x - tx1) <= border_tol
+                                or abs(p.y - ty0) <= border_tol
+                                or abs(p.y - ty1) <= border_tol
+                            )
+                            for p in path_points
+                        ):
+                            is_outer_border = True
 
                 # Also drop any `W n` clipping rectangle so CorelDRAW doesn't import clip boxes as borders
                 has_clip_op = any(c in ("W", "W*") for c in path_cmds)
@@ -541,6 +586,7 @@ def _isolate_sticker_and_remove_border_from_stream(
         # Graphics state stack & CTM
         if op == "q" and not operands:
             ctm_stack.append(pymupdf.Matrix(ctm))
+            font_stack.append(active_font_cmd)
             out_cmds.append("q")
             operands.clear()
             continue
@@ -548,6 +594,8 @@ def _isolate_sticker_and_remove_border_from_stream(
         if op == "Q" and not operands:
             if ctm_stack:
                 ctm = ctm_stack.pop()
+            if font_stack:
+                active_font_cmd = font_stack.pop()
             out_cmds.append("Q")
             operands.clear()
             continue
