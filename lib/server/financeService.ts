@@ -9,11 +9,26 @@ import {
   clients,
   workOrders,
 } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
-import { getCompanyIdByCode } from "./crmService";
-import { getNextDeliveryActNumber } from "./numberingService";
+import { eq, desc, and, sql, ilike } from "drizzle-orm";
+import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
+import { getNextDeliveryActNumber, calculateNextNumber, getCurrentYearSuffix, lockNumbering } from "./numberingService";
 import { emitNotification } from "./notificationService";
 import type { DeliveryActRecord, ClientSettlementRecord } from "@/store/workspaceStore";
+
+const FALLBACK_USD_RATE = 12850;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** UZS per USD for documents that carry no rate: the company's setting, else the built-in fallback. */
+function companyExchangeRate(company: { settings?: { exchangeRateUsd?: number } | null } | null | undefined): number {
+  const r = Number(company?.settings?.exchangeRateUsd);
+  return Number.isFinite(r) && r > 0 ? r : FALLBACK_USD_RATE;
+}
+
+/** UZS per USD the company works with (settings.exchangeRateUsd, else the built-in fallback). */
+export async function getCompanyExchangeRate(exec: DbExec, companyId: string): Promise<number> {
+  const company = await exec.query.companies.findFirst({ where: eq(companies.id, companyId) });
+  return companyExchangeRate(company);
+}
 
 // ─── 1. Delivery Acts ──────────────────────────────────────────────────────────
 
@@ -89,7 +104,7 @@ export async function getDeliveryActs(companyCode: string = "PRINTGOO"): Promise
       quantity: firstItem ? Number(firstItem.quantity) : 0,
       unit: firstItem ? firstItem.unit : "dona",
       subtotal: resolvedSubtotal,
-      vatRate: Number(act.vatRate) || 12,
+      vatRate: act.vatRate === null || act.vatRate === undefined ? 12 : Number(act.vatRate),
       vatAmount: resolvedVat,
       totalAmount: resolvedTotal,
       currency: effectiveCurrency,
@@ -112,7 +127,7 @@ export async function getDeliveryActs(companyCode: string = "PRINTGOO"): Promise
           : isActUzs
           ? Number(it.unitPriceUzs) || Number(it.unitPriceUsd) || 0
           : Number(it.unitPriceUsd) || Number(it.unitPriceUzs) || 0,
-        vatRate: Number(it.vatRate) || 12,
+        vatRate: it.vatRate === null || it.vatRate === undefined ? 12 : Number(it.vatRate),
       })),
     };
   });
@@ -136,65 +151,46 @@ export async function upsertDeliveryAct(
   companyCode: string = "PRINTGOO",
   opts: DeliveryActWriteOptions = {}
 ) {
-  const exec = opts.exec ?? db;
+  // Called on its own (the finance screen) it opens its own transaction, so the act, its lines and
+  // the client's balance are written together and its number is taken under the series lock.
+  if (!opts.exec) {
+    const afterCommit: Array<() => Promise<void>> = [];
+    const result: { success: boolean; docNo: string; id: string } = await db.transaction((tx) =>
+      upsertDeliveryAct(data, companyCode, { exec: tx, afterCommit })
+    );
+    for (const fn of afterCommit) {
+      try {
+        await fn();
+      } catch {
+        // a notification that fails does not undo a saved act
+      }
+    }
+    return result;
+  }
+  const exec = opts.exec;
   const companyId = await getCompanyIdByCode(companyCode);
   const linkedShipmentUuid =
     data.linkedShipmentUuid && /^[0-9a-f-]{36}$/i.test(data.linkedShipmentUuid) ? data.linkedShipmentUuid : null;
 
-  // 1. Mijozni ID, INN yoki nomi bo'yicha topish yoki yaratish
-  let targetClientId: string | null = null;
-  let clientDefaultCurrency = "UZS";
-  if (data.clientId && /^[0-9a-f-]{36}$/i.test(data.clientId)) {
-    const byId = await exec.query.clients.findFirst({
-      where: and(eq(clients.companyId, companyId), eq(clients.id, data.clientId)),
-    });
-    if (byId) {
-      targetClientId = byId.id;
-      clientDefaultCurrency = byId.currency || "UZS";
-    }
-  }
+  // 1. Mijoz: ID, INN yoki nomi bo'yicha. Topilmasa akt yozilmaydi (yon tomondan mijoz yaratilmaydi).
   const tinToSearch = data.customerTin?.trim();
-  if (!targetClientId && tinToSearch) {
-    const existingClient = await exec.query.clients.findFirst({
-      where: and(eq(clients.companyId, companyId), eq(clients.tin, tinToSearch)),
-    });
-    if (existingClient) {
-      targetClientId = existingClient.id;
-      clientDefaultCurrency = existingClient.currency || "UZS";
-    }
-  }
+  const client = await resolveClient(exec, companyId, { id: data.clientId, tin: tinToSearch, name: data.customer });
+  if (!client) throw new Error(unknownClientMessage(data.customer));
+  const targetClientId = client.id;
+  const clientDefaultCurrency = client.currency || "UZS";
 
-  if (!targetClientId && data.customer) {
-    const existingByName = await exec.query.clients.findFirst({
-      where: and(eq(clients.companyId, companyId), eq(clients.name, data.customer.trim())),
-    });
-    if (existingByName) {
-      targetClientId = existingByName.id;
-      clientDefaultCurrency = existingByName.currency || "UZS";
-    }
-  }
+  const hasOwnNumber = Boolean(data.id?.startsWith("ACT-") || data.id?.startsWith("SF-"));
+  if (!hasOwnNumber) await lockNumbering(exec, companyId, "SF");
+  const docNo = hasOwnNumber ? data.id! : await getNextDeliveryActNumber(companyCode, exec);
 
-  // Agar mijoz topilmasa, bazada yangi mijoz yaratamiz
-  if (!targetClientId) {
-    const newClientCode = `CUST-${Date.now().toString().slice(-4)}`;
-    const [insertedClient] = await exec
-      .insert(clients)
-      .values({
-        companyId,
-        code: newClientCode,
-        name: data.customer?.trim() || "Noma'lum Mijoz",
-        tin: tinToSearch || null,
-        contractNo: data.contractNo || null,
-      })
-      .returning();
-    targetClientId = insertedClient.id;
-    clientDefaultCurrency = insertedClient.currency || "UZS";
-  }
-
-  const docNo =
-    data.id?.startsWith("ACT-") || data.id?.startsWith("SF-")
-      ? data.id
-      : await getNextDeliveryActNumber(companyCode);
+  // VAT: what the document says (0 included); only a missing rate falls back to the company's.
+  const company = await exec.query.companies.findFirst({ where: eq(companies.id, companyId) });
+  const defaultVatRate = company?.isVatPayer === false ? 0 : Number(company?.settings?.defaultTaxPercent ?? 12);
+  const vatRateOf = (v: unknown) => {
+    const n = v === undefined || v === null || v === "" ? NaN : Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : defaultVatRate;
+  };
+  const actVatRate = vatRateOf(data.vatRate);
   const date = data.date || new Date().toISOString().split("T")[0];
 
   const dbStatusMap: Record<string, "draft" | "pending_signature" | "signed" | "disputed" | "cancelled"> = {
@@ -206,7 +202,7 @@ export async function upsertDeliveryAct(
   };
 
   const status = data.status ? dbStatusMap[data.status] || "draft" : "draft";
-  const rate = data.exchangeRate || 12850;
+  const rate = Number(data.exchangeRate) || companyExchangeRate(company);
   const snapRounding = (val: number) => {
     const nearestThousand = Math.round(val / 1000) * 1000;
     return nearestThousand > 0 && Math.abs(val - nearestThousand) < 1.5 ? nearestThousand : val;
@@ -251,6 +247,11 @@ export async function upsertDeliveryAct(
     }
   }
 
+  if (existingAct && !hasOwnNumber) {
+    // A freshly issued number must never land on somebody else's act.
+    throw new Error(`${docNo} raqamli schet-faktura allaqachon mavjud. Qayta urinib ko'ring.`);
+  }
+
   let actId: string;
 
   if (existingAct) {
@@ -270,7 +271,7 @@ export async function upsertDeliveryAct(
         subtotalUsd: subtotalUsd.toString(),
         subtotalUzs: subtotalUzs.toString(),
         exchangeRate: rate.toString(),
-        vatRate: (data.vatRate || 12).toString(),
+        vatRate: actVatRate.toString(),
         vatAmountUsd: vatUsd.toString(),
         vatAmountUzs: vatUzs.toString(),
         totalAmountUsd: totalUsd.toString(),
@@ -304,7 +305,7 @@ export async function upsertDeliveryAct(
         subtotalUsd: subtotalUsd.toString(),
         subtotalUzs: subtotalUzs.toString(),
         exchangeRate: rate.toString(),
-        vatRate: (data.vatRate || 12).toString(),
+        vatRate: actVatRate.toString(),
         vatAmountUsd: vatUsd.toString(),
         vatAmountUzs: vatUzs.toString(),
         totalAmountUsd: totalUsd.toString(),
@@ -336,7 +337,7 @@ export async function upsertDeliveryAct(
         unitPriceUzs: (isUsd ? p * rate : p).toString(),
         totalUsd: (isUsd ? t : t / rate).toString(),
         totalUzs: (isUsd ? t * rate : t).toString(),
-        vatRate: (it.vatRate || 12).toString(),
+        vatRate: vatRateOf(it.vatRate ?? actVatRate).toString(),
         sortOrder: idx,
       };
     });
@@ -419,35 +420,48 @@ export async function syncClientSettlement(
   contractNo?: string,
   exec: DbExec = db
 ) {
-  // Mijozning barcha amaldagi aktlari summasini (Debit) va to'lovlarini (Credit) hisoblash
+  // Debit: every act that is not cancelled. Credit: every payment that is not cancelled.
   const acts = (
     await exec.query.deliveryActs.findMany({
       where: and(eq(deliveryActs.companyId, companyId), eq(deliveryActs.clientId, clientId)),
     })
   ).filter((a) => a.status !== "cancelled");
 
-  const payments = await exec.query.clientPayments.findMany({
-    where: and(eq(clientPayments.companyId, companyId), eq(clientPayments.clientId, clientId)),
-  });
+  const payments = (
+    await exec.query.clientPayments.findMany({
+      where: and(eq(clientPayments.companyId, companyId), eq(clientPayments.clientId, clientId)),
+    })
+  ).filter((p) => p.status !== "cancelled");
+
+  const [client, existingSettlement] = await Promise.all([
+    exec.query.clients.findFirst({ where: eq(clients.id, clientId) }),
+    exec.query.clientSettlements.findFirst({
+      where: and(eq(clientSettlements.companyId, companyId), eq(clientSettlements.clientId, clientId)),
+    }),
+  ]);
 
   const totalDebitUsd = acts.reduce((sum, a) => sum + Number(a.totalAmountUsd), 0);
   const totalDebitUzs = acts.reduce((sum, a) => sum + Number(a.totalAmountUzs), 0);
   const totalCreditUsd = payments.reduce((sum, p) => sum + Number(p.amountUsd), 0);
   const totalCreditUzs = payments.reduce((sum, p) => sum + Number(p.amountUzs), 0);
 
-  const closingBalanceUsd = totalDebitUsd - totalCreditUsd;
-  const closingBalanceUzs = totalDebitUzs - totalCreditUzs;
+  // The balance the client opened with is part of what they owe.
+  const openingUsd = Number(existingSettlement?.openingBalanceUsd) || 0;
+  const openingUzs = Number(existingSettlement?.openingBalanceUzs) || 0;
+  const closingBalanceUsd = openingUsd + totalDebitUsd - totalCreditUsd;
+  const closingBalanceUzs = openingUzs + totalDebitUzs - totalCreditUzs;
 
+  // Debt or advance is judged in the currency the client is settled in.
+  const currency = (client?.currency || existingSettlement?.currency || "UZS").toUpperCase();
+  const balance = currency === "UZS" ? closingBalanceUzs : closingBalanceUsd;
+  const tolerance = currency === "UZS" ? 1 : 0.01;
   let status: "debt" | "settled" | "advance" = "settled";
-  if (closingBalanceUsd > 1) status = "debt";
-  else if (closingBalanceUsd < -1) status = "advance";
-
-  const existingSettlement = await exec.query.clientSettlements.findFirst({
-    where: and(eq(clientSettlements.companyId, companyId), eq(clientSettlements.clientId, clientId)),
-  });
+  if (balance > tolerance) status = "debt";
+  else if (balance < -tolerance) status = "advance";
 
   const lastDate =
-    payments[0]?.date || acts[0]?.date || new Date().toISOString().split("T")[0];
+    [...payments.map((p) => p.date), ...acts.map((a) => a.date)].filter(Boolean).sort().pop() ||
+    new Date().toISOString().split("T")[0];
 
   if (existingSettlement) {
     await exec
@@ -455,6 +469,7 @@ export async function syncClientSettlement(
       .set({
         customer: customerName || existingSettlement.customer,
         customerTin: customerTin || existingSettlement.customerTin,
+        currency,
         totalDebitUsd: totalDebitUsd.toFixed(2),
         totalDebitUzs: totalDebitUzs.toFixed(2),
         totalCreditUsd: totalCreditUsd.toFixed(2),
@@ -470,9 +485,10 @@ export async function syncClientSettlement(
     await exec.insert(clientSettlements).values({
       companyId,
       clientId,
-      customer: customerName,
+      customer: customerName || client?.name || "",
       customerTin: customerTin || null,
       contractNo: contractNo || null,
+      currency,
       totalDebitUsd: totalDebitUsd.toFixed(2),
       totalDebitUzs: totalDebitUzs.toFixed(2),
       totalCreditUsd: totalCreditUsd.toFixed(2),
@@ -483,6 +499,98 @@ export async function syncClientSettlement(
       status,
     });
   }
+}
+
+// ─── 2b. Credit Control ───────────────────────────────────────────────────────
+
+/** Days an invoice may stay unpaid before the client's new orders are held (business rules §1). */
+export const CREDIT_OVERDUE_DAYS = 14;
+
+export interface ClientCreditState {
+  clientId: string;
+  clientName: string;
+  /** What the client owes now, in USD (opening balance + acts − payments). */
+  balanceUsd: number;
+  /** 0 means no limit is set for the client. */
+  creditLimitUsd: number;
+  /** Part of the debt that is older than CREDIT_OVERDUE_DAYS. */
+  overdueUsd: number;
+  oldestOverdueDate: string | null;
+  blocked: boolean;
+  reason: string | null;
+}
+
+/**
+ * Whether a client may get a new order released to production.
+ * Blocked when the debt is above the client's credit limit or any invoice is unpaid for more
+ * than CREDIT_OVERDUE_DAYS. Payments settle the oldest debt first.
+ */
+export async function getClientCreditState(
+  exec: DbExec,
+  companyId: string,
+  clientId: string,
+  today: Date = new Date()
+): Promise<ClientCreditState | null> {
+  const client = await exec.query.clients.findFirst({
+    where: and(eq(clients.companyId, companyId), eq(clients.id, clientId)),
+  });
+  if (!client) return null;
+
+  const [acts, payments, settlement] = await Promise.all([
+    exec.query.deliveryActs.findMany({
+      where: and(eq(deliveryActs.companyId, companyId), eq(deliveryActs.clientId, clientId)),
+    }),
+    exec.query.clientPayments.findMany({
+      where: and(eq(clientPayments.companyId, companyId), eq(clientPayments.clientId, clientId)),
+    }),
+    exec.query.clientSettlements.findFirst({
+      where: and(eq(clientSettlements.companyId, companyId), eq(clientSettlements.clientId, clientId)),
+    }),
+  ]);
+  const liveActs = acts
+    .filter((a) => a.status !== "cancelled")
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const paid = payments.filter((p) => p.status !== "cancelled").reduce((sum, p) => sum + Number(p.amountUsd), 0);
+  const opening = Number(settlement?.openingBalanceUsd) || 0;
+  const debit = liveActs.reduce((sum, a) => sum + Number(a.totalAmountUsd), 0);
+  const balanceUsd = Number((opening + debit - paid).toFixed(2));
+
+  // Oldest first: an opening advance adds to the credit, an opening debt is settled before the acts.
+  let credit = paid + Math.max(0, -opening);
+  credit -= Math.min(credit, Math.max(0, opening));
+  const cutoff = new Date(today.getTime() - CREDIT_OVERDUE_DAYS * 86_400_000).toISOString().split("T")[0];
+  let overdueUsd = 0;
+  let oldestOverdueDate: string | null = null;
+  for (const act of liveActs) {
+    const amount = Number(act.totalAmountUsd) || 0;
+    const settled = Math.min(credit, amount);
+    credit -= settled;
+    const open = amount - settled;
+    if (open > 0.01 && act.date && act.date < cutoff) {
+      overdueUsd += open;
+      oldestOverdueDate = oldestOverdueDate ?? act.date;
+    }
+  }
+  overdueUsd = Number(overdueUsd.toFixed(2));
+
+  const creditLimitUsd = Number(client.creditLimitUsd) || 0;
+  let reason: string | null = null;
+  if (overdueUsd > 0.01) {
+    reason = `${client.name}: ${oldestOverdueDate} sanasidan beri to'lanmagan qarz bor ($${overdueUsd.toLocaleString("en-US")}, ${CREDIT_OVERDUE_DAYS} kundan oshgan).`;
+  } else if (creditLimitUsd > 0 && balanceUsd > creditLimitUsd + 0.01) {
+    reason = `${client.name}: qarz $${balanceUsd.toLocaleString("en-US")} kredit limitidan ($${creditLimitUsd.toLocaleString("en-US")}) oshgan.`;
+  }
+
+  return {
+    clientId: client.id,
+    clientName: client.name,
+    balanceUsd,
+    creditLimitUsd,
+    overdueUsd,
+    oldestOverdueDate,
+    blocked: reason !== null,
+    reason,
+  };
 }
 
 // ─── 3. Settlements List ───────────────────────────────────────────────────────
@@ -532,8 +640,12 @@ export async function getClientSettlements(companyCode: string = "PRINTGOO"): Pr
       return false;
     };
 
-    const clientActs = allActs.filter((a) => matchesClient(a.clientId, a.clientName, a.clientTin));
-    const clientPays = allPayments.filter((p) => matchesClient(p.clientId, p.customer, null));
+    const clientActs = allActs.filter(
+      (a) => a.status !== "cancelled" && matchesClient(a.clientId, a.clientName, a.clientTin)
+    );
+    const clientPays = allPayments.filter(
+      (p) => p.status !== "cancelled" && matchesClient(p.clientId, p.customer, null)
+    );
 
     const snapRounding = (val: number) => {
       const nearestThousand = Math.round(val / 1000) * 1000;
@@ -556,26 +668,6 @@ export async function getClientSettlements(companyCode: string = "PRINTGOO"): Pr
           : isUzs
           ? snapRounding(rawUzs || rawUsd || 0)
           : rawUsd || rawUzs || 0;
-
-        if (isMistakenlyMultipliedUzs) {
-          const healedUzs = cleanDebit;
-          const healedUsd = Math.round((healedUzs / rate) * 100) / 100;
-          const vatR = Number(a.vatRate) || 12;
-          const healedSubUzs = Number((healedUzs / (1 + vatR / 100)).toFixed(2));
-          const healedVatUzs = Number((healedUzs - healedSubUzs).toFixed(2));
-          db.update(deliveryActs)
-            .set({
-              currency: "UZS",
-              totalAmountUzs: healedUzs.toString(),
-              totalAmountUsd: healedUsd.toString(),
-              subtotalUzs: healedSubUzs.toString(),
-              subtotalUsd: (Math.round((healedSubUzs / rate) * 100) / 100).toString(),
-              vatAmountUzs: healedVatUzs.toString(),
-              vatAmountUsd: (Math.round((healedVatUzs / rate) * 100) / 100).toString(),
-            })
-            .where(eq(deliveryActs.id, a.id))
-            .catch(() => {});
-        }
 
         return {
           id: a.id,
@@ -632,28 +724,6 @@ export async function getClientSettlements(companyCode: string = "PRINTGOO"): Pr
     const closingBalance = Number((openingBalance + totalDebit - totalCredit).toFixed(2));
     const computedStatus: "Debt" | "Settled" | "Advance" =
       closingBalance > 0.01 ? "Debt" : closingBalance < -0.01 ? "Advance" : "Settled";
-
-    // Agar bazadagi clientSettlements qatorida eski noto'g'ri debit/closingBalance turgan bo'lsa, uni avtomatik tuzatib qo'yamiz
-    if (
-      isUzs &&
-      (Math.abs((Number(s.totalDebitUzs) || 0) - totalDebit) > 1 ||
-        Math.abs((Number(s.closingBalanceUzs) || 0) - closingBalance) > 1)
-    ) {
-      const dbSt = closingBalance > 0.01 ? "debt" : closingBalance < -0.01 ? "advance" : "settled";
-      db.update(clientSettlements)
-        .set({
-          currency: "UZS",
-          totalDebitUzs: totalDebit.toString(),
-          totalDebitUsd: (Math.round((totalDebit / 12850) * 100) / 100).toString(),
-          totalCreditUzs: totalCredit.toString(),
-          totalCreditUsd: (Math.round((totalCredit / 12850) * 100) / 100).toString(),
-          closingBalanceUzs: closingBalance.toString(),
-          closingBalanceUsd: (Math.round((closingBalance / 12850) * 100) / 100).toString(),
-          status: dbSt,
-        })
-        .where(eq(clientSettlements.id, s.id))
-        .catch(() => {});
-    }
 
     return {
       id: s.id,
@@ -712,6 +782,7 @@ export async function getClientPayments(companyCode: string = "PRINTGOO") {
 export async function recordPayment(
   data: {
     customer: string;
+    clientId?: string | null;
     amount: number;
     docNo?: string;
     date?: string;
@@ -720,60 +791,90 @@ export async function recordPayment(
     method?: "bank_transfer" | "cash" | "corporate_card" | "offset";
     note?: string;
     contractNo?: string;
+    /** The act this payment settles: its UUID or number (SF-…). */
+    deliveryActId?: string | null;
   },
-  companyCode: string = "PRINTGOO"
+  companyCode: string = "PRINTGOO",
+  exec: DbExec = db
 ) {
   const companyId = await getCompanyIdByCode(companyCode);
+  const amount = Number(data.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("To'lov summasi 0 dan katta bo'lishi kerak.");
+  }
+  const customerName = String(data.customer || "").trim();
 
-  // Mijozni topish
-  let targetClient = await db.query.clients.findFirst({
-    where: and(eq(clients.companyId, companyId), eq(clients.name, data.customer.trim())),
-  });
+  return exec.transaction(async (tx) => {
+    // A payment is booked on a client that exists: a typo must not open a second balance.
+    const targetClient = await resolveClient(tx, companyId, { id: data.clientId, name: customerName });
+    if (!targetClient) throw new Error(unknownClientMessage(customerName));
 
-  if (!targetClient) {
-    const newClientCode = `CUST-${Date.now().toString().slice(-4)}`;
-    const [created] = await db
-      .insert(clients)
+    let actId: string | null = null;
+    const actKey = String(data.deliveryActId || "").trim();
+    if (actKey) {
+      const act = await tx.query.deliveryActs.findFirst({
+        where: and(
+          eq(deliveryActs.companyId, companyId),
+          UUID_RE.test(actKey) ? eq(deliveryActs.id, actKey) : eq(deliveryActs.docNo, actKey)
+        ),
+      });
+      if (!act) throw new Error(`${actKey} schet-fakturasi topilmadi.`);
+      if (act.clientId !== targetClient.id) {
+        throw new Error(`${act.docNo} schet-fakturasi boshqa mijozga tegishli.`);
+      }
+      if (act.status === "cancelled") throw new Error(`${act.docNo} schet-fakturasi bekor qilingan.`);
+      actId = act.id;
+    }
+
+    const company = await tx.query.companies.findFirst({ where: eq(companies.id, companyId) });
+    const rate = Number(data.exchangeRate) || companyExchangeRate(company);
+    // Paid in the client's own currency unless the document says otherwise.
+    const currency = (data.currency || targetClient.currency || "UZS").toUpperCase();
+    const isUsd = currency === "USD";
+    const amountUsd = isUsd ? amount : Math.round((amount / rate) * 100) / 100;
+    const amountUzs = isUsd ? Math.round(amount * rate) : amount;
+
+    let docNo = String(data.docNo || "").trim();
+    if (docNo) {
+      const taken = await tx.query.clientPayments.findFirst({
+        where: and(eq(clientPayments.companyId, companyId), eq(clientPayments.docNo, docNo)),
+      });
+      if (taken) throw new Error(`${docNo} raqamli to'lov hujjati allaqachon mavjud.`);
+    } else {
+      await lockNumbering(tx, companyId, "PAY");
+      const yearSuffix = getCurrentYearSuffix();
+      const rows = await tx
+        .select({ num: clientPayments.docNo })
+        .from(clientPayments)
+        .where(and(eq(clientPayments.companyId, companyId), ilike(clientPayments.docNo, `PAY-${yearSuffix}-%`)));
+      docNo = calculateNextNumber("PAY", rows.map((r) => r.num), yearSuffix);
+    }
+    const date = data.date || new Date().toISOString().split("T")[0];
+
+    const [payment] = await tx
+      .insert(clientPayments)
       .values({
         companyId,
-        code: newClientCode,
-        name: data.customer.trim(),
+        docNo,
+        date,
+        clientId: targetClient.id,
+        customer: targetClient.name,
+        contractNo: data.contractNo || targetClient.contractNo || null,
+        amountUsd: amountUsd.toString(),
+        amountUzs: amountUzs.toString(),
+        exchangeRate: rate.toString(),
+        currency,
+        method: data.method || "bank_transfer",
+        deliveryActId: actId,
+        note: data.note || null,
+        status: "confirmed",
       })
       .returning();
-    targetClient = created;
-  }
 
-  const rate = data.exchangeRate || 12850;
-  const isUsd = (data.currency || "USD").toUpperCase() === "USD";
-  const amountUsd = isUsd ? data.amount : Math.round((data.amount / rate) * 100) / 100;
-  const amountUzs = isUsd ? Math.round(data.amount * rate) : data.amount;
+    await syncClientSettlement(companyId, targetClient.id, targetClient.name, targetClient.tin || undefined, undefined, tx);
 
-  const docNo = data.docNo || `PAY-${Date.now().toString().slice(-6)}`;
-  const date = data.date || new Date().toISOString().split("T")[0];
-
-  const [payment] = await db
-    .insert(clientPayments)
-    .values({
-      companyId,
-      docNo,
-      date,
-      clientId: targetClient.id,
-      customer: targetClient.name,
-      contractNo: data.contractNo || targetClient.contractNo || null,
-      amountUsd: amountUsd.toString(),
-      amountUzs: amountUzs.toString(),
-      exchangeRate: rate.toString(),
-      currency: data.currency || "USD",
-      method: data.method || "bank_transfer",
-      note: data.note || null,
-      status: "confirmed",
-    })
-    .returning();
-
-  // Settlements ni yangilaymiz
-  await syncClientSettlement(companyId, targetClient.id, targetClient.name, targetClient.tin || undefined);
-
-  return { success: true, payment };
+    return { success: true, payment };
+  });
 }
 
 // ─── 5. Bank Accounts ─────────────────────────────────────────────────────────

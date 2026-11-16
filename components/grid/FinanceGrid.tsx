@@ -366,12 +366,13 @@ export function FinanceGrid({ type }: FinanceGridProps) {
     if (!selectedClient) return;
     const amt = Number(paymentAmount);
     if (!amt || amt <= 0) return;
-    await recordPaymentAsync({
+    const saved = await recordPaymentAsync({
       customer: selectedClient.customer,
       amount: amt,
       note: paymentNote.trim() || undefined,
       contractNo: selectedClient.contractNo,
     });
+    if (!saved) return;
     fetchPayments();
     setIsPaymentFormOpen(false);
     setPaymentNote("");

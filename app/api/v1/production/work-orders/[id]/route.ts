@@ -35,19 +35,8 @@ export async function DELETE(
       }
     } catch (_) {}
 
-    // Fallback: Agar request body'da author kelgan bo'lsa (dev/demo mode)
-    let bodyAuthor: any = null;
-    try {
-      const text = await request.text();
-      if (text && text.trim().length > 0) {
-        const body = JSON.parse(text);
-        if (body && (body.user || body.author)) {
-          bodyAuthor = body.user || body.author;
-        }
-      }
-    } catch (_) {}
-
-    const currentUser = sessionUser || bodyAuthor;
+    // The actor is the signed-in user; a name or role sent in the request body is not trusted.
+    const currentUser = sessionUser;
 
     // RBAC huquqlarini tekshirish: Admin yoki production.delete huquqi
     if (currentUser) {
@@ -128,15 +117,15 @@ export async function PATCH(
     } catch (_) {}
 
     const body = await request.json().catch(() => ({}));
-    const authorPayload =
-      body.author ||
-      (sessionUser
-        ? {
-            id: sessionUser.id,
-            name: sessionUser.fullName || sessionUser.username || sessionUser.name || "Operator",
-            role: sessionUser.role || "Operator",
-          }
-        : undefined);
+    // The actor is the signed-in user; an author sent in the request body is not trusted.
+    const authorPayload = sessionUser
+      ? {
+          id: sessionUser.id,
+          name: sessionUser.fullName || sessionUser.username || sessionUser.name || "Operator",
+          role: sessionUser.role || "Operator",
+        }
+      : undefined;
+    delete body.author;
 
     const result = await updateWorkOrderReadiness(
       id,

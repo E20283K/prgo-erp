@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db, type DbExec } from "@/db";
 import {
   warehouseShipments,
   warehouseReceipts,
@@ -8,8 +8,9 @@ import {
   warehouseDispatchManifests,
   productionSpecifications,
   clients,
+  deliveryActs,
 } from "@/db/schema";
-import { eq, and, ilike } from "drizzle-orm";
+import { eq, and, ilike, sql } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 
 /**
@@ -17,6 +18,15 @@ import { getCompanyIdByCode } from "./crmService";
  */
 export function getCurrentYearSuffix(): string {
   return new Date().getFullYear().toString().slice(-2);
+}
+
+/**
+ * Serialises number allocation for one document series of a company. Held until the surrounding
+ * transaction ends, so "read the highest number, write the next one" cannot interleave between
+ * two saves. Has no effect outside a transaction.
+ */
+export async function lockNumbering(exec: DbExec, companyId: string, series: string): Promise<void> {
+  await exec.execute(sql`select pg_advisory_xact_lock(hashtext(${`${companyId}:${series}`}))`);
 }
 
 /**
@@ -98,23 +108,29 @@ export async function getNextReceiptNumber(
  * Schet-faktura / Bajarilgan ishlar dalolatnomasi (Delivery Act) uchun raqam: SF-26-XXXX
  */
 export async function getNextDeliveryActNumber(
-  companyCode: string = "PRINTGOO"
+  companyCode: string = "PRINTGOO",
+  exec: DbExec = db
 ): Promise<string> {
   const companyId = await getCompanyIdByCode(companyCode);
   const yearSuffix = getCurrentYearSuffix();
   const searchPattern = `SF-${yearSuffix}-%`;
 
-  const rows = await db
-    .select({ num: warehouseShipments.deliveryActId })
-    .from(warehouseShipments)
-    .where(
-      and(
-        eq(warehouseShipments.companyId, companyId),
-        ilike(warehouseShipments.deliveryActId, searchPattern)
-      )
-    );
+  // The acts themselves are the source of truth; shipments are read too so that a number
+  // a shipment still points at is never handed out again.
+  const [actRows, shipmentRows] = await Promise.all([
+    exec
+      .select({ num: deliveryActs.docNo })
+      .from(deliveryActs)
+      .where(and(eq(deliveryActs.companyId, companyId), ilike(deliveryActs.docNo, searchPattern))),
+    exec
+      .select({ num: warehouseShipments.deliveryActId })
+      .from(warehouseShipments)
+      .where(
+        and(eq(warehouseShipments.companyId, companyId), ilike(warehouseShipments.deliveryActId, searchPattern))
+      ),
+  ]);
 
-  return calculateNextNumber("SF", rows.map((r) => r.num), yearSuffix);
+  return calculateNextNumber("SF", [...actRows, ...shipmentRows].map((r) => r.num), yearSuffix);
 }
 
 /**

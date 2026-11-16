@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db, type DbExec } from "@/db";
 import {
   clients,
   clientContacts,
@@ -8,8 +8,11 @@ import {
   deliveryActs,
   clientSettlements,
   clientPayments,
+  workOrders,
+  warehouseShipments,
+  warehouseFinishedGoods,
 } from "@/db/schema";
-import { eq, desc, asc, sql } from "drizzle-orm";
+import { eq, desc, asc, sql, and } from "drizzle-orm";
 import { getNextCustomerCode } from "./numberingService";
 import type {
   CrmCustomerRecord,
@@ -65,6 +68,48 @@ export async function getCompanyIdByCode(code: string = "PRINTGOO"): Promise<str
     return retryComp.id;
   }
   return comp.id;
+}
+
+const CLIENT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The one way every module finds a client: by id, then by TIN, then by name
+ * (case and surrounding spaces ignored, no wildcards). Returns null when there is none —
+ * callers decide whether that is an error; nobody creates a client on the side.
+ */
+export async function resolveClient(
+  exec: DbExec,
+  companyId: string,
+  key: { id?: string | null; tin?: string | null; name?: string | null }
+) {
+  const id = String(key.id || "").trim();
+  if (id && CLIENT_UUID_RE.test(id)) {
+    const byId = await exec.query.clients.findFirst({
+      where: and(eq(clients.companyId, companyId), eq(clients.id, id)),
+    });
+    if (byId) return byId;
+  }
+  const tin = String(key.tin || "").trim();
+  if (tin) {
+    const byTin = await exec.query.clients.findFirst({
+      where: and(eq(clients.companyId, companyId), eq(clients.tin, tin)),
+    });
+    if (byTin) return byTin;
+  }
+  const name = String(key.name || "").trim();
+  if (name) {
+    const byName = await exec.query.clients.findFirst({
+      where: and(eq(clients.companyId, companyId), sql`lower(trim(${clients.name})) = lower(${name})`),
+      orderBy: [asc(clients.createdAt)],
+    });
+    if (byName) return byName;
+  }
+  return null;
+}
+
+/** Error text every module shows when a document names a client CRM does not know. */
+export function unknownClientMessage(name: string | null | undefined): string {
+  return `"${String(name || "").trim() || "—"}" mijozi CRM bazasida topilmadi. Mijozni ro'yxatdan tanlang yoki avval CRM'da ro'yxatdan o'tkazing.`;
 }
 
 /**
@@ -385,14 +430,32 @@ export async function deleteCrmClient(idOrCode: string, companyCode: string = "P
   });
   if (!existing) throw new Error("Mijoz topilmadi");
 
-  const [acts, settlements, payments] = await Promise.all([
-    db.select({ n: sql<number>`count(*)::int` }).from(deliveryActs).where(eq(deliveryActs.clientId, existing.id)),
-    db.select({ n: sql<number>`count(*)::int` }).from(clientSettlements).where(eq(clientSettlements.clientId, existing.id)),
-    db.select({ n: sql<number>`count(*)::int` }).from(clientPayments).where(eq(clientPayments.clientId, existing.id)),
+  // A client is deleted only when nothing in the chain points at it: orders, stock, shipments, money.
+  const count = sql<number>`count(*)::int`;
+  const [o, sh, fg, a, st, p] = await Promise.all([
+    db.select({ n: count }).from(workOrders).where(eq(workOrders.clientId, existing.id)),
+    db.select({ n: count }).from(warehouseShipments).where(eq(warehouseShipments.clientId, existing.id)),
+    db.select({ n: count }).from(warehouseFinishedGoods).where(eq(warehouseFinishedGoods.clientId, existing.id)),
+    db.select({ n: count }).from(deliveryActs).where(eq(deliveryActs.clientId, existing.id)),
+    db.select({ n: count }).from(clientSettlements).where(eq(clientSettlements.clientId, existing.id)),
+    db.select({ n: count }).from(clientPayments).where(eq(clientPayments.clientId, existing.id)),
   ]);
-  const linked = (acts[0]?.n ?? 0) + (settlements[0]?.n ?? 0) + (payments[0]?.n ?? 0);
-  if (linked > 0) {
-    throw new Error(`"${existing.name}" mijozida moliyaviy hujjatlar bor (${linked} ta). O'chirib bo'lmaydi — holatini "Inactive" qiling.`);
+  const orders = o[0]?.n ?? 0;
+  const shipments = sh[0]?.n ?? 0;
+  const stock = fg[0]?.n ?? 0;
+  const acts = a[0]?.n ?? 0;
+  const settlements = st[0]?.n ?? 0;
+  const payments = p[0]?.n ?? 0;
+  const parts = [
+    orders > 0 ? `${orders} ta buyurtma` : "",
+    shipments > 0 ? `${shipments} ta ombor chiqimi` : "",
+    stock > 0 ? `${stock} ta tayyor mahsulot` : "",
+    acts + settlements + payments > 0 ? `${acts + settlements + payments} ta moliyaviy hujjat` : "",
+  ].filter(Boolean);
+  if (parts.length > 0) {
+    throw new Error(
+      `"${existing.name}" mijozida bog'langan hujjatlar bor (${parts.join(", ")}). O'chirib bo'lmaydi — holatini "Inactive" qiling.`
+    );
   }
 
   await db.delete(clients).where(eq(clients.id, existing.id));

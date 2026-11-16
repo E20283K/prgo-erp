@@ -19,7 +19,7 @@ export function normalizePermanentMediaUrl(url?: string | null): string | undefi
   return url;
 }
 
-import { db } from "@/db";
+import { db, type DbExec } from "@/db";
 import {
   workOrders,
   workOrderOperations,
@@ -31,18 +31,24 @@ import {
   companies,
   clients,
   deliveryActs,
+  deliveryActItems,
   supplierOrders,
   productTypes,
+  warehouseShipments,
+  warehouseShipmentItems,
+  warehouseFinishedGoods,
 } from "@/db/schema";
-import { eq, desc, and, or, ilike, isNull, sql } from "drizzle-orm";
+import { eq, desc, and, or, ilike, isNull, sql, inArray } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
-import { getCompanyIdByCode } from "./crmService";
+import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
 import { syncOrderStageFromSteps, syncStepFromJournal, toShiftEvent } from "./workOrderEventService";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { generateNextCode } from "@/lib/utils";
 import { deriveWorkOrderStatus, type WorkOrderStatus } from "@/lib/workOrderStatus";
-import { getNextSpecNumber } from "./numberingService";
+import { getNextSpecNumber, lockNumbering } from "./numberingService";
+import { getClientCreditState } from "./financeService";
+import { canOverrideCreditHold } from "@/lib/userRole";
 import { emitNotification } from "./notificationService";
 import {
   normalizeDepartment,
@@ -208,6 +214,35 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
     orderBy: [desc(workOrders.createdAt)],
   });
 
+  // What has left the warehouse for each order (posted shipments) and what has been invoiced.
+  const [shippedRows, invoicedRows] = await Promise.all([
+    db
+      .select({
+        woNo: warehouseShipmentItems.sourceWorkOrderId,
+        qty: sql<string>`coalesce(sum(${warehouseShipmentItems.quantity}), 0)`,
+      })
+      .from(warehouseShipmentItems)
+      .innerJoin(warehouseShipments, eq(warehouseShipments.id, warehouseShipmentItems.shipmentId))
+      .where(
+        and(
+          eq(warehouseShipments.companyId, companyId),
+          inArray(warehouseShipments.status, ["Dispatched", "In Transit", "Delivered"])
+        )
+      )
+      .groupBy(warehouseShipmentItems.sourceWorkOrderId),
+    db
+      .select({
+        woId: deliveryActs.workOrderId,
+        qty: sql<string>`coalesce(sum(${deliveryActItems.quantity}), 0)`,
+      })
+      .from(deliveryActItems)
+      .innerJoin(deliveryActs, eq(deliveryActs.id, deliveryActItems.actId))
+      .where(and(eq(deliveryActs.companyId, companyId), sql`${deliveryActs.status} not in ('cancelled', 'draft')`))
+      .groupBy(deliveryActs.workOrderId),
+  ]);
+  const shippedByNo = new Map(shippedRows.filter((r) => r.woNo).map((r) => [r.woNo as string, Number(r.qty) || 0]));
+  const invoicedById = new Map(invoicedRows.filter((r) => r.woId).map((r) => [r.woId as string, Number(r.qty) || 0]));
+
   return rawOrders.map((wo, index) => {
     const checks = (wo.checks as any) || {
       designReady: false,
@@ -251,6 +286,9 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       operator: wo.operator || undefined,
       shift: wo.shift || undefined,
       recipe: wo.recipeCode || "",
+      cancelReason: wo.cancelReason || undefined,
+      shippedQty: shippedByNo.get(wo.docNo) || 0,
+      invoicedQty: invoicedById.get(wo.id) || 0,
       site: wo.site || "",
       priceTotal: Number(wo.priceTotal) || 0,
       currency: wo.currency || "UZS",
@@ -435,7 +473,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
  */
 export async function getNextWorkOrderNoFromDb(
   companyCode: string = "PRINTGOO",
-  department: string = "Offset"
+  department: string = "Offset",
+  exec: DbExec = db
 ): Promise<string> {
   const companyId = await getCompanyIdByCode(companyCode);
   const normalizedDept = normalizeDepartment(department);
@@ -443,7 +482,7 @@ export async function getNextWorkOrderNoFromDb(
   const yearSuffix = getCurrentYearSuffix();
   const pattern = `${prefix}-${yearSuffix}-%`;
 
-  const rows = await db
+  const rows = await exec
     .select({ docNo: workOrders.docNo })
     .from(workOrders)
     .where(
@@ -512,14 +551,11 @@ export async function upsertWorkOrder(
   }
 
   // 1. Mijozni tekshirish yoki topish (agar mavjud bo'lsa)
-  let clientId: string | null = null;
-  const clientRecord = await db.query.clients.findFirst({
-    where: (c, { and, eq, ilike }) =>
-      and(eq(c.companyId, companyId), ilike(c.name, customerName)),
+  const clientRecord = await resolveClient(db, companyId, {
+    id: (data as { clientId?: string | null }).clientId,
+    name: customerName,
   });
-  if (clientRecord) {
-    clientId = clientRecord.id;
-  }
+  const clientId: string | null = clientRecord?.id ?? null;
 
   // 2. Mavjud buyurtmani qidirish
   const existingOrder = await db.query.workOrders.findFirst({
@@ -545,8 +581,18 @@ export async function upsertWorkOrder(
     }
   }
 
+  // An order that goes to the floor belongs to a client CRM knows: finance invoices it by that link.
+  // Drafts, and orders already saved under this name before the rule, may still be saved.
+  const customerChanged =
+    !existingOrder || existingOrder.customerName.trim().toLowerCase() !== customerName.toLowerCase();
+  if (!clientId && customerChanged && (data.status || "").trim() !== "Draft") {
+    throw new WorkOrderValidationError(unknownClientMessage(customerName));
+  }
+
+  // A save that sends no status keeps the one the order has: a cancelled or draft order
+  // must not come back to life because a field was left out.
   const rawStatus = (data.status || "").trim();
-  let requestedStatus: WorkOrderStatus = "Active";
+  let requestedStatus: WorkOrderStatus = (existingOrder?.status as WorkOrderStatus | undefined) ?? "Active";
   if (rawStatus === "Draft") requestedStatus = "Draft";
   else if (rawStatus === "Active") requestedStatus = "Active";
   else if (rawStatus === "In Production" || rawStatus === "In_Production") requestedStatus = "In Production";
@@ -754,8 +800,6 @@ export async function upsertWorkOrder(
     updatedAt: new Date(),
   };
 
-  let targetId: string;
-
   const currentAuthor = {
     id: data.author?.id || data.user?.id,
     name: data.author?.name || data.user?.name || "Operator",
@@ -801,10 +845,152 @@ export async function upsertWorkOrder(
     }
   }
 
-  if (existingOrder) {
-    targetId = existingOrder.id;
-    await db.update(workOrders).set(payload).where(eq(workOrders.id, targetId));
+  // Credit control: checked when the order is released to the floor, not on every save.
+  const releasedNow =
+    (requestedStatus === "In Production" && existingStatus !== "In Production") ||
+    (stageVal === "Ready to Print" && existingOrder?.stage !== "Ready to Print" && statusVal !== "Draft");
+  if (releasedNow && statusVal !== "Cancelled") {
+    const hold = await checkCreditHold({
+      companyId,
+      clientId,
+      workOrderId: existingOrder?.id,
+      docNo,
+      priority: payload.priority,
+      author: currentAuthor,
+    });
+    if (hold) throw new WorkOrderValidationError(hold);
+  }
 
+  const incomingOps: any[] | null = Array.isArray(data.operations) ? data.operations : null;
+  const toOperationRow = (op: any, idx: number) => {
+    const rawDuration = op.durationHours ?? op.duration ?? 1.0;
+    const durationNum = parseFloat(String(rawDuration).replace(/[^\d.]/g, "")) || 1.0;
+
+    const rateNum = parseFloat(String(op.rateUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const setupNum = parseFloat(String(op.setupFeeUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const pwRateNum = parseFloat(String(op.pieceworkRateUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const plannedCostNum = parseFloat(String(op.plannedCostUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const pwTotalNum = parseFloat(String(op.pieceworkTotalUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const divisorNum = parseInt(String(op.unitDivisor || 1000), 10) || 1000;
+    const seqNum = parseInt(String(op.stepNumber ?? op.sequence ?? (idx + 1)), 10) || (idx + 1);
+
+    return {
+      tariffId: op.tariffId && op.tariffId.length > 20 ? op.tariffId : null,
+      tariffCode: op.tariffCode || null,
+      workRateId: typeof op.workRateId === "string" && isUuid(op.workRateId) ? op.workRateId : null,
+      name: op.name || `Bosqich ${idx + 1}`,
+      department: op.department || data.department || "Offset",
+      machineStr: op.machine || op.machineStr || null,
+      machineId: typeof op.machineId === "string" && isUuid(op.machineId) ? op.machineId : null,
+      operator: op.operator || (Array.isArray(op.operators) ? op.operators.join(", ") : null),
+      costMode: ["outsourced", "manual"].includes(op.costMode) ? op.costMode : "auto",
+      manualCostUsd: (Math.max(0, Number(op.manualCostUsd) || 0)).toFixed(2),
+      costNote: op.costNote ? String(op.costNote).slice(0, 500) : null,
+      durationHours: durationNum.toFixed(2),
+      toolingId: op.toolingId || null,
+      toolingName: op.toolingName || null,
+      calcUnit: op.calcUnit || null,
+      unitDivisor: divisorNum,
+      rateUsd: rateNum.toFixed(4),
+      setupFeeUsd: setupNum.toFixed(2),
+      pieceworkRateUsd: pwRateNum.toFixed(4),
+      plannedCostUsd: plannedCostNum.toFixed(2),
+      pieceworkTotalUsd: pwTotalNum.toFixed(2),
+      sequence: seqNum,
+      status: op.status || "Queued",
+      plannedQty: parseSafePlannedQty(op, Number(data.quantity) || 0),
+      startedAt: toDateOrNull(op.startedAt),
+      pausedAt: toDateOrNull(op.pausedAt),
+      completedAt: toDateOrNull(op.completedAt),
+      downtimeMinutes: Math.max(0, Math.round(Number(op.downtimeMinutes) || 0)),
+      actualDurationMinutes:
+        op.actualDurationMinutes !== undefined && op.actualDurationMinutes !== null && op.actualDurationMinutes !== ""
+          ? Math.max(0, Math.round(Number(op.actualDurationMinutes) || 0))
+          : null,
+      completedQty: parseSafeNumeric(op.completedQty ?? op.qtyCompleted, 0),
+      notes: op.notes || null,
+    };
+  };
+
+  // The order and its route are written together or not at all.
+  const targetId: string = await db.transaction(async (tx) => {
+    let orderId: string;
+    if (existingOrder) {
+      orderId = existingOrder.id;
+      await tx.update(workOrders).set(payload).where(eq(workOrders.id, orderId));
+    } else {
+      // Numbers are handed out one at a time: two orders saved at once must not get the same one.
+      await lockNumbering(tx, companyId, "WO");
+      if (isDraft) {
+        docNo = await getNextWorkOrderNoFromDb(companyCode, data.department || "Offset", tx);
+        payload.docNo = docNo;
+      }
+      const [{ maxQueue }] = await tx
+        .select({ maxQueue: sql<number>`coalesce(max(${workOrders.queueOrder}), 0)` })
+        .from(workOrders)
+        .where(eq(workOrders.companyId, companyId));
+      const [inserted] = await tx
+        .insert(workOrders)
+        .values({ ...payload, queueOrder: Number(maxQueue) + 10 })
+        .returning({ id: workOrders.id });
+      orderId = inserted.id;
+    }
+
+    // 3. Route steps. A step keeps its id for as long as it exists — shift-journal entries point at
+    //    it — so steps are matched (by id, else by position and name) and updated, not wiped.
+    if (incomingOps) {
+      const existingOps = await tx.query.workOrderOperations.findMany({
+        where: eq(workOrderOperations.workOrderId, orderId),
+      });
+      const existingById = new Map(existingOps.map((o) => [o.id, o]));
+      const sentIds = new Set(incomingOps.map((op) => op?.id).filter((id) => typeof id === "string" && isUuid(id)));
+      const kept = new Set<string>();
+
+      for (const [idx, op] of incomingOps.entries()) {
+        const row = toOperationRow(op, idx);
+        const sentId = typeof op.id === "string" && isUuid(op.id) ? (op.id as string) : null;
+        const match =
+          (sentId && existingById.get(sentId)) ||
+          (!sentId
+            ? existingOps.find(
+                (e) => !kept.has(e.id) && !sentIds.has(e.id) && e.sequence === row.sequence && e.name === row.name
+              )
+            : undefined);
+        if (match) {
+          kept.add(match.id);
+          await tx.update(workOrderOperations).set(row).where(eq(workOrderOperations.id, match.id));
+        } else {
+          await tx
+            .insert(workOrderOperations)
+            .values({ ...(sentId ? { id: sentId } : {}), workOrderId: orderId, ...row });
+        }
+      }
+
+      const removed = existingOps.filter((e) => !kept.has(e.id));
+      if (removed.length > 0) {
+        const logged = await tx
+          .selectDistinct({ opId: workOrderEvents.opId })
+          .from(workOrderEvents)
+          .where(and(eq(workOrderEvents.workOrderId, orderId), isNull(workOrderEvents.deletedAt)));
+        const loggedIds = new Set(logged.map((l) => l.opId));
+        const blocked = removed.filter((e) => loggedIds.has(e.id));
+        if (blocked.length > 0) {
+          throw new WorkOrderValidationError(
+            `Smena jurnalida yozuvi bor bosqichni o'chirib bo'lmaydi: ${blocked.map((e) => e.name).join(", ")}. Avval jurnal yozuvlarini o'chiring.`
+          );
+        }
+        await tx.delete(workOrderOperations).where(
+          inArray(
+            workOrderOperations.id,
+            removed.map((e) => e.id)
+          )
+        );
+      }
+    }
+    return orderId;
+  });
+
+  if (existingOrder) {
     // Audit Log: Server-side difflarni hisoblash va saqlash
     try {
       await computeAndRecordWorkOrderDiffs({
@@ -819,16 +1005,6 @@ export async function upsertWorkOrder(
       console.error("[WorkOrder Audit] Diff yozishda xatolik:", auditErr);
     }
   } else {
-    const [{ maxQueue }] = await db
-      .select({ maxQueue: sql<number>`coalesce(max(${workOrders.queueOrder}), 0)` })
-      .from(workOrders)
-      .where(eq(workOrders.companyId, companyId));
-    const [inserted] = await db
-      .insert(workOrders)
-      .values({ ...payload, queueOrder: Number(maxQueue) + 10 })
-      .returning({ id: workOrders.id });
-    targetId = inserted.id;
-
     // Audit Log: Yangi buyurtma yaratilish hodisasi
     try {
       await recordWorkOrderAuditLog({
@@ -850,67 +1026,6 @@ export async function upsertWorkOrder(
       });
     } catch (auditErr) {
       console.error("[WorkOrder Audit] Boshlang'ich log yozishda xatolik:", auditErr);
-    }
-  }
-
-  // 3. Marshrut operatsiyalarini (operations) saqlash
-  if (data.operations && Array.isArray(data.operations)) {
-    await db.delete(workOrderOperations).where(eq(workOrderOperations.workOrderId, targetId));
-    if (data.operations.length > 0) {
-      await db.insert(workOrderOperations).values(
-        data.operations.map((op: any, idx: number) => {
-          const rawDuration = op.durationHours ?? op.duration ?? 1.0;
-          const durationNum = parseFloat(String(rawDuration).replace(/[^\d.]/g, "")) || 1.0;
-
-          const rateNum = parseFloat(String(op.rateUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const setupNum = parseFloat(String(op.setupFeeUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const pwRateNum = parseFloat(String(op.pieceworkRateUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const plannedCostNum = parseFloat(String(op.plannedCostUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const pwTotalNum = parseFloat(String(op.pieceworkTotalUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const divisorNum = parseInt(String(op.unitDivisor || 1000), 10) || 1000;
-          const seqNum = parseInt(String(op.stepNumber ?? op.sequence ?? (idx + 1)), 10) || (idx + 1);
-
-          return {
-            // Keep the step's id: shift-journal entries point at it.
-            ...(typeof op.id === "string" && isUuid(op.id) ? { id: op.id } : {}),
-            workOrderId: targetId,
-            tariffId: op.tariffId && op.tariffId.length > 20 ? op.tariffId : null,
-            tariffCode: op.tariffCode || null,
-            workRateId: typeof op.workRateId === "string" && isUuid(op.workRateId) ? op.workRateId : null,
-            name: op.name || `Bosqich ${idx + 1}`,
-            department: op.department || data.department || "Offset",
-            machineStr: op.machine || op.machineStr || null,
-            machineId: typeof op.machineId === "string" && isUuid(op.machineId) ? op.machineId : null,
-            operator: op.operator || (Array.isArray(op.operators) ? op.operators.join(", ") : null),
-            costMode: ["outsourced", "manual"].includes(op.costMode) ? op.costMode : "auto",
-            manualCostUsd: (Math.max(0, Number(op.manualCostUsd) || 0)).toFixed(2),
-            costNote: op.costNote ? String(op.costNote).slice(0, 500) : null,
-            durationHours: durationNum.toFixed(2),
-            toolingId: op.toolingId || null,
-            toolingName: op.toolingName || null,
-            calcUnit: op.calcUnit || null,
-            unitDivisor: divisorNum,
-            rateUsd: rateNum.toFixed(4),
-            setupFeeUsd: setupNum.toFixed(2),
-            pieceworkRateUsd: pwRateNum.toFixed(4),
-            plannedCostUsd: plannedCostNum.toFixed(2),
-            pieceworkTotalUsd: pwTotalNum.toFixed(2),
-            sequence: seqNum,
-            status: op.status || "Queued",
-            plannedQty: parseSafePlannedQty(op, Number(data.quantity) || 0),
-            startedAt: toDateOrNull(op.startedAt),
-            pausedAt: toDateOrNull(op.pausedAt),
-            completedAt: toDateOrNull(op.completedAt),
-            downtimeMinutes: Math.max(0, Math.round(Number(op.downtimeMinutes) || 0)),
-            actualDurationMinutes:
-              op.actualDurationMinutes !== undefined && op.actualDurationMinutes !== null && op.actualDurationMinutes !== ""
-                ? Math.max(0, Math.round(Number(op.actualDurationMinutes) || 0))
-                : null,
-            completedQty: parseSafeNumeric(op.completedQty ?? op.qtyCompleted, 0),
-            notes: op.notes || null,
-          };
-        })
-      );
     }
   }
 
@@ -1060,6 +1175,54 @@ export async function upsertWorkOrder(
 }
 
 /**
+ * Credit control at the gate to production (business rules §1): an order of a client who is over
+ * their credit limit or has overdue debt is not released. An urgent order may be released by a
+ * director or administrator; that release is written to the order's audit log.
+ * Returns the hold reason when the order must wait, null when it may go.
+ */
+export async function checkCreditHold(params: {
+  companyId: string;
+  clientId: string | null | undefined;
+  workOrderId?: string;
+  docNo: string;
+  priority: string | null | undefined;
+  author?: { id?: string; name?: string; role?: string; initials?: string };
+  exec?: DbExec;
+}): Promise<string | null> {
+  if (!params.clientId) return null;
+  const credit = await getClientCreditState(params.exec ?? db, params.companyId, params.clientId);
+  if (!credit?.blocked) return null;
+
+  if (params.priority === "Urgent" && canOverrideCreditHold(params.author?.role)) {
+    if (params.workOrderId) {
+      try {
+        await recordWorkOrderAuditLog({
+          companyId: params.companyId,
+          workOrderId: params.workOrderId,
+          docNo: params.docNo,
+          action: "update",
+          author: {
+            id: params.author?.id || "system",
+            name: params.author?.name || "Rahbar",
+            role: params.author?.role || "Director",
+            initials: params.author?.initials,
+          },
+          category: "status",
+          actionText: "Kredit cheklovi rahbar ruxsati bilan chetlab o'tildi",
+          details: credit.reason || undefined,
+          badgeText: "Urgent",
+          badgeVariant: "destructive",
+        });
+      } catch (auditErr) {
+        console.error("[WorkOrder Audit] Kredit ruxsatini yozishda xatolik:", auditErr);
+      }
+    }
+    return null;
+  }
+  return `${credit.reason} Buyurtma ishlab chiqarishga chiqarilmaydi. Shoshilinch buyurtmani faqat rahbar chiqara oladi.`;
+}
+
+/**
  * Buyurtmani xavfsiz o'chirish yoki bekor qilish (Soft Delete / Hard Delete)
  */
 export async function deleteWorkOrder(
@@ -1120,15 +1283,94 @@ export async function deleteWorkOrder(
 
   if (effectiveMode === "cancel") {
     // Bekor qilish (Пометка на удаление / Cancel)
-    await db
-      .update(workOrders)
-      .set({
-        status: "Cancelled",
-        recipeCode: cancelReason
-          ? `${existingOrder.recipeCode ? `[${existingOrder.recipeCode}] ` : ""}[BEKOR QILINDI]: ${cancelReason}`
-          : existingOrder.recipeCode,
-      })
-      .where(eq(workOrders.id, existingOrder.id));
+    // Goods of this order that a shipment has reserved would be left hanging: release those first.
+    const heldShipments = await db
+      .selectDistinct({ shipmentNumber: warehouseShipments.shipmentNumber })
+      .from(warehouseShipments)
+      .leftJoin(warehouseShipmentItems, eq(warehouseShipmentItems.shipmentId, warehouseShipments.id))
+      .where(
+        and(
+          eq(warehouseShipments.companyId, companyId),
+          inArray(warehouseShipments.status, ["Reserved", "Picking", "Packed"]),
+          or(
+            eq(warehouseShipments.workOrderId, existingOrder.docNo),
+            eq(warehouseShipmentItems.sourceWorkOrderId, existingOrder.docNo)
+          )
+        )
+      );
+    if (heldShipments.length > 0) {
+      throw new Error(
+        `${existingOrder.docNo} mahsuloti ombor chiqimida band qilingan (${heldShipments
+          .map((s) => s.shipmentNumber)
+          .join(", ")}). Avval chiqimni bekor qiling.`
+      );
+    }
+
+    await db.transaction(async (tx) => {
+      // Boxes handed to the warehouse but not yet received go back to the shop.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pkg = existingOrder.packagingData as any;
+      const boxes = Array.isArray(pkg?.boxes)
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          pkg.boxes.map((box: any) => (box.status === "handed" ? { ...box, status: "ready", handedOverAt: undefined } : box))
+        : null;
+
+      await tx
+        .update(workOrders)
+        .set({
+          status: "Cancelled",
+          cancelReason: cancelReason || null,
+          ...(boxes ? { packagingData: { ...pkg, boxes } } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(workOrders.id, existingOrder.id));
+
+      // A hand-over the warehouse has not confirmed is withdrawn; stock already received stays.
+      await tx
+        .update(warehouseFinishedGoods)
+        .set({
+          pendingQuantity: "0",
+          receiptStatus: "Received",
+          notes: `Buyurtma bekor qilindi: kutilayotgan qabul olib tashlandi`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(warehouseFinishedGoods.companyId, companyId),
+            eq(warehouseFinishedGoods.workOrderId, existingOrder.docNo),
+            sql`${warehouseFinishedGoods.pendingQuantity} > 0`
+          )
+        );
+    });
+
+    // Purchases made for this order are still on their way: procurement has to decide about them.
+    try {
+      const openPurchases = await db.query.supplierOrders.findMany({
+        where: and(
+          eq(supplierOrders.companyId, companyId),
+          eq(supplierOrders.workOrderId, existingOrder.id),
+          inArray(supplierOrders.status, ["Draft", "Ordered", "In_Production", "Ready"])
+        ),
+        columns: { orderNo: true },
+      });
+      if (openPurchases.length > 0) {
+        await emitNotification(
+          {
+            dedupKey: `wo-cancel-po:${existingOrder.docNo}`,
+            severity: "warning",
+            category: "production",
+            eventType: "wo_status:cancelled",
+            entityCode: existingOrder.docNo,
+            title: `${existingOrder.docNo} bekor qilindi: ta'minot buyurtmalari ochiq`,
+            description: `Ochiq buyurtmalar: ${openPurchases.map((p) => p.orderNo).join(", ")}.`,
+            link: { module: "production", subModule: "work-orders" },
+          },
+          companyCode
+        );
+      }
+    } catch (poErr) {
+      console.error("[WorkOrder] Ta'minot buyurtmalarini tekshirishda xatolik:", poErr);
+    }
 
     // Telegram guruhidagi xabarni avtomatik yangilash
     try {
@@ -1303,6 +1545,24 @@ export async function updateWorkOrderReadiness(
       }
     }
 
+    // Credit control: a release to the floor is refused when asked for, and simply not done
+    // when it would only follow from the readiness checks (the checks themselves are still saved).
+    let creditHold: string | null = null;
+    if (patchPayload.stage === "Ready to Print" && existingOrder.stage !== "Ready to Print") {
+      creditHold = await checkCreditHold({
+        companyId,
+        clientId: existingOrder.clientId,
+        workOrderId: existingOrder.id,
+        docNo: existingOrder.docNo,
+        priority: existingOrder.priority,
+        author,
+      });
+      if (creditHold) {
+        if (updates.stage === "Ready to Print") return { success: false, error: creditHold };
+        patchPayload.stage = undefined;
+      }
+    }
+
     // Only Draft / Active / Cancelled are taken from the request; production statuses follow the stage.
     const nextStatus = deriveWorkOrderStatus(updates.status ?? existingOrder.status, patchPayload.stage ?? existingOrder.stage);
     if (nextStatus !== existingOrder.status) patchPayload.status = nextStatus;
@@ -1326,6 +1586,7 @@ export async function updateWorkOrderReadiness(
         checks: patchPayload.checks || existingOrder.checks,
         pressMachine: patchPayload.pressMachine || existingOrder.pressMachine,
         status: patchPayload.status || existingOrder.status,
+        ...(creditHold ? { creditHold } : {}),
       },
     };
   } catch (error: any) {

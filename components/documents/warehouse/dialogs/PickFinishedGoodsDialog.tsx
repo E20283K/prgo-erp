@@ -66,7 +66,7 @@ export function PickFinishedGoodsDialog({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFg, setSelectedFg] = useState<any | null>(null);
   const [shipQty, setShipQty] = useState<number>(1000);
-  const [unitPrice, setUnitPrice] = useState<number>(200);
+  const [unitPrice, setUnitPrice] = useState<number>(0);
   const [createReorder, setCreateReorder] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -105,8 +105,8 @@ export function PickFinishedGoodsDialog({
     setSelectedFg(item);
     const maxQty = item.availableQty || 1000;
     setShipQty(maxQty);
-    const suggestedPrice = item.unitCost ? Math.round(item.unitCost * 1.4) : 210;
-    setUnitPrice(suggestedPrice);
+    // The order's own selling price; with no order behind the goods the price is entered by hand.
+    setUnitPrice(Number(item.unitPrice) || 0);
     setCreateReorder(true);
   };
 
@@ -314,7 +314,7 @@ export function PickFinishedGoodsDialog({
                     Jami qator summasi
                   </label>
                   <div className="h-7 px-2.5 rounded-md border border-input bg-background flex items-center font-mono text-xs font-bold text-primary mt-1">
-                    {(shipQty * unitPrice).toLocaleString()} so'm
+                    {(shipQty * unitPrice).toLocaleString()} {selectedFg?.currency || "UZS"}
                   </div>
                 </div>
               </div>
