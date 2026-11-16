@@ -325,7 +325,7 @@ export async function upsertStockBalance(payload: any, companyCode: string = "PR
 
 export async function getWarehouseReceipts(companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  return db.query.warehouseReceipts.findMany({
+  const rows = await db.query.warehouseReceipts.findMany({
     where: eq(warehouseReceipts.companyId, companyId),
     with: {
       items: true,
@@ -333,6 +333,44 @@ export async function getWarehouseReceipts(companyCode: string = "PRINTGOO") {
     },
     orderBy: [desc(warehouseReceipts.receiptDate)],
   });
+  return rows.map(mapReceiptRow);
+}
+
+// Reyestr va hujjat formasi kutadigan shakl: id = hujjat raqami (RCV-...), UUID alohida saqlanadi
+function mapReceiptRow(r: any) {
+  const items = (r.items || []).map((i: any) => ({
+    id: i.id,
+    workOrderId: i.sourceWorkOrderId || undefined,
+    itemId: i.itemId,
+    finishedGoodId: i.finishedGoodId,
+    sourceWorkOrderId: i.sourceWorkOrderId,
+    sku: i.sku,
+    name: i.name,
+    category: i.category,
+    sheetFormat: i.sheetFormat || "",
+    grammage: i.grammage ?? 0,
+    quantity: Number(i.quantity) || 0,
+    unit: i.unit,
+    unitPriceUsd: Number(i.unitPrice) || 0,
+    batchNumber: i.batchNumber,
+    notes: i.notes,
+  }));
+  const units = new Set(items.map((i: any) => i.unit));
+  const sameUnit = units.size === 1;
+  const material =
+    items.length === 0 ? "" : items.length === 1 ? items[0].name : `${items[0].name} +${items.length - 1}`;
+  return {
+    ...r,
+    uuid: r.id,
+    id: r.receiptNumber,
+    date: r.receiptDate ? new Date(r.receiptDate).toISOString().split("T")[0] : "",
+    supplier: r.supplierName,
+    material,
+    quantity: sameUnit ? items.reduce((s: number, i: any) => s + i.quantity, 0) : null,
+    unit: sameUnit ? items[0].unit : "",
+    location: r.locationName || r.warehouse?.name || "",
+    items,
+  };
 }
 
 export async function upsertWarehouseReceipt(payload: any, companyCode: string = "PRINTGOO") {
