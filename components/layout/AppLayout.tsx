@@ -114,6 +114,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     // 2. Block standard browser keyboard shortcuts & unify F11 fullscreen
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Browser autofill / password managers dispatch synthetic keydown events
+      // without `key` or `code`; ignore them so string methods don't throw.
+      if (typeof e.key !== "string" || typeof e.code !== "string") return;
+
       // 0. Ctrl+Shift+C / Cmd+Shift+C: Toggle AI Element & Container Inspector
       if (
         (e.ctrlKey || e.metaKey) &&
