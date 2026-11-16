@@ -279,10 +279,13 @@ export const pieceworkLogs = pgTable(
     status: pieceworkStatusEnum("status").default("verified").notNull(),
     approvedBy: varchar("approved_by", { length: 128 }),
     notes: text("notes"),
+    /** Shift-journal entry (work_order_events.id) this record was made from; null when entered by hand. */
+    sourceEventId: uuid("source_event_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    uniqueIndex("piecework_source_event_uq").on(table.sourceEventId),
     index("piecework_employee_date_idx").on(table.employeeId, table.workDate),
     index("piecework_work_order_idx").on(table.workOrderId),
     index("piecework_status_idx").on(table.status),

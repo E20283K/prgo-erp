@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { branches, workOrderEvents, workOrderOperations, workOrders } from "@/db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
+import { resolveOperatorEmployeeId, syncPieceworkFromJournal } from "./pieceworkSyncService";
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 import { parseShiftSchedule, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
@@ -171,10 +172,19 @@ export async function listWorkOrderEvents(docNo: string, companyCode?: string | 
   return { events, schedule: await getShiftScheduleForCompany(wo.companyId) };
 }
 
+/** Piecework follows the journal, but a failure there must not lose the journal entry itself. */
+async function syncPieceworkSafely(workOrderId: string, opId: string) {
+  try {
+    await syncPieceworkFromJournal(workOrderId, opId);
+  } catch (e) {
+    console.error("[WorkOrder Events] Ishbayni jurnaldan yangilashda xatolik:", e);
+  }
+}
+
 /** Creates or updates one journal entry (keyed by the client's event id). */
 export async function saveWorkOrderEvent(
   docNo: string,
-  input: Partial<ShiftEvent> & { id: string },
+  input: Partial<ShiftEvent> & { id: string; employeeId?: string | null },
   actor: EventActor,
   companyCode?: string | null
 ): Promise<ShiftEvent> {
@@ -203,6 +213,7 @@ export async function saveWorkOrderEvent(
     type,
     note: input.note || "",
     operator: input.operator || actor.name,
+    employeeId: await resolveOperatorEmployeeId(db, wo.companyId, input.employeeId, input.operator || actor.name),
     batchLabel: input.batchLabel || null,
     grossInput: int(input.inputQty),
     makeReadyQty: int(input.makeReadyQty),
@@ -226,6 +237,7 @@ export async function saveWorkOrderEvent(
       .where(eq(workOrderEvents.id, existing.id))
       .returning();
     await syncStepFromJournal(wo.id, values.opId);
+    await syncPieceworkSafely(wo.id, values.opId);
     return toShiftEvent(row);
   }
   const [row] = await db
@@ -233,6 +245,7 @@ export async function saveWorkOrderEvent(
     .values({ ...values, workOrderId: wo.id, clientEventId: input.id, createdBy: actor.name })
     .returning();
   await syncStepFromJournal(wo.id, values.opId);
+  await syncPieceworkSafely(wo.id, values.opId);
   return toShiftEvent(row);
 }
 
@@ -256,6 +269,9 @@ export async function deleteWorkOrderEvent(
     )
     .returning({ id: workOrderEvents.id, opId: workOrderEvents.opId });
   if (!row) throw new Error("Yozuv topilmadi.");
-  if (row.opId) await syncStepFromJournal(wo.id, row.opId);
+  if (row.opId) {
+    await syncStepFromJournal(wo.id, row.opId);
+    await syncPieceworkSafely(wo.id, row.opId);
+  }
   return { id: eventId };
 }

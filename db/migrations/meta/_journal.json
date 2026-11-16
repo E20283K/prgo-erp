@@ -120,6 +120,13 @@
       "when": 1794762769318,
       "tag": "0016_product_types",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794835331714,
+      "tag": "0017_order_chain_links",
+      "breakpoints": true
     }
   ]
 }

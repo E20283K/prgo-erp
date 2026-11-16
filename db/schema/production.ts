@@ -14,7 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { companies, branches } from "./core";
-import { departments } from "./hr";
+import { departments, employees } from "./hr";
 import { clients } from "./crm";
 
 // ─── Enums ─────────────────────────────────────────────────────────────────────
@@ -369,6 +369,8 @@ export const workOrders = pgTable(
     site: varchar("site", { length: 128 }),
     pressMachine: varchar("press_machine", { length: 128 }),
     recipeCode: varchar("recipe_code", { length: 64 }),
+    /** Why the order was cancelled (set together with status "Cancelled"). */
+    cancelReason: text("cancel_reason"),
 
     quantity: numeric("quantity", { precision: 14, scale: 2 }).default("0").notNull(),
     unit: varchar("unit", { length: 32 }).default("pcs").notNull(),
@@ -534,6 +536,8 @@ export const workOrderEvents = pgTable(
     type: varchar("type", { length: 32 }).default("Run").notNull(), // "Setup" | "Run" | "Waste" | "QC" | "Delay"
     note: text("note").notNull(),
     operator: varchar("operator", { length: 128 }),
+    /** The employee behind "operator", when HR knows them: piecework is paid to this person. */
+    employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "set null" }),
     wasteQty: integer("waste_qty").default(0),
     wasteReason: varchar("waste_reason", { length: 128 }),
     grossInput: integer("gross_input"),

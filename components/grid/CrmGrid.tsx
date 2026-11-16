@@ -68,7 +68,6 @@ export function CrmGrid({ type }: CrmGridProps) {
     setModule,
     crmCustomers,
     clientSettlements,
-    upsertCustomer,
     loadCrmCustomers,
     isCrmCustomersLoading,
     suppliers,
@@ -670,65 +669,59 @@ export function CrmGrid({ type }: CrmGridProps) {
   };
 
   const handleConvertLeadToOrder = async (lead: LeadRecord) => {
-    const draftCustId = `draft-cust-${Date.now()}`;
-    const newCust: CrmCustomerRecord = {
-      id: draftCustId,
-      name: lead.company || "New Client LLC",
-      tin: lead.tin || "309112233",
-      industry: "Commercial & Packaging",
-      contactPerson: lead.contact || "Procurement Lead",
-      phone: lead.phone || "+998 90 000-00-00",
-      email: lead.email || "orders@client.uz",
-      contractNo: "",
-      paymentTerms: "50% Advance / 50% Before Dispatch",
-      manager: lead.manager || "Elena Voronina",
-      status: "Active",
-    };
-    upsertCustomer(newCust);
-    setLeads((prev) =>
-      prev.map((l) => (l.id === lead.id ? { ...l, status: "Converted" } : l))
-    );
-
+    // The server makes the lead a real CRM client (or links an existing one); the order draft
+    // then opens for that client with only what the lead holds.
+    let client: { id: string; code: string; name: string } | null = null;
     try {
-      await fetch(`/api/v1/crm/leads/${encodeURIComponent(lead.id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...lead, status: "Converted" }),
-      });
+      const res = await fetch(`/api/v1/crm/leads/${encodeURIComponent(lead.id)}/convert`, { method: "POST" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.success) {
+        addNotification({
+          title: "Lid mijozga aylantirilmadi",
+          description: body?.error || "Server xatosi",
+          severity: "error",
+        });
+        return;
+      }
+      client = body.client;
     } catch (e) {
-      console.error("Failed to update converted lead status:", e);
+      console.error("Failed to convert lead:", e);
+      addNotification({ title: "Lid mijozga aylantirilmadi", description: "Server bilan aloqa yo'q", severity: "error" });
+      return;
     }
+    if (!client) return;
 
-    const newOrderNo = `ORD-2026-${Math.floor(200 + Math.random() * 600)}`;
+    setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, status: "Converted" } : l)));
+    await useWorkspaceStore.getState().loadCrmCustomers();
+
+    const draftId = `draft-wo-${Date.now()}`;
     openTab({
-      id: newOrderNo,
-      title: `${newOrderNo}: ${newCust.name}`,
+      id: draftId,
+      title: `Yangi buyruq: ${client.name}`,
       type: "work-order",
       module: "production",
-      isUnsaved: false,
+      isUnsaved: true,
       activeLevel3Tab: "overview",
       documentData: {
-        docNo: newOrderNo,
-        customer: newCust.name,
-        product: lead.productInterest || "Custom Packaging Order",
-        quantity: 5000,
-        unit: "pcs",
-        orderType: "Production",
-        approvalStatus: "Draft",
-        currency: "USD",
-        recipe: "OFFSET_STD_V1",
+        id: draftId,
+        docNo: "",
+        clientId: client.id,
+        customer: client.name,
+        product: lead.productInterest || "",
         department: "Offset",
-        deadline: "2026-10-25",
-        responsible: newCust.manager,
+        quantity: 0,
+        unit: "pcs",
+        status: "Draft",
+        priority: "Normal",
         notes: lead.notes || "",
       },
     });
 
     addNotification({
-      title: `Lid buyurtmaga aylantirildi (${newOrderNo})`,
-      description: `${newCust.name} uchun yangi ishlab chiqarish buyurtmasi ochildi.`,
+      title: `Lid mijozga aylantirildi (${client.code})`,
+      description: `${client.name} uchun buyurtma qoralamasi ochildi.`,
       severity: "success",
-      link: { module: "production", subModule: "work-orders" },
+      link: { module: "crm", subModule: "customers" },
     });
 
     setLeadModalOpen(false);

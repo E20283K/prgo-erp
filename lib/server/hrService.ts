@@ -13,6 +13,7 @@ import {
   employeeHistory,
   companies,
   branches,
+  workOrders,
 } from "@/db/schema";
 import { eq, desc, and, sql, between, gte, lte, inArray, ne } from "drizzle-orm";
 import type {
@@ -28,6 +29,7 @@ import type {
   EmployeeHistoryItem,
 } from "@/components/documents/hr/types";
 import { getCompanyIdByCode } from "./crmService";
+import { getCompanyExchangeRate } from "./financeService";
 import { syncEmployeeToAllActiveDevices, removeEmployeeFromAllActiveDevices } from "./hikvisionService";
 import { generateNextCode } from "@/lib/utils";
 
@@ -939,12 +941,21 @@ export async function upsertPieceworkRecord(
     const rate = Number(data.pieceRate ?? data.rate ?? 0);
     const totalAmount = data.totalAmount ?? qty * rate;
 
+    // Piecework is paid for work on an order that exists: the number is checked, not taken on trust.
+    const workOrderNo = String(data.workOrderId || "").trim();
+    if (!workOrderNo) return { success: false, id: "", error: "Buyurtma raqami kiritilishi shart." };
+    const order = await db.query.workOrders.findFirst({
+      where: and(eq(workOrders.companyId, companyId), eq(workOrders.docNo, workOrderNo)),
+      columns: { id: true },
+    });
+    if (!order) return { success: false, id: "", error: `${workOrderNo} buyurtmasi topilmadi.` };
+
     if (data.id && data.id.length > 10 && !data.id.startsWith("pw-")) {
       await db
         .update(pieceworkLogs)
         .set({
           workDate: data.workDate || data.date!,
-          workOrderId: data.workOrderId!,
+          workOrderId: workOrderNo,
           machineCode: data.machineCode || data.machine || null,
           operationCode: data.operationCode || "OP-PRINT",
           operationName: data.operationName || data.operation || "Operatsiya",
@@ -957,7 +968,7 @@ export async function upsertPieceworkRecord(
           notes: data.notes || null,
           updatedAt: new Date(),
         })
-        .where(eq(pieceworkLogs.id, data.id));
+        .where(and(eq(pieceworkLogs.companyId, companyId), eq(pieceworkLogs.id, data.id)));
       return { success: true, id: data.id };
     }
 
@@ -966,7 +977,7 @@ export async function upsertPieceworkRecord(
       .values({
         companyId,
         employeeId: data.employeeId!,
-        workOrderId: data.workOrderId || "WO-0001",
+        workOrderId: workOrderNo,
         workDate: data.workDate || data.date || new Date().toISOString().split("T")[0],
         machineCode: data.machineCode || data.machine || null,
         operationCode: data.operationCode || "OP-PRINT",
@@ -1061,6 +1072,7 @@ export async function calculatePeriodPayroll(
 
     let count = 0;
     let locked = 0;
+    const usdRate = await getCompanyExchangeRate(exec, companyId);
 
     await exec.transaction(async (tx) => {
     for (const emp of activeEmps) {
@@ -1086,7 +1098,14 @@ export async function calculatePeriodPayroll(
           sql`${pieceworkLogs.workDate}::text LIKE ${period + "%"}`
         ),
       });
-      const pieceworkSum = pwList.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
+      // Piecework from the shift journal is priced in USD; the payroll is in the employee's currency.
+      const payCurrency = (emp.currency || "UZS").toUpperCase();
+      const pieceworkSum = pwList.reduce((sum, item) => {
+        const amount = Number(item.totalAmount || 0);
+        const itemCurrency = (item.currency || "UZS").toUpperCase();
+        if (itemCurrency === payCurrency) return sum + amount;
+        return sum + (itemCurrency === "USD" ? amount * usdRate : amount / usdRate);
+      }, 0);
 
       // 2. Davomat va overtime soatlari
       const attList = await tx.query.attendanceLogs.findMany({

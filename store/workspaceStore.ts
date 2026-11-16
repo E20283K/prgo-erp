@@ -535,6 +535,11 @@ export type ProductionQueueStage = "Queue" | "Ready to Print" | "In Production" 
 export interface ProductionQueueItem {
   id: string; // e.g. "WOOF-26-0351"
   docNo?: string;
+  /** Quantity that has left the warehouse in posted shipments. */
+  shippedQty?: number;
+  /** Quantity on invoices issued for the order (cancelled and draft ones excluded). */
+  invoicedQty?: number;
+  cancelReason?: string;
   clientOrderId?: string; // e.g. "CO-00041"
   clientId?: string;
   customer: string;
@@ -1041,6 +1046,7 @@ interface WorkspaceState {
     auditMeta?: { verifiedBy?: string; note?: string; forceStatus?: GateStatus }
   ) => void;
   setProductionStage: (idOrWoOrCo: string, stage: ProductionQueueStage) => void;
+  handleStageRefusal: (body: { success?: boolean; error?: string; data?: { creditHold?: string } } | null) => void;
   updateQueueMachine: (idOrWoOrCo: string, machine: string) => void;
   /** Moves an order in the planner's run order; `siblingIds` is the column it is moved within. */
   reorderQueueOrder: (idOrWoOrCo: string, direction: "up" | "down", siblingIds?: string[]) => void;
@@ -4311,9 +4317,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           checks: nextChecksToPersist,
           stage: nextStageToPersist,
         }),
-      }).catch((err) => {
-        console.error("Failed to persist readiness checks:", err);
-      });
+      })
+        .then((res) => res.json().catch(() => null))
+        .then((body) => get().handleStageRefusal(body))
+        .catch((err) => {
+          console.error("Failed to persist readiness checks:", err);
+        });
     }
   },
 
@@ -4382,10 +4391,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stage }),
-      }).catch((err) => {
-        console.error("Failed to persist production stage:", err);
-      });
+      })
+        .then((res) => res.json().catch(() => null))
+        .then((body) => get().handleStageRefusal(body))
+        .catch((err) => {
+          console.error("Failed to persist production stage:", err);
+        });
     }
+  },
+
+  // The server may refuse to release an order to the floor (credit control): the screen has
+  // already moved it, so the queue is reloaded and the reason shown.
+  handleStageRefusal: (body) => {
+    const reason = body?.success === false ? body.error : body?.data?.creditHold;
+    if (!reason) return;
+    get().addNotification({ title: "Buyurtma ishlab chiqarishga chiqarilmadi", description: reason, severity: "error" });
+    void get().loadProductionQueue();
   },
 
   updateQueueMachine: (idOrWoOrCo, machine) => {

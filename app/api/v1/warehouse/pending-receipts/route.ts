@@ -74,7 +74,8 @@ export async function POST(request: NextRequest) {
 
 /** Shop hands packed boxes over to the FG warehouse (waits for confirmation). */
 export async function PUT(request: NextRequest) {
-  const auth = await requireApiUser(request, WAREHOUSE_WRITE);
+  // The shop hands over, the warehouse receives: the hand-over is a production action too.
+  const auth = await requireApiUser(request, [...WAREHOUSE_WRITE, ["production", "create"], ["production", "edit"]]);
   if ("response" in auth) return auth.response;
 
   try {

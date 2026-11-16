@@ -13,23 +13,36 @@ import {
   clients,
   clientPayments,
   clientSettlements,
+  crmLeads,
   deliveryActs,
   deliveryActItems,
   employees,
   payrollRecords,
   pieceworkLogs,
   warehouseFinishedGoods,
+  workOrderEvents,
+  workOrderOperations,
   workOrders,
 } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
-import { getCompanyIdByCode } from "@/lib/server/crmService";
+import { getCompanyIdByCode, resolveClient } from "@/lib/server/crmService";
 import {
   getAvailableFinishedGoodsForShipment,
+  handOverFinishedGoods,
   lookupBoxOrWorkOrderBarcode,
   upsertWarehouseShipmentTx,
   type ShipmentTxContext,
 } from "@/lib/server/warehouseService";
-import { recordPayment, syncClientSettlement, upsertDeliveryAct } from "@/lib/server/financeService";
+import {
+  getClientCreditState,
+  getCompanyExchangeRate,
+  recordPayment,
+  syncClientSettlement,
+  upsertDeliveryAct,
+} from "@/lib/server/financeService";
+import { checkCreditHold } from "@/lib/server/workOrderService";
+import { resolveOperatorEmployeeId, syncPieceworkFromJournal } from "@/lib/server/pieceworkSyncService";
+import { convertLeadToClient } from "@/lib/server/leadService";
 import { getNextDeliveryActNumber, getCurrentYearSuffix } from "@/lib/server/numberingService";
 import { calculatePeriodPayroll } from "@/lib/server/hrService";
 import { ShipmentError } from "@/lib/server/shipmentEngine";
@@ -73,6 +86,7 @@ interface OrderFixture {
   companyId: string;
   clientId: string;
   clientName: string;
+  woId: string;
   woNo: string;
   fgId: string;
   fgSku: string;
@@ -96,21 +110,24 @@ async function seedOrder(
     .returning();
   const woNo = `WO-TST-${tag}`;
   const boxCode = `BX-TST-${tag}-01`;
-  await tx.insert(workOrders).values({
-    companyId,
-    clientId: client.id,
-    docNo: woNo,
-    customerName: clientName,
-    productName: "Test etiketka",
-    quantity: String(qty),
-    priceTotal: String(priceTotal),
-    currency,
-    status: "Active",
-    stage: "Completed",
-    packagingData: {
-      boxes: [{ id: "b1", boxNumber: 1, boxCode, barcode: boxCode, quantity: qty, status: "in_stock" }],
-    },
-  });
+  const [wo] = await tx
+    .insert(workOrders)
+    .values({
+      companyId,
+      clientId: client.id,
+      docNo: woNo,
+      customerName: clientName,
+      productName: "Test etiketka",
+      quantity: String(qty),
+      priceTotal: String(priceTotal),
+      currency,
+      status: "Active",
+      stage: "Completed",
+      packagingData: {
+        boxes: [{ id: "b1", boxNumber: 1, boxCode, barcode: boxCode, quantity: qty, status: "in_stock" }],
+      },
+    })
+    .returning();
   const fgSku = `FG-${woNo}`;
   const [fg] = await tx
     .insert(warehouseFinishedGoods)
@@ -127,7 +144,7 @@ async function seedOrder(
       locationName: "Tayyor mahsulotlar ombori",
     })
     .returning();
-  return { companyId, clientId: client.id, clientName, woNo, fgId: fg.id, fgSku, boxCode };
+  return { companyId, clientId: client.id, clientName, woId: wo.id, woNo, fgId: fg.id, fgSku, boxCode };
 }
 
 async function main() {
@@ -354,6 +371,222 @@ async function main() {
       .where(and(eq(payrollRecords.employeeId, paidWorker.id), eq(payrollRecords.period, period)));
     assert.equal(paidRec.status, "paid");
     assert.equal(Number(paidRec.grossPay), 777, "to'langan oylik o'zgarmaydi");
+  });
+
+  // ── B3: mijozni topish ──
+  await scenario("B3 mijoz: nom bo'yicha aniq topiladi, % joker emas", async (tx) => {
+    const f = await seedOrder(tx, "UZS", 500_000, 100, 3000);
+    const found = await resolveClient(tx, f.companyId, { name: `  ${f.clientName.toLowerCase()}  ` });
+    assert.equal(found?.id, f.clientId);
+    assert.equal(await resolveClient(tx, f.companyId, { name: "TEST MIJOZ %" }), null, "% joker bo'lib ishlamasligi kerak");
+  });
+
+  // ── B1: kredit nazorati ──
+  await scenario("B1 kredit: limitdan oshgan mijoz bloklanadi, rahbar shoshilinchni chiqaradi", async (tx) => {
+    const f = await seedOrder(tx, "USD", 1000, 100, 3);
+    await tx.update(clients).set({ creditLimitUsd: "100" }).where(eq(clients.id, f.clientId));
+    const today = new Date().toISOString().split("T")[0];
+    await upsertDeliveryAct(
+      {
+        customer: f.clientName,
+        clientId: f.clientId,
+        date: today,
+        totalAmount: 500,
+        subtotal: 500,
+        vatRate: 0,
+        currency: "USD",
+        status: "Signed & Stamped",
+      },
+      f.companyId,
+      { exec: tx, afterCommit: [] }
+    );
+    const state = await getClientCreditState(tx, f.companyId, f.clientId);
+    assert.equal(state?.balanceUsd, 500);
+    assert.equal(state?.overdueUsd, 0);
+    assert.equal(state?.blocked, true);
+    assert.match(state?.reason || "", /kredit limitidan/);
+
+    const base = { companyId: f.companyId, clientId: f.clientId, docNo: f.woNo, exec: tx };
+    assert.ok(await checkCreditHold({ ...base, priority: "Normal", author: { role: "admin" } }), "oddiy buyurtma ushlanadi");
+    assert.ok(await checkCreditHold({ ...base, priority: "Urgent", author: { role: "Operator" } }), "operator chiqara olmaydi");
+    assert.equal(await checkCreditHold({ ...base, priority: "Urgent", author: { role: "Director" } }), null);
+
+    await recordPayment({ customer: f.clientName, amount: 450, currency: "USD" }, f.companyId, tx);
+    assert.equal((await getClientCreditState(tx, f.companyId, f.clientId))?.blocked, false, "to'lovdan keyin ochiladi");
+  });
+
+  await scenario("B1 kredit: 14 kundan oshgan qarz bloklaydi (limit qo'yilmagan bo'lsa ham)", async (tx) => {
+    const f = await seedOrder(tx, "USD", 1000, 100, 3);
+    const old = new Date(Date.now() - 30 * 86_400_000).toISOString().split("T")[0];
+    const recent = new Date(Date.now() - 3 * 86_400_000).toISOString().split("T")[0];
+    const act = (date: string, total: number) =>
+      upsertDeliveryAct(
+        {
+          customer: f.clientName,
+          clientId: f.clientId,
+          date,
+          totalAmount: total,
+          subtotal: total,
+          vatRate: 0,
+          currency: "USD",
+          status: "Signed & Stamped",
+        },
+        f.companyId,
+        { exec: tx, afterCommit: [] }
+      );
+    await act(old, 200);
+    await act(recent, 300);
+    let state = await getClientCreditState(tx, f.companyId, f.clientId);
+    assert.equal(state?.overdueUsd, 200);
+    assert.equal(state?.oldestOverdueDate, old);
+    assert.equal(state?.blocked, true);
+    // To'lov eng eski qarzni yopadi: yangi akt hali muddatida.
+    await recordPayment({ customer: f.clientName, amount: 200, currency: "USD" }, f.companyId, tx);
+    state = await getClientCreditState(tx, f.companyId, f.clientId);
+    assert.equal(state?.overdueUsd, 0);
+    assert.equal(state?.balanceUsd, 300);
+    assert.equal(state?.blocked, false);
+  });
+
+  // ── B2: ishlab chiqarish → HR ──
+  await scenario("B2 ishbay: jurnaldan qoralama, tasdiqlangani o'zgarmaydi, oylikka so'mda kiradi", async (tx) => {
+    const f = await seedOrder(tx, "USD", 1000, 100, 3);
+    const tag = tagOf();
+    const [emp] = await tx
+      .insert(employees)
+      .values({
+        companyId: f.companyId,
+        badgeNumber: `TST-${tag}`,
+        firstName: "Test",
+        lastName: "Operator",
+        fullName: `Test Operator ${tag}`,
+        phone: "+998000000000",
+        wageType: "piecework",
+        baseSalary: "0",
+        hireDate: "2019-01-01",
+      })
+      .returning();
+    assert.equal(await resolveOperatorEmployeeId(tx, f.companyId, null, `  test operator ${tag.toLowerCase()} `), emp.id);
+    assert.equal(await resolveOperatorEmployeeId(tx, f.companyId, null, "Hech kim"), null);
+
+    const [op] = await tx
+      .insert(workOrderOperations)
+      .values({ workOrderId: f.woId, name: "Bosma", sequence: 1, pieceworkRateUsd: "2.0000", unitDivisor: 1000 })
+      .returning();
+    const mkEvent = async (good: number, type = "Run") =>
+      (
+        await tx
+          .insert(workOrderEvents)
+          .values({
+            workOrderId: f.woId,
+            opId: op.id,
+            time: "10:00",
+            occurredAt: new Date("2019-03-10T05:00:00Z"),
+            type,
+            note: "",
+            operator: emp.fullName,
+            employeeId: emp.id,
+            goodOutput: good,
+            clientEventId: randomUUID(),
+          })
+          .returning()
+      )[0];
+    const run = await mkEvent(5000);
+    const second = await mkEvent(1000);
+    await mkEvent(0, "Delay");
+    await syncPieceworkFromJournal(f.woId, op.id, tx);
+
+    const logs = () => tx.select().from(pieceworkLogs).where(eq(pieceworkLogs.employeeId, emp.id));
+    let rows = await logs();
+    assert.equal(rows.length, 2, "to'xtalish uchun ishbay yozilmaydi");
+    const first = rows.find((r) => r.sourceEventId === run.id)!;
+    assert.equal(first.status, "draft");
+    assert.equal(Number(first.totalAmount), 10, "5000 / 1000 × $2");
+    assert.equal(first.currency, "USD");
+    assert.equal(first.workOrderId, f.woNo);
+    assert.equal(first.workDate, "2019-03-10");
+
+    // Jurnal tuzatildi → qoralama yangilanadi; ikkinchi yozuv o'chirildi → qoralamasi ham.
+    await tx.update(workOrderEvents).set({ goodOutput: 3000 }).where(eq(workOrderEvents.id, run.id));
+    await tx.update(workOrderEvents).set({ deletedAt: new Date() }).where(eq(workOrderEvents.id, second.id));
+    await syncPieceworkFromJournal(f.woId, op.id, tx);
+    rows = await logs();
+    assert.equal(rows.length, 1);
+    assert.equal(Number(rows[0].totalAmount), 6);
+
+    // Usta tasdiqladi → jurnal endi o'zgartirmaydi.
+    await tx.update(pieceworkLogs).set({ status: "verified" }).where(eq(pieceworkLogs.id, rows[0].id));
+    await tx.update(workOrderEvents).set({ goodOutput: 9000 }).where(eq(workOrderEvents.id, run.id));
+    await syncPieceworkFromJournal(f.woId, op.id, tx);
+    rows = await logs();
+    assert.equal(Number(rows[0].totalAmount), 6);
+
+    const res = await calculatePeriodPayroll("2019-03", f.companyId, tx);
+    assert.equal(res.success, true, res.error);
+    const [rec] = await tx
+      .select()
+      .from(payrollRecords)
+      .where(and(eq(payrollRecords.employeeId, emp.id), eq(payrollRecords.period, "2019-03")));
+    const rate = await getCompanyExchangeRate(tx, f.companyId);
+    assert.equal(Number(rec.pieceworkAmount), 6 * rate, "USD ishbay oylikka so'mda kiradi");
+  });
+
+  // ── B5: omborga topshirish ──
+  await scenario("B5 topshirish: buyurtma mavjud bo'lishi va miqdor chegarasi", async (tx) => {
+    const f = await seedOrder(tx, "UZS", 500_000, 1000, 300);
+    // seedOrder: 1000 dona allaqachon omborda. Chegara: 1000 × 1.07 = 1070.
+    await expectError(
+      tx,
+      (sp) => handOverFinishedGoods({ workOrderId: "WO-YOQ-0000", quantity: 10 }, f.companyId, sp),
+      /topilmadi/
+    );
+    await expectError(
+      tx,
+      (sp) => handOverFinishedGoods({ workOrderId: f.woNo, quantity: 71 }, f.companyId, sp),
+      /ishlab chiqarilgandan ko'p/
+    );
+    const fg = await handOverFinishedGoods({ workOrderId: f.woNo, quantity: 70 }, f.companyId, tx);
+    assert.equal(Number(fg.pendingQuantity), 70);
+    assert.equal(Number(fg.quantity), 1000, "tasdiqlanmaguncha qoldiqqa qo'shilmaydi");
+    await tx.update(workOrders).set({ status: "Cancelled" }).where(eq(workOrders.id, f.woId));
+    await expectError(
+      tx,
+      (sp) => handOverFinishedGoods({ workOrderId: f.woNo, quantity: 1 }, f.companyId, sp),
+      /bekor qilingan/
+    );
+  });
+
+  // ── B9: lid → mijoz ──
+  await scenario("B9 lid: mijozga aylanadi, ikkinchi marta o'sha mijoz, mavjud mijozga bog'lanadi", async (tx) => {
+    const companyId = await getCompanyIdByCode("PRINTGOO");
+    const tag = tagOf();
+    const mkLead = async (company: string, n: number) =>
+      (
+        await tx
+          .insert(crmLeads)
+          .values({ companyId, leadNo: `LD-TST-${tag}-${n}`, company, phone: "+998901112233" })
+          .returning()
+      )[0];
+    const lead = await mkLead(`Test Lid ${tag}`, 1);
+    const first = await convertLeadToClient(lead.leadNo, companyId, tx);
+    assert.equal(first.created, true);
+    assert.equal(first.client.name, `Test Lid ${tag}`);
+    assert.match(first.client.code, /^CUST-\d{2}-\d{4}$/);
+    const [client] = await tx.select().from(clients).where(eq(clients.id, first.client.id));
+    assert.equal(client.phone, "+998901112233");
+    assert.equal(client.tin, null, "INN o'ylab topilmaydi");
+    const [after] = await tx.select().from(crmLeads).where(eq(crmLeads.id, lead.id));
+    assert.equal(after.status, "Converted");
+    assert.equal(after.convertedClientId, first.client.id);
+
+    const again = await convertLeadToClient(lead.leadNo, companyId, tx);
+    assert.equal(again.created, false);
+    assert.equal(again.client.id, first.client.id);
+
+    const twin = await mkLead(`test lid ${tag.toLowerCase()}`, 2);
+    const linked = await convertLeadToClient(twin.leadNo, companyId, tx);
+    assert.equal(linked.created, false, "shu nomli mijoz bor — yangisi ochilmaydi");
+    assert.equal(linked.client.id, first.client.id);
   });
 
   // ── Hisobot ──

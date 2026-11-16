@@ -10,7 +10,7 @@ import {
   workOrders,
 } from "@/db/schema";
 import { eq, desc, and, sql, ilike } from "drizzle-orm";
-import { getCompanyIdByCode } from "./crmService";
+import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
 import { getNextDeliveryActNumber, calculateNextNumber, getCurrentYearSuffix } from "./numberingService";
 import { emitNotification } from "./notificationService";
 import type { DeliveryActRecord, ClientSettlementRecord } from "@/store/workspaceStore";
@@ -22,6 +22,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function companyExchangeRate(company: { settings?: { exchangeRateUsd?: number } | null } | null | undefined): number {
   const r = Number(company?.settings?.exchangeRateUsd);
   return Number.isFinite(r) && r > 0 ? r : FALLBACK_USD_RATE;
+}
+
+/** UZS per USD the company works with (settings.exchangeRateUsd, else the built-in fallback). */
+export async function getCompanyExchangeRate(exec: DbExec, companyId: string): Promise<number> {
+  const company = await exec.query.companies.findFirst({ where: eq(companies.id, companyId) });
+  return companyExchangeRate(company);
 }
 
 // ─── 1. Delivery Acts ──────────────────────────────────────────────────────────
@@ -150,55 +156,12 @@ export async function upsertDeliveryAct(
   const linkedShipmentUuid =
     data.linkedShipmentUuid && /^[0-9a-f-]{36}$/i.test(data.linkedShipmentUuid) ? data.linkedShipmentUuid : null;
 
-  // 1. Mijozni ID, INN yoki nomi bo'yicha topish yoki yaratish
-  let targetClientId: string | null = null;
-  let clientDefaultCurrency = "UZS";
-  if (data.clientId && /^[0-9a-f-]{36}$/i.test(data.clientId)) {
-    const byId = await exec.query.clients.findFirst({
-      where: and(eq(clients.companyId, companyId), eq(clients.id, data.clientId)),
-    });
-    if (byId) {
-      targetClientId = byId.id;
-      clientDefaultCurrency = byId.currency || "UZS";
-    }
-  }
+  // 1. Mijoz: ID, INN yoki nomi bo'yicha. Topilmasa akt yozilmaydi (yon tomondan mijoz yaratilmaydi).
   const tinToSearch = data.customerTin?.trim();
-  if (!targetClientId && tinToSearch) {
-    const existingClient = await exec.query.clients.findFirst({
-      where: and(eq(clients.companyId, companyId), eq(clients.tin, tinToSearch)),
-    });
-    if (existingClient) {
-      targetClientId = existingClient.id;
-      clientDefaultCurrency = existingClient.currency || "UZS";
-    }
-  }
-
-  if (!targetClientId && data.customer) {
-    const existingByName = await exec.query.clients.findFirst({
-      where: and(eq(clients.companyId, companyId), eq(clients.name, data.customer.trim())),
-    });
-    if (existingByName) {
-      targetClientId = existingByName.id;
-      clientDefaultCurrency = existingByName.currency || "UZS";
-    }
-  }
-
-  // Agar mijoz topilmasa, bazada yangi mijoz yaratamiz
-  if (!targetClientId) {
-    const newClientCode = `CUST-${Date.now().toString().slice(-4)}`;
-    const [insertedClient] = await exec
-      .insert(clients)
-      .values({
-        companyId,
-        code: newClientCode,
-        name: data.customer?.trim() || "Noma'lum Mijoz",
-        tin: tinToSearch || null,
-        contractNo: data.contractNo || null,
-      })
-      .returning();
-    targetClientId = insertedClient.id;
-    clientDefaultCurrency = insertedClient.currency || "UZS";
-  }
+  const client = await resolveClient(exec, companyId, { id: data.clientId, tin: tinToSearch, name: data.customer });
+  if (!client) throw new Error(unknownClientMessage(data.customer));
+  const targetClientId = client.id;
+  const clientDefaultCurrency = client.currency || "UZS";
 
   const hasOwnNumber = Boolean(data.id?.startsWith("ACT-") || data.id?.startsWith("SF-"));
   const docNo = hasOwnNumber ? data.id! : await getNextDeliveryActNumber(companyCode, exec);
@@ -521,6 +484,98 @@ export async function syncClientSettlement(
   }
 }
 
+// ─── 2b. Credit Control ───────────────────────────────────────────────────────
+
+/** Days an invoice may stay unpaid before the client's new orders are held (business rules §1). */
+export const CREDIT_OVERDUE_DAYS = 14;
+
+export interface ClientCreditState {
+  clientId: string;
+  clientName: string;
+  /** What the client owes now, in USD (opening balance + acts − payments). */
+  balanceUsd: number;
+  /** 0 means no limit is set for the client. */
+  creditLimitUsd: number;
+  /** Part of the debt that is older than CREDIT_OVERDUE_DAYS. */
+  overdueUsd: number;
+  oldestOverdueDate: string | null;
+  blocked: boolean;
+  reason: string | null;
+}
+
+/**
+ * Whether a client may get a new order released to production.
+ * Blocked when the debt is above the client's credit limit or any invoice is unpaid for more
+ * than CREDIT_OVERDUE_DAYS. Payments settle the oldest debt first.
+ */
+export async function getClientCreditState(
+  exec: DbExec,
+  companyId: string,
+  clientId: string,
+  today: Date = new Date()
+): Promise<ClientCreditState | null> {
+  const client = await exec.query.clients.findFirst({
+    where: and(eq(clients.companyId, companyId), eq(clients.id, clientId)),
+  });
+  if (!client) return null;
+
+  const [acts, payments, settlement] = await Promise.all([
+    exec.query.deliveryActs.findMany({
+      where: and(eq(deliveryActs.companyId, companyId), eq(deliveryActs.clientId, clientId)),
+    }),
+    exec.query.clientPayments.findMany({
+      where: and(eq(clientPayments.companyId, companyId), eq(clientPayments.clientId, clientId)),
+    }),
+    exec.query.clientSettlements.findFirst({
+      where: and(eq(clientSettlements.companyId, companyId), eq(clientSettlements.clientId, clientId)),
+    }),
+  ]);
+  const liveActs = acts
+    .filter((a) => a.status !== "cancelled")
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const paid = payments.filter((p) => p.status !== "cancelled").reduce((sum, p) => sum + Number(p.amountUsd), 0);
+  const opening = Number(settlement?.openingBalanceUsd) || 0;
+  const debit = liveActs.reduce((sum, a) => sum + Number(a.totalAmountUsd), 0);
+  const balanceUsd = Number((opening + debit - paid).toFixed(2));
+
+  // Oldest first: an opening advance adds to the credit, an opening debt is settled before the acts.
+  let credit = paid + Math.max(0, -opening);
+  credit -= Math.min(credit, Math.max(0, opening));
+  const cutoff = new Date(today.getTime() - CREDIT_OVERDUE_DAYS * 86_400_000).toISOString().split("T")[0];
+  let overdueUsd = 0;
+  let oldestOverdueDate: string | null = null;
+  for (const act of liveActs) {
+    const amount = Number(act.totalAmountUsd) || 0;
+    const settled = Math.min(credit, amount);
+    credit -= settled;
+    const open = amount - settled;
+    if (open > 0.01 && act.date && act.date < cutoff) {
+      overdueUsd += open;
+      oldestOverdueDate = oldestOverdueDate ?? act.date;
+    }
+  }
+  overdueUsd = Number(overdueUsd.toFixed(2));
+
+  const creditLimitUsd = Number(client.creditLimitUsd) || 0;
+  let reason: string | null = null;
+  if (overdueUsd > 0.01) {
+    reason = `${client.name}: ${oldestOverdueDate} sanasidan beri to'lanmagan qarz bor ($${overdueUsd.toLocaleString("en-US")}, ${CREDIT_OVERDUE_DAYS} kundan oshgan).`;
+  } else if (creditLimitUsd > 0 && balanceUsd > creditLimitUsd + 0.01) {
+    reason = `${client.name}: qarz $${balanceUsd.toLocaleString("en-US")} kredit limitidan ($${creditLimitUsd.toLocaleString("en-US")}) oshgan.`;
+  }
+
+  return {
+    clientId: client.id,
+    clientName: client.name,
+    balanceUsd,
+    creditLimitUsd,
+    overdueUsd,
+    oldestOverdueDate,
+    blocked: reason !== null,
+    reason,
+  };
+}
+
 // ─── 3. Settlements List ───────────────────────────────────────────────────────
 
 export async function getClientSettlements(companyCode: string = "PRINTGOO"): Promise<ClientSettlementRecord[]> {
@@ -734,22 +789,8 @@ export async function recordPayment(
 
   return exec.transaction(async (tx) => {
     // A payment is booked on a client that exists: a typo must not open a second balance.
-    let targetClient =
-      data.clientId && UUID_RE.test(data.clientId)
-        ? await tx.query.clients.findFirst({
-            where: and(eq(clients.companyId, companyId), eq(clients.id, data.clientId)),
-          })
-        : undefined;
-    if (!targetClient && customerName) {
-      targetClient = await tx.query.clients.findFirst({
-        where: and(eq(clients.companyId, companyId), sql`lower(trim(${clients.name})) = lower(${customerName})`),
-      });
-    }
-    if (!targetClient) {
-      throw new Error(
-        `"${customerName || "—"}" mijozi CRM bazasida topilmadi. Mijozni ro'yxatdan tanlang yoki avval CRM'da ro'yxatdan o'tkazing.`
-      );
-    }
+    const targetClient = await resolveClient(tx, companyId, { id: data.clientId, name: customerName });
+    if (!targetClient) throw new Error(unknownClientMessage(customerName));
 
     let actId: string | null = null;
     const actKey = String(data.deliveryActId || "").trim();

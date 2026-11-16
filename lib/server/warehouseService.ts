@@ -25,7 +25,7 @@ import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNex
 import { emitNotification } from "./notificationService";
 import { upsertDeliveryAct, cancelDeliveryAct } from "./financeService";
 import { applySalePostedEffects, reverseSalePostedEffects } from "./tradingService";
-import { getCompanyIdByCode as resolveCompanyId } from "./crmService";
+import { getCompanyIdByCode as resolveCompanyId, resolveClient, unknownClientMessage } from "./crmService";
 import {
   UUID_RE,
   ShipmentError,
@@ -591,19 +591,13 @@ async function resolveShipmentClientId(
   existing: { clientId: string | null; customerName: string | null; tradingSaleId: string | null; workOrderId: string | null } | null
 ): Promise<string | null> {
   for (const candidate of [payload.clientId, existing?.clientId]) {
-    if (candidate && UUID_RE.test(String(candidate))) {
-      const row = await tx.query.clients.findFirst({
-        where: and(eq(clients.companyId, companyId), eq(clients.id, String(candidate))),
-      });
-      if (row) return row.id;
-    }
+    const row = await resolveClient(tx, companyId, { id: candidate ? String(candidate) : null });
+    if (row) return row.id;
   }
 
   const name = String(payload.customerName || payload.customer || existing?.customerName || "").trim();
   if (name && !name.startsWith("—")) {
-    const byName = await tx.query.clients.findFirst({
-      where: and(eq(clients.companyId, companyId), sql`lower(trim(${clients.name})) = lower(${name})`),
-    });
+    const byName = await resolveClient(tx, companyId, { name });
     if (byName) return byName.id;
   }
 
@@ -837,9 +831,7 @@ export async function upsertWarehouseShipmentTx(
         throw new ShipmentError("Qabul qiluvchi (mijoz) ko'rsatilmagan.");
       }
       if (!clientId) {
-        throw new ShipmentError(
-          `"${customerName}" mijozi CRM bazasida topilmadi. Mijozni ro'yxatdan tanlang yoki avval CRM'da ro'yxatdan o'tkazing.`
-        );
+        throw new ShipmentError(unknownClientMessage(customerName));
       }
     }
   }
@@ -1933,6 +1925,13 @@ export async function getPendingFinishedGoodsReceipts(companyCode: string = "PRI
   }));
 }
 
+/** Allowed overrun of a print run (business rules §3): ±7% up to 1 000, ±5% up to 10 000, ±3% above. */
+function runTolerance(orderQty: number): number {
+  if (orderQty <= 1000) return 0.07;
+  if (orderQty <= 10_000) return 0.05;
+  return 0.03;
+}
+
 /**
  * The shop hands packed boxes over to the FG warehouse: the quantity waits as "pending"
  * until the warehouse confirms it, and is not in stock (cannot be shipped) before that.
@@ -1950,7 +1949,8 @@ export async function handOverFinishedGoods(
     locationName?: string;
     boxCount?: number;
   },
-  companyCode: string = "PRINTGOO"
+  companyCode: string = "PRINTGOO",
+  exec: DbExec = db
 ) {
   const companyId = await getCompanyIdByCode(companyCode);
   const qty = Number(payload.quantity) || 0;
@@ -1961,7 +1961,15 @@ export async function handOverFinishedGoods(
   const unit = payload.unit || "pcs";
   const note = `${payload.boxCount ? `${payload.boxCount} quti, ` : ""}${fmtQty(qty)} ${unit} topshirildi`;
 
-  return db.transaction(async (tx) => {
+  return exec.transaction(async (tx) => {
+    // Goods are handed over for an order that exists and is still alive.
+    const order = await tx.query.workOrders.findFirst({
+      where: and(eq(workOrders.companyId, companyId), eq(workOrders.docNo, payload.workOrderId)),
+      with: { operations: true },
+    });
+    if (!order) throw new Error(`${payload.workOrderId} buyurtmasi topilmadi.`);
+    if (order.status === "Cancelled") throw new Error(`${order.docNo} buyurtmasi bekor qilingan.`);
+
     const [current] = await tx
       .select()
       .from(warehouseFinishedGoods)
@@ -1974,6 +1982,33 @@ export async function handOverFinishedGoods(
       )
       .for("update")
       .limit(1);
+
+    // Everything handed over so far (in stock, waiting, already shipped) plus this hand-over
+    // may not exceed what was made: the ordered run with its allowed overrun, or the final
+    // step's reported good output when that is higher.
+    const [shipped] = current
+      ? await tx
+          .select({ qty: sql<string>`coalesce(sum(${warehouseShipmentItems.quantity}), 0)` })
+          .from(warehouseShipmentItems)
+          .innerJoin(warehouseShipments, eq(warehouseShipments.id, warehouseShipmentItems.shipmentId))
+          .where(
+            and(
+              eq(warehouseShipmentItems.finishedGoodId, current.id),
+              inArray(warehouseShipments.status, ["Dispatched", "In Transit", "Delivered"])
+            )
+          )
+      : [{ qty: "0" }];
+    const handedSoFar =
+      (Number(current?.quantity) || 0) + (Number(current?.pendingQuantity) || 0) + (Number(shipped?.qty) || 0);
+    const orderQty = Number(order.quantity) || 0;
+    const lastStep = [...(order.operations || [])].sort((a, b) => b.sequence - a.sequence)[0];
+    const limit = Math.max(orderQty * (1 + runTolerance(orderQty)), Number(lastStep?.completedQty) || 0);
+    if (handedSoFar + qty > limit + 1e-6) {
+      throw new Error(
+        `${order.docNo}: topshirilgan miqdor (${fmtQty(handedSoFar + qty)}) ishlab chiqarilgandan ko'p. ` +
+          `Buyurtma ${fmtQty(orderQty)}, ruxsat etilgan chegara ${fmtQty(Math.floor(limit))}.`
+      );
+    }
 
     if (current) {
       const [updated] = await tx
@@ -1994,8 +2029,8 @@ export async function handOverFinishedGoods(
       .insert(warehouseFinishedGoods)
       .values({
         companyId,
-        clientId: payload.clientId || null,
-        customerName: payload.customerName || "Mijoz",
+        clientId: order.clientId || payload.clientId || null,
+        customerName: order.customerName || payload.customerName || "Mijoz",
         workOrderId: payload.workOrderId,
         orderNo: payload.orderNo || null,
         productName: payload.productName || "Tayyor mahsulot",
