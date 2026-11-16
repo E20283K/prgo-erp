@@ -107,13 +107,14 @@ export function CustomerSettlementsTab({
       : `Shartnoma ${customer.contractNo || ""} bo'yicha to'lov (${paymentMethod})`.trim();
 
     if (recordPaymentAsync) {
-      await recordPaymentAsync({
+      const saved = await recordPaymentAsync({
         customer: customerKey,
         amount: amt,
         currency: isUsd ? "USD" : "UZS",
         contractNo: customer.contractNo,
         note: noteText,
       });
+      if (!saved) return;
     } else {
       recordClientPayment(customerKey, amt, undefined, noteText);
     }

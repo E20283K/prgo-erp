@@ -1237,6 +1237,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         await get().loadFinanceData(companyCode);
         return true;
       }
+      // The server refused it: drop the optimistic entry and say why.
+      const body = await res.json().catch(() => null);
+      await get().loadFinanceData(companyCode);
+      get().addNotification({
+        title: "To'lov saqlanmadi",
+        description: body?.error || "Server xatosi",
+        severity: "error",
+      });
       return false;
     } catch (e) {
       console.error("Failed to record payment on server:", e);

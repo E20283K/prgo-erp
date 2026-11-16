@@ -57,6 +57,8 @@ export interface NotificationRulesConfig {
 export interface CompanySettings {
   timezone?: string;
   defaultTaxPercent?: number;
+  /** UZS per 1 USD used when a document carries no rate of its own. */
+  exchangeRateUsd?: number;
   allowNegativeStock?: boolean;
   workOrderPrefix?: string;
   telegram?: TelegramCompanySettings;

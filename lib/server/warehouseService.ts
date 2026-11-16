@@ -20,7 +20,7 @@ import {
   clients,
   deliveryActs,
 } from "@/db/schema";
-import { eq, desc, and, or, sql } from "drizzle-orm";
+import { eq, desc, and, or, sql, inArray } from "drizzle-orm";
 import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber, getNextManifestNumber } from "./numberingService";
 import { emitNotification } from "./notificationService";
 import { upsertDeliveryAct, cancelDeliveryAct } from "./financeService";
@@ -630,6 +630,39 @@ async function resolveShipmentClientId(
   return null;
 }
 
+/**
+ * Currency the shipment is invoiced in: the currency its lines were priced in, i.e. that of the
+ * work orders being shipped. Lines from orders in different currencies cannot share one invoice.
+ * Without an order the client's own currency applies (undefined → upsertDeliveryAct decides).
+ */
+async function resolveShipmentCurrency(
+  tx: DbExec,
+  companyId: string,
+  workOrderNo: string | null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  items: any[]
+): Promise<string | undefined> {
+  const woNos = [
+    ...new Set(
+      [workOrderNo, ...items.map((it) => it?.sourceWorkOrderId)]
+        .map((v) => String(v || "").trim())
+        .filter((v) => v && !v.startsWith("—"))
+    ),
+  ];
+  if (woNos.length === 0) return undefined;
+  const orders = await tx.query.workOrders.findMany({
+    where: and(eq(workOrders.companyId, companyId), inArray(workOrders.docNo, woNos)),
+    columns: { docNo: true, currency: true },
+  });
+  const currencies = [...new Set(orders.map((o) => (o.currency || "UZS").toUpperCase()))];
+  if (currencies.length > 1) {
+    throw new ShipmentError(
+      `Chiqimdagi buyurtmalar turli valyutada narxlangan (${currencies.join(", ")}). Har bir valyuta uchun alohida chiqim rasmiylashtiring.`
+    );
+  }
+  return currencies[0];
+}
+
 async function findDeliveryActByKey(tx: DbExec, companyId: string, key: string | null | undefined) {
   if (!key) return null;
   return (
@@ -960,6 +993,7 @@ export async function upsertWarehouseShipmentTx(
       };
     });
     const total = invoiceItems.reduce((acc, it) => acc + it.totalPrice, 0);
+    const actCurrency = await resolveShipmentCurrency(tx, companyId, workOrderId, effectiveItems);
     const act = await upsertDeliveryAct(
       {
         // Bekor qilingan SF bo'lsa — o'sha raqam qayta faollashtiriladi
@@ -975,7 +1009,7 @@ export async function upsertWarehouseShipmentTx(
         vatRate: 0,
         vatAmount: 0,
         totalAmount: total,
-        currency: "UZS",
+        currency: actCurrency,
         warehouse: fromLocationName,
         carrier: shipmentValues.carrier || undefined,
         driverName: shipmentValues.driverName || undefined,
@@ -2065,16 +2099,26 @@ export async function confirmFinishedGoodsReceipt(
 
 // ─── 9. Available Finished Goods Stock for Multi-customer Shipment ─────────────
 
-export async function getAvailableFinishedGoodsForShipment(companyCode: string = "PRINTGOO") {
+export async function getAvailableFinishedGoodsForShipment(companyCode: string = "PRINTGOO", exec: DbExec = db) {
   const companyId = await getCompanyIdByCode(companyCode);
-  const rows = await db.query.warehouseFinishedGoods.findMany({
+  const rows = await exec.query.warehouseFinishedGoods.findMany({
     // Stock on hand, even when another hand-over of the same order still waits for confirmation.
     where: and(eq(warehouseFinishedGoods.companyId, companyId), sql`${warehouseFinishedGoods.quantity} > 0`),
     orderBy: [desc(warehouseFinishedGoods.producedAt)],
   });
 
+  const woNos = [...new Set(rows.map((fg) => fg.workOrderId).filter((v): v is string => !!v))];
+  const orders = woNos.length
+    ? await exec.query.workOrders.findMany({
+        where: and(eq(workOrders.companyId, companyId), inArray(workOrders.docNo, woNos)),
+        columns: { docNo: true, priceTotal: true, quantity: true, currency: true },
+      })
+    : [];
+  const orderByNo = new Map(orders.map((o) => [o.docNo, o]));
+
   return rows
     .map((fg) => {
+      const order = fg.workOrderId ? orderByNo.get(fg.workOrderId) : undefined;
       const totalQty = Number(fg.quantity) || 0;
       const reserved = Number(fg.reservedQuantity) || 0;
       const availableQty = Math.max(0, totalQty - reserved);
@@ -2092,6 +2136,9 @@ export async function getAvailableFinishedGoodsForShipment(companyCode: string =
         availableQty,
         unit: fg.unit,
         unitCost: Number(fg.costPricePerUnit) || 0,
+        // Selling price of the order the goods were made for; 0 when there is none to take it from.
+        unitPrice: saleUnitPriceOf(order),
+        currency: order?.currency || "UZS",
         location: [fg.locationName, fg.locationShelf].filter(Boolean).join(" — ") || "Tayyor Mahsulot Ombori",
         allocationStatus: fg.allocationStatus,
         status: fg.status,
@@ -2376,17 +2423,25 @@ export async function upsertDispatchManifest(payload: any, companyCode: string =
 
 // ─── 12. Box Barcode & Product Passport Scanner Lookup ─────────────────────────
 
-export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: string = "PRINTGOO") {
+/** What the customer pays per unit: the order's selling price, never the cost price. */
+function saleUnitPriceOf(wo: { priceTotal: unknown; quantity: unknown } | null | undefined): number {
+  if (!wo) return 0;
+  const qty = Number(wo.quantity) || 0;
+  if (!(qty > 0)) return 0;
+  return Number(((Number(wo.priceTotal) || 0) / qty).toFixed(4)) || 0;
+}
+
+export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: string = "PRINTGOO", exec: DbExec = db) {
   const companyId = await getCompanyIdByCode(companyCode);
   const code = (rawCode || "").trim().toUpperCase();
   if (!code) {
     throw new Error("Shtrix-kod kiritilmadi");
   }
 
-  const allWos = await db.query.workOrders.findMany({
+  const allWos = await exec.query.workOrders.findMany({
     where: eq(workOrders.companyId, companyId),
   });
-  const allFg = await db.query.warehouseFinishedGoods.findMany({
+  const allFg = await exec.query.warehouseFinishedGoods.findMany({
     where: eq(warehouseFinishedGoods.companyId, companyId),
   });
 
@@ -2410,11 +2465,7 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
       );
       if (matchedBox) {
         const fg = findFgForWo(wo.docNo);
-        const totalWoQty = Math.max(1, Number(wo.quantity) || 1);
-        const unitPrice =
-          Number(fg?.costPricePerUnit) ||
-          Number(((Number(wo.priceTotal) || 0) / totalWoQty).toFixed(4)) ||
-          0;
+        const unitPrice = saleUnitPriceOf(wo);
         const unitWeightGrams = Number(pkg.unitWeightGrams) || Number(matchedBox.unitWeightGrams) || 15;
         const boxQty = Number(matchedBox.quantity) || 500;
         const boxWeightKg =
@@ -2436,6 +2487,8 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
           finishedGoodId: fg?.id || null,
           unit: wo.unit || fg?.unit || "pcs",
           unitPrice,
+          unitCost: Number(fg?.costPricePerUnit) || 0,
+          currency: wo.currency || "UZS",
           boxes: [
             {
               id: matchedBox.id || `box-${matchedBox.boxNumber || 1}`,
@@ -2478,9 +2531,7 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
       const stdCap = Number((matchedWo?.packagingData as any)?.standardBoxCapacity) || Math.min(5000, totalQty);
       const totalBoxes = Math.max(1, Math.ceil(totalQty / stdCap));
       const boxQty = boxNum === totalBoxes ? totalQty - (totalBoxes - 1) * stdCap : stdCap;
-      const unitPrice =
-        Number(matchedFg?.costPricePerUnit) ||
-        (matchedWo ? Number(((Number(matchedWo.priceTotal) || 0) / Math.max(1, Number(matchedWo.quantity) || 1)).toFixed(4)) : 0);
+      const unitPrice = saleUnitPriceOf(matchedWo);
 
       const cleanWo = woNo.replace(/[^A-Z0-9_-]/gi, "");
       const padNum = String(boxNum).padStart(2, "0");
@@ -2498,6 +2549,8 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
         finishedGoodId: matchedFg?.id || null,
         unit: matchedWo?.unit || matchedFg?.unit || "pcs",
         unitPrice,
+        unitCost: Number(matchedFg?.costPricePerUnit) || 0,
+        currency: matchedWo?.currency || "UZS",
         boxes: [
           {
             id: `box-${cleanWo}-${padNum}`,
@@ -2533,9 +2586,7 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
     const woNo = matchedWo?.docNo || matchedFg?.workOrderId || code;
     const customerName = matchedWo?.customerName || matchedFg?.customerName || "Mijoz";
     const productName = matchedWo?.productName || matchedFg?.productName || "Tayyor mahsulot";
-    const unitPrice =
-      Number(matchedFg?.costPricePerUnit) ||
-      (matchedWo ? Number(((Number(matchedWo.priceTotal) || 0) / Math.max(1, Number(matchedWo.quantity) || 1)).toFixed(4)) : 0);
+    const unitPrice = saleUnitPriceOf(matchedWo);
 
     const pkg = matchedWo?.packagingData as any;
     let readyBoxes: any[] = [];
@@ -2589,12 +2640,14 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
       finishedGoodId: matchedFg?.id || null,
       unit: matchedWo?.unit || matchedFg?.unit || "pcs",
       unitPrice,
+      unitCost: Number(matchedFg?.costPricePerUnit) || 0,
+      currency: matchedWo?.currency || "UZS",
       boxes: readyBoxes,
     };
   }
 
   // 4) Check if code matches a Trading Sale sticker / package (TRD-..., TR-SALE-..., TRD-BOX-...)
-  const allSales = await db.query.tradingSales.findMany({
+  const allSales = await exec.query.tradingSales.findMany({
     where: eq(tradingSales.companyId, companyId),
     with: { items: true },
   });
@@ -2636,7 +2689,7 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
     // Savdo qoralama chiqimga biriktirilgan bo'lishi mumkin — faqat o'tkazilgan chiqim "jo'natilgan" hisoblanadi
     let saleAlreadyDispatched = false;
     if (matchedSale.linkedShipmentId) {
-      const linkedShp = await db.query.warehouseShipments.findFirst({
+      const linkedShp = await exec.query.warehouseShipments.findFirst({
         where: and(
           eq(warehouseShipments.companyId, companyId),
           eq(warehouseShipments.shipmentNumber, matchedSale.linkedShipmentId)
@@ -2678,7 +2731,7 @@ export async function lookupBoxOrWorkOrderBarcode(rawCode: string, companyCode: 
   }
 
   // 5) Check if code matches an individual Trading Catalog item SKU / Barcode (2910)
-  const allCatalog = await db.query.tradingCatalog.findMany({
+  const allCatalog = await exec.query.tradingCatalog.findMany({
     where: eq(tradingCatalog.companyId, companyId),
   });
 

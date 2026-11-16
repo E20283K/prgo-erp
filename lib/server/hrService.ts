@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db, type DbExec } from "@/db";
 import {
   employees,
   departments,
@@ -14,7 +14,7 @@ import {
   companies,
   branches,
 } from "@/db/schema";
-import { eq, desc, and, sql, between, gte, lte } from "drizzle-orm";
+import { eq, desc, and, sql, between, gte, lte, inArray, ne } from "drizzle-orm";
 import type {
   EmployeeRecord,
   DepartmentRecord,
@@ -1045,13 +1045,14 @@ export async function getPayrollList(
  */
 export async function calculatePeriodPayroll(
   period: string, // "2026-10"
-  companyCode: string = "PRINTGOO"
-): Promise<{ success: boolean; count: number; error?: string }> {
+  companyCode: string = "PRINTGOO",
+  exec: DbExec = db
+): Promise<{ success: boolean; count: number; locked?: number; error?: string }> {
   try {
     const companyId = await getCompanyIdByCode(companyCode);
 
     // Barcha faol xodimlarni olish
-    const activeEmps = await db.query.employees.findMany({
+    const activeEmps = await exec.query.employees.findMany({
       where: and(
         eq(employees.companyId, companyId),
         eq(employees.status, "active")
@@ -1059,19 +1060,36 @@ export async function calculatePeriodPayroll(
     });
 
     let count = 0;
+    let locked = 0;
 
+    await exec.transaction(async (tx) => {
     for (const emp of activeEmps) {
-      // 1. Ishbay summasi
-      const pwList = await db.query.pieceworkLogs.findMany({
+      // An approved or paid payroll is closed: recalculating must not reopen it.
+      const existingRecord = await tx.query.payrollRecords.findFirst({
         where: and(
+          eq(payrollRecords.employeeId, emp.id),
+          eq(payrollRecords.period, period)
+        ),
+      });
+      if (existingRecord && (existingRecord.status === "approved" || existingRecord.status === "paid")) {
+        locked++;
+        continue;
+      }
+
+      // 1. Ishbay summasi
+      // Only piecework a foreman has confirmed is paid; drafts wait for verification.
+      const pwList = await tx.query.pieceworkLogs.findMany({
+        where: and(
+          eq(pieceworkLogs.companyId, companyId),
           eq(pieceworkLogs.employeeId, emp.id),
+          inArray(pieceworkLogs.status, ["verified", "approved", "paid"]),
           sql`${pieceworkLogs.workDate}::text LIKE ${period + "%"}`
         ),
       });
       const pieceworkSum = pwList.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
 
       // 2. Davomat va overtime soatlari
-      const attList = await db.query.attendanceLogs.findMany({
+      const attList = await tx.query.attendanceLogs.findMany({
         where: and(
           eq(attendanceLogs.employeeId, emp.id),
           sql`${attendanceLogs.workDate}::text LIKE ${period + "%"}`
@@ -1093,17 +1111,17 @@ export async function calculatePeriodPayroll(
       const overtimePay = Math.round(totalOvertimeHours * hourlyBase * 1.5);
 
       // 4. Avanslar
-      const advances = await db.query.employeeAdvances.findMany({
+      const advances = await tx.query.employeeAdvances.findMany({
         where: and(
           eq(employeeAdvances.employeeId, emp.id),
           eq(employeeAdvances.period, period),
-          eq(employeeAdvances.status, "pending")
+          ne(employeeAdvances.status, "cancelled")
         ),
       });
       const totalAdvance = advances.reduce((sum, a) => sum + Number(a.amount || 0), 0);
 
       // 5. Bonus va jarimalar (Adjustments)
-      const adjustments = await db.query.payrollAdjustments.findMany({
+      const adjustments = await tx.query.payrollAdjustments.findMany({
         where: and(
           eq(payrollAdjustments.employeeId, emp.id),
           eq(payrollAdjustments.period, period)
@@ -1127,15 +1145,8 @@ export async function calculatePeriodPayroll(
       const netPay = Math.max(0, grossPay - totalDeductions);
 
       // Payroll yozuvini kiritish yoki yangilash
-      const existingRecord = await db.query.payrollRecords.findFirst({
-        where: and(
-          eq(payrollRecords.employeeId, emp.id),
-          eq(payrollRecords.period, period)
-        ),
-      });
-
       if (existingRecord) {
-        await db
+        await tx
           .update(payrollRecords)
           .set({
             baseSalary: String(basePay),
@@ -1153,7 +1164,7 @@ export async function calculatePeriodPayroll(
           })
           .where(eq(payrollRecords.id, existingRecord.id));
       } else {
-        await db.insert(payrollRecords).values({
+        await tx.insert(payrollRecords).values({
           companyId,
           period,
           employeeId: emp.id,
@@ -1173,8 +1184,9 @@ export async function calculatePeriodPayroll(
 
       count++;
     }
+    });
 
-    return { success: true, count };
+    return { success: true, count, locked };
   } catch (err) {
     return { success: false, count: 0, error: err instanceof Error ? err.message : "Hisoblashda xatolik" };
   }
