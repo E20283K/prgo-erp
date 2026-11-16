@@ -678,7 +678,16 @@ async function updateWorkOrderBoxes(
   scannedCodes: Set<string>
 ) {
   if (mode === "dispatch" && scannedCodes.size === 0) return;
-  const allWos = await tx.query.workOrders.findMany({ where: eq(workOrders.companyId, companyId) });
+  // Only orders whose boxes mention the shipment (storno) or one of the scanned codes are loaded,
+  // not every order of the company; the exact match is still made box by box below.
+  const needles = mode === "reset" ? [shipmentNumber] : [...scannedCodes];
+  const likeOf = (v: string) => `%${v.toUpperCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const allWos = await tx.query.workOrders.findMany({
+    where: and(
+      eq(workOrders.companyId, companyId),
+      or(...needles.filter(Boolean).map((n) => sql`upper(${workOrders.packagingData}::text) like ${likeOf(n)}`))
+    ),
+  });
   for (const wo of allWos) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pkg = wo.packagingData as any;

@@ -2,6 +2,7 @@ import createMiddleware from 'next-intl/middleware';
 import { NextResponse, type NextRequest } from 'next/server';
 import { routing } from './i18n/routing';
 import { validateSession } from './lib/server/authService';
+import { isWriteForbidden } from './lib/writeAccess';
 
 const intlMiddleware = createMiddleware(routing);
 
@@ -42,6 +43,10 @@ async function guardApi(request: NextRequest) {
   try {
     const user = await validateSession(token);
     if (!user) return unauthorized('Sessiya muddati tugagan yoki yaroqsiz');
+    // Yozish amali uchun modul ruxsati (qoidalar: lib/writeAccess.ts)
+    if (isWriteForbidden(user, pathname, request.method)) {
+      return NextResponse.json({ success: false, error: "Bu amal uchun ruxsatingiz yo'q." }, { status: 403 });
+    }
   } catch (error) {
     console.error('[proxy] Sessiyani tekshirishda xato:', error);
     return NextResponse.json({ success: false, error: 'Sessiyani tekshirib bo\'lmadi' }, { status: 503 });

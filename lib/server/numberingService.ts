@@ -10,7 +10,7 @@ import {
   clients,
   deliveryActs,
 } from "@/db/schema";
-import { eq, and, ilike } from "drizzle-orm";
+import { eq, and, ilike, sql } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 
 /**
@@ -18,6 +18,15 @@ import { getCompanyIdByCode } from "./crmService";
  */
 export function getCurrentYearSuffix(): string {
   return new Date().getFullYear().toString().slice(-2);
+}
+
+/**
+ * Serialises number allocation for one document series of a company. Held until the surrounding
+ * transaction ends, so "read the highest number, write the next one" cannot interleave between
+ * two saves. Has no effect outside a transaction.
+ */
+export async function lockNumbering(exec: DbExec, companyId: string, series: string): Promise<void> {
+  await exec.execute(sql`select pg_advisory_xact_lock(hashtext(${`${companyId}:${series}`}))`);
 }
 
 /**

@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { db, pgClient, type DbExec } from "@/db";
 import {
+  auditLogs,
   clients,
   clientPayments,
   clientSettlements,
@@ -17,6 +18,7 @@ import {
   deliveryActs,
   deliveryActItems,
   employees,
+  notifications,
   payrollRecords,
   pieceworkLogs,
   warehouseFinishedGoods,
@@ -24,7 +26,7 @@ import {
   workOrderOperations,
   workOrders,
 } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getCompanyIdByCode, resolveClient } from "@/lib/server/crmService";
 import {
   getAvailableFinishedGoodsForShipment,
@@ -40,9 +42,10 @@ import {
   syncClientSettlement,
   upsertDeliveryAct,
 } from "@/lib/server/financeService";
-import { checkCreditHold } from "@/lib/server/workOrderService";
+import { checkCreditHold, upsertWorkOrder, WorkOrderValidationError } from "@/lib/server/workOrderService";
 import { resolveOperatorEmployeeId, syncPieceworkFromJournal } from "@/lib/server/pieceworkSyncService";
 import { convertLeadToClient } from "@/lib/server/leadService";
+import { isWriteForbidden } from "@/lib/writeAccess";
 import { getNextDeliveryActNumber, getCurrentYearSuffix } from "@/lib/server/numberingService";
 import { calculatePeriodPayroll } from "@/lib/server/hrService";
 import { ShipmentError } from "@/lib/server/shipmentEngine";
@@ -61,6 +64,15 @@ async function scenario(name: string, fn: (tx: DbExec) => Promise<void>) {
   } catch (e) {
     if (e instanceof Rollback) results.push({ name, ok: true });
     else results.push({ name, ok: false, error: e instanceof Error ? e.stack || e.message : String(e) });
+  }
+}
+
+function unit(name: string, fn: () => void) {
+  try {
+    fn();
+    results.push({ name, ok: true });
+  } catch (e) {
+    results.push({ name, ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 }
 
@@ -587,6 +599,116 @@ async function main() {
     const linked = await convertLeadToClient(twin.leadNo, companyId, tx);
     assert.equal(linked.created, false, "shu nomli mijoz bor — yangisi ochilmaydi");
     assert.equal(linked.client.id, first.client.id);
+  });
+
+  // ── C1/C2/C4: buyurtmani saqlash ──
+  // upsertWorkOrder o'z tranzaksiyasini ochadi, shuning uchun bu ssenariy bazaga haqiqatan yozadi:
+  // qoralama buyurtma (Telegramga yuborilmaydi) yaratiladi va oxirida izlari bilan o'chiriladi.
+  {
+    const name = "C1/C2/C4 saqlash: bosqich ID saqlanadi, jurnalli bosqich o'chmaydi, status jim o'zgarmaydi";
+    const companyId = await getCompanyIdByCode("PRINTGOO");
+    const docNo = `WO-TST-${tagOf()}`;
+    const base = {
+      docNo,
+      customer: "Test mijoz (qoralama)",
+      product: "Test etiketka",
+      quantity: 1000,
+      status: "Draft",
+    };
+    const steps = [
+      { name: "Bosma", sequence: 1 },
+      { name: "Kesish", sequence: 2 },
+    ];
+    const opsOf = (orderId: string) =>
+      db.query.workOrderOperations.findMany({
+        where: eq(workOrderOperations.workOrderId, orderId),
+        orderBy: (o, { asc }) => [asc(o.sequence)],
+      });
+    let orderId: string | null = null;
+    try {
+      const created = await upsertWorkOrder({ ...base, operations: steps as never }, companyId);
+      orderId = created.workOrder.id as string;
+      const before = await opsOf(orderId);
+      assert.equal(before.length, 2);
+
+      await db.insert(workOrderEvents).values({
+        workOrderId: orderId,
+        opId: before[0].id,
+        time: "10:00",
+        occurredAt: new Date(),
+        type: "Run",
+        note: "",
+        goodOutput: 100,
+        clientEventId: randomUUID(),
+      });
+
+      // Bosqichlar ID'siz qayta yuborildi: o'sha qatorlar yangilanadi, ID o'zgarmaydi.
+      await upsertWorkOrder({ ...base, operations: steps as never }, companyId);
+      const after = await opsOf(orderId);
+      assert.deepEqual(
+        after.map((o) => o.id),
+        before.map((o) => o.id),
+        "bosqich ID'lari saqlanishi kerak"
+      );
+
+      // Jurnalida yozuvi bor bosqichni olib tashlash rad etiladi va hech narsa yozilmaydi.
+      let refused: unknown = null;
+      try {
+        await upsertWorkOrder({ ...base, quantity: 2000, operations: [steps[1]] as never }, companyId);
+      } catch (e) {
+        refused = e;
+      }
+      assert.ok(refused instanceof WorkOrderValidationError, `rad etilishi kerak edi: ${String(refused)}`);
+      assert.match((refused as Error).message, /Smena jurnalida yozuvi bor/);
+      const [unchanged] = await db.select().from(workOrders).where(eq(workOrders.id, orderId));
+      assert.equal(Number(unchanged.quantity), 1000, "rad etilgan saqlash buyurtmani o'zgartirmasligi kerak");
+      assert.equal((await opsOf(orderId)).length, 2);
+
+      // Jurnali yo'q bosqichni olib tashlash mumkin.
+      await upsertWorkOrder({ ...base, operations: [steps[0]] as never }, companyId);
+      assert.deepEqual(
+        (await opsOf(orderId)).map((o) => o.id),
+        [before[0].id]
+      );
+
+      // Status yuborilmasa bekor qilingan buyurtma bekor qilinganicha qoladi.
+      await db.update(workOrders).set({ status: "Cancelled" }).where(eq(workOrders.id, orderId));
+      await upsertWorkOrder({ ...base, status: undefined }, companyId);
+      const [still] = await db.select().from(workOrders).where(eq(workOrders.id, orderId));
+      assert.equal(still.status, "Cancelled");
+
+      results.push({ name, ok: true });
+    } catch (e) {
+      results.push({ name, ok: false, error: e instanceof Error ? e.stack || e.message : String(e) });
+    } finally {
+      if (orderId) {
+        await db.delete(workOrders).where(eq(workOrders.id, orderId));
+        await db.delete(auditLogs).where(inArray(auditLogs.entityId, [orderId, docNo]));
+      }
+      await db.delete(notifications).where(eq(notifications.entityCode, docNo));
+    }
+  }
+
+  // ── C6: yozish ruxsatlari ──
+  unit("C6 ruxsat: yozish modul huquqi bilan, o'qish ochiq, rahbar cheklanmaydi", () => {
+    const perms = (mod: string, ...actions: string[]) => ({
+      role: "manager",
+      permissions: { [mod]: Object.fromEntries(actions.map((a) => [a, true])) },
+    });
+    const finance = "/api/v1/finance/payments";
+    const order = "/api/v1/production/work-orders/WO-1";
+    assert.equal(isWriteForbidden(perms("crm", "edit"), finance, "POST"), true, "CRM xodimi to'lov yoza olmaydi");
+    assert.equal(isWriteForbidden(perms("finance", "create"), finance, "POST"), false);
+    assert.equal(isWriteForbidden(perms("crm", "view"), finance, "GET"), false, "o'qish ochiq");
+    assert.equal(isWriteForbidden(perms("production", "edit"), order, "PATCH"), false);
+    assert.equal(isWriteForbidden(perms("production", "edit"), order, "DELETE"), true, "o'chirish alohida huquq");
+    assert.equal(isWriteForbidden(perms("production", "delete"), order, "DELETE"), false);
+    assert.equal(isWriteForbidden(perms("production", "edit"), `${order}/events`, "DELETE"), false, "jurnal yozuvi — tahrir");
+    assert.equal(isWriteForbidden(perms("production", "create"), "/api/v1/crm/suppliers/S1/orders", "POST"), false);
+    assert.equal(isWriteForbidden(perms("production", "create"), "/api/v1/crm/clients", "POST"), true);
+    assert.equal(isWriteForbidden({ role: "Director", permissions: {} }, finance, "POST"), false);
+    assert.equal(isWriteForbidden({ role: "operator", permissions: {} }, "/api/v1/hr/payroll/calculate", "POST"), true);
+    assert.equal(isWriteForbidden({ role: "operator", permissions: {} }, "/api/v1/warehouse/shipments", "POST"), false, "ombor o'zi tekshiradi");
   });
 
   // ── Hisobot ──

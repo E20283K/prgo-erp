@@ -44,24 +44,24 @@ export async function POST(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const companyCode = searchParams.get("company") ?? "PRINTGOO";
 
-    if (!body.author && !body.user) {
-      try {
-        const cookieStore = await cookies();
-        const token =
-          cookieStore.get("printgoo_session")?.value ||
-          request.headers.get("authorization")?.replace("Bearer ", "");
-        if (token) {
-          const sessionUser = await validateSession(token);
-          if (sessionUser) {
-            body.author = {
-              id: sessionUser.id,
-              name: sessionUser.fullName || sessionUser.username,
-              role: sessionUser.role,
-            };
-          }
-        }
-      } catch (_) {}
-    }
+    // Who saves the order is taken from the session, never from the request body: the author's
+    // role decides what they may do (e.g. release an urgent order past a credit hold).
+    delete body.user;
+    delete body.author;
+    try {
+      const cookieStore = await cookies();
+      const token =
+        cookieStore.get("printgoo_session")?.value ||
+        request.headers.get("authorization")?.replace("Bearer ", "");
+      const sessionUser = token ? await validateSession(token) : null;
+      if (sessionUser) {
+        body.author = {
+          id: sessionUser.id,
+          name: sessionUser.fullName || sessionUser.username,
+          role: sessionUser.role,
+        };
+      }
+    } catch (_) {}
 
     const result = await upsertWorkOrder(body, companyCode);
     return NextResponse.json(result);

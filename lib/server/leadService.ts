@@ -2,7 +2,7 @@ import { db, type DbExec } from "@/db";
 import { crmLeads, clients } from "@/db/schema";
 import { eq, desc, and, or, ilike } from "drizzle-orm";
 import { getCompanyIdByCode, resolveClient } from "./crmService";
-import { calculateNextNumber, getCurrentYearSuffix } from "./numberingService";
+import { calculateNextNumber, getCurrentYearSuffix, lockNumbering } from "./numberingService";
 import type { LeadRecord } from "@/components/crm/LeadDetailModal";
 
 export async function getCrmLeads(companyCode: string = "PRINTGOO"): Promise<LeadRecord[]> {
@@ -118,6 +118,7 @@ export async function convertLeadToClient(leadNoOrId: string, companyCode: strin
     let client = await resolveClient(tx, companyId, { id: lead.convertedClientId, tin: lead.tin, name: lead.company });
     let created = false;
     if (!client) {
+      await lockNumbering(tx, companyId, "CUST");
       const yearSuffix = getCurrentYearSuffix();
       const codes = await tx
         .select({ num: clients.code })

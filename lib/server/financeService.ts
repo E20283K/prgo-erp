@@ -11,7 +11,7 @@ import {
 } from "@/db/schema";
 import { eq, desc, and, sql, ilike } from "drizzle-orm";
 import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
-import { getNextDeliveryActNumber, calculateNextNumber, getCurrentYearSuffix } from "./numberingService";
+import { getNextDeliveryActNumber, calculateNextNumber, getCurrentYearSuffix, lockNumbering } from "./numberingService";
 import { emitNotification } from "./notificationService";
 import type { DeliveryActRecord, ClientSettlementRecord } from "@/store/workspaceStore";
 
@@ -151,7 +151,23 @@ export async function upsertDeliveryAct(
   companyCode: string = "PRINTGOO",
   opts: DeliveryActWriteOptions = {}
 ) {
-  const exec = opts.exec ?? db;
+  // Called on its own (the finance screen) it opens its own transaction, so the act, its lines and
+  // the client's balance are written together and its number is taken under the series lock.
+  if (!opts.exec) {
+    const afterCommit: Array<() => Promise<void>> = [];
+    const result: { success: boolean; docNo: string; id: string } = await db.transaction((tx) =>
+      upsertDeliveryAct(data, companyCode, { exec: tx, afterCommit })
+    );
+    for (const fn of afterCommit) {
+      try {
+        await fn();
+      } catch {
+        // a notification that fails does not undo a saved act
+      }
+    }
+    return result;
+  }
+  const exec = opts.exec;
   const companyId = await getCompanyIdByCode(companyCode);
   const linkedShipmentUuid =
     data.linkedShipmentUuid && /^[0-9a-f-]{36}$/i.test(data.linkedShipmentUuid) ? data.linkedShipmentUuid : null;
@@ -164,6 +180,7 @@ export async function upsertDeliveryAct(
   const clientDefaultCurrency = client.currency || "UZS";
 
   const hasOwnNumber = Boolean(data.id?.startsWith("ACT-") || data.id?.startsWith("SF-"));
+  if (!hasOwnNumber) await lockNumbering(exec, companyId, "SF");
   const docNo = hasOwnNumber ? data.id! : await getNextDeliveryActNumber(companyCode, exec);
 
   // VAT: what the document says (0 included); only a missing rate falls back to the company's.
@@ -824,6 +841,7 @@ export async function recordPayment(
       });
       if (taken) throw new Error(`${docNo} raqamli to'lov hujjati allaqachon mavjud.`);
     } else {
+      await lockNumbering(tx, companyId, "PAY");
       const yearSuffix = getCurrentYearSuffix();
       const rows = await tx
         .select({ num: clientPayments.docNo })

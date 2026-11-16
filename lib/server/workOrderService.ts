@@ -46,7 +46,7 @@ import { syncOrderStageFromSteps, syncStepFromJournal, toShiftEvent } from "./wo
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import { generateNextCode } from "@/lib/utils";
 import { deriveWorkOrderStatus, type WorkOrderStatus } from "@/lib/workOrderStatus";
-import { getNextSpecNumber } from "./numberingService";
+import { getNextSpecNumber, lockNumbering } from "./numberingService";
 import { getClientCreditState } from "./financeService";
 import { canOverrideCreditHold } from "@/lib/userRole";
 import { emitNotification } from "./notificationService";
@@ -473,7 +473,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
  */
 export async function getNextWorkOrderNoFromDb(
   companyCode: string = "PRINTGOO",
-  department: string = "Offset"
+  department: string = "Offset",
+  exec: DbExec = db
 ): Promise<string> {
   const companyId = await getCompanyIdByCode(companyCode);
   const normalizedDept = normalizeDepartment(department);
@@ -481,7 +482,7 @@ export async function getNextWorkOrderNoFromDb(
   const yearSuffix = getCurrentYearSuffix();
   const pattern = `${prefix}-${yearSuffix}-%`;
 
-  const rows = await db
+  const rows = await exec
     .select({ docNo: workOrders.docNo })
     .from(workOrders)
     .where(
@@ -588,8 +589,10 @@ export async function upsertWorkOrder(
     throw new WorkOrderValidationError(unknownClientMessage(customerName));
   }
 
+  // A save that sends no status keeps the one the order has: a cancelled or draft order
+  // must not come back to life because a field was left out.
   const rawStatus = (data.status || "").trim();
-  let requestedStatus: WorkOrderStatus = "Active";
+  let requestedStatus: WorkOrderStatus = (existingOrder?.status as WorkOrderStatus | undefined) ?? "Active";
   if (rawStatus === "Draft") requestedStatus = "Draft";
   else if (rawStatus === "Active") requestedStatus = "Active";
   else if (rawStatus === "In Production" || rawStatus === "In_Production") requestedStatus = "In Production";
@@ -797,8 +800,6 @@ export async function upsertWorkOrder(
     updatedAt: new Date(),
   };
 
-  let targetId: string;
-
   const currentAuthor = {
     id: data.author?.id || data.user?.id,
     name: data.author?.name || data.user?.name || "Operator",
@@ -860,10 +861,136 @@ export async function upsertWorkOrder(
     if (hold) throw new WorkOrderValidationError(hold);
   }
 
-  if (existingOrder) {
-    targetId = existingOrder.id;
-    await db.update(workOrders).set(payload).where(eq(workOrders.id, targetId));
+  const incomingOps: any[] | null = Array.isArray(data.operations) ? data.operations : null;
+  const toOperationRow = (op: any, idx: number) => {
+    const rawDuration = op.durationHours ?? op.duration ?? 1.0;
+    const durationNum = parseFloat(String(rawDuration).replace(/[^\d.]/g, "")) || 1.0;
 
+    const rateNum = parseFloat(String(op.rateUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const setupNum = parseFloat(String(op.setupFeeUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const pwRateNum = parseFloat(String(op.pieceworkRateUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const plannedCostNum = parseFloat(String(op.plannedCostUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const pwTotalNum = parseFloat(String(op.pieceworkTotalUsd || 0).replace(/[^\d.]/g, "")) || 0;
+    const divisorNum = parseInt(String(op.unitDivisor || 1000), 10) || 1000;
+    const seqNum = parseInt(String(op.stepNumber ?? op.sequence ?? (idx + 1)), 10) || (idx + 1);
+
+    return {
+      tariffId: op.tariffId && op.tariffId.length > 20 ? op.tariffId : null,
+      tariffCode: op.tariffCode || null,
+      workRateId: typeof op.workRateId === "string" && isUuid(op.workRateId) ? op.workRateId : null,
+      name: op.name || `Bosqich ${idx + 1}`,
+      department: op.department || data.department || "Offset",
+      machineStr: op.machine || op.machineStr || null,
+      machineId: typeof op.machineId === "string" && isUuid(op.machineId) ? op.machineId : null,
+      operator: op.operator || (Array.isArray(op.operators) ? op.operators.join(", ") : null),
+      costMode: ["outsourced", "manual"].includes(op.costMode) ? op.costMode : "auto",
+      manualCostUsd: (Math.max(0, Number(op.manualCostUsd) || 0)).toFixed(2),
+      costNote: op.costNote ? String(op.costNote).slice(0, 500) : null,
+      durationHours: durationNum.toFixed(2),
+      toolingId: op.toolingId || null,
+      toolingName: op.toolingName || null,
+      calcUnit: op.calcUnit || null,
+      unitDivisor: divisorNum,
+      rateUsd: rateNum.toFixed(4),
+      setupFeeUsd: setupNum.toFixed(2),
+      pieceworkRateUsd: pwRateNum.toFixed(4),
+      plannedCostUsd: plannedCostNum.toFixed(2),
+      pieceworkTotalUsd: pwTotalNum.toFixed(2),
+      sequence: seqNum,
+      status: op.status || "Queued",
+      plannedQty: parseSafePlannedQty(op, Number(data.quantity) || 0),
+      startedAt: toDateOrNull(op.startedAt),
+      pausedAt: toDateOrNull(op.pausedAt),
+      completedAt: toDateOrNull(op.completedAt),
+      downtimeMinutes: Math.max(0, Math.round(Number(op.downtimeMinutes) || 0)),
+      actualDurationMinutes:
+        op.actualDurationMinutes !== undefined && op.actualDurationMinutes !== null && op.actualDurationMinutes !== ""
+          ? Math.max(0, Math.round(Number(op.actualDurationMinutes) || 0))
+          : null,
+      completedQty: parseSafeNumeric(op.completedQty ?? op.qtyCompleted, 0),
+      notes: op.notes || null,
+    };
+  };
+
+  // The order and its route are written together or not at all.
+  const targetId: string = await db.transaction(async (tx) => {
+    let orderId: string;
+    if (existingOrder) {
+      orderId = existingOrder.id;
+      await tx.update(workOrders).set(payload).where(eq(workOrders.id, orderId));
+    } else {
+      // Numbers are handed out one at a time: two orders saved at once must not get the same one.
+      await lockNumbering(tx, companyId, "WO");
+      if (isDraft) {
+        docNo = await getNextWorkOrderNoFromDb(companyCode, data.department || "Offset", tx);
+        payload.docNo = docNo;
+      }
+      const [{ maxQueue }] = await tx
+        .select({ maxQueue: sql<number>`coalesce(max(${workOrders.queueOrder}), 0)` })
+        .from(workOrders)
+        .where(eq(workOrders.companyId, companyId));
+      const [inserted] = await tx
+        .insert(workOrders)
+        .values({ ...payload, queueOrder: Number(maxQueue) + 10 })
+        .returning({ id: workOrders.id });
+      orderId = inserted.id;
+    }
+
+    // 3. Route steps. A step keeps its id for as long as it exists — shift-journal entries point at
+    //    it — so steps are matched (by id, else by position and name) and updated, not wiped.
+    if (incomingOps) {
+      const existingOps = await tx.query.workOrderOperations.findMany({
+        where: eq(workOrderOperations.workOrderId, orderId),
+      });
+      const existingById = new Map(existingOps.map((o) => [o.id, o]));
+      const sentIds = new Set(incomingOps.map((op) => op?.id).filter((id) => typeof id === "string" && isUuid(id)));
+      const kept = new Set<string>();
+
+      for (const [idx, op] of incomingOps.entries()) {
+        const row = toOperationRow(op, idx);
+        const sentId = typeof op.id === "string" && isUuid(op.id) ? (op.id as string) : null;
+        const match =
+          (sentId && existingById.get(sentId)) ||
+          (!sentId
+            ? existingOps.find(
+                (e) => !kept.has(e.id) && !sentIds.has(e.id) && e.sequence === row.sequence && e.name === row.name
+              )
+            : undefined);
+        if (match) {
+          kept.add(match.id);
+          await tx.update(workOrderOperations).set(row).where(eq(workOrderOperations.id, match.id));
+        } else {
+          await tx
+            .insert(workOrderOperations)
+            .values({ ...(sentId ? { id: sentId } : {}), workOrderId: orderId, ...row });
+        }
+      }
+
+      const removed = existingOps.filter((e) => !kept.has(e.id));
+      if (removed.length > 0) {
+        const logged = await tx
+          .selectDistinct({ opId: workOrderEvents.opId })
+          .from(workOrderEvents)
+          .where(and(eq(workOrderEvents.workOrderId, orderId), isNull(workOrderEvents.deletedAt)));
+        const loggedIds = new Set(logged.map((l) => l.opId));
+        const blocked = removed.filter((e) => loggedIds.has(e.id));
+        if (blocked.length > 0) {
+          throw new WorkOrderValidationError(
+            `Smena jurnalida yozuvi bor bosqichni o'chirib bo'lmaydi: ${blocked.map((e) => e.name).join(", ")}. Avval jurnal yozuvlarini o'chiring.`
+          );
+        }
+        await tx.delete(workOrderOperations).where(
+          inArray(
+            workOrderOperations.id,
+            removed.map((e) => e.id)
+          )
+        );
+      }
+    }
+    return orderId;
+  });
+
+  if (existingOrder) {
     // Audit Log: Server-side difflarni hisoblash va saqlash
     try {
       await computeAndRecordWorkOrderDiffs({
@@ -878,16 +1005,6 @@ export async function upsertWorkOrder(
       console.error("[WorkOrder Audit] Diff yozishda xatolik:", auditErr);
     }
   } else {
-    const [{ maxQueue }] = await db
-      .select({ maxQueue: sql<number>`coalesce(max(${workOrders.queueOrder}), 0)` })
-      .from(workOrders)
-      .where(eq(workOrders.companyId, companyId));
-    const [inserted] = await db
-      .insert(workOrders)
-      .values({ ...payload, queueOrder: Number(maxQueue) + 10 })
-      .returning({ id: workOrders.id });
-    targetId = inserted.id;
-
     // Audit Log: Yangi buyurtma yaratilish hodisasi
     try {
       await recordWorkOrderAuditLog({
@@ -909,67 +1026,6 @@ export async function upsertWorkOrder(
       });
     } catch (auditErr) {
       console.error("[WorkOrder Audit] Boshlang'ich log yozishda xatolik:", auditErr);
-    }
-  }
-
-  // 3. Marshrut operatsiyalarini (operations) saqlash
-  if (data.operations && Array.isArray(data.operations)) {
-    await db.delete(workOrderOperations).where(eq(workOrderOperations.workOrderId, targetId));
-    if (data.operations.length > 0) {
-      await db.insert(workOrderOperations).values(
-        data.operations.map((op: any, idx: number) => {
-          const rawDuration = op.durationHours ?? op.duration ?? 1.0;
-          const durationNum = parseFloat(String(rawDuration).replace(/[^\d.]/g, "")) || 1.0;
-
-          const rateNum = parseFloat(String(op.rateUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const setupNum = parseFloat(String(op.setupFeeUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const pwRateNum = parseFloat(String(op.pieceworkRateUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const plannedCostNum = parseFloat(String(op.plannedCostUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const pwTotalNum = parseFloat(String(op.pieceworkTotalUsd || 0).replace(/[^\d.]/g, "")) || 0;
-          const divisorNum = parseInt(String(op.unitDivisor || 1000), 10) || 1000;
-          const seqNum = parseInt(String(op.stepNumber ?? op.sequence ?? (idx + 1)), 10) || (idx + 1);
-
-          return {
-            // Keep the step's id: shift-journal entries point at it.
-            ...(typeof op.id === "string" && isUuid(op.id) ? { id: op.id } : {}),
-            workOrderId: targetId,
-            tariffId: op.tariffId && op.tariffId.length > 20 ? op.tariffId : null,
-            tariffCode: op.tariffCode || null,
-            workRateId: typeof op.workRateId === "string" && isUuid(op.workRateId) ? op.workRateId : null,
-            name: op.name || `Bosqich ${idx + 1}`,
-            department: op.department || data.department || "Offset",
-            machineStr: op.machine || op.machineStr || null,
-            machineId: typeof op.machineId === "string" && isUuid(op.machineId) ? op.machineId : null,
-            operator: op.operator || (Array.isArray(op.operators) ? op.operators.join(", ") : null),
-            costMode: ["outsourced", "manual"].includes(op.costMode) ? op.costMode : "auto",
-            manualCostUsd: (Math.max(0, Number(op.manualCostUsd) || 0)).toFixed(2),
-            costNote: op.costNote ? String(op.costNote).slice(0, 500) : null,
-            durationHours: durationNum.toFixed(2),
-            toolingId: op.toolingId || null,
-            toolingName: op.toolingName || null,
-            calcUnit: op.calcUnit || null,
-            unitDivisor: divisorNum,
-            rateUsd: rateNum.toFixed(4),
-            setupFeeUsd: setupNum.toFixed(2),
-            pieceworkRateUsd: pwRateNum.toFixed(4),
-            plannedCostUsd: plannedCostNum.toFixed(2),
-            pieceworkTotalUsd: pwTotalNum.toFixed(2),
-            sequence: seqNum,
-            status: op.status || "Queued",
-            plannedQty: parseSafePlannedQty(op, Number(data.quantity) || 0),
-            startedAt: toDateOrNull(op.startedAt),
-            pausedAt: toDateOrNull(op.pausedAt),
-            completedAt: toDateOrNull(op.completedAt),
-            downtimeMinutes: Math.max(0, Math.round(Number(op.downtimeMinutes) || 0)),
-            actualDurationMinutes:
-              op.actualDurationMinutes !== undefined && op.actualDurationMinutes !== null && op.actualDurationMinutes !== ""
-                ? Math.max(0, Math.round(Number(op.actualDurationMinutes) || 0))
-                : null,
-            completedQty: parseSafeNumeric(op.completedQty ?? op.qtyCompleted, 0),
-            notes: op.notes || null,
-          };
-        })
-      );
     }
   }
 
