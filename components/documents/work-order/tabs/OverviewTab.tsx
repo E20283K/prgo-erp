@@ -1954,7 +1954,7 @@ export function OverviewTab({
                 {/* Production Site Combobox */}
                 <div>
                   <label className="text-muted-foreground font-medium text-xs block mb-1">
-                    Ishlab chiqarish maydoni (Filial)
+                    Ishlab chiqarish maydoni
                   </label>
                   <OrgUnitSelect
                     branchId={formData.site}
@@ -1964,7 +1964,7 @@ export function OverviewTab({
                       onMarkUnsaved();
                     }}
                     disabled={isOperator}
-                    placeholder="Filialni tanlang..."
+                    placeholder="Tashkilotni tanlang..."
                     className="h-8 text-xs bg-muted/30"
                   />
                 </div>

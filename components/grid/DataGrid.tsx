@@ -189,6 +189,8 @@ export function DataGrid() {
     loadWarehouseStock,
     plants,
     fetchPlants,
+    companiesList,
+    loadCompanies,
     currentUser,
     deleteWorkOrderAsync,
     addNotification,
@@ -203,6 +205,9 @@ export function DataGrid() {
     }
     if (!plants || plants.length === 0) {
       fetchPlants();
+    }
+    if (!companiesList || companiesList.length === 0) {
+      loadCompanies();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -285,7 +290,11 @@ export function DataGrid() {
         sampleStage,
         sampleStatusLabel,
         department: (wo.department as any) || "Offset",
-        site: (plants && plants.find((p) => p.id === wo.site)?.name) || wo.site || "Bosh sex",
+        site:
+          plants?.find((p) => p.id === wo.site)?.name ||
+          companiesList?.find((c) => c.id === wo.site)?.name ||
+          wo.site ||
+          "Bosh sex",
         customer: wo.customer,
         product: wo.product,
         productType: wo.productType || "",
@@ -305,7 +314,7 @@ export function DataGrid() {
         rawOrder: wo,
       };
     });
-  }, [productionQueue, plants]);
+  }, [productionQueue, plants, companiesList]);
   const [viewMode, setViewMode] = useState<"grid" | "calendar" | "timeline">("grid");
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
@@ -816,7 +825,7 @@ export function DataGrid() {
           customer: rowData.customer,
           product: rowData.product,
           department: rowData.department,
-          site: rowData.site,
+          site: raw?.site || rowData.site,
           quantity: rowData.qty,
           unit: rowData.unit,
           status: rowData.status,

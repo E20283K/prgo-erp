@@ -489,7 +489,7 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
           <div className="space-y-1">
             <Label className="text-[11px] font-medium text-foreground flex items-center gap-1">
               <Building className="w-3 h-3 text-muted-foreground" />
-              <span>Asosiy Filial / Korxona</span>
+              <span>Tashkilot</span>
               <span className="text-red-500">*</span>
             </Label>
             <OrgUnitSelect
@@ -497,7 +497,7 @@ export function UserGeneralTab({ data, onChange }: UserGeneralTabProps) {
               onValueChange={(val) => {
                 onChange({ plant: val.label, branchId: val.branchId, companyId: val.companyId });
               }}
-              placeholder="Filial yoki korxonani tanlang..."
+              placeholder="Tashkilotni tanlang..."
               className="h-8 text-xs"
             />
           </div>

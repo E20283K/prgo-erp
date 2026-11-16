@@ -381,7 +381,7 @@ export function DeviceDetailModal({
 
             <div>
               <div className="flex justify-between items-center mb-1">
-                <Label className="text-xs">Filial / Korxona *</Label>
+                <Label className="text-xs">Tashkilot *</Label>
                 {errors.branchId && <span className="text-[10px] text-destructive">{errors.branchId}</span>}
               </div>
               <OrgUnitSelect
@@ -390,7 +390,7 @@ export function DeviceDetailModal({
                   setFormData((prev) => ({ ...prev, branchId: val.branchId || val.companyId }));
                   if (errors.branchId) setErrors((prev) => ({ ...prev, branchId: "" }));
                 }}
-                placeholder="Filial yoki korxonani tanlang..."
+                placeholder="Tashkilotni tanlang..."
                 className={`h-8 text-xs ${errors.branchId ? "border-destructive" : ""}`}
               />
             </div>

@@ -1521,7 +1521,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                   </div>
 
                   <div>
-                    <Label className="text-xs mb-1 block">Tashkilot / Filial</Label>
+                    <Label className="text-xs mb-1 block">Tashkilot</Label>
                     <OrgUnitSelect
                       branchId={formData.branchId}
                       companyId={formData.companyId}
@@ -1533,7 +1533,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                           plant: val.label,
                         });
                       }}
-                      placeholder="Tashkilot yoki filialni tanlang..."
+                      placeholder="Tashkilotni tanlang..."
                     />
                   </div>
 
