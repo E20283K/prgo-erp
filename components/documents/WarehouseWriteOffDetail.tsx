@@ -102,7 +102,6 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
     loadMachines,
     employees,
     loadEmployees,
-    upsertWarehouseStock,
     upsertWarehouseMovementAsync,
     replaceTabId,
     setTabUnsaved,
@@ -124,13 +123,13 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
         totalLossUsd: Number(i.totalLossUsd) || (Number(i.quantity) || 0) * (Number(i.unitPriceUsd) || 0),
       }));
     } else if (d.material || d.materialName) {
-      const q = Number(d.quantity) || 100;
-      const p = 0.12;
+      const q = Number(d.quantity) || 0;
+      const p = Number(warehouseStock.find((s) => s.sku === d.materialSku)?.unitPriceUsd) || 0;
       initialItems = [
         {
           id: `item-${Date.now()}`,
-          sku: d.materialSku || `MAT-${Date.now().toString().slice(-4)}`,
-          name: d.material || d.materialName || "Brak qilingan material",
+          sku: d.materialSku || "",
+          name: d.material || d.materialName || "",
           sheetFormat: d.sheetFormat || "",
           quantity: q,
           receivedQty: q,
@@ -145,16 +144,16 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
     return {
       id: d.id || tab.id,
       date: d.date || d.movementDate || new Date().toISOString().split("T")[0],
-      warehouse: d.warehouse || d.from || d.fromLocationName || (warehousesList[0]?.name || "Asosiy ombor"),
+      warehouse: d.warehouse || d.from || d.fromLocationName || warehousesList[0]?.name || "",
       reasonCategory: (d.reasonCategory as WriteOffReason) || "SetupWaste",
       workOrderId: d.workOrderId || "",
       pressMachine: d.pressMachine || "",
-      operator: d.operator || (employees[0]?.fullName || "Komissiya a'zosi"),
+      operator: d.operator || employees[0]?.fullName || "",
       reasonNotes: d.reasonNotes || d.reason || "",
       status: d.status === "Completed" ? "Completed" : "Pending",
       items: initialItems,
     };
-  }, [tab.documentData, tab.id, warehousesList, employees]);
+  }, [tab.documentData, tab.id, warehousesList, employees, warehouseStock]);
 
   const [doc, setDoc] = useState<WriteOffDoc>(initialDoc);
   const isLocked = doc.status === "Completed";
@@ -221,7 +220,7 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
   const [isStockPickerOpen, setIsStockPickerOpen] = useState(false);
   const [stockSearch, setStockSearch] = useState("");
   const [selectedStockSku, setSelectedStockSku] = useState<string>("");
-  const [pickerQuantity, setPickerQuantity] = useState<number>(50);
+  const [pickerQuantity, setPickerQuantity] = useState<number>(0);
 
   const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
   const [lineFormData, setLineFormData] = useState<WriteOffLineItem | null>(null);
@@ -260,8 +259,8 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
     const stockItem = warehouseStock.find((s) => s.sku === selectedStockSku);
     if (!stockItem) return;
 
-    const qty = Number(pickerQuantity) || 1;
-    const unitPrice = stockItem.unitPriceUsd || 0.15;
+    const qty = Number(pickerQuantity) || 0;
+    const unitPrice = Number(stockItem.unitPriceUsd) || 0;
     const newLine: WriteOffLineItem = {
       id: `item-${Date.now()}-${doc.items.length}`,
       sku: stockItem.sku,
@@ -281,23 +280,23 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
     setIsStockPickerOpen(false);
     setSelectedStockSku("");
-    setPickerQuantity(50);
+    setPickerQuantity(0);
   };
 
   const handleAddEmptyLine = () => {
     if (isLocked) return;
     const newLine: WriteOffLineItem = {
       id: `item-${Date.now()}-${doc.items.length}`,
-      sku: `MAT-${Date.now().toString().slice(-4)}`,
+      sku: "",
       name: "",
       category: "Paper & Board",
       sheetFormat: "",
       grammage: 0,
-      quantity: 50,
-      receivedQty: 50,
+      quantity: 0,
+      receivedQty: 0,
       unit: "sheets",
-      unitPriceUsd: 0.15,
-      totalLossUsd: 7.5,
+      unitPriceUsd: 0,
+      totalLossUsd: 0,
       notes: "",
     };
     setDoc((prev) => ({ ...prev, items: [...prev.items, newLine] }));
@@ -322,10 +321,15 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
     }
     const q = Number(lineFormData.quantity) || 0;
     const p = Number(lineFormData.unitPriceUsd) || 0;
+    // SKU bo'sh bo'lsa nomi bo'yicha katalogdan bog'lanadi
+    const byName = !lineFormData.sku?.trim()
+      ? warehouseStock.find((s) => s.name.trim().toLowerCase() === lineFormData.name.trim().toLowerCase())
+      : undefined;
     setDoc((prev) => {
       const next = [...prev.items];
       next[editingLineIndex] = {
         ...lineFormData,
+        sku: lineFormData.sku?.trim() || byName?.sku || "",
         quantity: q,
         receivedQty: q,
         unitPriceUsd: p,
@@ -372,13 +376,14 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
     };
 
     const res: any = await upsertWarehouseMovementAsync(payload);
-    let realId = res?.movementNumber || (isDraft ? "WOF-26-0001" : doc.id);
-    if (realId.startsWith("draft-") || realId.startsWith("new-") || realId.startsWith("tab-")) {
-      realId = "WOF-26-0001";
-    }
+    // Xato bo'lsa store server xabarini ko'rsatgan; hujjat o'zgarishsiz qoladi
+    if (!res?.movementNumber) return;
+    const realId: string = res.movementNumber;
 
     setDoc((prev) => ({ ...prev, id: realId }));
-    replaceTabId(tab.id, realId, `${realId}: Hisobdan chiqarish`, { ...doc, id: realId });
+    if (realId !== doc.id) {
+      replaceTabId(tab.id, realId, `${realId}: Hisobdan chiqarish`, { ...doc, id: realId });
+    }
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Brak dalolatnomasi saqlandi",
@@ -398,21 +403,17 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
       return;
     }
 
-    // Ombor zaxirasidan yechish
-    doc.items.forEach((line) => {
-      const qty = Number(line.quantity) || 0;
-      const targetItem = warehouseStock.find(
-        (s) => (s.sku === line.sku || s.name === line.name) && s.location === doc.warehouse
-      );
-      if (targetItem) {
-        upsertWarehouseStock({
-          ...targetItem,
-          stockLevel: Math.max(0, targetItem.stockLevel - qty),
-          available: Math.max(0, targetItem.available - qty),
-        });
-      }
-    });
+    const noSku = doc.items.filter((l) => !l.sku?.trim());
+    if (noSku.length > 0) {
+      alert(`Quyidagi qatorlar uchun material katalogdan tanlanmagan: ${noSku.map((l) => l.name || "?").join(", ")}`);
+      return;
+    }
+    if (doc.items.some((l) => !(Number(l.quantity) > 0))) {
+      alert("Har bir qatorda miqdor 0 dan katta bo'lishi shart!");
+      return;
+    }
 
+    // Qoldiq faqat serverda, hujjat bilan bitta tranzaksiyada yechiladi; javobdan keyin ro'yxat qayta yuklanadi
     const payload = {
       ...doc,
       movementNumber: isDraft ? "" : doc.id,
@@ -425,10 +426,9 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
     };
 
     const res: any = await upsertWarehouseMovementAsync(payload);
-    let realId = res?.movementNumber || (isDraft ? "WOF-26-0001" : doc.id);
-    if (realId.startsWith("draft-") || realId.startsWith("new-") || realId.startsWith("tab-")) {
-      realId = "WOF-26-0001";
-    }
+    // Xato bo'lsa (masalan, qoldiq yetarli emas) store server xabarini ko'rsatgan; hujjat qoralama bo'lib qoladi
+    if (!res?.movementNumber) return;
+    const realId: string = res.movementNumber;
 
     setDoc((prev) => ({ ...prev, id: realId, status: "Completed" }));
     replaceTabId(tab.id, realId, `${realId}: Hisobdan chiqarildi`, {

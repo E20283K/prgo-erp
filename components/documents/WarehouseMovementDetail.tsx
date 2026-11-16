@@ -89,7 +89,6 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
     warehousesList,
     loadWarehouses,
     employees,
-    upsertWarehouseStock,
     upsertWarehouseMovementAsync,
     replaceTabId,
     setTabUnsaved,
@@ -112,11 +111,11 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
       initialItems = [
         {
           id: `item-${Date.now()}`,
-          sku: d.materialSku || `MAT-${Date.now().toString().slice(-4)}`,
-          name: d.material || d.materialName || "Material",
+          sku: d.materialSku || "",
+          name: d.material || d.materialName || "",
           sheetFormat: d.sheetFormat || "",
-          quantity: Number(d.quantity) || 100,
-          receivedQty: Number(d.receivedQty) || Number(d.quantity) || 100,
+          quantity: Number(d.quantity) || 0,
+          receivedQty: Number(d.receivedQty) || Number(d.quantity) || 0,
           unit: d.unit || "sheets",
           notes: d.reason || "",
         },
@@ -131,7 +130,7 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
       to: d.to || d.toLocationName || "",
       toWarehouseId: d.toWarehouseId,
       movementType: d.movementType || "Transfer",
-      operator: d.operator || (employees[0]?.fullName || "Ombor mudiri"),
+      operator: d.operator || employees[0]?.fullName || "",
       reason: d.reason || "",
       status: d.status === "Completed" ? "Completed" : "Pending",
       items: initialItems,
@@ -140,7 +139,12 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
 
   const [doc, setDoc] = useState<WarehouseMovementDoc>(initialDoc);
   const isLocked = doc.status === "Completed";
-  const isDraft = !doc.id || doc.id.startsWith("draft-") || doc.id.startsWith("new-") || doc.id.startsWith("MOV-NEW-");
+  const isDraft =
+    !doc.id ||
+    doc.id.startsWith("draft-") ||
+    doc.id.startsWith("new-") ||
+    doc.id.startsWith("tab-") ||
+    doc.id.startsWith("MOV-NEW-");
 
   // Load warehouses if empty
   useEffect(() => {
@@ -197,7 +201,7 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
     const stockItem = warehouseStock.find((s) => s.sku === selectedStockSku);
     if (!stockItem) return;
 
-    const qty = Number(pickerQuantity) || 1;
+    const qty = Number(pickerQuantity) || 0;
     const newLine: MovementLineItem = {
       id: `item-${Date.now()}-${doc.items.length}`,
       sku: stockItem.sku,
@@ -215,7 +219,7 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
     setIsStockPickerOpen(false);
     setSelectedStockSku("");
-    setPickerQuantity(100);
+    setPickerQuantity(0);
   };
 
   // Add empty manual line
@@ -223,13 +227,13 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
     if (isLocked) return;
     const newLine: MovementLineItem = {
       id: `item-${Date.now()}-${doc.items.length}`,
-      sku: `MAT-${Date.now().toString().slice(-4)}`,
+      sku: "",
       name: "",
       category: "Paper & Board",
       sheetFormat: "",
       grammage: 0,
-      quantity: 100,
-      receivedQty: 100,
+      quantity: 0,
+      receivedQty: 0,
       unit: "sheets",
       notes: "",
     };
@@ -255,10 +259,15 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
       alert("Material nomini kiritish shart!");
       return;
     }
+    // SKU bo'sh bo'lsa nomi bo'yicha katalogdan bog'lanadi
+    const byName = !lineFormData.sku?.trim()
+      ? warehouseStock.find((s) => s.name.trim().toLowerCase() === lineFormData.name.trim().toLowerCase())
+      : undefined;
     setDoc((prev) => {
       const next = [...prev.items];
       next[editingLineIndex] = {
         ...lineFormData,
+        sku: lineFormData.sku?.trim() || byName?.sku || "",
         quantity: Number(lineFormData.quantity) || 0,
         receivedQty: Number(lineFormData.receivedQty) || Number(lineFormData.quantity) || 0,
       };
@@ -293,10 +302,12 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
       material: doc.items.map((i) => i.name).join(", ") || "Material",
     };
 
-    const res = await upsertWarehouseMovementAsync(payload);
-    if (isDraft) {
-      const realId = `MOV-${Date.now().toString().slice(-4)}`;
-      setDoc((prev) => ({ ...prev, id: realId }));
+    const res: any = await upsertWarehouseMovementAsync(payload);
+    // Xato bo'lsa store server xabarini ko'rsatgan; hujjat o'zgarishsiz qoladi
+    if (!res?.movementNumber) return;
+    const realId: string = res.movementNumber;
+    setDoc((prev) => ({ ...prev, id: realId }));
+    if (realId !== doc.id) {
       replaceTabId(tab.id, realId, `${realId}: Ichki ko'chirish`, { ...doc, id: realId });
     }
     setTabUnsaved(tab.id, false);
@@ -327,66 +338,31 @@ export function WarehouseMovementDetail({ tab }: { tab: DocumentTab }) {
       return;
     }
 
-    // Update stock balances: deduct from source warehouse, add to target warehouse
-    doc.items.forEach((line) => {
-      const qty = Number(line.quantity) || 0;
+    const noSku = doc.items.filter((l) => !l.sku?.trim());
+    if (noSku.length > 0) {
+      alert(`Quyidagi qatorlar uchun material katalogdan tanlanmagan: ${noSku.map((l) => l.name || "?").join(", ")}`);
+      return;
+    }
+    if (doc.items.some((l) => !(Number(l.quantity) > 0))) {
+      alert("Har bir qatorda miqdor 0 dan katta bo'lishi shart!");
+      return;
+    }
 
-      // Source deduction
-      const fromItem = warehouseStock.find(
-        (s) => (s.sku === line.sku || s.name === line.name) && s.location === doc.from
-      );
-      if (fromItem) {
-        upsertWarehouseStock({
-          ...fromItem,
-          stockLevel: Math.max(0, fromItem.stockLevel - qty),
-          available: Math.max(0, fromItem.available - qty),
-        });
-      }
-
-      // Target addition
-      const toItem = warehouseStock.find(
-        (s) => (s.sku === line.sku || s.name === line.name) && s.location === doc.to
-      );
-      if (toItem) {
-        upsertWarehouseStock({
-          ...toItem,
-          stockLevel: toItem.stockLevel + qty,
-          available: toItem.available + qty,
-        });
-      } else {
-        // Create stock record in target warehouse
-        upsertWarehouseStock({
-          sku: line.sku,
-          name: line.name,
-          category: (line.category as any) || "Paper & Board",
-          sheetFormat: line.sheetFormat,
-          grammage: line.grammage !== undefined ? Number(line.grammage) : undefined,
-          unit: (line.unit as any) || "sheets",
-          location: doc.to,
-          stockLevel: qty,
-          reserved: 0,
-          available: qty,
-          reorder: 100,
-          unitPriceUsd: 0,
-          status: "In Stock",
-          lastReceived: new Date().toISOString().split("T")[0],
-        });
-      }
-    });
-
-    const realId = isDraft ? `MOV-${Date.now().toString().slice(-4)}` : doc.id;
+    // Qoldiq faqat serverda, hujjat bilan bitta tranzaksiyada o'zgaradi; javobdan keyin ro'yxat qayta yuklanadi
     const payload = {
       ...doc,
-      id: realId,
-      movementNumber: realId,
+      movementNumber: isDraft ? "" : doc.id,
       status: "Completed",
       quantity: doc.items.reduce((acc, i) => acc + (Number(i.quantity) || 0), 0),
       material: doc.items.map((i) => i.name).join(", ") || "Material",
     };
 
-    await upsertWarehouseMovementAsync(payload);
+    const res: any = await upsertWarehouseMovementAsync(payload);
+    // Xato bo'lsa (masalan, qoldiq yetarli emas) store server xabarini ko'rsatgan; hujjat qoralama bo'lib qoladi
+    if (!res?.movementNumber) return;
+    const realId: string = res.movementNumber;
     setDoc((prev) => ({ ...prev, id: realId, status: "Completed" }));
-    if (isDraft) {
+    if (realId !== doc.id) {
       replaceTabId(tab.id, realId, `${realId}: ${doc.from} → ${doc.to}`, { ...doc, id: realId, status: "Completed" });
     }
     setTabUnsaved(tab.id, false);

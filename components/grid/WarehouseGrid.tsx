@@ -460,14 +460,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   };
 
   const handleSave = async () => {
-    const prefixes: Record<string, string> = {
-      movements: 'MOV', receipts: 'RCV', shipments: 'SHP',
-      inventory: 'IC', locations: 'LOC', 'stock-balance': 'MAT',
-      'finished-goods': 'FG',
-    };
-    const prefix = prefixes[type] ?? 'REC';
-    const newId = `${prefix}-${String(Date.now()).slice(-4)}`;
-    const newRow = { id: newId, ...formData };
+    // Hujjat raqamini faqat server beradi: yangi yozuv "draft-…" belgisi bilan yuboriladi
+    const newRow = { id: `draft-${type}-${Date.now()}`, ...formData };
 
     if (type === 'shipments') {
       await upsertWarehouseShipmentAsync(newRow);
@@ -632,10 +626,11 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
     if (targetRows.length === 0) return;
 
-    const newId = `RCV-${Date.now().toString().slice(-4)}`;
+    // Raqamni saqlashda server beradi (RCV-YY-XXXX)
+    const newId = `draft-rcv-${Date.now()}`;
     openTab({
       id: newId,
-      title: `${newId}: Defitsit Kirim Hujjati`,
+      title: "Yangi kirim: Defitsit",
       type: "warehouse-receipt",
       module: "warehouse",
       isUnsaved: false,
@@ -647,7 +642,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         items: targetRows.map((r, idx) => ({
           id: `line-${Date.now()}-${idx}`,
           workOrderId: r.workOrderId,
-          sku: r.materialSku || `MAT-${100 + idx}`,
+          sku: r.materialSku || "",
           name: r.materialName,
           category: r.category || "Paper & Board",
           sheetFormat: r.sheetFormat || "",
@@ -1600,11 +1595,11 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                     const selIdx = selection.rows.toArray()[0];
                     const record = filteredRows[selIdx];
                     if (!record) return;
-                    const nextNum = 6010 + warehouseShipments.length;
-                    const newId = `SHP-${nextNum}`;
+                    // Raqamni saqlashda server beradi (SHP-YY-XXXX)
+                    const newId = `draft-shp-${Date.now()}`;
                     openTab({
                       id: newId,
-                      title: `${newId}: Zaxiradan Chiqim`,
+                      title: "Yangi chiqim: Zaxiradan",
                       type: "warehouse-shipment",
                       module: "warehouse",
                       isUnsaved: false,

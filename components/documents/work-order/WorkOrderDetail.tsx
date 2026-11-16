@@ -2769,15 +2769,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       };
     });
 
-    const movement = consumeMaterialsForWorkOrder({
+    const movement = await consumeMaterialsForWorkOrder({
       workOrderId: currentDocNo,
       orderNumber: currentDocNo,
       customer: formData.customer,
       pressMachine: formData.pressMachine,
-      operator: employees[0]?.fullName || "Smena boshlig'i",
+      operator: employees[0]?.fullName || "",
       reason: `Ishlab chiqarishga sarf (Spisanie) — ${currentDocNo} (${formData.product})`,
       items: preparedItems,
     });
+    // Ombor hujjati o'tmagan bo'lsa (qoldiq yetarli emas, material katalogda yo'q) — buyurtma o'zgarmaydi
+    if (!movement) return;
 
     const now = new Date().toISOString();
     const updates = {

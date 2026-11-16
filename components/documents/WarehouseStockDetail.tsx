@@ -471,23 +471,28 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
   // Offcut area ratio vs parent sheet
   const offcutAreaStats = useMemo(() => {
     if (!doc.isOffcut) return null;
-    const cutDims = (doc.cutDimensions || doc.sheetFormat || "470×700").split("×");
-    const cutArea = (parseFloat(cutDims[0]) || 470) * (parseFloat(cutDims[1]) || 700);
-
-    const parentDims = (parentMaterial?.sheetFormat || "700×1000").split("×");
-    const parentArea = (parseFloat(parentDims[0]) || 700) * (parseFloat(parentDims[1]) || 1000);
+    // Formatlar haqiqiy kartochkadan olinadi; o'qib bo'lmasa statistika ko'rsatilmaydi
+    const cutFormat = doc.cutDimensions || doc.sheetFormat || "";
+    const parentFormat = parentMaterial?.sheetFormat || "";
+    const area = (f: string) => {
+      const m = f.match(/(\d+(?:[.,]\d+)?)\s*[x×х*]\s*(\d+(?:[.,]\d+)?)/i);
+      return m ? Number(m[1].replace(",", ".")) * Number(m[2].replace(",", ".")) : 0;
+    };
+    const cutArea = area(cutFormat);
+    const parentArea = area(parentFormat);
+    if (!cutArea || !parentArea) return null;
 
     const ratio = Math.round((cutArea / parentArea) * 100);
-    const virginCost = parentMaterial?.unitPriceUsd || (parentMaterial?.unitPriceUzs ? Number((parentMaterial.unitPriceUzs / 12850).toFixed(4)) : 0.20);
-    const offcutCost = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / 12850).toFixed(4)) : 0.11);
+    const virginCost = parentMaterial?.unitPriceUsd || (parentMaterial?.unitPriceUzs ? Number((parentMaterial.unitPriceUzs / 12850).toFixed(4)) : 0);
+    const offcutCost = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / 12850).toFixed(4)) : 0);
     const savedPerSheet = Math.max(0, virginCost - offcutCost);
     const totalSavedUsd = Math.round(savedPerSheet * doc.stockLevel);
     const totalSavedUzs = Math.round(totalSavedUsd * 12850);
 
     return {
       ratio,
-      cutFormat: doc.cutDimensions || doc.sheetFormat || "470×700",
-      parentFormat: parentMaterial?.sheetFormat || "700×1000",
+      cutFormat,
+      parentFormat,
       savedPerSheet: Number(savedPerSheet.toFixed(3)),
       savedPerSheetUzs: Math.round(savedPerSheet * 12850),
       totalSavedUsd,
@@ -497,17 +502,18 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
 
   // Quick Action: Open New Warehouse Receipt with this item pre-selected
   const handleCreateReceipt = () => {
-    const newId = `RCV-${Date.now().toString().slice(-4)}`;
+    // Raqamni saqlashda server beradi (RCV-YY-XXXX)
+    const newId = `draft-rcv-${Date.now()}`;
     openTab({
       id: newId,
-      title: `${newId}: ${doc.name || "Kirim"}`,
+      title: `Yangi kirim: ${doc.name || "Xomashyo"}`,
       type: "warehouse-receipt",
       module: "warehouse",
       isUnsaved: false,
       documentData: {
         id: newId,
         date: new Date().toISOString().split("T")[0],
-        supplier: doc.supplier || "Markaziy Yetkazib Beruvchi",
+        supplier: doc.supplier || "",
         material: doc.name,
         quantity: doc.reorder || 1000,
         unit: doc.unit,

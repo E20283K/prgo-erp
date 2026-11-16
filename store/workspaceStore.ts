@@ -869,7 +869,7 @@ interface WorkspaceState {
       unitPrice?: number;
       acquisitionSource?: string;
     }>;
-  }) => WarehouseMovementRecord;
+  }) => Promise<WarehouseMovementRecord | null>;
   recordClientPayment: (customer: string, amount: number, docNo?: string, note?: string) => void;
   isFinanceLoading: boolean;
   loadFinanceData: (companyCode?: string) => Promise<void>;
@@ -3933,146 +3933,93 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       };
     }),
 
-  consumeMaterialsForWorkOrder: (payload) => {
-    let resultRecord: WarehouseMovementRecord;
-    set((state) => {
-      const today = new Date().toISOString().split("T")[0];
-      const validItems = (payload.items || []).filter(
-        (m) =>
-          m.acquisitionSource !== "client" &&
-          !(m.name || "").toLowerCase().includes("mijoz")
-      );
+  consumeMaterialsForWorkOrder: async (payload) => {
+    const state = get();
+    const today = new Date().toISOString().split("T")[0];
+    const validItems = (payload.items || []).filter(
+      (m) =>
+        m.acquisitionSource !== "client" &&
+        !(m.name || "").toLowerCase().includes("mijoz")
+    );
 
-      // Sequential ISS-26-XXXX generation
-      const existingIss = state.warehouseMovements.filter((m) =>
-        m.id.startsWith("ISS-26-")
-      );
-      let maxNum = 0;
-      for (const m of existingIss) {
-        const parts = m.id.split("-");
-        const n = parseInt(parts[2], 10);
-        if (!isNaN(n) && n > maxNum) maxNum = n;
-      }
-      const nextNum = maxNum > 0 ? maxNum + 1 : 1001 + existingIss.length;
-      const issueNumber = `ISS-26-${String(nextNum).padStart(4, "0")}`;
-
-      // Update warehouse stock
-      const updatedStock = state.warehouseStock.map((stock) => {
-        const item = validItems.find((m) => {
-          const skuMatch =
-            (m.sku && m.sku.toLowerCase() === stock.sku.toLowerCase()) ||
-            (m.id && m.id.toLowerCase() === stock.sku.toLowerCase());
-          if (skuMatch) return true;
-          const nameMatch =
-            m.name &&
-            stock.name &&
-            (m.name.toLowerCase().includes(stock.name.toLowerCase()) ||
-              stock.name.toLowerCase().includes(m.name.toLowerCase()));
-          return nameMatch;
-        });
-
-        if (!item) return stock;
-        const actualQty = Number(item.actualQty) || Number(item.planQty) || 0;
-        const planQty = Number(item.planQty) || actualQty;
-        const newStockLevel = Math.max(0, stock.stockLevel - actualQty);
-        const newReserved = Math.max(0, stock.reserved - planQty);
-        const newAvailable = Math.max(0, newStockLevel - newReserved);
-        const newStatus: WarehouseStockRecord["status"] =
-          newAvailable <= stock.reorder * 0.5
-            ? "Critical"
-            : newAvailable <= stock.reorder
-            ? "Low Stock"
-            : "In Stock";
-        return {
-          ...stock,
-          stockLevel: newStockLevel,
-          reserved: newReserved,
-          available: newAvailable,
-          status: newStatus,
-        };
-      });
-
-      const lineItems: MovementLineItem[] = validItems.map((item, idx) => ({
-        id: `line-${Date.now()}-${idx}`,
-        sku: item.sku || item.id || `MAT-${String(idx + 1).padStart(4, "0")}`,
-        name: item.name,
-        category: item.category,
-        grammage: item.grammage,
-        sheetFormat: item.sheetFormat,
-        quantity: Number(item.actualQty) || Number(item.planQty) || 0,
-        receivedQty: Number(item.actualQty) || Number(item.planQty) || 0,
-        unit: item.unit || "birlik",
-        notes: item.wasteQty ? `Texnologik chiqindi: +${item.wasteQty} ${item.unit}` : undefined,
-      }));
-
-      const totalQty = lineItems.reduce((sum, l) => sum + l.quantity, 0);
-
-      resultRecord = {
-        id: issueNumber,
-        date: today,
-        material: lineItems[0]?.name || "Ishlab chiqarish materiallari",
-        materialSku: lineItems[0]?.sku,
-        sheetFormat: lineItems[0]?.sheetFormat,
-        quantity: totalQty,
-        receivedQty: totalQty,
-        unit: lineItems[0]?.unit || "birlik",
-        from: (() => {
-          // API qatorlarida locationName, eski lokal yozuvlarda location bo'ladi
-          const src: any = state.warehouseStock.find((st) =>
-            validItems.some((m) => m.sku && m.sku.toLowerCase() === st.sku.toLowerCase())
-          );
-          return src?.locationName || src?.location || "Xomashyo ombori";
-        })(),
-        to: payload.pressMachine || "Ishlab chiqarish sexi",
-        reason:
-          payload.reason ||
-          `Ishlab chiqarishga sarf (Spisanie) — ${payload.orderNumber || payload.workOrderId}`,
-        status: "Completed",
-        operator: payload.operator || "Smena boshlig'i",
-        movementType: "ProductionIssue",
-        pressMachine: payload.pressMachine,
-        items: lineItems,
-        workOrderId: payload.workOrderId,
-      };
-
-      const notif = {
-        id: `notif-${Date.now()}`,
-        title: `Xomashyo hisobdan chiqarildi (${issueNumber})`,
-        description: `${payload.workOrderId} buyurtmasi bo'yicha ${lineItems.length} ta xomashyo ombordan to'liq sarflandi.`,
-        severity: "info" as const,
-        timestamp: Date.now(),
-        read: false,
-        link: { module: "warehouse", subModule: "stock-balance" },
-      };
-
-      return {
-        warehouseStock: updatedStock,
-        warehouseMovements: [resultRecord, ...state.warehouseMovements],
-        notifications: [notif, ...state.notifications],
-      };
+    // Har bir qator katalogdagi aniq SKU ga bog'lanishi shart (nomi bo'yicha faqat to'liq moslik)
+    const resolved = validItems.map((item) => {
+      const name = (item.name || "").trim().toLowerCase();
+      const stock =
+        state.warehouseStock.find((st) => item.sku && st.sku.toLowerCase() === item.sku.toLowerCase()) ||
+        state.warehouseStock.find((st) => name && st.name.trim().toLowerCase() === name);
+      return { item, stock };
     });
-
-    // Asynchronous backend persistence
-    if (typeof window !== "undefined") {
-      // Raqamni server beradi (ISSUE-NEW-* — qoralama belgisi); xato bo'lsa optimistik qoldiq qayta yuklanadi
-      fetch("/api/v1/warehouse/movements", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...resultRecord!, id: `ISSUE-NEW-${Date.now()}`, movementNumber: undefined }),
-      })
-        .then(async (res) => {
-          if (!res.ok) await notifyWarehouseSaveError(res, "Xomashyo sarfini omborda o'tkazib bo'lmadi");
-        })
-        .catch((err) => {
-          console.warn("Async warehouse movement persist warning:", err);
-        })
-        .finally(() => {
-          get().loadWarehouseMovements();
-          get().loadWarehouseStock();
-        });
+    const unmatched = resolved.filter((r) => !r.stock);
+    if (unmatched.length > 0) {
+      toast.add({
+        title: "Xomashyo katalogda topilmadi",
+        description: unmatched.map((r) => r.item.name || r.item.sku || "?").join(", "),
+        type: "error",
+      });
+      return null;
     }
 
-    return resultRecord!;
+    const locations = Array.from(
+      new Set(resolved.map((r) => String((r.stock as any)?.locationName || r.stock?.location || "").trim()))
+    );
+    if (locations.length !== 1 || !locations[0]) {
+      toast.add({
+        title: "Xomashyo sarfini o'tkazib bo'lmadi",
+        description: "Materiallar bitta omborda bo'lishi kerak. Ombor bo'yicha alohida sexga berish hujjatini rasmiylashtiring.",
+        type: "error",
+      });
+      return null;
+    }
+
+    const lineItems: MovementLineItem[] = resolved.map(({ item, stock }, idx) => ({
+      id: `line-${Date.now()}-${idx}`,
+      sku: stock!.sku,
+      name: stock!.name,
+      category: item.category || stock!.category,
+      grammage: item.grammage,
+      sheetFormat: item.sheetFormat || stock!.sheetFormat,
+      quantity: Number(item.actualQty) || Number(item.planQty) || 0,
+      receivedQty: Number(item.actualQty) || Number(item.planQty) || 0,
+      unit: item.unit || stock!.unit || "sheets",
+      notes: item.wasteQty ? `Texnologik chiqindi: +${item.wasteQty} ${item.unit}` : undefined,
+    }));
+    const totalQty = lineItems.reduce((sum, l) => sum + l.quantity, 0);
+
+    const draft: WarehouseMovementRecord = {
+      id: "",
+      date: today,
+      material: lineItems.map((l) => l.name).join(", "),
+      materialSku: lineItems[0]?.sku,
+      sheetFormat: lineItems[0]?.sheetFormat,
+      quantity: totalQty,
+      receivedQty: totalQty,
+      unit: lineItems[0]?.unit || "sheets",
+      from: locations[0],
+      to: payload.pressMachine || "Sex",
+      reason:
+        payload.reason ||
+        `Ishlab chiqarishga sarf (Spisanie) — ${payload.orderNumber || payload.workOrderId}`,
+      status: "Completed",
+      operator: payload.operator || "",
+      movementType: "ProductionIssue",
+      pressMachine: payload.pressMachine,
+      items: lineItems,
+      workOrderId: payload.workOrderId,
+    };
+
+    // Raqamni va qoldiq yechilishini faqat server beradi; xato bo'lsa hech narsa o'zgarmaydi
+    const res = await get().upsertWarehouseMovementAsync({ ...draft, movementNumber: "" });
+    if (!res || !res.movementNumber) return null;
+
+    const issueNumber: string = res.movementNumber;
+    get().addNotification({
+      title: `Xomashyo hisobdan chiqarildi (${issueNumber})`,
+      description: `${payload.workOrderId} buyurtmasi bo'yicha ${lineItems.length} ta xomashyo ombordan sarflandi.`,
+      severity: "info",
+      link: { module: "warehouse", subModule: "stock-balance" },
+    } as any);
+    return { ...draft, id: issueNumber };
   },
 
   recordClientPayment: (customer, amount, docNo, note) =>

@@ -50,15 +50,15 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
   }, [warehouseStock]);
 
   const [selectedParentSku, setSelectedParentSku] = useState<string>(
-    paperSubstrates[0]?.sku || "MAT-1010"
+    paperSubstrates[0]?.sku || ""
   );
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<string>(
-    productionQueue[0]?.id || "WOOF-26-0351"
+    productionQueue[0]?.id || "WO-DIRECT"
   );
-  const [cutDimensions, setCutDimensions] = useState<string>("470×700");
-  const [quantity, setQuantity] = useState<string>("850");
+  const [cutDimensions, setCutDimensions] = useState<string>("");
+  const [quantity, setQuantity] = useState<string>("");
   const [location, setLocation] = useState<string>("");
-  const [operator, setOperator] = useState<string>("D. Karimov (Ombor mudiri)");
+  const [operator, setOperator] = useState<string>("");
 
   const parentMaterial = useMemo(() => {
     return warehouseStock.find((s) => s.sku === selectedParentSku);
@@ -79,12 +79,12 @@ export function ReturnOffcutDialog({ open, onOpenChange }: ReturnOffcutDialogPro
   }, [parentMaterial, cutDimensions, valuationPercent]);
 
   const offcutSku = `${selectedParentSku}-OFF`;
-  const offcutName = `${parentMaterial?.name || "Paper Substrate"} (${cutDimensions}) [Delovoy otxod]`;
+  const offcutName = `${parentMaterial?.name || "Material"} (${cutDimensions || "—"}) [Delovoy otxod]`;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const qty = parseInt(quantity, 10);
-    if (!qty || qty <= 0 || !parentMaterial || !location.trim() || isSubmitting) return;
+    if (!qty || qty <= 0 || !parentMaterial || !location.trim() || !cutDimensions.trim() || isSubmitting) return;
 
     const unit = parentMaterial.unit || "sheets";
     const workOrderId = selectedWorkOrder && selectedWorkOrder !== "WO-DIRECT" ? selectedWorkOrder : "";

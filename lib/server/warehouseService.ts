@@ -20,8 +20,8 @@ import {
   clients,
   deliveryActs,
 } from "@/db/schema";
-import { eq, desc, and, or, sql, inArray } from "drizzle-orm";
-import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber, getNextManifestNumber } from "./numberingService";
+import { eq, desc, and, or, sql, inArray, isNull } from "drizzle-orm";
+import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber, getNextManifestNumber, lockNumbering } from "./numberingService";
 import { emitNotification } from "./notificationService";
 import { upsertDeliveryAct, cancelDeliveryAct } from "./financeService";
 import { applySalePostedEffects, reverseSalePostedEffects } from "./tradingService";
@@ -338,26 +338,37 @@ export async function getWarehouseReceipts(companyCode: string = "PRINTGOO") {
 export async function upsertWarehouseReceipt(payload: any, companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
 
-  const rawNo = (payload.receiptNumber || payload.id || "").trim();
-  const isDraft = !rawNo || rawNo.startsWith("draft-") || rawNo.startsWith("RCV-NEW-") || rawNo.startsWith("tab-") || rawNo === "NEW" || rawNo.includes("Qoralama") || rawNo.includes("Yangi");
-  const receiptNumber = isDraft ? await getNextReceiptNumber(companyCode) : rawNo;
+  const rawNo = String(payload.receiptNumber || payload.id || "").trim();
+  const isDraft = isDraftDocNumber(rawNo);
   const status = payload.status || "Draft";
-  const locationName = payload.locationName || payload.location || "Asosiy ombor";
+  const locationName = String(payload.locationName || payload.location || "").trim();
+  if (status === "Accepted" && !locationName) throw new Error("Qabul qiluvchi ombor tanlanmagan.");
 
-  const itemsList: any[] = Array.isArray(payload.items) ? payload.items : [];
-  const badSku = itemsList.find((i) => isPlaceholderSku(i?.sku));
+  const itemsList: any[] = (Array.isArray(payload.items) ? payload.items : []).map((i: any) => ({
+    ...i,
+    sku: String(i?.sku || "").trim(),
+    name: String(i?.name || "").trim(),
+  }));
+  const badSku = itemsList.find((i) => isPlaceholderSku(i.sku));
   if (badSku) {
     throw new Error(`"${badSku.name || badSku.sku}" qatori uchun material katalogdan tanlanmagan (SKU: ${badSku.sku}).`);
   }
   if (status === "Accepted") {
     if (itemsList.length === 0) throw new Error("Qabul qilish uchun kamida bitta qator bo'lishi kerak.");
-    const bad = itemsList.filter((i) => !i?.sku || !(Number(i.quantity) > 0));
+    const bad = itemsList.filter((i) => (!i.sku && !i.name) || !(Number(i.quantity) > 0));
     if (bad.length > 0) {
-      throw new Error(`Qabul qilish uchun har bir qatorda SKU va 0 dan katta miqdor bo'lishi kerak: ${bad.map((b) => b?.name || "?").join(", ")}`);
+      throw new Error(`Qabul qilish uchun har bir qatorda material va 0 dan katta miqdor bo'lishi kerak: ${bad.map((b) => b.name || "?").join(", ")}`);
     }
   }
 
   const { receiptRecord, posted } = await db.transaction(async (tx) => {
+    // Raqam tranzaksiya ichida, seriya qulfi ostida beriladi: parallel saqlashlar bir xil raqam olmaydi
+    let receiptNumber = rawNo;
+    if (isDraft) {
+      await lockNumbering(tx, companyId, "RCV");
+      receiptNumber = await getNextReceiptNumber(companyId, tx);
+    }
+
     // Hujjat qatori qulflanadi: parallel "Qabul qilish" qoldiqni ikki marta oshira olmaydi
     const [existingReceipt] = !isDraft
       ? await tx
@@ -367,6 +378,9 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
           .for("update")
           .limit(1)
       : [];
+    if (!isDraft && !existingReceipt) {
+      throw new Error(`${receiptNumber} raqamli kirim hujjati topilmadi.`);
+    }
     const wasAccepted = existingReceipt?.status === "Accepted";
     if (wasAccepted && status !== "Accepted") {
       throw new Error(`${receiptNumber} kirimi allaqachon qabul qilingan va qoldiqqa o'tkazilgan. Uni qoralamaga qaytarib bo'lmaydi.`);
@@ -398,12 +412,13 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
       receiptDate: payload.receiptDate || payload.date ? new Date(payload.receiptDate || payload.date) : new Date(),
       supplierName: payload.supplierName || payload.supplier || "Noma'lum yetkazib beruvchi",
       poNumber: payload.poNumber || null,
-      locationName,
+      locationName: locationName || null,
       status: status as any,
       receivedBy: payload.receivedBy || null,
       notes: payload.notes || null,
       totalAmount: totalAmount.toFixed(2),
-      currency: payload.currency || "UZS",
+      // Xomashyo qatorlari narxi USD da kiritiladi (unitPriceUsd); valyuta aniq berilmasa shunga qarab
+      currency: payload.currency || (itemsList.some((i) => i.unitPriceUsd !== undefined) ? "USD" : "UZS"),
       updatedAt: new Date(),
     };
 
@@ -419,13 +434,15 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
           .returning();
 
     const shouldPostStock = status === "Accepted";
-    if (itemsList.length > 0) {
-      await tx.delete(warehouseReceiptItems).where(eq(warehouseReceiptItems.receiptId, record.id));
-
+    // Qoralamada qatorlar o'chirilgan bo'lsa ham eski qatorlar qolib ketmasin
+    await tx.delete(warehouseReceiptItems).where(eq(warehouseReceiptItems.receiptId, record.id));
+    // SKU siz yangi material: tasdiqlashda nomi bo'yicha mavjud kartaga bog'lanadi yoki MAT-XXXX beriladi
+    const resolveSku = shouldPostStock ? await createReceiptSkuResolver(tx, companyId) : null;
+    {
       for (const item of itemsList) {
         const qty = Number(item.quantity) || 0;
         const unitPrice = Number(item.unitPrice || item.unitPriceUsd) || 0;
-        const sku = item.sku || `SKU-${Date.now().toString().slice(-4)}`;
+        const sku = item.sku || (resolveSku ? await resolveSku(item.name) : "");
 
         await tx.insert(warehouseReceiptItems).values({
           receiptId: record.id,
@@ -472,17 +489,17 @@ export async function upsertWarehouseReceipt(payload: any, companyCode: string =
     try {
       await emitNotification(
         {
-          dedupKey: `receipt-posted:${receiptNumber}`,
+          dedupKey: `receipt-posted:${receiptRecord.receiptNumber}`,
           severity: "info",
           category: "warehouse",
           eventType: "stock_receipt:posted",
-          entityCode: receiptNumber,
-          title: `Ombor kirimi o'tkazildi: ${receiptNumber}`,
-          description: `${payload.supplierName || "Yetkazib beruvchi"} dan xomashyo kirim qilindi (${locationName}).`,
+          entityCode: receiptRecord.receiptNumber,
+          title: `Ombor kirimi o'tkazildi: ${receiptRecord.receiptNumber}`,
+          description: `${payload.supplierName || payload.supplier || "Yetkazib beruvchi"} dan xomashyo kirim qilindi (${locationName}).`,
           link: { module: "warehouse", subModule: "receipts" },
           targetTab: {
-            id: `doc-receipt-${receiptNumber}`,
-            title: `${receiptNumber} (Kirim)`,
+            id: `doc-receipt-${receiptRecord.receiptNumber}`,
+            title: `${receiptRecord.receiptNumber} (Kirim)`,
             type: "warehouse-receipt",
             module: "warehouse",
           },
@@ -1160,18 +1177,8 @@ function parseSheetArea(format?: string | null): number {
 
 export async function upsertWarehouseMovement(payload: any, companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  const rawCandidate = (payload.movementNumber || payload.id || "").trim();
-  const isDraft =
-    !rawCandidate ||
-    rawCandidate.startsWith("draft-") ||
-    rawCandidate.startsWith("new-") ||
-    rawCandidate.startsWith("tab-") ||
-    rawCandidate.startsWith("ISSUE-NEW-") ||
-    rawCandidate.startsWith("WOFF-NEW-") ||
-    rawCandidate.includes("NEW") ||
-    rawCandidate.includes("Qoralama") ||
-    rawCandidate.includes("Yangi") ||
-    rawCandidate === "NEW";
+  const rawCandidate = String(payload.movementNumber || payload.id || "").trim();
+  const isDraft = isDraftDocNumber(rawCandidate);
 
   const movementType = payload.movementType || "Transfer";
   let prefix: "ISS" | "RET" | "WOF" | "MOV" = "MOV";
@@ -1179,7 +1186,6 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
   else if (movementType === "ProductionReturn" || movementType === "CuttingReturn") prefix = "RET";
   else if (movementType === "WriteOff") prefix = "WOF";
 
-  const movementNumber = isDraft ? await getNextMovementNumber(prefix, companyCode) : rawCandidate;
   const status = payload.status || "Pending";
 
   const qty = Number(payload.quantity) || 0;
@@ -1197,12 +1203,12 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
 
   const values = {
     companyId,
-    movementNumber,
+    movementNumber: rawCandidate,
     movementDate: payload.movementDate || payload.date ? new Date(payload.movementDate || payload.date) : new Date(),
     fromWarehouseId: payload.fromWarehouseId || null,
     toWarehouseId: payload.toWarehouseId || null,
-    fromLocationName: payload.fromLocationName || payload.from || "A ombor",
-    toLocationName: payload.toLocationName || payload.to || "B ombor",
+    fromLocationName: String(payload.fromLocationName || payload.from || "").trim(),
+    toLocationName: String(payload.toLocationName || payload.to || "").trim(),
     itemId: payload.itemId || null,
     materialSku: payload.materialSku || itemsList[0]?.sku || null,
     materialName: payload.materialName || payload.material || itemsList.map((i: any) => i.name).join(", ") || "Material",
@@ -1228,11 +1234,23 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
   }
   const isOutgoing = movementType === "Transfer" || movementType === "ProductionIssue" || movementType === "WriteOff";
   const isIncoming = movementType === "Transfer" || movementType === "ProductionReturn" || movementType === "CuttingReturn";
+  if (status === "Completed") {
+    if (isOutgoing && !values.fromLocationName) throw new Error("Chiqim qilinadigan ombor tanlanmagan.");
+    if (isIncoming && !values.toLocationName) throw new Error("Qabul qiluvchi ombor tanlanmagan.");
+  }
   if (movementType === "Transfer" && status === "Completed" && values.fromLocationName === values.toLocationName) {
     throw new Error("Ko'chirishda jo'natuvchi va qabul qiluvchi ombor bir xil bo'lishi mumkin emas.");
   }
 
   const movementRecord = await db.transaction(async (tx) => {
+    // Raqam tranzaksiya ichida, seriya qulfi ostida beriladi: parallel saqlashlar bir xil raqam olmaydi
+    let movementNumber = rawCandidate;
+    if (isDraft) {
+      await lockNumbering(tx, companyId, prefix);
+      movementNumber = await getNextMovementNumber(prefix, companyId, tx);
+    }
+    values.movementNumber = movementNumber;
+
     // Hujjat qatorini qulflash: parallel "Yakunlash" qoldiqni ikki marta o'zgartira olmaydi
     const [existingMovement] = !isDraft
       ? await tx
@@ -1242,6 +1260,9 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
           .for("update")
           .limit(1)
       : [];
+    if (!isDraft && !existingMovement) {
+      throw new Error(`${movementNumber} raqamli ombor harakati topilmadi.`);
+    }
     if (existingMovement?.status === "Completed") {
       if (status !== "Completed") {
         throw new Error(`${movementNumber} harakati allaqachon yakunlangan va qoldiqqa o'tkazilgan. Uni o'zgartirib bo'lmaydi.`);
@@ -1285,6 +1306,24 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
     }
     if (movementType === "Transfer" && lines.some((l) => l.rcvQty > l.qty + 1e-9)) {
       throw new Error("Qabul qilingan miqdor jo'natilgan miqdordan ko'p bo'lishi mumkin emas.");
+    }
+    const unmatched = itemsList.filter((l) => !String(l?.sku || "").trim() && (Number(l?.quantity) > 0 || Number(l?.receivedQty) > 0));
+    if (unmatched.length > 0) {
+      throw new Error(`Qatorda SKU yo'q (katalogdan tanlanmagan): ${unmatched.map((l) => l?.name || "?").join(", ")}`);
+    }
+
+    // Sexdan qaytarish va otxod faqat katalogdagi materialga; qaytarish sexga berilganidan oshmaydi
+    if (movementType === "ProductionReturn" || movementType === "CuttingReturn") {
+      await assertSkusInCatalog(tx, companyId, lines.map((l) => l.sku.replace(/-OFF$/i, "")));
+    }
+    if (movementType === "ProductionReturn") {
+      await assertReturnWithinIssued(
+        tx,
+        companyId,
+        values.workOrderId,
+        movementNumber,
+        sumBySku(lines, (l) => l.rcvQty)
+      );
     }
 
     // Chiqim tomonida bo'sh qoldiq (stock - reserved) yetarliligini oldindan tekshirish
@@ -1430,7 +1469,7 @@ export async function upsertInventoryCount(payload: any, companyCode: string = "
   const rawCount = String(payload.countNumber || payload.id || "").trim();
   const isDraftCount =
     !rawCount || /^(draft-|new-|tab-|IC-NEW)/i.test(rawCount) || rawCount.includes("NEW") || rawCount.includes("Yangi");
-  const countNumber = isDraftCount ? await getNextInventoryCountNumber(companyCode) : rawCount;
+  let countNumber = rawCount;
 
   const systemQty = Number(payload.systemQty) || 0;
   const actualQty = Number(payload.actualQty) || 0;
@@ -1467,6 +1506,12 @@ export async function upsertInventoryCount(payload: any, companyCode: string = "
   };
 
   return db.transaction(async (tx) => {
+    // Raqam tranzaksiya ichida, seriya qulfi ostida beriladi
+    if (isDraftCount) {
+      await lockNumbering(tx, companyId, "INV");
+      countNumber = await getNextInventoryCountNumber(companyId, tx);
+      values.countNumber = countNumber;
+    }
     const [existingCount] = !isDraftCount
       ? await tx
           .select()
@@ -1693,6 +1738,126 @@ export async function upsertFinishedGood(payload: any, companyCode: string = "PR
 
 /** Vaqtinchalik UI identifikatorlari (tab-*, draft-*) SKU sifatida registrga tushmasligi kerak */
 const isPlaceholderSku = (sku: unknown) => /^(tab-|draft-|new-)/i.test(String(sku || ""));
+
+/**
+ * Klient hali raqam olmagan hujjatni qanday belgilaydi: bo'sh, `draft-…`, `tab-…`, `RCV-NEW-…`, "Yangi".
+ * Bunday hujjatga raqamni faqat server beradi.
+ */
+function isDraftDocNumber(raw: string): boolean {
+  const v = (raw || "").trim();
+  return (
+    !v ||
+    /^(draft-|new-|tab-)/i.test(v) ||
+    /-NEW(-|$)/i.test(v) ||
+    v.toUpperCase() === "NEW" ||
+    v.includes("Qoralama") ||
+    v.includes("Yangi")
+  );
+}
+
+/**
+ * Kirimda SKU siz kelgan yangi material uchun: nomi bo'yicha mavjud kartaga bog'laydi,
+ * topilmasa navbatdagi MAT-XXXX ni beradi. "MAT" seriyasi tranzaksiya oxirigacha qulflanadi.
+ */
+async function createReceiptSkuResolver(tx: DbExec, companyId: string) {
+  await lockNumbering(tx, companyId, "MAT");
+  const rows = await tx
+    .select({ sku: warehouseStockBalances.sku, name: warehouseStockBalances.name })
+    .from(warehouseStockBalances)
+    .where(eq(warehouseStockBalances.companyId, companyId));
+  const byName = new Map<string, string>();
+  let maxNum = 0;
+  for (const r of rows) {
+    if (r.name && !byName.has(r.name.trim().toLowerCase())) byName.set(r.name.trim().toLowerCase(), r.sku);
+    const m = (r.sku || "").trim().match(/^MAT-(\d+)$/i);
+    if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10) || 0);
+  }
+  return async (name: string): Promise<string> => {
+    const key = (name || "").trim().toLowerCase();
+    if (!key) throw new Error("Qatorda material nomi ham, SKU ham ko'rsatilmagan.");
+    const found = byName.get(key);
+    if (found) return found;
+    maxNum += 1;
+    const sku = `MAT-${String(maxNum).padStart(4, "0")}`;
+    byName.set(key, sku);
+    return sku;
+  };
+}
+
+/** Kirim turidagi harakatlar (sexdan qaytarish, otxod) faqat katalogda bor materialga yoziladi. */
+async function assertSkusInCatalog(exec: DbExec, companyId: string, skus: string[]) {
+  const unique = Array.from(new Set(skus.filter(Boolean)));
+  if (unique.length === 0) return;
+  const rows = await exec
+    .select({ sku: warehouseStockBalances.sku })
+    .from(warehouseStockBalances)
+    .where(and(eq(warehouseStockBalances.companyId, companyId), inArray(warehouseStockBalances.sku, unique)));
+  const known = new Set(rows.map((r) => r.sku));
+  const missing = unique.filter((s) => !known.has(s));
+  if (missing.length > 0) {
+    throw new Error(`Katalogda yo'q material(lar): ${missing.join(", ")}. Avval xomashyo pasportini oching yoki kirim qiling.`);
+  }
+}
+
+/**
+ * Sexdan qaytariladigan miqdor shu buyurtma bo'yicha sexga berilgan (va hali qaytarilmagan)
+ * miqdordan oshmasligi kerak.
+ */
+async function assertReturnWithinIssued(
+  exec: DbExec,
+  companyId: string,
+  workOrderId: string | null,
+  excludeMovementNumber: string,
+  required: Map<string, number>
+) {
+  const rows = await exec
+    .select()
+    .from(warehouseMovements)
+    .where(
+      and(
+        eq(warehouseMovements.companyId, companyId),
+        eq(warehouseMovements.status, "Completed"),
+        workOrderId ? eq(warehouseMovements.workOrderId, workOrderId) : isNull(warehouseMovements.workOrderId)
+      )
+    );
+  const issued = new Map<string, number>();
+  const returned = new Map<string, number>();
+  for (const r of rows) {
+    if (r.movementNumber === excludeMovementNumber) continue;
+    let type = "";
+    let items: any[] = [];
+    try {
+      const meta = r.reason && r.reason.startsWith("{") ? JSON.parse(r.reason) : null;
+      type = meta?.movementType || "";
+      items = Array.isArray(meta?.items) ? meta.items : [];
+    } catch (_) {}
+    if (!type) type = r.movementNumber.startsWith("ISS-") ? "ProductionIssue" : r.movementNumber.startsWith("RET-") ? "ProductionReturn" : "";
+    if (type !== "ProductionIssue" && type !== "ProductionReturn") continue;
+    if (items.length === 0 && r.materialSku) {
+      items = [{ sku: r.materialSku, quantity: r.quantity, receivedQty: r.receivedQty }];
+    }
+    for (const it of items) {
+      const sku = String(it?.sku || "");
+      if (!sku) continue;
+      if (type === "ProductionIssue") {
+        issued.set(sku, (issued.get(sku) || 0) + (Number(it.quantity) || 0));
+      } else {
+        const q = it.receivedQty !== undefined && it.receivedQty !== "" ? Number(it.receivedQty) : Number(it.quantity);
+        returned.set(sku, (returned.get(sku) || 0) + (Number(q) || 0));
+      }
+    }
+  }
+  const problems: string[] = [];
+  for (const [sku, qty] of required) {
+    const left = (issued.get(sku) || 0) - (returned.get(sku) || 0);
+    if (qty > left + 1e-9) problems.push(`${sku}: qaytarilmoqda ${fmtQty(qty)}, sexda ${fmtQty(Math.max(0, left))}`);
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `Qaytarish miqdori ${workOrderId ? `${workOrderId} buyurtmasi bo'yicha ` : ""}sexga berilganidan ko'p. ${problems.join("; ")}`
+    );
+  }
+}
 
 const fmtQty = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 3 });
 

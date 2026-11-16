@@ -100,17 +100,17 @@ export function WarehouseMovementDialog({
       });
     } else {
       setFormData({
-        id: `MOV-${Date.now().toString().slice(-4)}`,
+        id: `draft-mov-${Date.now()}`,
         date: new Date().toISOString().split("T")[0],
         from: "",
         to: "",
         material: "",
         materialSku: "",
-        quantity: 100,
+        quantity: 0,
         unit: "sheets",
         movementType: "Transfer",
         reason: "",
-        operator: employees[0]?.fullName || "Ombor mudiri",
+        operator: employees[0]?.fullName || "",
         status: "Pending",
       });
     }

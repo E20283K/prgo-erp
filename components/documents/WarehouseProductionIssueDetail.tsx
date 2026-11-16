@@ -95,7 +95,6 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
     loadMachines,
     employees,
     loadEmployees,
-    upsertWarehouseStock,
     upsertWarehouseMovementAsync,
     toggleReadinessCheck,
     replaceTabId,
@@ -117,11 +116,11 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
       initialItems = [
         {
           id: `item-${Date.now()}`,
-          sku: d.materialSku || `MAT-${Date.now().toString().slice(-4)}`,
-          name: d.material || d.materialName || "Material",
+          sku: d.materialSku || "",
+          name: d.material || d.materialName || "",
           sheetFormat: d.sheetFormat || "",
-          quantity: Number(d.quantity) || 100,
-          receivedQty: Number(d.receivedQty) || Number(d.quantity) || 100,
+          quantity: Number(d.quantity) || 0,
+          receivedQty: Number(d.receivedQty) || Number(d.quantity) || 0,
           unit: d.unit || "sheets",
           notes: d.reason || "",
         },
@@ -140,10 +139,16 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
       id: d.id || tab.id,
       date: d.date || d.movementDate || new Date().toISOString().split("T")[0],
       operationType: initialOpType,
-      warehouse: d.warehouse || d.from || d.fromLocationName || (warehousesList[0]?.name || "Asosiy ombor"),
+      warehouse:
+        d.warehouse ||
+        (d.movementType === "ProductionReturn" || d.movementType === "CuttingReturn"
+          ? d.to || d.toLocationName
+          : d.from || d.fromLocationName) ||
+        warehousesList[0]?.name ||
+        "",
       workOrderId: d.workOrderId || "",
       pressMachine: d.pressMachine || "",
-      operator: d.operator || (employees[0]?.fullName || "Ombor mudiri"),
+      operator: d.operator || employees[0]?.fullName || "",
       reason: d.reason || "",
       status: d.status === "Completed" ? "Completed" : "Pending",
       items: initialItems,
@@ -215,7 +220,7 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
   const [isStockPickerOpen, setIsStockPickerOpen] = useState(false);
   const [stockSearch, setStockSearch] = useState("");
   const [selectedStockSku, setSelectedStockSku] = useState<string>("");
-  const [pickerQuantity, setPickerQuantity] = useState<number>(100);
+  const [pickerQuantity, setPickerQuantity] = useState<number>(0);
 
   const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
   const [lineFormData, setLineFormData] = useState<MovementLineItem | null>(null);
@@ -238,21 +243,27 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
     [isLocked, setTabUnsaved, tab.id]
   );
 
-  // Buyurtmaga biriktirilgan barcha xomashyolarni (qog'oz, plyonka, lak/bo'yoq) aniqlash
+  // Buyurtmaga biriktirilgan xomashyolar: faqat buyurtma texnologik xaritasidagi miqdorlar va katalogdagi SKU.
+  // Katalogda topilmagan material SKU siz qoladi — tasdiqlashda foydalanuvchi uni katalogdan tanlaydi.
   const getMaterialsForWorkOrder = useCallback((wo: any): MovementLineItem[] => {
+    const findStock = (sku?: string, name?: string) => {
+      const n = (name || "").trim().toLowerCase();
+      return (
+        (sku ? warehouseStock.find((s) => s.sku === sku) : undefined) ||
+        (n ? warehouseStock.find((s) => s.name.trim().toLowerCase() === n) : undefined)
+      );
+    };
     const items: MovementLineItem[] = [];
 
-    // 1. Agar wo.materials massivida aniq materiallar ro'yxati berilgan bo'lsa
     if (Array.isArray(wo.materials) && wo.materials.length > 0) {
       wo.materials.forEach((mat: any, idx: number) => {
-        const matched = warehouseStock.find(
-          (s) => (mat.sku && s.sku === mat.sku) || s.name.toLowerCase() === (mat.name || "").toLowerCase()
-        );
-        const qty = Number(mat.quantity) || 100;
+        if (mat.acquisitionSource === "client") return;
+        const matched = findStock(mat.sku, mat.name);
+        const qty = Number(mat.actualQty) || Number(mat.planQty) || Number(mat.quantity) || 0;
         items.push({
           id: `item-${Date.now()}-${idx}`,
-          sku: mat.sku || matched?.sku || `MAT-${wo.id.slice(-4)}-${idx + 1}`,
-          name: mat.name || matched?.name || "Xomashyo",
+          sku: matched?.sku || mat.sku || "",
+          name: matched?.name || mat.name || "",
           category: matched?.category || mat.category || "Paper & Board",
           sheetFormat: mat.sheetFormat || matched?.sheetFormat || "",
           grammage: mat.grammage || matched?.grammage || 0,
@@ -262,91 +273,26 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
           notes: `${wo.id} texnologik xaritasi bo'yicha`,
         });
       });
+      return items;
     }
 
-    // 2. Asosiy qog'oz / Substrat (PaperStock)
-    const plannedQty = Number(wo.plannedSheets) || Number(wo.quantity) || 1000;
-    const hasPaper = items.some((i) => i.category === "Paper & Board" || i.unit === "sheets" || i.unit === "rolls");
-
-    if (!hasPaper) {
-      const matchedStock =
-        warehouseStock.find(
-          (s) =>
-            (wo.paperStock && s.name.toLowerCase().includes(wo.paperStock.toLowerCase())) ||
-            (wo.product && s.name.toLowerCase().includes(wo.product.toLowerCase())) ||
-            (wo.product && wo.product.toLowerCase().includes(s.name.toLowerCase()))
-        ) || warehouseStock.find((s) => s.category === "Paper & Board");
-
+    // Texnologik xarita bo'lmasa — faqat asosiy qog'oz, rejadagi list soni bilan
+    const plannedQty = Number(wo.plannedSheets) || 0;
+    const paper = findStock(undefined, wo.paperStock);
+    if (wo.paperStock || paper) {
       items.push({
         id: `item-${Date.now()}-paper`,
-        sku: matchedStock?.sku || `PAP-${wo.id.replace(/\D/g, "").slice(-4) || "REQ"}`,
-        name: matchedStock?.name || wo.paperStock || `${wo.product} Qog'ozi`,
-        category: matchedStock?.category || "Paper & Board",
-        sheetFormat: matchedStock?.sheetFormat || "700×1000",
-        grammage: matchedStock?.grammage || wo.grammage || wo.paperDensity || 250,
+        sku: paper?.sku || "",
+        name: paper?.name || wo.paperStock || "",
+        category: paper?.category || "Paper & Board",
+        sheetFormat: paper?.sheetFormat || "",
+        grammage: paper?.grammage || 0,
         quantity: plannedQty,
         receivedQty: plannedQty,
-        unit: matchedStock?.unit || "sheets",
+        unit: paper?.unit || "sheets",
         notes: `${wo.id} rejalashtirilgan xomashyosi`,
       });
     }
-
-    // 3. Agar Laminatsiya plyonkasi bo'lsa
-    if (
-      wo.lamination &&
-      typeof wo.lamination === "string" &&
-      !wo.lamination.toLowerCase().includes("yo'q") &&
-      !wo.lamination.toLowerCase().includes("none")
-    ) {
-      const matchedLam = warehouseStock.find(
-        (s) =>
-          s.category === "Foil & Film" ||
-          s.name.toLowerCase().includes("laminat") ||
-          s.name.toLowerCase().includes("film")
-      );
-      const lamQty = Math.ceil(plannedQty * 0.7);
-      items.push({
-        id: `item-${Date.now()}-lam`,
-        sku: matchedLam?.sku || `FLM-${wo.id.replace(/\D/g, "").slice(-3) || "LAM"}`,
-        name: matchedLam?.name || `${wo.lamination} Plyonkasi`,
-        category: "Foil & Film",
-        sheetFormat: matchedLam?.sheetFormat || "",
-        grammage: 0,
-        quantity: lamQty,
-        receivedQty: lamQty,
-        unit: matchedLam?.unit || "m²",
-        notes: `${wo.id} laminatsiya plyonkasi`,
-      });
-    }
-
-    // 4. Agar Lak / Qoplama (Coating) bo'lsa
-    if (
-      wo.coating &&
-      typeof wo.coating === "string" &&
-      !wo.coating.toLowerCase().includes("yo'q") &&
-      !wo.coating.toLowerCase().includes("none")
-    ) {
-      const matchedCoating = warehouseStock.find(
-        (s) =>
-          s.category === "Inks & Plates" ||
-          s.name.toLowerCase().includes("lak") ||
-          s.name.toLowerCase().includes("varnish")
-      );
-      const varnishKg = Math.max(1, Math.ceil(plannedQty * 0.003));
-      items.push({
-        id: `item-${Date.now()}-coat`,
-        sku: matchedCoating?.sku || `INK-LAK-${wo.id.replace(/\D/g, "").slice(-3) || "LAK"}`,
-        name: matchedCoating?.name || `${wo.coating} Laki`,
-        category: "Inks & Plates",
-        sheetFormat: "",
-        grammage: 0,
-        quantity: varnishKg,
-        receivedQty: varnishKg,
-        unit: matchedCoating?.unit || "kg",
-        notes: `${wo.id} qoplama laki`,
-      });
-    }
-
     return items;
   }, [warehouseStock]);
 
@@ -419,7 +365,7 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
     const stockItem = warehouseStock.find((s) => s.sku === selectedStockSku);
     if (!stockItem) return;
 
-    const qty = Number(pickerQuantity) || 1;
+    const qty = Number(pickerQuantity) || 0;
     const newLine: MovementLineItem = {
       id: `item-${Date.now()}-${doc.items.length}`,
       sku: stockItem.sku,
@@ -437,20 +383,20 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
     setIsStockPickerOpen(false);
     setSelectedStockSku("");
-    setPickerQuantity(100);
+    setPickerQuantity(0);
   };
 
   const handleAddEmptyLine = () => {
     if (isLocked) return;
     const newLine: MovementLineItem = {
       id: `item-${Date.now()}-${doc.items.length}`,
-      sku: `MAT-${Date.now().toString().slice(-4)}`,
+      sku: "",
       name: "",
       category: "Paper & Board",
       sheetFormat: "",
       grammage: 0,
-      quantity: 100,
-      receivedQty: 100,
+      quantity: 0,
+      receivedQty: 0,
       unit: "sheets",
       notes: "",
     };
@@ -474,10 +420,15 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
       alert("Material nomini kiritish shart!");
       return;
     }
+    // SKU bo'sh bo'lsa nomi bo'yicha katalogdan bog'lanadi
+    const byName = !lineFormData.sku?.trim()
+      ? warehouseStock.find((s) => s.name.trim().toLowerCase() === lineFormData.name.trim().toLowerCase())
+      : undefined;
     setDoc((prev) => {
       const next = [...prev.items];
       next[editingLineIndex] = {
         ...lineFormData,
+        sku: lineFormData.sku?.trim() || byName?.sku || "",
         quantity: Number(lineFormData.quantity) || 0,
         receivedQty: Number(lineFormData.receivedQty) || Number(lineFormData.quantity) || 0,
       };
@@ -506,21 +457,22 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
       ...doc,
       movementNumber: isDraft ? "" : doc.id,
       movementType: doc.operationType,
-      from: doc.warehouse,
-      to: doc.pressMachine || "Sex (Bosma mashinasi)",
+      from: doc.operationType === "ProductionIssue" ? doc.warehouse : (doc.pressMachine || "Sex"),
+      to: doc.operationType === "ProductionIssue" ? (doc.pressMachine || "Sex") : doc.warehouse,
       status: "Pending",
       quantity: doc.items.reduce((acc, i) => acc + (Number(i.quantity) || 0), 0),
       material: doc.items.map((i) => i.name).join(", ") || "Material",
     };
 
     const res: any = await upsertWarehouseMovementAsync(payload);
-    let realId = res?.movementNumber || (isDraft ? `${doc.operationType === "ProductionIssue" ? "ISS" : "RET"}-26-0001` : doc.id);
-    if (realId.startsWith("draft-") || realId.startsWith("new-") || realId.startsWith("tab-")) {
-      realId = `${doc.operationType === "ProductionIssue" ? "ISS" : "RET"}-26-0001`;
-    }
+    // Xato bo'lsa store server xabarini ko'rsatgan; hujjat o'zgarishsiz qoladi
+    if (!res?.movementNumber) return;
+    const realId: string = res.movementNumber;
 
     setDoc((prev) => ({ ...prev, id: realId }));
-    replaceTabId(tab.id, realId, `${realId}: ${doc.operationType === "ProductionIssue" ? "Sexga berish" : "Sexdan qaytarish"}`, { ...doc, id: realId });
+    if (realId !== doc.id) {
+      replaceTabId(tab.id, realId, `${realId}: ${doc.operationType === "ProductionIssue" ? "Sexga berish" : "Sexdan qaytarish"}`, { ...doc, id: realId });
+    }
     setTabUnsaved(tab.id, false);
     addNotification({
       title: "Hujjat qoralamasi saqlandi",
@@ -542,38 +494,21 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
 
     const isIssue = doc.operationType === "ProductionIssue";
 
-    // Ombor balansini yangilash
-    doc.items.forEach((line) => {
-      const qty = Number(line.quantity) || 0;
-      const targetItem = warehouseStock.find(
-        (s) => (s.sku === line.sku || s.name === line.name) && s.location === doc.warehouse
-      );
+    const noSku = doc.items.filter((l) => !l.sku?.trim());
+    if (noSku.length > 0) {
+      alert(`Quyidagi qatorlar uchun material katalogdan tanlanmagan: ${noSku.map((l) => l.name || "?").join(", ")}`);
+      return;
+    }
+    if (doc.items.some((l) => !(Number(l.quantity) > 0))) {
+      alert("Har bir qatorda miqdor 0 dan katta bo'lishi shart!");
+      return;
+    }
+    if (doc.operationType === "ProductionReturn" && !doc.workOrderId) {
+      alert("Sexdan qaytarish uchun buyurtmani tanlash shart!");
+      return;
+    }
 
-      if (isIssue) {
-        // Sexga berilganda: ombordan ayirish
-        if (targetItem) {
-          upsertWarehouseStock({
-            ...targetItem,
-            stockLevel: Math.max(0, targetItem.stockLevel - qty),
-            available: Math.max(0, targetItem.available - qty),
-          });
-        }
-      } else if (doc.operationType === "ProductionReturn") {
-        // Butun qog'oz qaytganida: omborga qayta qo'shish
-        if (targetItem) {
-          upsertWarehouseStock({
-            ...targetItem,
-            stockLevel: targetItem.stockLevel + qty,
-            available: targetItem.available + qty,
-          });
-        }
-      }
-      // CuttingReturn: the server receives the offcut into its own "-OFF" card and values it;
-      // the stock list is reloaded after the document is posted.
-    });
-
-
-
+    // Qoldiq faqat serverda, hujjat bilan bitta tranzaksiyada o'zgaradi; javobdan keyin ro'yxat qayta yuklanadi
     const payload = {
       ...doc,
       movementNumber: isDraft ? "" : doc.id,
@@ -586,10 +521,9 @@ export function WarehouseProductionIssueDetail({ tab }: { tab: DocumentTab }) {
     };
 
     const res: any = await upsertWarehouseMovementAsync(payload);
-    let realId = res?.movementNumber || (isDraft ? `${isIssue ? "ISS" : "RET"}-26-0001` : doc.id);
-    if (realId.startsWith("draft-") || realId.startsWith("new-") || realId.startsWith("tab-")) {
-      realId = `${isIssue ? "ISS" : "RET"}-26-0001`;
-    }
+    // Xato bo'lsa (masalan, qoldiq yetarli emas) store server xabarini ko'rsatgan; hujjat qoralama bo'lib qoladi
+    if (!res?.movementNumber) return;
+    const realId: string = res.movementNumber;
 
     // Buyurtma tayyorlik darvozasini yangilash (Paper ready)
     if (isIssue && doc.workOrderId) {

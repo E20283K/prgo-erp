@@ -111,14 +111,11 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
     warehouseStock,
     warehousesList,
     loadWarehouses,
-    plants,
-    fetchPlants,
     employees,
     suppliers,
     loadSuppliers,
     warehouseReceipts,
     productionQueue,
-    upsertWarehouseStock,
     upsertWarehouseReceiptAsync,
     replaceTabId,
     openTab,
@@ -138,7 +135,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
       date: d.date || new Date().toISOString().split("T")[0],
       supplier: d.supplier || "",
       poNumber: d.poNumber || "",
-      location: d.location || (warehousesList[0]?.name || "Asosiy ombor"),
+      location: d.location || warehousesList[0]?.name || "",
       receivedBy: d.receivedBy || (employees[0]?.fullName || ""),
       status: d.status === "Accepted" || d.status === "Received" || d.status === "Completed" ? "Accepted" : "Draft",
       notes: d.notes || "",
@@ -167,16 +164,13 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
     );
   }, [productionQueue, woSearch]);
 
-  // Fetch suppliers, warehouses and plants if not loaded yet
+  // Fetch suppliers and warehouses if not loaded yet
   useEffect(() => {
     if (suppliers.length === 0 && loadSuppliers) {
       loadSuppliers();
     }
     if (warehousesList.length === 0 && loadWarehouses) {
       loadWarehouses();
-    }
-    if (plants.length === 0 && fetchPlants) {
-      fetchPlants();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -193,69 +187,18 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
     warehouseStock.forEach((s) => {
       if (s.supplier) list.add(s.supplier);
     });
-    if (list.size === 0) {
-      list.add("Tashkent Paper Trade LLC");
-      list.add("Sappi Paper Mill");
-      list.add("Hubergroup Eco-Inks");
-      list.add("Avery Dennison Central Asia");
-    }
     return Array.from(list).map((name) => ({ value: name, label: name }));
   }, [suppliers, warehouseReceipts, warehouseStock]);
 
   // Employee options for ReceivedBy
-  const employeeOptions = useMemo<ComboboxOption[]>(() => {
-    if (employees && employees.length > 0) {
-      return employees.map((e) => ({
+  const employeeOptions = useMemo<ComboboxOption[]>(
+    () =>
+      (employees || []).map((e) => ({
         value: e.fullName,
-        label: `${e.fullName} (${e.position || "Xodim"})`,
-      }));
-    }
-    return [
-      { value: "Aziz Rahimov", label: "Aziz Rahimov (Bosh omborchi)" },
-      { value: "Farrux Saidov", label: "Farrux Saidov (Katta klodovshik)" },
-      { value: "Jamshid Aliyev", label: "Jamshid Aliyev (Smena ustasi)" },
-    ];
-  }, [employees]);
-
-  // Warehouse location options from plants and postgres warehouses table
-  const warehouseOptions = useMemo(() => {
-    const list: { id: string; name: string }[] = [];
-
-    // 1. From plant records (each branch/plant has its own warehouses)
-    plants.forEach((p) => {
-      if (Array.isArray(p.warehouses) && p.warehouses.length > 0) {
-        p.warehouses.forEach((w) => {
-          const displayName = plants.length > 1 ? `${p.name} — ${w.name}` : w.name;
-          list.push({
-            id: w.id || `${p.id}-${w.name}`,
-            name: displayName,
-          });
-        });
-      }
-    });
-
-    // 2. From postgres warehouses catalog
-    (warehousesList || []).forEach((wh: any) => {
-      const exists = list.some(
-        (item) => item.name.toLowerCase() === wh.name.toLowerCase() || item.id === wh.id
-      );
-      if (!exists) {
-        list.push({
-          id: wh.id || wh.name,
-          name: wh.name,
-        });
-      }
-    });
-
-    if (list.length === 0) {
-      return [
-        { id: "wh-1", name: "Asosiy xomashyo ombori" },
-        { id: "wh-2", name: "Yordamchi materiallar ombori" },
-        { id: "wh-3", name: "Tayyor mahsulotlar ombori" },
-      ];
-    }
-    return list;
-  }, [plants, warehousesList]);
+        label: e.position ? `${e.fullName} (${e.position})` : e.fullName,
+      })),
+    [employees]
+  );
 
   const totalAmountUsd = useMemo(
     () =>
@@ -451,7 +394,8 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
       nextItems[editingLineIndex] = {
         ...lineFormData,
         name: lineFormData.name.trim(),
-        sku: lineFormData.sku.trim() || `MAT-${Date.now().toString().slice(-4)}`,
+        // SKU bo'sh qolsa — yangi material: tasdiqlashda server nomi bo'yicha bog'laydi yoki MAT-XXXX beradi
+        sku: lineFormData.sku.trim(),
         quantity: Number(lineFormData.quantity) || 0,
         unitPriceUsd: Number(lineFormData.unitPriceUsd) || 0,
         grammage: Number(lineFormData.grammage) || 0,
@@ -500,7 +444,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
     const newLine: ReceiptLineItem = {
       id: `line-${Date.now()}-${nextIdx}`,
       workOrderId: "",
-      sku: `MAT-${100 + nextIdx}`,
+      sku: "",
       name: "",
       category: "Paper & Board",
       sheetFormat: "",
@@ -537,7 +481,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
         name: "",
         category: "Paper & Board",
         unit: "sheets",
-        location: doc.location || "Asosiy ombor",
+        location: doc.location || "",
         stockLevel: 0,
         available: 0,
         reserved: 0,
@@ -557,25 +501,24 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
       const q = productionQueue.find((item) => item.id === woId);
       if (!q) return;
 
-      const matchedStock = warehouseStock.find(
-        (s) =>
-          s.name.toLowerCase().includes(q.product.toLowerCase()) ||
-          q.product.toLowerCase().includes(s.name.toLowerCase()) ||
-          s.category === "Paper & Board"
-      );
+      // Faqat aniq mos keladigan material; topilmasa qator nomsiz qoladi va foydalanuvchi katalogdan tanlaydi
+      const product = (q.product || "").trim().toLowerCase();
+      const matchedStock = product
+        ? warehouseStock.find((s) => s.name.trim().toLowerCase() === product)
+        : undefined;
 
-      const neededQty = q.plannedSheets || q.quantity || 1000;
+      const neededQty = Number(q.plannedSheets) || Number(q.quantity) || 0;
       const avail = matchedStock?.available || 0;
       const deficit = Math.max(0, neededQty - avail);
 
       itemsToAdd.push({
         id: `line-${Date.now()}-${Math.random().toString().slice(-4)}`,
         workOrderId: q.id,
-        sku: matchedStock?.sku || `PAP-${q.id.replace(/\D/g, "").slice(-3)}`,
-        name: matchedStock?.name || `${q.product} Xomashyosi`,
+        sku: matchedStock?.sku || "",
+        name: matchedStock?.name || "",
         category: matchedStock?.category || "Paper & Board",
-        sheetFormat: matchedStock?.sheetFormat || "700×1000",
-        grammage: matchedStock?.grammage || 250,
+        sheetFormat: matchedStock?.sheetFormat || "",
+        grammage: matchedStock?.grammage || 0,
         quantity: deficit > 0 ? deficit : neededQty,
         unit: matchedStock?.unit || (q.unit as any) || "sheets",
         unitPriceUsd: matchedStock?.unitPriceUsd || 0,
@@ -603,17 +546,29 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  const isDraft = !doc.id || doc.id.startsWith("draft-") || doc.id.startsWith("new-") || doc.id.startsWith("RCV-NEW-");
+  const isDraft =
+    !doc.id ||
+    doc.id.startsWith("draft-") ||
+    doc.id.startsWith("new-") ||
+    doc.id.startsWith("tab-") ||
+    doc.id.startsWith("RCV-NEW-");
+
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleSaveDraft = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
     const res = await upsertWarehouseReceiptAsync({
       ...doc,
       receiptNumber: isDraft ? "" : doc.id,
       status: "Draft",
     });
-    if (res && res.receiptNumber) {
-      const realId = res.receiptNumber;
-      setDoc((prev) => ({ ...prev, id: realId }));
+    setIsSaving(false);
+    // Xato bo'lsa store server xabarini ko'rsatgan; hujjat o'zgarishsiz qoladi
+    if (!res?.receiptNumber) return;
+    const realId = res.receiptNumber;
+    setDoc((prev) => ({ ...prev, id: realId }));
+    if (realId !== doc.id) {
       replaceTabId(tab.id, realId, `${realId}: ${doc.supplier || "Kirim Hujjati"}`, { ...doc, id: realId });
     }
     setTabUnsaved(tab.id, false);
@@ -631,48 +586,30 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
       return;
     }
 
-    doc.items.forEach((line) => {
-      const existing = warehouseStock.find(
-        (s) =>
-          s.sku.toLowerCase() === line.sku.toLowerCase() ||
-          s.name.toLowerCase() === line.name.toLowerCase()
-      );
-      if (existing) {
-        upsertWarehouseStock({
-          ...existing,
-          stockLevel: existing.stockLevel + (line.quantity || 0),
-          available: existing.available + (line.quantity || 0),
-          unitPriceUsd: line.unitPriceUsd || existing.unitPriceUsd,
-          lastReceived: doc.date,
-        });
-      } else {
-        upsertWarehouseStock({
-          sku: line.sku,
-          name: line.name || "Noma'lum Xomashyo",
-          category: (line.category as any) || "Paper & Board",
-          grammage: line.grammage,
-          sheetFormat: line.sheetFormat,
-          unit: (line.unit as any) || "sheets",
-          location: doc.location,
-          stockLevel: line.quantity || 0,
-          reserved: 0,
-          available: line.quantity || 0,
-          reorder: 1000,
-          unitPriceUsd: line.unitPriceUsd || 0,
-          lastReceived: doc.date,
-          status: "In Stock",
-        });
-      }
-    });
+    if (!doc.location?.trim()) {
+      alert("Qabul qiluvchi omborni tanlash shart!");
+      return;
+    }
+    const unnamed = doc.items.filter((l) => !l.name.trim() && !l.sku.trim());
+    if (unnamed.length > 0) {
+      alert("Har bir qatorda material tanlangan bo'lishi shart!");
+      return;
+    }
+    if (isSaving) return;
 
+    // Qoldiq faqat serverda, hujjat bilan bitta tranzaksiyada oshiriladi; javobdan keyin ro'yxat qayta yuklanadi
+    setIsSaving(true);
     const res = await upsertWarehouseReceiptAsync({
       ...doc,
       receiptNumber: isDraft ? "" : doc.id,
       status: "Accepted",
     });
-    const finalId = res?.receiptNumber || doc.id;
+    setIsSaving(false);
+    // Xato bo'lsa store server xabarini ko'rsatgan; hujjat qoralama bo'lib qoladi
+    if (!res?.receiptNumber) return;
+    const finalId = res.receiptNumber;
     setDoc((prev) => ({ ...prev, id: finalId, status: "Accepted" }));
-    if (isDraft && res?.receiptNumber) {
+    if (finalId !== doc.id) {
       replaceTabId(tab.id, finalId, `${finalId}: ${doc.supplier || "Kirim Hujjati"}`, { ...doc, id: finalId, status: "Accepted" });
     }
     setTabUnsaved(tab.id, false);
@@ -736,6 +673,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
                 size="sm"
                 variant="outline"
                 onClick={handleSaveDraft}
+                disabled={isSaving}
                 className="h-7 px-2.5 text-xs gap-1.5"
               >
                 <Save className="w-3.5 h-3.5" />
@@ -744,6 +682,7 @@ export function WarehouseReceiptDetail({ tab }: { tab: DocumentTab }) {
               <Button
                 size="sm"
                 onClick={handlePostReceipt}
+                disabled={isSaving}
                 className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 font-medium shadow-none cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />

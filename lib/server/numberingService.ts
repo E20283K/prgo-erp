@@ -85,13 +85,14 @@ export async function getNextShipmentNumber(
  * Ombor Kirimi (Receipt) uchun navbatdagi unikal raqam: RCV-26-XXXX
  */
 export async function getNextReceiptNumber(
-  companyCode: string = "PRINTGOO"
+  companyCode: string = "PRINTGOO",
+  exec: DbExec = db
 ): Promise<string> {
   const companyId = await getCompanyIdByCode(companyCode);
   const yearSuffix = getCurrentYearSuffix();
   const searchPattern = `RCV-${yearSuffix}-%`;
 
-  const rows = await db
+  const rows = await exec
     .select({ num: warehouseReceipts.receiptNumber })
     .from(warehouseReceipts)
     .where(
@@ -184,10 +185,11 @@ export async function getNextCustomerCode(
  */
 export async function getNextMaterialSku(
   companyCode: string = "PRINTGOO",
-  padLength: number = 4
+  padLength: number = 4,
+  exec: DbExec = db
 ): Promise<string> {
   const companyId = await getCompanyIdByCode(companyCode);
-  const rows = await db
+  const rows = await exec
     .select({ sku: warehouseStockBalances.sku })
     .from(warehouseStockBalances)
     .where(
@@ -222,13 +224,14 @@ export async function getNextMaterialSku(
  */
 export async function getNextMovementNumber(
   prefix: "ISS" | "RET" | "WOF" | "MOV" = "MOV",
-  companyCode: string = "PRINTGOO"
+  companyCode: string = "PRINTGOO",
+  exec: DbExec = db
 ): Promise<string> {
   const companyId = await getCompanyIdByCode(companyCode);
   const yearSuffix = getCurrentYearSuffix();
   const searchPattern = `${prefix}-${yearSuffix}-%`;
 
-  const rows = await db
+  const rows = await exec
     .select({ num: warehouseMovements.movementNumber })
     .from(warehouseMovements)
     .where(
@@ -245,13 +248,14 @@ export async function getNextMovementNumber(
  * Ombor Inventarizatsiyasi uchun rasmiy tartib raqami: INV-26-XXXX
  */
 export async function getNextInventoryCountNumber(
-  companyCode: string = "PRINTGOO"
+  companyCode: string = "PRINTGOO",
+  exec: DbExec = db
 ): Promise<string> {
   const companyId = await getCompanyIdByCode(companyCode);
   const yearSuffix = getCurrentYearSuffix();
   const searchPattern = `INV-${yearSuffix}-%`;
 
-  const rows = await db
+  const rows = await exec
     .select({ num: warehouseInventoryCounts.countNumber })
     .from(warehouseInventoryCounts)
     .where(
