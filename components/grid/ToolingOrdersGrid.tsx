@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { useAskDialog } from "@/components/documents/work-order/dialogs/AskDialog";
 import {
   Dialog,
   DialogContent,
@@ -98,6 +99,7 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
 };
 
 export function ToolingOrdersGrid() {
+  const { ask, dialog: askDialog } = useAskDialog();
   const {
     theme,
     suppliers,
@@ -1206,10 +1208,13 @@ export function ToolingOrdersGrid() {
 
   // Buyurtmani bazadan butunlay o'chirish
   const handleDeleteOrder = async (order: ToolingOrderRecord) => {
-    const ok = window.confirm(
-      `${order.orderNo} buyurtmasi bazadan butunlay o'chiriladi. Bu amalni qaytarib bo'lmaydi. Davom etasizmi?`
-    );
-    if (!ok) return;
+    const ok = await ask({
+      title: `${order.orderNo} o'chirilsinmi?`,
+      message: "Buyurtma bazadan butunlay o'chiriladi. Bu amalni qaytarib bo'lmaydi.",
+      confirmLabel: "O'chirish",
+      destructive: true,
+    });
+    if (ok === null) return;
     try {
       const res = await fetch(`/api/v1/production/tooling-orders/${order.id}`, { method: "DELETE" });
       const json = await res.json();
@@ -1225,11 +1230,11 @@ export function ToolingOrdersGrid() {
         }
         fetchOrders();
       } else {
-        alert(json.error || "O'chirishda xatolik");
+        addNotification({ title: "O'chirishda xatolik", description: json.error || order.orderNo, severity: "error" });
       }
     } catch (err) {
       console.error("Delete tooling order error:", err);
-      alert("Buyurtmani o'chirishda xatolik yuz berdi");
+      addNotification({ title: "O'chirishda xatolik", description: order.orderNo, severity: "error" });
     }
   };
 
@@ -1297,6 +1302,7 @@ export function ToolingOrdersGrid() {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
+      {askDialog}
       {/* 1. Industrial KPI Metric Ribbon */}
       <div className="border-b border-border bg-card px-3 py-2 flex flex-wrap items-center gap-2 justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -1396,6 +1402,20 @@ export function ToolingOrdersGrid() {
             >
               <CheckCircle2 className="size-3.5" />
               <span>Tayyor deb belgilash</span>
+            </Button>
+          )}
+
+          {viewMode === "orders" && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5 px-2.5 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => selectedOrder && handleDeleteOrder(selectedOrder)}
+              disabled={!selectedOrder}
+              title={selectedOrder ? selectedOrder.orderNo : undefined}
+            >
+              <Trash2 className="size-3.5" />
+              <span>O'chirish</span>
             </Button>
           )}
 
