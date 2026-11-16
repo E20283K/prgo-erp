@@ -30,44 +30,93 @@ export interface MaterialDeficitRow {
   status: "Deficit";
 }
 
-/** Ishdagi buyurtmalar uchun xomashyo yetishmovchiligi ("Requirements" reyestri). */
+const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+function isClientMaterial(m: any): boolean {
+  return m?.acquisitionSource === "client" || m?.sourceType === "client" || norm(m?.supplier).includes("mijoz");
+}
+
+function isProcurementMaterial(m: any): boolean {
+  return m?.acquisitionSource === "procurement" || m?.sourceType === "procurement" || m?.availability === "On Order";
+}
+
+/** Katalogdagi pozitsiya: avval SKU, so'ng to'liq nom bo'yicha (sarf bilan bir xil qoida). */
+function matchStock(m: any, stock: WarehouseStockRecord[]): WarehouseStockRecord | undefined {
+  const sku = norm(m?.sku || m?.id);
+  const name = norm(m?.name);
+  return (
+    (sku ? stock.find((s) => norm(s.sku) === sku) : undefined) ||
+    (name ? stock.find((s) => norm(s.name) === name) : undefined)
+  );
+}
+
+function isMaterialsConsumed(q: ProductionQueueItem): boolean {
+  const any = q as any;
+  return !!(any.materialsConsumed || any.dimensions?.materialsConsumed || any.materialIssueDocNo);
+}
+
+/**
+ * Ishdagi buyurtmalar BOM'idan xomashyo ehtiyoji ("Requirements" reyestri).
+ * - "Xaridga" qatorlari: katalogda yo'q bo'lsa to'liq miqdori, bor bo'lsa (kirim qilingan) qoldiqdan oshgan qismi.
+ * - "Ombordan" qatorlari: katalogdagi bo'sh qoldiqdan oshgan qismi. Qoldiq buyurtmalar
+ *   orasida muddat tartibida taqsimlanadi, bir qoldiq ikki marta hisoblanmaydi.
+ * - Mijoz xomashyosi, yakunlangan/bekor qilingan va xomashyosi sarflangan buyurtmalar o'tkazib yuboriladi.
+ */
 export function computeMaterialDeficits(
   queue: ProductionQueueItem[],
   stock: WarehouseStockRecord[]
 ): MaterialDeficitRow[] {
   const defs: MaterialDeficitRow[] = [];
-  queue.forEach((q) => {
-    if (q.stage === "Completed") return;
-    const product = (q.product || "").toLowerCase();
+  const remaining = new Map<string, number>();
+  const remainingOf = (s: WarehouseStockRecord) =>
+    remaining.has(s.sku) ? remaining.get(s.sku)! : Math.max(0, Number(s.available) || 0);
 
-    const matchedStock =
-      stock.find((s) => {
-        const name = (s.name || "").toLowerCase();
-        return name.includes(product) || product.includes(name);
-      }) || stock.find((s) => s.category === "Paper & Board");
+  const active = queue
+    .filter((q) => q.stage !== "Completed" && q.status !== "Cancelled" && !isMaterialsConsumed(q))
+    .sort((a, b) => String(a.deadline || "9999").localeCompare(String(b.deadline || "9999")));
 
-    const neededQty = q.plannedSheets || q.quantity || 1000;
-    const avail = matchedStock?.available || 0;
-    const deficit = Math.max(0, neededQty - avail);
-    if (deficit <= 0) return;
+  active.forEach((q) => {
+    const materials = Array.isArray(q.materials) ? q.materials : [];
+    materials.forEach((m: any, idx: number) => {
+      if (!m || isClientMaterial(m)) return;
+      const required = Number(m.actualQty ?? m.planQty ?? m.qty) || 0;
+      if (required <= 0) return;
 
-    defs.push({
-      id: `DEF-${q.id}`,
-      workOrderId: q.id,
-      customer: q.customer,
-      product: q.product,
-      materialSku: matchedStock?.sku || `PAP-${q.id.replace(/\D/g, "").slice(-3) || "REQ"}`,
-      materialName: matchedStock?.name || `${q.product} Xomashyosi`,
-      category: matchedStock?.category || "Paper & Board",
-      sheetFormat: matchedStock?.sheetFormat || "700×1000",
-      grammage: matchedStock?.grammage || 250,
-      requiredQty: neededQty,
-      availableQty: avail,
-      deficitQty: deficit,
-      unit: matchedStock?.unit || q.unit || "sheets",
-      deadline: q.deadline,
-      priority: q.priority,
-      status: "Deficit",
+      const matched = matchStock(m, stock);
+      const procurement = isProcurementMaterial(m);
+      const avail = matched ? remainingOf(matched) : 0;
+
+      // Katalogda topilmagan ombor qatori — ehtiyojni aniqlab bo'lmaydi.
+      // Xarid qatori esa topilmasa ham to'liq miqdori bilan ehtiyoj.
+      if (!matched && !procurement) return;
+
+      // Xarid qilingan xomashyo kirim qilingach omborda paydo bo'ladi va ehtiyojni yopadi
+      let deficit = required;
+      if (matched) {
+        const used = Math.min(avail, required);
+        remaining.set(matched.sku, avail - used);
+        deficit = required - used;
+      }
+      if (deficit <= 0) return;
+
+      defs.push({
+        id: `DEF-${q.id}-${idx}`,
+        workOrderId: q.id,
+        customer: q.customer,
+        product: q.product,
+        materialSku: matched?.sku || m.sku || "",
+        materialName: m.name || matched?.name || "",
+        category: m.category || matched?.category || "",
+        sheetFormat: m.sheetFormat || matched?.sheetFormat || "",
+        grammage: Number(m.grammage ?? matched?.grammage) || 0,
+        requiredQty: required,
+        availableQty: avail,
+        deficitQty: deficit,
+        unit: m.unit || matched?.unit || "",
+        deadline: q.deadline,
+        priority: q.priority,
+        status: "Deficit",
+      });
     });
   });
   return defs;

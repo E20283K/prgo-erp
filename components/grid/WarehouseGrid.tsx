@@ -32,7 +32,7 @@ import {
   Truck,
   Boxes,
   Building2,
-  DollarSign, ChevronDown,
+  DollarSign, ChevronDown, Loader2,
 } from "lucide-react";
 
 import { useWorkspaceStore, generateNextMaterialSku } from "@/store/workspaceStore";
@@ -159,6 +159,9 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     deliveryActs,
     openTab,
     productionQueue,
+    loadProductionQueue,
+    isProductionQueueLoading,
+    isWarehouseStockLoading,
     pendingFinishedGoodsReceipts,
     loadPendingFinishedGoods,
     dispatchManifests,
@@ -847,6 +850,10 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       loadCarriers();
       if (loadCrmCustomers) loadCrmCustomers();
     } else if (type === 'stock-balance') {
+      loadWarehouseStock();
+    } else if (type === 'requirements') {
+      // Ehtiyoj buyurtmalar BOM'i va ombor qoldig'idan hisoblanadi — ikkalasi har ochilganda yangilanadi
+      loadProductionQueue();
       loadWarehouseStock();
     } else if (type === 'movements' || type === 'production-issue' || type === 'write-offs') {
       loadWarehouseMovements();
@@ -1925,6 +1932,12 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
           {/* Grid */}
           <div className="flex-1 w-full h-full relative" id="warehouse-grid-root">
+            {type === 'requirements' && filteredRows.length === 0 && (isProductionQueueLoading || isWarehouseStockLoading) && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/60 text-xs text-muted-foreground pointer-events-none">
+                <Loader2 className="size-3.5 animate-spin" />
+                Yuklanmoqda
+              </div>
+            )}
             <DataEditor
               getCellContent={getContent}
               onCellActivated={handleCellActivated}
