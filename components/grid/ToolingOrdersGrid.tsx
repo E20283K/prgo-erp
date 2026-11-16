@@ -16,7 +16,8 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { useWorkspaceStore, ProductionQueueItem } from "@/store/workspaceStore";
 import { ToolingOrderRecord } from "@/lib/server/supplierService";
-import { getInitialToolingItems } from "@/components/documents/work-order/WorkOrderDetail";
+import { getInitialToolingItems } from "@/components/documents/work-order/toolingItems";
+import { computeToolingDeficits } from "@/lib/deficits";
 import { WorkOrderToolingItem } from "@/components/documents/work-order/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -270,83 +271,8 @@ export function ToolingOrdersGrid() {
     if (loadProductionQueue) loadProductionQueue();
   }, [fetchOrders, loadSuppliers, loadProductionQueue]);
 
-  // Compute Deficit Rows from productionQueue using actual work order tooling items
-  const deficitRows = useMemo(() => {
-    const list: Array<{
-      id: string;
-      workOrderId: string;
-      customer: string;
-      product: string;
-      neededTooling: string;
-      specDetails?: string;
-      quantity: number;
-      unit: string;
-      toolingCategory: ToolingOrderRecord["orderType"];
-      deadline?: string;
-      status: "Deficit";
-      estimatedCost?: number;
-      currency?: string;
-      fileUrl?: string;
-      fileName?: string;
-      imageUrl?: string;
-    }> = [];
-
-    productionQueue.forEach((q) => {
-      if (q.stage === "Completed") return;
-
-      const items: WorkOrderToolingItem[] =
-        Array.isArray(q.toolingItems) && q.toolingItems.length > 0
-          ? q.toolingItems
-          : getInitialToolingItems(q as any, q.id || q.docNo || "");
-
-      items.forEach((item) => {
-        // If already ready, mounted or delivered, it is not a deficit
-        if (item.status === "Ready" || item.status === "Delivered" || item.status === "Mounted") {
-          return;
-        }
-
-        // Map category to supplier orderType
-        let orderType: ToolingOrderRecord["orderType"] = "ctp_plates";
-        if (item.category === "die_cutting") orderType = "die_tooling";
-        else if (item.category === "foil_cliche" || item.category === "emboss_cliche") orderType = "cliche";
-        else if (item.category === "varnish_plate") orderType = "outsourcing";
-
-        // Check if an order has already been placed in supplierOrders (orders state)
-        const isAlreadyOrdered = orders.some((o) => {
-          if (!o.workOrderNo) return false;
-          const matchWo = o.workOrderNo.trim().toLowerCase() === (q.id || q.docNo || "").trim().toLowerCase();
-          const matchType = o.orderType === orderType;
-          return matchWo && matchType && o.status !== "Cancelled";
-        });
-
-        if (!isAlreadyOrdered) {
-          list.push({
-            id: `DEF-${q.id}-${item.id || item.category}`,
-            workOrderId: q.id || q.docNo || "",
-            customer: q.customer || "—",
-            product: q.product || "Mahsulot",
-            neededTooling: item.name,
-            specDetails: item.specDetails,
-            quantity: item.quantity || 1,
-            unit: item.unit || "dona",
-            toolingCategory: orderType,
-            deadline: q.deadline,
-            status: "Deficit",
-            estimatedCost: item.estimatedCost,
-            currency: item.currency || q.currency || "UZS",
-            fileUrl: item.fileUrl || undefined,
-            fileName: item.fileName || undefined,
-            imageUrl:
-              item.imageUrl ||
-              q.photoUrl ||
-              (Array.isArray(q.photoUrls) && q.photoUrls.length > 0 ? q.photoUrls[0] : undefined),
-          });
-        }
-      });
-    });
-
-    return list;
-  }, [productionQueue, orders]);
+  // Buyurtmalarda kerak, lekin hali buyurtma berilmagan jihozlar (sidebar badge bilan bir xil hisob)
+  const deficitRows = useMemo(() => computeToolingDeficits(productionQueue, orders), [productionQueue, orders]);
 
   // Filtered orders
   const filteredOrders = useMemo(() => {

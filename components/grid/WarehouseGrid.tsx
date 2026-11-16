@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useMemo } from "react";
+import { computeMaterialDeficits } from "@/lib/deficits";
 import { 
   DataEditor, 
   GridCell, 
@@ -862,43 +863,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   // 2. Data Synchronization Effect: ONLY copies store data into rowsData without calling any fetch
   useEffect(() => {
     if (type === 'requirements') {
-      const defs: any[] = [];
-      productionQueue.forEach((q) => {
-        if (q.stage === "Completed") return;
-
-        const matchedStock = warehouseStock.find(
-          (s) =>
-            s.name.toLowerCase().includes(q.product.toLowerCase()) ||
-            q.product.toLowerCase().includes(s.name.toLowerCase())
-        ) || warehouseStock.find((s) => s.category === "Paper & Board");
-
-        const neededQty = q.plannedSheets || q.quantity || 1000;
-        const avail = matchedStock?.available || 0;
-        const deficit = Math.max(0, neededQty - avail);
-
-        // Faqat haqiqiy defitsit mavjud bo'lganda (xomashyo yetishmayotganda) ro'yxatda aks etadi
-        if (deficit > 0) {
-          defs.push({
-            id: `DEF-${q.id}`,
-            workOrderId: q.id,
-            customer: q.customer,
-            product: q.product,
-            materialSku: matchedStock?.sku || `PAP-${q.id.replace(/\D/g, "").slice(-3) || "REQ"}`,
-            materialName: matchedStock?.name || `${q.product} Xomashyosi`,
-            category: matchedStock?.category || "Paper & Board",
-            sheetFormat: matchedStock?.sheetFormat || "700×1000",
-            grammage: matchedStock?.grammage || 250,
-            requiredQty: neededQty,
-            availableQty: avail,
-            deficitQty: deficit,
-            unit: matchedStock?.unit || q.unit || "sheets",
-            deadline: q.deadline,
-            priority: q.priority,
-            status: "Deficit",
-          });
-        }
-      });
-      setRowsData(defs);
+      setRowsData(computeMaterialDeficits(productionQueue, warehouseStock));
     } else if (type === 'finished-goods') {
       setRowsData(finishedGoods);
     } else if (type === 'shipments' || type === 'manifests') {

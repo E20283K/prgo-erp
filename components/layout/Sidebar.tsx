@@ -79,6 +79,23 @@ const MODULE_COLORS: Record<string, string> = {
   settings: "bg-zinc-600",
 };
 
+const BADGE_REFRESH_MS = 60_000;
+
+// Hal qilinishi kerak bo'lgan yozuvlar soni
+function NavCountBadge({ count, className }: { count?: number; className?: string }) {
+  if (!count || count <= 0) return null;
+  return (
+    <span
+      className={cn(
+        "ml-auto inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none tabular-nums text-white",
+        className,
+      )}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -104,7 +121,33 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     tabs,
     activeTabId,
     currentUser,
+    navBadges,
+    loadNavBadges,
   } = useWorkspaceStore();
+
+  // Badge'lar: ochilganda, har daqiqada, oyna fokusga qaytganda va bo'lim almashganda yangilanadi
+  React.useEffect(() => {
+    if (!currentUser) return;
+    loadNavBadges();
+    const timer = window.setInterval(loadNavBadges, BADGE_REFRESH_MS);
+    const onFocus = () => loadNavBadges();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [currentUser, loadNavBadges]);
+
+  React.useEffect(() => {
+    if (currentUser) loadNavBadges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSubModule]);
+
+  const badgeFor = (modId: string, itemId: string) => navBadges?.[modId]?.[itemId] ?? 0;
+  const sumBadges = (modId: string, itemIds: string[]) =>
+    itemIds.reduce((sum, id) => sum + badgeFor(modId, id), 0);
+  const moduleBadgeTotal = (modId: string) =>
+    Object.values(navBadges?.[modId] ?? {}).reduce((a, b) => a + (b || 0), 0);
 
   const { state, isMobile } = useSidebar();
   const isCollapsed = state === "collapsed" && !isMobile;
@@ -354,6 +397,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                               <span className="flex-1 text-sm font-medium text-foreground truncate">
                                 {modName}
                               </span>
+                              <NavCountBadge count={moduleBadgeTotal(mod.id)} />
                               {mod.id === activeModule && (
                                 <Check className="size-3.5 text-primary shrink-0" />
                               )}
@@ -388,6 +432,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     const isSectionActive = section.items.some(
                       (i) => i.id === currentSubModule,
                     );
+                    const sectionBadge = sumBadges(
+                      activeMod.id,
+                      section.items.map((i) => i.id),
+                    );
 
                     if (isCollapsed) {
                       return (
@@ -402,9 +450,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                 />
                               }
                             >
-                              {SectionIcon && (
-                                <SectionIcon className="size-4 shrink-0 text-muted-foreground" />
-                              )}
+                              <span className="relative flex shrink-0">
+                                {SectionIcon && (
+                                  <SectionIcon className="size-4 shrink-0 text-muted-foreground" />
+                                )}
+                                {sectionBadge > 0 && (
+                                  <span className="absolute -right-1 -top-1 size-2 rounded-full bg-red-600 ring-2 ring-sidebar" />
+                                )}
+                              </span>
                               <span className="sr-only">{sectionName}</span>
                             </DropdownMenuTrigger>
 
@@ -448,6 +501,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                       >
                                         {itemName}
                                       </span>
+                                      <NavCountBadge
+                                        count={badgeFor(activeMod.id, item.id)}
+                                      />
                                       {isItemActive && (
                                         <Check className="size-3.5 text-primary shrink-0 ml-auto" />
                                       )}
@@ -485,6 +541,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                             >
                               {sectionName}
                             </span>
+                            <NavCountBadge
+                              count={sectionBadge}
+                              className="ml-0 group-data-[open]/collapsible:hidden group-data-[collapsible=icon]:hidden"
+                            />
                             <ChevronRight className="ml-auto size-4 shrink-0 transition-transform duration-200 group-data-[open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
                           </CollapsibleTrigger>
                           <CollapsibleContent>
@@ -514,6 +574,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                       <span className="flex-1 min-w-0 truncate text-left">
                                         {itemName}
                                       </span>
+                                      <NavCountBadge
+                                        count={badgeFor(activeMod.id, item.id)}
+                                      />
                                     </SidebarMenuSubButton>
                                   </SidebarMenuSubItem>
                                 );

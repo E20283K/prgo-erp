@@ -797,6 +797,10 @@ interface WorkspaceState {
   loadWarehouseShipments: (companyCode?: string) => Promise<void>;
   upsertWarehouseShipmentAsync: (shipment: any, companyCode?: string) => Promise<any>;
 
+  /** Sidebar: modul -> band -> hal qilinishi kerak bo'lgan yozuvlar soni */
+  navBadges: Record<string, Record<string, number>>;
+  loadNavBadges: (companyCode?: string) => Promise<void>;
+
   warehouseReceipts: any[];
   isWarehouseReceiptsLoading: boolean;
   loadWarehouseReceipts: (companyCode?: string) => Promise<void>;
@@ -1166,6 +1170,8 @@ export const INITIAL_WAREHOUSE_MOVEMENTS: WarehouseMovementRecord[] = [];
 
 export const INITIAL_PRODUCTION_QUEUE: ProductionQueueItem[] = [];
 
+let navBadgesLastLoad = 0;
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   tabs: [
     {
@@ -1514,6 +1520,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } catch (e) {
       console.error("Failed to save warehouse movement:", e);
       return false;
+    }
+  },
+
+  navBadges: {},
+  loadNavBadges: async (companyCode = "PRINTGOO") => {
+    // Har bir menyu bosilishida butun buyurtmalar ro'yxati qayta yuklanmasin
+    const now = Date.now();
+    if (now - navBadgesLastLoad < 10_000) return;
+    navBadgesLastLoad = now;
+    try {
+      const res = await fetch("/api/v1/nav-badges?company=" + encodeURIComponent(companyCode));
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.success && json.data) set({ navBadges: json.data });
+    } catch (e) {
+      console.error("Nav badges load error:", e);
     }
   },
 
