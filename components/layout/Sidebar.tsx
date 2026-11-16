@@ -398,9 +398,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                 {modName}
                               </span>
                               <NavCountBadge count={moduleBadgeTotal(mod.id)} />
-                              {mod.id === activeModule && (
-                                <Check className="size-3.5 text-primary shrink-0" />
-                              )}
+                              {/* Doimiy joy: belgi bor-yo'qligidan qat'i nazar badge'lar bir chiziqda turadi */}
+                              <span className="flex size-3.5 shrink-0 items-center justify-center">
+                                {mod.id === activeModule && (
+                                  <Check className="size-3.5 text-primary" />
+                                )}
+                              </span>
                               <Kbd className="ml-auto opacity-75 bg-muted border-muted-foreground/20 text-[10px]">
                                 {isMac ? `⌥${index + 1}` : `Alt+${index + 1}`}
                               </Kbd>
