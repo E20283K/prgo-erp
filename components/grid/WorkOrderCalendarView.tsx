@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   format,
   addMonths,
@@ -63,6 +63,17 @@ interface WorkOrderCalendarViewProps {
   onCalendarModeChange?: (mode: "month" | "week" | "day") => void;
 }
 
+type CalendarDateField = "orderDate" | "deadline";
+
+const DATE_FIELD_STORAGE_KEY = "workOrderCalendar.dateField";
+
+/** Normalizes "YYYY-MM-DD", "YYYY-MM-DD HH:mm" or ISO "YYYY-MM-DDTHH:mm..." to "YYYY-MM-DD". */
+function toDateKey(value: string | undefined | null): string | null {
+  if (!value) return null;
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+  return match ? match[1] : null;
+}
+
 export function WorkOrderCalendarView({
   orders,
   onOpenOrder,
@@ -100,6 +111,25 @@ export function WorkOrderCalendarView({
       externalSetMode(mode);
     } else {
       setInternalMode(mode);
+    }
+  };
+
+  // Which order date drives calendar placement
+  const [dateField, setDateFieldState] = useState<CalendarDateField>("deadline");
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(DATE_FIELD_STORAGE_KEY);
+      if (saved === "orderDate" || saved === "deadline") setDateFieldState(saved);
+    } catch {
+      // storage unavailable — keep default
+    }
+  }, []);
+  const setDateField = (field: CalendarDateField) => {
+    setDateFieldState(field);
+    try {
+      window.localStorage.setItem(DATE_FIELD_STORAGE_KEY, field);
+    } catch {
+      // storage unavailable — keep in-memory choice only
     }
   };
 
@@ -152,11 +182,11 @@ export function WorkOrderCalendarView({
     }
   }, [currentDate, calendarMode]);
 
-  // Index orders by deadline date: YYYY-MM-DD
+  // Index orders by the selected date field (orderDate or deadline): YYYY-MM-DD
   const ordersByDate = useMemo(() => {
     const map = new Map<string, OrderRow[]>();
     orders.forEach((order) => {
-      const datePart = order.deadline ? order.deadline.split(" ")[0] : null;
+      const datePart = toDateKey(order[dateField]);
       if (!datePart) return;
       if (!map.has(datePart)) {
         map.set(datePart, []);
@@ -164,7 +194,7 @@ export function WorkOrderCalendarView({
       map.get(datePart)!.push(order);
     });
     return map;
-  }, [orders]);
+  }, [orders, dateField]);
 
   const handleOrderClick = (order: OrderRow) => {
     if (onOpenOrder) {
@@ -255,9 +285,28 @@ export function WorkOrderCalendarView({
               : format(currentDate, "EEEE, MMMM d, yyyy")}
           </h2>
 
-          <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground ml-2">
-            Targeting Deadlines
-          </Badge>
+          <div className="flex items-center bg-muted/60 p-0.5 rounded-md border border-border/60 ml-2">
+            <button
+              onClick={() => setDateField("orderDate")}
+              className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                dateField === "orderDate"
+                  ? "bg-background text-foreground shadow-2xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Qabul sanasi
+            </button>
+            <button
+              onClick={() => setDateField("deadline")}
+              className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                dateField === "deadline"
+                  ? "bg-background text-foreground shadow-2xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Deadline
+            </button>
+          </div>
         </div>
 
         {/* Right: View Mode Toggle & Quick Create */}
@@ -358,7 +407,8 @@ export function WorkOrderCalendarView({
 
               // Map orders to hour slot: if order deadline/startDate contains hour, or distribute by index
               const slotOrders = allDayOrders.filter((order, idx) => {
-                if (order.deadline && order.deadline.includes(` ${hourLabel}`)) {
+                const fieldValue = order[dateField];
+                if (fieldValue && (fieldValue.includes(` ${hourLabel}`) || fieldValue.includes(`T${hourLabel}`))) {
                   return true;
                 }
                 // Evenly distribute mock day orders across 08:00 - 20:00 slots
@@ -559,6 +609,7 @@ export function WorkOrderCalendarView({
                             <div><span className="font-medium text-background">Run Qty:</span> {order.qty.toLocaleString()} {order.unit}</div>
                             <div><span className="font-medium text-background">Total:</span> ${order.priceTotal.toLocaleString()} USD</div>
                             <div><span className="font-medium text-background">Manager:</span> {order.responsible}</div>
+                            <div><span className="font-medium text-background">Qabul sanasi:</span> {order.orderDate || "—"}</div>
                             <div><span className="font-medium text-background">Start Date:</span> {order.startDate}</div>
                             <div><span className="font-medium text-background">Deadline:</span> {order.deadline}</div>
                           </div>
