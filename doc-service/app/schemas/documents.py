@@ -99,11 +99,14 @@ class JobTicketOperationItem(BaseModel):
     id: Optional[str] = None
     stepNumber: int = 10
     name: str
-    machine: str = "Standard"
+    machine: str = "—"
     operator: str = "—"
-    duration: float = 1.0
+    duration: float = 0
     qtyCompleted: Optional[str] = None
     status: str = "Queued"
+    # The step's plan in its own counting unit (sheets, metres or pieces), for the output report.
+    plannedQty: Optional[float] = None
+    planUnit: Optional[str] = None
 
 class JobTicketSpotColor(BaseModel):
     id: Optional[str] = None

@@ -327,6 +327,66 @@ def draw_fitted_text(
     else:
         c.drawString(x_mm * mm, y_pos_pt, text)
 
+# ─── MANUAL OUTPUT REPORT (page 3+) ──────────────────────────────────────────
+# Blank grid the operators fill in by hand on the shop floor: one row per route step,
+# then downtime, material usage, notes and hand-over signatures.
+REPORT_TOP_MM = 25.0
+REPORT_BOTTOM_MM = 284.0
+REPORT_GAP_MM = 3.0
+REPORT_PANEL_H = 7.0  # panel title bar + spacing
+REPORT_HEAD_H = 6.0  # column header row
+REPORT_OP_ROW_H = 9.0
+REPORT_DT_ROW_H = 7.5
+REPORT_DT_ROWS = 5
+REPORT_MAT_ROW_H = 7.0
+REPORT_MAT_BLANK_ROWS = 2
+REPORT_SIGN_H = 48.0
+
+REPORT_OP_COLS = [
+    ("№", 7), ("OPERATSIYA / DASTGOH", 43), ("REJA", 17), ("KIRISH", 15), ("PRILADKA", 15),
+    ("BRAK", 14), ("CHIQISH", 15), ("BOSHLASH", 14), ("TUGASH", 14), ("OPERATOR", 23), ("IMZO", 15),
+]
+REPORT_DT_COLS = [
+    ("№", 7), ("OPERATSIYA", 40), ("SABAB", 60), ("BOSHLASH", 18), ("TUGASH", 18),
+    ("DAQIQA", 16), ("OPERATOR", 18), ("IMZO", 15),
+]
+REPORT_MAT_COLS = [
+    ("MATERIAL", 62), ("REJA", 26), ("BERILDI", 26), ("SARFLANDI", 26), ("QAYTARILDI", 26), ("IMZO", 26),
+]
+
+
+def plan_report_pages(n_ops: int, n_mats: int) -> List[List[Dict[str, Any]]]:
+    """Splits the report blocks over A4 pages; the route table breaks across pages by rows."""
+    avail = REPORT_BOTTOM_MM - REPORT_TOP_MM
+    blocks: List[Dict[str, Any]] = []
+
+    rows_left = max(1, n_ops)
+    start = 0
+    per_page = int((avail - REPORT_PANEL_H - REPORT_HEAD_H) // REPORT_OP_ROW_H)
+    while rows_left > 0:
+        take = min(rows_left, per_page)
+        blocks.append({"kind": "ops", "start": start, "count": take,
+                       "h": REPORT_PANEL_H + REPORT_HEAD_H + take * REPORT_OP_ROW_H})
+        start += take
+        rows_left -= take
+    blocks.append({"kind": "downtime", "h": REPORT_PANEL_H + REPORT_HEAD_H + REPORT_DT_ROWS * REPORT_DT_ROW_H})
+    mat_rows = min(n_mats, 10) + REPORT_MAT_BLANK_ROWS
+    blocks.append({"kind": "materials", "rows": mat_rows, "h": REPORT_PANEL_H + REPORT_HEAD_H + mat_rows * REPORT_MAT_ROW_H})
+    blocks.append({"kind": "sign", "h": REPORT_SIGN_H})
+
+    pages: List[List[Dict[str, Any]]] = [[]]
+    used = 0.0
+    for b in blocks:
+        need = b["h"] + (REPORT_GAP_MM if pages[-1] else 0)
+        if pages[-1] and used + need > avail:
+            pages.append([])
+            used = 0.0
+            need = b["h"]
+        pages[-1].append(b)
+        used += need
+    return pages
+
+
 def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     """
     Generates the unified 2-Page Industrial Order Passport (Job Ticket / Наряд-заказ) A4 PDF.
@@ -350,7 +410,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     page_w, page_h = A4  # 210mm x 297mm
     margin_x = 9.0 * mm
     full_w_mm = 192.0  # 210 - 2 * 9mm
-    total_pages = 2
+    report_pages = plan_report_pages(len(req.operations or []), len(req.materials or []))
+    total_pages = 2 + len(report_pages)
 
     def y_mm(mm_from_top: float) -> float:
         return page_h - (mm_from_top * mm)
@@ -381,28 +442,26 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
             c.drawRightString((x_mm + w_mm - 2.5) * mm, y_mm(top_mm + 4.0), badge_right)
 
     # ─── Extract & Calculate Core Metrics ──────────────────────────────────────
-    width = float(od.get("width") or 50)
-    height = float(od.get("height") or 90)
+    # Only values the order actually holds are printed; a missing value shows "—", never a guess.
+    width = float(od.get("width") or 0)
+    height = float(od.get("height") or 0)
     dim_unit = str(od.get("dimensionUnit") or "mm")
-    bleed = float(od.get("bleed") if od.get("bleed") is not None else 2)
-    item_w = width + 2 * bleed
-    item_h = height + 2 * bleed
-    cols = max(1, int(960 // (item_w + 2)))
-    rows = max(1, int(660 // (item_h + 2)))
-    yield_per_sheet = max(1, cols * rows)
-    net_qty = int(od.get("quantity") or 5000)
-    make_ready = int(od.get("kashirovkaMakeReadySheets") or 50)
-    gross_sheets = int((net_qty / yield_per_sheet) * 1.05 + 0.999) + make_ready
+    bleed = float(od.get("bleed") if od.get("bleed") is not None else 0)
+    net_qty = int(od.get("quantity") or 0)
+    imp_summary = (od.get("impositionState") or {}).get("summary") or {}
+    yield_per_sheet = int(imp_summary.get("itemsPerSheet") or 0)
+    gross_sheets = int(imp_summary.get("pressSheets") or 0)
+    make_ready = int(od.get("kashirovkaMakeReadySheets") or 0)
 
     priority = str(od.get("priority") or "Normal")
-    status = str(od.get("status") or "Active")
+    status = str(od.get("status") or "—")
     customer = str(od.get("customer") or "—")
     product = str(od.get("product") or "—")
-    department = str(od.get("department") or "Offset")
-    site = str(od.get("site") or "Building 1")
+    department = str(od.get("department") or "—")
+    site = str(od.get("site") or "")
     press_machine = str(od.get("pressMachine") or "—")
-    recipe = str(od.get("recipe") or "OFFSET_STD_V1")
-    unit = str(od.get("unit") or "pcs")
+    recipe = str(od.get("recipe") or "—")
+    unit = str(od.get("unit") or "dona")
     start_date = str(od.get("startDate") or "—")
     deadline = str(od.get("deadline") or "—")
 
@@ -490,7 +549,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     draw_box(9, req_top, full_w_mm, req_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
 
     status_label = str(L.get("status") or L.get("colStatus") or "HOLATI").upper()
-    status_val = str(od.get("status") or "Active").strip()
+    status_val = status.strip()
 
     prio_label = str(L.get("priority") or "MUHIMLIGI").upper()
     prio_raw = str(od.get("priority") or "Normal").strip()
@@ -513,8 +572,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         prio_text_col = "#1d4ed8"
 
     req_cols_data = [
-        (9, 38, L["customer"], customer, str(od.get("orderType") or "Production Order")),
-        (47, 38, L["product"], product, str(od.get("itemCategory") or "Commercial Print")),
+        (9, 38, L["customer"], customer, str(od.get("orderType") or "")),
+        (47, 38, L["product"], product, str(od.get("itemCategory") or "")),
         (85, 30, L["departmentSite"], department, site),
         (115, 36, L["pressMachine"], press_machine, f"{L.get('recipe', 'Retsept')}: {recipe}"),
     ]
@@ -559,9 +618,9 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     kpi_top = req_top + req_h + 1.5
     draw_box(9, kpi_top, full_w_mm, 10.5, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
     kpis = [
-        (L["netRun"], f"{net_qty:,} {unit}", "#1d4ed8"),
-        (L["grossSheets"], f"{gross_sheets:,} sht", "#0f172a"),
-        (L["impositionYield"], f"{yield_per_sheet} pcs / sht ({cols}×{rows})", "#047857"),
+        (L["netRun"], f"{net_qty:,} {unit}" if net_qty else "—", "#1d4ed8"),
+        (L["grossSheets"], f"{gross_sheets:,} varaq" if gross_sheets else "—", "#0f172a"),
+        (L["impositionYield"], f"{yield_per_sheet} dona / varaq" if yield_per_sheet else "—", "#047857"),
         (L["scheduleWindow"], f"{start_date} → {deadline}", "#0f172a"),
     ]
     for i, (lbl, val, col_hex) in enumerate(kpis):
@@ -577,7 +636,9 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     sec3_top = kpi_top + 12.0
     sec3_h = 58.0
     draw_box(9, sec3_top, full_w_mm, sec3_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-    panel3_badge = f"{width:g}×{height:g} {dim_unit} (+{bleed:g}{dim_unit}) • {od.get('shapeType', 'Standard').upper()}"
+    panel3_badge = f"{width:g}×{height:g} {dim_unit} (+{bleed:g}{dim_unit})"
+    if od.get("shapeType"):
+        panel3_badge += f" • {str(od.get('shapeType')).upper()}"
     draw_panel_header(9.8, sec3_top + 0.8, full_w_mm - 1.6, L["physicalSpecs"], panel3_badge)
 
     hole_size = float(od.get("holeSize") if od.get("holeSize") is not None else (4 if od.get("itemCategory") == "Hangtag" else 0))
@@ -648,7 +709,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     p_card_h = 39.0
     gap_p = 3.0
     p_card_w = (full_w_mm - 4.0 - 2 * gap_p) / 3.0  # ~60.6 mm each
-    aspect = width / max(1.0, height)
+    aspect = width / height if width > 0 and height > 0 else 1.0
 
     # ── CARD 1: OLDI / FRONT PROOF ──
     c1_x = 11.0
@@ -709,9 +770,10 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFillColor(colors.white)
     c.setFont(FONT_BOLD, 5.8)
     c.drawString((c2_x + 2.0) * mm, y_mm(p_card_top + 3.0), "ORQA / BACK PROOF")
-    c.setFillColor(colors.HexColor("#93c5fd" if back_raw_p1 else "#cbd5e1"))
+    back_printed = any(bool(v) for v in (od.get("backColors") or {}).values()) or bool(back_raw_p1)
+    c.setFillColor(colors.HexColor("#93c5fd" if back_printed else "#cbd5e1"))
     c.setFont(FONT_BOLD, 5.2)
-    c.drawRightString((c2_x + p_card_w - 2.0) * mm, y_mm(p_card_top + 3.0), "2-SIDED" if back_raw_p1 else "1-SIDED")
+    c.drawRightString((c2_x + p_card_w - 2.0) * mm, y_mm(p_card_top + 3.0), "2 TOMON" if back_printed else "1 TOMON")
 
     art2_x = c2_x + 2.0 + (slot_w - art_w) / 2.0
     art2_top = art1_top
@@ -739,11 +801,11 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         draw_box(art2_x, art2_top, art_w, art_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
         c.setFillColor(colors.HexColor("#94a3b8"))
         c.setFont(FONT_REGULAR, 5.0)
-        c.drawCentredString((art2_x + art_w / 2) * mm, y_mm(art2_top + art_h / 2 + 1.0), "1-TOMONLI (ORQASI OQ)")
+        c.drawCentredString((art2_x + art_w / 2) * mm, y_mm(art2_top + art_h / 2 + 1.0), "ORQA MAKET YO'Q" if back_printed else "ORQASI BOSILMAYDI")
 
     c.setFillColor(colors.HexColor("#475569"))
     c.setFont(FONT_BOLD, 4.8)
-    back_lbl = f"ORQA YUZI • {width:g}×{height:g}{dim_unit}" if back_raw_p1 else "ORQA BOSMA MAVJUD EMAS"
+    back_lbl = f"ORQA YUZI • {width:g}×{height:g}{dim_unit}" if back_printed else "ORQA BOSMA MAVJUD EMAS"
     c.drawCentredString((c2_x + p_card_w / 2) * mm, y_mm(p_card_top + p_card_h - 1.8), back_lbl)
 
     # ── CARD 3: DIELINE / SHTANS CAD KONTUR ──
@@ -817,7 +879,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     c.setFillColor(colors.HexColor("#475569"))
     c.setFont(FONT_BOLD, 4.8)
-    tooling_lbl = f"SHTAMP: {trunc(od.get('selectedToolingName') or 'Standart pichoq', 18)} (+{bleed:g}mm)"
+    tooling_lbl = f"SHTAMP: {trunc(od.get('selectedToolingName') or '—', 18)} (+{bleed:g}mm)"
     c.drawCentredString((c3_x + p_card_w / 2) * mm, y_mm(p_card_top + p_card_h - 1.8), tooling_lbl)
 
     # Bottom Specs Bar inside Section 3
@@ -826,7 +888,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     draw_box(11.0, s3_bar_top, full_w_mm - 4.0, s3_bar_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
     phys_cells = [
         (11.0, 46.0, L["trimDimensions"], f"{width:g} × {height:g} {dim_unit} (+{bleed:g}{dim_unit})"),
-        (57.0, 44.0, L["cornerCut"], str(od.get("cornerType") or "Square")),
+        (57.0, 44.0, L["cornerCut"], str(od.get("cornerType") or "—")),
         (101.0, 45.0, L["holeEyelet"], f"Ø{hole_size:g}mm • {hole_pos}" if hole_size > 0 and hole_pos != "none" else "—"),
         (146.0, 53.0, L["paperSubstrate"], str(od.get("paperStock") or "—")),
     ]
@@ -862,19 +924,15 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFillColor(colors.HexColor("#64748b"))
     c.setFont(FONT_REGULAR, 5.5)
     c.drawString(13.0 * mm, y_mm(lam_top + 7.5), "Turi:")
-    draw_fitted_text(c, lam_name, 22.0, y_mm(lam_top + 7.5), col_left_w - 13.0, font_name=FONT_BOLD, base_font_size=6.2)
+    draw_fitted_text(c, lam_name if lam_name != "None" else "—", 22.0, y_mm(lam_top + 7.5), col_left_w - 13.0, font_name=FONT_BOLD, base_font_size=6.2)
 
-    lam_sides = str(od.get("laminationSides") or "1s").upper()
-    lam_micron = od.get("laminationMicron") or 28
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont(FONT_REGULAR, 5.5)
-    c.drawString(13.0 * mm, y_mm(lam_top + 12.0), "Parametr:")
-    draw_fitted_text(c, f"Tomoni: {lam_sides}  •  Qalinligi: {lam_micron} μm  •  Plenka: BOPP Thermal", 25.0, y_mm(lam_top + 12.0), col_left_w - 16.0, font_name=FONT_REGULAR, base_font_size=5.8)
-
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont(FONT_REGULAR, 5.5)
-    c.drawString(13.0 * mm, y_mm(lam_top + 16.5), "Holat:")
-    draw_fitted_text(c, "Harorat: 110-115°C • Bosim: 18 MPa • Rulon tarangligi normal", 22.0, y_mm(lam_top + 16.5), col_left_w - 13.0, font_name=FONT_REGULAR, base_font_size=5.5, color="#047857")
+    if lam_name != "None":
+        lam_sides = str(od.get("laminationSides") or "—").upper()
+        lam_micron = od.get("laminationMicron")
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont(FONT_REGULAR, 5.5)
+        c.drawString(13.0 * mm, y_mm(lam_top + 12.0), "Parametr:")
+        draw_fitted_text(c, f"Tomoni: {lam_sides}  •  Qalinligi: {f'{lam_micron} μm' if lam_micron else '—'}", 25.0, y_mm(lam_top + 12.0), col_left_w - 16.0, font_name=FONT_REGULAR, base_font_size=5.8)
 
     # 2. Varnish & Surface Coatings Box
     coat_top = lam_top + lam_h + 2.5
@@ -895,12 +953,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFillColor(colors.HexColor("#64748b"))
     c.setFont(FONT_REGULAR, 5.5)
     c.drawString(13.0 * mm, y_mm(coat_top + 12.0), "Pardoz:")
-    draw_fitted_text(c, f"Maxsus effekt: {emb_val}", 25.0, y_mm(coat_top + 12.0), col_left_w - 16.0, font_name=FONT_REGULAR, base_font_size=5.8)
-
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont(FONT_REGULAR, 5.5)
-    c.drawString(13.0 * mm, y_mm(coat_top + 16.5), "Qoplash:")
-    draw_fitted_text(c, "Selektiv UV (Spot UV 100%) • Anirox: 12 cm³/m²", 25.0, y_mm(coat_top + 16.5), col_left_w - 16.0, font_name=FONT_REGULAR, base_font_size=5.5, color="#1d4ed8")
+    draw_fitted_text(c, emb_val if emb_val != "None" else "—", 25.0, y_mm(coat_top + 12.0), col_left_w - 16.0, font_name=FONT_REGULAR, base_font_size=5.8)
 
     # 3. Inks (CMYK + Spot/Pantone) Box
     ink_top = coat_top + coat_h + 2.5
@@ -911,10 +964,10 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFont(FONT_BOLD, 5.5)
     c.drawString(13.0 * mm, y_mm(ink_top + 2.8), "BO'YOQLAR (CMYK + SPOT STANSIYALARI)")
     c.setFillColor(colors.HexColor("#93c5fd"))
-    c.drawRightString((11.0 + col_left_w - 2.0) * mm, y_mm(ink_top + 2.8), str(od.get("colorsConfig") or "4+0"))
+    c.drawRightString((11.0 + col_left_w - 2.0) * mm, y_mm(ink_top + 2.8), str(od.get("colorsConfig") or "—"))
 
-    front_colors = od.get("frontColors") or {"c": True, "m": True, "y": True, "k": True}
-    back_colors = od.get("backColors") or {"c": False, "m": False, "y": False, "k": False}
+    front_colors = od.get("frontColors") or {}
+    back_colors = od.get("backColors") or {}
 
     def draw_cmyk_row_p1(top_y: float, side_label: str, ch_map: Dict[str, Any]):
         c.setFillColor(colors.HexColor("#475569"))
@@ -948,7 +1001,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     else:
         c.setFillColor(colors.HexColor("#94a3b8"))
         c.setFont(FONT_REGULAR, 5.5)
-        c.drawString(28.0 * mm, y_mm(ink_top + 18.2), "Qo'shimcha Pantone talab etilmaydi (Faqat standart CMYK)")
+        c.drawString(28.0 * mm, y_mm(ink_top + 18.2), "—")
 
     # RIGHT COLUMN: KASHIROVKA SPECIFICATION & SUBSTRATE LAYERS
     kash_mode = str(od.get("kashirovkaMode") or "none")
@@ -963,14 +1016,18 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.drawRightString((col_right_x + col_right_w - 2.0) * mm, y_mm(kash_box_top + 2.8), kash_mode.upper())
 
     if kash_mode != "none":
-        glue_gsm = od.get("kashirovkaGlueGsm") or 25
-        curing_hours = od.get("kashirovkaCuringHours") or 12
-        kash_strategy = str(od.get("kashirovkaStrategy") or "split_half_sheet")
+        glue_gsm = float(od.get("kashirovkaGlueGsm") or 0)
+        curing_hours = od.get("kashirovkaCuringHours")
+        kash_strategy = str(od.get("kashirovkaStrategy") or "—")
 
         c.setFillColor(colors.HexColor("#64748b"))
         c.setFont(FONT_REGULAR, 5.5)
-        c.drawString((col_right_x + 2.0) * mm, y_mm(kash_box_top + 7.5), f"Yelim sarfi: {glue_gsm} g/m² • Quritish: {curing_hours}h • Priladka: {make_ready} sht")
-        c.drawString((col_right_x + 2.0) * mm, y_mm(kash_box_top + 11.5), f"Strategiya: {kash_strategy} • Yelim turi: PVAC Dispersiya")
+        c.drawString(
+            (col_right_x + 2.0) * mm,
+            y_mm(kash_box_top + 7.5),
+            f"Yelim sarfi: {f'{glue_gsm:g} g/m²' if glue_gsm else '—'} • Quritish: {f'{curing_hours}h' if curing_hours else '—'} • Priladka: {f'{make_ready} varaq' if make_ready else '—'}",
+        )
+        c.drawString((col_right_x + 2.0) * mm, y_mm(kash_box_top + 11.5), f"Strategiya: {kash_strategy}")
 
         # Table Header
         l_th_top = kash_box_top + 13.5
@@ -983,41 +1040,40 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.drawRightString((col_right_x + 78.0) * mm, y_mm(l_th_top + 2.8), "GSM")
         c.drawRightString((col_right_x + col_right_w - 3.0) * mm, y_mm(l_th_top + 2.8), "BOSMA")
 
-        layers = od.get("kashirovkaLayers") or [
-            {"role": "top_liner", "label": "Face Liner (Old)", "paperStock": "Coated Cardboard", "grammage": 300, "colors": "4+0"},
-            {"role": "bottom_liner", "label": "Back Liner (Orqa)", "paperStock": "Coated Cardboard", "grammage": 300, "colors": "4+0"},
-        ]
-        if kash_mode == "triplex" and len(layers) < 3:
-            layers.insert(1, {"role": "core_board", "label": "Core Filler (O'rta)", "paperStock": "Colorplan Black", "grammage": 300, "colors": "0+0"})
+        layers = od.get("kashirovkaLayers") or []
+        if not layers:
+            c.setFillColor(colors.HexColor("#94a3b8"))
+            c.setFont(FONT_REGULAR, 5.5)
+            c.drawString((col_right_x + 2.5) * mm, y_mm(l_th_top + 8.4), "Qatlamlar kiritilmagan")
 
         total_net_gsm = 0
         for l_idx, layer in enumerate(layers[:3]):
             ly_top = l_th_top + 4.2 + l_idx * 6.5
-            l_gsm = int(layer.get("grammage") or 300)
+            l_gsm = int(layer.get("grammage") or 0)
             total_net_gsm += l_gsm
             c.setFillColor(colors.HexColor("#475569"))
             c.setFont(FONT_BOLD, 5.5)
             c.drawString((col_right_x + 2.5) * mm, y_mm(ly_top + 4.2), str(l_idx + 1))
             draw_fitted_text(c, layer.get("label") or f"Layer {l_idx+1}", col_right_x + 8.0, y_mm(ly_top + 4.2), 31.0, font_name=FONT_BOLD, base_font_size=5.5)
-            draw_fitted_text(c, layer.get("paperStock") or "Standard", col_right_x + 40.0, y_mm(ly_top + 4.2), 36.0, font_name=FONT_REGULAR, base_font_size=5.5)
-            c.drawRightString((col_right_x + 78.0) * mm, y_mm(ly_top + 4.2), f"{l_gsm}g")
-            c.drawRightString((col_right_x + col_right_w - 3.0) * mm, y_mm(ly_top + 4.2), str(layer.get("colors") or "4+0"))
+            draw_fitted_text(c, layer.get("paperStock") or "—", col_right_x + 40.0, y_mm(ly_top + 4.2), 36.0, font_name=FONT_REGULAR, base_font_size=5.5)
+            c.drawRightString((col_right_x + 78.0) * mm, y_mm(ly_top + 4.2), f"{l_gsm}g" if l_gsm else "—")
+            c.drawRightString((col_right_x + col_right_w - 3.0) * mm, y_mm(ly_top + 4.2), str(layer.get("colors") or "—"))
             c.setStrokeColor(colors.HexColor("#e2e8f0"))
             c.setLineWidth(0.3)
             c.line((col_right_x + 1.0) * mm, y_mm(ly_top + 6.0), (col_right_x + col_right_w - 1.0) * mm, y_mm(ly_top + 6.0))
 
         # Totals Strip
-        total_mounted_gsm = total_net_gsm + (len(layers) - 1) * glue_gsm
-        estimated_caliper = round((total_mounted_gsm * 1.32) / 1000, 2)
-        tot_top = kash_box_top + kash_box_h - 12.0
-        draw_box(col_right_x + 1.0, tot_top, col_right_w - 2.0, 10.0, fill_hex="#eff6ff", stroke_hex="#bfdbfe")
-        c.setFillColor(colors.HexColor("#1d4ed8"))
-        c.setFont(FONT_BOLD, 6.0)
-        c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 4.0), f"JAMI QALINLIK (CALIPER): ~{estimated_caliper} mm")
-        c.drawRightString((col_right_x + col_right_w - 3.0) * mm, y_mm(tot_top + 4.0), f"ZICHLIK: {total_mounted_gsm} g/m²")
-        c.setFillColor(colors.HexColor("#475569"))
-        c.setFont(FONT_REGULAR, 5.0)
-        c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 7.8), "Kashirovka qatlamlari presslangandan so'ng 12 soat quritish tanaffusi shart.")
+        if layers and total_net_gsm:
+            total_mounted_gsm = round(total_net_gsm + max(0, len(layers) - 1) * glue_gsm)
+            tot_top = kash_box_top + kash_box_h - 12.0
+            draw_box(col_right_x + 1.0, tot_top, col_right_w - 2.0, 10.0, fill_hex="#eff6ff", stroke_hex="#bfdbfe")
+            c.setFillColor(colors.HexColor("#1d4ed8"))
+            c.setFont(FONT_BOLD, 6.0)
+            c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 4.0), f"ZICHLIK: {total_mounted_gsm} g/m²")
+            if curing_hours:
+                c.setFillColor(colors.HexColor("#475569"))
+                c.setFont(FONT_REGULAR, 5.0)
+                c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 7.8), f"Presslangandan so'ng {curing_hours} soat quritish shart.")
     else:
         # Monotype (Standard single substrate)
         c.setFillColor(colors.HexColor("#0f172a"))
@@ -1026,14 +1082,15 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.setFillColor(colors.HexColor("#64748b"))
         c.setFont(FONT_REGULAR, 5.5)
         c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 13.0), "Xomashyo markasi:")
-        draw_fitted_text(c, str(od.get("paperStock") or "Coated Cardboard 300g/m²"), col_right_x + 3.0, y_mm(kash_box_top + 18.0), col_right_w - 6.0, font_name=FONT_BOLD, base_font_size=6.5)
+        draw_fitted_text(c, str(od.get("paperStock") or "—"), col_right_x + 3.0, y_mm(kash_box_top + 18.0), col_right_w - 6.0, font_name=FONT_BOLD, base_font_size=6.5)
 
-        press_w = od.get("pressSheetW") or 700
-        press_h = od.get("pressSheetH") or 1000
-        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 24.0), f"Bichim listi (Press Sheet): {press_w} × {press_h} mm")
-        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 29.0), "Tolalar yo'nalishi (Grain): Bo'ylama (Long Grain ||)")
-        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 34.0), "Namlik va saqlash: 20-22°C, 50-55% RH standart ombor rejimi")
-        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 39.0), f"Bitta listdan chiqish: {yield_per_sheet} dona ({cols} × {rows} qoliplash)")
+        imp_st = od.get("impositionState") or {}
+        press_w = imp_st.get("sheetW") or od.get("pressSheetW")
+        press_h = imp_st.get("sheetH") or od.get("pressSheetH")
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont(FONT_REGULAR, 5.5)
+        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 24.0), f"Bosma varaq: {f'{press_w:g} × {press_h:g} mm' if press_w and press_h else '—'}")
+        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 29.0), f"Bitta varaqdan chiqish: {f'{yield_per_sheet} dona' if yield_per_sheet else '—'}")
 
         tot_top = kash_box_top + kash_box_h - 14.0
         draw_box(col_right_x + 1.0, tot_top, col_right_w - 2.0, 12.0, fill_hex="#f1f5f9", stroke_hex="#cbd5e1")
@@ -1056,33 +1113,20 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     gate_w = (full_w_mm - 6.0) / 4.0  # 46.5mm each
     for i, (g_title, g_sub) in enumerate(gates):
         gx = 9.0 + i * (gate_w + 2.0)
-        draw_box(gx, gates_top, gate_w, gates_h, fill_hex="#f0fdf4", stroke_hex="#86efac")
+        draw_box(gx, gates_top, gate_w, gates_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
         c.setFillColor(colors.HexColor("#0f172a"))
         c.setFont(FONT_BOLD, 6.0)
         c.drawString((gx + 2.0) * mm, y_mm(gates_top + 4.5), trunc(g_title, 22))
         c.setFillColor(colors.HexColor("#475569"))
         c.setFont(FONT_REGULAR, 5.0)
         c.drawString((gx + 2.0) * mm, y_mm(gates_top + 8.5), trunc(g_sub, 26))
-        # Pass Pill
-        draw_box(gx + gate_w - 11.0, gates_top + 2.5, 9.5, 4.0, fill_hex="#16a34a", stroke_hex=None)
-        c.setFillColor(colors.white)
-        c.setFont(FONT_BOLD, 5.2)
-        c.drawCentredString((gx + gate_w - 6.2) * mm, y_mm(gates_top + 5.5), L["pass"])
+        # Empty tick box: the gate is checked by hand on the shop floor, the PDF never claims it passed.
+        draw_box(gx + gate_w - 6.5, gates_top + 2.0, 4.5, 4.5, fill_hex="#ffffff", stroke_hex="#475569", lw=0.6)
 
     # ─── 8. FULL TECHNOLOGICAL MANUFACTURING ROUTE (ALL OPERATIONS) ───────────
     sec8_top = gates_top + gates_h + 2.0
     ops_list = req.operations or []
-    if not ops_list:
-        ops_list = [
-            JobTicketOperationItem(stepNumber=10, name="CTP Plitalarni lazerda ochish", machine="Kodak Magnus 800", operator="M. Qodirov", duration=0.8, status="Finished"),
-            JobTicketOperationItem(stepNumber=20, name="Ofset bosma 4+0 CMYK", machine="Heidelberg Speedmaster XL 106", operator="A. Rahimov", duration=2.5, status="Finished"),
-            JobTicketOperationItem(stepNumber=30, name="Suv asosli dispersiyali laklash", machine="Heidelberg Inline Coater", operator="A. Rahimov", duration=0.5, status="Finished"),
-            JobTicketOperationItem(stepNumber=40, name="Termolaminatsiya (Matte BOPP)", machine="Autobond Mini 76", operator="I. Zokirov", duration=1.2, status="In Progress"),
-            JobTicketOperationItem(stepNumber=50, name="Tirakli kesish va Shtamplash", machine="Bobst SP 102-E", operator="S. Umarov", duration=1.8, status="Queued"),
-            JobTicketOperationItem(stepNumber=60, name="Qadoqlash va Yakuniy OTK", machine="Avtomat Qadoqlash", operator="D. Aliyeva", duration=0.6, status="Queued"),
-        ]
-
-    ops_to_draw = len(ops_list)
+    ops_to_draw = max(1, len(ops_list))
     row_h_op = 5.6
     sec8_h = 12.0 + ops_to_draw * row_h_op
 
@@ -1101,6 +1145,11 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.drawCentredString(173.5 * mm, y_mm(r_th_y + 3.1), "HOLAT")
     c.drawCentredString(191.5 * mm, y_mm(r_th_y + 3.1), "IMZO")
 
+    if not ops_list:
+        c.setFillColor(colors.HexColor("#94a3b8"))
+        c.setFont(FONT_REGULAR, 6.0)
+        c.drawString(22.0 * mm, y_mm(r_th_y + 4.4 + 3.6), "Marshrut kiritilmagan")
+
     for idx, op in enumerate(ops_list):
         ry = r_th_y + 4.4 + idx * row_h_op
         bg_col = "#ffffff" if idx % 2 == 0 else "#f8fafc"
@@ -1116,7 +1165,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
         c.setFillColor(colors.HexColor("#0f172a"))
         c.setFont(FONT_BOLD, 6.0)
-        c.drawRightString(162.0 * mm, y_mm(ry + 3.6), f"{op.duration:g}h")
+        c.drawRightString(162.0 * mm, y_mm(ry + 3.6), f"{op.duration:g}h" if op.duration else "—")
 
         # Status badge
         s_op = str(op.status or "Queued")
@@ -1155,23 +1204,11 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     # ─── 9. SHIFT HANDOVER & OPERATOR NOTES ───────────────────────────────────
     notes_top = 24.5
-    notes = req.shiftNotes or [
-        JobTicketShiftNote(
-            author="M. Ivanova (Bosma brigadiri)",
-            shift="1-smena",
-            time="11:45",
-            text="CMYK zichliklari 1.45 D ga qulflangan. Viskozitet 23s DIN4. Tezlik 14,000 ottisk/soat.",
-        ),
-        JobTicketShiftNote(
-            author="S. Umarov (Shtamplash)",
-            shift="2-smena",
-            time="19:30",
-            text="Bobst 102E da pichoq o'rnatildi, 0.4mm bigovka kanali moslandi. Birinchi namuna OTK tasdiqladi.",
-        ),
-    ]
-    notes_h = 13.5
-    draw_box(9, notes_top, full_w_mm, notes_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-    draw_panel_header(9.8, notes_top + 0.8, full_w_mm - 1.6, L["shiftNotesTitle"])
+    notes = req.shiftNotes or []
+    notes_h = 13.5 if notes else -2.0
+    if notes:
+        draw_box(9, notes_top, full_w_mm, notes_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
+        draw_panel_header(9.8, notes_top + 0.8, full_w_mm - 1.6, L["shiftNotesTitle"])
 
     note_w = (full_w_mm - 6.0) / 2.0
     for n_idx, note in enumerate(notes[:2]):
@@ -1202,7 +1239,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
                     "id": a.get("skuId") or f"sku-{idx}",
                     "size": s_name,
                     "model": a.get("model") or "STD",
-                    "quantity": int(a.get("qty") or a.get("quantity") or (net_qty // max(len(sku_artworks_raw), 1)))
+                    "quantity": int(a.get("qty") or a.get("quantity") or 0)
                 })
     if not sizes_raw:
         sizes_raw = [{"size": "ALL", "quantity": net_qty}]
@@ -1510,11 +1547,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
                 elif f_raw:
                     draw_raster_or_svg(c, f_raw, art_x, art_y, art_w, art_h, y_mm)
     else:
-        draw_box(9, sec11_top, full_w_mm, sec11_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
-        draw_panel_header(9.8, sec11_top + 0.8, full_w_mm - 1.6, "SKU PREPRESS PROOFLAR MATRITSASI", "MASTER PROOF")
-        c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont(FONT_REGULAR, 7.5)
-        c.drawCentredString((9 + full_w_mm / 2.0) * mm, y_mm(sec11_top + sec11_h / 2.0), "SKU o'lchamlari bo'yicha yagona tasdiqlangan master artwork qo'llaniladi (1-sahifaga qarang)")
+        # No SKU artwork on file: the gallery is left out rather than claiming an approved master.
+        sec11_h = -2.5
 
     # ─── 12. BOSMA FORMALAR VA TIRAJ TAQSIMOTI (PLATES RUN & YIELD) ───────────
     sec12_top = sec11_top + sec11_h + 2.5
@@ -1524,36 +1558,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     imp_state = od.get("impositionState") or {}
     plates_data = imp_state.get("plateCalculations") or od.get("plateCalculations") or []
 
-    press_sheet_w = float(imp_state.get("sheetW") or od.get("pressSheetW") or 500)
-    press_sheet_h = float(imp_state.get("sheetH") or od.get("pressSheetH") or 350)
-    prod_w_val = float(od.get("width") or 50)
-    prod_h_val = float(od.get("height") or 80)
-    eff_pieces = int(imp_state.get("effectivePieces") or ((press_sheet_w // (prod_w_val + 4)) * (press_sheet_h // (prod_h_val + 4))) or 1)
-
-    if not plates_data:
-        # Fallback single plate distribution from sizes_raw
-        p_sheets = math.ceil(net_qty / max(1, eff_pieces))
-        p_assignments = []
-        for s_item in sizes_raw:
-            s_q = int(s_item.get("quantity") or 0)
-            s_slots = max(1, round((s_q / max(1, net_qty)) * eff_pieces))
-            p_assignments.append({
-                "sizeCode": str(s_item.get("size") or s_item.get("sizeCode") or "STD"),
-                "model": str(s_item.get("model") or "STD"),
-                "slots": s_slots,
-                "targetQuantity": s_q,
-                "yieldQuantity": s_slots * p_sheets,
-                "overproduction": max(0, (s_slots * p_sheets) - s_q),
-            })
-        plates_data = [{
-            "id": "plate-1",
-            "name": "Forma 1",
-            "requiredSheets": p_sheets,
-            "unassignedSlots": max(0, eff_pieces - sum(a["slots"] for a in p_assignments)),
-            "totalYield": sum(a["yieldQuantity"] for a in p_assignments),
-            "totalOverproduction": sum(a["overproduction"] for a in p_assignments),
-            "assignments": p_assignments,
-        }]
+    # Only the plates the imposition actually calculated; no plan is invented when it was never run.
+    eff_pieces = int(imp_state.get("effectivePieces") or yield_per_sheet or 1)
 
     total_sheets_run = sum(p.get("requiredSheets", 0) for p in plates_data)
     total_yield = sum(p.get("totalYield", 0) for p in plates_data)
@@ -1564,14 +1570,15 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     needed_h = 7.0 + len(plates_data) * 9.8 + total_sku_count * 4.4 + 4.0
     sec12_h = min(avail_sec12_h, max(28.0, needed_h))
 
-    draw_box(9, sec12_top, full_w_mm, sec12_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-    draw_panel_header(
-        9.8,
-        sec12_top + 0.8,
-        full_w_mm - 1.6,
-        "BOSMA FORMALAR VA TIRAJ TAQSIMOTI (PLATES RUN & YIELD)",
-        f"{len(plates_data)} FORMA · JAMI {total_sheets_run:,} LIST",
-    )
+    if plates_data:
+        draw_box(9, sec12_top, full_w_mm, sec12_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
+        draw_panel_header(
+            9.8,
+            sec12_top + 0.8,
+            full_w_mm - 1.6,
+            "BOSMA FORMALAR VA TIRAJ TAQSIMOTI",
+            f"{len(plates_data)} FORMA · JAMI {total_sheets_run:,} VARAQ",
+        )
 
     curr_y = sec12_top + 6.6
     for p_idx, plate in enumerate(plates_data):
@@ -1697,6 +1704,126 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.drawRightString(page_w - margin_x, y_mm(291.0), f"{L['printDate']}: {datetime.now().strftime('%Y-%m-%d %H:%M')} • Sahifa 2 / {total_pages}")
 
     c.showPage()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 3+: MANUAL OUTPUT REPORT (filled in by hand)
+    # ══════════════════════════════════════════════════════════════════════════
+    def draw_grid(top: float, cols, row_h: float, n_rows: int, cell_text=None):
+        """Column header + ruled empty rows. cell_text(row, col) -> (text, bold, color) or None."""
+        x_edges = [9.0]
+        for _, w in cols:
+            x_edges.append(x_edges[-1] + w)
+        table_h = REPORT_HEAD_H + n_rows * row_h
+        draw_box(9.0, top, full_w_mm, REPORT_HEAD_H, fill_hex="#f1f5f9", stroke_hex=None)
+        c.setFillColor(colors.HexColor("#334155"))
+        c.setFont(FONT_BOLD, 5.6)
+        for ci, (lbl, w) in enumerate(cols):
+            c.drawCentredString((x_edges[ci] + w / 2.0) * mm, y_mm(top + 4.0), lbl)
+        c.setStrokeColor(colors.HexColor("#64748b"))
+        c.setLineWidth(0.4)
+        c.rect(9.0 * mm, y_mm(top + table_h), full_w_mm * mm, table_h * mm, fill=0, stroke=1)
+        for xe in x_edges[1:-1]:
+            c.line(xe * mm, y_mm(top), xe * mm, y_mm(top + table_h))
+        for ri in range(n_rows + 1):
+            ly = top + REPORT_HEAD_H + ri * row_h
+            c.line(9.0 * mm, y_mm(ly), (9.0 + full_w_mm) * mm, y_mm(ly))
+        if cell_text:
+            for ri in range(n_rows):
+                for ci, (_, w) in enumerate(cols):
+                    cell = cell_text(ri, ci)
+                    if not cell:
+                        continue
+                    lines = cell if isinstance(cell, list) else [cell]
+                    ry = top + REPORT_HEAD_H + ri * row_h
+                    if len(lines) == 1:
+                        text, bold, col_hex = lines[0]
+                        draw_fitted_text(c, text, x_edges[ci] + 1.5, y_mm(ry + row_h / 2.0 + 1.2), w - 3.0,
+                                         font_name=FONT_BOLD if bold else FONT_REGULAR, base_font_size=6.2,
+                                         min_font_size=4.8, color=col_hex, max_lines=1)
+                    else:
+                        for li, (text, bold, col_hex) in enumerate(lines[:2]):
+                            draw_fitted_text(c, text, x_edges[ci] + 1.5, y_mm(ry + 3.6 + li * 3.4), w - 3.0,
+                                             font_name=FONT_BOLD if bold else FONT_REGULAR,
+                                             base_font_size=6.2 if li == 0 else 5.2, min_font_size=4.6,
+                                             color=col_hex, max_lines=1)
+
+    ops_all = req.operations or []
+    mats_all = (req.materials or [])[:10]
+
+    def op_cell(start: int):
+        def fn(ri: int, ci: int):
+            idx = start + ri
+            if idx >= len(ops_all):
+                return None
+            op = ops_all[idx]
+            if ci == 0:
+                return ("#" + str(op.stepNumber), True, "#475569")
+            if ci == 1:
+                machine = op.machine if op.machine and op.machine != "—" else ""
+                return [(op.name, True, "#0f172a"), (machine, False, "#64748b")] if machine else (op.name, True, "#0f172a")
+            if ci == 2 and op.plannedQty:
+                return (f"{op.plannedQty:,.0f} {op.planUnit or ''}".strip(), False, "#334155")
+            return None
+        return fn
+
+    def mat_cell(ri: int, ci: int):
+        if ri >= len(mats_all):
+            return None
+        m_item = mats_all[ri]
+        if ci == 0:
+            return (m_item.name, True, "#0f172a")
+        if ci == 1:
+            return (f"{m_item.req:g} {m_item.unit}", False, "#334155")
+        return None
+
+    for p_idx, page_blocks in enumerate(report_pages):
+        draw_unified_header(3 + p_idx)
+        cur = REPORT_TOP_MM
+        for b in page_blocks:
+            if b["kind"] == "ops":
+                badge = f"{len(ops_all)} BOSQICH" if b["start"] == 0 else "DAVOMI"
+                draw_panel_header(9.0, cur, full_w_mm, "ISHLAB CHIQARISH HISOBOTI", badge)
+                draw_grid(cur + REPORT_PANEL_H, REPORT_OP_COLS, REPORT_OP_ROW_H, b["count"], op_cell(b["start"]))
+            elif b["kind"] == "downtime":
+                draw_panel_header(9.0, cur, full_w_mm, "TO'XTALISHLAR")
+                draw_grid(cur + REPORT_PANEL_H, REPORT_DT_COLS, REPORT_DT_ROW_H, REPORT_DT_ROWS)
+            elif b["kind"] == "materials":
+                draw_panel_header(9.0, cur, full_w_mm, "MATERIAL SARFI")
+                draw_grid(cur + REPORT_PANEL_H, REPORT_MAT_COLS, REPORT_MAT_ROW_H, b["rows"], mat_cell)
+            elif b["kind"] == "sign":
+                draw_panel_header(9.0, cur, full_w_mm, "IZOH")
+                c.setStrokeColor(colors.HexColor("#94a3b8"))
+                c.setLineWidth(0.4)
+                for li in range(3):
+                    ly = cur + REPORT_PANEL_H + 6.0 + li * 6.0
+                    c.line(9.0 * mm, y_mm(ly), (9.0 + full_w_mm) * mm, y_mm(ly))
+                sign_top = cur + REPORT_PANEL_H + 23.0
+                sign_roles = ["Smena ustasi", "OTK", "Omborga qabul"]
+                sign_w = (full_w_mm - 2 * 4.0) / 3.0
+                for si, role in enumerate(sign_roles):
+                    sx = 9.0 + si * (sign_w + 4.0)
+                    draw_box(sx, sign_top, sign_w, 18.0, fill_hex="#ffffff", stroke_hex="#64748b", lw=0.4)
+                    c.setFillColor(colors.HexColor("#0f172a"))
+                    c.setFont(FONT_BOLD, 6.2)
+                    c.drawString((sx + 2.0) * mm, y_mm(sign_top + 4.0), role.upper())
+                    c.setFillColor(colors.HexColor("#64748b"))
+                    c.setFont(FONT_REGULAR, 5.4)
+                    for li, lbl in enumerate(["F.I.Sh", "Imzo", "Sana"]):
+                        ly = sign_top + 8.5 + li * 4.2
+                        c.drawString((sx + 2.0) * mm, y_mm(ly), lbl)
+                        c.setStrokeColor(colors.HexColor("#94a3b8"))
+                        c.line((sx + 12.0) * mm, y_mm(ly + 0.3), (sx + sign_w - 2.0) * mm, y_mm(ly + 0.3))
+            cur += b["h"] + REPORT_GAP_MM
+
+        c.setStrokeColor(colors.HexColor("#cbd5e1"))
+        c.setLineWidth(0.5)
+        c.line(margin_x, y_mm(287.0), page_w - margin_x, y_mm(287.0))
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont(FONT_REGULAR, 6.0)
+        c.drawString(margin_x, y_mm(291.0), f"{L['footerSystem']} • DOC: {doc_no} • ISHLAB CHIQARISH HISOBOTI")
+        c.drawRightString(page_w - margin_x, y_mm(291.0), f"{L['printDate']}: {datetime.now().strftime('%Y-%m-%d %H:%M')} • Sahifa {3 + p_idx} / {total_pages}")
+        c.showPage()
+
     c.save()
     buf.seek(0)
     base_pdf_bytes = buf.getvalue()

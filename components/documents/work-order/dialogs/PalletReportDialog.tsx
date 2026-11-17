@@ -68,7 +68,6 @@ interface PalletReportDialogProps {
     /** How the quantities were obtained; estimated and derived ones are not counted facts. */
     qtySource: QtySource;
   }) => void;
-  onOpenPrintTag?: (event: ShiftEvent) => void;
   /** Plant shifts: the current one is preselected. */
   shiftSchedule?: ShiftInterval[];
   /** Unit the step counts in (varaq, metr, zarba, dona...). */
@@ -105,7 +104,6 @@ export function PalletReportDialog({
   piecesPerSheet = 1,
   editingEvent = null,
   onSaveEvent,
-  onOpenPrintTag,
   shiftSchedule = DEFAULT_SHIFTS,
   unit: unitProp = "varaq",
   profile,

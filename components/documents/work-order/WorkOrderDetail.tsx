@@ -115,7 +115,7 @@ import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { getProducedOutputQty, isProductionRouteFinished } from "./utils/productionOutput";
 import { DEFAULT_SHIFTS, atPlantTime, occurredAtFromTime, plantClock, type ShiftInterval } from "@/lib/shiftSchedule";
 import { stepUnit } from "./utils/stepKpis";
-import { getCountingProfile } from "./utils/countingProfile";
+import { getCountingProfile, planInUnit } from "./utils/countingProfile";
 import { useAskDialog } from "./dialogs/AskDialog";
 import { resolveMachine } from "./utils/operationCost";
 import {
@@ -129,7 +129,6 @@ import { OperationDialog } from "./dialogs/OperationDialog";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
 import { DowntimeLogDialog } from "./dialogs/DowntimeLogDialog";
-import { PalletTagPrintDialog } from "./dialogs/PalletTagPrintDialog";
 import { JobTicketDialog } from "./dialogs/JobTicketDialog";
 import { PackagingDialog } from "./dialogs/PackagingDialog";
 import { TelegramOrdersGroupModal } from "./TelegramOrdersGroupModal";
@@ -1606,8 +1605,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const [isLogEventDialogOpen, setIsLogEventDialogOpen] = useState(false);
   const [isPalletReportDialogOpen, setIsPalletReportDialogOpen] = useState(false);
   const [isDowntimeDialogOpen, setIsDowntimeDialogOpen] = useState(false);
-  const [isPalletTagPrintOpen, setIsPalletTagPrintOpen] = useState(false);
-  const [selectedTagPrintEvent, setSelectedTagPrintEvent] = useState<ShiftEvent | null>(null);
   const [editingPalletEvent, setEditingPalletEvent] = useState<ShiftEvent | null>(null);
   const [editingDowntimeEvent, setEditingDowntimeEvent] = useState<ShiftEvent | null>(null);
   const [logEventForm, setLogEventForm] = useState<{
@@ -3067,11 +3064,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setIsPalletReportDialogOpen(true);
   };
 
-  const handleOpenPalletTagPrint = (event: ShiftEvent) => {
-    setSelectedTagPrintEvent(event);
-    setIsPalletTagPrintOpen(true);
-  };
-
   const askDialog = useAskDialog();
 
   // ── Step state machine: every transition is a journal entry; the step's fields follow the journal ──
@@ -4316,7 +4308,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 onOpenEditPalletLog={handleOpenEditPalletEvent}
                 onOpenDowntimeLog={handleRecordDowntime}
                 onOpenEditDowntimeLog={handleOpenEditDowntimeEvent}
-                onOpenPalletTagPrint={handleOpenPalletTagPrint}
                 onStartSetup={handleStartSetup}
                 onStartStep={handleStartRun}
                 onPauseStep={handlePauseStep}
@@ -4462,7 +4453,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           piecesPerSheet={activePrintPlan.piecesPerSheet}
           editingEvent={editingPalletEvent}
           onSaveEvent={handleSavePalletEvent}
-          onOpenPrintTag={handleOpenPalletTagPrint}
         />
       )}
 
@@ -4484,18 +4474,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         />
       )}
 
-      {/* Dialog: Pallet Tag QR Print Slip */}
-      {selectedTagPrintEvent && (
-        <PalletTagPrintDialog
-          isOpen={isPalletTagPrintOpen}
-          onOpenChange={setIsPalletTagPrintOpen}
-          workOrderNo={data.docNo || tab.id}
-          productName={formData.product}
-          customerName={formData.customer}
-          step={selectedOp}
-          event={selectedTagPrintEvent}
-        />
-      )}
 
       {/* Unified Order Passport / Job Ticket Dialog */}
       {isJobTicketOpen && (
@@ -4506,16 +4484,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           formData={{ ...formData, skuArtworks }}
           activeSpec={activeSpec}
           activeMachine={activeMachine}
-          operations={operations}
+          operations={operations.map((op) => {
+            const profile = profileOf(op);
+            return { ...op, plannedQty: planInUnit(Number(formData.quantity) || 0, profile), planUnit: profile.unit };
+          })}
           materials={currentRecipeMaterials}
           shiftEvents={shiftEvents}
-          onExportSuccess={(docId) =>
-            addNotification({
-              title: tOrder("printSpec"),
-              description: `PDF exported: ${docId}`,
-              severity: "success",
-            })
-          }
         />
       )}
 

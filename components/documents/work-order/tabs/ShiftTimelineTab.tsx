@@ -13,7 +13,6 @@ import {
   Play,
   Pause,
   Wrench,
-  QrCode,
   FileSpreadsheet,
   Search,
   Pencil,
@@ -162,7 +161,6 @@ interface ShiftTimelineTabProps {
   onOpenEditPalletLog?: (event: ShiftEvent) => void;
   onOpenDowntimeLog?: () => void;
   onOpenEditDowntimeLog?: (event: ShiftEvent) => void;
-  onOpenPalletTagPrint?: (event: ShiftEvent) => void;
   /** Make-ready starts. */
   onStartSetup?: (opId: string) => void;
   /** Production run starts (from the queue or after make-ready). */
@@ -194,7 +192,6 @@ export function ShiftTimelineTab({
   onOpenEditPalletLog,
   onOpenDowntimeLog,
   onOpenEditDowntimeLog,
-  onOpenPalletTagPrint,
   onStartSetup,
   onStartStep,
   onPauseStep,
@@ -1216,19 +1213,6 @@ export function ShiftTimelineTab({
 
                       <td className="py-2 px-3 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1">
-                          {ev.type === "Run" && onOpenPalletTagPrint && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => onOpenPalletTagPrint(ev)}
-                              title="QR etiketka"
-                              className="size-7 p-0 text-muted-foreground hover:text-foreground"
-                            >
-                              <QrCode className="size-3.5" />
-                            </Button>
-                          )}
-
                           {transitionLabel
                             ? null
                             : isDowntime

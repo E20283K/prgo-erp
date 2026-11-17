@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import {
   X,
@@ -22,8 +22,10 @@ import {
   RouteStep,
   ShiftEvent,
   ShiftNote,
-  RECIPE_MATERIALS,
 } from "../types";
+
+/** A route step with its plan in the step's own counting unit, printed on the output report page. */
+export type JobTicketOperation = RouteStep & { plannedQty?: number; planUnit?: string };
 
 interface JobTicketDialogProps {
   isOpen: boolean;
@@ -32,10 +34,9 @@ interface JobTicketDialogProps {
   formData: WorkOrderFormData;
   activeSpec?: MasterSpecification;
   activeMachine?: MachineOption;
-  operations?: RouteStep[];
+  operations?: JobTicketOperation[];
   materials?: { name: string; req: number; unit: string; stock: number }[];
   shiftEvents?: ShiftEvent[];
-  onExportSuccess?: (docNo: string) => void;
 }
 
 const LABEL_KEYS = [
@@ -134,25 +135,17 @@ export function JobTicketDialog({
   formData,
   operations,
   materials,
-  onExportSuccess,
 }: JobTicketDialogProps) {
   const t = useTranslations("JobTicket");
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Only the latest request may show its result; an older one (closed dialog, repeated refresh) is aborted.
+  const abortRef = useRef<AbortController | null>(null);
 
-  const netQuantity = formData.quantity || 5000;
-
-  // BOM Materials
-  const bomMaterials =
-    materials && materials.length > 0
-      ? materials
-      : RECIPE_MATERIALS[formData.recipe] || RECIPE_MATERIALS["OFFSET_STD_V1"] || [];
-
-  // Operations
-  const routeSteps: RouteStep[] = operations || [];
-
-  // Shift Notes
+  // Only the order's own BOM; no recipe template is substituted when it is empty.
+  const bomMaterials = materials || [];
+  const routeSteps: JobTicketOperation[] = operations || [];
   const shiftNotes: ShiftNote[] = formData.shiftNotes || [];
 
   const generateReportLabPdf = useCallback(async () => {
@@ -161,6 +154,10 @@ export function JobTicketDialog({
       labelsMap[key] = t(key);
     }
 
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       setIsGeneratingPdf(true);
       setErrorMsg(null);
@@ -168,6 +165,7 @@ export function JobTicketDialog({
       const res = await fetch("/api/docs/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           type: "job-ticket-pdf",
           payload: {
@@ -197,56 +195,32 @@ export function JobTicketDialog({
       const filename = `Order_Passport_${workOrderId || "PRINTGOO"}.pdf`;
       const file = new File([blob], filename, { type: "application/pdf" });
       const url = `${URL.createObjectURL(file)}#filename=${encodeURIComponent(filename)}`;
+      if (controller.signal.aborted) return;
       setPdfBlobUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev.split("#")[0]);
         return url;
       });
-      onExportSuccess?.(workOrderId);
     } catch (err) {
-      console.warn("ReportLab service unavailable, falling back to client-side PDF renderer...", err);
-      try {
-        const { pdf } = await import("@react-pdf/renderer");
-        const { WorkOrderSpecPDF } = await import("../WorkOrderSpecPDF");
-        const clientBlob = await pdf(
-          <WorkOrderSpecPDF
-            docNo={workOrderId}
-            orderData={formData}
-            operations={routeSteps}
-            materials={bomMaterials}
-            labels={labelsMap}
-          />
-        ).toBlob();
-        const filename = `Order_Passport_${workOrderId || "PRINTGOO"}.pdf`;
-        const file = new File([clientBlob], filename, { type: "application/pdf" });
-        const url = `${URL.createObjectURL(file)}#filename=${encodeURIComponent(filename)}`;
-        setPdfBlobUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev.split("#")[0]);
-          return url;
-        });
-        onExportSuccess?.(workOrderId);
-      } catch (clientErr) {
-        console.error("Failed to generate Order Passport PDF:", clientErr);
-        setErrorMsg(
-          err instanceof Error
-            ? err.message
-            : "Ish pasporti PDF generatsiyasida xatolik yuz berdi."
-        );
-      }
+      if (controller.signal.aborted) return;
+      console.error("Failed to generate Order Passport PDF:", err);
+      setErrorMsg(err instanceof Error ? err.message : "PDF generatsiyasida xatolik.");
     } finally {
-      setIsGeneratingPdf(false);
+      if (abortRef.current === controller) setIsGeneratingPdf(false);
     }
   }, [workOrderId, formData, routeSteps, bomMaterials, shiftNotes, t]);
 
-  // Automatically generate the ReportLab PDF when the dialog opens
+  // Generate once per opening; the cleanup aborts the request, so a re-run effect
+  // (React StrictMode in dev) does not produce a second PDF.
   useEffect(() => {
-    if (isOpen) {
-      generateReportLabPdf();
-    } else {
+    if (!isOpen) {
       setPdfBlobUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev.split("#")[0]);
         return null;
       });
+      return;
     }
+    generateReportLabPdf();
+    return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
