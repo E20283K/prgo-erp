@@ -1255,12 +1255,12 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                       )}
 
                       {!isNewRecord && (
-                        <div className="flex items-center gap-1 w-full" title="Sex terminali (kiosk) uchun PIN, 4–6 raqam">
+                        <div className="flex items-center gap-1 w-full" title="Sex terminali (kiosk) uchun PIN, 4 raqam">
                           <Input
                             value={terminalPin}
-                            onChange={(e) => setTerminalPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                            onChange={(e) => setTerminalPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter" && terminalPin.length >= 4) void saveTerminalPin(terminalPin);
+                              if (e.key === "Enter" && terminalPin.length === 4) void saveTerminalPin(terminalPin);
                             }}
                             type="password"
                             inputMode="numeric"
@@ -1273,7 +1273,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             variant="outline"
                             size="sm"
                             className="h-6 px-1.5 shrink-0"
-                            disabled={savingPin || terminalPin.length < 4}
+                            disabled={savingPin || terminalPin.length !== 4}
                             onClick={() => void saveTerminalPin(terminalPin)}
                             title="PIN saqlash"
                           >

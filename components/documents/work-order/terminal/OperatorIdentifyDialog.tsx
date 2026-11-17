@@ -23,6 +23,9 @@ interface Props {
 }
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+/** Same as the server: the last digit signs the operator in. */
+const PIN_LENGTH = 4;
+const isFullPin = (v: string) => v.length === PIN_LENGTH && /^\d+$/.test(v);
 
 /**
  * Shared kiosk: who is at the machine. A PIN on the pad, or a badge scanner that types the badge
@@ -67,9 +70,18 @@ export function OperatorIdentifyDialog({ open, machineId, actionLabel, onIdentif
     }
   };
 
-  const press = (key: string) => {
+  /** A full PIN signs in at once; a badge scanner ends with Enter. */
+  const update = (next: string) => {
+    if (busy) return;
     setError("");
-    setCode((c) => (c.length >= 32 ? c : c + key));
+    setCode(next);
+    if (isFullPin(next)) void submit(next);
+  };
+
+  const press = (key: string) => {
+    const isDigits = /^\d*$/.test(code);
+    if ((isDigits && code.length >= PIN_LENGTH) || code.length >= 32) return;
+    update(code + key);
     inputRef.current?.focus();
   };
 
@@ -90,30 +102,50 @@ export function OperatorIdentifyDialog({ open, machineId, actionLabel, onIdentif
           <DialogTitle className="text-sm font-semibold">{actionLabel ? `Kim? · ${actionLabel}` : "Kim?"}</DialogTitle>
         </DialogHeader>
         <div className="p-4 space-y-3">
-          <div className="relative">
+          <div className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+            <ScanLine className="size-3.5" />
+            <span>PIN yoki beyj</span>
+          </div>
+          <div className="relative" onClick={() => inputRef.current?.focus()}>
+            {isPin ? (
+              <div className="grid grid-cols-4 gap-2">
+                {Array.from({ length: PIN_LENGTH }, (_, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      "h-16 rounded-lg border bg-background flex items-center justify-center",
+                      error ? "border-destructive" : i === code.length ? "border-primary" : "border-border"
+                    )}
+                  >
+                    {busy && i === PIN_LENGTH - 1 ? (
+                      <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                    ) : (
+                      i < code.length && <span className="size-4 rounded-full bg-foreground" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="h-16 rounded-lg border border-primary bg-background flex items-center justify-center font-mono text-xl truncate px-3">
+                {code}
+              </div>
+            )}
+            {/* Takes keyboard and badge-scanner input; the cells above show it. */}
             <input
               ref={inputRef}
               value={code}
-              onChange={(e) => {
-                setError("");
-                setCode(e.target.value);
-              }}
+              onChange={(e) => update(e.target.value.slice(0, 32))}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
                   void submit(e.currentTarget.value);
                 }
               }}
-              type={isPin ? "password" : "text"}
               inputMode="numeric"
               autoComplete="off"
-              placeholder="PIN yoki beyj"
-              className={cn(
-                "h-12 w-full rounded-md border border-border bg-background px-3 pr-9 text-center font-mono text-xl tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans placeholder:text-sm outline-none focus:border-primary",
-                error && "border-destructive"
-              )}
+              aria-label="PIN yoki beyj"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-default"
             />
-            <ScanLine className="size-4 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2" />
           </div>
           <div className="h-4 text-center text-xs text-destructive">{error}</div>
           <div className="grid grid-cols-3 gap-2">

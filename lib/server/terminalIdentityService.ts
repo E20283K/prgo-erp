@@ -9,7 +9,9 @@ import { and, eq, ne, sql } from "drizzle-orm";
  * journal trusts for who did the work (piecework, OEE), while the kiosk account stays the author.
  */
 
-const PIN_RE = /^\d{4,6}$/;
+/** Fixed length, so the kiosk can sign in the moment the last digit is pressed. */
+export const PIN_LENGTH = 4;
+const PIN_RE = /^\d{4}$/;
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 
 function secret(): string {
@@ -41,7 +43,7 @@ export async function setEmployeeTerminalPin(employeeId: string, pin: string | n
     await db.update(employees).set({ terminalPinHash: null, updatedAt: new Date() }).where(eq(employees.id, emp.id));
     return { hasPin: false };
   }
-  if (!PIN_RE.test(pin)) throw new Error("PIN 4–6 ta raqamdan iborat bo'lishi kerak.");
+  if (!PIN_RE.test(pin)) throw new Error("PIN 4 ta raqamdan iborat bo'lishi kerak.");
 
   const hash = pinHash(emp.companyId, pin);
   const taken = await db.query.employees.findFirst({
@@ -80,7 +82,7 @@ function recordMiss(key: string) {
   else m.count += 1;
 }
 
-/** A PIN (4–6 digits) or a scanned badge number identifies one active employee of the company. */
+/** A 4-digit PIN or a scanned badge number identifies one active employee of the company. */
 export async function identifyOperator(
   companyId: string,
   code: string,
