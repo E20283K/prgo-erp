@@ -165,14 +165,6 @@ const FAULT_PARTY_CONFIG: Record<string, string> = {
   supplier: "Ta'minotchi / Pudratchi defekti",
 };
 
-const FALLBACK_CATALOG_DIES = [
-  { id: "die-01", code: "DIE-BX-180x240", name: "Standart quti shtampi (FEFCO 0427)", dieType: "flatbed", widthMm: 180, heightMm: 240, location: "SHELF-A1", status: "available" },
-  { id: "die-02", code: "DIE-RECT-50x90", name: "Vizitka / Birka shtampi (To'g'ri to'rtburchak)", dieType: "flatbed", widthMm: 50, heightMm: 90, location: "SHELF-B3", status: "available" },
-  { id: "die-03", code: "DIE-ROTR-75x120", name: "Aylanma yorliq pichog'i (Z=96)", dieType: "rotary_magnetic", widthMm: 75, heightMm: 120, location: "RACK-CYL-04", status: "available" },
-  { id: "die-04", code: "KL-FOIL-LOGO-01", name: "Zarhal (Hot Foil) Logo Jez Klishesi", dieType: "hot_stamp", widthMm: 60, heightMm: 40, location: "BOX-FOIL-02", status: "available" },
-  { id: "die-05", code: "KL-EMB-MEDAL-02", name: "Kongrev Bo'rtma Magniy Klishesi", dieType: "embossing", widthMm: 50, heightMm: 50, location: "BOX-EMB-01", status: "available" },
-];
-
 export function PrepressToolingTab({
   formData,
   docNo,
@@ -252,12 +244,8 @@ export function PrepressToolingTab({
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogCategoryFilter, setCatalogCategoryFilter] = useState<string>("ALL");
 
-  const catalogDies = useMemo(() => {
-    return diesTooling && diesTooling.length > 0 ? diesTooling : FALLBACK_CATALOG_DIES;
-  }, [diesTooling]);
-
   const filteredCatalogDies = useMemo(() => {
-    const list = catalogDies;
+    const list = diesTooling || [];
     const search = catalogSearch.toLowerCase().trim();
     return list.filter((tool: any) => {
       const matchCat =
@@ -278,7 +266,7 @@ export function PrepressToolingTab({
 
       return matchCat && matchSearch;
     });
-  }, [catalogDies, catalogSearch, catalogCategoryFilter]);
+  }, [diesTooling, catalogSearch, catalogCategoryFilter]);
 
   const handleAttachCatalogDie = (tool: any) => {
     const category: ToolingCategory =
