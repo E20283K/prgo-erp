@@ -285,6 +285,12 @@ export function WorkOrderTimelineView({
 
   const [api, setApi] = useState<IApi | undefined>(undefined);
   const [activeZoomIdx, setActiveZoomIdx] = useState<number>(2);
+  // SVAR Gantt re-runs store.init() whenever any prop changes (e.g. new tasks
+  // after a data refresh), which resets zoom/cellWidth to the props. We keep
+  // the live api to snapshot the user's current zoom before that happens.
+  const apiRef = useRef<IApi | undefined>(undefined);
+  // Bumped on every preset click (even the active one) to remount from defaults.
+  const [presetNonce, setPresetNonce] = useState(0);
   const [sortBy, setSortBy] = useState<SortField>("deadline");
   const [hoverInfo, setHoverInfo] = useState<{
     task: WoTask;
@@ -395,10 +401,8 @@ export function WorkOrderTimelineView({
     };
   }, []);
 
-  const zoomConfig = useMemo<IZoomConfig>(() => {
-    return {
-      level: activeZoomIdx,
-      levels: [
+  const zoomLevels = useMemo<IZoomConfig["levels"]>(() => {
+    return [
         {
           minCellWidth: 80,
           maxCellWidth: 260,
@@ -463,9 +467,8 @@ export function WorkOrderTimelineView({
             },
           ],
         },
-      ],
-    };
-  }, [dfLocale, activeZoomIdx]);
+    ];
+  }, [dfLocale]);
 
   const markers = useMemo<IMarker[]>(() => {
     return [
@@ -726,6 +729,33 @@ export function WorkOrderTimelineView({
     return list;
   }, [orders, sortBy, t]);
 
+  // Zoom/cellWidth fed to the Gantt. Recomputed exactly when the Gantt will
+  // re-init (tasks/theme/preset change); in that case we carry over the
+  // user's live wheel-zoom state instead of snapping back to the preset.
+  // `api` is cleared on preset click, so a preset always starts from defaults.
+  // It is deliberately not a dependency: a fresh api after remount must not
+  // trigger another re-init.
+  const ganttView = useMemo(() => {
+    const s = api?.getState?.();
+    const level = typeof s?.zoom?.level === "number" ? s.zoom.level : activeZoomIdx;
+    return {
+      zoom: { level, levels: zoomLevels } as IZoomConfig,
+      cellWidth: typeof s?.cellWidth === "number" ? s.cellWidth : 52,
+      scroll: s ? { left: s.scrollLeft as number, top: s.scrollTop as number } : null,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomLevels, activeZoomIdx, presetNonce, tasks, currentTheme]);
+
+  // Restore scroll position after a re-init that kept the live zoom.
+  useEffect(() => {
+    const scroll = ganttView.scroll;
+    if (!scroll) return;
+    const id = requestAnimationFrame(() => {
+      apiRef.current?.exec("scroll-chart", scroll);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [ganttView]);
+
   const tasksById = useMemo(() => {
     const map = new Map<string, WoTask>();
     tasks.forEach((task) => map.set(String(task.id), task));
@@ -783,16 +813,21 @@ export function WorkOrderTimelineView({
     [ordersById, onOpenOrder, openTab]
   );
 
-  const handleInit = useCallback(
-    (ganttApi: IApi) => {
-      setApi(ganttApi);
-      ganttApi.on("select-task", (ev: { id: string | number }) => {
-        if (suppressSelectRef.current) return;
-        if (ev?.id != null) handleOpenById(ev.id);
-      });
-    },
-    [handleOpenById]
-  );
+  // Read through a ref so handleInit stays stable: SVAR re-inits the store
+  // (resetting zoom) whenever the init callback identity changes.
+  const handleOpenByIdRef = useRef(handleOpenById);
+  useEffect(() => {
+    handleOpenByIdRef.current = handleOpenById;
+  }, [handleOpenById]);
+
+  const handleInit = useCallback((ganttApi: IApi) => {
+    apiRef.current = ganttApi;
+    setApi(ganttApi);
+    ganttApi.on("select-task", (ev: { id: string | number }) => {
+      if (suppressSelectRef.current) return;
+      if (ev?.id != null) handleOpenByIdRef.current(ev.id);
+    });
+  }, []);
 
   const handleZoomStep = (dir: 1 | -1) => {
     if (!api) return;
@@ -800,7 +835,11 @@ export function WorkOrderTimelineView({
   };
 
   const handleSelectZoomPreset = (levelIndex: number) => {
+    // Drop the old instance so ganttView uses the preset defaults on remount.
+    apiRef.current = undefined;
+    setApi(undefined);
     setActiveZoomIdx(levelIndex);
+    setPresetNonce((n) => n + 1);
   };
 
   const handleScrollToday = () => {
@@ -1161,16 +1200,16 @@ export function WorkOrderTimelineView({
         >
           <ThemeWrapper fonts={false}>
             <Gantt
-              key={`zoom-${activeZoomIdx}-${currentTheme}`}
+              key={`zoom-${presetNonce}-${currentTheme}`}
               init={handleInit}
               tasks={tasks}
               links={[]}
               markers={markers}
               readonly
               columns={columns}
-              zoom={zoomConfig}
+              zoom={ganttView.zoom}
               autoScale={true}
-              cellWidth={52}
+              cellWidth={ganttView.cellWidth}
               cellHeight={28}
               scaleHeight={26}
               taskTemplate={WoBar}
