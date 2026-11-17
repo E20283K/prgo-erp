@@ -5,6 +5,7 @@ import {
   ShoppingCart,
   Package,
   Banknote,
+  HandCoins,
   Settings2,
   Briefcase,
   // Production icons
@@ -250,6 +251,7 @@ export const MODULE_NAV: ModuleDef[] = [
         defaultOpen: true,
         items: [
           { id: "piecework", label: "Piecework", icon: Award },
+          { id: "advances", label: "Advances", icon: HandCoins },
           { id: "payroll", label: "Payroll", icon: Calculator },
         ],
       },

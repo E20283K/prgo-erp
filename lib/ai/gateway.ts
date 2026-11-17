@@ -70,7 +70,7 @@ export function getGeminiApiKeys(): string[] {
 const geminiKeyCooldowns = new Map<string, number>();
 let geminiKeyIndex = 0;
 
-function isKeyCoolingDown(key: string): boolean {
+export function isKeyCoolingDown(key: string): boolean {
   const cooldownUntil = geminiKeyCooldowns.get(key);
   if (!cooldownUntil) return false;
   if (Date.now() > cooldownUntil) {
@@ -80,7 +80,7 @@ function isKeyCoolingDown(key: string): boolean {
   return true;
 }
 
-function markKeyCooldown(key: string, durationSeconds: number = 60) {
+export function markKeyCooldown(key: string, durationSeconds: number = 60) {
   geminiKeyCooldowns.set(key, Date.now() + durationSeconds * 1000);
 }
 

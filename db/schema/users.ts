@@ -50,6 +50,8 @@ export const users = pgTable(
     linkedEmployeeId: uuid("linked_employee_id").references(() => employees.id, {
       onDelete: "set null",
     }),
+    // Telegram account allowed to talk to the payout bot (set via signed /start deep link).
+    telegramUserId: varchar("telegram_user_id", { length: 32 }),
     permissions: jsonb("permissions").$type<UserPermissions>().notNull(),
     scope: jsonb("scope").$type<UserScope>().notNull(),
     security: jsonb("security").$type<UserSecurity>().notNull(),
@@ -60,6 +62,7 @@ export const users = pgTable(
     uniqueIndex("users_username_uq").on(table.username),
     uniqueIndex("users_email_uq").on(table.email),
     uniqueIndex("users_code_uq").on(table.code),
+    uniqueIndex("users_telegram_user_uq").on(table.telegramUserId),
     index("users_role_idx").on(table.role),
     index("users_status_idx").on(table.status),
     index("users_company_idx").on(table.companyId),

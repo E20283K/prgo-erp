@@ -2,6 +2,7 @@
 
 import React from "react";
 import { SystemUserRecord, UserSecurity, UserAuditEntry } from "../types";
+import { TelegramLinkSection } from "./TelegramLinkSection";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -58,6 +59,8 @@ export function UserSecurityTab({ data, onChange }: UserSecurityTabProps) {
 
   return (
     <div className="space-y-4 max-w-5xl">
+      {data.id && <TelegramLinkSection userId={data.id} />}
+
       {/* ── Section 1: Autentifikatsiya va Parol Siyosati ──────────────── */}
       <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
         <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center gap-2">

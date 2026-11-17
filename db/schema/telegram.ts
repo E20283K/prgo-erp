@@ -149,6 +149,49 @@ export const quickReplyTemplates = pgTable(
 
 // ─── Relations ────────────────────────────────────────────────────────────────
 
+// ─── 4. Payout Bot Drafts (Avans/Raschot tasdiqlash kartalari) ───────────────
+
+export interface PayoutDraftCandidate {
+  id: string;
+  fullName: string;
+  position: string | null;
+}
+
+export interface PayoutDraftItem {
+  nameAsWritten: string;
+  employeeId: string | null;
+  candidates: PayoutDraftCandidate[];
+  amount: number;
+  currency: string;
+  kind: "advance" | "settlement";
+  period: string; // "2026-11"
+  advanceDate: string; // "2026-11-17"
+  note: string | null;
+}
+
+export const telegramPayoutDrafts = pgTable(
+  "telegram_payout_drafts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    tgChatId: varchar("tg_chat_id", { length: 64 }).notNull(),
+    sourceMessageId: integer("source_message_id").notNull(),
+    botMessageId: integer("bot_message_id"),
+    transcript: text("transcript"),
+    items: jsonb("items").$type<PayoutDraftItem[]>().default([]).notNull(),
+    status: varchar("status", { length: 16 }).default("pending").notNull(), // pending | confirmed | cancelled | expired
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("tg_payout_drafts_source_uq").on(table.tgChatId, table.sourceMessageId),
+    index("tg_payout_drafts_company_idx").on(table.companyId, table.status),
+  ]
+);
+
 export const telegramChatsRelations = relations(telegramChats, ({ one, many }) => ({
   company: one(companies, {
     fields: [telegramChats.companyId],
@@ -189,3 +232,4 @@ export type TelegramMessage = typeof telegramMessages.$inferSelect;
 export type NewTelegramMessage = typeof telegramMessages.$inferInsert;
 export type QuickReplyTemplate = typeof quickReplyTemplates.$inferSelect;
 export type NewQuickReplyTemplate = typeof quickReplyTemplates.$inferInsert;
+export type TelegramPayoutDraft = typeof telegramPayoutDrafts.$inferSelect;

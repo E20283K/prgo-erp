@@ -134,6 +134,13 @@
       "when": 1794919817913,
       "tag": "0018_terminal_pin",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794922487445,
+      "tag": "0019_employee_payouts",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,7 @@ import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
 import { generateTechCardImage } from "./techCardGenerator";
 import { generateJobTicketPdf } from "./jobTicketPdfGenerator";
+import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
@@ -1895,6 +1896,11 @@ export async function processTelegramWebhookUpdate(
 
     const companyId = await getCompanyIdByCode(companyCode);
     const token = await getEffectiveTelegramBotToken(companyCode);
+
+    // ── 0. Avans/raschot boti: ERP userga bog'langan buxgalter/direktor shaxsiy chatlari ──
+    if (await tryHandlePayoutBotUpdate(update, companyId, token)) {
+      return { success: true, handled: true };
+    }
 
     // ── 1. Inline tugma bosilishi (Callback Query) ───────────────────────────
     if (callbackQuery) {

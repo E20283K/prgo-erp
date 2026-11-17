@@ -225,6 +225,35 @@ export interface EmployeeAdvanceRecord {
   period: string;
   status: "pending" | "deducted" | "cancelled";
   notes?: string | null;
+  kind: PayoutKind;
+  currency: string;
+  paymentMethod: PayoutMethod;
+  source: PayoutSource;
+  createdByName?: string | null;
+  createdAt?: string;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
+}
+
+export type PayoutKind = "advance" | "settlement";
+export type PayoutMethod = "cash" | "card";
+export type PayoutSource = "ui" | "telegram";
+
+/** One month of an employee's pay account: what was accrued vs. what was handed out. */
+export interface EmployeeLedgerPeriod {
+  period: string;
+  accrued: number | null; // gross − tax − penalty; null until payroll is calculated
+  advances: number;
+  settlements: number;
+  balance: number | null; // accrued − advances − settlements
+  payrollStatus: string | null;
+}
+
+export interface EmployeeLedger {
+  employeeId: string;
+  currency: string;
+  periods: EmployeeLedgerPeriod[];
+  entries: EmployeeAdvanceRecord[];
 }
 
 export interface PayrollAdjustmentRecord {

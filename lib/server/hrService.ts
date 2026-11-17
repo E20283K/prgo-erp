@@ -24,7 +24,6 @@ import type {
   AttendanceRecord,
   PieceworkRecord,
   PayrollRecord,
-  EmployeeAdvanceRecord,
   PayrollAdjustmentRecord,
   EmployeeHistoryItem,
 } from "@/components/documents/hr/types";
@@ -1134,6 +1133,7 @@ export async function calculatePeriodPayroll(
         where: and(
           eq(employeeAdvances.employeeId, emp.id),
           eq(employeeAdvances.period, period),
+          eq(employeeAdvances.kind, "advance"), // raschot is a payout of netPay, not a deduction
           ne(employeeAdvances.status, "cancelled")
         ),
       });
@@ -1230,32 +1230,4 @@ export async function getEmployeeHistoryList(employeeId: string): Promise<Employ
   }));
 }
 
-export async function getEmployeeAdvancesList(
-  companyCode: string = "PRINTGOO",
-  period?: string
-): Promise<EmployeeAdvanceRecord[]> {
-  const companyId = await getCompanyIdByCode(companyCode);
-
-  const list = await db.query.employeeAdvances.findMany({
-    where: and(
-      eq(employeeAdvances.companyId, companyId),
-      period ? eq(employeeAdvances.period, period) : undefined
-    ),
-    with: {
-      employee: true,
-    },
-    orderBy: [desc(employeeAdvances.advanceDate)],
-  });
-
-  return list.map((a) => ({
-    id: a.id,
-    employeeId: a.employeeId,
-    employeeName: a.employee?.fullName || "",
-    badgeNumber: a.employee?.badgeNumber || "",
-    amount: Number(a.amount) || 0,
-    advanceDate: a.advanceDate,
-    period: a.period,
-    status: a.status as any,
-    notes: a.notes,
-  }));
-}
+// Advances/payouts live in employeePayoutService.

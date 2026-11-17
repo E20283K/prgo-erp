@@ -71,6 +71,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import { generateNextCode } from "@/lib/utils";
 import { OrgUnitSelect } from "@/components/common/OrgUnitSelect";
+import { EmployeeLedgerPanel } from "../advances/EmployeeLedgerPanel";
 import {
   Select,
   SelectContent,
@@ -100,6 +101,7 @@ import {
   UploadCloud,
   Trash2,
   KeyRound,
+  Wallet,
 } from "lucide-react";
 
 interface EmployeeDetailProps {
@@ -1015,6 +1017,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       badge: employeeAttendance.length > 0 ? `${totalHoursWorked} soat` : null,
     },
     { id: "skills", label: "Malaka va ruxsatnomalar", icon: Award },
+    ...(employeeDbId ? [{ id: "ledger", label: "Hisob", icon: Wallet }] : []),
     {
       id: "history",
       label: "Tarix",
@@ -1904,6 +1907,8 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
               </Card>
             </div>
           )}
+
+          {activeTab === "ledger" && employeeDbId && <EmployeeLedgerPanel employeeId={employeeDbId} />}
 
           {/* TAB 6: HISTORY OF CHANGES */}
           {activeTab === "history" && (

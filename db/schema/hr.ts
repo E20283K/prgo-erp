@@ -311,12 +311,24 @@ export const employeeAdvances = pgTable(
     advanceDate: date("advance_date").notNull(),
     period: varchar("period", { length: 7 }).notNull(), // "2026-10"
     status: varchar("status", { length: 16 }).default("pending").notNull(), // "pending" | "deducted" | "cancelled"
+    kind: varchar("kind", { length: 16 }).default("advance").notNull(), // "advance" | "settlement" (raschot)
+    currency: varchar("currency", { length: 3 }).default("UZS").notNull(),
+    paymentMethod: varchar("payment_method", { length: 16 }).default("cash").notNull(), // "cash" | "card"
+    source: varchar("source", { length: 16 }).default("ui").notNull(), // "ui" | "telegram"
+    // Plain uuids (no FK): users.ts already imports this module, keep the schema graph acyclic.
+    createdByUserId: uuid("created_by_user_id"),
+    telegramChatId: varchar("telegram_chat_id", { length: 64 }),
+    telegramMessageId: integer("telegram_message_id"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledByUserId: uuid("cancelled_by_user_id"),
+    cancelReason: text("cancel_reason"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("advances_emp_period_idx").on(table.employeeId, table.period),
     index("advances_company_idx").on(table.companyId),
+    index("advances_company_period_kind_idx").on(table.companyId, table.period, table.kind),
   ]
 );
 
