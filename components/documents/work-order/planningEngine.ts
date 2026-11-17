@@ -302,7 +302,7 @@ export function calculatePrintPlanning(inputs: PrintPlanningInput): PrintPlannin
 
 /**
  * Generates an automated technological route (operations list)
- * directly from the print plan, accounting for CTP, Front Print, Back Print (if needed),
+ * directly from the print plan, accounting for paper trimming, Front Print, Back Print (if needed),
  * surface coating / lamination, and die-cutting.
  */
 export function generateRouteStepsFromPlan(
@@ -315,31 +315,10 @@ export function generateRouteStepsFromPlan(
   const steps: RouteStep[] = [];
   let stepCounter = 10;
   const pressMachine = pressMachineName || "Ofset bosma uskunasi";
-  const ctpPlates = Math.max(1, plan.totalCtpPlates || 4);
   const grossSheets = Math.max(1, plan.grossPressSheets || 1000);
   const finishedPieces = Math.max(1, plan.netPressSheets * (plan.piecesPerSheet || 1));
 
-  // Step 1: Prepress & CTP Plates
-  const ctpCost = Number((ctpPlates * 12).toFixed(2));
-  steps.push({
-    id: `route-step-${Date.now()}-1`,
-    stepNumber: stepCounter,
-    name: `Prepress va CTP qolip tayyorlash (${ctpPlates} dona · ${plan.colorNotation})`,
-    machine: "Screen PlateRite 8600 CTP",
-    operator: "",
-    duration: Math.max(0.5, Number((ctpPlates * 0.15).toFixed(1))),
-    qtyCompleted: `0 / ${ctpPlates} dona`,
-    status: "Queued",
-    calcUnit: "1 plate",
-    unitDivisor: 1,
-    rateUsd: 12,
-    setupFeeUsd: 0,
-    pieceworkRateUsd: 1.5,
-    plannedCostUsd: ctpCost,
-    pieceworkTotalUsd: Number((ctpPlates * 1.5).toFixed(2)),
-    kind: "prepress",
-  });
-  stepCounter += 10;
+  // CTP plates are bought from a supplier as tooling items, so the route has no plate-making step.
 
   // Step 2: Paper Stock Trimming (Ombor kesimi)
   if (plan.pressSheetsPerParent > 1) {

@@ -995,12 +995,10 @@ export const RECIPE_ROUTES: Record<string, { name: string; machineStr: string }[
     { name: "OTK va qadoqlash", machineStr: "Qadoqlash liniyasi" }
   ],
   "OFFSET_STD_V1": [
-    { name: "Prepress va CTP qolip tayyorlash", machineStr: "Screen PlateRite 8600" },
     { name: "4+0 Ofset bosma", machineStr: "PRESS_MACHINE" },
     { name: "Tigel kesish", machineStr: "Bobst Novacut 106" }
   ],
   "OFFSET_KASHIROVKA_V1": [
-    { name: "Prepress va CTP qolip tayyorlash", machineStr: "Screen PlateRite 8600" },
     { name: "4+0 Ofset bosma (Old va orqa qatlam)", machineStr: "PRESS_MACHINE" },
     { name: "1+0 Termo-laminatsiya", machineStr: "Autobond Mini 76" },
     { name: "Kashirovka (Dupleks yelimlash)", machineStr: "Meiguang Sheet Laminator" },
@@ -1008,19 +1006,16 @@ export const RECIPE_ROUTES: Record<string, { name: string; machineStr: string }[
     { name: "Tigel kesish (600g+ karton)", machineStr: "Bobst Novacut 106" }
   ],
   "OFFSET_PREM_V2": [
-    { name: "Prepress va CTP qolip tayyorlash", machineStr: "Screen PlateRite 8600" },
     { name: "4+4 Ofset bosma", machineStr: "PRESS_MACHINE" },
     { name: "Tanlangan UF-laklash", machineStr: "Steinemann Hibis 104" },
     { name: "Tigel kesish", machineStr: "Bobst Novacut 106" },
     { name: "Yelimlash va yig'ish", machineStr: "Bobst Visionfold" }
   ],
   "FLEXO_NYLON_V1": [
-    { name: "Flekso-polimer qolip tayyorlash", machineStr: "Esko CDI Crystal" },
     { name: "Flekso bosma", machineStr: "PRESS_MACHINE" },
     { name: "Bo'ylama kesish va o'rash", machineStr: "Rotoflex Slitter" }
   ],
   "FLEXO_SATIN_V2": [
-    { name: "Flekso-polimer qolip tayyorlash", machineStr: "Esko CDI Crystal" },
     { name: "Ko'p rangli flekso bosma", machineStr: "PRESS_MACHINE" },
     { name: "Issiq zarhal bosish", machineStr: "Pantec Rhino" },
     { name: "Bo'ylama kesish va o'rash", machineStr: "Rotoflex Slitter" }
