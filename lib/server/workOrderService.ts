@@ -258,6 +258,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       docNo: wo.docNo,
       clientOrderId: wo.clientOrderId || undefined,
       clientId: wo.clientId || undefined,
+      parentWorkOrderId: dims.parentWorkOrderId || undefined,
+      isReorder: Boolean(dims.parentWorkOrderId),
       customer: wo.customerName,
       product: wo.productName,
       productType: wo.productType || "",
@@ -745,6 +747,9 @@ export async function upsertWorkOrder(
       flexoCoreDiameter: data.flexoCoreDiameter,
       flexoColors: data.flexoColors,
       financials: data.financials,
+      // Takroriy buyurtmaning asosi: alohida ustun yo'q, shuning uchun o'lchamlar JSON ida saqlanadi.
+      parentWorkOrderId:
+        data.parentWorkOrderId ?? (existingOrder?.dimensions as any)?.parentWorkOrderId ?? undefined,
     },
     colorsConfig: {
       formula: data.colorsConfig,

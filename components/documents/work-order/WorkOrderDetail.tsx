@@ -153,6 +153,7 @@ import { computeTariffEstimate, TariffRecord } from "@/components/documents/tari
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 
 import { getInitialToolingItems } from "./toolingItems";
+import { buildReorderDocument } from "./reorder";
 export { getInitialToolingItems };
 
 export function syncBomWithSpecs(
@@ -1757,43 +1758,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const handleReorderWorkOrder = () => {
     const currentDocNo = docNo || data.docNo || tab.id;
     const draftId = `draft-wo-${Date.now()}`;
-    const today = new Date().toISOString().split("T")[0];
-    const deadlineDate = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
-
-    // Reset operations to Queued with 0 / target quantity
-    const resetOperations: RouteStep[] = operations.map((op) => ({
-      ...op,
-      status: "Queued",
-      qtyCompleted: `0 / ${(formData.quantity || 5000).toLocaleString()}`,
-    }));
-
-    // Construct reorder payload carrying over all technical specs
-    const reorderPayload = {
-      ...data,
-      ...formData,
-      docNo: "",
-      parentWorkOrderId: currentDocNo,
-      isReorder: true,
-      status: "Draft",
-      startDate: today,
-      deadline: deadlineDate,
-      operations: resetOperations,
-      sampleRequired: false,
-      orderType: "Production",
-      sampleData: {
-        ...sampleData,
-        isRequired: false,
-        approvalStatus: "approved",
-        qcPassed: true,
-        isProduced: true,
-        technicalNotes: `Takroriy buyurtma: ${currentDocNo} tasdiqlangan etaloni asosida`,
-      },
-      milestones: (formData.milestones || []).map((m) => ({
-        ...m,
-        status: "Pending",
-      })),
-      packagingData: undefined,
-    };
 
     openTab({
       id: draftId,
@@ -1802,11 +1766,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       module: "production",
       isUnsaved: false,
       activeLevel3Tab: "overview",
-      documentData: {
-        ...reorderPayload,
-        id: draftId,
-        docNo: "",
-      },
+      documentData: buildReorderDocument(
+        {
+          ...data,
+          ...formData,
+          operations,
+          materials: currentBomItems,
+          sampleData,
+          skuArtworks,
+          attachments: orderAttachments,
+        },
+        { parentDocNo: currentDocNo, draftId }
+      ),
     });
 
     addNotification({
@@ -2192,6 +2163,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         updates.actualEndDate = new Date().toISOString().split("T")[0];
       } else if (nextStatus !== "Completed" && formData.status === "Completed" && !("actualEndDate" in updates)) {
         updates.actualEndDate = "";
+      }
+    }
+
+    // Takroriy buyurtma qoralamasida tiraj o'zgarsa, asl buyurtmaning dona narxi saqlanadi:
+    // "Umumiy summa" eski tiraj uchun qolib ketmasligi kerak.
+    if ("quantity" in updates && !("priceTotal" in updates) && formData.isReorder && formData.status === "Draft") {
+      const oldQty = Number(formData.quantity) || 0;
+      const newQty = Number(updates.quantity) || 0;
+      const oldTotal = Number(formData.priceTotal) || 0;
+      if (oldQty > 0 && newQty > 0 && oldTotal > 0) {
+        const decimals = (formData.currency || "UZS") === "UZS" ? 0 : 2;
+        updates.priceTotal = Number(((oldTotal / oldQty) * newQty).toFixed(decimals));
       }
     }
 

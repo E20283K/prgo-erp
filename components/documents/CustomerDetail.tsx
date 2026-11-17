@@ -9,6 +9,7 @@ import {
   CustomerContractRecord,
 } from "@/store/workspaceStore";
 import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
+import { buildReorderDocument } from "@/components/documents/work-order/reorder";
 import {
   DocumentHeader,
   DocumentSidebar,
@@ -559,8 +560,6 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
 
   const handleReorderWorkOrder = (order: any) => {
     const newWoId = `draft-wo-${Date.now()}`;
-    const today = new Date().toISOString().split("T")[0];
-    const deadlineDate = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
     const existingWo = productionQueue.find(
       (q) => q.id === order.docId || q.docNo === order.docId
     );
@@ -572,24 +571,16 @@ export function CustomerDetail({ tab }: { tab: DocumentTab }) {
       module: "production",
       isUnsaved: false,
       activeLevel3Tab: "overview",
-      documentData: {
-        ...(existingWo || {}),
-        id: newWoId,
-        docNo: "",
-        parentWorkOrderId: order.docId,
-        isReorder: true,
-        customer: form.name,
-        customerTin: form.tin,
-        product: order.product,
-        quantity: order.orderedQty ?? order.quantity ?? existingWo?.quantity ?? 5000,
-        unit: order.unit || existingWo?.unit || "pcs",
-        status: "Draft",
-        stage: "Queue",
-        startDate: today,
-        deadline: deadlineDate,
-        sampleRequired: false,
-        orderType: "Production",
-      },
+      documentData: buildReorderDocument((existingWo || {}) as Record<string, any>, {
+        parentDocNo: order.docId,
+        draftId: newWoId,
+        overrides: {
+          customer: form.name,
+          product: order.product,
+          quantity: order.orderedQty ?? order.quantity ?? existingWo?.quantity ?? 5000,
+          unit: order.unit || existingWo?.unit || "pcs",
+        },
+      }),
     });
 
     addNotification({
