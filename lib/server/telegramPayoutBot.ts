@@ -1,13 +1,14 @@
 import crypto from "crypto";
 import { db } from "@/db";
 import {
+  employees,
   telegramPayoutDrafts,
   users,
   type PayoutDraftItem,
   type TelegramPayoutDraft,
 } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
-import { parsePayoutMessage } from "@/lib/ai/payoutParser";
+import { and, eq, inArray } from "drizzle-orm";
+import { parsePayoutLocally, parsePayoutMessage } from "@/lib/ai/payoutParser";
 import {
   createPayoutTx,
   getEmployeeDirectory,
@@ -67,6 +68,113 @@ async function tg(token: string, method: string, body: Record<string, unknown>) 
     console.error(`[PayoutBot] ${method} failed:`, err);
     return null;
   }
+}
+
+async function tgMultipart(token: string, method: string, form: FormData) {
+  if (!token || token.includes("mock")) return null;
+  try {
+    const res = await fetch(`${TG}/bot${token}/${method}`, { method: "POST", body: form });
+    const json = await res.json();
+    if (!json?.ok) console.warn(`[PayoutBot] ${method}:`, json?.description);
+    return json;
+  } catch (err) {
+    console.error(`[PayoutBot] ${method} failed:`, err);
+    return null;
+  }
+}
+
+// ─── Employee photos on the confirmation card ───────────────────────────────
+
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+/** Avatar bytes from a data: URL, a file under public/, or an http(s) URL. */
+async function loadAvatar(url: string | null): Promise<{ buf: Buffer; mime: string } | null> {
+  if (!url) return null;
+  try {
+    const data = url.match(/^data:(image\/[a-z+.-]+);base64,(.+)$/i);
+    if (data) {
+      const buf = Buffer.from(data[2], "base64");
+      return buf.length <= MAX_PHOTO_BYTES ? { buf, mime: data[1] } : null;
+    }
+    if (url.startsWith("/")) {
+      const { readFile } = await import("fs/promises");
+      const path = await import("path");
+      const publicDir = path.join(process.cwd(), "public");
+      const abs = path.resolve(publicDir, "." + decodeURIComponent(url.split("?")[0]));
+      if (!abs.startsWith(publicDir + path.sep)) return null;
+      const buf = await readFile(abs);
+      const ext = path.extname(abs).toLowerCase();
+      const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+      return buf.length <= MAX_PHOTO_BYTES ? { buf, mime } : null;
+    }
+    if (/^https?:\/\//i.test(url)) {
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf.length <= MAX_PHOTO_BYTES ? { buf, mime: res.headers.get("content-type") || "image/jpeg" } : null;
+    }
+  } catch (err) {
+    console.warn("[PayoutBot] avatar load failed:", err instanceof Error ? err.message : err);
+  }
+  return null;
+}
+
+interface CardPerson {
+  employeeId: string;
+  caption: string;
+}
+
+/** Everyone the card mentions: resolved employees and, for ambiguous lines, each candidate — numbered like the card. */
+function draftPeople(items: PayoutDraftItem[], directory: DirectoryEmployee[]): CardPerson[] {
+  const byId = new Map(directory.map((e) => [e.id, e]));
+  const out: CardPerson[] = [];
+  const seen = new Set<string>();
+  const add = (i: number, id: string) => {
+    const e = byId.get(id);
+    if (!e || seen.has(id)) return;
+    seen.add(id);
+    out.push({ employeeId: id, caption: `${i + 1}. ${e.fullName}${e.position ? ` · ${e.position}` : ""}` });
+  };
+  items.forEach((it, i) => {
+    if (it.employeeId) add(i, it.employeeId);
+    else it.candidates.forEach((c) => add(i, c.id));
+  });
+  return out;
+}
+
+/** One photo → sendPhoto; 2–10 → an album. Employees without an avatar are simply left out. */
+async function sendEmployeePhotos(token: string, chatId: string, replyTo: number, people: CardPerson[]) {
+  if (people.length === 0) return;
+  const rows = await db
+    .select({ id: employees.id, avatarUrl: employees.avatarUrl })
+    .from(employees)
+    .where(inArray(employees.id, people.map((p) => p.employeeId)));
+  const avatarById = new Map(rows.map((r) => [r.id, r.avatarUrl]));
+
+  const photos: { caption: string; buf: Buffer; mime: string }[] = [];
+  for (const p of people.slice(0, 10)) {
+    const img = await loadAvatar(avatarById.get(p.employeeId) ?? null);
+    if (img) photos.push({ caption: p.caption, ...img });
+  }
+  if (photos.length === 0) return;
+
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append("reply_to_message_id", String(replyTo));
+  const blob = (ph: (typeof photos)[number]) => new Blob([new Uint8Array(ph.buf)], { type: ph.mime });
+
+  if (photos.length === 1) {
+    form.append("caption", photos[0].caption);
+    form.append("photo", blob(photos[0]), "employee.jpg");
+    await tgMultipart(token, "sendPhoto", form);
+    return;
+  }
+  form.append(
+    "media",
+    JSON.stringify(photos.map((ph, n) => ({ type: "photo", media: `attach://p${n}`, caption: ph.caption })))
+  );
+  photos.forEach((ph, n) => form.append(`p${n}`, blob(ph), `employee${n}.jpg`));
+  await tgMultipart(token, "sendMediaGroup", form);
 }
 
 function esc(s: string): string {
@@ -236,9 +344,18 @@ async function handleMessage(message: TgMessage, user: BotUser, companyId: strin
   try {
     parsed = await parsePayoutMessage({ text, audio, employees: directory, today });
   } catch (err) {
-    console.error("[PayoutBot] AI parse failed:", err);
-    await tg(token, "sendMessage", { chat_id: chatId, text: "AI xabarni tahlil qila olmadi. Qayta urinib ko'ring." });
-    return;
+    console.error("[PayoutBot] AI parse failed:", err instanceof Error ? err.message : err);
+    // Text can still be handled by the rule-based parser; the confirm card guards against mistakes.
+    parsed = audio ? null : parsePayoutLocally(text);
+    if (!parsed || parsed.items.length === 0) {
+      await tg(token, "sendMessage", {
+        chat_id: chatId,
+        text: audio
+          ? "AI hozir ishlamayapti, ovozli xabarni o'qib bo'lmadi. Matn bilan yozing."
+          : "AI hozir ishlamayapti. Oddiy shaklda yozing: \"Vali Aliyev 500 ming avans\".",
+      });
+      return;
+    }
   }
 
   if (parsed.intent === "balance_query") {
@@ -287,6 +404,9 @@ async function handleMessage(message: TgMessage, user: BotUser, companyId: strin
     .onConflictDoNothing()
     .returning();
   if (!draft) return;
+
+  // Photos first, so the card with the buttons ends up right under the faces it refers to.
+  await sendEmployeePhotos(token, chatId, message.message_id, draftPeople(items, directory));
 
   const card = await renderDraftCard(draft, directory);
   const sent = await tg(token, "sendMessage", {

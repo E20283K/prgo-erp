@@ -109,3 +109,76 @@ export async function parsePayoutMessage(input: {
     queryNames: Array.isArray(raw.queryNames) ? raw.queryNames.map(String) : [],
   };
 }
+
+// ─── Offline fallback (used when Gemini is unavailable) ──────────────────────
+
+const AMOUNT_RE =
+  /(\$\s*)?(\d+(?:[.,]\d+)?(?:[ \u00a0]\d{3})*)\s*(mln|million|миллион|млн|mlrd|ming|минг|тысяч|тыс|k)?\.?\s*(so['ʻ’`]?m|сум|сўм|uzs|\$|dollar|usd|доллар)?/gi;
+
+const SETTLEMENT_RE = /raschot|расч[её]т|oylik|зарплат|zarplata|qoldi/i;
+const NAME_STOP = new Set([
+  "avans", "аванс", "raschot", "расчет", "расчёт", "oylik", "berdim", "berildi", "berdik", "som", "so'm", "сум",
+  "naqd", "karta", "kartaga", "mln", "ming", "uchun", "va", "bilan", "dollar", "raschoti", "oyligi", "avansi",
+  "yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentabr", "sentyabr", "oktabr", "oktyabr",
+  "noyabr", "dekabr",
+]);
+
+function stripSuffix(word: string): string {
+  return word.replace(/(ga|ka|qa|ning|dan|ni|га|ка|қа|нинг|дан|ни)$/i, "");
+}
+
+/**
+ * Minimal rule-based parse: "<Ism> [avans|raschot] <summa>" segments separated by commas / "va".
+ * Only meant to keep the bot usable when the AI call fails; employees are resolved by name match later.
+ */
+export function parsePayoutLocally(text: string): ParsedPayoutMessage {
+  const items: ParsedPayoutItem[] = [];
+  const segments = text.split(/,(?!\d)|[;\n]|\s+va\s+|\s+и\s+/i).map((s) => s.trim()).filter(Boolean);
+  let lastUnit: string | undefined;
+  const pending: { name: string; raw: number; unit?: string; usd: boolean; kind: ParsedPayoutItem["kind"]; note: string | null }[] = [];
+
+  for (const seg of segments) {
+    AMOUNT_RE.lastIndex = 0;
+    const m = [...seg.matchAll(AMOUNT_RE)].find((x) => /\d/.test(x[2]));
+    if (!m) continue;
+    const raw = Number(m[2].replace(/[ \u00a0]/g, "").replace(",", "."));
+    const unit = m[3]?.toLowerCase();
+    if (unit) lastUnit = unit;
+    const usd = Boolean(m[1]) || /\$|dollar|usd|доллар/i.test(m[4] ?? "");
+    const words = seg
+      .replace(m[0], " ")
+      .split(/\s+/)
+      .map((w) => w.replace(/[^\p{L}'ʻ’`]/gu, ""))
+      .filter((w) => w.length >= 2 && !NAME_STOP.has(w.toLowerCase()));
+    const name = words.slice(0, 2).map(stripSuffix).join(" ").trim();
+    if (!name) continue;
+    pending.push({
+      name,
+      raw,
+      unit,
+      usd,
+      kind: SETTLEMENT_RE.test(seg) || SETTLEMENT_RE.test(text) ? "settlement" : "advance",
+      note: /karta|карт/i.test(seg) ? "kartaga" : null,
+    });
+  }
+
+  for (const p of pending) {
+    // "Vali 300, Ali 200 ming" — a unit written once applies to the bare numbers too.
+    const unit = p.unit ?? lastUnit;
+    const mult = !unit ? 1 : /mln|million|миллион|млн/.test(unit) ? 1_000_000 : /mlrd/.test(unit) ? 1_000_000_000 : 1_000;
+    const amount = Math.round(p.raw * mult);
+    if (amount <= 0) continue;
+    items.push({
+      nameAsWritten: p.name,
+      employeeId: null,
+      amount,
+      currency: p.usd ? "USD" : "UZS",
+      kind: p.kind,
+      date: null,
+      period: null,
+      note: p.note,
+    });
+  }
+
+  return { intent: items.length ? "payout" : "unknown", transcript: text, items, queryNames: [] };
+}
