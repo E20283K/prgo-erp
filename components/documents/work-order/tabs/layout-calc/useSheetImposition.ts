@@ -575,6 +575,19 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
   }, [variants, resolvedDie, settings.trimW, settings.trimH, sourceKey]);
 
   const lastPersisted = useRef<string>("");
+  const persistReady = useRef(false);
+  const pendingPersist = useRef<{ json: string; state: PersistedImpositionState } | null>(null);
+  const persistCb = useRef(onImpositionStateChange);
+  useEffect(() => {
+    persistCb.current = onImpositionStateChange;
+  });
+  const flushPersist = useCallback(() => {
+    const pending = pendingPersist.current;
+    if (!pending) return;
+    pendingPersist.current = null;
+    lastPersisted.current = pending.json;
+    persistCb.current?.(pending.state);
+  }, []);
   const [pdfMeta, setPdfMeta] = useState<Pick<PersistedImpositionState, "jobId" | "pdfUrl" | "generatedAt">>({
     jobId: saved?.jobId,
     pdfUrl: saved?.pdfUrl,
@@ -642,19 +655,20 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
         : saved?.summary,
     };
     const json = JSON.stringify(state);
-    if (!lastPersisted.current) {
+    if (!persistReady.current) {
       // First run: only record the baseline so opening the tab does not mark the order dirty
-      lastPersisted.current = saved ? JSON.stringify(saved) : "";
-      if (!saved) return;
+      persistReady.current = true;
+      lastPersisted.current = saved ? JSON.stringify(saved) : json;
     }
     if (json === lastPersisted.current) return;
-    const t = setTimeout(() => {
-      lastPersisted.current = json;
-      onImpositionStateChange(state);
-    }, PERSIST_DEBOUNCE_MS);
+    pendingPersist.current = { json, state };
+    const t = setTimeout(flushPersist, PERSIST_DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, pdfMeta, summary]);
+
+  // Leaving the tab unmounts it: write any debounced change before it is lost
+  useEffect(() => () => flushPersist(), [flushPersist]);
 
   // ---------------------------------------------------------------- apply to order
   const applyToOrder = useCallback(() => {
