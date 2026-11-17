@@ -511,9 +511,29 @@ class LayoutCalculator:
 
         # Top-Down koordinata (PyMuPDF standartida: Y=0 yuqorida, Y=height pastda)
         if getattr(bg_config, "alignment", None) == SheetAlignment.CENTER:
-            # Butun list markazi bo'yicha to'liq simmetrik joylashtirish (oldi-orqa mukammal mos tushishi uchun)
-            start_x = max(0.0, (sheet_w_pt - total_grid_w) / 2.0)
-            start_y = max(0.0, (sheet_h_pt - total_grid_h) / 2.0)
+            # Butun list markazi bo'yicha joylashtirish (oldi-orqa mukammal mos tushishi uchun),
+            # lekin blok hoshiyalardan chiqmasligi shart: ayniqsa klapan (pastki hoshiya) —
+            # qisqichlar zonasiga fon yoki mahsulot tushmasligi kerak.
+            def clamp(value: float, lo: float, hi: float) -> Optional[float]:
+                return min(max(value, lo), hi) if lo <= hi else None
+
+            center_x = max(0.0, (sheet_w_pt - total_grid_w) / 2.0)
+            center_y = max(0.0, (sheet_h_pt - total_grid_h) / 2.0)
+
+            # Vertikal: orqa tomon ham shu Y da bo'ladi (klapan o'zgarmaydi)
+            y_hi = sheet_h_pt - margin_bottom_pt - total_grid_h
+            fitted_y = clamp(center_y, margin_top_pt, y_hi)
+            # Blok hoshiyalar orasiga sig'masa ham klapan ustuvor
+            start_y = fitted_y if fitted_y is not None else max(0.0, y_hi)
+
+            # Gorizontal: ikki tomonlama bosmada orqa tomon X bo'yicha ko'zgulanadi,
+            # shuning uchun ikkala tomonda ham chap/o'ng hoshiya saqlanishi uchun simmetrik chegara
+            if mode in (ImpositionMode.SHEETWISE, ImpositionMode.WORK_AND_TURN):
+                side_pt = max(margin_left_pt, margin_right_pt)
+                fitted_x = clamp(center_x, side_pt, sheet_w_pt - side_pt - total_grid_w)
+            else:
+                fitted_x = clamp(center_x, margin_left_pt, sheet_w_pt - margin_right_pt - total_grid_w)
+            start_x = fitted_x if fitted_x is not None else center_x
         elif center_grid:
             start_x = margin_left_pt + max(0.0, (usable_w_pt - total_grid_w) / 2.0)
             start_y = margin_top_pt + max(0.0, (usable_h_pt - total_grid_h) / 2.0)

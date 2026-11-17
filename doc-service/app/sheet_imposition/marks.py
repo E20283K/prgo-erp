@@ -3,9 +3,10 @@ Marks Generator: Texnik belgilar, Krop chiziqlari, Rang shkalasi (Color Bar) va 
 """
 
 import io
-import math
-from typing import List, Tuple, Optional
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 from reportlab.lib.colors import CMYKColor, CMYKColorSep
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from .models import (
@@ -25,6 +26,42 @@ PT_TO_MM = 25.4 / 72.0
 REG_COLOR = CMYKColor(1.0, 1.0, 1.0, 1.0)
 BLACK_COLOR = CMYKColor(0.0, 0.0, 0.0, 1.0)
 
+# Belgilar va qog'oz cheti / tashqi fon orasidagi xavfsiz oraliqlar
+EDGE_SAFE_PT = 1.0 * MM_TO_PT     # Gilotina kesish xatoligi (list cheti)
+BLEED_SAFE_PT = 0.5 * MM_TO_PT    # Tashqi fondan (bleed) uzoqlik
+MARK_SAFE_PT = 0.3 * MM_TO_PT     # Privodka kresti uchun minimal bo'shliq
+
+REG_RADIUS_PT = 3.5 * MM_TO_PT
+REG_MIN_RADIUS_PT = 1.2 * MM_TO_PT
+
+INFO_FONT = "Helvetica"
+INFO_FONT_SIZE = 6.5
+INFO_MIN_FONT_SIZE = 4.0
+# Helvetica: ascent ~0.72, descent ~0.21 em; rang teglari fon to'rtburchagi bilan ~1.0 em
+INFO_ASCENT = 0.75
+INFO_DESCENT = 0.25
+
+COLOR_BAR_SQ_W = 4.5 * MM_TO_PT
+COLOR_BAR_SQ_H = 3.5 * MM_TO_PT
+COLOR_BAR_MIN_H = 1.5 * MM_TO_PT
+COLOR_BAR_CENTER_GAP = 12.0 * MM_TO_PT  # Yuqori markaziy krest atrofidagi toza zona (har tarafga)
+
+
+@dataclass
+class FreeZones:
+    """List cheti bilan montaj blokining tashqi foni (bleed) orasidagi haqiqiy bo'sh joy (pt)."""
+    left: float
+    right: float
+    top: float
+    bottom: float
+
+
+def _fit_font_size(band: float) -> Optional[float]:
+    """Berilgan kenglikdagi tasmaga sig'adigan shrift o'lchami (sig'masa None)."""
+    usable = band - EDGE_SAFE_PT - BLEED_SAFE_PT
+    size = min(INFO_FONT_SIZE, usable / (INFO_ASCENT + INFO_DESCENT))
+    return size if size >= INFO_MIN_FONT_SIZE else None
+
 
 class MarksGenerator:
     """Montaj varag'idagi barcha vektorli belgilarni generatsiya qiluvchi sinf."""
@@ -42,25 +79,58 @@ class MarksGenerator:
         packet = io.BytesIO()
         canv = canvas.Canvas(packet, pagesize=(sheet.width_pt, sheet.height_pt))
 
+        zones = MarksGenerator._free_zones(sheet, bg_config, items)
+        with_color_bar = (
+            style in (TemplateStyle.STANDARD_COLORBAR, TemplateStyle.PACKAGING_DIE_CUT, TemplateStyle.OFFSET_STANDARD)
+            and not is_dieline_sheet
+        )
+
         # 1. Krop chiziqlarini (Crop Marks) chizish
         MarksGenerator._draw_crop_marks(canv, sheet, bg_config, items)
 
         # 2. Privodka krestlarini (Registration Marks) chizish
-        MarksGenerator._draw_registration_marks(canv, sheet)
+        MarksGenerator._draw_registration_marks(canv, sheet, zones)
 
         # 3. Rang shkalasini (Color Bar) chizish (agar Standard yoki tegishli shablon bo'lsa)
-        if style in (TemplateStyle.STANDARD_COLORBAR, TemplateStyle.PACKAGING_DIE_CUT, TemplateStyle.OFFSET_STANDARD) and not is_dieline_sheet:
-            MarksGenerator._draw_color_bars(canv, sheet, job.colors)
+        if with_color_bar:
+            MarksGenerator._draw_color_bars(canv, sheet, zones, job.colors)
 
         # 4. Yon tomondagi pasport yozuvlari (Metadata)
-        MarksGenerator._draw_sheet_metadata(canv, sheet, bg_config, items, job, style, is_dieline_sheet)
+        MarksGenerator._draw_sheet_metadata(
+            canv, sheet, bg_config, zones, job, style, is_dieline_sheet,
+            MarksGenerator._color_bar_span(sheet, zones, job.colors) if with_color_bar else None,
+        )
 
         # 5. Klapan (Gripper) va Verniy burchak texnik belgilarini chizish
-        MarksGenerator._draw_gripper_marks(canv, sheet, bg_config, items)
+        MarksGenerator._draw_gripper_marks(canv, sheet, bg_config, zones)
 
         canv.save()
         packet.seek(0)
         return packet.getvalue()
+
+    @staticmethod
+    def _free_zones(sheet: SheetConfig, bg_config: BleedAndGutterConfig, items: List[PlacedItem]) -> FreeZones:
+        """
+        Belgilar uchun haqiqiy bo'sh joy: list cheti -> montaj blokining tashqi foni.
+        Hoshiya (margin) kesim chizig'igacha o'lchanadi va tashqi fon uning ichiga tushadi,
+        "Markaz" joylashuvida esa blok hoshiyalardan qat'i nazar markazlashadi.
+        """
+        w = sheet.width_pt
+        h = sheet.height_pt
+        bleed = bg_config.outer_bleed_pt
+        if items:
+            min_x = min(it.trim_x for it in items)
+            max_x = max(it.trim_x + it.trim_w for it in items)
+            min_y = min(it.trim_y for it in items)          # yuqoridan (PyMuPDF koordinatasi)
+            max_y = max(it.trim_y + it.trim_h for it in items)
+            left, right = min_x - bleed, w - max_x - bleed
+            top, bottom = min_y - bleed, h - max_y - bleed
+        else:
+            left = sheet.margin_left_mm * MM_TO_PT - bleed
+            right = sheet.margin_right_mm * MM_TO_PT - bleed
+            top = sheet.margin_top_mm * MM_TO_PT - bleed
+            bottom = sheet.margin_bottom_mm * MM_TO_PT - bleed
+        return FreeZones(max(0.0, left), max(0.0, right), max(0.0, top), max(0.0, bottom))
 
     @staticmethod
     def _draw_crop_marks(
@@ -128,91 +198,113 @@ class MarksGenerator:
         canv.restoreState()
 
     @staticmethod
-    def _draw_registration_marks(canv: canvas.Canvas, sheet: SheetConfig):
-        """Qog'ozning 4 chetiga privodka krestlarini (doira + krest) chizish."""
+    def _draw_registration_marks(canv: canvas.Canvas, sheet: SheetConfig, zones: FreeZones):
+        """
+        Qog'ozning 4 chetiga privodka krestlarini (doira + krest) chizish.
+        Krest o'z tomonidagi bo'sh tasma markaziga qo'yiladi va unga sig'adigan qilib
+        kichraytiriladi; juda tor tasmada (fon yoki mahsulot ustiga chiqmasligi uchun) chizilmaydi.
+        """
         canv.saveState()
         canv.setStrokeColor(REG_COLOR)
         canv.setLineWidth(0.3)
 
         w = sheet.width_pt
         h = sheet.height_pt
-        r = 3.5 * MM_TO_PT # radius 3.5 mm
 
-        # 4 ta markaziy nuqta (tepa, past, chap, o'ng)
-        centers = [
-            (w / 2.0, sheet.margin_bottom_mm * MM_TO_PT / 2.0), # Pastki (klapan oraliq)
-            (w / 2.0, h - sheet.margin_top_mm * MM_TO_PT / 2.0), # Yuqori
-            (sheet.margin_left_mm * MM_TO_PT / 2.0, h / 2.0), # Chap
-            (w - sheet.margin_right_mm * MM_TO_PT / 2.0, h / 2.0), # O'ng
+        # (markaz x, markaz y, tasma kengligi) — tepa, past, chap, o'ng
+        marks = [
+            (w / 2.0, zones.bottom / 2.0, zones.bottom),
+            (w / 2.0, h - zones.top / 2.0, zones.top),
+            (zones.left / 2.0, h / 2.0, zones.left),
+            (w - zones.right / 2.0, h / 2.0, zones.right),
         ]
 
-        for cx, cy in centers:
+        for cx, cy, band in marks:
+            half = band / 2.0 - MARK_SAFE_PT
+            r = min(REG_RADIUS_PT, half)
+            if r < REG_MIN_RADIUS_PT:
+                continue
+            arm = min(r * 1.5, half)
             canv.circle(cx, cy, r, stroke=1, fill=0)
             canv.circle(cx, cy, r * 0.5, stroke=1, fill=0)
-            canv.line(cx - r * 1.5, cy, cx + r * 1.5, cy)
-            canv.line(cx, cy - r * 1.5, cx, cy + r * 1.5)
+            canv.line(cx - arm, cy, cx + arm, cy)
+            canv.line(cx, cy - arm, cx, cy + arm)
 
         canv.restoreState()
 
     @staticmethod
-    def _draw_color_bars(canv: canvas.Canvas, sheet: SheetConfig, colors: List[ColorChannel]):
-        """Yuqori hoshiyaga CMYK va Spot ranglar shkalasini chizish (1-rasm)."""
-        if not colors:
+    def _color_bar_blocks(colors: List[ColorChannel]) -> list:
+        blocks = []
+        for col in colors or []:
+            for dens in (1.0, 0.7, 0.4):  # 100%, 70%, 40% kataklar
+                c, m, y, k = col.cmyk
+                if col.is_spot:
+                    blocks.append(CMYKColorSep(c * dens, m * dens, y * dens, k * dens, spotName=col.name, density=dens))
+                else:
+                    blocks.append(CMYKColor(c * dens, m * dens, y * dens, k * dens))
+        return blocks
+
+    @staticmethod
+    def _color_bar_height(zones: FreeZones) -> Optional[float]:
+        bar_h = min(COLOR_BAR_SQ_H, zones.top - 2 * BLEED_SAFE_PT)
+        return bar_h if bar_h >= COLOR_BAR_MIN_H else None
+
+    @staticmethod
+    def _color_bar_span(sheet: SheetConfig, zones: FreeZones, colors: List[ColorChannel]) -> Optional[Tuple[float, float]]:
+        """Rang shkalasi egallaydigan gorizontal oraliq (x0, x1), chizilmasa None."""
+        blocks = MarksGenerator._color_bar_blocks(colors)
+        if not blocks or MarksGenerator._color_bar_height(zones) is None:
+            return None
+        cx = sheet.width_pt / 2.0
+        mid = (len(blocks) + 1) // 2
+        return (
+            cx - COLOR_BAR_CENTER_GAP - mid * COLOR_BAR_SQ_W,
+            cx + COLOR_BAR_CENTER_GAP + (len(blocks) - mid) * COLOR_BAR_SQ_W,
+        )
+
+    @staticmethod
+    def _draw_color_bars(canv: canvas.Canvas, sheet: SheetConfig, zones: FreeZones, colors: List[ColorChannel]):
+        """Yuqori bo'sh tasmaga CMYK va Spot ranglar shkalasini chizish (1-rasm)."""
+        blocks = MarksGenerator._color_bar_blocks(colors)
+        bar_h = MarksGenerator._color_bar_height(zones)
+        if not blocks or bar_h is None:
             return
 
         canv.saveState()
-        sq_w = 4.5 * MM_TO_PT
-        sq_h = 3.5 * MM_TO_PT
+        sq_w = COLOR_BAR_SQ_W
 
-        # Yuqori qismdagi joylashuv (yuqori hoshiya ichida)
-        y_top = sheet.height_pt - (sheet.margin_top_mm * MM_TO_PT * 0.75)
-        
-        # Barcha ranglar uchun 100%, 75%, 50% kataklar
-        densities = [1.0, 0.7, 0.4]
-        blocks = []
-        for col in colors:
-            for dens in densities:
-                if col.is_spot:
-                    c, m, y, k = col.cmyk
-                    fill_c = CMYKColorSep(c * dens, m * dens, y * dens, k * dens, spotName=col.name, density=dens)
-                else:
-                    c, m, y, k = col.cmyk
-                    fill_c = CMYKColor(c * dens, m * dens, y * dens, k * dens)
-                blocks.append(fill_c)
-
-        if not blocks:
-            canv.restoreState()
-            return
+        # Yuqori bo'sh tasma markazida (tashqi fonga tegmaydi)
+        y_bottom = sheet.height_pt - zones.top / 2.0 - bar_h / 2.0
 
         # Yuqori markaziy privodka kresti bilan ustma-ust tushmasligi uchun
         # markazda kamida 24 mm (har tarafga 12 mm) toza xavfsizlik oraliq qoldiriladi.
         cx = sheet.width_pt / 2.0
-        gap_half = 12.0 * MM_TO_PT
-
         mid = (len(blocks) + 1) // 2
         left_blocks = blocks[:mid]
         right_blocks = blocks[mid:]
 
+        canv.setStrokeColor(REG_COLOR)
+        canv.setLineWidth(0.2)
+
         # Chap qanot (markaziy krestdan chapda)
-        left_w = len(left_blocks) * sq_w
-        curr_x = cx - gap_half - left_w
+        curr_x = cx - COLOR_BAR_CENTER_GAP - len(left_blocks) * sq_w
         for fill_c in left_blocks:
             canv.setFillColor(fill_c)
-            canv.setStrokeColor(REG_COLOR)
-            canv.setLineWidth(0.2)
-            canv.rect(curr_x, y_top, sq_w, sq_h, fill=1, stroke=1)
+            canv.rect(curr_x, y_bottom, sq_w, bar_h, fill=1, stroke=1)
             curr_x += sq_w
 
         # O'ng qanot (markaziy krestdan o'ngda)
-        curr_x = cx + gap_half
+        curr_x = cx + COLOR_BAR_CENTER_GAP
         for fill_c in right_blocks:
             canv.setFillColor(fill_c)
-            canv.setStrokeColor(REG_COLOR)
-            canv.setLineWidth(0.2)
-            canv.rect(curr_x, y_top, sq_w, sq_h, fill=1, stroke=1)
+            canv.rect(curr_x, y_bottom, sq_w, bar_h, fill=1, stroke=1)
             curr_x += sq_w
 
         canv.restoreState()
+
+    @staticmethod
+    def _color_tags_width(colors: List[ColorChannel], font_name: str, font_size: float) -> float:
+        return sum(stringWidth(f" {c.name}  ", font_name, font_size) for c in colors or [])
 
     @staticmethod
     def _draw_color_tags(
@@ -239,7 +331,8 @@ class MarksGenerator:
                 canv.saveState()
                 canv.setFillColor(CMYKColor(0, 0, 0, 0.08))
                 w_tag = canv.stringWidth(f" {c_name} ", font_name, font_size)
-                canv.rect(curr_x, -1.5, w_tag, font_size + 2.5, fill=1, stroke=0)
+                pad = font_size * 0.2
+                canv.rect(curr_x, -pad, w_tag, font_size + pad, fill=1, stroke=0)
                 canv.restoreState()
 
             canv.setFillColor(txt_color)
@@ -249,14 +342,41 @@ class MarksGenerator:
         return curr_x
 
     @staticmethod
+    def _fit_text(canv: canvas.Canvas, text: str, max_w: float, font_name: str, font_size: float) -> str:
+        """Matnni max_w ga sig'guncha oxiridan qisqartirish."""
+        if canv.stringWidth(text, font_name, font_size) <= max_w:
+            return text
+        while len(text) > 4 and canv.stringWidth(text + "...", font_name, font_size) > max_w:
+            text = text[:-1]
+        return text.rstrip() + "..." if len(text) > 4 else ""
+
+    @staticmethod
+    def _draw_info_line(
+        canv: canvas.Canvas,
+        text: str,
+        colors: Optional[List[ColorChannel]],
+        font_size: float,
+        max_w: float,
+    ):
+        """Joriy koordinatada (0, 0) dan bitta pasport qatori: matn + ixtiyoriy rang teglari."""
+        canv.setFont(INFO_FONT, font_size)
+        tags_w = MarksGenerator._color_tags_width(colors, INFO_FONT, font_size) if colors else 0.0
+        text = MarksGenerator._fit_text(canv, text, max(0.0, max_w - tags_w), INFO_FONT, font_size)
+        canv.setFillColor(BLACK_COLOR)
+        canv.drawString(0, 0, text)
+        if colors and tags_w <= max_w:
+            MarksGenerator._draw_color_tags(canv, canv.stringWidth(text, INFO_FONT, font_size), colors, INFO_FONT, font_size)
+
+    @staticmethod
     def _draw_sheet_metadata(
         canv: canvas.Canvas,
         sheet: SheetConfig,
         bg_config: BleedAndGutterConfig,
-        items: List[PlacedItem],
+        zones: FreeZones,
         job: JobMetadata,
         style: TemplateStyle,
-        is_dieline: bool
+        is_dieline: bool,
+        color_bar_span: Optional[Tuple[float, float]] = None,
     ):
         """
         Yon hoshiyalarga pasport yozuvlarini chiqarish.
@@ -265,12 +385,12 @@ class MarksGenerator:
         Krestlar va matnlar ustma-ust tushmasligi uchun krest atrofida +/- 15 mm daxlsiz
         toza zona ajratiladi. Matnlar esa krestdan PASTKI (Zone 1) va YUQORI (Zone 2)
         hududlarga ajratib joylashtiriladi.
+
+        Yon tasma (list cheti -> tashqi fon) yozuvga tor bo'lsa, shrift kichraytiriladi;
+        undan ham tor bo'lsa, o'sha tomonning yozuvlari yuqori tasmaga gorizontal ko'chiriladi
+        (fon yoki mahsulot ustiga hech qachon chiqmaydi).
         """
         canv.saveState()
-
-        font_name = "Helvetica"
-        font_size = 6.5
-        canv.setFont(font_name, font_size)
 
         side_title = "Pichoq (Die-cut)" if is_dieline else job.side_name
 
@@ -282,140 +402,110 @@ class MarksGenerator:
         # 1-zona: Pastki hudud (klapan/gripper belgilaridan tepada, krestdan kamida 15 mm pastda)
         y_zone1_start = max(18.0 * MM_TO_PT, sheet.margin_bottom_mm * MM_TO_PT + 5.0 * MM_TO_PT)
         y_zone1_max = reg_y - reg_buffer
+        available_zone1 = y_zone1_max - y_zone1_start
 
         # 2-zona: Yuqori hudud (krestdan kamida 15 mm tepada boshlanadi)
         y_zone2_start = reg_y + reg_buffer
+        available_zone2 = (h - zones.top) - y_zone2_start
 
-        # Matnning X koordinatasi (hoshiya kengligiga mos holda markazlashtiriladi)
-        x_left = sheet.margin_left_mm * MM_TO_PT * 0.45
-        x_right = w - (sheet.margin_right_mm * MM_TO_PT * 0.45)
-
-        # Matn uzunligini nazorat qilish va krest tomon oshib ketishining oldini olish
-        available_zone1 = y_zone1_max - y_zone1_start
         safe_job_name = job.job_name
         if len(safe_job_name) > 36:
             safe_job_name = safe_job_name[:33] + "..."
 
+        # Har bir tomon uchun: (pastki qator matni, yuqori qator matni, yuqori qatorga rang teglari)
         if style in (TemplateStyle.COMPACT_SIDE_INFO, TemplateStyle.DIGITAL_COMPACT):
-            # -------------------------------------------------------------
-            # 2-rasm uslubi (Compact / Digital):
-            # Chap hoshiyada:
-            # - Pastki qism (Zone 1): Fayl nomi, Forma, Buyurtma soni, List soni
-            # - [KREST ZONASI BO'SH SAQLANADI]
-            # - Yuqori qism (Zone 2): Sana, Sahifa, Rang kanallari (har biri o'z bo'yog'ida)
-            # -------------------------------------------------------------
-
-            # 1. Pastki blok (Zone 1)
+            # 2-rasm uslubi (Compact / Digital): faqat chap hoshiya
             notes_suffix = f"    [{job.custom_notes}]" if job.custom_notes else ""
-            info_part1 = (
-                f"Fayl: {safe_job_name}    "
-                f"Forma: {job.sheet_form_str}    "
-                f"Buyurtma soni: {job.order_quantity:,} dona    "
-                f"Bosilishi kerak: {job.calculated_sheets:,} list"
-                f"{notes_suffix}"
-            ).replace(",", " ")
-
-            # Agar tor varaqda matn krest zonasiga yaqinlashsa, xavfsiz qisqartirish
-            while canv.stringWidth(info_part1, font_name, font_size) > available_zone1 - 5.0 and len(notes_suffix) > 6:
-                notes_suffix = notes_suffix[:-5] + "...]"
-                info_part1 = (
-                    f"Fayl: {safe_job_name}  "
-                    f"Forma: {job.sheet_form_str}  "
-                    f"Buyurtma: {job.order_quantity:,}  "
-                    f"List: {job.calculated_sheets:,}"
+            left = (
+                (
+                    f"Fayl: {safe_job_name}    "
+                    f"Forma: {job.sheet_form_str}    "
+                    f"Buyurtma soni: {job.order_quantity:,} dona    "
+                    f"Bosilishi kerak: {job.calculated_sheets:,} list"
                     f"{notes_suffix}"
-                ).replace(",", " ")
-
-            while canv.stringWidth(info_part1, font_name, font_size) > available_zone1 - 5.0 and len(safe_job_name) > 8:
-                safe_job_name = safe_job_name[:-4] + "..."
-                info_part1 = (
-                    f"Fayl: {safe_job_name}  "
-                    f"Forma: {job.sheet_form_str}  "
-                    f"Buyurtma: {job.order_quantity:,}  "
-                    f"List: {job.calculated_sheets:,}"
-                ).replace(",", " ")
-
-            canv.saveState()
-            canv.translate(x_left, y_zone1_start)
-            canv.rotate(90)
-            canv.setFillColor(BLACK_COLOR)
-            canv.drawString(0, 0, info_part1)
-            canv.restoreState()
-
-            # 2. Yuqori blok (Zone 2 - Krestdan 15 mm tepada boshlanadi)
-            canv.saveState()
-            canv.translate(x_left, y_zone2_start)
-            canv.rotate(90)
-            canv.setFillColor(BLACK_COLOR)
-
-            info_part2 = f"Sana: {job.date_str}    Sahifa: {side_title}    Rang: "
-            canv.drawString(0, 0, info_part2)
-            x_off = canv.stringWidth(info_part2, font_name, font_size)
-
-            MarksGenerator._draw_color_tags(canv, x_off, job.colors, font_name, font_size)
-            canv.restoreState()
-
+                ).replace(",", " "),
+                f"Sana: {job.date_str}    Sahifa: {side_title}    Rang: ",
+            )
+            right = None
         else:
-            # -------------------------------------------------------------
-            # 3-rasm uslubi (Packaging) & Standard:
-            # Chap hoshiyada:
-            # - Pastki qism: Ish nomi va Sahifa
-            # - [KREST ZONASI BO'SH SAQLANADI]
-            # - Yuqori qism: Rang kanallari (har biri o'z bo'yog'ida)
-            #
-            # O'ng hoshiyada:
-            # - Pastki qism: Qog'oz o'lchami va Mahsulot o'lchami
-            # - [KREST ZONASI BO'SH SAQLANADI]
-            # - Yuqori qism: Ketadigan joyi (Bleed) va Oraliq (Gutter)
-            # -------------------------------------------------------------
-
-            # 1. Chap tomon - Pastki blok (Zone 1)
+            # 3-rasm uslubi (Packaging) & Standard: chapda ish nomi + ranglar, o'ngda o'lchamlar
             notes_str = f"    List: {job.calculated_sheets:,}".replace(",", " ")
             if job.custom_notes:
                 notes_str += f" ({job.custom_notes})"
-            info_left_part1 = f"Ish nomi: {safe_job_name}    Sahifa: {side_title}{notes_str}"
-            while canv.stringWidth(info_left_part1, font_name, font_size) > available_zone1 - 5.0 and len(info_left_part1) > 25:
-                info_left_part1 = info_left_part1[:-5] + "..."
-            canv.saveState()
-            canv.translate(x_left, y_zone1_start)
-            canv.rotate(90)
-            canv.setFillColor(BLACK_COLOR)
-            canv.drawString(0, 0, info_left_part1)
-            canv.restoreState()
-
-            # 2. Chap tomon - Yuqori blok (Zone 2 - Krestdan 15 mm tepada)
-            canv.saveState()
-            canv.translate(x_left, y_zone2_start)
-            canv.rotate(90)
-            canv.setFillColor(BLACK_COLOR)
-            canv.drawString(0, 0, "Rang: ")
-            x_off = canv.stringWidth("Rang: ", font_name, font_size)
-            MarksGenerator._draw_color_tags(canv, x_off, job.colors, font_name, font_size)
-            canv.restoreState()
-
-            # 3. O'ng tomon - Pastki blok (Zone 1)
-            info_right_part1 = (
+            left = (
+                f"Ish nomi: {safe_job_name}    Sahifa: {side_title}{notes_str}",
+                "Rang: ",
+            )
+            right = (
                 f"Qog'oz o'lchami: {sheet.width_mm:.0f}x{sheet.height_mm:.0f} mm    "
-                f"Mahsulot o'lchami: {bg_config.trim_width_mm:.0f}x{bg_config.trim_height_mm:.0f} mm"
-            )
-            canv.saveState()
-            canv.translate(x_right, y_zone1_start)
-            canv.rotate(90)
-            canv.setFillColor(BLACK_COLOR)
-            canv.drawString(0, 0, info_right_part1)
-            canv.restoreState()
-
-            # 4. O'ng tomon - Yuqori blok (Zone 2 - Krestdan 15 mm tepada)
-            info_right_part2 = (
+                f"Mahsulot o'lchami: {bg_config.trim_width_mm:.0f}x{bg_config.trim_height_mm:.0f} mm",
                 f"Fon (Bleed): {bg_config.bleed_mm:.1f} mm    "
-                f"Oraliq (Gutter): {bg_config.gutter_x_mm:.1f}x{bg_config.gutter_y_mm:.1f} mm"
+                f"Oraliq (Gutter): {bg_config.gutter_x_mm:.1f}x{bg_config.gutter_y_mm:.1f} mm",
             )
-            canv.saveState()
-            canv.translate(x_right, y_zone2_start)
-            canv.rotate(90)
-            canv.setFillColor(BLACK_COLOR)
-            canv.drawString(0, 0, info_right_part2)
-            canv.restoreState()
+
+        def band_baseline(band_start: float, band: float, size: float) -> float:
+            """Burilgan (90°) matn bazaviy chizig'i: harflar -x tomonga (ascent), +x ga (descent) chiqadi."""
+            lo = band_start + EDGE_SAFE_PT if band_start == 0 else band_start + BLEED_SAFE_PT
+            hi = band_start + band - (BLEED_SAFE_PT if band_start == 0 else EDGE_SAFE_PT)
+            center = (lo + hi) / 2.0
+            return center + (INFO_ASCENT - INFO_DESCENT) * size / 2.0
+
+        def draw_vertical(x_base: float, size: float, lines: Tuple[str, str], with_colors: bool):
+            for y0, text, avail, colors in (
+                (y_zone1_start, lines[0], available_zone1, None),
+                (y_zone2_start, lines[1], available_zone2, job.colors if with_colors else None),
+            ):
+                if avail <= 0:
+                    continue
+                canv.saveState()
+                canv.translate(x_base, y0)
+                canv.rotate(90)
+                MarksGenerator._draw_info_line(canv, text, colors, size, avail - 5.0)
+                canv.restoreState()
+
+        fallback_top: List[Tuple[str, Tuple[str, str], bool]] = []
+
+        for side, lines, band, band_start in (
+            ("left", left, zones.left, 0.0),
+            ("right", right, zones.right, w - zones.right),
+        ):
+            if lines is None:
+                continue
+            with_colors = side == "left"
+            size = _fit_font_size(band)
+            if size is not None:
+                draw_vertical(band_baseline(band_start, band, size), size, lines, with_colors)
+            else:
+                fallback_top.append((side, lines, with_colors))
+
+        # Yon tasma tor: yozuvlar yuqori tasmaga gorizontal (rang shkalasi va markaziy krestdan chetda)
+        if fallback_top:
+            top_size = _fit_font_size(zones.top)
+            if top_size is not None:
+                # Gorizontal matn: harflar +y ga (ascent), -y ga (descent) chiqadi
+                lo = h - zones.top + BLEED_SAFE_PT
+                hi = h - EDGE_SAFE_PT
+                baseline = (lo + hi) / 2.0 - (INFO_ASCENT - INFO_DESCENT) * top_size / 2.0
+                gap = 3.0 * MM_TO_PT
+                if color_bar_span:
+                    mid_x0, mid_x1 = color_bar_span
+                else:
+                    mid_x0, mid_x1 = w / 2.0 - COLOR_BAR_CENTER_GAP, w / 2.0 + COLOR_BAR_CENTER_GAP
+                edge_x = max(gap, EDGE_SAFE_PT)
+
+                for side, lines, with_colors in fallback_top:
+                    text = f"{lines[0]}    {lines[1]}"
+                    colors = job.colors if with_colors else None
+                    if side == "left":
+                        x0, max_w = edge_x, mid_x0 - gap - edge_x
+                    else:
+                        x0, max_w = mid_x1 + gap, (w - edge_x) - (mid_x1 + gap)
+                    if max_w <= 0:
+                        continue
+                    canv.saveState()
+                    canv.translate(x0, baseline)
+                    MarksGenerator._draw_info_line(canv, text, colors, top_size, max_w)
+                    canv.restoreState()
 
         canv.restoreState()
 
@@ -424,7 +514,7 @@ class MarksGenerator:
         canv: canvas.Canvas,
         sheet: SheetConfig,
         bg_config: BleedAndGutterConfig,
-        items: List[PlacedItem]
+        zones: FreeZones,
     ):
         """
         Klapan (Gripper margin) va 'Verniy burchak' texnik belgilarini chizish.
@@ -440,7 +530,8 @@ class MarksGenerator:
         w = sheet.width_pt
         h = sheet.height_pt
         klapan_pt = sheet.margin_bottom_mm * MM_TO_PT
-        cy = klapan_pt / 2.0
+        # Pastki privodka kresti bilan bir chiziqda (pastki bo'sh tasma markazi)
+        cy = zones.bottom / 2.0
         cx = w / 2.0
 
         font_name = "Helvetica-Bold"
@@ -459,36 +550,48 @@ class MarksGenerator:
             p.close()
             canv.drawPath(p, fill=1, stroke=0)
 
-        offset_x = 12.0 * MM_TO_PT
-        # O'ng tomonda: KLAPAN {gripper} mm (GRIPPER)
-        draw_feed_arrow(canv, cx + offset_x, cy)
-        canv.drawString(cx + offset_x + tri_w, cy - 2.0, f"KLAPAN {sheet.margin_bottom_mm:.0f} mm (GRIPPER)")
+        if zones.bottom >= tri_h + 2 * BLEED_SAFE_PT:
+            offset_x = 12.0 * MM_TO_PT
+            # O'ng tomonda: KLAPAN {gripper} mm (GRIPPER)
+            draw_feed_arrow(canv, cx + offset_x, cy)
+            canv.drawString(cx + offset_x + tri_w, cy - 2.0, f"KLAPAN {sheet.margin_bottom_mm:.0f} mm (GRIPPER)")
 
-        # Chap tomonda: BOSMA KLAPANI
-        draw_feed_arrow(canv, cx - offset_x, cy)
-        canv.drawRightString(cx - offset_x - tri_w, cy - 2.0, f"BOSMA KLAPANI: {sheet.margin_bottom_mm:.0f} mm")
+            # Chap tomonda: BOSMA KLAPANI
+            draw_feed_arrow(canv, cx - offset_x, cy)
+            canv.drawRightString(cx - offset_x - tri_w, cy - 2.0, f"BOSMA KLAPANI: {sheet.margin_bottom_mm:.0f} mm")
 
         # 2. Verniy burchak (Reference Corner / Верный угол) - pastki chap burchakda
         bx = max(4.0 * MM_TO_PT, sheet.margin_left_mm * MM_TO_PT * 0.4)
         by = max(3.0 * MM_TO_PT, klapan_pt * 0.25)
-        arm_len = 6.0 * MM_TO_PT
+        arm_len = min(6.0 * MM_TO_PT, zones.bottom - BLEED_SAFE_PT - by)
 
-        # 90 gradus burchak chizig'i
-        canv.setLineWidth(0.6)
-        canv.line(bx, by, bx + arm_len, by)
-        canv.line(bx, by, bx, by + arm_len)
-        canv.setLineWidth(0.35)
+        if arm_len >= 2.0 * MM_TO_PT:
+            # 90 gradus burchak chizig'i
+            canv.setLineWidth(0.6)
+            canv.line(bx, by, bx + arm_len, by)
+            canv.line(bx, by, bx, by + arm_len)
+            canv.setLineWidth(0.35)
 
-        canv.setFont(font_name, 5.0)
-        canv.drawString(bx + 2.0, by + 2.0, "VERNY UGOL")
+            canv.setFont(font_name, 5.0)
+            canv.drawString(bx + 2.0, by + 2.0, "VERNY UGOL")
 
         # 3. Klapan balandligini ko'rsatuvchi chekka shtrixlar (Left & Right Ticks)
-        tick_len = 3.5 * MM_TO_PT
-        canv.line(0, klapan_pt, tick_len, klapan_pt)
-        canv.line(w, klapan_pt, w - tick_len, klapan_pt)
-
+        # Shtrix va yozuv yon bo'sh tasmadan (tashqi fongacha) chiqmaydi
+        tick_label = f"{sheet.margin_bottom_mm:.0f}mm"
+        label_w = stringWidth(tick_label, "Helvetica", 4.5)
         canv.setFont("Helvetica", 4.5)
-        canv.drawString(tick_len + 1.5, klapan_pt - 1.5, f"{sheet.margin_bottom_mm:.0f}mm")
-        canv.drawRightString(w - tick_len - 1.5, klapan_pt - 1.5, f"{sheet.margin_bottom_mm:.0f}mm")
+        for band, at_left in ((zones.left, True), (zones.right, False)):
+            tick_len = min(3.5 * MM_TO_PT, band - BLEED_SAFE_PT)
+            if tick_len < 1.0 * MM_TO_PT:
+                continue
+            if at_left:
+                canv.line(0, klapan_pt, tick_len, klapan_pt)
+            else:
+                canv.line(w, klapan_pt, w - tick_len, klapan_pt)
+            if tick_len + 1.5 + label_w <= band - BLEED_SAFE_PT:
+                if at_left:
+                    canv.drawString(tick_len + 1.5, klapan_pt - 1.5, tick_label)
+                else:
+                    canv.drawRightString(w - tick_len - 1.5, klapan_pt - 1.5, tick_label)
 
         canv.restoreState()

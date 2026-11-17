@@ -11,6 +11,14 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
   const s = c.settings;
   const n = (v: number | undefined, fallback = 0) => v ?? fallback;
 
+  // Space for marks = margin minus outer bleed; doc-service shrinks or moves marks below ~8 mm
+  const MARK_ZONE_MM = 8;
+  const narrowSides = [
+    { label: "yuqori", margin: s.marginTop },
+    { label: "chap", margin: s.marginLeft },
+    { label: "o'ng", margin: s.marginRight },
+  ].filter((side) => side.margin - (s.outerBleed ?? 0) < MARK_ZONE_MM);
+
   return (
     <Section
       title="Qog'oz"
@@ -89,6 +97,15 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
         <NumField label="Chap" suffix="mm" value={s.marginLeft} disabled={readOnly} onChange={(v) => c.update({ marginLeft: n(v) })} />
         <NumField label="O'ng" suffix="mm" value={s.marginRight} disabled={readOnly} onChange={(v) => c.update({ marginRight: n(v) })} />
       </div>
+      {narrowSides.length > 0 && (
+        <div className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-500">
+          <AlertTriangle className="size-3.5 shrink-0 mt-px" />
+          <span>
+            Tor hoshiya ({narrowSides.map((side) => side.label).join(", ")}): fondan keyin{" "}
+            {MARK_ZONE_MM} mm dan kam joy. Krest va yozuvlar kichraytiriladi yoki ko&apos;chiriladi.
+          </span>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] text-muted-foreground">Joylashuv</span>
