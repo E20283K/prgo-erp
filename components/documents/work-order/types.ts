@@ -869,6 +869,7 @@ export interface WorkOrderFormData {
   customerTin?: string;
   clientId?: string;
   impositionState?: PersistedImpositionState;
+  flexoImpositionState?: PersistedFlexoImpositionState;
   /** Single source of the die-cut contour (noj), shared by Specifications and Imposition */
   dieline?: OrderDieline;
   deliveryBatches?: WorkOrderDeliveryBatch[];
@@ -942,6 +943,32 @@ export interface PersistedImpositionState {
     parentSheets: number;
     ctpPlates: number;
   };
+}
+
+/**
+ * Flexo cylinder imposition settings saved on the work order (dimensions.flexoImpositionState).
+ * Keeps the Flexo tab's inputs across tab switches and saves.
+ */
+export interface PersistedFlexoImpositionState {
+  version: 1;
+  /** Attachment id or "ALL_ATTACHMENTS" the designs were analyzed from */
+  sourceAttachmentId?: string;
+  /** design item_key -> gear teeth */
+  gearOverrides: Record<string, number>;
+  /** design item_key -> copies around the cylinder */
+  copiesOverrides: Record<string, number>;
+  removeOuterBorder: boolean;
+  separateColors: boolean;
+  colorOutputMode: "side_by_side" | "separate_files";
+  combineSameGear: boolean;
+  columnGapMm: number;
+  maxCylinderWidthMm: number;
+  regmarkEnabled: boolean;
+  regmarkStrokeMm: number;
+  regmarkTickMm: number;
+  regmarkWidthMm: number;
+  orderQty: number;
+  allowancePercent: number;
 }
 
 export const FLOOR_OPERATORS: string[] = [];

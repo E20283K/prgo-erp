@@ -1114,6 +1114,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     pressSheetH: data.pressSheetH || (initialQueueItem as any)?.pressSheetH || (data.dimensions as any)?.pressSheetH,
     plannedSheets: (data as any).plannedSheets || (initialQueueItem as any)?.plannedSheets || (data.dimensions as any)?.plannedSheets,
     impositionState: (data as any).impositionState || (initialQueueItem as any)?.impositionState || (data.dimensions as any)?.impositionState,
+    flexoImpositionState: (data as any).flexoImpositionState || (initialQueueItem as any)?.flexoImpositionState || (data.dimensions as any)?.flexoImpositionState,
     dieline: (data as any).dieline || (initialQueueItem as any)?.dieline || (data.dimensions as any)?.dieline,
   });
 
@@ -4068,16 +4069,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
                     onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                     onAuditLog={() => {}}
-                    onFlexoSave={(res: any) => {
-                      if (
-                        formData.flexoCylinderTeeth !== res.gearTeeth ||
-                        formData.flexoWebWidth !== res.webWidth
-                      ) {
-                        setFormData((prev) => ({
-                          ...prev,
-                          flexoCylinderTeeth: res.gearTeeth,
-                          flexoWebWidth: res.webWidth,
-                        }));
+                    flexoImpositionState={formData.flexoImpositionState}
+                    onFlexoImpositionStateChange={(flexoState) => {
+                      setFormData((prev) => ({ ...prev, flexoImpositionState: flexoState }));
+                      updateTabData(tab.id, { flexoImpositionState: flexoState });
+                      setTabUnsaved(tab.id, true);
+                    }}
+                    onFlexoSave={({ gearTeeth }) => {
+                      if (gearTeeth && formData.flexoCylinderTeeth !== gearTeeth) {
+                        setFormData((prev) => ({ ...prev, flexoCylinderTeeth: gearTeeth }));
                       }
                     }}
                     onFlexoFilmAttached={({ colorCount, filename, gearTeeth }) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import {
   FileText,
@@ -46,7 +46,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { OrderAttachment } from "@/components/documents/work-order/types";
+import { OrderAttachment, PersistedFlexoImpositionState } from "@/components/documents/work-order/types";
 import {
   fetchImpositionGears,
   analyzeImpositionPdf,
@@ -74,11 +74,46 @@ interface Props {
   orderAttachments?: OrderAttachment[];
   setOrderAttachments?: React.Dispatch<React.SetStateAction<OrderAttachment[]>>;
   onAuditLog?: (action: string, detail: string) => void;
-  onFlexoSave?: (gearTeeth: number) => void;
+  onFlexoSave?: (payload: { gearTeeth: number }) => void;
   onFlexoFilmAttached?: (payload: { colorCount: number; filename: string; gearTeeth?: number }) => void;
   onSwitchTab?: (tabKey: string) => void;
   onMarkUnsaved?: () => void;
+  flexoImpositionState?: PersistedFlexoImpositionState;
+  onFlexoImpositionStateChange?: (state: PersistedFlexoImpositionState) => void;
 }
+
+const PERSIST_DEBOUNCE_MS = 400;
+
+const DEFAULT_SETTINGS: Omit<PersistedFlexoImpositionState, "orderQty"> = {
+  version: 1,
+  gearOverrides: {},
+  copiesOverrides: {},
+  removeOuterBorder: true,
+  separateColors: true,
+  colorOutputMode: "side_by_side",
+  combineSameGear: false,
+  columnGapMm: 5.0,
+  maxCylinderWidthMm: 0,
+  regmarkEnabled: true,
+  regmarkStrokeMm: 0.2,
+  regmarkTickMm: 0.7,
+  regmarkWidthMm: 0,
+  allowancePercent: 5,
+};
+
+/**
+ * Doc-service results (analysis job, generated films) are not stored on the order,
+ * but are kept for the browser session so switching tabs does not re-run them.
+ */
+interface FlexoSessionCache {
+  attachmentsKey: string;
+  analyzeData: AnalyzeResponse | null;
+  generateData: GenerateResponse | null;
+  activeDesignIndex: number;
+  selectedOutputFileIndex: number;
+  previewMode: "film" | "original";
+}
+const flexoSessionCache = new Map<string, FlexoSessionCache>();
 
 export function FlexoCalcTab({
   defaultQuantity = 10000,
@@ -90,53 +125,72 @@ export function FlexoCalcTab({
   onFlexoFilmAttached,
   onSwitchTab,
   onMarkUnsaved,
+  flexoImpositionState,
+  onFlexoImpositionStateChange,
 }: Props) {
   const t = useTranslations("flexoImposition");
+
+  // Saved settings (from the order) and session results are read once on mount
+  const [initial] = useState(() => {
+    const saved = flexoImpositionState?.version === 1 ? flexoImpositionState : undefined;
+    const settings: PersistedFlexoImpositionState = {
+      ...DEFAULT_SETTINGS,
+      orderQty: defaultQuantity || 10000,
+      ...saved,
+    };
+    return { saved, settings, cache: flexoSessionCache.get(docNo) };
+  });
 
   // Gears master list loaded from Python doc-service (gears.json SSOT)
   const [gears, setGears] = useState<GearItem[]>([]);
   const [isLoadingGears, setIsLoadingGears] = useState(false);
 
   // Selected source attachment or uploaded file
-  const [selectedAttachmentId, setSelectedAttachmentId] = useState<string>("");
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState<string>(
+    initial.settings.sourceAttachmentId || ""
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analyzeData, setAnalyzeData] = useState<AnalyzeResponse | null>(null);
+  const [analyzeData, setAnalyzeData] = useState<AnalyzeResponse | null>(initial.cache?.analyzeData ?? null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   // Per-design overrides: design item_key -> { custom_gear, custom_copies }
-  const [gearOverrides, setGearOverrides] = useState<Record<string, number>>({});
-  const [copiesOverrides, setCopiesOverrides] = useState<Record<string, number>>({});
+  const [gearOverrides, setGearOverrides] = useState<Record<string, number>>(initial.settings.gearOverrides);
+  const [copiesOverrides, setCopiesOverrides] = useState<Record<string, number>>(initial.settings.copiesOverrides);
 
   // Imposition Configuration
-  const [removeOuterBorder, setRemoveOuterBorder] = useState(true);
-  const [separateColors, setSeparateColors] = useState(true);
-  const [colorOutputMode, setColorOutputMode] = useState<"side_by_side" | "separate_files">("side_by_side");
-  const [combineSameGear, setCombineSameGear] = useState(false);
-  const [columnGapMm, setColumnGapMm] = useState<number>(5.0);
-  const [maxCylinderWidthMm, setMaxCylinderWidthMm] = useState<number>(0);
+  const [removeOuterBorder, setRemoveOuterBorder] = useState(initial.settings.removeOuterBorder);
+  const [separateColors, setSeparateColors] = useState(initial.settings.separateColors);
+  const [colorOutputMode, setColorOutputMode] = useState<"side_by_side" | "separate_files">(
+    initial.settings.colorOutputMode
+  );
+  const [combineSameGear, setCombineSameGear] = useState(initial.settings.combineSameGear);
+  const [columnGapMm, setColumnGapMm] = useState<number>(initial.settings.columnGapMm);
+  const [maxCylinderWidthMm, setMaxCylinderWidthMm] = useState<number>(initial.settings.maxCylinderWidthMm);
 
   // Regmark settings (1:1 with Python imposition engine)
-  const [regmarkEnabled, setRegmarkEnabled] = useState(true);
-  const [regmarkStrokeMm, setRegmarkStrokeMm] = useState(0.2);
-  const [regmarkTickMm, setRegmarkTickMm] = useState(0.7);
-  const [regmarkWidthMm, setRegmarkWidthMm] = useState<number>(0);
+  const [regmarkEnabled, setRegmarkEnabled] = useState(initial.settings.regmarkEnabled);
+  const [regmarkStrokeMm, setRegmarkStrokeMm] = useState(initial.settings.regmarkStrokeMm);
+  const [regmarkTickMm, setRegmarkTickMm] = useState(initial.settings.regmarkTickMm);
+  const [regmarkWidthMm, setRegmarkWidthMm] = useState<number>(initial.settings.regmarkWidthMm);
 
   // Production yield block
-  const [orderQty, setOrderQty] = useState<number>(defaultQuantity || 10000);
-  const [allowancePercent, setAllowancePercent] = useState<number>(5);
+  const [orderQty, setOrderQty] = useState<number>(initial.settings.orderQty);
+  const [allowancePercent, setAllowancePercent] = useState<number>(initial.settings.allowancePercent);
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generateData, setGenerateData] = useState<GenerateResponse | null>(null);
+  const [generateData, setGenerateData] = useState<GenerateResponse | null>(initial.cache?.generateData ?? null);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
   // Visual Preview states
-  const [previewMode, setPreviewMode] = useState<"film" | "original">("film");
-  const [activeDesignIndex, setActiveDesignIndex] = useState<number>(0);
-  const [selectedOutputFileIndex, setSelectedOutputFileIndex] = useState<number>(0);
+  const [previewMode, setPreviewMode] = useState<"film" | "original">(initial.cache?.previewMode ?? "film");
+  const [activeDesignIndex, setActiveDesignIndex] = useState<number>(initial.cache?.activeDesignIndex ?? 0);
+  const [selectedOutputFileIndex, setSelectedOutputFileIndex] = useState<number>(
+    initial.cache?.selectedOutputFileIndex ?? 0
+  );
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
   // Attaching state
@@ -145,6 +199,96 @@ export function FlexoCalcTab({
 
   // Gear combobox popover per design
   const [gearComboboxOpenKey, setGearComboboxOpenKey] = useState<string | null>(null);
+
+  // ---------------------------------------------------------------- persist settings on the order
+  const persistedState = useMemo<PersistedFlexoImpositionState>(
+    () => ({
+      version: 1,
+      ...(selectedAttachmentId ? { sourceAttachmentId: selectedAttachmentId } : {}),
+      gearOverrides,
+      copiesOverrides,
+      removeOuterBorder,
+      separateColors,
+      colorOutputMode,
+      combineSameGear,
+      columnGapMm,
+      maxCylinderWidthMm,
+      regmarkEnabled,
+      regmarkStrokeMm,
+      regmarkTickMm,
+      regmarkWidthMm,
+      orderQty,
+      allowancePercent,
+    }),
+    [
+      selectedAttachmentId,
+      gearOverrides,
+      copiesOverrides,
+      removeOuterBorder,
+      separateColors,
+      colorOutputMode,
+      combineSameGear,
+      columnGapMm,
+      maxCylinderWidthMm,
+      regmarkEnabled,
+      regmarkStrokeMm,
+      regmarkTickMm,
+      regmarkWidthMm,
+      orderQty,
+      allowancePercent,
+    ]
+  );
+
+  // Baseline = what the order already holds, so opening the tab does not mark it dirty
+  const lastPersistedRef = useRef<string>(
+    initial.saved ? JSON.stringify(initial.settings) : ""
+  );
+  const pendingStateRef = useRef<PersistedFlexoImpositionState | null>(null);
+  const onStateChangeRef = useRef(onFlexoImpositionStateChange);
+  useEffect(() => {
+    onStateChangeRef.current = onFlexoImpositionStateChange;
+  }, [onFlexoImpositionStateChange]);
+
+  const flushPersist = useCallback(() => {
+    const pending = pendingStateRef.current;
+    if (!pending) return;
+    pendingStateRef.current = null;
+    lastPersistedRef.current = JSON.stringify(pending);
+    onStateChangeRef.current?.(pending);
+  }, []);
+
+  useEffect(() => {
+    const json = JSON.stringify(persistedState);
+    if (!lastPersistedRef.current) {
+      // First run without a saved state: record defaults only, do not mark the order dirty
+      lastPersistedRef.current = json;
+      return;
+    }
+    if (json === lastPersistedRef.current) {
+      pendingStateRef.current = null;
+      return;
+    }
+    pendingStateRef.current = persistedState;
+    const timer = setTimeout(flushPersist, PERSIST_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [persistedState, flushPersist]);
+
+  // Leaving the tab within the debounce window must not drop the last edit
+  useEffect(() => flushPersist, [flushPersist]);
+
+  // Keep doc-service results for the session (not saved on the order)
+  const autoAnalyzedKeyRef = useRef<string>(initial.cache?.attachmentsKey ?? "");
+  useEffect(() => {
+    flexoSessionCache.set(docNo, {
+      // Only a finished analysis lets the next mount skip re-analyzing
+      attachmentsKey: analyzeData ? autoAnalyzedKeyRef.current : "",
+      analyzeData,
+      generateData,
+      activeDesignIndex,
+      selectedOutputFileIndex,
+      previewMode,
+    });
+  }, [docNo, analyzeData, generateData, activeDesignIndex, selectedOutputFileIndex, previewMode]);
 
   // Load gears from doc-service on mount
   useEffect(() => {
@@ -223,7 +367,8 @@ export function FlexoCalcTab({
 
       // Notify parent of selected optimal gear
       if (result.designs.length > 0 && onFlexoSave) {
-        onFlexoSave(result.designs[0].suggested_gear);
+        const first = result.designs[0];
+        onFlexoSave({ gearTeeth: gearOverrides[first.item_key] || first.suggested_gear });
       }
       onAuditLog?.("Flexo Imposition Analyzed", `${file.name} (${result.designs.length} designs)`);
     } catch (err: any) {
@@ -265,7 +410,8 @@ export function FlexoCalcTab({
       setActiveDesignIndex(0);
 
       if (result.designs.length > 0 && onFlexoSave) {
-        onFlexoSave(result.designs[0].suggested_gear);
+        const first = result.designs[0];
+        onFlexoSave({ gearTeeth: gearOverrides[first.item_key] || first.suggested_gear });
       }
     } catch (err: any) {
       setAnalyzeError(err?.message || "Faylni tahlil qilib bo'lmadi");
@@ -275,7 +421,6 @@ export function FlexoCalcTab({
   };
 
   // Auto-analyze attachments on tab switch or mount if available
-  const autoAnalyzedKeyRef = useRef<string>("");
   useEffect(() => {
     if (isAnalyzing || !pdfAttachments.length) return;
 
@@ -283,6 +428,18 @@ export function FlexoCalcTab({
     if (autoAnalyzedKeyRef.current === attachmentsKey) return;
 
     autoAnalyzedKeyRef.current = attachmentsKey;
+
+    // Re-use the source picked last time if it is still attached
+    const savedSource = initial.settings.sourceAttachmentId;
+    if (
+      savedSource &&
+      (savedSource === "ALL_ATTACHMENTS"
+        ? pdfAttachments.length > 1
+        : pdfAttachments.some((a) => a.id === savedSource))
+    ) {
+      handleSelectAttachment(savedSource);
+      return;
+    }
 
     const masterAtt = pdfAttachments.find((a) => a.name.startsWith("[Master PDF]"));
     if (masterAtt) {
@@ -329,7 +486,7 @@ export function FlexoCalcTab({
 
       // Notify parent of updated gear
       if (overridesList.length > 0 && onFlexoSave) {
-        onFlexoSave(overridesList[0].custom_gear);
+        onFlexoSave({ gearTeeth: overridesList[0].custom_gear });
       }
 
       onAuditLog?.(
@@ -653,7 +810,7 @@ export function FlexoCalcTab({
                                             [design.item_key]: g.gear,
                                           }));
                                           setGearComboboxOpenKey(null);
-                                          onFlexoSave?.(g.gear);
+                                          onFlexoSave?.({ gearTeeth: g.gear });
                                         }}
                                         className="text-xs flex items-center justify-between py-1 px-2 cursor-pointer"
                                       >
