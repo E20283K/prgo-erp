@@ -158,6 +158,8 @@ export const employees = pgTable(
     terminationDate: date("termination_date"),
     currentShift: varchar("current_shift", { length: 32 }).default("day"), // "day", "night", "2/2"
     avatarUrl: text("avatar_url"),
+    // Shared shop-floor kiosk: keyed hash of the operator's PIN (unique per company, see terminalIdentityService).
+    terminalPinHash: varchar("terminal_pin_hash", { length: 64 }),
     details: jsonb("details").$type<EmployeeMetadata>().default({}).notNull(),
     isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -165,6 +167,7 @@ export const employees = pgTable(
   },
   (table) => [
     uniqueIndex("employees_company_badge_uq").on(table.companyId, table.badgeNumber),
+    uniqueIndex("employees_company_terminal_pin_uq").on(table.companyId, table.terminalPinHash),
     index("employees_company_department_idx").on(table.companyId, table.departmentId),
     index("employees_company_status_idx").on(table.companyId, table.status),
   ]

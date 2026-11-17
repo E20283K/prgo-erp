@@ -81,14 +81,13 @@ const goodOf = (events: ShiftEvent[], completedQty: unknown) => {
   return reported > 0 ? reported : Number(completedQty) || 0;
 };
 
-export async function getMachineQueue(machineId: string): Promise<{ machine: TerminalMachine; jobs: TerminalJob[] }> {
-  const machine = await db.query.productionMachines.findFirst({ where: eq(productionMachines.id, machineId) });
-  if (!machine) throw new Error("Uskuna topilmadi.");
-  const machineName = machine.name.trim().toLowerCase();
+type MachineRow = typeof productionMachines.$inferSelect;
 
-  const orders = await db.query.workOrders.findMany({
+/** Orders on the floor of one company, with their route and journal. */
+function loadFloorOrders(companyId: string) {
+  return db.query.workOrders.findMany({
     where: and(
-      eq(workOrders.companyId, machine.companyId),
+      eq(workOrders.companyId, companyId),
       inArray(workOrders.stage, [...FLOOR_STAGES]),
       notInArray(workOrders.status, ["Draft", "Cancelled"])
     ),
@@ -97,7 +96,66 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
       events: true,
     },
   });
+}
 
+type FloorOrder = Awaited<ReturnType<typeof loadFloorOrders>>[number];
+
+export async function getMachineQueue(machineId: string): Promise<{ machine: TerminalMachine; jobs: TerminalJob[] }> {
+  const machine = await db.query.productionMachines.findFirst({ where: eq(productionMachines.id, machineId) });
+  if (!machine) throw new Error("Uskuna topilmadi.");
+  const jobs = buildMachineJobs(machine, await loadFloorOrders(machine.companyId));
+  return {
+    machine: { id: machine.id, code: machine.code, name: machine.name, department: machine.department },
+    jobs,
+  };
+}
+
+export interface FloorMachine extends TerminalMachine {
+  /** The job running (or set up, or paused) on the machine, if any. */
+  active: Pick<TerminalJob, "workOrderNo" | "productName" | "opName" | "phase" | "goodQty" | "plannedQty" | "openDowntime"> | null;
+  /** Jobs waiting on the machine, and how many of them can start now. */
+  queued: number;
+  ready: number;
+}
+
+/** Every machine of the shop at a glance, for the shared kiosk's home screen. */
+export async function getFloorOverview(): Promise<FloorMachine[]> {
+  const machines = await db.select().from(productionMachines);
+  const ordersByCompany = new Map<string, FloorOrder[]>();
+  for (const companyId of new Set(machines.map((m) => m.companyId))) {
+    ordersByCompany.set(companyId, await loadFloorOrders(companyId));
+  }
+  return machines
+    .map((machine) => {
+      const jobs = buildMachineJobs(machine, ordersByCompany.get(machine.companyId) || []);
+      const active = jobs.find((j) => j.phase !== "queued") || null;
+      const waiting = jobs.filter((j) => j.phase === "queued");
+      return {
+        id: machine.id,
+        code: machine.code,
+        name: machine.name,
+        department: machine.department,
+        active: active
+          ? {
+              workOrderNo: active.workOrderNo,
+              productName: active.productName,
+              opName: active.opName,
+              phase: active.phase,
+              goodQty: active.goodQty,
+              plannedQty: active.plannedQty,
+              openDowntime: active.openDowntime,
+            }
+          : null,
+        queued: waiting.length,
+        ready: waiting.filter((j) => j.ready).length,
+      };
+    })
+    .sort((a, b) => a.department.localeCompare(b.department) || a.name.localeCompare(b.name));
+}
+
+/** The steps of floor orders that run on one machine, in the order the operator should take them. */
+function buildMachineJobs(machine: MachineRow, orders: FloorOrder[]): TerminalJob[] {
+  const machineName = machine.name.trim().toLowerCase();
   const jobs: TerminalJob[] = [];
   for (const wo of orders) {
     const events = (wo.events || []).filter((ev) => !ev.deletedAt).map(toShiftEvent);
@@ -190,9 +248,5 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
       (PRIORITY_RANK[a.priority] ?? 2) - (PRIORITY_RANK[b.priority] ?? 2) ||
       a.stepNumber - b.stepNumber
   );
-
-  return {
-    machine: { id: machine.id, code: machine.code, name: machine.name, department: machine.department },
-    jobs,
-  };
+  return jobs;
 }

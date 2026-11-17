@@ -3,6 +3,7 @@ import { branches, workOrderEvents, workOrderOperations, workOrders } from "@/db
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { resolveOperatorEmployeeId, syncPieceworkFromJournal } from "./pieceworkSyncService";
+import { verifyOperatorToken } from "./terminalIdentityService";
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 import { parseShiftSchedule, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
@@ -184,13 +185,17 @@ async function syncPieceworkSafely(workOrderId: string, opId: string) {
 /** Creates or updates one journal entry (keyed by the client's event id). */
 export async function saveWorkOrderEvent(
   docNo: string,
-  input: Partial<ShiftEvent> & { id: string; employeeId?: string | null },
+  input: Partial<ShiftEvent> & { id: string; employeeId?: string | null; operatorToken?: string | null },
   actor: EventActor,
   companyCode?: string | null
 ): Promise<ShiftEvent> {
   if (!input.id) throw new Error("Hodisa identifikatori kerak.");
   if (!input.opId) throw new Error("Hodisa bosqichga bog'lanmagan.");
   const wo = await findWorkOrder(docNo, companyCode);
+
+  // Shared kiosk: the operator who identified with a PIN or badge did the work, whoever the device is signed in as.
+  const kioskOperator = input.operatorToken ? await verifyOperatorToken(input.operatorToken) : null;
+  if (kioskOperator && kioskOperator.companyId !== wo.companyId) throw new Error("Operator boshqa korxonaga tegishli.");
 
   const existing = await db.query.workOrderEvents.findFirst({
     where: and(eq(workOrderEvents.workOrderId, wo.id), eq(workOrderEvents.clientEventId, input.id)),
@@ -212,8 +217,10 @@ export async function saveWorkOrderEvent(
     shift: input.shift || shiftAt(clock.time, schedule),
     type,
     note: input.note || "",
-    operator: input.operator || actor.name,
-    employeeId: await resolveOperatorEmployeeId(db, wo.companyId, input.employeeId, input.operator || actor.name),
+    operator: kioskOperator?.fullName || input.operator || actor.name,
+    employeeId:
+      kioskOperator?.employeeId ??
+      (await resolveOperatorEmployeeId(db, wo.companyId, input.employeeId, input.operator || actor.name)),
     batchLabel: input.batchLabel || null,
     grossInput: int(input.inputQty),
     makeReadyQty: int(input.makeReadyQty),

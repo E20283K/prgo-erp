@@ -127,6 +127,13 @@
       "when": 1794835331714,
       "tag": "0017_order_chain_links",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794919817913,
+      "tag": "0018_terminal_pin",
+      "breakpoints": true
     }
   ]
 }

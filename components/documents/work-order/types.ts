@@ -555,6 +555,8 @@ export interface ShiftEvent {
   toStatus?: RouteStep["status"];
   note: string;
   operator: string;
+  /** Shared kiosk: signed proof of the operator who identified with a PIN or badge (write-only). */
+  operatorToken?: string;
   inputQty?: number;
   makeReadyQty?: number;
   defectQty?: number;

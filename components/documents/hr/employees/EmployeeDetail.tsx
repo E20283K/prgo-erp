@@ -99,6 +99,7 @@ import {
   Upload,
   UploadCloud,
   Trash2,
+  KeyRound,
 } from "lucide-react";
 
 interface EmployeeDetailProps {
@@ -232,6 +233,44 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [newSkillText, setNewSkillText] = useState("");
   const [syncingBiometric, setSyncingBiometric] = useState(false);
+  // Shop-floor kiosk PIN: only whether one is set comes back, never the PIN.
+  const [hasTerminalPin, setHasTerminalPin] = useState(false);
+  const [terminalPin, setTerminalPin] = useState("");
+  const [savingPin, setSavingPin] = useState(false);
+  const employeeDbId = !isNewRecord ? formData.id : "";
+  useEffect(() => {
+    if (!employeeDbId) return;
+    let cancelled = false;
+    fetch(`/api/v1/hr/employees/${employeeDbId}/terminal-pin`)
+      .then((r) => r.json())
+      .then((j) => !cancelled && j.success && setHasTerminalPin(Boolean(j.hasPin)))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeDbId]);
+
+  const saveTerminalPin = async (pin: string | null) => {
+    if (!employeeDbId) return;
+    setSavingPin(true);
+    try {
+      const res = await fetch(`/api/v1/hr/employees/${employeeDbId}/terminal-pin`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!json.success) {
+        addNotification({ title: "PIN saqlanmadi", description: json.error, severity: "error" });
+        return;
+      }
+      setHasTerminalPin(Boolean(json.hasPin));
+      setTerminalPin("");
+      addNotification({ title: json.hasPin ? "PIN o'rnatildi" : "PIN o'chirildi", description: formData.fullName, severity: "success" });
+    } finally {
+      setSavingPin(false);
+    }
+  };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Fetch full details and history from API if ID is valid UUID and not draft
@@ -1210,6 +1249,47 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                           )}
                           Face ID yuklash
                         </Button>
+                      )}
+
+                      {!isNewRecord && (
+                        <div className="flex items-center gap-1 w-full" title="Sex terminali (kiosk) uchun PIN, 4–6 raqam">
+                          <Input
+                            value={terminalPin}
+                            onChange={(e) => setTerminalPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && terminalPin.length >= 4) void saveTerminalPin(terminalPin);
+                            }}
+                            type="password"
+                            inputMode="numeric"
+                            autoComplete="new-password"
+                            placeholder={hasTerminalPin ? "PIN ••••" : "PIN"}
+                            className="h-6 text-[10px] px-1.5 font-mono"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-1.5 shrink-0"
+                            disabled={savingPin || terminalPin.length < 4}
+                            onClick={() => void saveTerminalPin(terminalPin)}
+                            title="PIN saqlash"
+                          >
+                            {savingPin ? <Loader2 className="size-3 animate-spin" /> : <KeyRound className="size-3" />}
+                          </Button>
+                          {hasTerminalPin && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-1.5 shrink-0 text-destructive hover:bg-destructive/10"
+                              disabled={savingPin}
+                              onClick={() => void saveTerminalPin(null)}
+                              title="PIN o'chirish"
+                            >
+                              <X className="size-3" />
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </div>
 

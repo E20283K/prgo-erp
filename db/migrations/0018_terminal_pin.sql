@@ -1,0 +1,2 @@
+ALTER TABLE "employees" ADD COLUMN "terminal_pin_hash" varchar(64);--> statement-breakpoint
+CREATE UNIQUE INDEX "employees_company_terminal_pin_uq" ON "employees" USING btree ("company_id","terminal_pin_hash");

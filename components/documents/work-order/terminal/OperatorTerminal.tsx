@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Pause, Play, Plus, RefreshCw, SlidersHorizontal, Wrench, ExternalLink } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Pause, Play, Plus, RefreshCw, SlidersHorizontal, Wrench, ExternalLink, LayoutGrid, Users, UserRound, LogOut, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,7 +15,8 @@ import { stepUnit } from "../utils/stepKpis";
 import { PalletReportDialog } from "../dialogs/PalletReportDialog";
 import { DowntimeLogDialog } from "../dialogs/DowntimeLogDialog";
 import { useAskDialog } from "../dialogs/AskDialog";
-import type { TerminalJob, TerminalMachine } from "@/lib/server/operatorTerminalService";
+import type { FloorMachine, TerminalJob, TerminalMachine } from "@/lib/server/operatorTerminalService";
+import { OperatorIdentifyDialog, type KioskOperator } from "./OperatorIdentifyDialog";
 
 /**
  * Operator terminal: one machine, its queue across all active orders, and the current job
@@ -23,6 +24,26 @@ import type { TerminalJob, TerminalMachine } from "@/lib/server/operatorTerminal
  */
 
 const MACHINE_KEY = "pg.terminal.machine";
+/** Shared kiosk on this device: every action asks who is at the machine. */
+const KIOSK_KEY = "pg.terminal.kiosk";
+/** The identified operator is let go after this long without an action. */
+const OPERATOR_IDLE_MS = 60_000;
+
+const readLocal = (key: string) => {
+  try {
+    return localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+};
+const writeLocal = (key: string, value: string) => {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* per-browser convenience only */
+  }
+};
 
 const PHASE_LABEL: Record<StepPhase, string> = {
   queued: "Navbatda",
@@ -46,13 +67,13 @@ const hms = (seconds: number) => {
 };
 
 /** The dialogs work on route steps: a terminal job seen as one. */
-function jobAsStep(job: TerminalJob): RouteStep {
+function jobAsStep(job: TerminalJob, operator = ""): RouteStep {
   return {
     id: job.opId,
     stepNumber: job.stepNumber,
     name: job.opName,
     machine: "",
-    operator: "",
+    operator,
     duration: job.plannedHours,
     // Same shape as a stored step: the plan is in order pieces, the dialog converts it to the step's unit.
     qtyCompleted: `${job.goodQty.toLocaleString()} / ${job.plannedPieces.toLocaleString()}`,
@@ -74,13 +95,15 @@ export function OperatorTerminal() {
     if (st.machines.length === 0 && st.loadMachines) st.loadMachines();
   }, []);
   const [machines, setMachines] = useState<TerminalMachine[]>([]);
-  const [machineId, setMachineId] = useState<string>(() => {
-    try {
-      return localStorage.getItem(MACHINE_KEY) || "";
-    } catch {
-      return "";
-    }
-  });
+  const [machineId, setMachineId] = useState<string>(() => readLocal(MACHINE_KEY));
+  const [floor, setFloor] = useState<FloorMachine[]>([]);
+  const [kiosk, setKiosk] = useState<boolean>(() => readLocal(KIOSK_KEY) === "1");
+  const [operator, setOperatorState] = useState<KioskOperator | null>(null);
+  const operatorRef = useRef<KioskOperator | null>(null);
+  const lastActionRef = useRef(0);
+  const [lastActionAt, setLastActionAt] = useState(0);
+  const identifyResolver = useRef<((op: KioskOperator | null) => void) | null>(null);
+  const [identifyLabel, setIdentifyLabel] = useState<string | null>(null);
   const [jobs, setJobs] = useState<TerminalJob[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -141,6 +164,80 @@ export function OperatorTerminal() {
     return () => clearInterval(id);
   }, [loadQueue]);
 
+  // No machine picked: the whole shop as tiles, refreshed like the queue.
+  const loadFloor = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/v1/production/terminal?overview=1");
+      const json = await res.json().catch(() => ({}));
+      if (json.success) setFloor(json.floor || []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (machineId) return;
+    const first = setTimeout(() => void loadFloor(), 0);
+    const id = setInterval(() => void loadFloor(), 30000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, [machineId, loadFloor]);
+
+  const pickMachine = (id: string) => {
+    setMachineId(id);
+    writeLocal(MACHINE_KEY, id);
+  };
+
+  const setOperator = (op: KioskOperator | null) => {
+    operatorRef.current = op;
+    setOperatorState(op);
+  };
+  /** Every action by the identified operator restarts the idle window. */
+  const touchOperator = () => {
+    const at = Date.now();
+    lastActionRef.current = at;
+    setLastActionAt(at);
+  };
+
+  /**
+   * Kiosk mode: resolves once someone has identified (or is still within the idle window).
+   * Off kiosk, the signed-in account is the operator, as before.
+   */
+  const requireOperator = (label: string): Promise<boolean> => {
+    if (!kiosk) return Promise.resolve(true);
+    const cur = operatorRef.current;
+    const fresh =
+      cur &&
+      Date.now() - lastActionRef.current < OPERATOR_IDLE_MS &&
+      new Date(cur.expiresAt).getTime() - Date.now() > OPERATOR_IDLE_MS;
+    if (fresh) {
+      touchOperator();
+      return Promise.resolve(true);
+    }
+    return new Promise<boolean>((resolve) => {
+      identifyResolver.current = (op) => {
+        identifyResolver.current = null;
+        setIdentifyLabel(null);
+        if (op) {
+          setOperator(op);
+          touchOperator();
+        }
+        resolve(Boolean(op));
+      };
+      setIdentifyLabel(label);
+    });
+  };
+
+  const toggleKiosk = () => {
+    const next = !kiosk;
+    setKiosk(next);
+    writeLocal(KIOSK_KEY, next ? "1" : "");
+    setOperator(null);
+  };
+
   const job = jobs.find((j) => `${j.workOrderNo}:${j.opId}` === selectedKey) || null;
 
   // The plant's shifts, for the report and downtime dialogs.
@@ -153,16 +250,21 @@ export function OperatorTerminal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the schedule is per plant, one load is enough
   }, [job?.workOrderNo]);
 
-  const save = async (event: ShiftEvent, okTitle?: string) => {
+  /** `asOperator: false` keeps an entry's own operator (closing a downtime someone else opened). */
+  const save = async (event: ShiftEvent, okTitle?: string, asOperator = true) => {
     if (!job) return false;
+    const op = kiosk && asOperator ? operatorRef.current : null;
     setBusy(true);
     try {
-      const res = await useWorkspaceStore.getState().saveWorkOrderEventAsync(job.workOrderNo, event);
+      const res = await useWorkspaceStore
+        .getState()
+        .saveWorkOrderEventAsync(job.workOrderNo, op ? { ...event, operator: op.fullName, operatorToken: op.token } : event);
       if (!res.success) {
         addNotification({ title: "Saqlanmadi", description: res.error, severity: "error" });
         return false;
       }
       if (okTitle) addNotification({ title: okTitle, description: `${job.workOrderNo} · #${job.stepNumber} ${job.opName}`, severity: "success" });
+      if (op) touchOperator();
       await loadQueue();
       return true;
     } finally {
@@ -199,11 +301,13 @@ export function OperatorTerminal() {
   };
 
   const startSetup = async () => {
+    if (!(await requireOperator("Sozlash"))) return;
     const gate = await startGate();
     if (gate.ok) await transition("SetupStart", gate.note || "Sozlash boshlandi");
   };
 
   const startRun = async () => {
+    if (!(await requireOperator("Ishga tushirish"))) return;
     let note = "Ish boshlandi";
     if (job?.phase === "queued") {
       const gate = await startGate();
@@ -218,17 +322,19 @@ export function OperatorTerminal() {
     const open = job.recentEvents.find((ev) => ev.id === job.openDowntime!.id);
     if (!open) return 0;
     const minutes = Math.max(1, Math.round((Date.now() - new Date(job.openDowntime.since).getTime()) / 60000));
-    await save({ ...open, downtimeDurationMinutes: minutes });
+    await save({ ...open, downtimeDurationMinutes: minutes }, undefined, false);
     return minutes;
   };
 
   const resume = async () => {
+    if (!(await requireOperator("Davom ettirish"))) return;
     const minutes = await closeDowntime();
     if (minutes === 0) await transition("RunStart", "Davom ettirildi");
   };
 
   const finish = async (goodOverride?: number) => {
     if (!job) return;
+    if (!(await requireOperator("Yakunlash"))) return;
     const good = goodOverride ?? job.goodQty;
     if (good <= 0) {
       addNotification({ title: "Yakunlab bo'lmaydi", description: "Avval chiqim hisobotini (palet) kiriting.", severity: "error" });
@@ -250,6 +356,19 @@ export function OperatorTerminal() {
     }
   };
 
+  const openPallet = async () => {
+    if (await requireOperator("Palet")) setIsPalletOpen(true);
+  };
+  const openDowntime = async (mode: "open" | "record") => {
+    if (await requireOperator(mode === "open" ? "To'xtatish" : "To'xtalish qayd")) setDowntimeMode(mode);
+  };
+
+  // The operator is let go after a minute without actions (never while one of their forms is open);
+  // the next action asks again (requireOperator applies the same window).
+  const dialogOpen = isPalletOpen || Boolean(downtimeMode);
+  const activeOperator = operator && (dialogOpen || nowMs - lastActionAt <= OPERATOR_IDLE_MS) ? operator : null;
+  const operatorLeft = activeOperator ? Math.max(0, Math.ceil((OPERATOR_IDLE_MS - (nowMs - lastActionAt)) / 1000)) : 0;
+
   const openSeconds = job?.openDowntime ? (nowMs - new Date(job.openDowntime.since).getTime()) / 1000 : 0;
   const scrap = job && job.inputQty > 0 ? (job.makeReadyQty + job.defectQty) / job.inputQty : null;
   const BIG = "h-12 px-5 text-sm font-semibold gap-2";
@@ -260,17 +379,20 @@ export function OperatorTerminal() {
     <div className="flex flex-col h-full min-h-0 bg-background">
       {/* Machine bar */}
       <div className="h-11 shrink-0 border-b border-border bg-card px-3 flex items-center gap-3">
-        <span className="text-xs text-muted-foreground">Uskuna</span>
+        <Button
+          type="button"
+          variant={machineId ? "ghost" : "secondary"}
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          onClick={() => pickMachine("")}
+        >
+          <LayoutGrid className="size-3.5" />
+          <span>Sex</span>
+        </Button>
         <Select
           value={machineId}
           onValueChange={(val: string | null) => {
-            if (!val) return;
-            setMachineId(val);
-            try {
-              localStorage.setItem(MACHINE_KEY, val);
-            } catch {
-              /* per-browser convenience only */
-            }
+            if (val) pickMachine(val);
           }}
         >
           <SelectTrigger className="h-8 w-72 text-xs">
@@ -284,15 +406,51 @@ export function OperatorTerminal() {
             ))}
           </SelectContent>
         </Select>
-        <Button type="button" variant="ghost" size="sm" onClick={() => void loadQueue()} disabled={!machineId || loading} className="h-8 gap-1.5 text-xs">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => void (machineId ? loadQueue() : loadFloor())}
+          disabled={loading}
+          className="h-8 gap-1.5 text-xs"
+        >
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           <span>Yangilash</span>
         </Button>
-        <span className="ml-auto font-mono text-sm text-foreground">{plantClock(new Date(nowMs)).time}</span>
+        <div className="ml-auto flex items-center gap-2">
+          {kiosk &&
+            (activeOperator ? (
+              <div className="h-8 pl-2.5 pr-1 flex items-center gap-2 rounded-md border border-border bg-muted/40 text-xs whitespace-nowrap">
+                <UserRound className="size-3.5 text-muted-foreground" />
+                <span className="font-medium text-foreground max-w-48 truncate">{activeOperator.fullName}</span>
+                <span className="font-mono text-muted-foreground w-7 text-right">{operatorLeft}s</span>
+                <Button type="button" variant="ghost" size="icon" className="size-6" title="Chiqish" onClick={() => setOperator(null)}>
+                  <LogOut className="size-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <div className="h-8 px-2.5 flex items-center gap-1.5 rounded-md border border-dashed border-border text-xs text-muted-foreground whitespace-nowrap">
+                <Lock className="size-3.5" />
+                <span>Operator yo&apos;q</span>
+              </div>
+            ))}
+          <Button
+            type="button"
+            variant={kiosk ? "secondary" : "ghost"}
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={toggleKiosk}
+            title="Umumiy kompyuter: har bir amal oldidan PIN yoki beyj"
+          >
+            <Users className="size-3.5" />
+            <span>Kiosk</span>
+          </Button>
+          <span className="font-mono text-sm text-foreground">{plantClock(new Date(nowMs)).time}</span>
+        </div>
       </div>
 
       {!machineId ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Uskunani tanlang</div>
+        <FloorGrid floor={floor} loading={loading} onPick={pickMachine} />
       ) : (
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[340px_1fr]">
           {/* Queue */}
@@ -418,7 +576,7 @@ export function OperatorTerminal() {
                       variant="outline"
                       className={cn(BIG, "border-amber-500/40 text-amber-700 dark:text-amber-400")}
                       disabled={busy}
-                      onClick={() => setDowntimeMode("open")}
+                      onClick={() => void openDowntime("open")}
                     >
                       <Pause className="size-4" />
                       To&apos;xtatish
@@ -431,7 +589,7 @@ export function OperatorTerminal() {
                     </Button>
                   )}
                   {(job.phase === "run" || job.phase === "paused") && (
-                    <Button type="button" className={cn(BIG, "bg-emerald-600 hover:bg-emerald-700 text-white")} disabled={busy} onClick={() => setIsPalletOpen(true)}>
+                    <Button type="button" className={cn(BIG, "bg-emerald-600 hover:bg-emerald-700 text-white")} disabled={busy} onClick={() => void openPallet()}>
                       <Plus className="size-4" />
                       Palet
                     </Button>
@@ -449,7 +607,7 @@ export function OperatorTerminal() {
                     </Button>
                   )}
                   {job.phase !== "queued" && (
-                    <Button type="button" variant="ghost" className="h-12 px-3 text-xs gap-1.5 text-muted-foreground" disabled={busy} onClick={() => setDowntimeMode("record")}>
+                    <Button type="button" variant="ghost" className="h-12 px-3 text-xs gap-1.5 text-muted-foreground" disabled={busy} onClick={() => void openDowntime("record")}>
                       <Wrench className="size-3.5" />
                       To&apos;xtalish qayd
                     </Button>
@@ -523,7 +681,7 @@ export function OperatorTerminal() {
         <PalletReportDialog
           isOpen={isPalletOpen}
           onOpenChange={setIsPalletOpen}
-          selectedOp={jobAsStep(job)}
+          selectedOp={jobAsStep(job, activeOperator?.fullName)}
           allOperations={[jobAsStep(job)]}
           previousOpGoodOutput={job.previousStep?.goodQty || 0}
           existingOpEvents={job.reports}
@@ -562,11 +720,19 @@ export function OperatorTerminal() {
 
       {askDialog.dialog}
 
+      <OperatorIdentifyDialog
+        open={identifyLabel !== null}
+        machineId={machineId}
+        actionLabel={identifyLabel || undefined}
+        onIdentified={(op) => identifyResolver.current?.(op)}
+        onCancel={() => identifyResolver.current?.(null)}
+      />
+
       {job && downtimeMode && (
         <DowntimeLogDialog
           isOpen={Boolean(downtimeMode)}
           onOpenChange={(open) => !open && setDowntimeMode(null)}
-          selectedOp={jobAsStep(job)}
+          selectedOp={jobAsStep(job, activeOperator?.fullName)}
           mode={downtimeMode}
           shiftSchedule={schedule}
           onSaveDowntime={async (data) => {
@@ -590,6 +756,63 @@ export function OperatorTerminal() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function FloorGrid({ floor, loading, onPick }: { floor: FloorMachine[]; loading: boolean; onPick: (id: string) => void }) {
+  if (floor.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+        {loading ? "Yuklanmoqda" : "Uskuna yo'q"}
+      </div>
+    );
+  }
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto p-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2">
+        {floor.map((m) => {
+          const phase: StepPhase = m.active?.openDowntime ? "paused" : m.active?.phase || "queued";
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onPick(m.id)}
+              className="text-left rounded-lg border border-border bg-card hover:bg-muted/40 p-3 min-h-28 flex flex-col gap-1.5"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-foreground truncate">{m.name}</div>
+                  <div className="text-[11px] text-muted-foreground truncate">{m.department}</div>
+                </div>
+                <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 shrink-0", PHASE_CLASS[phase])}>
+                  {m.active ? PHASE_LABEL[phase] : "Bo'sh"}
+                </Badge>
+              </div>
+              {m.active ? (
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="font-mono text-muted-foreground">{m.active.workOrderNo}</span>
+                    <span className="font-mono text-foreground">
+                      {m.active.goodQty.toLocaleString()} / {m.active.plannedQty.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="text-xs text-foreground truncate">{m.active.productName}</div>
+                  <div className="text-[11px] text-muted-foreground truncate">
+                    {m.active.openDowntime ? m.active.openDowntime.reason : m.active.opName}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground">Faol ish yo&apos;q</div>
+              )}
+              <div className="mt-auto text-[11px] text-muted-foreground">
+                Navbat {m.queued}
+                {m.queued > 0 && ` · tayyor ${m.ready}`}
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
