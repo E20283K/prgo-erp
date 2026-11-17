@@ -294,6 +294,7 @@ export function OverviewTab({
     plants,
     machines,
     employees,
+    companiesList,
   } = useWorkspaceStore(
     useShallow((s) => ({
       masterSpecifications: s.masterSpecifications,
@@ -301,6 +302,7 @@ export function OverviewTab({
       plants: s.plants,
       machines: s.machines,
       employees: s.employees,
+      companiesList: s.companiesList,
     }))
   );
   const {
@@ -520,8 +522,13 @@ export function OverviewTab({
     if (siteMatch) return siteMatch.name || siteMatch.label;
     const defaultMatch = SITE_OPTIONS.find((s) => s.id === formData.site || s.name === formData.site);
     if (defaultMatch) return defaultMatch.name;
+    // Ishlab chiqarish maydoni OrgUnitSelect orqali tashkilot ID si sifatida saqlanadi
+    const companyMatch = companiesList?.find((c) => c.id === formData.site);
+    if (companyMatch) return companyMatch.name;
+    // Topilmagan ID ni xom UUID ko'rinishida chiqarmaymiz
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(formData.site)) return "—";
     return formData.site;
-  }, [formData.site, plants, sites, activeSite]);
+  }, [formData.site, plants, sites, activeSite, companiesList]);
 
   const techOptions = useMemo<ComboboxOption[]>(() => {
     return TECHNOLOGY_OPTIONS.map((tech) => {
