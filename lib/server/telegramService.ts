@@ -1221,12 +1221,26 @@ export function buildProductionStepper(currentStage: string, currentStatus: stri
   else if (currentStage === "Completed") activeIndex = 4;
 
   const renderedSteps = steps.map((s, idx) => {
-    if (idx < activeIndex) return `[✓ ${s.label}]`;
-    if (idx === activeIndex) return `[▶ ${s.label}]`;
-    return `[○ ${s.label}]`;
+    if (idx < activeIndex) return `✓ ${s.label}`;
+    if (idx === activeIndex) return `▶ <b>${s.label}</b>`;
+    return `○ ${s.label}`;
   });
 
-  return renderedSteps.join(" ➔ ");
+  return renderedSteps.join("\n");
+}
+
+/**
+ * Mijoz nomidan Telegram heshtegi yasash: guruhda mijozning boshqa
+ * buyurtmalarini bir bosishda topish uchun. Harf/raqamdan boshqa belgilar
+ * "_" ga aylanadi (Telegram heshtegida bo'sh joy va tinish belgisi bo'lmaydi).
+ */
+export function buildClientHashtag(name: string): string {
+  const tag = (name || "")
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/g, "");
+  // Faqat raqamlardan iborat heshteg Telegramda ishlamaydi
+  if (!tag || !/\p{L}/u.test(tag)) return "";
+  return `#${tag}`;
 }
 
 export function escapeTelegramHtml(str: string): string {
@@ -1277,11 +1291,14 @@ export function formatWorkOrderTelegramCaption(order: any, customNote?: string):
 
   const escapeHtml = escapeTelegramHtml;
 
+  const clientTag = buildClientHashtag(clientName);
+
   const lines = [
-    `🏭 <b>* ${escapeHtml(clientName)} *</b>`,
+    clientTag ? `🏭 ${clientTag}` : `🏭 <b>${escapeHtml(clientName)}</b>`,
     `📋 <b>BUYURTMA: ${escapeHtml(orderNo)}</b>`,
     ``,
-    `🔄 <b>Jarayon:</b> ${stepper}`,
+    `🔄 <b>Jarayon:</b>`,
+    stepper,
     `📌 <b>Holati:</b> ${escapeHtml(statusLabel)} (${escapeHtml(stageLabel)})`,
     ``,
     `📦 <b>Mahsulot:</b> ${escapeHtml(productName)}`,

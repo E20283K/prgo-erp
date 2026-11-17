@@ -153,14 +153,21 @@ export function TelegramOrdersGroupModal({
     else if (stage === "Packaging") activeIndex = 3;
     else if (stage === "Completed") activeIndex = 4;
 
-    return steps
-      .map((s, idx) => {
-        if (idx < activeIndex) return `[✓ ${s.label}]`;
-        if (idx === activeIndex) return `[▶ ${s.label}]`;
-        return `[○ ${s.label}]`;
-      })
-      .join(" ➔ ");
+    return steps.map((s, idx) => ({
+      label: s.label,
+      mark: idx < activeIndex ? "✓" : idx === activeIndex ? "▶" : "○",
+      active: idx === activeIndex,
+    }));
   }, [stage]);
+
+  // Server tomondagi buildClientHashtag bilan bir xil qoida
+  const clientTag = useMemo(() => {
+    const tag = customerName
+      .toUpperCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "_")
+      .replace(/^_+|_+$/g, "");
+    return tag && /\p{L}/u.test(tag) ? `#${tag}` : "";
+  }, [customerName]);
 
   const embellishmentsStr = useMemo(() => {
     const list: string[] = [];
@@ -392,11 +399,16 @@ export function TelegramOrdersGroupModal({
               </Badge>
             </div>
             <div className="p-2.5 rounded border border-border bg-card font-mono text-[11px] space-y-1.5 leading-relaxed">
-              <div className="text-primary font-bold">🏭 * {customerName.toUpperCase()} *</div>
+              <div className="text-primary font-bold">🏭 {clientTag || customerName.toUpperCase()}</div>
               <div className="font-bold text-foreground">📋 BUYURTMA: {orderNumber}</div>
 
               <div className="pt-1 text-muted-foreground">
-                <span className="font-semibold text-foreground">🔄 Jarayon:</span> {previewStepper}
+                <div className="font-semibold text-foreground">🔄 Jarayon:</div>
+                {previewStepper.map((s) => (
+                  <div key={s.label} className={s.active ? "font-semibold text-foreground" : undefined}>
+                    {s.mark} {s.label}
+                  </div>
+                ))}
               </div>
               <div className="text-muted-foreground">
                 <span className="font-semibold text-foreground">📌 Holati:</span> {status} ({stage})
