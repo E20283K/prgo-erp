@@ -1676,43 +1676,10 @@ function formatMachineDbToRecord(m: any): any {
 
 export async function getProductionMachines(companyCode: string = "PRINTGOO") {
   const companyId = await getCompanyIdByCode(companyCode);
-  let rows = await db.query.productionMachines.findMany({
+  const rows = await db.query.productionMachines.findMany({
     where: eq(productionMachines.companyId, companyId),
     orderBy: [desc(productionMachines.createdAt)],
   });
-
-  if (rows.length === 0) {
-    const defaultMachines = [
-      { code: "M-001", name: "Heidelberg Speedmaster XL 106", department: "Offset", status: "Running", hourlyRateUsd: "45.00", maxSpeedPerHour: 15000, currentOperator: "Alisher Ergashev" },
-      { code: "M-002", name: "Mark Andy P5 Series", department: "Flexo", status: "Running", hourlyRateUsd: "35.00", maxSpeedPerHour: 12000, currentOperator: "Bobur Karimov" },
-      { code: "M-003", name: "Gallus ECS 340", department: "Flexo", status: "Idle", hourlyRateUsd: "30.00", maxSpeedPerHour: 10000, currentOperator: "Jamshid Qodirov" },
-      { code: "M-004", name: "Bobst Novacut 106", department: "Post-press", status: "Running", hourlyRateUsd: "25.00", maxSpeedPerHour: 8000, currentOperator: "Dilshod Saidov" },
-      { code: "M-005", name: "Muller Martini Presto II", department: "Post-press", status: "Maintenance", hourlyRateUsd: "20.00", maxSpeedPerHour: 6000, currentOperator: "Otabek Umarov" },
-    ];
-
-    try {
-      await db.insert(productionMachines).values(
-        defaultMachines.map((m) => ({
-          code: m.code,
-          name: m.name,
-          department: m.department,
-          status: m.status,
-          hourlyRateUsd: m.hourlyRateUsd,
-          maxSpeedPerHour: m.maxSpeedPerHour,
-          currentOperator: m.currentOperator,
-          companyId,
-          isActive: true,
-        }))
-      ).onConflictDoNothing();
-
-      rows = await db.query.productionMachines.findMany({
-        where: eq(productionMachines.companyId, companyId),
-        orderBy: [desc(productionMachines.createdAt)],
-      });
-    } catch (e) {
-      console.error("Error auto-seeding machines:", e);
-    }
-  }
 
   return rows.map(formatMachineDbToRecord);
 }

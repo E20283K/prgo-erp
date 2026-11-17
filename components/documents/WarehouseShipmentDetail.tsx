@@ -130,71 +130,6 @@ export interface CarrierProfile {
   type: "fleet" | "courier" | "self" | "other";
 }
 
-export const DEFAULT_CARRIERS: CarrierProfile[] = [
-  {
-    id: "carrier-1",
-    name: "PrintGoo Fleet #1 (ISUZU)",
-    vehicleModel: "ISUZU Furgon 3.5t",
-    vehicleNo: "01 A 772 BB",
-    driverName: "Rustam Ismoilov",
-    driverPhone: "+998 90 123-45-67",
-    type: "fleet",
-  },
-  {
-    id: "carrier-2",
-    name: "PrintGoo Fleet #2 (Labo)",
-    vehicleModel: "Labo 0.7t (Furgon)",
-    vehicleNo: "01 B 334 CC",
-    driverName: "Anvar Xalilov",
-    driverPhone: "+998 90 987-65-43",
-    type: "fleet",
-  },
-  {
-    id: "carrier-3",
-    name: "PrintGoo Fleet #3 (Gazelle)",
-    vehicleModel: "Gazelle Next 1.5t",
-    vehicleNo: "01 F 550 AA",
-    driverName: "Jamshid Saidov",
-    driverPhone: "+998 93 456-78-90",
-    type: "fleet",
-  },
-  {
-    id: "carrier-4",
-    name: "Express Logistics UZ",
-    vehicleModel: "Ford Transit Express",
-    vehicleNo: "01 E 100 EX",
-    driverName: "Navbatchi kuryer",
-    driverPhone: "+998 71 200-11-22",
-    type: "courier",
-  },
-  {
-    id: "carrier-5",
-    name: "BTS Express Pochta",
-    vehicleModel: "BTS Logistics Van",
-    vehicleNo: "01 B 707 TS",
-    driverName: "BTS Kuryer",
-    driverPhone: "+998 71 123-00-00",
-    type: "courier",
-  },
-  {
-    id: "carrier-6",
-    name: "Yandex Delivery Cargo",
-    vehicleModel: "Yandex Cargo Furgon",
-    vehicleNo: "Ilovada belgilanadi",
-    driverName: "Ilovadagi haydovchi",
-    driverPhone: "+998 71 200-00-00",
-    type: "courier",
-  },
-  {
-    id: "carrier-7",
-    name: "Mijoz o'zi olib ketadi (Samovyvoz)",
-    vehicleModel: "Mijoz transporti",
-    vehicleNo: "—",
-    driverName: "Mijoz vakili",
-    driverPhone: "—",
-    type: "self",
-  },
-];
 
 const BRANCH_RECIPIENTS = [
   "Samarkand Branch (Filial ombori)",
@@ -1235,11 +1170,11 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       quantity: defaultQty,
       unit: defaultUnit,
       from: d.from || availableWarehouses[0]?.name || "Asosiy ombor",
-      carrier: d.carrier || DEFAULT_CARRIERS[0].name,
+      carrier: d.carrier || "",
       trackingNo: d.trackingNo || "",
-      driverName: d.driverName || DEFAULT_CARRIERS[0].driverName,
-      driverPhone: d.driverPhone || DEFAULT_CARRIERS[0].driverPhone,
-      vehicleNo: d.vehicleNo || DEFAULT_CARRIERS[0].vehicleNo,
+      driverName: d.driverName || "",
+      driverPhone: d.driverPhone || "",
+      vehicleNo: d.vehicleNo || "",
       recipientName: d.recipientName || "",
       powerOfAttorney: d.powerOfAttorney || "",
       packagesCount: Number(d.packagesCount) || totalPkg,
@@ -1260,9 +1195,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
 
   const [doc, setDoc] = useState<WarehouseShipmentRecord>(initialDoc);
 
-  const resolvedCarriers = useMemo<CarrierProfile[]>(() => {
-    if (carriersList && carriersList.length > 0) {
-      return carriersList.map((c) => ({
+  const resolvedCarriers = useMemo<CarrierProfile[]>(
+    () =>
+      (carriersList || []).map((c) => ({
         id: c.id,
         name: c.name,
         type: (c.type as any) || "fleet",
@@ -1270,10 +1205,9 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         vehicleNo: c.vehicleNo || "—",
         driverName: c.driverName || "—",
         driverPhone: c.driverPhone || "—",
-      }));
-    }
-    return DEFAULT_CARRIERS;
-  }, [carriersList]);
+      })),
+    [carriersList]
+  );
 
   const [isCarrierModalOpen, setIsCarrierModalOpen] = useState(false);
   const [carrierModalData, setCarrierModalData] = useState<Partial<CarrierProfile> | undefined>(undefined);
@@ -2952,23 +2886,17 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
                     updates.vehicleNo = "—";
                     updates.driverName = "Mijoz vakili";
                   } else if (mode === "courier") {
-                    const firstCourier = resolvedCarriers.find((c) => c.type === "courier") || resolvedCarriers[3] || {
-                      name: "BTS Express Pochta",
-                      vehicleNo: "01 B 707 TS",
-                      driverName: "BTS Kuryer",
-                    };
-                    updates.carrier = firstCourier.name;
-                    updates.vehicleNo = firstCourier.vehicleNo || "—";
-                    updates.driverName = firstCourier.driverName || "Kuryer";
+                    const firstCourier = resolvedCarriers.find((c) => c.type === "courier");
+                    updates.carrier = firstCourier?.name || "";
+                    updates.vehicleNo = firstCourier?.vehicleNo || "";
+                    updates.driverName = firstCourier?.driverName || "";
+                    updates.driverPhone = firstCourier?.driverPhone || "";
                   } else {
-                    const firstFleet = resolvedCarriers.find((c) => c.type === "fleet") || resolvedCarriers[0] || {
-                      name: "PrintGoo Fleet #1 (ISUZU)",
-                      vehicleNo: "01 A 772 BB",
-                      driverName: "Rustam Ismoilov",
-                    };
-                    updates.carrier = firstFleet.name;
-                    updates.vehicleNo = firstFleet.vehicleNo;
-                    updates.driverName = firstFleet.driverName;
+                    const firstFleet = resolvedCarriers.find((c) => c.type === "fleet");
+                    updates.carrier = firstFleet?.name || "";
+                    updates.vehicleNo = firstFleet?.vehicleNo || "";
+                    updates.driverName = firstFleet?.driverName || "";
+                    updates.driverPhone = firstFleet?.driverPhone || "";
                   }
                   return { ...prev, ...updates };
                 });

@@ -39,7 +39,6 @@ import {
 } from "@/components/ui/select";
 import {
   WAREHOUSE_LOCATIONS,
-  DEFAULT_CARRIERS,
   CarrierProfile,
   CarrierCombobox,
   CarrierDialog,
@@ -90,6 +89,9 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
     setActiveModule,
     setModule,
     theme,
+    carriersList,
+    loadCarriers,
+    upsertCarrierAsync,
   } = useWorkspaceStore();
 
   const isDark = theme === "dark";
@@ -126,8 +128,8 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
       totalAmount: total,
       currency: d.currency || "UZS",
       warehouse: d.warehouse || "Main Factory — Tashkent",
-      carrier: d.carrier || "PrintGoo Fleet #1",
-      driverName: d.driverName || "R. Ismoilov (01 A 772 BB)",
+      carrier: d.carrier || "",
+      driverName: d.driverName || "",
       recipientName: d.recipientName || "J. Rahimov (Ombor mudiri)",
       status: d.status || "Draft",
       linkedShipmentId: d.linkedShipmentId,
@@ -147,8 +149,26 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
   }, [storeRecord, tab.documentData, tab.id]);
 
   const [form, setForm] = useState<DeliveryActRecord>(initialRecord);
-  const [carriers, setCarriers] = useState<CarrierProfile[]>(DEFAULT_CARRIERS);
   const [carrierDialogOpen, setCarrierDialogOpen] = useState(false);
+
+  React.useEffect(() => {
+    if (carriersList.length === 0) loadCarriers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const carriers = useMemo<CarrierProfile[]>(
+    () =>
+      carriersList.map((c) => ({
+        id: c.id,
+        name: c.name,
+        type: (c.type as CarrierProfile["type"]) || "fleet",
+        vehicleModel: c.vehicleModel || "",
+        vehicleNo: c.vehicleNo || "—",
+        driverName: c.driverName || "—",
+        driverPhone: c.driverPhone || "—",
+      })),
+    [carriersList]
+  );
 
   // Sync when store record updates (e.g. after posting)
   React.useEffect(() => {
@@ -176,11 +196,23 @@ export function DeliveryActDetail({ tab }: { tab: DocumentTab }) {
   );
 
   const handleAddNewCarrier = useCallback(
-    (newProfile: CarrierProfile) => {
-      setCarriers((prev) => [newProfile, ...prev]);
+    async (newProfile: CarrierProfile) => {
+      try {
+        await upsertCarrierAsync({
+          name: newProfile.name,
+          type: newProfile.type,
+          vehicleModel: newProfile.vehicleModel,
+          vehicleNo: newProfile.vehicleNo,
+          driverName: newProfile.driverName,
+          driverPhone: newProfile.driverPhone,
+          isActive: true,
+        });
+      } catch (err) {
+        console.error("Failed to save carrier to database:", err);
+      }
       handleSelectCarrier(newProfile);
     },
-    [handleSelectCarrier]
+    [handleSelectCarrier, upsertCarrierAsync]
   );
 
   // Recalculate totals from line items

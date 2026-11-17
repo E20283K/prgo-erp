@@ -135,123 +135,10 @@ export interface SupplierLedgerEntry {
 export async function getSuppliers(companyCode: string = "PRINTGOO"): Promise<SupplierRecord[]> {
   const companyId = await getCompanyIdByCode(companyCode);
 
-  let raw = await db.query.suppliers.findMany({
+  const raw = await db.query.suppliers.findMany({
     where: eq(suppliers.companyId, companyId),
     orderBy: [desc(suppliers.createdAt)],
   });
-
-  if (raw.length === 0) {
-    const defaultSuppliers = [
-      {
-        companyId,
-        code: "SUP-101",
-        name: "Toshkent CTP Markazi",
-        legalName: "Toshkent CTP Prepress MCHJ",
-        category: "ctp_prepress" as const,
-        tin: "305123456",
-        contactPerson: "Farhod Usmonov",
-        phone: "+998 90 123-45-67",
-        email: "ctp@prepress.uz",
-        currency: "UZS",
-        status: "Active" as const,
-        notes: "CTP metall formalar, termal plastinalar, rang ajratish",
-      },
-      {
-        companyId,
-        code: "SUP-102",
-        name: "Laser Die Shtamp Servis",
-        legalName: "Laser Die Technology MCHJ",
-        category: "die_tooling" as const,
-        tin: "306234567",
-        contactPerson: "Akmal Qodirov",
-        phone: "+998 93 456-78-90",
-        email: "info@laserdie.uz",
-        currency: "UZS",
-        status: "Active" as const,
-        notes: "Lazer kesim shtansformalar, perfo pichoqlar, ejektor rezinalar",
-      },
-      {
-        companyId,
-        code: "SUP-103",
-        name: "Grafik Klishe Gravirovka",
-        legalName: "Grafik Klishe Servis XK",
-        category: "cliche_stamping" as const,
-        tin: "307345678",
-        contactPerson: "Rustam Aliyev",
-        phone: "+998 97 789-01-23",
-        email: "cliche@grafik.uz",
-        currency: "UZS",
-        status: "Active" as const,
-        notes: "Zarhal (Hot Foil) latun va kongrev magniy klishelari",
-      },
-      {
-        companyId,
-        code: "SUP-104",
-        name: "Master Plate CTP Servis",
-        legalName: "Master Plate CTP MCHJ",
-        category: "ctp_prepress" as const,
-        tin: "308456789",
-        contactPerson: "Jamshid Karimov",
-        phone: "+998 91 234-56-78",
-        email: "master@plate.uz",
-        currency: "UZS",
-        status: "Active" as const,
-        notes: "Offset va Flexo polimer CTP formalar",
-      },
-      {
-        companyId,
-        code: "SUP-105",
-        name: "Apex Die-Cutting Tools",
-        legalName: "Apex Tooling MCHJ",
-        category: "die_tooling" as const,
-        tin: "309567890",
-        contactPerson: "Sardor Mahmudov",
-        phone: "+998 90 567-89-01",
-        email: "order@apexdies.uz",
-        currency: "UZS",
-        status: "Active" as const,
-        notes: "Rotatsion magnit pichoqlar va tekis shtamplar",
-      },
-      {
-        companyId,
-        code: "SUP-106",
-        name: "O'zbekiston Qog'oz Savdo",
-        legalName: "O'zbekiston Qog'oz Savdo AJ",
-        category: "raw_materials" as const,
-        tin: "301678901",
-        contactPerson: "Bahrom Saidov",
-        phone: "+998 71 200-11-22",
-        email: "sales@paper.uz",
-        currency: "UZS",
-        status: "Active" as const,
-        notes: "Bo'rli qog'oz, ofset qog'oz, karton, kraft",
-      },
-      {
-        companyId,
-        code: "SUP-107",
-        name: "Sun Chemical Uzbekistan",
-        legalName: "Sun Chemical Tashkent MCHJ",
-        category: "cmyk_inks" as const,
-        tin: "302789012",
-        contactPerson: "Aziz Rahimov",
-        phone: "+998 71 250-33-44",
-        email: "inks@sunchem.uz",
-        currency: "UZS",
-        status: "Active" as const,
-        notes: "Ofset va flexo bo'yoqlar, pantonelar, laklar",
-      },
-    ];
-
-    try {
-      await db.insert(suppliers).values(defaultSuppliers).onConflictDoNothing();
-      raw = await db.query.suppliers.findMany({
-        where: eq(suppliers.companyId, companyId),
-        orderBy: [desc(suppliers.createdAt)],
-      });
-    } catch (seedErr) {
-      console.warn("Suppliers auto-seed fallback:", seedErr);
-    }
-  }
 
   return raw.map((s) => ({
     id: s.id,
@@ -485,7 +372,7 @@ export async function getAllToolingOrders(
   const rawSuppliers = await getSuppliers(companyCode);
   const suppMap = new Map(rawSuppliers.map((s) => [s.id, s]));
 
-  let raw = await db.query.supplierOrders.findMany({
+  const raw = await db.query.supplierOrders.findMany({
     where: eq(supplierOrders.companyId, companyId),
     with: {
       supplier: true,
@@ -493,110 +380,6 @@ export async function getAllToolingOrders(
     },
     orderBy: [desc(supplierOrders.orderDate), desc(supplierOrders.createdAt)],
   });
-
-  if (raw.length === 0) {
-    const ctpSupp = rawSuppliers.find((s) => s.category === "ctp_prepress") || rawSuppliers[0];
-    const dieSupp = rawSuppliers.find((s) => s.category === "die_tooling") || rawSuppliers[1] || rawSuppliers[0];
-    const clicheSupp = rawSuppliers.find((s) => s.category === "cliche_stamping") || rawSuppliers[2] || rawSuppliers[0];
-
-    const todayStr = new Date().toISOString().split("T")[0];
-
-    const seedOrders: Array<Partial<SupplierOrderRecord>> = [
-      {
-        supplierId: ctpSupp?.id || "",
-        orderNo: "PO-2026-0041",
-        orderDate: todayStr,
-        deliveryDeadline: todayStr,
-        orderType: "ctp_plates",
-        title: "4 ta CTP Forma (CMYK) — Choy qutisi 250g",
-        workOrderNo: "WO-2026-084",
-        quantity: 4,
-        unit: "dona",
-        amount: 280000,
-        currency: "UZS",
-        status: "In_Production",
-        specDetails: "Format: 745x605mm, 0.30mm termal plita, 2400 DPI",
-        notes: "Bugun 15:00 gacha yetkazilishi shart (smena kutmoqda)",
-      },
-      {
-        supplierId: dieSupp?.id || "",
-        orderNo: "PO-2026-0042",
-        orderDate: todayStr,
-        deliveryDeadline: todayStr,
-        orderType: "die_tooling",
-        title: "Lazer kesish shtansformasi — Dori qutisi",
-        workOrderNo: "WO-2026-085",
-        quantity: 1,
-        unit: "kompl",
-        amount: 1450000,
-        currency: "UZS",
-        status: "Ordered",
-        specDetails: "12-pozitsiyali avtomat Bobst, ejektor rezina, 23.8mm pichoq",
-        notes: "Dieline chizmasi tasdiqlangan",
-      },
-      {
-        supplierId: clicheSupp?.id || "",
-        orderNo: "PO-2026-0043",
-        orderDate: todayStr,
-        deliveryDeadline: todayStr,
-        orderType: "cliche",
-        title: "Zarhal bosish (Hot Foil) latun klishe",
-        workOrderNo: "WO-2026-086",
-        quantity: 1,
-        unit: "dona",
-        amount: 620000,
-        currency: "UZS",
-        status: "Ready",
-        specDetails: "Latun 7mm, 3D relyefli, 140x95mm logo",
-        notes: "Prepress xonasida qabul qilishga tayyor",
-      },
-      {
-        supplierId: clicheSupp?.id || "",
-        orderNo: "PO-2026-0044",
-        orderDate: todayStr,
-        deliveryDeadline: todayStr,
-        orderType: "cliche",
-        title: "Kongrev bo'rtma klishe (Patriza bilan)",
-        workOrderNo: "WO-2026-087",
-        quantity: 1,
-        unit: "kompl",
-        amount: 480000,
-        currency: "UZS",
-        status: "Delivered",
-        specDetails: "Magniy 4mm + kompozit patriza",
-        notes: "Omborga qabul qilindi, qolip javoniga joylandi",
-      },
-      {
-        supplierId: ctpSupp?.id || "",
-        orderNo: "PO-2026-0045",
-        orderDate: todayStr,
-        deliveryDeadline: todayStr,
-        orderType: "ctp_plates",
-        title: "8 ta CTP Forma (Oldi-orqa 4+4) — Mahsulot katalogi",
-        workOrderNo: "WO-2026-088",
-        quantity: 8,
-        unit: "dona",
-        amount: 560000,
-        currency: "UZS",
-        status: "Ordered",
-        specDetails: "Heidelberg SM-74 (605x745mm), 175 lpi",
-        notes: "Ertaga ertalabki smenaga rejalashtirilgan",
-      },
-    ];
-
-    if (ctpSupp?.id) {
-      for (const item of seedOrders) {
-        if (item.supplierId) {
-          await upsertSupplierOrder(item, companyCode);
-        }
-      }
-      raw = await db.query.supplierOrders.findMany({
-        where: eq(supplierOrders.companyId, companyId),
-        with: { supplier: true, workOrder: true },
-        orderBy: [desc(supplierOrders.orderDate), desc(supplierOrders.createdAt)],
-      });
-    }
-  }
 
   // Map any work orders by docNo for orders that only have workOrderNo string
   const allWos = await db.query.workOrders.findMany({

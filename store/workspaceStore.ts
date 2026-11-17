@@ -48,7 +48,6 @@ import {
   INITIAL_TRADING_SALES,
   INITIAL_IMPORT_BATCHES,
   INITIAL_SETTLEMENT_LEDGERS,
-  INITIAL_TRADING_CATALOG,
 } from "@/components/documents/trading/data";
 
 export type CompanyLegalType = "MChJ" | "YTT" | "XK" | "AJ";
@@ -2377,7 +2376,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   tradingOrders: [],
   tradingYttEntities: INITIAL_YTT_ENTITIES,
   tradingImports: INITIAL_IMPORT_BATCHES,
-  tradingCatalog: INITIAL_TRADING_CATALOG,
+  tradingCatalog: [],
   tradingSettlements: INITIAL_SETTLEMENT_LEDGERS,
   isTradingLoading: false,
 

@@ -57,7 +57,6 @@ import {
   TradingCatalogItemRecord,
   TRADING_UNITS,
 } from "./types";
-import { INITIAL_YTT_ENTITIES, INITIAL_TRADING_CATALOG } from "./data";
 import { AktSverkaPrintModal } from "../customer/components/AktSverkaPrintModal";
 import { TradingPackageLabelModal } from "./TradingPackageLabelModal";
 
