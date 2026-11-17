@@ -139,6 +139,7 @@ export function toShiftEvent(row: EventRow): ShiftEvent {
     note: row.note || "",
     operator: row.operator || "",
     inputQty: row.grossInput ?? undefined,
+    qtySource: (row.qtySource as ShiftEvent["qtySource"]) || undefined,
     makeReadyQty: row.makeReadyQty ?? undefined,
     defectQty: row.defectQty ?? undefined,
     goodQty: isDowntime ? undefined : row.goodOutput ?? undefined,
@@ -182,6 +183,8 @@ async function syncPieceworkSafely(workOrderId: string, opId: string) {
   }
 }
 
+const QTY_SOURCES = ["counter", "counted", "estimated", "derived"];
+
 /** Creates or updates one journal entry (keyed by the client's event id). */
 export async function saveWorkOrderEvent(
   docNo: string,
@@ -223,6 +226,7 @@ export async function saveWorkOrderEvent(
       (await resolveOperatorEmployeeId(db, wo.companyId, input.employeeId, input.operator || actor.name)),
     batchLabel: input.batchLabel || null,
     grossInput: int(input.inputQty),
+    qtySource: QTY_SOURCES.includes(input.qtySource as string) ? input.qtySource : null,
     makeReadyQty: int(input.makeReadyQty),
     defectQty: int(input.defectQty),
     goodOutput: int(input.goodQty),

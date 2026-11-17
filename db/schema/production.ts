@@ -541,6 +541,11 @@ export const workOrderEvents = pgTable(
     wasteQty: integer("waste_qty").default(0),
     wasteReason: varchar("waste_reason", { length: 128 }),
     grossInput: integer("gross_input"),
+    /**
+     * Where the report's quantities come from: "counter" (machine counter), "counted",
+     * "estimated" (weight / stack height) or "derived" (input unknown: good + make-ready + defect).
+     */
+    qtySource: varchar("qty_source", { length: 16 }),
     goodOutput: integer("good_output"),
     /** Id the client gave the event: saves are idempotent upserts on it. */
     clientEventId: varchar("client_event_id", { length: 64 }),

@@ -1146,7 +1146,17 @@ export function ShiftTimelineTab({
                         {isDowntime || transitionLabel
                           ? "—"
                           : ev.inputQty !== undefined
-                          ? ev.inputQty.toLocaleString()
+                          ? (
+                              <span title={ev.qtySource === "derived" ? "Kirgan noma'lum: yaroqli + priladka + brak" : undefined}>
+                                {ev.qtySource === "estimated" && "~"}
+                                {ev.inputQty.toLocaleString()}
+                                {(ev.qtySource === "derived" || ev.qtySource === "estimated") && (
+                                  <span className="block text-[10px] font-sans text-amber-600 dark:text-amber-400">
+                                    {ev.qtySource === "derived" ? "hisoblangan" : "taxminiy"}
+                                  </span>
+                                )}
+                              </span>
+                            )
                           : "—"}
                       </td>
 
@@ -1179,6 +1189,7 @@ export function ShiftTimelineTab({
                           "—"
                         ) : ev.goodQty !== undefined ? (
                           <span className="text-emerald-600 dark:text-emerald-400">
+                            {ev.qtySource === "estimated" && "~"}
                             {ev.goodQty.toLocaleString()}
                           </span>
                         ) : (

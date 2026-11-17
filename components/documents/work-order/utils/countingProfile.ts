@@ -64,7 +64,9 @@ export function getCountingProfile(input: CountingInputs): CountingProfile {
   }
   if (category === "offset" || category === "die-cutting" || category === "guillotine" || category === "mounting" || dept.includes("offset")) {
     const ups = Math.max(1, Math.floor(Number(input.itemsPerSheet) || 1));
-    return { kind: "sheet", unit: "varaq", container: "Palet", piecesPerUnit: ups, counter: false, makeReadyLabel: "Priladka" };
+    // Sheet-fed presses and die-cutters count every sheet through the feeder; a guillotine counts cuts, not sheets.
+    const counter = category === "offset" || category === "die-cutting" || (!category && dept.includes("offset"));
+    return { kind: "sheet", unit: "varaq", container: "Palet", piecesPerUnit: ups, counter, makeReadyLabel: "Priladka" };
   }
   return { kind: "piece", unit: "dona", container: "Quti", piecesPerUnit: 1, counter: false, makeReadyLabel: "Sozlash" };
 }

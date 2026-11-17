@@ -1,0 +1,1 @@
+ALTER TABLE "work_order_events" ADD COLUMN "qty_source" varchar(16);

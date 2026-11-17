@@ -33,9 +33,9 @@ import {
 } from "@/components/ui/select";
 import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { RouteStep, ShiftEvent } from "../types";
+import type { QtySource, RouteStep, ShiftEvent } from "../types";
 import { DEFAULT_SHIFTS, plantClock, shiftAt, type ShiftInterval } from "@/lib/shiftSchedule";
-import { lastCounterReading, planInUnit, type CountingProfile } from "../utils/countingProfile";
+import { COUNTER_NOTE_RE, lastCounterReading, type CountingProfile } from "../utils/countingProfile";
 
 type ShiftName = NonNullable<ShiftEvent["shift"]>;
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -65,6 +65,8 @@ interface PalletReportDialogProps {
     time: string;
     note: string;
     markStepFinished?: boolean;
+    /** How the quantities were obtained; estimated and derived ones are not counted facts. */
+    qtySource: QtySource;
   }) => void;
   onOpenPrintTag?: (event: ShiftEvent) => void;
   /** Plant shifts: the current one is preselected. */
@@ -74,6 +76,13 @@ interface PalletReportDialogProps {
   /** How this technology counts (pallet of sheets, roll of metres, box of pieces). */
   profile?: CountingProfile;
 }
+
+const QTY_SOURCE_LABEL: Record<QtySource, string> = {
+  counter: "Hisoblagich",
+  counted: "Sanaldi",
+  estimated: "Taxminiy",
+  derived: "Noma'lum",
+};
 
 const DEFECT_REASON_OPTIONS: ComboboxItem[] = [
   { value: "Rang og'ishi / Noto'g'ri rang", label: "Rang og'ishi / Noto'g'ri rang (Color Shift)", badge: "Press" },
@@ -122,22 +131,14 @@ export function PalletReportDialog({
       : selectedOp.multiplier || (isMultipiece && piecesPerSheet > 1 ? piecesPerSheet : 1);
   const showPieces = multiplier > 1;
 
-  // Suggested default input quantity from previous step or planned target
+  // What the previous step handed over and this step has not taken in yet. Never the plan:
+  // a target is not a count, and saving it would book it as fact.
   const suggestedInputQty = useMemo(() => {
-    if (previousOpGoodOutput > 0) {
-      // Calculate how much input already logged for this step
-      const alreadyInput = existingOpEvents.reduce((sum, ev) => sum + (ev.inputQty || 0), 0);
-      const remaining = Math.max(0, previousOpGoodOutput - alreadyInput);
-      return remaining > 0 ? remaining : previousOpGoodOutput;
-    }
-    // Fallback: parse target from qtyCompleted
-    const match = (selectedOp.qtyCompleted || "").match(/\/\s*([\d,\s]+)/);
-    if (match) {
-      const planPieces = parseInt(match[1].replace(/[^\d]/g, ""), 10) || 1000;
-      return profile ? planInUnit(planPieces, profile) : planPieces;
-    }
-    return 1000;
-  }, [previousOpGoodOutput, existingOpEvents, selectedOp.qtyCompleted]);
+    if (previousOpGoodOutput <= 0) return 0;
+    const alreadyInput = existingOpEvents.reduce((sum, ev) => sum + (ev.inputQty || 0), 0);
+    const remaining = Math.max(0, previousOpGoodOutput - alreadyInput);
+    return remaining > 0 ? remaining : previousOpGoodOutput;
+  }, [previousOpGoodOutput, existingOpEvents]);
 
   // What the previous step has produced and this step has not taken in yet.
   const availableFromPrevious =
@@ -173,14 +174,23 @@ export function PalletReportDialog({
   const [counterStart, setCounterStart] = useState<number>(0);
   const [counterEnd, setCounterEnd] = useState<number>(0);
   const useCounter = Boolean(profile?.counter);
+  const defaultSource: QtySource = useCounter ? "counter" : "counted";
+  const [qtySource, setQtySource] = useState<QtySource>(defaultSource);
+  /** Input unknown ("derived"): the operator counts the good stack, the input is the sum. */
+  const [goodInput, setGoodInput] = useState<number>(0);
+  const isDerived = qtySource === "derived";
+  const sourceOptions: QtySource[] = useCounter
+    ? ["counter", "counted", "estimated", "derived"]
+    : ["counted", "estimated", "derived"];
   const applyCounter = (start: number, end: number) => {
     setCounterStart(start);
     setCounterEnd(end);
-    if (end > start) {
-      setInputQty(end - start);
-      setCustomGoodQty(null);
-    }
+    setCustomGoodQty(null);
   };
+  // Counter mode: the input is the difference of the two readings, nothing typed by hand.
+  const isCounter = qtySource === "counter";
+  const counterDelta = counterEnd > counterStart ? counterEnd - counterStart : 0;
+  const counterInvalid = isCounter && counterEnd > 0 && counterEnd <= counterStart;
 
   // Synchronize when opening
   useEffect(() => {
@@ -194,6 +204,11 @@ export function PalletReportDialog({
         setWasteReason(editingEvent.wasteReason || "");
         setTime(editingEvent.time || defaultTime);
         setCustomGoodQty(editingEvent.goodQty ?? null);
+        setQtySource(editingEvent.qtySource || defaultSource);
+        setGoodInput(editingEvent.qtySource === "derived" ? editingEvent.goodQty || 0 : 0);
+        const readings = (editingEvent.note || "").match(COUNTER_NOTE_RE);
+        setCounterStart(readings ? parseInt(readings[1].replace(/[^\d]/g, ""), 10) || 0 : 0);
+        setCounterEnd(readings ? parseInt(readings[2].replace(/[^\d]/g, ""), 10) || 0 : 0);
         setSelectedOperator(editingEvent.operator || selectedOp.operator || employees[0]?.fullName || "");
       } else {
         setBatchLabel(`${container} #${existingOpEvents.length + 1}`);
@@ -206,6 +221,8 @@ export function PalletReportDialog({
         setDefectQty(0);
         setWasteReason("");
         setCustomGoodQty(null);
+        setQtySource(defaultSource);
+        setGoodInput(0);
         setSelectedOperator(selectedOp.operator || employees[0]?.fullName || "");
       }
     }
@@ -213,11 +230,16 @@ export function PalletReportDialog({
   }, [isOpen, editingEvent, existingOpEvents.length, suggestedInputQty, selectedOp.operator, employees]);
 
   // Net good output calculation
+  // Input as reported: the counter difference, or what the operator entered.
+  const baseInput = isCounter ? counterDelta : inputQty;
   const calculatedGoodQty = useMemo(() => {
-    if (customGoodQty !== null) return customGoodQty;
-    const net = Math.max(0, inputQty - (makeReadyQty + defectQty));
-    return net;
-  }, [customGoodQty, inputQty, makeReadyQty, defectQty]);
+    if (isDerived) return goodInput;
+    if (customGoodQty !== null && !isCounter) return customGoodQty;
+    return Math.max(0, baseInput - (makeReadyQty + defectQty));
+  }, [isDerived, isCounter, goodInput, customGoodQty, baseInput, makeReadyQty, defectQty]);
+
+  // Unknown input is rebuilt from what was counted.
+  const effectiveInput = isDerived ? goodInput + makeReadyQty + defectQty : baseInput;
 
   // Output pieces (if multi-piece)
   const outputPieces = useMemo(() => {
@@ -226,7 +248,7 @@ export function PalletReportDialog({
 
   // Total waste
   const totalWaste = makeReadyQty + defectQty;
-  const wastePercent = inputQty > 0 ? ((totalWaste / inputQty) * 100).toFixed(1) : "0.0";
+  const wastePercent = effectiveInput > 0 ? ((totalWaste / effectiveInput) * 100).toFixed(1) : "0.0";
 
   // Operator list combining step operators + active HR employees
   const quickOperators = useMemo(() => {
@@ -271,28 +293,36 @@ export function PalletReportDialog({
     return clean.slice(0, 2).toUpperCase();
   };
 
-  const overInput = availableFromPrevious !== null && inputQty > availableFromPrevious;
+  const overInput = availableFromPrevious !== null && effectiveInput > availableFromPrevious;
+  // Nothing to book until something was counted (or estimated).
+  const missingQty = isDerived ? goodInput <= 0 : baseInput <= 0;
+  // Waste cannot exceed what went in.
+  const wasteOverInput = !isDerived && baseInput > 0 && makeReadyQty + defectQty > baseInput;
+  const cannotSave = overInput || missingQty || counterInvalid || wasteOverInput;
 
   const handleSave = (markStepFinished: boolean) => {
-    if (overInput) return;
+    if (cannotSave) return;
     const counterText =
       useCounter && counterEnd > counterStart
         ? ` | Hisoblagich: ${counterStart.toLocaleString()} → ${counterEnd.toLocaleString()}`
         : "";
+    const sourceText =
+      qtySource === "estimated" ? " (taxminiy)" : qtySource === "derived" ? " (hisoblangan)" : "";
     const noteText =
-      `[${batchLabel}] Kirish: ${inputQty.toLocaleString()} ${unit} | ${profile?.makeReadyLabel || "Priladka"}: ${makeReadyQty} | Brak: ${defectQty} | Chiqish: ${calculatedGoodQty.toLocaleString()} ${unit}` +
+      `[${batchLabel}] Kirish: ${effectiveInput.toLocaleString()} ${unit}${sourceText} | ${profile?.makeReadyLabel || "Priladka"}: ${makeReadyQty} | Brak: ${defectQty} | Chiqish: ${calculatedGoodQty.toLocaleString()} ${unit}` +
       (showPieces ? ` (${outputPieces.toLocaleString()} dona)` : "") +
-      counterText;
+      (qtySource === "counter" ? counterText : "");
 
     onSaveEvent({
       eventId: editingEvent?.id,
       batchLabel,
       shift,
       operator: selectedOperator,
-      inputQty,
+      inputQty: effectiveInput,
       makeReadyQty,
       defectQty,
       goodQty: calculatedGoodQty,
+      qtySource,
       outputPiecesQty: showPieces ? outputPieces : undefined,
       wasteReason: defectQty > 0 ? wasteReason : undefined,
       time,
@@ -343,7 +373,7 @@ export function PalletReportDialog({
         {/* Body Content */}
         <div className="p-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
           {/* Discrepancy Warning Banner */}
-          {availableFromPrevious !== null && inputQty > availableFromPrevious && (
+          {availableFromPrevious !== null && effectiveInput > availableFromPrevious && (
             <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between text-rose-700 dark:text-rose-400">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="size-4 shrink-0 text-rose-600" />
@@ -352,7 +382,7 @@ export function PalletReportDialog({
                 </span>
               </div>
               <span className="font-mono text-xs font-bold shrink-0">
-                +{(inputQty - availableFromPrevious).toLocaleString()}
+                +{(effectiveInput - availableFromPrevious).toLocaleString()}
               </span>
             </div>
           )}
@@ -512,29 +542,57 @@ export function PalletReportDialog({
               </div>
             </div>
 
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-muted-foreground shrink-0">Kirgan</span>
+              <div className="flex rounded-md border border-border bg-muted/40 p-0.5">
+                {sourceOptions.map((src) => (
+                  <button
+                    key={src}
+                    type="button"
+                    onClick={() => {
+                      setQtySource(src);
+                      setCustomGoodQty(null);
+                    }}
+                    className={cn(
+                      "h-6 px-2.5 rounded text-[11px] font-medium cursor-pointer",
+                      qtySource === src ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {QTY_SOURCE_LABEL[src]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Enlarged 3-Column Calculator */}
-            {useCounter && (
-              <div className="grid grid-cols-2 gap-2.5 mb-2.5">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground">Hisoblagich boshi ({unit})</label>
-                  <Input
-                    type="number"
-                    value={counterStart === 0 ? "" : counterStart}
-                    onChange={(e) => applyCounter(parseInt(e.target.value, 10) || 0, counterEnd)}
-                    className="h-8 text-xs font-mono"
-                    placeholder="0"
-                  />
+            {isCounter && (
+              <div className="space-y-1">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground">Hisoblagich boshi</label>
+                    <Input
+                      type="number"
+                      value={counterStart === 0 ? "" : counterStart}
+                      onChange={(e) => applyCounter(parseInt(e.target.value, 10) || 0, counterEnd)}
+                      className="h-10 text-base font-mono font-semibold"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground">Hisoblagich oxiri</label>
+                    <Input
+                      type="number"
+                      autoFocus
+                      value={counterEnd === 0 ? "" : counterEnd}
+                      onChange={(e) => applyCounter(counterStart, parseInt(e.target.value, 10) || 0)}
+                      className={cn("h-10 text-base font-mono font-semibold", counterInvalid && "border-destructive")}
+                      placeholder="0"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground">Hisoblagich oxiri ({unit})</label>
-                  <Input
-                    type="number"
-                    value={counterEnd === 0 ? "" : counterEnd}
-                    onChange={(e) => applyCounter(counterStart, parseInt(e.target.value, 10) || 0)}
-                    className="h-8 text-xs font-mono"
-                    placeholder="0"
-                  />
-                </div>
+                {counterInvalid && (
+                  <div className="text-[11px] text-destructive">Oxiri boshidan katta bo&apos;lishi kerak</div>
+                )}
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -547,30 +605,44 @@ export function PalletReportDialog({
                     </span>
                     Kirgan
                   </span>
-                  <span className="text-[10px] font-mono font-semibold text-muted-foreground uppercase">
-                    (Brutto)
+                  <span
+                    className={cn(
+                      "text-[10px] font-mono font-semibold uppercase",
+                      qtySource === "estimated" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+                    )}
+                  >
+                    {qtySource === "estimated" ? "Taxminiy" : isDerived ? "Hisoblangan" : isCounter ? "Hisoblagich" : "(Brutto)"}
                   </span>
                 </div>
                 <div className="relative flex items-center mt-0.5">
                   <Input
                     type="number"
-                    value={inputQty === 0 ? "" : inputQty}
+                    value={isDerived || isCounter ? (effectiveInput === 0 ? "" : effectiveInput) : inputQty === 0 ? "" : inputQty}
+                    readOnly={isDerived || isCounter}
+                    tabIndex={isDerived || isCounter ? -1 : undefined}
                     onChange={(e) => {
                       setInputQty(parseInt(e.target.value, 10) || 0);
                       setCustomGoodQty(null);
                     }}
-                    className="h-12 text-2xl font-mono font-bold pl-3 pr-11 text-foreground bg-background border-input tracking-tight"
-                    placeholder="0"
+                    className={cn(
+                      "h-12 text-2xl font-mono font-bold pl-3 pr-11 bg-background border-input tracking-tight",
+                      isDerived || isCounter ? "text-muted-foreground bg-muted/40 border-dashed" : "text-foreground"
+                    )}
+                    placeholder={isDerived || isCounter ? "—" : "0"}
                   />
                   <span className="absolute right-3 text-xs font-semibold font-mono text-muted-foreground pointer-events-none uppercase">
                     {unit}
                   </span>
                 </div>
                 <span className="text-[10px] text-muted-foreground leading-tight truncate">
-                  {previousOpGoodOutput > 0
+                  {isDerived
+                    ? "Yaroqli + priladka + brak"
+                    : qtySource === "estimated"
+                    ? "Vazn yoki taxlam balandligi bo'yicha"
+                    : previousOpGoodOutput > 0
                     ? `Oldingi: ${previousOpGoodOutput.toLocaleString()} ${unit}`
-                    : useCounter
-                    ? "Hisoblagich bo'yicha uzunlik"
+                    : isCounter
+                    ? "Oxiri − boshi"
                     : "Jarayonga kirgan umumiy miqdor"}
                 </span>
               </div>
@@ -657,6 +729,10 @@ export function PalletReportDialog({
               </div>
             )}
 
+            {wasteOverInput && (
+              <div className="text-[11px] text-destructive">Priladka va brak kirgan miqdordan ko&apos;p</div>
+            )}
+
             {/* Result Hero Card: Good Output (Prominent & Clear) */}
             <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-transparent border border-emerald-500/35 flex items-center justify-between">
               <div className="space-y-1">
@@ -668,24 +744,53 @@ export function PalletReportDialog({
                     Net Output
                   </Badge>
                 </div>
-                <div className="text-xs text-muted-foreground font-mono flex items-center gap-1.5 flex-wrap">
-                  <span>{inputQty.toLocaleString()} kirish</span>
-                  <span className="text-muted-foreground/60">−</span>
-                  <span className="text-amber-700 dark:text-amber-400 font-semibold">{makeReadyQty.toLocaleString()} priladka</span>
-                  <span className="text-muted-foreground/60">−</span>
-                  <span className="text-rose-600 dark:text-rose-400 font-semibold">{defectQty.toLocaleString()} brak</span>
-                  <span className="text-muted-foreground/60">=</span>
-                  <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{calculatedGoodQty.toLocaleString()} {unit}</strong>
-                </div>
+                {isDerived ? (
+                  <div className="text-xs text-muted-foreground font-mono flex items-center gap-1.5 flex-wrap">
+                    <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{goodInput.toLocaleString()} yaroqli</strong>
+                    <span className="text-muted-foreground/60">+</span>
+                    <span className="text-amber-700 dark:text-amber-400 font-semibold">{makeReadyQty.toLocaleString()} priladka</span>
+                    <span className="text-muted-foreground/60">+</span>
+                    <span className="text-rose-600 dark:text-rose-400 font-semibold">{defectQty.toLocaleString()} brak</span>
+                    <span className="text-muted-foreground/60">=</span>
+                    <span>{effectiveInput.toLocaleString()} kirish</span>
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground font-mono flex items-center gap-1.5 flex-wrap">
+                    <span>{baseInput.toLocaleString()} kirish</span>
+                    <span className="text-muted-foreground/60">−</span>
+                    <span className="text-amber-700 dark:text-amber-400 font-semibold">{makeReadyQty.toLocaleString()} priladka</span>
+                    <span className="text-muted-foreground/60">−</span>
+                    <span className="text-rose-600 dark:text-rose-400 font-semibold">{defectQty.toLocaleString()} brak</span>
+                    <span className="text-muted-foreground/60">=</span>
+                    <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{calculatedGoodQty.toLocaleString()} {unit}</strong>
+                  </div>
+                )}
               </div>
 
               <div className="text-right shrink-0 pl-3">
-                <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-700 dark:text-emerald-400 leading-none tracking-tight">
-                  {calculatedGoodQty.toLocaleString()}{" "}
-                  <span className="text-xs sm:text-sm font-semibold text-emerald-700/80 dark:text-emerald-400/80 uppercase">
-                    {unit}
-                  </span>
-                </div>
+                {isDerived ? (
+                  <div className="relative flex items-center w-44">
+                    <Input
+                      type="number"
+                      autoFocus
+                      value={goodInput === 0 ? "" : goodInput}
+                      onChange={(e) => setGoodInput(parseInt(e.target.value, 10) || 0)}
+                      className="h-12 text-2xl font-mono font-bold pl-3 pr-14 text-emerald-700 dark:text-emerald-400 bg-background border-emerald-500/40 focus-visible:ring-emerald-500 tracking-tight"
+                      placeholder="0"
+                    />
+                    <span className="absolute right-3 text-xs font-semibold font-mono text-emerald-700/80 dark:text-emerald-400 pointer-events-none uppercase">
+                      {unit}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-700 dark:text-emerald-400 leading-none tracking-tight">
+                    {qtySource === "estimated" && "~"}
+                    {calculatedGoodQty.toLocaleString()}{" "}
+                    <span className="text-xs sm:text-sm font-semibold text-emerald-700/80 dark:text-emerald-400/80 uppercase">
+                      {unit}
+                    </span>
+                  </div>
+                )}
                 {showPieces && (
                   <div className="text-xs font-mono font-bold text-primary mt-1 flex items-center justify-end gap-1">
                     <Package className="w-3.5 h-3.5 inline" />
@@ -728,7 +833,7 @@ export function PalletReportDialog({
               variant="outline"
               size="sm"
               onClick={() => handleSave(false)}
-              disabled={overInput}
+              disabled={cannotSave}
               className="h-8 text-xs border-border bg-card hover:bg-muted font-medium cursor-pointer shrink-0"
             >
               Partiyani saqlash (Davom etadi)
@@ -738,7 +843,7 @@ export function PalletReportDialog({
               type="button"
               size="sm"
               onClick={() => handleSave(true)}
-              disabled={overInput}
+              disabled={cannotSave}
               className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shrink-0"
             >
               <CheckCircle2 className="w-3.5 h-3.5 mr-1" />

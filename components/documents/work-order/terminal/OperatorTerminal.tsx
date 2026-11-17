@@ -655,7 +655,8 @@ export function OperatorTerminal() {
                           <>
                             <span className="text-foreground truncate">{ev.batchLabel || "Palet"}</span>
                             <span className="ml-auto font-mono text-emerald-600 dark:text-emerald-400">
-                              +{(ev.goodQty || 0).toLocaleString()}
+                              {ev.qtySource === "estimated" ? "~" : "+"}
+                              {(ev.goodQty || 0).toLocaleString()}
                             </span>
                           </>
                         ) : (
@@ -703,6 +704,7 @@ export function OperatorTerminal() {
                 note: data.note,
                 operator: data.operator,
                 inputQty: data.inputQty,
+                qtySource: data.qtySource,
                 makeReadyQty: data.makeReadyQty,
                 defectQty: data.defectQty,
                 goodQty: data.goodQty,

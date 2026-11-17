@@ -3303,6 +3303,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     time: string;
     note: string;
     markStepFinished?: boolean;
+    qtySource: NonNullable<ShiftEvent["qtySource"]>;
   }) => {
     const totalWaste = eventData.makeReadyQty + eventData.defectQty;
     const previousEvents = shiftEventsRef.current;
@@ -3325,6 +3326,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           note: eventData.note,
           operator: eventData.operator,
           inputQty: eventData.inputQty,
+          qtySource: eventData.qtySource,
           makeReadyQty: eventData.makeReadyQty,
           defectQty: eventData.defectQty,
           goodQty: eventData.goodQty,
@@ -3346,6 +3348,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         note: eventData.note,
         operator: eventData.operator,
         inputQty: eventData.inputQty,
+        qtySource: eventData.qtySource,
         makeReadyQty: eventData.makeReadyQty,
         defectQty: eventData.defectQty,
         goodQty: eventData.goodQty,

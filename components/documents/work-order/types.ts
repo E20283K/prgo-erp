@@ -525,6 +525,8 @@ export function ensurePackagingStep(ops: RouteStep[], quantity = 0): RouteStep[]
   return next;
 }
 
+export type QtySource = "counter" | "counted" | "estimated" | "derived";
+
 export interface ShiftEvent {
   id: string;
   opId: string;
@@ -558,6 +560,8 @@ export interface ShiftEvent {
   /** Shared kiosk: signed proof of the operator who identified with a PIN or badge (write-only). */
   operatorToken?: string;
   inputQty?: number;
+  /** Where the quantities come from; "estimated" and "derived" are not counted facts. */
+  qtySource?: QtySource;
   makeReadyQty?: number;
   defectQty?: number;
   goodQty?: number;
