@@ -69,6 +69,9 @@ import {
   SubstrateLayer,
   getDefaultKashirovkaLayers,
   calculateKashirovkaTotals,
+  rebuildKashirovkaLayers,
+  resolveKashirovkaGlueGsm,
+  KASHIROVKA_LAYER_LABELS,
   parseGrammageFromStock,
   WorkOrderSampleData,
   OrderAttachment,
@@ -869,43 +872,63 @@ export function SpecificationsTab({
       return formData.kashirovkaLayers;
     }
     return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating, formData.paperDensity);
-  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating]);
+  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating, formData.paperDensity]);
 
   const kashirovkaTotals = useMemo(
-    () => calculateKashirovkaTotals(kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm ?? 25),
+    () => calculateKashirovkaTotals(kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm),
     [kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm]
   );
 
+  // Layers set before switching kashirovka off, so switching it back on restores them.
+  const [stashedKashirovkaLayers, setStashedKashirovkaLayers] = useState<SubstrateLayer[]>([]);
+
+  const kashirovkaDefaultsPatch = (): Record<string, unknown> => {
+    const patch: Record<string, unknown> = {};
+    if (!formData.kashirovkaStrategy) patch.kashirovkaStrategy = "split_half_sheet";
+    if (!formData.kashirovkaGlueGsm) patch.kashirovkaGlueGsm = 25;
+    if (!formData.kashirovkaMakeReadySheets) patch.kashirovkaMakeReadySheets = 50;
+    if (!formData.kashirovkaCuringHours) patch.kashirovkaCuringHours = 12;
+    return patch;
+  };
+
   const handleKashirovkaModeChange = (mode: KashirovkaMode) => {
-    if (isOperator) return;
-    const updates: Record<string, any> = { kashirovkaMode: mode };
+    if (isOperator || mode === kashirovkaMode) return;
+    const updates: Record<string, unknown> = { kashirovkaMode: mode };
     if (mode === "none") {
+      setStashedKashirovkaLayers(kashirovkaLayers);
       updates.kashirovkaLayers = [];
     } else {
-      const nextLayers = getDefaultKashirovkaLayers(mode, formData.paperStock, formData.coating, formData.paperDensity);
-      updates.kashirovkaLayers = nextLayers;
-      if (!formData.kashirovkaStrategy) {
-        updates.kashirovkaStrategy = "split_half_sheet";
-      }
-      if (formData.kashirovkaGlueGsm === undefined) {
-        updates.kashirovkaGlueGsm = 25;
-      }
-      if (formData.kashirovkaMakeReadySheets === undefined) {
-        updates.kashirovkaMakeReadySheets = 50;
-      }
-      if (formData.kashirovkaCuringHours === undefined) {
-        updates.kashirovkaCuringHours = 12;
-      }
+      const previous = kashirovkaLayers.length > 0 ? kashirovkaLayers : stashedKashirovkaLayers;
+      updates.kashirovkaLayers = rebuildKashirovkaLayers(
+        mode,
+        previous,
+        formData.paperStock || "",
+        formData.coating || "",
+        formData.paperDensity,
+        formData.paperStock
+      );
+      Object.assign(updates, kashirovkaDefaultsPatch());
     }
     handleFieldChange(updates);
     onMarkUnsaved();
   };
 
+  const updateKashirovkaLayer = (idx: number, patch: Partial<SubstrateLayer>) => {
+    const nextLayers = kashirovkaLayers.map((l, i) => (i === idx ? { ...l, ...patch } : l));
+    handleFieldChange("kashirovkaLayers", nextLayers);
+    onMarkUnsaved();
+  };
+
+  /**
+   * Keeps kashirovka in step with the base paper and the target GSM.
+   * A paper change never switches kashirovka off; only lowering the target does.
+   */
   const buildKashirovkaSyncUpdates = (
     stockName: string,
     stockGsm: number,
-    targetGsmVal: number | undefined
-  ): Record<string, any> => {
+    targetGsmVal: number | undefined,
+    source: "paper" | "target"
+  ): Record<string, unknown> => {
     if (!isOffset) return {};
     const target = Number(targetGsmVal) || 0;
     const gsm = Number(stockGsm) || 0;
@@ -913,29 +936,34 @@ export function SpecificationsTab({
     if (target > 0 && gsm > 0) {
       if (target > gsm) {
         const nextMode: KashirovkaMode = target >= gsm * 2.5 ? "triplex" : "duplex";
-        const updates: Record<string, any> = {
+        return {
           kashirovkaMode: nextMode,
-          kashirovkaLayers: getDefaultKashirovkaLayers(nextMode, stockName, formData.coating, gsm),
+          kashirovkaLayers: rebuildKashirovkaLayers(
+            nextMode,
+            kashirovkaLayers.length > 0 ? kashirovkaLayers : stashedKashirovkaLayers,
+            stockName,
+            formData.coating || "",
+            gsm,
+            formData.paperStock
+          ),
+          ...kashirovkaDefaultsPatch(),
         };
-        if (!formData.kashirovkaStrategy) updates.kashirovkaStrategy = "split_half_sheet";
-        if (formData.kashirovkaGlueGsm === undefined) updates.kashirovkaGlueGsm = 25;
-        if (formData.kashirovkaMakeReadySheets === undefined) updates.kashirovkaMakeReadySheets = 50;
-        if (formData.kashirovkaCuringHours === undefined) updates.kashirovkaCuringHours = 12;
-        return updates;
       }
-      if (kashirovkaMode !== "none") {
+      if (source === "target" && kashirovkaMode !== "none") {
+        setStashedKashirovkaLayers(kashirovkaLayers);
         return { kashirovkaMode: "none", kashirovkaLayers: [] };
       }
-      return {};
     }
 
-    if (kashirovkaMode !== "none") {
+    if (kashirovkaMode !== "none" && source === "paper") {
       return {
-        kashirovkaLayers: getDefaultKashirovkaLayers(
+        kashirovkaLayers: rebuildKashirovkaLayers(
           kashirovkaMode,
+          kashirovkaLayers,
           stockName,
-          formData.coating,
-          gsm > 0 ? gsm : undefined
+          formData.coating || "",
+          gsm > 0 ? gsm : undefined,
+          formData.paperStock
         ),
       };
     }
@@ -2377,7 +2405,8 @@ export function SpecificationsTab({
                         ...buildKashirovkaSyncUpdates(
                           formData.paperStock || "",
                           currentGsm,
-                          nextTarget
+                          nextTarget,
+                          "target"
                         ),
                       });
                       onMarkUnsaved();
@@ -2409,7 +2438,7 @@ export function SpecificationsTab({
                   const updates: Record<string, any> = {
                     paperStock: val,
                     ...(resolvedGsm > 0 ? { paperDensity: resolvedGsm } : {}),
-                    ...buildKashirovkaSyncUpdates(val, resolvedGsm, formData.targetGsm),
+                    ...buildKashirovkaSyncUpdates(val, resolvedGsm, formData.targetGsm, "paper"),
                   };
                   const matched = warehouseStock.find(
                     (w) =>
@@ -2926,174 +2955,216 @@ export function SpecificationsTab({
             </div>
           )}
 
-          {/* Card 4: Multi-Layer Substrate & Kashirovka (Duplex / Triplex - Offset only) */}
-          {isOffset && (
-            <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
-            <div className="flex items-center justify-between pb-1.5 border-b border-border">
-              <div className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-primary shrink-0" />
-                <span className="font-semibold text-xs text-foreground">
-                  Multi-layer mounting (Кашировка)
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {kashirovkaMode !== "none" && (
-                  <Badge variant="outline" className="font-mono text-[10px] text-amber-600 dark:text-amber-400 border-amber-300">
-                    {kashirovkaMode === "triplex" ? "3-Ply Triplex" : "2-Ply Duplex"} · {kashirovkaTotals.totalMountedGsm}g/m²
-                  </Badge>
-                )}
-                <Switch
-                  checked={kashirovkaMode !== "none"}
-                  disabled={isOperator}
-                  onCheckedChange={(checked) => {
-                    handleKashirovkaModeChange(checked ? "duplex" : "none");
-                  }}
-                />
-              </div>
-            </div>
-
-            {kashirovkaMode !== "none" ? (
-              <div className="space-y-3 bg-muted/20 p-3 rounded-lg border border-border text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground font-medium">Mounting Type:</span>
-                  <div className="inline-flex items-center bg-muted p-0.5 rounded-full border border-border">
-                    <button
-                      type="button"
-                      disabled={isOperator}
-                      onClick={() => handleKashirovkaModeChange("duplex")}
-                      className={cn(
-                        "px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer",
-                        kashirovkaMode === "duplex"
-                          ? "bg-background text-foreground shadow-xs font-bold"
-                          : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      Duplex (2-Ply)
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isOperator}
-                      onClick={() => handleKashirovkaModeChange("triplex")}
-                      className={cn(
-                        "px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer",
-                        kashirovkaMode === "triplex"
-                          ? "bg-background text-foreground shadow-xs font-bold"
-                          : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      Triplex (3-Ply Sandwich)
-                    </button>
-                  </div>
+          {/* Card 4: Kashirovka (Duplex / Triplex, offset only) */}
+          {isOffset && (() => {
+            const isKashirovkaOn = kashirovkaMode !== "none";
+            const printedLinersCount = kashirovkaLayers.filter(
+              (l) => l.role !== "core_board" && l.colors !== "0+0"
+            ).length;
+            const strategy = formData.kashirovkaStrategy || "split_half_sheet";
+            const segmentClass = (active: boolean) =>
+              cn(
+                "h-6 px-2 rounded text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
+                active
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
+              );
+            const modeOptions: { value: KashirovkaMode; label: string }[] = [
+              { value: "none", label: "Yo'q" },
+              { value: "duplex", label: "2 qavat" },
+              { value: "triplex", label: "3 qavat" },
+            ];
+            const strategyOptions = [
+              { value: "split_half_sheet", label: "1-CTP" },
+              { value: "separate_sheets", label: "2-CTP" },
+            ] as const;
+            const numberField = (
+              key: "kashirovkaGlueGsm" | "kashirovkaMakeReadySheets" | "kashirovkaCuringHours",
+              label: string,
+              unit: string,
+              step: number,
+              placeholder?: string
+            ) => (
+              <label className="flex flex-col gap-1 min-w-0">
+                <span className="text-[10px] uppercase font-semibold text-muted-foreground">{label}</span>
+                <div className="flex items-center gap-1">
+                  <Input
+                    type="number"
+                    min={0}
+                    step={step}
+                    disabled={isOperator}
+                    value={formData[key] || ""}
+                    placeholder={placeholder}
+                    onChange={(e) => {
+                      handleFieldChange(key, e.target.value === "" ? undefined : Number(e.target.value));
+                      onMarkUnsaved();
+                    }}
+                    className="h-7 text-xs font-mono text-right"
+                  />
+                  <span className="text-[10px] font-mono text-muted-foreground shrink-0">{unit}</span>
                 </div>
+              </label>
+            );
 
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50 text-[11px]">
-                  <div>
-                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Net Paper Stock:</span>
-                    <span className="font-mono font-bold text-foreground">{kashirovkaTotals.netPaperGsm} gsm</span>
+            return (
+              <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
+                <div
+                  className={cn(
+                    "flex items-center justify-between gap-2",
+                    isKashirovkaOn && "pb-1.5 border-b border-border"
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Layers className="size-3.5 text-primary shrink-0" />
+                    <span className="font-semibold text-xs text-foreground">Kashirovka</span>
+                    {isKashirovkaOn && (
+                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-mono">
+                        {kashirovkaTotals.netPaperGsm} g/m²
+                      </Badge>
+                    )}
                   </div>
-                  <div>
-                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Adhesive Bond:</span>
-                    <span className="font-mono font-bold text-foreground">+{kashirovkaTotals.totalGlueGsm} gsm</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Total Caliper:</span>
-                    <span className="font-mono font-bold text-primary">~{kashirovkaTotals.estimatedCaliperMm} mm</span>
-                  </div>
-                </div>
-
-                {/* Kashirovka Imposition Strategy */}
-                <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                  <span className="text-muted-foreground font-medium">Bosma usuli:</span>
-                  <div className="inline-flex items-center bg-muted p-0.5 rounded-full border border-border">
-                    <button
-                      type="button"
-                      disabled={isOperator}
-                      onClick={() => {
-                        handleFieldChange("kashirovkaStrategy", "split_half_sheet");
-                        onMarkUnsaved();
-                      }}
-                      className={cn(
-                        "px-2 py-0.5 rounded-full text-[10px] font-medium transition-all cursor-pointer",
-                        (formData.kashirovkaStrategy || "split_half_sheet") === "split_half_sheet"
-                          ? "bg-background text-foreground shadow-xs font-semibold"
-                          : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      1-CTP (Yarim list)
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isOperator}
-                      onClick={() => {
-                        handleFieldChange("kashirovkaStrategy", "separate_sheets");
-                        onMarkUnsaved();
-                      }}
-                      className={cn(
-                        "px-2 py-0.5 rounded-full text-[10px] font-medium transition-all cursor-pointer",
-                        formData.kashirovkaStrategy === "separate_sheets"
-                          ? "bg-background text-foreground shadow-xs font-semibold"
-                          : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      2-CTP (Alohida listlar)
-                    </button>
-                  </div>
-                </div>
-
-                {/* Substrate Layers Breakdown */}
-                <div className="pt-2 border-t border-border/50 space-y-1.5">
-                  <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
-                    Mounted Layers Composition:
-                  </span>
-                  <div className="space-y-1">
-                    {kashirovkaLayers.map((layer, idx) => (
-                      <div
-                        key={layer.id || idx}
-                        className="flex items-center justify-between p-1.5 rounded bg-background border border-border text-[11px]"
+                  <div
+                    role="group"
+                    aria-label="Kashirovka turi"
+                    className="inline-flex items-center gap-0.5 bg-muted p-0.5 rounded-md border border-border"
+                  >
+                    {modeOptions.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        disabled={isOperator}
+                        aria-pressed={kashirovkaMode === opt.value}
+                        onClick={() => handleKashirovkaModeChange(opt.value)}
+                        className={segmentClass(kashirovkaMode === opt.value)}
                       >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <Badge variant="secondary" className="h-4 px-1 text-[9px] font-mono shrink-0">
-                            L{idx + 1}
-                          </Badge>
-                          <span className="font-medium truncate text-foreground">{layer.label}</span>
-                        </div>
-                        <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground shrink-0">
-                          <span>{layer.grammage} gsm</span>
-                          <span className="text-border">|</span>
-                          <Badge variant="outline" className="h-3.5 px-1 text-[9px]">
-                            <select
-                              aria-label={`${layer.label} rang rejimi`}
-                              disabled={isOperator}
-                              value={layer.colors}
-                              onChange={(e) => {
-                                const nextColor = e.target.value as SubstrateLayer["colors"];
-                                const nextLayers = kashirovkaLayers.map((l, i) =>
-                                  i === idx ? { ...l, colors: nextColor } : l
-                                );
-                                handleFieldChange("kashirovkaLayers", nextLayers);
-                                onMarkUnsaved();
-                              }}
-                              className="bg-transparent text-[10px] font-mono text-foreground outline-none cursor-pointer"
-                            >
-                              <option value="4+0">4+0</option>
-                              <option value="1+0">1+0</option>
-                              <option value="4+4">4+4</option>
-                              <option value="0+0">0+0 (Bo&apos;sh)</option>
-                            </select>
-                          </Badge>
-                        </div>
-                      </div>
+                        {opt.label}
+                      </button>
                     ))}
                   </div>
                 </div>
+
+                {isKashirovkaOn && (
+                  <>
+                    <div className="grid grid-cols-4 gap-2 text-[11px]">
+                      {[
+                        { label: "Qog'oz", value: `${kashirovkaTotals.netPaperGsm} g/m²` },
+                        { label: "Yelim", value: `+${kashirovkaTotals.totalGlueGsm} g/m²` },
+                        { label: "Jami", value: `${kashirovkaTotals.totalMountedGsm} g/m²` },
+                        { label: "Qalinlik", value: `~${kashirovkaTotals.estimatedCaliperMm} mm` },
+                      ].map((stat) => (
+                        <div key={stat.label} className="min-w-0">
+                          <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                            {stat.label}
+                          </span>
+                          <span className="font-mono font-semibold text-foreground">{stat.value}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="space-y-1 pt-2 border-t border-border">
+                      {kashirovkaLayers.map((layer, idx) => {
+                        const roleLabel = KASHIROVKA_LAYER_LABELS[layer.role] || `Qatlam ${idx + 1}`;
+                        return (
+                          <div
+                            key={layer.id || idx}
+                            className="grid grid-cols-[5.5rem_minmax(0,1fr)_4rem_4.25rem] items-center gap-1.5"
+                          >
+                            <span className="text-[11px] font-medium text-foreground truncate">{roleLabel}</span>
+                            <ComboboxSelect
+                              items={paperStockOptions}
+                              value={layer.paperStock}
+                              onValueChange={(val) => {
+                                const matched = warehouseStock.find(
+                                  (w) =>
+                                    w.name.toLowerCase() === val.toLowerCase() ||
+                                    w.sku.toLowerCase() === val.toLowerCase()
+                                );
+                                const gsm = matched?.grammage || parseGrammageFromStock(val, 0);
+                                updateKashirovkaLayer(idx, {
+                                  paperStock: val,
+                                  ...(gsm > 0 ? { grammage: gsm } : {}),
+                                });
+                              }}
+                              placeholder="Qog'oz"
+                              disabled={isOperator}
+                              allowCustom={!isOperator}
+                              className="h-7 text-xs font-mono"
+                            />
+                            <Input
+                              type="number"
+                              min={0}
+                              step={10}
+                              aria-label={`${roleLabel} zichligi`}
+                              disabled={isOperator}
+                              value={layer.grammage || ""}
+                              onChange={(e) =>
+                                updateKashirovkaLayer(idx, { grammage: Number(e.target.value) || 0 })
+                              }
+                              className="h-7 text-xs font-mono text-right"
+                            />
+                            <select
+                              aria-label={`${roleLabel} bosmasi`}
+                              disabled={isOperator}
+                              value={layer.colors}
+                              onChange={(e) =>
+                                updateKashirovkaLayer(idx, {
+                                  colors: e.target.value as SubstrateLayer["colors"],
+                                })
+                              }
+                              className="h-7 w-full rounded-md border border-border bg-background px-1.5 text-xs font-mono text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {layer.role !== "core_board" && (
+                                <>
+                                  <option value="4+0">4+0</option>
+                                  <option value="5+0">5+0</option>
+                                  <option value="2+0">2+0</option>
+                                  <option value="1+0">1+0</option>
+                                </>
+                              )}
+                              <option value="0+0">0+0</option>
+                              {layer.colors === "4+4" && <option value="4+4">4+4</option>}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
+                      {numberField("kashirovkaGlueGsm", "Yelim", "g/m²", 1, String(resolveKashirovkaGlueGsm()))}
+                      {numberField("kashirovkaMakeReadySheets", "Priladka", "list", 5)}
+                      {numberField("kashirovkaCuringHours", "Quritish", "soat", 1)}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
+                      <span className="text-xs text-muted-foreground font-medium">Bosma usuli</span>
+                      <div
+                        role="group"
+                        aria-label="Bosma usuli"
+                        className="inline-flex items-center gap-0.5 bg-muted p-0.5 rounded-md border border-border"
+                      >
+                        {strategyOptions.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            disabled={isOperator || printedLinersCount < 2}
+                            aria-pressed={strategy === opt.value}
+                            title={opt.value === "split_half_sheet" ? "Yarim list" : "Alohida listlar"}
+                            onClick={() => {
+                              handleFieldChange("kashirovkaStrategy", opt.value);
+                              onMarkUnsaved();
+                            }}
+                            className={segmentClass(strategy === opt.value)}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
-            ) : (
-              <div className="text-[11px] text-muted-foreground italic bg-muted/10 p-2.5 rounded border border-dashed border-border text-center">
-                Standard single-ply substrate (No mounting/lamination onto secondary carrier).
-              </div>
-            )}
-          </div>
-          )}
+            );
+          })()}
             </>
           )}
         </div>

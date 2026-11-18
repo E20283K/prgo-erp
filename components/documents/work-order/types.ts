@@ -21,8 +21,30 @@ export interface SubstrateLayer {
   label: string;
   paperStock: string;
   grammage: number;
-  colors: "4+0" | "1+0" | "0+0" | "4+4";
+  colors: "4+0" | "1+0" | "2+0" | "5+0" | "0+0" | "4+4";
   coating: string;
+}
+
+export const KASHIROVKA_LAYER_LABELS: Record<SubstrateLayer["role"], string> = {
+  top_liner: "Old qatlam",
+  core_board: "O'rta qatlam",
+  bottom_liner: "Orqa qatlam",
+};
+
+const KASHIROVKA_DEFAULT_GLUE_GSM = 25;
+
+export function resolveKashirovkaGlueGsm(glueGsm?: number): number {
+  const value = Number(glueGsm);
+  return Number.isFinite(value) && value > 0 ? value : KASHIROVKA_DEFAULT_GLUE_GSM;
+}
+
+/** Approximate caliper in microns per 1 g/m², by material family. */
+function caliperFactorForStock(stock: string, grammage: number): number {
+  const name = (stock || "").toLowerCase();
+  if (/xrom|erzats|chip|grey|gray|kulrang|gofr|duplex board|triplex board/.test(name)) return 1.6;
+  if (/ofset|offset|uncoated|bo'rsiz|bo‘rsiz|kraft/.test(name)) return 1.25;
+  if (grammage > 0 && grammage < 200 && /bo'r|bo‘r|coated|mel|gloss|matt|silk/.test(name)) return 0.9;
+  return 1.32;
 }
 
 export function parseGrammageFromStock(stock?: string, fallback = 300): number {
@@ -33,51 +55,83 @@ export function parseGrammageFromStock(stock?: string, fallback = 300): number {
 
 export function getDefaultKashirovkaLayers(
   mode: KashirovkaMode,
-  baseStock = "Coated Cardboard 300g/m²",
-  baseCoating = "Soft-Touch Matte + Spot UV",
+  baseStock = "",
+  baseCoating = "",
   explicitBaseGsm?: number
 ): SubstrateLayer[] {
   if (mode === "none") return [];
-  const parsedGsm = explicitBaseGsm && explicitBaseGsm > 0 ? explicitBaseGsm : parseGrammageFromStock(baseStock, 300);
-  const baseGsm = explicitBaseGsm && explicitBaseGsm > 0 ? Math.max(parsedGsm, 100) : parsedGsm;
-  const useBaseDirect = Boolean(explicitBaseGsm && explicitBaseGsm > 0) || baseGsm >= 250;
+  const stock = baseStock || "";
+  const baseGsm =
+    explicitBaseGsm && explicitBaseGsm > 0 ? explicitBaseGsm : parseGrammageFromStock(stock, 0);
   const topLayer: SubstrateLayer = {
     id: "layer-top",
     role: "top_liner",
-    label: "Face Liner (Front / Лицо)",
-    paperStock: useBaseDirect ? baseStock : "Coated Cardboard 300g/m²",
-    grammage: useBaseDirect ? baseGsm : 300,
+    label: KASHIROVKA_LAYER_LABELS.top_liner,
+    paperStock: stock,
+    grammage: baseGsm,
     colors: "4+0",
-    coating: baseCoating || "Matte Lamination (1S)",
+    coating: baseCoating || "",
   };
   const bottomLayer: SubstrateLayer = {
     id: "layer-bottom",
     role: "bottom_liner",
-    label: "Back Liner (Reverse / Оборот)",
-    paperStock: useBaseDirect ? baseStock : "Coated Cardboard 300g/m²",
-    grammage: useBaseDirect ? baseGsm : 300,
+    label: KASHIROVKA_LAYER_LABELS.bottom_liner,
+    paperStock: stock,
+    grammage: baseGsm,
     colors: "4+0",
-    coating: "Matte Lamination (1S)",
+    coating: "",
   };
   if (mode === "triplex") {
     const coreLayer: SubstrateLayer = {
       id: "layer-core",
       role: "core_board",
-      label: "Inner Core Filler (Вставка)",
-      paperStock: useBaseDirect ? baseStock : "Colorplan Ebony Black Core 300g/m²",
-      grammage: useBaseDirect ? baseGsm : 300,
+      label: KASHIROVKA_LAYER_LABELS.core_board,
+      paperStock: stock,
+      grammage: baseGsm,
       colors: "0+0",
-      coating: "None / Uncoated",
+      coating: "",
     };
     return [topLayer, coreLayer, bottomLayer];
   }
   return [topLayer, bottomLayer];
 }
 
+/**
+ * Rebuilds the layer list for a mode while keeping what the user already set
+ * per role (colors, coating, a layer-specific paper). Layers that still follow
+ * the previous base stock are moved to the new base stock.
+ */
+export function rebuildKashirovkaLayers(
+  mode: KashirovkaMode,
+  previousLayers: SubstrateLayer[] | undefined,
+  baseStock: string,
+  baseCoating: string,
+  baseGsm: number | undefined,
+  previousBaseStock?: string
+): SubstrateLayer[] {
+  const defaults = getDefaultKashirovkaLayers(mode, baseStock, baseCoating, baseGsm);
+  const previous = previousLayers || [];
+  if (previous.length === 0) return defaults;
+  const prevBase = (previousBaseStock || "").trim().toLowerCase();
+  return defaults.map((def) => {
+    const existing = previous.find((l) => l.role === def.role);
+    if (!existing) return def;
+    const existingStock = (existing.paperStock || "").trim().toLowerCase();
+    const followsBase = !existingStock || existingStock === prevBase;
+    return {
+      ...existing,
+      id: def.id,
+      label: def.label,
+      paperStock: followsBase ? def.paperStock : existing.paperStock,
+      grammage: followsBase ? def.grammage : existing.grammage,
+    };
+  });
+}
+
 export function calculateKashirovkaTotals(
   mode: KashirovkaMode = "none",
   layers: SubstrateLayer[] = [],
-  glueGsmPerBond = 25
+  glueGsmPerBond: number = KASHIROVKA_DEFAULT_GLUE_GSM
 ) {
   if (mode === "none" || layers.length === 0) {
     return {
@@ -90,10 +144,14 @@ export function calculateKashirovkaTotals(
   }
   const netPaperGsm = layers.reduce((sum, l) => sum + (Number(l.grammage) || 0), 0);
   const glueBonds = Math.max(0, layers.length - 1);
-  const totalGlueGsm = glueBonds * (Number(glueGsmPerBond) || 25);
+  const totalGlueGsm = glueBonds * resolveKashirovkaGlueGsm(glueGsmPerBond);
   const totalMountedGsm = netPaperGsm + totalGlueGsm;
-  // ~1.32 microns per gsm for coated board + glue bond film
-  const estimatedCaliperMm = Number(((totalMountedGsm * 1.32) / 1000).toFixed(2));
+  // Paper caliper depends on the material family; a dried glue film is ~1 µm per g/m².
+  const paperCaliperUm = layers.reduce((sum, l) => {
+    const gsm = Number(l.grammage) || 0;
+    return sum + gsm * caliperFactorForStock(l.paperStock, gsm);
+  }, 0);
+  const estimatedCaliperMm = Number(((paperCaliperUm + totalGlueGsm) / 1000).toFixed(2));
   return {
     netPaperGsm,
     glueBonds,

@@ -633,11 +633,11 @@ export function OverviewTab({
     if (formData.kashirovkaLayers && formData.kashirovkaLayers.length > 0) {
       return formData.kashirovkaLayers;
     }
-    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating);
-  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating]);
+    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating, formData.paperDensity);
+  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating, formData.paperDensity]);
 
   const kashirovkaTotals = useMemo(
-    () => calculateKashirovkaTotals(kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm ?? 25),
+    () => calculateKashirovkaTotals(kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm),
     [kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm]
   );
 
