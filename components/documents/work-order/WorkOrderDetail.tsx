@@ -153,6 +153,7 @@ import { computeTariffEstimate, TariffRecord } from "@/components/documents/tari
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 
 import { getInitialToolingItems } from "./toolingItems";
+import { syncKashirovkaBomRows } from "./utils/kashirovkaBom";
 import { buildReorderDocument } from "./reorder";
 export { getInitialToolingItems };
 
@@ -183,9 +184,10 @@ export function syncBomWithSpecs(
 
     const paperIdx = items.findIndex(
       (i) =>
-        i.category === "Paper & Board" ||
-        i.category === "Roll & Label" ||
-        i.category === "Offcuts & Scraps"
+        !i.autoSource &&
+        (i.category === "Paper & Board" ||
+          i.category === "Roll & Label" ||
+          i.category === "Offcuts & Scraps")
     );
 
     // Roll stock (flexo/termo labels) is consumed in running metres, not one sheet per piece.
@@ -580,6 +582,9 @@ export function syncBomWithSpecs(
       }
     }
   }
+
+  // 5. Kashirovka: paper for the layers mounted onto the printed sheet, plus the glue
+  items = syncKashirovkaBomRows(items, form, stockList, requiredPaperSheets);
 
   return items;
 }
@@ -1254,7 +1259,17 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         quantity: data.quantity || initialQueueItem?.quantity,
         parentSheetW: (data as any).parentSheetW || (initialQueueItem as any)?.parentSheetW,
         parentSheetH: (data as any).parentSheetH || (initialQueueItem as any)?.parentSheetH,
-      },
+        plannedSheets: (data as any).plannedSheets || (initialQueueItem as any)?.plannedSheets,
+        currency: data.currency || initialQueueItem?.currency,
+        exchangeRate: data.exchangeRate || (initialQueueItem as any)?.exchangeRate,
+        kashirovkaMode: data.kashirovkaMode || initialQueueItem?.kashirovkaMode,
+        kashirovkaStrategy: data.kashirovkaStrategy || initialQueueItem?.kashirovkaStrategy,
+        kashirovkaLayers:
+          data.kashirovkaLayers && data.kashirovkaLayers.length > 0
+            ? data.kashirovkaLayers
+            : initialQueueItem?.kashirovkaLayers,
+        kashirovkaGlueGsm: data.kashirovkaGlueGsm ?? initialQueueItem?.kashirovkaGlueGsm,
+      } as Partial<WorkOrderFormData>,
       useWorkspaceStore.getState().warehouseStock
     );
   });
@@ -2222,6 +2237,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         "plannedSheets",
         "parentSheetW",
         "parentSheetH",
+        "kashirovkaMode",
+        "kashirovkaStrategy",
+        "kashirovkaLayers",
+        "kashirovkaGlueGsm",
       ].includes(f)
     );
 
@@ -2666,7 +2685,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       if (isNaN(actual) || actual <= 0) {
         actual = plan;
       }
-      const isSubstrate = idx === 0 || item.category === "Paper & Board" || item.category === "Roll & Label";
+      // Press-shift waste belongs to the printed sheet, not to the kashirovka backing layers.
+      const isSubstrate =
+        !item.autoSource && (idx === 0 || item.category === "Paper & Board" || item.category === "Roll & Label");
       let waste = Number(item.wasteQty) || 0;
       if (isSubstrate && totalShiftWasteSheets > 0 && actual === plan) {
         actual += totalShiftWasteSheets;

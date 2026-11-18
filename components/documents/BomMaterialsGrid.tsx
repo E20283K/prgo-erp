@@ -106,6 +106,13 @@ export type MaterialIssueType = "standard" | "remake" | "client_change" | "press
 export type FaultParty = "none" | "prepress" | "production" | "client" | "supplier";
 export type AcquisitionSource = "warehouse" | "procurement" | "client";
 
+const FAULT_PARTY_OPTIONS: { value: Exclude<FaultParty, "none">; label: string }[] = [
+  { value: "prepress", label: "Prepress / Dizayn" },
+  { value: "production", label: "Sex / Stanok" },
+  { value: "client", label: "Mijoz" },
+  { value: "supplier", label: "Ta'minotchi" },
+];
+
 export interface BomItem {
   id: string;
   name: string;
@@ -140,6 +147,10 @@ export interface BomItem {
   imageUrl?: string;
   sourceType?: AcquisitionSource;
   acquisitionSource?: AcquisitionSource;
+  /** Row generated from the order spec, e.g. "kashirovka:bottom_liner"; the spec sync owns it. */
+  autoSource?: string;
+  /** Set once the user edits the plan of an auto row; the spec sync then leaves it alone. */
+  autoLocked?: boolean;
 }
 
 export interface BomFormState extends BomItem {
@@ -223,6 +234,8 @@ export function normalizeBomItem(item: any): BomItem {
         : undefined,
     acquisitionSource: item.acquisitionSource || (item.supplier?.toLowerCase().includes("mijoz") ? "client" : item.availability === "On Order" || item.sourceType === "procurement" ? "procurement" : "warehouse"),
     sourceType: item.sourceType || (item.supplier?.toLowerCase().includes("mijoz") ? "client" : item.availability === "On Order" ? "procurement" : "warehouse"),
+    ...(item.autoSource ? { autoSource: String(item.autoSource) } : {}),
+    ...(item.autoLocked ? { autoLocked: true } : {}),
   };
 }
 
@@ -617,6 +630,10 @@ export function BomMaterialsGrid({
 
   // Compute Shortage Items (items out of stock or requiring procurement)
   const shortageItems = useMemo(() => {
+    const isClientItem = (item: BomItem) =>
+      item.acquisitionSource === "client" || Boolean(item.supplier?.toLowerCase().includes("mijoz"));
+    const rowQty = (item: BomItem) => (item.actualQty !== undefined ? item.actualQty : item.qty || 0);
+    const flagged = new Set<string>();
     return items.filter((item) => {
       // Client supplied materials never have a shortage
       if (item.acquisitionSource === "client" || item.supplier?.toLowerCase().includes("mijoz")) {
@@ -631,8 +648,20 @@ export function BomMaterialsGrid({
           ws.name.toLowerCase() === item.name.toLowerCase()
       );
       if (matched) {
-        const required = item.actualQty !== undefined ? item.actualQty : (item.qty || 0);
-        return required > matched.available;
+        // The same stock item can be planned on several rows; compare their sum, list it once.
+        if (flagged.has(matched.sku)) return false;
+        const required = items
+          .filter(
+            (other) =>
+              !isClientItem(other) &&
+              (other.id.toLowerCase() === matched.sku.toLowerCase() ||
+                other.name.toLowerCase() === matched.name.toLowerCase())
+          )
+          .reduce((sum, other) => sum + rowQty(other), 0);
+        if (required > matched.available) {
+          flagged.add(matched.sku);
+          return true;
+        }
       }
       return false;
     });
@@ -872,7 +901,7 @@ export function BomMaterialsGrid({
             kind: GridCellKind.Text,
             data: type,
             displayData: label,
-            allowOverlay: true,
+            allowOverlay: false,
             themeOverride: {
               textDark: color,
               baseFontStyle: type === "remake" ? "bold 11px sans-serif" : "500 11px sans-serif",
@@ -997,22 +1026,14 @@ export function BomMaterialsGrid({
         }
         case "faultParty": {
           const party = item.faultParty || "none";
-          const label =
-            party === "prepress"
-              ? "Prepress / Dizayn"
-              : party === "production"
-              ? "Sex / Stanok"
-              : party === "client"
-              ? "Mijoz"
-              : party === "supplier"
-              ? "Ta'minotchi"
-              : "—";
+          const label = FAULT_PARTY_OPTIONS.find((o) => o.value === party)?.label || "—";
 
+          // No free-text overlay: activating the cell opens the row dialog with the picker.
           return {
             kind: GridCellKind.Text,
             data: party,
             displayData: label,
-            allowOverlay: true,
+            allowOverlay: false,
             themeOverride: {
               textDark:
                 party === "prepress"
@@ -1109,8 +1130,9 @@ export function BomMaterialsGrid({
       if (!targetItem || !column) return;
 
       commitItems((prev) => {
-        const next = prev.map((item) => {
-          if (item.id === targetItem.id) {
+        // Match by row index: one material can sit on several rows (e.g. kashirovka layers).
+        const next = prev.map((item, idx) => {
+          if (idx === row) {
             const updated = { ...item };
             if (column.id === "actualQty") {
               const val =
@@ -1128,6 +1150,7 @@ export function BomMaterialsGrid({
                   : parseFloat(String(newValue.data)) || 0;
               updated.planQty = Math.max(0, val);
               updated.wasteQty = Math.max(0, (updated.actualQty || 0) - updated.planQty);
+              if (updated.autoSource) updated.autoLocked = true;
             } else if (column.id === "wasteQty") {
               const val =
                 typeof newValue.data === "number"
@@ -1360,7 +1383,13 @@ export function BomMaterialsGrid({
       supplier,
       availability: finalAvailability,
       issueType: formState.issueType || "standard",
-      faultParty: formState.faultParty || "none",
+      // Matches the picker: a non-standard issue always names a party, a standard one never does.
+      faultParty:
+        (formState.issueType || "standard") === "standard"
+          ? "none"
+          : formState.faultParty && formState.faultParty !== "none"
+          ? formState.faultParty
+          : "prepress",
       notes: formState.notes?.trim() || "",
       imageUrl:
         formState.imageUrl &&
@@ -1375,7 +1404,12 @@ export function BomMaterialsGrid({
     if (editingIndex !== null) {
       commitItems((prev) => {
         const next = [...prev];
-        next[editingIndex] = itemToSave;
+        const before = prev[editingIndex];
+        // Editing an auto row by hand hands it over to the user, so the spec sync stops resizing it.
+        next[editingIndex] =
+          before?.autoSource && (before.planQty !== planQty || before.id !== itemToSave.id)
+            ? { ...itemToSave, autoLocked: true }
+            : itemToSave;
         return next;
       });
       toast.add({
@@ -2676,8 +2710,13 @@ export function BomMaterialsGrid({
               )}
             </div>
 
-            {/* ── 3. ISSUE TYPE & NOTES (Compact 2 columns) ── */}
-            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/80">
+            {/* ── 3. ISSUE TYPE, FAULT PARTY & NOTES ── */}
+            <div
+              className={cn(
+                "grid gap-2 pt-1 border-t border-border/80",
+                (formState.issueType || "standard") === "standard" ? "grid-cols-2" : "grid-cols-3"
+              )}
+            >
               <div>
                 <label className="text-[10px] text-muted-foreground block mb-1">Sarf turi</label>
                 <Select
@@ -2701,6 +2740,27 @@ export function BomMaterialsGrid({
                   </SelectContent>
                 </Select>
               </div>
+
+              {(formState.issueType || "standard") !== "standard" && (
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">Aybdor</label>
+                  <Select
+                    value={formState.faultParty && formState.faultParty !== "none" ? formState.faultParty : "prepress"}
+                    onValueChange={(val: any) => setFormState((p) => ({ ...p, faultParty: val }))}
+                  >
+                    <SelectTrigger className="h-8 text-xs bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FAULT_PARTY_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div>
                 <label className="text-[10px] text-muted-foreground block mb-1">Izoh / Sabab</label>
