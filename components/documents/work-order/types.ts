@@ -785,6 +785,12 @@ export interface WorkOrderFormData {
     rechargeToClient?: number;
     supplierClaim?: number;
     costBasisQty?: number;
+    /** "manual": the hand-entered manualTotalCost replaces the computed cost. Missing = "auto". */
+    costMode?: "auto" | "manual";
+    /** Hand-entered cost of the whole run, in the order currency. */
+    manualTotalCost?: number;
+    /** Computed cost at save time, kept for comparison when the manual cost is in use. */
+    autoTotalCost?: number;
   };
   // Physical Item Specifications from planned Client Order
   itemCategory?: string;

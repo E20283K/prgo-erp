@@ -157,6 +157,28 @@ const NON_COGS_GROUPS: CostGroup[] = ["recharge", "claim"];
 
 const PLATE_STEP_NAME_RE = /ctp|prepress|polimer qolip/i;
 
+export interface EffectiveCost {
+  mode: "auto" | "manual";
+  total: number;
+  unit: number;
+}
+
+/**
+ * The cost the price and the finished-goods receipt are based on: the hand-entered total
+ * when the order is in manual cost mode, otherwise the computed one.
+ */
+export function resolveEffectiveCost(
+  auto: { totalBaseCost: number; costBasisQty: number },
+  fin?: { costMode?: "auto" | "manual"; manualTotalCost?: number } | null
+): EffectiveCost {
+  const manual = Number(fin?.manualTotalCost) || 0;
+  const mode = fin?.costMode === "manual" && manual > 0 ? "manual" : "auto";
+  const total = mode === "manual" ? Number(manual.toFixed(2)) : auto.totalBaseCost;
+  const qty = Number(auto.costBasisQty) || 0;
+  const unit = qty > 0 && total > 0 ? Number((total / qty).toFixed(4)) : 0;
+  return { mode, total, unit };
+}
+
 /**
  * Pure calculation engine for Work Order cost breakdown, unit base cost, and expense allocation.
  * Used by FinancialsTab and by the finished-goods receipt to write the real unit cost.

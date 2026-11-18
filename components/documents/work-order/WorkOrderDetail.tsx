@@ -143,6 +143,7 @@ import {
   calculateWorkOrderFinancials,
   DEFAULT_OVERHEAD_PERCENT,
   getWorkOrderMaterialReturns,
+  resolveEffectiveCost,
 } from "./utils/financialsEngine";
 import { elapsedRunMinutes } from "./utils/operationCost";
 import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
@@ -1705,7 +1706,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         clientId: (data as any).clientId || null,
         unit: formData.unit || "pcs",
         quantity: readyQty,
-        costPricePerUnit: fgCosts.unitBaseCost,
+        // A hand-entered order cost (manual cost mode) wins over the computed one.
+        costPricePerUnit: resolveEffectiveCost(fgCosts, formData.financials).unit,
         boxCount: readyBoxes.length,
       });
       if (!result.success) {

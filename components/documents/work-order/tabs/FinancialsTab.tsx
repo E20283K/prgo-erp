@@ -34,7 +34,6 @@ import {
   Check,
   AlertCircle,
   Layers,
-  Boxes,
   Percent,
 } from "lucide-react";
 import { ShiftEvent, WorkOrderFormData, RouteStep } from "../types";
@@ -48,6 +47,7 @@ import {
   calculateWorkOrderFinancials,
   DEFAULT_OVERHEAD_PERCENT,
   getWorkOrderMaterialReturns,
+  resolveEffectiveCost,
   type CostGroup,
   type FinancialCostResult,
 } from "../utils/financialsEngine";
@@ -157,8 +157,7 @@ export function FinancialsTab({
   const {
     rawCostRows,
     nonCogsRows,
-    totalBaseCost,
-    unitBaseCost,
+    totalBaseCost: autoTotalCost,
     costBasisQty,
     wasteInfoCost,
     returnedMaterialValue,
@@ -168,8 +167,33 @@ export function FinancialsTab({
   const gridRows = useMemo(() => [...rawCostRows, ...nonCogsRows], [rawCostRows, nonCogsRows]);
   const [view, setView] = useState<"costs" | "route">("costs");
 
+  // ─── 3b. COST MODE: computed or hand-entered (the system's cost data is still incomplete) ──
+  const [costMode, setCostMode] = useState<"auto" | "manual">(formData?.financials?.costMode ?? "auto");
+  const [manualTotalInput, setManualTotalInput] = useState<string>(() => {
+    const v = Number(formData?.financials?.manualTotalCost) || 0;
+    return v > 0 ? String(v) : "";
+  });
+  const [manualUnitInput, setManualUnitInput] = useState<string>(() => {
+    const v = Number(formData?.financials?.manualTotalCost) || 0;
+    return v > 0 && costBasisQty > 0 ? String(Number((v / costBasisQty).toFixed(4))) : "";
+  });
+  const effective = useMemo(
+    () => resolveEffectiveCost(costs, { costMode, manualTotalCost: Number(manualTotalInput) || 0 }),
+    [costs, costMode, manualTotalInput]
+  );
+  // Everything below (markup, price, margin) works on the effective cost.
+  const totalBaseCost = effective.total;
+  const unitBaseCost = effective.unit;
+
   const toFinancials = useCallback(
-    (c: FinancialCostResult, margin: number): NonNullable<WorkOrderFormData["financials"]> => ({
+    (
+      c: FinancialCostResult,
+      margin: number,
+      mode: "auto" | "manual",
+      manualTotal: number
+    ): NonNullable<WorkOrderFormData["financials"]> => {
+      const eff = resolveEffectiveCost(c, { costMode: mode, manualTotalCost: manualTotal });
+      return {
       plannedMaterialCost: c.plannedMaterialCost,
       actualMaterialCost: c.materialCost,
       // Route = machine + labor of every step; finished steps at fact, the rest at plan.
@@ -177,9 +201,12 @@ export function FinancialsTab({
       actualMachineCost: Number(c.routeLines.reduce((s, l) => s + (l.actualCost ?? l.plannedCost), 0).toFixed(2)),
       toolingCost: c.toolingCost,
       laborCost: c.laborCost,
-      baseCost: c.totalBaseCost,
-      unitBaseCost: c.unitBaseCost,
-      totalBaseCost: c.totalBaseCost,
+      baseCost: eff.total,
+      unitBaseCost: eff.unit,
+      totalBaseCost: eff.total,
+      costMode: mode,
+      manualTotalCost: manualTotal > 0 ? manualTotal : undefined,
+      autoTotalCost: c.totalBaseCost,
       wasteCost: c.wasteInfoCost,
       margin,
       overheadPercent: c.overheadPercent,
@@ -190,14 +217,17 @@ export function FinancialsTab({
       rechargeToClient: c.rechargeToClient,
       supplierClaim: c.supplierClaim,
       costBasisQty: c.costBasisQty,
-    }),
+      };
+    },
     []
   );
 
   const handleOverheadChange = (valStr: string) => {
     const pct = Math.min(100, Math.max(0, parseFloat(valStr) || 0));
     setOverheadPercent(pct);
-    onFinancialsChange?.(toFinancials(computeCosts(pct), formData?.financials?.margin ?? 25));
+    onFinancialsChange?.(
+      toFinancials(computeCosts(pct), formData?.financials?.margin ?? 25, costMode, Number(manualTotalInput) || 0)
+    );
   };
 
   // ─── 4. PRICING & MARKUP CALCULATOR STATE ────────────────────────────────────
@@ -244,10 +274,40 @@ export function FinancialsTab({
     }
   };
 
+  // A cost change keeps the markup and re-derives the price from the new cost.
+  const commitCost = (mode: "auto" | "manual", manualTotal: number) => {
+    const eff = resolveEffectiveCost(costs, { costMode: mode, manualTotalCost: manualTotal });
+    if (eff.total > 0) {
+      setCustomPriceInput(String(Number((eff.total * (1 + markupPercent / 100)).toFixed(2))));
+    }
+    onFinancialsChange?.(toFinancials(costs, formData?.financials?.margin ?? 25, mode, manualTotal));
+  };
+
+  const handleCostModeChange = (mode: "auto" | "manual") => {
+    if (mode === costMode) return;
+    setCostMode(mode);
+    commitCost(mode, Number(manualTotalInput) || 0);
+  };
+
+  const handleManualTotalChange = (valStr: string) => {
+    setManualTotalInput(valStr);
+    const total = parseFloat(valStr) || 0;
+    setManualUnitInput(total > 0 && costBasisQty > 0 ? String(Number((total / costBasisQty).toFixed(4))) : "");
+    commitCost("manual", total);
+  };
+
+  const handleManualUnitChange = (valStr: string) => {
+    setManualUnitInput(valStr);
+    const unit = parseFloat(valStr) || 0;
+    const total = unit > 0 && costBasisQty > 0 ? Number((unit * costBasisQty).toFixed(2)) : 0;
+    setManualTotalInput(total > 0 ? String(total) : "");
+    commitCost("manual", total);
+  };
+
   const handleApplyPriceToOrder = () => {
     if (onPriceChange) {
       onPriceChange(activeSellingPrice, {
-        ...toFinancials(costs, profitMarginPercent),
+        ...toFinancials(costs, profitMarginPercent, costMode, Number(manualTotalInput) || 0),
         itemsCount: rawCostRows.length,
         calculatedAt: new Date().toISOString(),
       });
@@ -432,17 +492,67 @@ export function FinancialsTab({
         <div className="rounded border border-border bg-card px-2.5 py-1.5 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[10px] font-medium tracking-wide uppercase">Tannarx</span>
-            <Boxes className="size-3 text-muted-foreground" />
+            <div className="inline-flex items-center rounded border border-border bg-muted/40 p-px">
+              {([
+                ["auto", "Avto"],
+                ["manual", "Qo'lda"],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => handleCostModeChange(id)}
+                  className={cn(
+                    "h-4.5 px-1.5 rounded-sm text-[10px] font-medium cursor-pointer",
+                    costMode === id ? "bg-card text-foreground border border-border" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="text-sm font-bold font-mono text-foreground tracking-tight">
-            {totalBaseCost > 0 ? formatMoney(totalBaseCost, currency) : "—"}
-          </div>
-          <div className="text-[9.5px] text-muted-foreground font-mono truncate">
-            1 dona: <strong className="text-foreground">{unitBaseCost > 0 ? formatMoney(unitBaseCost, currency, 3) : "—"}</strong>
-            <span className="ml-1 opacity-75">
-              (~{formatMoney(isUsd ? totalBaseCost * exchangeRate : (exchangeRate > 0 ? totalBaseCost / exchangeRate : 0), isUsd ? "UZS" : "USD", 0)})
-            </span>
-          </div>
+          {costMode === "manual" ? (
+            <>
+              <div className="flex items-center gap-1">
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={currency === "UZS" ? 0 : 2}
+                  value={manualTotalInput}
+                  placeholder="Jami"
+                  onValueChange={(values, info) => {
+                    if (info.source === "event") handleManualTotalChange(values.value);
+                  }}
+                  className="h-6 min-w-0 flex-1 text-xs font-mono font-bold px-1.5 bg-background"
+                />
+                <MoneyInput
+                  thousandSeparator=" "
+                  decimalScale={4}
+                  value={manualUnitInput}
+                  placeholder="1 dona"
+                  disabled={costBasisQty <= 0}
+                  onValueChange={(values, info) => {
+                    if (info.source === "event") handleManualUnitChange(values.value);
+                  }}
+                  className="h-6 w-20 text-xs font-mono px-1.5 bg-background"
+                />
+              </div>
+              <div className="text-[9.5px] text-muted-foreground font-mono truncate">
+                Avto: <strong className="text-foreground">{autoTotalCost > 0 ? formatMoney(autoTotalCost, currency) : "—"}</strong>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-bold font-mono text-foreground tracking-tight">
+                {totalBaseCost > 0 ? formatMoney(totalBaseCost, currency) : "—"}
+              </div>
+              <div className="text-[9.5px] text-muted-foreground font-mono truncate">
+                1 dona: <strong className="text-foreground">{unitBaseCost > 0 ? formatMoney(unitBaseCost, currency, 3) : "—"}</strong>
+                <span className="ml-1 opacity-75">
+                  (~{formatMoney(isUsd ? totalBaseCost * exchangeRate : (exchangeRate > 0 ? totalBaseCost / exchangeRate : 0), isUsd ? "UZS" : "USD", 0)})
+                </span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Card 2: Markup */}
@@ -696,6 +806,11 @@ export function FinancialsTab({
         </div>
 
         <div className="flex items-center gap-2">
+          {effective.mode === "manual" && (
+            <Badge variant="outline" className="text-[9.5px] h-4.5 px-1.5 py-0 font-sans">
+              Qo&apos;lda
+            </Badge>
+          )}
           <span className="text-muted-foreground font-sans font-medium text-[11px]">JAMI BAZA TANNARX (TOTAL COGS):</span>
           <span className="font-bold text-xs text-foreground">
             {formatMoney(totalBaseCost, currency)}
