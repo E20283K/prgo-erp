@@ -262,6 +262,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       mode: printMethodToMode(printMethod, backColorCount > 0),
       strategy: "smart_no_split",
       maxOverprintPct: 10,
+      allowancePct: 0,
       fillDirection: "col",
       wasteSheets: 0,
       manualSlots: {},
@@ -469,15 +470,18 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
 
   const effectiveParams = layoutParams;
 
+  // Tiraj allowance: every variant is planned with its extra run (10 000 + 5% = 10 500)
+  const allowancePct = Math.max(0, settings.allowancePct ?? 0);
   const variantInputs = useMemo(
     () =>
       variants.map((v) => ({
         name: v.name,
-        quantity: Math.max(1, Math.round(v.quantity)),
+        // Round the product first: 10 000 × 1.05 is 10 500.000…2 in floating point
+        quantity: Math.max(1, Math.ceil(Math.round(Math.round(v.quantity) * (100 + allowancePct)) / 100)),
         manual_slots: v.manualSlots ?? null,
         sku_id: v.skuId ?? null,
       })),
-    [variants]
+    [variants, allowancePct]
   );
 
   const calcRequest = useMemo<CalculateRequest>(
@@ -531,6 +535,9 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     // Engine semantics: technological overprint excludes free "bonus" slots that cost no extra sheets
     const overprint = calc.forms.reduce((s, f) => s + f.total_overprint_qty, 0);
     const overprintPct = calc.total_order_qty > 0 ? (overprint / calc.total_order_qty) * 100 : 0;
+    // Everything printed above the order: the tiraj allowance plus the engine's overprint
+    const orderedQty = variants.reduce((sum, v) => sum + Math.max(1, Math.round(v.quantity)), 0);
+    const extraPct = orderedQty > 0 ? ((calc.total_order_qty - orderedQty + overprint) / orderedQty) * 100 : 0;
     return {
       forms,
       itemsPerSheet: calc.items_per_sheet,
@@ -540,8 +547,9 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       ctpPlates,
       produced,
       overprintPct,
+      extraPct,
     };
-  }, [calc, settings.cutDivisor, settings.mode, frontColorCount, backColorCount]);
+  }, [calc, variants, settings.cutDivisor, settings.mode, frontColorCount, backColorCount]);
 
   // ---------------------------------------------------------------- analyze / generate
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);

@@ -16,6 +16,8 @@ type ViewBox = { x: number; y: number; w: number; h: number };
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 40;
 const BUTTON_STEP = 1.4;
+/** Matches crop_length_mm sent to doc-service */
+const CROP_LEN = 4;
 
 /** Mouse notch (~100px) ≈ 15%; trackpad / pinch deltas are small, so zoom stays smooth. */
 function wheelFactor(e: WheelEvent): number {
@@ -27,9 +29,36 @@ function wheelFactor(e: WheelEvent): number {
 function SchemeView({ c, formIdx, side }: { c: SheetImpositionController; formIdx: number; side: "front" | "back" }) {
   const s = c.settings;
   const form = c.calc?.forms[formIdx];
-  const cells = side === "back" ? form?.back_cells ?? [] : form?.front_cells ?? [];
+  const cells = useMemo(
+    () => (side === "back" ? form?.back_cells : form?.front_cells) ?? [],
+    [form, side]
+  );
   const W = s.sheetW;
   const H = s.sheetH;
+
+  const maxCol = cells.reduce((m, c2) => Math.max(m, c2.col), 0);
+  const maxRow = cells.reduce((m, c2) => Math.max(m, c2.row), 0);
+  const cropOff = s.outerBleed + s.cropGap;
+  const block = useMemo(() => {
+    if (!cells.length) return null;
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const xs = new Set<number>();
+    const ys = new Set<number>();
+    for (const c2 of cells) {
+      xs.add(r2(c2.x_mm));
+      xs.add(r2(c2.x_mm + c2.w_mm));
+      ys.add(r2(c2.y_mm));
+      ys.add(r2(c2.y_mm + c2.h_mm));
+    }
+    return {
+      minX: Math.min(...cells.map((c2) => c2.x_mm)),
+      maxX: Math.max(...cells.map((c2) => c2.x_mm + c2.w_mm)),
+      minY: Math.min(...cells.map((c2) => c2.y_mm)),
+      maxY: Math.max(...cells.map((c2) => c2.y_mm + c2.h_mm)),
+      xs: [...xs],
+      ys: [...ys],
+    };
+  }, [cells]);
 
   const base = useMemo<ViewBox>(() => ({ x: -W * 0.02, y: -H * 0.04, w: W * 1.04, h: H * 1.06 }), [W, H]);
   const [vb, setVb] = useState<ViewBox>(base);
@@ -148,6 +177,45 @@ function SchemeView({ c, formIdx, side }: { c: SheetImpositionController; formId
           KLAPAN {s.marginBottom} mm
         </text>
 
+        {/* Bleed (fon) behind each cell, as the engine extends artwork: outer edges of the block
+            get the outer bleed, edges facing a neighbour get min(inner bleed, gutter / 2). */}
+        {cells.map((cell, i) => {
+          const l = cell.col === 0 ? s.outerBleed : Math.min(s.innerBleed, s.gutterX / 2);
+          const r = cell.col === maxCol ? s.outerBleed : Math.min(s.innerBleed, s.gutterX / 2);
+          const t = cell.row === 0 ? s.outerBleed : Math.min(s.innerBleed, s.gutterY / 2);
+          const b = cell.row === maxRow ? s.outerBleed : Math.min(s.innerBleed, s.gutterY / 2);
+          if (l + r + t + b <= 0) return null;
+          return (
+            <rect
+              key={`bleed-${i}`}
+              x={cell.x_mm - l}
+              y={cell.y_mm - t}
+              width={cell.w_mm + l + r}
+              height={cell.h_mm + t + b}
+              fill={variantColor(cell.variant_index).solid}
+              fillOpacity={0.18}
+            />
+          );
+        })}
+
+        {/* Crop marks on the outer perimeter only (engine: offset = outer bleed + crop gap, 4 mm long) */}
+        {block && (
+          <g stroke="var(--foreground)" strokeWidth={stroke} strokeOpacity={0.8}>
+            {block.xs.map((x) => (
+              <React.Fragment key={`cx-${x}`}>
+                <line x1={x} y1={block.minY - cropOff} x2={x} y2={block.minY - cropOff - CROP_LEN} />
+                <line x1={x} y1={block.maxY + cropOff} x2={x} y2={block.maxY + cropOff + CROP_LEN} />
+              </React.Fragment>
+            ))}
+            {block.ys.map((y) => (
+              <React.Fragment key={`cy-${y}`}>
+                <line x1={block.minX - cropOff} y1={y} x2={block.minX - cropOff - CROP_LEN} y2={y} />
+                <line x1={block.maxX + cropOff} y1={y} x2={block.maxX + cropOff + CROP_LEN} y2={y} />
+              </React.Fragment>
+            ))}
+          </g>
+        )}
+
         {cells.map((cell, i) => {
           const col = variantColor(cell.variant_index);
           const fs = Math.max(1, Math.min(cell.w_mm, cell.h_mm) * 0.16);
@@ -244,7 +312,7 @@ export function SheetCanvas({ c }: { c: SheetImpositionController }) {
             { label: "Press-list", value: fmt(sm.pressSheets) },
             { label: "Ota-list", value: fmt(sm.parentSheets) },
             { label: "CTP", value: sm.ctpPlates },
-            { label: "Ortiqcha", value: `${sm.overprintPct.toFixed(1)}%`, tone: overTone as "warn" | undefined },
+            { label: "Ortiqcha", value: `${sm.extraPct.toFixed(1)}%`, tone: overTone as "warn" | undefined },
             { label: "To'lish", value: `${c.calc.utilization_pct.toFixed(0)}%` },
           ]
         : [],

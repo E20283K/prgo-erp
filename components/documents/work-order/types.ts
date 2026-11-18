@@ -939,6 +939,8 @@ export interface PersistedImpositionState {
   mode: "single_sided" | "sheetwise" | "work_and_turn";
   strategy: "smart_no_split" | "max_economy_split" | "single_form" | "manual";
   maxOverprintPct: number;
+  /** Extra run on top of each variant's order quantity, % (10 000 + 5% = 10 500) */
+  allowancePct?: number;
   fillDirection: "col" | "row";
   wasteSheets: number;
   /** Manual slot counts keyed by variant key (SizeDistribution.id or "main") */

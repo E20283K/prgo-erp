@@ -89,7 +89,22 @@ export function GangingPanel({ c, readOnly }: { c: SheetImpositionController; re
             { value: "manual", label: "Qo'lda" },
           ]}
         />
-        <NumField label="Ortiqcha" suffix="%" value={s.maxOverprintPct} disabled={readOnly} onChange={(v) => c.update({ maxOverprintPct: v ?? 0 })} />
+        <NumField
+          label="Ortiqcha"
+          suffix="%"
+          step={0.5}
+          value={s.allowancePct ?? 0}
+          disabled={readOnly}
+          onChange={(v) => c.update({ allowancePct: Math.max(0, v ?? 0) })}
+        />
+        {/* A ceiling for ganging several variants on one form, not an allowance: with one variant it changes nothing */}
+        <NumField
+          label="Maks. ortiq"
+          suffix="%"
+          value={s.maxOverprintPct}
+          disabled={readOnly || c.variants.length < 2}
+          onChange={(v) => c.update({ maxOverprintPct: v ?? 0 })}
+        />
         <NumField label="Priladka" suffix="list" value={s.wasteSheets} disabled={readOnly} onChange={(v) => c.update({ wasteSheets: Math.round(v ?? 0) })} />
         <SelectField
           className="col-span-2"

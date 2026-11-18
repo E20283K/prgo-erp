@@ -25,7 +25,14 @@ export function ProductPanel({ c, readOnly }: { c: SheetImpositionController; re
           label="Kesim"
           value={s.cutStyle}
           disabled={readOnly || s.category === "diecut"}
-          onChange={(cutStyle) => c.update({ cutStyle })}
+          // One knife cuts flush between neighbours, so there is no gutter; two knives need one
+          onChange={(cutStyle) =>
+            c.update(
+              cutStyle === "single"
+                ? { cutStyle, gutterX: 0, gutterY: 0 }
+                : { cutStyle, gutterX: s.gutterX || 3, gutterY: s.gutterY || 3 }
+            )
+          }
           options={[
             { value: "double", label: "2 pichoq" },
             { value: "single", label: "1 pichoq" },
