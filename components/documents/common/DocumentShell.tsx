@@ -30,7 +30,14 @@ export function getStatusTone(status?: string): keyof typeof STATUS_STYLES {
   switch (status) {
     case "Active":
     case "In Production":
+    case "Faol":
       return "success";
+    case "Ta'tilda":
+      return "info";
+    case "Sinovda":
+      return "warning";
+    case "Bo'shatilgan":
+      return "danger";
     case "Approved":
     case "Completed":
       return "info";

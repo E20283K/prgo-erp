@@ -29,7 +29,7 @@ const DataEditor = dynamic(
 
 const DEFAULT_PIECEWORK_COLUMNS: GridColumn[] = [
   { id: "workDate", title: "Sana", width: 105, icon: GridColumnIcon.HeaderDate },
-  { id: "workOrderId", title: "Work Order №", width: 130, icon: GridColumnIcon.HeaderString },
+  { id: "workOrderId", title: "Buyurtma №", width: 130, icon: GridColumnIcon.HeaderString },
   { id: "machine", title: "Stanok / Uskuna", width: 145, icon: GridColumnIcon.HeaderString },
   { id: "operationName", title: "Bajarilgan operatsiya", width: 220, icon: GridColumnIcon.HeaderString },
   { id: "quantity", title: "Bajarilgan hajm", width: 125, icon: GridColumnIcon.HeaderNumber },
@@ -65,8 +65,18 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import { generateNextCode } from "@/lib/utils";
@@ -87,8 +97,8 @@ import {
   Award,
   Save,
   Printer,
-  FileCheck,
   ShieldCheck,
+  Fingerprint,
   CheckCircle2,
   History,
   UserX,
@@ -131,6 +141,108 @@ function parseFIO(emp: EmployeeRecord): EmployeeRecord {
     fullName: computedFullName,
   };
 }
+
+type NormalizedStatus = "active" | "probation" | "on_leave" | "terminated";
+type NormalizedWage = "salary" | "piecework" | "hourly" | "mixed";
+
+// The API has historically returned both "Active" and "active" style values.
+function normalizeStatus(s?: string | null): NormalizedStatus {
+  const v = String(s || "active").toLowerCase().replace(/\s+/g, "_");
+  if (v === "onleave" || v === "on_leave") return "on_leave";
+  if (v === "probation" || v === "terminated") return v;
+  return "active";
+}
+
+function normalizeWage(w?: string | null): NormalizedWage {
+  const v = String(w || "piecework").toLowerCase();
+  return v === "salary" || v === "hourly" || v === "mixed" ? v : "piecework";
+}
+
+const STATUS_LABELS: Record<NormalizedStatus, string> = {
+  active: "Faol",
+  probation: "Sinovda",
+  on_leave: "Ta'tilda",
+  terminated: "Bo'shatilgan",
+};
+
+const WAGE_LABELS: Record<NormalizedWage, string> = {
+  piecework: "Ishbay",
+  salary: "Oklad",
+  hourly: "Soatbay",
+  mixed: "Aralash",
+};
+
+const SHIFT_LABELS: Record<string, string> = {
+  day: "Kunduzgi (08:00–20:00)",
+  night: "Tungi (20:00–08:00)",
+  daily: "Ofis (09:00–18:00)",
+};
+
+const HISTORY_TYPE_LABELS: Record<string, string> = {
+  position_change: "Lavozim",
+  salary_change: "Oklad",
+  department_change: "Bo'lim",
+  status_change: "Holat",
+};
+
+const fmtMoney = (n: unknown) => `${Number(n || 0).toLocaleString("uz-UZ")} UZS`;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Keep stored photos small: a 3x4 portrait at 600x800 is plenty for the card and Face ID.
+function resizeImage(file: File, maxW = 600, maxH = 800): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxW / img.width, maxH / img.height);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error("Canvas mavjud emas"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.88));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Rasmni o'qib bo'lmadi"));
+    };
+    img.src = url;
+  });
+}
+
+function Field({
+  label,
+  required,
+  error,
+  className,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cn("min-w-0 space-y-1", className)}>
+      <Label className="text-[11px] font-medium text-muted-foreground">
+        {label}
+        {required && <span className="text-destructive">*</span>}
+      </Label>
+      {children}
+      {error && <div className="text-[10px] leading-tight text-destructive">{error}</div>}
+    </div>
+  );
+}
+
+const errCls = (e?: string) => (e ? "border-destructive focus-visible:ring-destructive/30" : "");
 
 function getInitials(name?: string): string {
   if (!name) return "X";
@@ -235,6 +347,12 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [newSkillText, setNewSkillText] = useState("");
   const [syncingBiometric, setSyncingBiometric] = useState(false);
+  const [confirmTerminate, setConfirmTerminate] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+  }, []);
   // Shop-floor kiosk PIN: only whether one is set comes back, never the PIN.
   const [hasTerminalPin, setHasTerminalPin] = useState(false);
   const [terminalPin, setTerminalPin] = useState("");
@@ -275,7 +393,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
   };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Fetch full details and history from API if ID is valid UUID and not draft
+  // Fetch full details from API if ID is valid UUID and not draft
   useEffect(() => {
     if (!isInitialNew && empId && empId.length > 20 && !empId.startsWith("emp-new")) {
       fetch(`/api/v1/hr/employees/${empId}`)
@@ -286,19 +404,25 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
           }
         })
         .catch(() => {});
-
-      setHistoryLoading(true);
-      fetch(`/api/v1/hr/employees/${empId}/history`)
-        .then((r) => r.json())
-        .then((res) => {
-          if (res.success && res.data) {
-            setHistoryList(res.data);
-          }
-        })
-        .catch(() => {})
-        .finally(() => setHistoryLoading(false));
     }
   }, [empId, isInitialNew]);
+
+  // History reloads after each save so the tab never shows a stale list.
+  useEffect(() => {
+    if (!employeeDbId || employeeDbId.length <= 20) return;
+    let cancelled = false;
+    setHistoryLoading(true);
+    fetch(`/api/v1/hr/employees/${employeeDbId}/history`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (!cancelled && res.success && Array.isArray(res.data)) setHistoryList(res.data);
+      })
+      .catch(() => {})
+      .finally(() => !cancelled && setHistoryLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeDbId, historyVersion]);
 
   // Load departments and positions from database
   useEffect(() => {
@@ -354,30 +478,34 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
   }, [formData.id, empId]);
 
   // Filter piecework and attendance for this employee (with fallback to store)
+  // Without a badge, "undefined === undefined" would pull in every unbadged row.
+  const myBadge = formData.badgeNumber || formData.badgeNo || "";
   const employeePieceworks = useMemo(() => {
     if (apiPieceworks && apiPieceworks.length > 0) return apiPieceworks;
     return (piecework || []).filter(
       (pw) =>
-        pw.employeeId === formData.id ||
-        (pw.badgeNumber || pw.badgeNo) === (formData.badgeNumber || formData.badgeNo)
+        (formData.id && pw.employeeId === formData.id) ||
+        (myBadge && (pw.badgeNumber || pw.badgeNo) === myBadge)
     );
-  }, [apiPieceworks, piecework, formData]);
+  }, [apiPieceworks, piecework, formData.id, myBadge]);
 
   const totalPieceworkEarned = useMemo(() => {
-    return employeePieceworks.reduce((sum, pw) => sum + pw.totalAmount, 0);
+    return employeePieceworks.reduce((sum, pw) => sum + Number(pw.totalAmount || 0), 0);
   }, [employeePieceworks]);
 
   const employeeAttendance = useMemo(() => {
     if (apiAttendance && apiAttendance.length > 0) return apiAttendance;
     return (attendance || []).filter(
       (att) =>
-        att.employeeId === formData.id ||
-        (att.badgeNumber || att.badgeNo) === (formData.badgeNumber || formData.badgeNo)
+        (formData.id && att.employeeId === formData.id) ||
+        (myBadge && (att.badgeNumber || att.badgeNo) === myBadge)
     );
-  }, [apiAttendance, attendance, formData]);
+  }, [apiAttendance, attendance, formData.id, myBadge]);
 
+  // Rounded to avoid "37.300000000000004 soat" from float sums.
   const totalHoursWorked = useMemo(() => {
-    return employeeAttendance.reduce((sum, att) => sum + att.workedHours, 0);
+    const sum = employeeAttendance.reduce((s, att) => s + Number(att.workedHours || 0), 0);
+    return Math.round(sum * 10) / 10;
   }, [employeeAttendance]);
 
   const lateCount = useMemo(
@@ -456,7 +584,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       }
 
       if (col.id === "quantity") {
-        const q = row.completedQuantity ?? row.quantity ?? 0;
+        const q = Number(row.completedQuantity ?? row.quantity ?? 0);
         const u = row.unit || "dona";
         return {
           kind: GridCellKind.Text,
@@ -468,7 +596,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       }
 
       if (col.id === "rate") {
-        const r = row.pieceRate ?? row.rate ?? 0;
+        const r = Number(row.pieceRate ?? row.rate ?? 0);
         return {
           kind: GridCellKind.Text,
           data: String(r),
@@ -482,7 +610,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         return {
           kind: GridCellKind.Text,
           data: String(row.totalAmount),
-          displayData: `${(row.totalAmount || 0).toLocaleString("uz-UZ")} UZS`,
+          displayData: fmtMoney(row.totalAmount),
           allowOverlay: false,
           themeOverride: { textDark: "#059669", baseFontStyle: "bold 11px monospace" },
         };
@@ -683,30 +811,24 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > 10 * 1024 * 1024) {
       addNotification({
         title: "Xatolik",
-        description: "Fayl hajmi 5MB dan oshmasligi kerak.",
+        description: "Fayl hajmi 10MB dan oshmasligi kerak.",
         severity: "error",
       });
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      handleUpdate({ avatarUrl: result });
-      addNotification({
-        title: "Rasm yuklandi",
-        description: "Xodim fotosurati biriktirildi.",
-        severity: "success",
-      });
-    };
-    reader.readAsDataURL(file);
-
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+
+    resizeImage(file)
+      .then((dataUrl) => handleUpdate({ avatarUrl: dataUrl }))
+      .catch((err: Error) =>
+        addNotification({ title: "Xatolik", description: err.message, severity: "error" })
+      );
   };
 
   const handleRemovePhoto = (e: React.MouseEvent) => {
@@ -850,34 +972,58 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     return result;
   }, [plants, formData.plant]);
 
-  const handleSave = async (shouldClose = false) => {
-    const lName = formData.lastName?.trim() || "";
-    const fName = formData.firstName?.trim() || "";
-    const mName = formData.middleName?.trim() || "";
-    const dept = formData.departmentName?.trim() || formData.department?.trim() || "";
-    const pos = formData.positionTitle?.trim() || formData.position?.trim() || "";
-    const phone = formData.phone?.trim() || "";
-    const hireDate = formData.hireDate?.trim() || "";
+  // `overrides` lets actions like status toggles save a value in the same click,
+  // without waiting for setFormData to land.
+  const handleSave = async (shouldClose = false, overrides: Partial<EmployeeRecord> = {}) => {
+    if (saving) return false;
+    const data: EmployeeRecord = { ...formData, ...overrides };
+    const lName = data.lastName?.trim() || "";
+    const fName = data.firstName?.trim() || "";
+    const mName = data.middleName?.trim() || "";
+    const dept = data.departmentName?.trim() || data.department?.trim() || "";
+    const pos = data.positionTitle?.trim() || data.position?.trim() || "";
+    const phone = data.phone?.trim() || "";
+    const email = data.email?.trim() || "";
+    const hireDate = data.hireDate?.trim() || "";
+    const badge = data.badgeNumber?.trim() || data.badgeNo?.trim() || "";
+    const wage = normalizeWage(data.wageType);
+    const pinfl = (data.pinfl || "").trim();
 
     const computedFullName =
-      [lName, fName, mName].filter(Boolean).join(" ").trim() || formData.fullName?.trim() || "";
+      [lName, fName, mName].filter(Boolean).join(" ").trim() || data.fullName?.trim() || "";
 
     const newErrors: Record<string, string> = {};
+    if (!badge) newErrors.badgeNumber = "Tabel raqamini kiriting";
     if (!lName) newErrors.lastName = "Familiyani kiriting";
     if (!fName) newErrors.firstName = "Ismni kiriting";
-    if (!dept) newErrors.departmentName = "Sex / Bo'limni tanlang";
-    if (!pos) newErrors.positionTitle = "Lavozimni kiriting";
-    if (!phone || phone.replace(/\D/g, "").length < 7) {
-      newErrors.phone = "Telefon raqamini kiriting (kamida 7 ta raqam)";
+    if (!dept) newErrors.departmentName = "Bo'limni tanlang";
+    if (!pos) newErrors.positionTitle = "Lavozimni tanlang";
+    if (phone.replace(/\D/g, "").length < 7) newErrors.phone = "Telefon raqami to'liq emas";
+    if (email && !EMAIL_RE.test(email)) newErrors.email = "Pochta manzili noto'g'ri";
+    if (!hireDate) newErrors.hireDate = "Sanani tanlang";
+    if (pinfl && !/^\d{14}$/.test(pinfl)) newErrors.pinfl = "14 ta raqam bo'lishi kerak";
+    // Rates only matter while the person is paid; terminating must never be blocked by them.
+    if (normalizeStatus(data.status) !== "terminated") {
+      if ((wage === "salary" || wage === "mixed") && !(Number(data.baseSalary) > 0)) {
+        newErrors.baseSalary = "Okladni kiriting";
+      }
+      if (wage === "hourly" && !(Number(data.hourlyRate) > 0)) {
+        newErrors.hourlyRate = "Stavkani kiriting";
+      }
+      const mult = Number(data.pieceworkMultiplier ?? data.pieceworkRateMultiplier ?? 1);
+      if ((wage === "piecework" || wage === "mixed") && !(mult > 0)) {
+        newErrors.pieceworkMultiplier = "0 dan katta bo'lsin";
+      }
     }
-    if (!hireDate) newErrors.hireDate = "Qabul sanasini ko'rsating";
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
-      if (activeTab !== "overview") setActiveTab("overview");
+      const onWageTab = ["baseSalary", "hourlyRate", "pieceworkMultiplier"];
+      const firstKey = Object.keys(newErrors)[0];
+      setActiveTab(onWageTab.includes(firstKey) ? "wage" : "overview");
       addNotification({
-        title: "Majburiy maydonlar to'ldirilmadi",
-        description: "Iltimos, yulduzcha (*) bilan belgilangan maydonlarni to'ldiring.",
+        title: "Maydonlar to'ldirilmadi",
+        description: Object.values(newErrors).join(", "),
         severity: "error",
       });
       return false;
@@ -885,24 +1031,19 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
     setErrors({});
     setSaving(true);
-    let currentId = formData.id;
+    let currentId = data.id;
 
     try {
       const payload: Partial<EmployeeRecord> = {
-        ...formData,
+        ...data,
         firstName: fName,
         lastName: lName,
         middleName: mName || null,
         fullName: computedFullName,
-        avatarUrl: formData.avatarUrl || null,
-        badgeNumber:
-          formData.badgeNumber?.trim() ||
-          formData.badgeNo?.trim() ||
-          `EMP-${Date.now().toString().slice(-4)}`,
-        badgeNo:
-          formData.badgeNumber?.trim() ||
-          formData.badgeNo?.trim() ||
-          `EMP-${Date.now().toString().slice(-4)}`,
+        email: email || null,
+        avatarUrl: data.avatarUrl || null,
+        badgeNumber: badge,
+        badgeNo: badge,
       };
 
       if (isNewRecord) {
@@ -919,7 +1060,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
         const createdId = json.employeeId;
         const finalRecord: EmployeeRecord = {
-          ...formData,
+          ...data,
           ...payload,
           id: createdId,
         };
@@ -942,8 +1083,8 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
           severity: "success",
         });
       } else {
-        if (formData.id && formData.id.length > 20) {
-          const res = await fetch(`/api/v1/hr/employees/${formData.id}`, {
+        if (data.id && data.id.length > 20) {
+          const res = await fetch(`/api/v1/hr/employees/${data.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -953,7 +1094,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
             throw new Error(json.error || "Xodimni yangilashda xatolik yuz berdi");
           }
         }
-        const updatedRecord = { ...formData, ...payload };
+        const updatedRecord = { ...data, ...payload };
         setFormData(updatedRecord);
         upsertEmployee(updatedRecord);
         updateTabData(
@@ -970,7 +1111,9 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         });
       }
 
-      setTimeout(() => setIsSaved(false), 2500);
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setIsSaved(false), 2500);
+      setHistoryVersion((v) => v + 1);
 
       if (shouldClose) {
         closeTab(isNewRecord ? `emp-${currentId}` : tab.id);
@@ -989,21 +1132,60 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
   };
 
   const handlePostAndClose = () => {
-    handleSave(true);
+    void handleSave(true);
   };
 
-  const handleToggleStatus = (newStatus: "active" | "terminated") => {
-    handleUpdate({ status: newStatus });
-    addNotification({
-      title: newStatus === "terminated" ? "Xodim bo'shatildi" : "Xodim faollashtirildi",
-      description: `${formData.fullName} holati o'zgartirildi.`,
-      severity: newStatus === "terminated" ? "warning" : "success",
-    });
+  // Status change is saved right away: before, the button only flipped local state
+  // and announced "bo'shatildi" even though nothing reached the server.
+  const handleToggleStatus = async (newStatus: "active" | "terminated") => {
+    setConfirmTerminate(false);
+    await handleSave(false, { status: newStatus });
+  };
+
+  // Ctrl+S / Cmd+S saves the card.
+  const saveRef = useRef(handleSave);
+  useEffect(() => {
+    saveRef.current = handleSave;
+  });
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "s") return;
+      const root = rootRef.current;
+      // Only the visible tab reacts; hidden workspace tabs have no layout box.
+      if (!root || root.offsetParent === null) return;
+      e.preventDefault();
+      void saveRef.current(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const status = normalizeStatus(formData.status);
+  const wage = normalizeWage(formData.wageType);
+  const showSalary = wage === "salary" || wage === "mixed";
+  const showHourly = wage === "hourly";
+  const showPiece = wage === "piecework" || wage === "mixed";
+
+  const describeHistoryValue = (v: Record<string, unknown> | null) => {
+    if (!v) return "—";
+    const parts: string[] = [];
+    if (v.status) parts.push(STATUS_LABELS[normalizeStatus(String(v.status))]);
+    if (v.baseSalary != null) parts.push(fmtMoney(v.baseSalary));
+    if (v.positionId) {
+      const p = positionsList.find((x) => x.id === v.positionId);
+      parts.push(p?.title || "Lavozim");
+    }
+    if (v.departmentId) {
+      const d = departmentsList.find((x) => x.id === v.departmentId);
+      parts.push(d?.name || "Bo'lim");
+    }
+    return parts.join(" · ") || "—";
   };
 
   const navItems: DocumentNavItem[] = [
-    { id: "overview", label: "Umumiy ma'lumotlar", icon: User },
-    { id: "wage", label: "Ish haqi va stavkalar", icon: CreditCard },
+    { id: "overview", label: "Asosiy", icon: User },
+    { id: "wage", label: "Ish haqi", icon: CreditCard },
     {
       id: "piecework",
       label: "Ishbay naryadlar",
@@ -1016,7 +1198,12 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
       icon: CalendarClock,
       badge: employeeAttendance.length > 0 ? `${totalHoursWorked} soat` : null,
     },
-    { id: "skills", label: "Malaka va ruxsatnomalar", icon: Award },
+    {
+      id: "skills",
+      label: "Malaka",
+      icon: Award,
+      badge: (formData.skills || []).length > 0 ? String((formData.skills || []).length) : null,
+    },
     ...(employeeDbId ? [{ id: "ledger", label: "Hisob", icon: Wallet }] : []),
     {
       id: "history",
@@ -1026,47 +1213,52 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
     },
   ];
 
+  const fullNameShown = (formData.fullName || "").trim();
+  const skills = formData.skills || [];
+
   return (
-    <div className="flex h-full flex-col bg-background text-foreground text-xs select-none">
+    <div ref={rootRef} className="flex h-full flex-col bg-background text-foreground text-xs">
       {/* ── Level 2: Document Header ── */}
       <DocumentHeader
         icon={User}
-        title={formData.fullName.trim() || (isNewRecord ? "Yangi xodim (Qoralama)" : "Nomsiz xodim")}
+        title={fullNameShown || (isNewRecord ? "Yangi xodim" : "Nomsiz xodim")}
         docNo={formData.badgeNumber || formData.badgeNo || "EMP-0000"}
-        status={isNewRecord ? "Qoralama" : formData.status}
+        status={isNewRecord ? "Qoralama" : STATUS_LABELS[status]}
         actions={
           <div className="flex items-center gap-1.5">
             {!isNewRecord && (
               <>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
-                  className="h-7 text-xs gap-1"
+                  className="h-7 w-7 p-0"
                   onClick={() => window.print()}
+                  title="Chop etish"
                 >
                   <Printer className="size-3.5" />
-                  Chop etish
                 </Button>
 
-                {formData.status === "active" ? (
+                {status === "terminated" ? (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-7 text-xs text-destructive hover:bg-destructive/10 gap-1"
-                    onClick={() => handleToggleStatus("terminated")}
+                    className="h-7 text-xs gap-1"
+                    disabled={saving}
+                    onClick={() => void handleToggleStatus("active")}
                   >
-                    <UserX className="size-3.5" />
-                    Bo'shatish
+                    <UserCheck className="size-3.5" />
+                    Faollashtirish
                   </Button>
                 ) : (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-7 text-xs text-emerald-600 hover:bg-emerald-50 gap-1"
-                    onClick={() => handleToggleStatus("active")}
+                    className="h-7 text-xs text-destructive hover:bg-destructive/10 gap-1"
+                    disabled={saving}
+                    onClick={() => setConfirmTerminate(true)}
                   >
-                    <UserCheck className="size-3.5" />
-                    Faollashtirish
+                    <UserX className="size-3.5" />
+                    Bo'shatish
                   </Button>
                 )}
               </>
@@ -1077,20 +1269,22 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
               size="sm"
               className="h-7 text-xs gap-1"
               disabled={saving}
-              onClick={() => handleSave(false)}
+              onClick={() => void handleSave(false)}
+              title="Saqlash (Ctrl+S)"
             >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+              {saving ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : isSaved ? (
+                <CheckCircle2 className="size-3.5 text-emerald-600" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
               {isSaved ? "Saqlandi" : "Saqlash"}
             </Button>
 
-            <Button
-              size="sm"
-              className="h-7 text-xs bg-primary text-primary-foreground gap-1"
-              disabled={saving}
-              onClick={handlePostAndClose}
-            >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
-              O'tkazish va yopish
+            <Button size="sm" className="h-7 text-xs gap-1" disabled={saving} onClick={handlePostAndClose}>
+              <CheckCircle2 className="size-3.5" />
+              Saqlab yopish
             </Button>
           </div>
         }
@@ -1098,56 +1292,57 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
 
       {/* ── Main Layout: Sidebar + Document Workspace ── */}
       <div className="flex-1 flex flex-row min-h-0 min-w-0 overflow-hidden">
-        {/* Left Document Sidebar */}
         <DocumentSidebar
           summary={
             <SidebarSummaryCard
               avatar={
                 formData.avatarUrl ? (
                   <Avatar size="sm" className="size-8">
-                    <AvatarImage src={formData.avatarUrl} alt={formData.fullName} className="object-cover" />
+                    <AvatarImage src={formData.avatarUrl} alt={fullNameShown} className="object-cover" />
                     <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
-                      {getInitials(formData.fullName)}
+                      {getInitials(fullNameShown)}
                     </AvatarFallback>
                   </Avatar>
                 ) : undefined
               }
               icon={!formData.avatarUrl ? User : undefined}
-              title={formData.fullName.trim() || (isNewRecord ? "Yangi xodim" : "Nomsiz xodim")}
-              subtitle={formData.positionTitle || formData.position || "Lavozim biriktirilmagan"}
+              title={fullNameShown || (isNewRecord ? "Yangi xodim" : "Nomsiz xodim")}
+              subtitle={formData.positionTitle || formData.position || "Lavozim yo'q"}
             >
-              <InfoRow label="Sex/Bo'lim">{formData.departmentName || formData.department || "—"}</InfoRow>
-              <InfoRow label="Tashkilot / Filial">{formData.plant || "PrintGoo Bosh Zavod"}</InfoRow>
-              <InfoRow label="To'lov turi">{formData.wageType}</InfoRow>
-              <InfoRow label="Oklad">
-                <span className="font-mono font-medium">
-                  {Number(formData.baseSalary || 0).toLocaleString("uz-UZ")} UZS
-                </span>
-              </InfoRow>
+              <InfoRow label="Bo'lim">{formData.departmentName || formData.department || "—"}</InfoRow>
+              <InfoRow label="Filial">{formData.plant || "—"}</InfoRow>
+              <InfoRow label="To'lov">{WAGE_LABELS[wage]}</InfoRow>
+              {showSalary && (
+                <InfoRow label="Oklad">
+                  <span className="font-mono font-medium">{fmtMoney(formData.baseSalary)}</span>
+                </InfoRow>
+              )}
+              {showHourly && (
+                <InfoRow label="Soatbay">
+                  <span className="font-mono font-medium">{fmtMoney(formData.hourlyRate)}</span>
+                </InfoRow>
+              )}
             </SidebarSummaryCard>
           }
-          sectionsLabel="Hujjat bo'limlari"
+          sectionsLabel="Bo'limlar"
           items={navItems}
           activeId={activeTab}
           onSelect={setActiveTab}
           footer={
-            <div className="space-y-1.5 text-[11px]">
-              <div className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
-                Oylik ko'rsatkichlar
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Ishbay summa:</span>
+            <div className="space-y-1 text-[11px]">
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Ishbay</span>
                 <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">
-                  {totalPieceworkEarned.toLocaleString("uz-UZ")} UZS
+                  {fmtMoney(totalPieceworkEarned)}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Ish soatlari:</span>
-                <span className="font-mono font-medium">{totalHoursWorked} soat</span>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Ish soati</span>
+                <span className="font-mono font-medium">{totalHoursWorked}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Smena:</span>
-                <span className="text-[10px] text-primary">{formData.currentShift}</span>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Smena</span>
+                <span className="truncate">{SHIFT_LABELS[formData.currentShift || "day"] || formData.currentShift}</span>
               </div>
             </div>
           }
@@ -1156,64 +1351,57 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
         {/* Right Content Area: Level 3 Tabs */}
         <div
           className={cn(
-            "flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden",
+            "flex-1 min-w-0 min-h-0 flex flex-col",
             activeTab === "piecework" || activeTab === "attendance"
-              ? "p-0"
-              : "overflow-y-auto p-4 space-y-4"
+              ? "p-0 overflow-hidden"
+              : "overflow-y-auto p-3 gap-3"
           )}
         >
           {/* TAB 1: OVERVIEW */}
           {activeTab === "overview" && (
-            <div className="space-y-4 w-full">
-              <Card className="w-full">
-                <CardHeader className="py-3 px-4 border-b">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <User className="size-4 text-primary" />
-                    Xodim ma'lumotlari
+            <>
+              <Card className="w-full gap-0 py-0">
+                <CardHeader className="py-2 px-3 border-b">
+                  <CardTitle className="text-xs font-semibold flex items-center gap-2">
+                    <User className="size-3.5 text-primary" />
+                    Asosiy
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4">
+                <CardContent className="p-3">
                   <div className="flex flex-col sm:flex-row gap-4 items-start">
-                    {/* 3x4 Photo Container */}
-                    <div className="flex flex-col items-center gap-1.5 shrink-0 self-center sm:self-start">
-                      <div
+                    {/* 3x4 Photo */}
+                    <div className="flex flex-col items-center gap-1 shrink-0 self-center sm:self-start">
+                      <button
+                        type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        className="group relative w-28 h-36 rounded-md border-2 border-dashed border-border hover:border-primary/60 bg-muted/30 hover:bg-muted/50 cursor-pointer overflow-hidden flex flex-col items-center justify-center transition-colors"
-                        title="Fotosurat yuklash uchun bosing"
+                        className="group relative w-24 h-32 rounded-md border border-dashed border-border hover:border-primary/60 bg-muted/30 overflow-hidden flex flex-col items-center justify-center transition-colors"
+                        title={formData.avatarUrl ? "Rasmni almashtirish" : "Rasm yuklash (3x4)"}
                       >
                         {formData.avatarUrl ? (
                           <>
-                            <img
-                              src={formData.avatarUrl}
-                              alt={formData.fullName}
-                              className="w-full h-full object-cover"
-                            />
-                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 text-white text-[11px] font-medium transition-opacity">
+                            <img src={formData.avatarUrl} alt={fullNameShown} className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
                               <Camera className="size-4" />
-                              <span>O'zgartirish</span>
                             </div>
                           </>
                         ) : (
-                          <div className="flex flex-col items-center justify-center p-2 text-center text-muted-foreground gap-1.5">
-                            <Camera className="size-6 text-muted-foreground/70 group-hover:text-primary transition-colors" />
-                            <span className="text-[10px] leading-tight font-medium">Fotosurat (3x4)</span>
-                            <span className="text-[9px] text-muted-foreground/60">Yuklash</span>
+                          <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                            <Camera className="size-5 group-hover:text-primary transition-colors" />
+                            <span className="text-[10px] font-medium">3x4</span>
                           </div>
                         )}
-
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          className="hidden"
-                          onChange={handlePhotoSelect}
-                        />
-                      </div>
-
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={handlePhotoSelect}
+                      />
                       <div className="flex items-center gap-1">
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
                           className="h-6 text-[10px] px-2 gap-1"
                           onClick={() => fileInputRef.current?.click()}
@@ -1226,7 +1414,7 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="h-6 text-[10px] px-1.5 text-destructive hover:bg-destructive/10"
+                            className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10"
                             onClick={handleRemovePhoto}
                             title="Rasmni o'chirish"
                           >
@@ -1234,161 +1422,65 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                           </Button>
                         )}
                       </div>
-
-                      {!isNewRecord && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-[10px] px-2 gap-1 w-full text-blue-600 border-blue-200 hover:bg-blue-50 dark:border-blue-900 dark:hover:bg-blue-950 mt-0.5"
-                          disabled={syncingBiometric}
-                          onClick={handleSyncToTerminals}
-                          title="Xodim yuzini Hikvision turniketlariga yuborish"
-                        >
-                          {syncingBiometric ? (
-                            <Loader2 className="size-3 animate-spin" />
-                          ) : (
-                            <UploadCloud className="size-3" />
-                          )}
-                          Face ID yuklash
-                        </Button>
-                      )}
-
-                      {!isNewRecord && (
-                        <div className="flex items-center gap-1 w-full" title="Sex terminali (kiosk) uchun PIN, 4 raqam">
-                          <Input
-                            value={terminalPin}
-                            onChange={(e) => setTerminalPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && terminalPin.length === 4) void saveTerminalPin(terminalPin);
-                            }}
-                            type="password"
-                            inputMode="numeric"
-                            autoComplete="new-password"
-                            placeholder={hasTerminalPin ? "PIN ••••" : "PIN"}
-                            className="h-6 text-[10px] px-1.5 font-mono"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-6 px-1.5 shrink-0"
-                            disabled={savingPin || terminalPin.length !== 4}
-                            onClick={() => void saveTerminalPin(terminalPin)}
-                            title="PIN saqlash"
-                          >
-                            {savingPin ? <Loader2 className="size-3 animate-spin" /> : <KeyRound className="size-3" />}
-                          </Button>
-                          {hasTerminalPin && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-1.5 shrink-0 text-destructive hover:bg-destructive/10"
-                              disabled={savingPin}
-                              onClick={() => void saveTerminalPin(null)}
-                              title="PIN o'chirish"
-                            >
-                              <X className="size-3" />
-                            </Button>
-                          )}
-                        </div>
-                      )}
                     </div>
 
                     {/* Form Fields Grid */}
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 w-full">
-                      <div>
-                        <Label className="text-xs">Tabel raqami *</Label>
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-3 gap-y-2.5 w-full">
+                      <Field label="Familiya" required error={errors.lastName}>
                         <Input
-                          value={formData.badgeNumber || formData.badgeNo || ""}
-                          onChange={(e) =>
-                            handleUpdate({ badgeNumber: e.target.value, badgeNo: e.target.value })
-                          }
-                          className="h-8 font-mono font-semibold"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <Label className="text-xs">Familiya *</Label>
-                          {errors.lastName && (
-                            <span className="text-[10px] text-destructive font-medium">
-                              {errors.lastName}
-                            </span>
-                          )}
-                        </div>
-                        <Input
+                          autoFocus={isNewRecord}
                           value={formData.lastName || ""}
                           onChange={(e) => {
                             const lName = e.target.value;
-                            const fName = formData.firstName || "";
-                            const mName = formData.middleName || "";
-                            const full = [lName, fName, mName].filter(Boolean).join(" ").trim();
                             handleUpdate({
                               lastName: lName,
-                              fullName: full,
+                              fullName: [lName, formData.firstName, formData.middleName].filter(Boolean).join(" ").trim(),
                             });
                           }}
-                          placeholder="Masalan: Karimov"
-                          className={`h-8 font-medium ${errors.lastName ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                          placeholder="Karimov"
+                          className={cn("h-7 text-xs font-medium", errCls(errors.lastName))}
                         />
-                      </div>
+                      </Field>
 
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <Label className="text-xs">Ism *</Label>
-                          {errors.firstName && (
-                            <span className="text-[10px] text-destructive font-medium">
-                              {errors.firstName}
-                            </span>
-                          )}
-                        </div>
+                      <Field label="Ism" required error={errors.firstName}>
                         <Input
                           value={formData.firstName || ""}
                           onChange={(e) => {
                             const fName = e.target.value;
-                            const lName = formData.lastName || "";
-                            const mName = formData.middleName || "";
-                            const full = [lName, fName, mName].filter(Boolean).join(" ").trim();
                             handleUpdate({
                               firstName: fName,
-                              fullName: full,
+                              fullName: [formData.lastName, fName, formData.middleName].filter(Boolean).join(" ").trim(),
                             });
                           }}
-                          placeholder="Masalan: Sardor"
-                          className={`h-8 font-medium ${errors.firstName ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                          placeholder="Sardor"
+                          className={cn("h-7 text-xs font-medium", errCls(errors.firstName))}
                         />
-                      </div>
+                      </Field>
 
-                      <div>
-                        <Label className="text-xs mb-1 block">Otasining ismi</Label>
+                      <Field label="Otasining ismi">
                         <Input
                           value={formData.middleName || ""}
                           onChange={(e) => {
                             const mName = e.target.value;
-                            const lName = formData.lastName || "";
-                            const fName = formData.firstName || "";
-                            const full = [lName, fName, mName].filter(Boolean).join(" ").trim();
                             handleUpdate({
                               middleName: mName,
-                              fullName: full,
+                              fullName: [formData.lastName, formData.firstName, mName].filter(Boolean).join(" ").trim(),
                             });
                           }}
-                          placeholder="Masalan: Anvarovich"
-                          className="h-8 font-medium"
+                          placeholder="Anvarovich"
+                          className="h-7 text-xs font-medium"
                         />
-                      </div>
+                      </Field>
 
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <Label className="text-xs">Sex / Bo'lim *</Label>
-                          {errors.departmentName && (
-                            <span className="text-[10px] text-destructive font-medium">
-                              {errors.departmentName}
-                            </span>
-                          )}
-                        </div>
+                      <Field label="Tabel raqami" required error={errors.badgeNumber}>
+                        <Input
+                          value={formData.badgeNumber || formData.badgeNo || ""}
+                          onChange={(e) => handleUpdate({ badgeNumber: e.target.value, badgeNo: e.target.value })}
+                          className={cn("h-7 text-xs font-mono font-semibold", errCls(errors.badgeNumber))}
+                        />
+                      </Field>
+
+                      <Field label="Bo'lim" required error={errors.departmentName}>
                         <ComboboxSelect
                           items={departmentOptions}
                           value={formData.departmentName || formData.department || ""}
@@ -1407,13 +1499,10 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             }
                           }}
                           allowCustom
-                          placeholder="Bo'limni tanlang..."
-                          className={cn(
-                            "h-8 text-xs bg-muted/20 w-full font-medium",
-                            errors.departmentName && "border-destructive focus-visible:ring-destructive"
-                          )}
+                          placeholder="Tanlang"
+                          className={cn("h-7 text-xs w-full font-medium", errCls(errors.departmentName))}
                           contentClassName="w-[320px]"
-                          actionLabel="Yangi bo'lim yaratish..."
+                          actionLabel="Yangi bo'lim"
                           onAction={(query) => {
                             openTab({
                               id: `dept-new-${Date.now()}`,
@@ -1432,17 +1521,9 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             </div>
                           )}
                         />
-                      </div>
+                      </Field>
 
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <Label className="text-xs">Lavozim *</Label>
-                          {errors.positionTitle && (
-                            <span className="text-[10px] text-destructive font-medium">
-                              {errors.positionTitle}
-                            </span>
-                          )}
-                        </div>
+                      <Field label="Lavozim" required error={errors.positionTitle}>
                         <ComboboxSelect
                           items={positionOptions}
                           value={formData.positionTitle || formData.position || ""}
@@ -1458,13 +1539,10 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             }
                           }}
                           allowCustom
-                          placeholder="Lavozimni tanlang..."
-                          className={cn(
-                            "h-8 text-xs bg-muted/20 w-full font-medium",
-                            errors.positionTitle && "border-destructive focus-visible:ring-destructive"
-                          )}
+                          placeholder="Tanlang"
+                          className={cn("h-7 text-xs w-full font-medium", errCls(errors.positionTitle))}
                           contentClassName="w-[320px]"
-                          actionLabel="Yangi lavozim yaratish..."
+                          actionLabel="Yangi lavozim"
                           onAction={(query) => {
                             openTab({
                               id: `pos-new-${Date.now()}`,
@@ -1483,249 +1561,307 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
                             </div>
                           )}
                         />
-                      </div>
+                      </Field>
 
-                      <div>
-                        <Label className="text-xs mb-1 block">Holati *</Label>
+                      <Field label="Holati" required>
                         <Select
-                          value={formData.status}
+                          value={status}
                           onValueChange={(val) => {
-                            if (val) handleUpdate({ status: val as any });
+                            if (val) handleUpdate({ status: val as NormalizedStatus });
                           }}
                         >
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
+                          <SelectTrigger className="h-7 text-xs w-full">
+                            <SelectValue>{STATUS_LABELS[status]}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="active">Faol</SelectItem>
-                            <SelectItem value="probation">Sinov</SelectItem>
-                            <SelectItem value="on_leave">Mehnat ta'tilida</SelectItem>
-                            <SelectItem value="terminated">Ishdan bo'shatilgan</SelectItem>
+                            {(Object.keys(STATUS_LABELS) as NormalizedStatus[]).map((k) => (
+                              <SelectItem key={k} value={k}>
+                                {STATUS_LABELS[k]}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
-                      </div>
+                      </Field>
 
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <Label className="text-xs">Telefon raqami *</Label>
-                          {errors.phone && (
-                            <span className="text-[10px] text-destructive font-medium">
-                              {errors.phone}
-                            </span>
-                          )}
-                        </div>
+                      <Field label="Qabul sanasi" required error={errors.hireDate}>
+                        <DatePicker
+                          value={formData.hireDate}
+                          onChange={(val) => handleUpdate({ hireDate: val })}
+                          className={cn("h-7 text-xs font-mono", errCls(errors.hireDate))}
+                        />
+                      </Field>
+
+                      <Field label="Telefon" required error={errors.phone}>
                         <PhoneInput
                           value={formData.phone || ""}
                           onChange={(e) => handleUpdate({ phone: e.target.value })}
                           placeholder="+998 90 123-45-67"
-                          className={`h-8 font-mono ${errors.phone ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                          className={cn("h-7 text-xs font-mono", errCls(errors.phone))}
                         />
-                      </div>
+                      </Field>
 
-                      <div>
-                        <Label className="text-xs mb-1 block">Elektron pochta</Label>
+                      <Field label="Pochta" error={errors.email}>
                         <Input
+                          type="email"
                           value={formData.email || ""}
                           onChange={(e) => handleUpdate({ email: e.target.value })}
-                          className="h-8"
+                          className={cn("h-7 text-xs", errCls(errors.email))}
                           placeholder="xodim@printgoo.uz"
                         />
-                      </div>
+                      </Field>
 
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <Label className="text-xs">Ishga qabul sanasi *</Label>
-                          {errors.hireDate && (
-                            <span className="text-[10px] text-destructive font-medium">
-                              {errors.hireDate}
-                            </span>
-                          )}
-                        </div>
-                        <DatePicker
-                          value={formData.hireDate}
-                          onChange={(val) => handleUpdate({ hireDate: val })}
-                          className={`h-8 font-mono ${errors.hireDate ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                        />
-                      </div>
-
-                      <div>
-                        <Label className="text-xs">Smena grafigi *</Label>
+                      <Field label="Smena" required>
                         <Select
                           value={formData.currentShift || "day"}
                           onValueChange={(val) => {
                             if (val) handleUpdate({ currentShift: val });
                           }}
                         >
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
+                          <SelectTrigger className="h-7 text-xs w-full">
+                            <SelectValue>
+                              {SHIFT_LABELS[formData.currentShift || "day"] || formData.currentShift}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="day">Kunduzgi smena A (08:00–20:00)</SelectItem>
-                            <SelectItem value="night">Tungi smena B (20:00–08:00)</SelectItem>
-                            <SelectItem value="daily">Ofis / Standart (09:00–18:00)</SelectItem>
+                            {Object.entries(SHIFT_LABELS).map(([k, v]) => (
+                              <SelectItem key={k} value={k}>
+                                {v}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
-                      </div>
+                      </Field>
+
+                      <Field label="Tashkilot">
+                        <OrgUnitSelect
+                          branchId={formData.branchId}
+                          companyId={formData.companyId}
+                          value={formData.plant}
+                          onValueChange={(val) => {
+                            handleUpdate({
+                              branchId: val.branchId,
+                              companyId: val.companyId,
+                              plant: val.label,
+                            });
+                          }}
+                          placeholder="Tanlang"
+                        />
+                      </Field>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Passport & Legal Data */}
-              <Card className="w-full">
-                <CardHeader className="py-3 px-4 border-b">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <ShieldCheck className="size-4 text-primary" />
-                    Pasport va soliq rekvizitlari
+              <Card className="w-full gap-0 py-0">
+                <CardHeader className="py-2 px-3 border-b">
+                  <CardTitle className="text-xs font-semibold flex items-center gap-2">
+                    <ShieldCheck className="size-3.5 text-primary" />
+                    Rekvizitlar
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-                  <div>
-                    <Label className="text-xs">Pasport seriya va raqam</Label>
+                <CardContent className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-3 gap-y-2.5">
+                  <Field label="Pasport">
                     <Input
                       value={formData.passportNo || formData.passportNumber || ""}
-                      onChange={(e) =>
-                        handleUpdate({ passportNo: e.target.value, passportNumber: e.target.value })
-                      }
-                      className="h-8 font-mono uppercase"
+                      onChange={(e) => {
+                        const v = e.target.value.toUpperCase();
+                        handleUpdate({ passportNo: v, passportNumber: v });
+                      }}
+                      className="h-7 text-xs font-mono"
+                      maxLength={12}
                       placeholder="AA 1234567"
                     />
-                  </div>
+                  </Field>
 
-                  <div>
-                    <Label className="text-xs">JSHSHIR (PINFL)</Label>
+                  <Field label="JSHSHIR" error={errors.pinfl}>
                     <Input
                       value={formData.pinfl || ""}
-                      onChange={(e) => handleUpdate({ pinfl: e.target.value })}
-                      className="h-8 font-mono"
-                      maxLength={14}
-                      placeholder="31502910010023"
+                      onChange={(e) => handleUpdate({ pinfl: e.target.value.replace(/\D/g, "").slice(0, 14) })}
+                      inputMode="numeric"
+                      className={cn("h-7 text-xs font-mono", errCls(errors.pinfl))}
+                      placeholder="14 raqam"
                     />
-                  </div>
+                  </Field>
 
-                  <div>
-                    <Label className="text-xs mb-1 block">Tashkilot</Label>
-                    <OrgUnitSelect
-                      branchId={formData.branchId}
-                      companyId={formData.companyId}
-                      value={formData.plant}
-                      onValueChange={(val) => {
-                        handleUpdate({
-                          branchId: val.branchId,
-                          companyId: val.companyId,
-                          plant: val.label,
-                        });
-                      }}
-                      placeholder="Tashkilotni tanlang..."
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2 md:col-span-3 xl:col-span-4">
-                    <Label className="text-xs">Qo'shimcha izohlar</Label>
-                    <Input
+                  <Field label="Izoh" className="sm:col-span-2 lg:col-span-3 2xl:col-span-4">
+                    <Textarea
                       value={formData.notes || ""}
                       onChange={(e) => handleUpdate({ notes: e.target.value })}
-                      className="h-8"
-                      placeholder="Xodim bo'yicha maxsus ko'rsatmalar..."
+                      className="min-h-12 text-xs"
+                      rows={2}
                     />
-                  </div>
+                  </Field>
                 </CardContent>
               </Card>
-            </div>
+
+              {/* Shop-floor terminal access */}
+              {!isNewRecord && (
+                <Card className="w-full gap-0 py-0">
+                  <CardHeader className="py-2 px-3 border-b">
+                    <CardTitle className="text-xs font-semibold flex items-center gap-2">
+                      <Fingerprint className="size-3.5 text-primary" />
+                      Terminal
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-3 gap-y-2.5">
+                    <Field label="Kiosk PIN">
+                      <div className="flex items-center gap-1">
+                        <Input
+                          value={terminalPin}
+                          onChange={(e) => setTerminalPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && terminalPin.length === 4) void saveTerminalPin(terminalPin);
+                          }}
+                          type="password"
+                          inputMode="numeric"
+                          autoComplete="new-password"
+                          placeholder={hasTerminalPin ? "O'rnatilgan" : "4 raqam"}
+                          className="h-7 text-xs font-mono"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 w-7 p-0 shrink-0"
+                          disabled={savingPin || terminalPin.length !== 4}
+                          onClick={() => void saveTerminalPin(terminalPin)}
+                          title="PIN saqlash"
+                        >
+                          {savingPin ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
+                        </Button>
+                        {hasTerminalPin && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 shrink-0 text-destructive hover:bg-destructive/10"
+                            disabled={savingPin}
+                            onClick={() => void saveTerminalPin(null)}
+                            title="PIN o'chirish"
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </Field>
+
+                    <Field label="Face ID">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1 w-full justify-start"
+                        disabled={syncingBiometric || !formData.avatarUrl}
+                        onClick={handleSyncToTerminals}
+                        title={formData.avatarUrl ? "Turniketlarga yuborish" : "Avval rasm yuklang"}
+                      >
+                        {syncingBiometric ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <UploadCloud className="size-3.5" />
+                        )}
+                        Turniketga yuborish
+                      </Button>
+                    </Field>
+                  </CardContent>
+                </Card>
+              )}
+            </>
           )}
 
           {/* TAB 2: WAGE & RATES */}
           {activeTab === "wage" && (
-            <div className="space-y-4 w-full">
-              <Card className="w-full">
-                <CardHeader className="py-3 px-4 border-b">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <CreditCard className="size-4 text-emerald-600" />
-                    Mehnatga haq to'lash stavkalari
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-                  <div>
-                    <Label className="text-xs">To'lov shakli *</Label>
+            <Card className="w-full gap-0 py-0">
+              <CardHeader className="py-2 px-3 border-b">
+                <CardTitle className="text-xs font-semibold flex items-center gap-2">
+                  <CreditCard className="size-3.5 text-primary" />
+                  Stavkalar
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-3 gap-y-2.5">
+                  <Field label="To'lov shakli" required>
                     <Select
-                      value={formData.wageType}
+                      value={wage}
                       onValueChange={(val) => {
-                        if (val) handleUpdate({ wageType: val as any });
+                        if (val) handleUpdate({ wageType: val as NormalizedWage });
                       }}
                     >
-                      <SelectTrigger className="h-8">
-                        <SelectValue />
+                      <SelectTrigger className="h-7 text-xs w-full">
+                        <SelectValue>{WAGE_LABELS[wage]}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="piecework">Ishbay</SelectItem>
-                        <SelectItem value="mixed">Aralash</SelectItem>
-                        <SelectItem value="salary">Oklad</SelectItem>
-                        <SelectItem value="hourly">Soatbay</SelectItem>
+                        {(Object.keys(WAGE_LABELS) as NormalizedWage[]).map((k) => (
+                          <SelectItem key={k} value={k}>
+                            {WAGE_LABELS[k]}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  </Field>
 
-                  <div>
-                    <Label className="text-xs">Asosiy oklad (UZS) *</Label>
-                    <MoneyInput
-                      thousandSeparator=" "
-                      decimalScale={0}
-                      value={formData.baseSalary}
-                      onValueChange={(values) => handleUpdate({ baseSalary: values.floatValue ?? 0 })}
-                      className="h-8 font-mono font-semibold"
-                    />
-                  </div>
+                  {showSalary && (
+                    <Field label="Oklad, UZS" required error={errors.baseSalary}>
+                      <MoneyInput
+                        thousandSeparator=" "
+                        decimalScale={0}
+                        value={formData.baseSalary}
+                        onValueChange={(values) => handleUpdate({ baseSalary: values.floatValue ?? 0 })}
+                        className={cn("h-7 text-xs font-semibold", errCls(errors.baseSalary))}
+                      />
+                    </Field>
+                  )}
 
-                  <div>
-                    <Label className="text-xs">Ishbay koeffitsiyenti (K-tarif)</Label>
-                    <Input
-                      type="number"
-                      step="0.05"
-                      value={formData.pieceworkMultiplier || formData.pieceworkRateMultiplier || 1.0}
-                      onChange={(e) =>
-                        handleUpdate({
-                          pieceworkMultiplier: Number(e.target.value) || 1.0,
-                          pieceworkRateMultiplier: Number(e.target.value) || 1.0,
-                        })
-                      }
-                      className="h-8 font-mono"
-                    />
-                  </div>
+                  {showHourly && (
+                    <Field label="Soatbay, UZS" required error={errors.hourlyRate}>
+                      <MoneyInput
+                        thousandSeparator=" "
+                        decimalScale={0}
+                        value={formData.hourlyRate}
+                        onValueChange={(values) => handleUpdate({ hourlyRate: values.floatValue ?? 0 })}
+                        className={cn("h-7 text-xs", errCls(errors.hourlyRate))}
+                      />
+                    </Field>
+                  )}
 
-                  <div>
-                    <Label className="text-xs">Soatbay stavka (UZS/soat)</Label>
-                    <MoneyInput
-                      thousandSeparator=" "
-                      decimalScale={0}
-                      value={formData.hourlyRate}
-                      onValueChange={(values) => handleUpdate({ hourlyRate: values.floatValue ?? 0 })}
-                      className="h-8 font-mono"
-                    />
-                  </div>
+                  {showPiece && (
+                    <Field label="K-tarif" required error={errors.pieceworkMultiplier}>
+                      <MoneyInput
+                        thousandSeparator=""
+                        decimalScale={2}
+                        value={formData.pieceworkMultiplier ?? formData.pieceworkRateMultiplier ?? 1}
+                        onValueChange={(values) => {
+                          const v = values.floatValue ?? 0;
+                          handleUpdate({ pieceworkMultiplier: v, pieceworkRateMultiplier: v });
+                        }}
+                        className={cn("h-7 text-xs", errCls(errors.pieceworkMultiplier))}
+                      />
+                    </Field>
+                  )}
 
-                  <div className="sm:col-span-2 md:col-span-2 xl:col-span-2">
-                    <Label className="text-xs">Ish haqi bank kartasi (Uzcard / Humo)</Label>
+                  <Field label="Bank kartasi">
                     <Input
                       value={formData.bankCardNo || ""}
-                      onChange={(e) => handleUpdate({ bankCardNo: e.target.value })}
-                      className="h-8 font-mono"
-                      placeholder="8600 **** **** ****"
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/\D/g, "").slice(0, 16);
+                        handleUpdate({ bankCardNo: digits.replace(/(\d{4})(?=\d)/g, "$1 ") });
+                      }}
+                      inputMode="numeric"
+                      className="h-7 text-xs font-mono"
+                      placeholder="8600 0000 0000 0000"
                     />
-                  </div>
-                </CardContent>
-              </Card>
+                  </Field>
+                </div>
 
-              {/* Wage Calculation Rules Box */}
-              <div className="p-3.5 rounded border bg-muted/20 space-y-1.5 w-full">
-                <div className="font-semibold text-xs text-foreground flex items-center gap-1.5">
-                  <CheckCircle2 className="size-3.5 text-primary" />
-                  Ishbay hisoblash qoidasi
+                <div className="rounded border bg-muted/30 px-2.5 py-1.5 text-[11px] font-mono text-muted-foreground">
+                  {wage === "salary" && "Maosh = Oklad + Bonus − Ushlanma"}
+                  {wage === "hourly" && "Maosh = Soat × Stavka + Bonus − Ushlanma"}
+                  {wage === "piecework" && "Maosh = Σ(Hajm × Tarif) × K + Bonus − Ushlanma"}
+                  {wage === "mixed" && "Maosh = Oklad + Σ(Hajm × Tarif) × K + Bonus − Ushlanma"}
                 </div>
-                <div className="text-[11px] text-muted-foreground leading-relaxed font-mono">
-                  Jami maosh = Asosiy oklad + (Bajarilgan hajm × Tarif × K-tarif) + Bonuslar - Ushlanmalar
-                </div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* TAB 3: PIECEWORK HISTORY (GLIDE DATA GRID) */}
@@ -1733,234 +1869,242 @@ export function EmployeeDetail({ tab }: EmployeeDetailProps) {
             <div className="flex flex-col flex-1 h-full min-h-0 w-full overflow-hidden">
               <div className="h-9 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
-                  <Layers className="size-4 text-primary" />
-                  <span className="font-semibold text-xs">Bajarilgan ishbay naryadlar</span>
+                  <Layers className="size-3.5 text-primary" />
+                  <span className="font-semibold text-xs">Ishbay naryadlar</span>
                   <Badge variant="outline" className="font-mono text-[10px] h-5">
-                    {employeePieceworks.length} ta yozuv
+                    {employeePieceworks.length}
                   </Badge>
-                  <span className="text-[11px] text-muted-foreground font-mono hidden md:inline ml-1">
-                    2 marta bosish — Work Order ochish
-                  </span>
                 </div>
-                <Badge
-                  variant="outline"
-                  className="font-mono text-xs bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-300"
-                >
-                  Jami: {totalPieceworkEarned.toLocaleString("uz-UZ")} UZS
-                </Badge>
+                <span className="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                  {fmtMoney(totalPieceworkEarned)}
+                </span>
               </div>
 
-              {/* Glide Canvas - full height and width like OperationsTab */}
-              <div className="flex-1 w-full h-full relative" id="glide-emp-piecework-root">
-                <DataEditor
-                  columns={pwCols}
-                  rows={employeePieceworks.length}
-                  getCellContent={getPieceworkCellContent}
-                  onColumnResize={handlePieceworkColumnResize}
-                  onCellActivated={handlePieceworkActivated}
-                  gridSelection={pwSelection}
-                  onGridSelectionChange={setPwSelection}
-                  rowMarkers="both"
-                  freezeColumns={1}
-                  smoothScrollX
-                  smoothScrollY
-                  theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
-                  width="100%"
-                  height="100%"
-                  headerHeight={28}
-                  rowHeight={32}
-                />
+              <div className="flex-1 w-full h-full relative" title="Buyurtmani ochish: 2 marta bosing">
+                {employeePieceworks.length === 0 ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-muted-foreground">
+                    <Layers className="size-5 opacity-50" />
+                    <span className="text-xs">Naryadlar yo'q</span>
+                  </div>
+                ) : (
+                  <DataEditor
+                    columns={pwCols}
+                    rows={employeePieceworks.length}
+                    getCellContent={getPieceworkCellContent}
+                    onColumnResize={handlePieceworkColumnResize}
+                    onCellActivated={handlePieceworkActivated}
+                    gridSelection={pwSelection}
+                    onGridSelectionChange={setPwSelection}
+                    rowMarkers="number"
+                    freezeColumns={1}
+                    smoothScrollX
+                    smoothScrollY
+                    theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+                    width="100%"
+                    height="100%"
+                    headerHeight={28}
+                    rowHeight={28}
+                  />
+                )}
               </div>
             </div>
           )}
 
-          {/* TAB 4: ATTENDANCE & TIMESHEET (GLIDE DATA GRID) */}
+          {/* TAB 4: ATTENDANCE (GLIDE DATA GRID) */}
           {activeTab === "attendance" && (
             <div className="flex flex-col flex-1 h-full min-h-0 w-full overflow-hidden">
               <div className="h-9 border-b border-border bg-card px-3 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
-                  <CalendarClock className="size-4 text-primary" />
-                  <span className="font-semibold text-xs">Davomat tabeli</span>
+                  <CalendarClock className="size-3.5 text-primary" />
+                  <span className="font-semibold text-xs">Davomat</span>
                   <Badge variant="outline" className="font-mono text-[10px] h-5">
                     {employeeAttendance.length} kun
                   </Badge>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Badge variant="outline" className="font-mono text-xs">
-                    Ishlangan: {totalHoursWorked} soat
+                  <Badge variant="outline" className="font-mono text-[10px] h-5">
+                    {totalHoursWorked} soat
                   </Badge>
                   {lateCount > 0 && (
-                    <Badge variant="outline" className="font-mono text-xs text-amber-600 border-amber-300">
+                    <Badge variant="outline" className="font-mono text-[10px] h-5 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800">
                       {lateCount} kechikish
                     </Badge>
                   )}
                 </div>
               </div>
 
-              {/* Glide Canvas - full height and width like OperationsTab */}
-              <div className="flex-1 w-full h-full relative" id="glide-emp-attendance-root">
-                <DataEditor
-                  columns={attCols}
-                  rows={employeeAttendance.length}
-                  getCellContent={getAttendanceCellContent}
-                  onColumnResize={handleAttendanceColumnResize}
-                  gridSelection={attSelection}
-                  onGridSelectionChange={setAttSelection}
-                  rowMarkers="both"
-                  freezeColumns={1}
-                  smoothScrollX
-                  smoothScrollY
-                  theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
-                  width="100%"
-                  height="100%"
-                  headerHeight={28}
-                  rowHeight={32}
-                />
+              <div className="flex-1 w-full h-full relative">
+                {employeeAttendance.length === 0 ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-muted-foreground">
+                    <CalendarClock className="size-5 opacity-50" />
+                    <span className="text-xs">Davomat yo'q</span>
+                  </div>
+                ) : (
+                  <DataEditor
+                    columns={attCols}
+                    rows={employeeAttendance.length}
+                    getCellContent={getAttendanceCellContent}
+                    onColumnResize={handleAttendanceColumnResize}
+                    gridSelection={attSelection}
+                    onGridSelectionChange={setAttSelection}
+                    rowMarkers="number"
+                    freezeColumns={1}
+                    smoothScrollX
+                    smoothScrollY
+                    theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
+                    width="100%"
+                    height="100%"
+                    headerHeight={28}
+                    rowHeight={28}
+                  />
+                )}
               </div>
             </div>
           )}
 
-          {/* TAB 5: SKILLS & CERTIFICATES */}
+          {/* TAB 5: SKILLS */}
           {activeTab === "skills" && (
-            <div className="space-y-4 w-full">
-              <Card className="w-full">
-                <CardHeader className="py-3 px-4 border-b">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <Award className="size-4 text-primary" />
-                    Kasbiy ko'nikmalar va stanoklarga ruxsatnomalar
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 space-y-4">
-                  <div>
-                    <Label className="text-xs font-semibold mb-2 block">
-                      O'zlashtirilgan uskunalar va texnologiyalar
-                    </Label>
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                      {(formData.skills || []).map((skill, idx) => (
-                        <Badge
-                          key={idx}
-                          variant="secondary"
-                          className="px-2.5 py-1 text-xs font-medium flex items-center gap-1.5"
-                        >
-                          <CheckCircle2 className="size-3 text-emerald-600" />
-                          {skill}
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveSkill(skill)}
-                            className="text-muted-foreground hover:text-destructive ml-1"
-                          >
-                            <X className="size-3" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
+            <Card className="w-full gap-0 py-0">
+              <CardHeader className="py-2 px-3 border-b">
+                <CardTitle className="text-xs font-semibold flex items-center gap-2">
+                  <Award className="size-3.5 text-primary" />
+                  Ko'nikmalar
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 space-y-2.5">
+                <div className="flex items-center gap-1.5 max-w-md">
+                  <Input
+                    value={newSkillText}
+                    onChange={(e) => setNewSkillText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddSkill();
+                      }
+                    }}
+                    placeholder="Stanok yoki texnologiya"
+                    className="h-7 text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1 shrink-0"
+                    disabled={!newSkillText.trim()}
+                    onClick={handleAddSkill}
+                  >
+                    <Plus className="size-3.5" />
+                    Qo'shish
+                  </Button>
+                </div>
 
-                    <div className="flex items-center gap-2 max-w-md">
-                      <Input
-                        value={newSkillText}
-                        onChange={(e) => setNewSkillText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleAddSkill();
-                          }
-                        }}
-                        placeholder="Yangi ko'nikma yoki stanok nomi..."
-                        className="h-8 text-xs"
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 text-xs gap-1 shrink-0"
-                        onClick={handleAddSkill}
+                {skills.length === 0 ? (
+                  <div className="text-[11px] text-muted-foreground">Ko'nikmalar yo'q</div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {skills.map((skill) => (
+                      <Badge
+                        key={skill}
+                        variant="secondary"
+                        className="h-6 pl-2 pr-1 text-xs font-medium flex items-center gap-1"
                       >
-                        <Plus className="size-3.5" />
-                        Qo'shish
-                      </Button>
-                    </div>
+                        {skill}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSkill(skill)}
+                          className="rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          title="O'chirish"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </Badge>
+                    ))}
                   </div>
-
-                  <Separator />
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                    <div className="p-3 rounded border bg-muted/20 space-y-1">
-                      <div className="font-semibold text-foreground flex items-center gap-1.5">
-                        <FileCheck className="size-4 text-emerald-600" />
-                        Mehnat xavfsizligi yo'riqnomasi
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        Flekso bosma mashinalari elektr va mexanik xavfsizligi bo'yicha yo'riqnoma o'tkazilgan.
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded border bg-muted/20 space-y-1">
-                      <div className="font-semibold text-foreground flex items-center gap-1.5">
-                        <ShieldCheck className="size-4 text-blue-600" />
-                        Tibbiy ko'rik xulosasi
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        Yillik davriy tibbiy ko'rikdan o'tgan va ishlab chiqarish sexiga ruxsat etilgan.
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+                )}
+              </CardContent>
+            </Card>
           )}
 
           {activeTab === "ledger" && employeeDbId && <EmployeeLedgerPanel employeeId={employeeDbId} />}
 
-          {/* TAB 6: HISTORY OF CHANGES */}
+          {/* TAB 6: HISTORY */}
           {activeTab === "history" && (
-            <div className="space-y-4 w-full">
-              <Card className="w-full">
-                <CardHeader className="py-3 px-4 border-b">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <History className="size-4 text-primary" />
-                    Kadrlar harakati tarixi
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4">
-                  {historyLoading ? (
-                    <div className="text-center py-6 text-muted-foreground">Tarix yuklanmoqda...</div>
-                  ) : historyList.length === 0 ? (
-                    <div className="text-center py-6 text-muted-foreground">
-                      Ushbu xodim bo'yicha o'zgarishlar tarixi mavjud emas.
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
+            <Card className="w-full gap-0 py-0">
+              <CardHeader className="py-2 px-3 border-b">
+                <CardTitle className="text-xs font-semibold flex items-center gap-2">
+                  <History className="size-3.5 text-primary" />
+                  Kadrlar tarixi
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {historyLoading && historyList.length === 0 ? (
+                  <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Yuklanmoqda
+                  </div>
+                ) : historyList.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">Tarix yo'q</div>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/40 text-[11px] text-muted-foreground">
+                      <tr className="h-7 text-left">
+                        <th className="px-3 font-medium w-36">Sana</th>
+                        <th className="px-3 font-medium w-24">Turi</th>
+                        <th className="px-3 font-medium">Eski</th>
+                        <th className="px-3 font-medium">Yangi</th>
+                        <th className="px-3 font-medium w-32">Muallif</th>
+                      </tr>
+                    </thead>
+                    <tbody>
                       {historyList.map((item) => (
-                        <div
-                          key={item.id}
-                          className="p-3 rounded border bg-muted/20 flex items-start justify-between text-xs"
-                        >
-                          <div className="space-y-1">
-                            <div className="font-semibold text-foreground flex items-center gap-2">
-                              <Badge variant="outline" className="text-[10px]">
-                                {item.changeType}
-                              </Badge>
-                              <span>O'zgartirdi: {item.changedBy || "Tizim"}</span>
-                            </div>
-                            <div className="text-muted-foreground text-[11px]">
-                              Eski: <span className="font-mono">{JSON.stringify(item.oldValue)}</span>
-                            </div>
-                            <div className="text-primary text-[11px] font-medium">
-                              Yangi: <span className="font-mono">{JSON.stringify(item.newValue)}</span>
-                            </div>
-                          </div>
-                          <div className="text-[11px] text-muted-foreground font-mono">
-                            {new Date(item.changedAt).toLocaleString("uz-UZ")}
-                          </div>
-                        </div>
+                        <tr key={item.id} className="h-7 border-t border-border">
+                          <td className="px-3 font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                            {new Date(item.changedAt).toLocaleString("uz-UZ", {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            })}
+                          </td>
+                          <td className="px-3">
+                            <Badge variant="outline" className="h-5 text-[10px]">
+                              {HISTORY_TYPE_LABELS[item.changeType] || item.changeType}
+                            </Badge>
+                          </td>
+                          <td className="px-3 text-muted-foreground">{describeHistoryValue(item.oldValue)}</td>
+                          <td className="px-3 font-medium">{describeHistoryValue(item.newValue)}</td>
+                          <td className="px-3 text-muted-foreground truncate">{item.changedBy || "Tizim"}</td>
+                        </tr>
                       ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
           )}
         </div>
       </div>
+
+      <AlertDialog open={confirmTerminate} onOpenChange={setConfirmTerminate}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-sm">
+              <UserX className="size-4 text-destructive" />
+              Xodimni bo'shatish
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              {fullNameShown || "Xodim"} holati "Bo'shatilgan" qilib saqlanadi.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-3">
+            <AlertDialogCancel className="h-8 text-xs">Bekor qilish</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              className="h-8 text-xs"
+              onClick={() => void handleToggleStatus("terminated")}
+            >
+              Bo'shatish
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
