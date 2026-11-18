@@ -283,7 +283,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       startDate: wo.startDate || "",
       deadline: wo.deadline || "",
       actualEndDate: wo.actualEndDate || "",
-      plannedSheets: Number(wo.quantity) || 0,
+      // Imposition sheet count lives in dimensions; older orders without it fall back to the tiraj.
+      plannedSheets: Number(dims.plannedSheets) || Number(wo.quantity) || 0,
       completedSheets: 0,
       operator: wo.operator || undefined,
       shift: wo.shift || undefined,
@@ -720,6 +721,7 @@ export async function upsertWorkOrder(
       printMethod: data.printMethod,
       parentSheetW: data.parentSheetW,
       parentSheetH: data.parentSheetH,
+      plannedSheets: (data as any).plannedSheets ?? (existingOrder?.dimensions as any)?.plannedSheets,
       pressSheetW: data.pressSheetW,
       pressSheetH: data.pressSheetH,
       makeReadyPerPlate: data.makeReadyPerPlate,
