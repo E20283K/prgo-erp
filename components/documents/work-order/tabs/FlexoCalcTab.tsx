@@ -20,6 +20,7 @@ import {
   Sliders,
   Check,
   ChevronsUpDown,
+  Package,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,6 +72,9 @@ interface Props {
   defaultProdW?: number;
   defaultProdH?: number;
   defaultBleed?: number;
+  /** Roll material chosen in the specification (read-only here) */
+  materialName?: string;
+  webWidthMm?: number;
   orderAttachments?: OrderAttachment[];
   setOrderAttachments?: React.Dispatch<React.SetStateAction<OrderAttachment[]>>;
   onAuditLog?: (action: string, detail: string) => void;
@@ -118,6 +122,8 @@ const flexoSessionCache = new Map<string, FlexoSessionCache>();
 export function FlexoCalcTab({
   defaultQuantity = 10000,
   docNo = "WO-NEW",
+  materialName,
+  webWidthMm,
   orderAttachments = [],
   setOrderAttachments,
   onAuditLog,
@@ -648,6 +654,28 @@ export function FlexoCalcTab({
 
         {/* Scrollable Configuration Body */}
         <div className="flex-1 overflow-y-auto p-3 space-y-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          {/* Order material (from the specification) */}
+          <div className="h-7 px-2.5 border border-border rounded-md bg-background flex items-center gap-2 text-[11px]">
+            <Package className="size-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Material</span>
+            {materialName ? (
+              <span className="font-medium text-foreground truncate" title={materialName}>
+                {materialName}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onSwitchTab?.("specs")}
+                className="font-medium text-amber-600 hover:underline cursor-pointer truncate"
+              >
+                Tanlanmagan
+              </button>
+            )}
+            {webWidthMm ? (
+              <span className="ml-auto font-mono text-muted-foreground shrink-0">{webWidthMm} mm</span>
+            ) : null}
+          </div>
+
           {/* Section 1: Source File Selection */}
           <div className="space-y-2 border border-border rounded-md p-2.5 bg-zinc-50/50 dark:bg-zinc-900/40">
             <span className="font-semibold text-foreground text-[11px] flex items-center justify-between">

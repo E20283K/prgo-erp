@@ -238,6 +238,8 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     return {
       version: 2,
       paperName: stock?.name ?? paperStock,
+      // Not found yet (stock still loading): leave unsynced so the sheet is picked once it arrives
+      specPaperStock: stock || (propParentW && propParentH) ? paperStock : undefined,
       parentSheetW: pW,
       parentSheetH: pH,
       cutDivisor: propPressW && propPressH ? Math.max(1, Math.round((pW * pH) / (propPressW * propPressH))) : best.divisor,
@@ -319,6 +321,30 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     }),
     [settings.trimW, settings.trimH, settings.gutterX, settings.gutterY, settings.marginTop, settings.marginBottom, settings.marginLeft, settings.marginRight]
   );
+
+  // The specification's paper is the order's source of truth: when it changes (even while this
+  // tab was closed) re-pick the paper and its sheet. A choice made here stays until the spec changes.
+  if (paperStock && paperStock !== settings.specPaperStock && warehouseStock.length > 0) {
+    const key = paperStock.toLowerCase();
+    const stock = warehouseStock.find((w) => [w.name, w.sku].some((x) => x?.toLowerCase() === key));
+    const name = stock?.name ?? paperStock;
+    const dims = stock ? parseFormatString(stock.cutDimensions || stock.sheetFormat) : null;
+    if (name === settings.paperName || !dims) {
+      setSettings((prev) => ({ ...prev, specPaperStock: paperStock, paperName: name }));
+    } else {
+      const best = pickOptimalCutOption(calculateSheetCutOptions(dims[0], dims[1], gridEstimate, machine));
+      setSettings((prev) => ({
+        ...prev,
+        specPaperStock: paperStock,
+        paperName: name,
+        parentSheetW: dims[0],
+        parentSheetH: dims[1],
+        cutDivisor: best.divisor,
+        sheetW: best.pressW,
+        sheetH: best.pressH,
+      }));
+    }
+  }
 
   const cutOptions = useMemo<SheetCutOption[]>(
     () => calculateSheetCutOptions(settings.parentSheetW, settings.parentSheetH, gridEstimate, machine),

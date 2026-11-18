@@ -913,6 +913,8 @@ export interface OrderDieline {
 export interface PersistedImpositionState {
   version: 2;
   paperName?: string;
+  /** Specification paper the layout last synced to; a different spec value re-picks the paper. */
+  specPaperStock?: string;
   parentSheetW: number;
   parentSheetH: number;
   cutDivisor: number;

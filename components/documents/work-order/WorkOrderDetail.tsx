@@ -4061,6 +4061,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     defaultProdW={formData.width}
                     defaultProdH={formData.height}
                     defaultBleed={formData.bleed}
+                    materialName={formData.paperStock}
+                    webWidthMm={Number(formData.flexoWebWidth) || undefined}
                     orderAttachments={orderAttachments}
                     setOrderAttachments={setOrderAttachments}
                     onMarkUnsaved={() => setTabUnsaved(tab.id, true)}
