@@ -51,6 +51,7 @@ import {
   ComboboxSelect,
   type ComboboxOption,
 } from "@/components/ui/combobox";
+import { FinishingOptionSelect } from "../FinishingOptionSelect";
 import { DieLinePreview } from "../DieLinePreview";
 import { DielineSourceCard } from "../dieline/DielineSourceCard";
 import { TextileLabelPreview } from "../TextileLabelPreview";
@@ -149,17 +150,6 @@ const HOLE_POSITION_OPTIONS: ComboboxOption[] = [
   { value: "both-sides-fold", label: "Buklama atrofida juft (Both Sides / Fold)" },
 ];
 
-const LAMINATION_OPTIONS: ComboboxOption[] = [
-  { value: "none", label: "Mavjud emas" },
-  { value: "Soft-Touch Matte", label: "Soft-Touch Matte" },
-  { value: "Matte Lamination", label: "Matte Lamination" },
-  { value: "Gloss Lamination", label: "Gloss Lamination" },
-  { value: "Anti-Scuff Matte", label: "Anti-Scuff Matte" },
-  { value: "Thermal Metallized Silver", label: "Metallized Silver" },
-  { value: "Thermal Metallized Gold", label: "Metallized Gold" },
-  { value: "Holographic Film", label: "Holographic Film" },
-];
-
 const LAMINATION_SIDES_OPTIONS: ComboboxOption[] = [
   { value: "1s", label: "1-tomonlama (1+0)" },
   { value: "2s", label: "2-tomonlama (1+1)" },
@@ -170,25 +160,6 @@ const LAMINATION_MICRON_OPTIONS: ComboboxOption[] = [
   { value: "28", label: "28 µm (Mustahkam)" },
   { value: "30", label: "30 µm (Velvet PET)" },
   { value: "32", label: "32 µm (Qalin)" },
-];
-
-const COATING_OPTIONS: ComboboxOption[] = [
-  { value: "none", label: "Mavjud emas" },
-  { value: "Spot UV (3D)", label: "Tanlanma 3D UF lak" },
-  { value: "Spot UV (Flat)", label: "Tanlanma tekis UF lak" },
-  { value: "Overall UV", label: "Umumiy UF lak" },
-  { value: "Overall WB Varnish", label: "Suvli dispersion lak" },
-  { value: "Drip-off Varnish", label: "Drip-off gibrid lak" },
-];
-
-const EMBELLISHMENT_OPTIONS: ComboboxOption[] = [
-  { value: "none", label: "Mavjud emas" },
-  { value: "Screen White", label: "Oq rang (Ipak bosma / Serigrafiya)" },
-  { value: "Gold Hot Foil", label: "Oltin issiq folga" },
-  { value: "Silver Hot Foil", label: "Kumush issiq folga" },
-  { value: "Holographic Foil", label: "Golografik folga" },
-  { value: "Blind Emboss", label: "Relyefli bo'rtma (Kongrev)" },
-  { value: "Deboss", label: "Botiq bosma (Blint)" },
 ];
 
 const LABEL_FOLD_OPTIONS: ComboboxOption[] = [
@@ -2548,11 +2519,11 @@ export function SpecificationsTab({
                   <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                     Plyonka turi
                   </label>
-                  <ComboboxSelect
-                    items={LAMINATION_OPTIONS}
+                  <FinishingOptionSelect
+                    kind="lamination"
                     value={currentLamination}
                     disabled={isOperator}
-                    onValueChange={(val) => {
+                    onChange={(val) => {
                       const nextVal = val === "none" ? "" : val;
                       handleFieldChange({
                         lamination: nextVal,
@@ -2719,11 +2690,11 @@ export function SpecificationsTab({
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Lak turi
                     </label>
-                    <ComboboxSelect
-                      items={COATING_OPTIONS}
+                    <FinishingOptionSelect
+                      kind="coating"
                       value={currentCoating}
                       disabled={isOperator}
-                      onValueChange={(val) => {
+                      onChange={(val) => {
                         const nextVal = val === "none" ? "" : val;
                         handleFieldChange({
                           coating: nextVal,
@@ -2846,11 +2817,11 @@ export function SpecificationsTab({
                     <label className="text-[11px] font-medium text-muted-foreground block mb-1">
                       Pardoz turi
                     </label>
-                    <ComboboxSelect
-                      items={EMBELLISHMENT_OPTIONS}
+                    <FinishingOptionSelect
+                      kind="embellishment"
                       value={currentEmbellishment}
                       disabled={isOperator}
-                      onValueChange={(val) => {
+                      onChange={(val) => {
                         const nextVal = val === "none" ? "" : val;
                         handleFieldChange({
                           embellishment: nextVal,

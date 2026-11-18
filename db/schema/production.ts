@@ -472,6 +472,28 @@ export const productTypes = pgTable(
   (table) => [uniqueIndex("product_types_company_name_uq").on(table.companyId, table.name)]
 );
 
+// ─── 3c. Finishing Options (Laminatsiya / lak / pardoz turlari ma'lumotnomasi) ──
+// work_orders.lamination | coating | embellishment shu ro'yxatdagi `value` ni saqlaydi.
+
+export const finishingOptions = pgTable(
+  "finishing_options",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 32 }).notNull(), // "lamination" | "coating" | "embellishment"
+    value: varchar("value", { length: 255 }).notNull(),
+    label: varchar("label", { length: 255 }).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("finishing_options_company_kind_value_uq").on(table.companyId, table.kind, table.value),
+  ]
+);
+
 // ─── 4. Work Order Operations (Texnologik marshrut operatsiyalari) ──────────────
 
 export const workOrderOperations = pgTable(
