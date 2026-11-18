@@ -1899,6 +1899,8 @@ export async function upsertProductionSpecification(data: any, companyCode: stri
       dimensionUnit: data.dimensionUnit || data.dimensions?.dimensionUnit || "mm",
     },
     techSpecs: data.techSpecs || {
+      // Valyuta kursi (BOM narxlarini USD <-> UZS o'tkazish uchun)
+      exchangeRate: data.exchangeRate !== undefined ? Number(data.exchangeRate) || null : undefined,
       // Offset
       sheetFormat: data.sheetFormat,
       grammage: data.grammage,

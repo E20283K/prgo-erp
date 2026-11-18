@@ -97,7 +97,6 @@ import {
   formatMoney 
 } from "@/components/documents/common/DocumentShell";
 import { cn } from "@/lib/utils";
-import { getNextWorkOrderNo } from "@/components/documents/work-order/utils/workOrderNumbering";
 
 const CURRENCY_OPTIONS = [
   { value: "USD", label: "USD ($) — AQSH Dollari", symbol: "$" },
@@ -105,6 +104,45 @@ const CURRENCY_OPTIONS = [
   { value: "EUR", label: "EUR (€) — Yevro", symbol: "€" },
   { value: "RUB", label: "RUB (₽) — Rossiya Rubli", symbol: "₽" },
 ];
+
+// Ish buyrug'idagi kabi: hujjat ichida tahrirlanadigan kurs, faqat boshlang'ich qiymat
+const DEFAULT_UZS_RATE = 12850;
+
+/**
+ * Ombor/nomenklatura narxini texkarta valyutasiga o'tkazadi.
+ * Manba valyutasi aniq ma'lum bo'lsa shuni ishlatadi; summaga qarab taxmin qilmaydi.
+ * Faqat USD <-> UZS konvertatsiya qilinadi (boshqa juftliklar uchun kurs yo'q).
+ */
+function stockPriceInCurrency(stock: any, target: string, rate: number): number {
+  const fx = Number(rate) > 0 ? Number(rate) : DEFAULT_UZS_RATE;
+  const srcCurrency = String(stock?.currency || "").toUpperCase();
+  const srcPrice = Number(stock?.unitPrice ?? stock?.standardCost) || 0;
+  const usd = Number(stock?.unitPriceUsd) || 0;
+  const uzs = Number(stock?.unitPriceUzs) || 0;
+
+  if (srcCurrency === target && srcPrice > 0) return srcPrice;
+  if (target === "UZS") {
+    if (uzs > 0) return uzs;
+    if (srcCurrency === "USD" && srcPrice > 0) return Math.round(srcPrice * fx);
+    if (usd > 0) return Math.round(usd * fx);
+    return 0;
+  }
+  if (target === "USD") {
+    if (usd > 0) return usd;
+    if (srcCurrency === "UZS" && srcPrice > 0) return Number((srcPrice / fx).toFixed(4));
+    if (uzs > 0) return Number((uzs / fx).toFixed(4));
+    return 0;
+  }
+  return srcCurrency === target ? srcPrice : 0;
+}
+
+/** BOM qatori qiymati: sarf normasi × (1 + chiqindi%) × birlik narxi */
+function materialLineTotal(m: any): number {
+  const q = Number(m?.quantity) || 0;
+  const p = Number(m?.unitPrice) || 0;
+  const w = Number(m?.wastePercent) || 0;
+  return q * (1 + w / 100) * p;
+}
 
 const CATEGORY_OPTIONS = [
   "Commercial Print",
@@ -170,6 +208,8 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     warehouseStock,
     tariffs,
     fetchTariffs,
+    loadWarehouseStock,
+    loadMachines,
   } = useWorkspaceStore();
   const isDark = theme === "dark";
   const data = tab.documentData || {};
@@ -198,6 +238,12 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     if ((!tariffs || tariffs.length === 0) && fetchTariffs) {
       fetchTariffs();
     }
+    if ((!warehouseStock || warehouseStock.length === 0) && loadWarehouseStock) {
+      loadWarehouseStock();
+    }
+    if ((!machines || machines.length === 0) && loadMachines) {
+      loadMachines();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -218,8 +264,9 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
           (s) => s.sku === itemCode || s.name.toLowerCase() === item.name.toLowerCase()
         );
         if (!exists) {
-          const minStockNum = Number(item.minStock) || 0;
+          // Nomenklaturada bor, omborda yo'q: qoldiq 0, joy/ta'minotchi noma'lum
           const costNum = Number(item.standardCost) || 0;
+          const itemCurrency = String(item.currency || "USD").toUpperCase();
           const unitCode = typeof item.unit === "object" ? item.unit?.code || item.unit?.shortName || "pcs" : (item.unit || "pcs");
           list.push({
             sku: itemCode,
@@ -228,15 +275,16 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
             grammage: item.properties?.densityGsm || undefined,
             sheetFormat: item.properties?.format || undefined,
             unit: unitCode,
-            location: "Main Warehouse (Baza)",
-            stockLevel: minStockNum > 0 ? minStockNum * 3 : 1000,
+            location: "",
+            stockLevel: 0,
             reserved: 0,
-            available: minStockNum > 0 ? minStockNum * 3 : 1000,
-            reorder: minStockNum,
-            unitPriceUsd: item.currency === "USD" ? costNum : Number((costNum / 12850).toFixed(2)),
-            supplier: "Asosiy Ta'minotchi",
-            status: "In Stock",
-            lastReceived: "2026-10-01",
+            available: 0,
+            reorder: Number(item.minStock) || 0,
+            unitPrice: costNum,
+            currency: itemCurrency as any,
+            unitPriceUsd: itemCurrency === "USD" ? costNum : 0,
+            status: "Critical",
+            lastReceived: "",
           });
         }
       }
@@ -275,6 +323,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
     description: data.description || data.desc || "",
     basePrice: Number(data.basePrice) || 0,
     currency: data.currency || "USD",
+    exchangeRate: Number(data.exchangeRate ?? specs.exchangeRate) || DEFAULT_UZS_RATE,
     unit: data.unit || "1k pcs",
     
     // 4-bo'lim: Texnik Spetsifikatsiya & Geometriya (Barcha texnologiyalar uchun)
@@ -369,6 +418,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   const [isMatDialogOpen, setIsMatDialogOpen] = useState(false);
   const [editingMatIndex, setEditingMatIndex] = useState<number | null>(null);
   const [isMatSelectOpen, setIsMatSelectOpen] = useState(false);
+  const [matSearch, setMatSearch] = useState("");
   const [matDialogForm, setMatDialogForm] = useState({
     name: "",
     spec: "",
@@ -391,12 +441,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
       ? `${stock.sheetFormat} mm${stock.grammage ? `, ${stock.grammage} g/m²` : ""}`
       : (stock.grammage ? `${stock.grammage} g/m²` : stock.spec || "");
 
-    let price = Number(stock.unitPriceUsd ?? stock.unitPrice ?? stock.standardCost) || 0;
-    if (formData.currency === "UZS" && price < 100) {
-      price = Math.round(price * 12850);
-    } else if (formData.currency === "USD" && price > 1000) {
-      price = Number((price / 12850).toFixed(3));
-    }
+    const price = stockPriceInCurrency(stock, formData.currency, formData.exchangeRate);
 
     setMatDialogForm((prev) => ({
       ...prev,
@@ -441,11 +486,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
 
   // Hisoblangan moddiy tannarx
   const totalMaterialCost = useMemo(() => {
-    return materials.reduce((acc: number, m: any) => {
-      const q = Number(m.quantity) || 0;
-      const p = Number(m.unitPrice) || 0;
-      return acc + (q * p);
-    }, 0);
+    return materials.reduce((acc: number, m: any) => acc + materialLineTotal(m), 0);
   }, [materials]);
 
   const totalRoutingHours = useMemo(() => {
@@ -473,6 +514,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
         version: formData.version,
         basePrice: formData.basePrice,
         currency: formData.currency,
+        exchangeRate: formData.exchangeRate,
         unit: formData.unit,
         description: formData.description,
         baseMaterial: formData.baseMaterial,
@@ -517,6 +559,13 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
           machineStr: op.machineStr,
           durationHours: op.durationHours,
           operator: op.operator,
+          tariffId: op.tariffId,
+          tariffCode: op.tariffCode,
+          rateUsd: op.rateUsd,
+          setupFeeUsd: op.setupFeeUsd,
+          pieceworkRateUsd: op.pieceworkRateUsd,
+          calcUnit: op.calcUnit,
+          unitDivisor: op.unitDivisor,
         })),
       };
 
@@ -546,9 +595,18 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleDeleteSpecification = async () => {
+    // Bazaga hali yozilmagan qoralama: faqat tabni yopamiz
+    const persistedRef = data.id && !String(data.id).startsWith("new-") && !String(data.id).startsWith("draft-")
+      ? String(data.id)
+      : (!isDraft && data.code ? String(data.code) : "");
+    if (!persistedRef) {
+      setIsDeleteDialogOpen(false);
+      closeTab(tab.id);
+      return;
+    }
     setIsDeleting(true);
     try {
-      const targetId = data.id || formData.code;
+      const targetId = persistedRef;
       const success = await deleteSpecificationAsync(targetId);
       if (success) {
         addNotification({
@@ -571,6 +629,15 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleCreateWorkOrderFromSpec = () => {
+    // Ish buyrug'i bazadagi texkartaga bog'lanadi, shuning uchun avval saqlash shart
+    if (isDraft || tab.isUnsaved) {
+      addNotification({
+        title: "Avval saqlang",
+        description: "Ish buyrug'i ochishdan oldin texkartani bazaga saqlang",
+        severity: "warning",
+      });
+      return;
+    }
     const newWoId = `draft-wo-${Date.now()}`;
     openTab({
       id: newWoId,
@@ -598,6 +665,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
         colorsConfig: formData.colorsConfig,
         priceTotal: formData.basePrice,
         currency: formData.currency || "USD",
+        exchangeRate: formData.exchangeRate,
         materials: materials,
         operations: operations.map((op: any, idx: number) => ({
           id: String(idx + 1),
@@ -615,8 +683,9 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
           rateUsd: op.rateUsd,
           setupFeeUsd: op.setupFeeUsd,
           pieceworkRateUsd: op.pieceworkRateUsd,
-          plannedCostUsd: op.rateUsd ? Number(((op.setupFeeUsd || 0) + (1000 / (op.unitDivisor || 1000)) * op.rateUsd).toFixed(2)) : 0,
-          pieceworkTotalUsd: op.pieceworkRateUsd ? Number(((1000 / (op.unitDivisor || 1000)) * op.pieceworkRateUsd).toFixed(2)) : 0,
+          // Miqdor hali 0: faqat pripravka; hajmga bog'liq qism miqdor kiritilganda ish buyrug'ida hisoblanadi
+          plannedCostUsd: op.rateUsd ? Number((op.setupFeeUsd || 0).toFixed(2)) : 0,
+          pieceworkTotalUsd: 0,
         })),
       },
     });
@@ -630,37 +699,15 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   // --- Material Dialog Handlers ---
   const handleOpenAddMaterial = () => {
     setEditingMatIndex(null);
-    const firstStock = combinedStock[0];
-    if (firstStock) {
-      const formattedSpec = firstStock.sheetFormat 
-        ? `${firstStock.sheetFormat} mm${firstStock.grammage ? `, ${firstStock.grammage} g/m²` : ""}`
-        : (firstStock.grammage ? `${firstStock.grammage} g/m²` : "");
-
-      let price = Number(firstStock.unitPriceUsd ?? (firstStock as any).unitPrice ?? (firstStock as any).standardCost) || 0;
-      if (formData.currency === "UZS" && price < 100) {
-        price = Math.round(price * 12850);
-      } else if (formData.currency === "USD" && price > 1000) {
-        price = Number((price / 12850).toFixed(3));
-      }
-
-      setMatDialogForm({
-        name: firstStock.name,
-        spec: formattedSpec,
-        quantity: 1,
-        unit: (typeof firstStock.unit === "object" ? (firstStock.unit as any)?.code : firstStock.unit) || "kg",
-        unitPrice: price,
-        wastePercent: 0,
-      });
-    } else {
-      setMatDialogForm({
-        name: "",
-        spec: "",
-        quantity: 1,
-        unit: "pcs",
-        unitPrice: 0,
-        wastePercent: 0,
-      });
-    }
+    // Bo'sh forma: material katalogdan ongli ravishda tanlanadi
+    setMatDialogForm({
+      name: "",
+      spec: "",
+      quantity: 1,
+      unit: "pcs",
+      unitPrice: 0,
+      wastePercent: 0,
+    });
     setIsMatDialogOpen(true);
   };
 
@@ -680,6 +727,14 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
   };
 
   const handleSaveMaterialDialog = () => {
+    if (!matDialogForm.name.trim()) {
+      addNotification({
+        title: "Material tanlanmagan",
+        description: "Katalogdan xomashyo tanlang yoki yangi nom kiriting",
+        severity: "warning",
+      });
+      return;
+    }
     if (editingMatIndex !== null) {
       const updated = [...materials];
       updated[editingMatIndex] = {
@@ -834,7 +889,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
 
     const q = Number(mat.quantity) || 0;
     const p = Number(mat.unitPrice) || 0;
-    const total = q * p;
+    const total = materialLineTotal(mat);
 
     if (col === 0) return { kind: GridCellKind.Number, data: row + 1, displayData: String(row + 1), allowOverlay: false };
     if (col === 1) return { kind: GridCellKind.Text, data: mat.name, displayData: mat.name, allowOverlay: true };
@@ -1181,6 +1236,17 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-muted-foreground font-medium block mb-1">Kurs (1 USD, so'm)</label>
+                    <MoneyInput
+                      thousandSeparator=" "
+                      decimalScale={2}
+                      value={formData.exchangeRate}
+                      onValueChange={(values) => handleFieldChange("exchangeRate", values.floatValue ?? 0)}
+                      className="h-8 text-xs font-mono"
+                    />
                   </div>
 
                   <div>
@@ -1864,8 +1930,10 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                 />
                 <PopoverContent className="w-[450px] p-0 shadow-lg border-border" align="start">
                   <Command className="w-full">
-                    <CommandInput 
-                      placeholder="Xomashyo nomi, SKU yoki formati bo'yicha qidirish..." 
+                    <CommandInput
+                      value={matSearch}
+                      onValueChange={setMatSearch}
+                      placeholder="Xomashyo nomi, SKU yoki formati bo'yicha qidirish..."
                       className="h-8 text-xs"
                     />
                     <CommandList className="max-h-64">
@@ -1876,14 +1944,11 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                           variant="outline"
                           size="sm"
                           className="h-7 text-xs gap-1.5 border-dashed"
+                          disabled={!matSearch.trim()}
                           onClick={() => {
-                            setMatDialogForm((p) => ({
-                              ...p,
-                              name: p.name || "Yangi Xomashyo",
-                              spec: p.spec || "Standart parametr",
-                              unitPrice: p.unitPrice || 0.25,
-                              unit: p.unit || "sheets",
-                            }));
+                            const typed = matSearch.trim();
+                            if (!typed) return;
+                            setMatDialogForm((p) => ({ ...p, name: typed }));
                             setIsMatSelectOpen(false);
                           }}
                         >
@@ -1918,8 +1983,10 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                                     <div className="text-[10px] text-muted-foreground flex items-center gap-1.5">
                                       {stock.sheetFormat && <span>{stock.sheetFormat} mm</span>}
                                       {stock.grammage && <span>• {stock.grammage} g/m²</span>}
-                                      <span>• Joy: {stock.location}</span>
-                                      <span>• ${stock.unitPriceUsd}/{stock.unit}</span>
+                                      {stock.location && <span>• Joy: {stock.location}</span>}
+                                      <span>
+                                        • {formatMoney(stockPriceInCurrency(stock, formData.currency, formData.exchangeRate), formData.currency)}/{stock.unit}
+                                      </span>
                                     </div>
                                   </div>
 
@@ -2003,7 +2070,7 @@ export function ProductSpecDetail({ tab }: { tab: DocumentTab }) {
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                      <span>Joylashuv: <strong className="text-foreground font-mono">{selectedStockItem.location}</strong></span>
+                      <span>Joylashuv: <strong className="text-foreground font-mono">{selectedStockItem.location || "—"}</strong></span>
                       <span>Jami zaxira: <strong className="text-foreground font-mono">{selectedStockItem.stockLevel.toLocaleString()}</strong></span>
                     </div>
                   </div>

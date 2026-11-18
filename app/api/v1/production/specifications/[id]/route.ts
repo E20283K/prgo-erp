@@ -57,6 +57,9 @@ export async function DELETE(
     const { searchParams } = new URL(request.url);
     const companyCode = searchParams.get("companyCode") || "PRINTGOO";
     const deleted = await deleteProductionSpecification(id, companyCode);
+    if (!deleted) {
+      return NextResponse.json({ success: false, error: "Specification not found" }, { status: 404 });
+    }
     return NextResponse.json({ success: true, data: { deleted } });
   } catch (error) {
     console.error("DELETE /api/v1/production/specifications/[id] error:", error);
