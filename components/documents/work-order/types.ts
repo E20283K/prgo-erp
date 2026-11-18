@@ -21,7 +21,8 @@ export interface SubstrateLayer {
   label: string;
   paperStock: string;
   grammage: number;
-  colors: "4+0" | "1+0" | "2+0" | "5+0" | "0+0" | "4+4";
+  /** Print scheme "front+back", e.g. "5+0"; derived from the order colours by syncKashirovkaLayerColors. */
+  colors: string;
   coating: string;
 }
 
@@ -156,6 +157,70 @@ export function kashirovkaPlatesPerForm(
   return (strategy || "split_half_sheet") === "separate_sheets"
     ? inks.reduce((sum, n) => sum + n, 0)
     : Math.max(...inks);
+}
+
+/** Inks on one side of the order: ticked CMYK channels plus Pantone colours on that side. */
+function orderSideInks(
+  side: "front" | "back",
+  process: { c: boolean; m: boolean; y: boolean; k: boolean } | undefined,
+  spots: { side: "front" | "back" | "both" }[] | undefined
+): number {
+  const proc = process ? [process.c, process.m, process.y, process.k].filter(Boolean).length : 0;
+  const spot = (spots || []).filter((s) => s.side === side || s.side === "both").length;
+  return proc + spot;
+}
+
+/**
+ * Sets each layer's print scheme from the order colours: the face liner carries the
+ * order's front, the back liner its reverse, and the core board is never printed.
+ * Orders that only carry the "4+0" colorsConfig string (no ticked channels) fall back to it.
+ * Returns the same array when nothing changes, so callers can skip a state update.
+ */
+export function syncKashirovkaLayerColors(
+  layers: SubstrateLayer[] | undefined,
+  frontColors: { c: boolean; m: boolean; y: boolean; k: boolean } | undefined,
+  backColors: { c: boolean; m: boolean; y: boolean; k: boolean } | undefined,
+  spotColors: { side: "front" | "back" | "both" }[] | undefined,
+  colorsConfig?: string
+): SubstrateLayer[] {
+  if (!layers || layers.length === 0) return layers || [];
+  let frontInks = orderSideInks("front", frontColors, spotColors);
+  let backInks = orderSideInks("back", backColors, spotColors);
+  const legacy = (colorsConfig || "").match(/^\s*(\d+)\s*\+\s*(\d+)\s*$/);
+  if (frontInks + backInks === 0 && legacy) {
+    frontInks = Number(legacy[1]);
+    backInks = Number(legacy[2]);
+  }
+  const front = `${frontInks}+0`;
+  const back = `${backInks}+0`;
+  let changed = false;
+  const next = layers.map((l) => {
+    const colors = l.role === "top_liner" ? front : l.role === "bottom_liner" ? back : "0+0";
+    if (l.colors === colors) return l;
+    changed = true;
+    return { ...l, colors };
+  });
+  return changed ? next : layers;
+}
+
+/** Returns the form with its kashirovka layer colours derived from the order colours. */
+export function withSyncedKashirovkaColors<
+  T extends {
+    kashirovkaLayers?: SubstrateLayer[];
+    frontColors?: { c: boolean; m: boolean; y: boolean; k: boolean };
+    backColors?: { c: boolean; m: boolean; y: boolean; k: boolean };
+    spotColorItems?: { side: "front" | "back" | "both" }[];
+    colorsConfig?: string;
+  },
+>(form: T): T {
+  const layers = syncKashirovkaLayerColors(
+    form.kashirovkaLayers,
+    form.frontColors,
+    form.backColors,
+    form.spotColorItems,
+    form.colorsConfig
+  );
+  return layers === form.kashirovkaLayers ? form : { ...form, kashirovkaLayers: layers };
 }
 
 export function calculateKashirovkaTotals(

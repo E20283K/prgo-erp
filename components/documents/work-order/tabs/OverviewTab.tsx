@@ -139,6 +139,7 @@ import {
   calculateKashirovkaTotals,
   getDefaultKashirovkaLayers,
   kashirovkaPlatesPerForm,
+  syncKashirovkaLayerColors,
   WorkOrderSampleData,
   generateSuggestedProductName,
   ProductNameNamingPreset,
@@ -634,8 +635,24 @@ export function OverviewTab({
     if (formData.kashirovkaLayers && formData.kashirovkaLayers.length > 0) {
       return formData.kashirovkaLayers;
     }
-    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating, formData.paperDensity);
-  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating, formData.paperDensity]);
+    return syncKashirovkaLayerColors(
+      getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating, formData.paperDensity),
+      formData.frontColors,
+      formData.backColors,
+      formData.spotColorItems,
+      formData.colorsConfig
+    );
+  }, [
+    kashirovkaMode,
+    formData.kashirovkaLayers,
+    formData.paperStock,
+    formData.coating,
+    formData.paperDensity,
+    formData.frontColors,
+    formData.backColors,
+    formData.spotColorItems,
+    formData.colorsConfig,
+  ]);
 
   const kashirovkaTotals = useMemo(
     () => calculateKashirovkaTotals(kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm),

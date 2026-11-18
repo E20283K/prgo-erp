@@ -138,7 +138,7 @@ import {
   BomItem,
   normalizeBomItem,
 } from "../BomMaterialsGrid";
-import { WorkOrderPackagingSummary, WorkOrderToolingItem, ensurePackagingStep, kashirovkaPlatesPerForm } from "./types";
+import { WorkOrderPackagingSummary, WorkOrderToolingItem, ensurePackagingStep, kashirovkaPlatesPerForm, syncKashirovkaLayerColors, withSyncedKashirovkaColors } from "./types";
 import {
   calculateWorkOrderFinancials,
   DEFAULT_OVERHEAD_PERCENT,
@@ -1011,7 +1011,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     }
   };
 
-  const [formData, setFormData] = useState<WorkOrderFormData>({
+  // Kashirovka layer colours follow the order colours, also for orders saved before that rule
+  const [formData, setFormData] = useState<WorkOrderFormData>(() => withSyncedKashirovkaColors({
     customer: data.customer || initialQueueItem?.customer || "",
     product: data.product || initialQueueItem?.product || "",
     productType: data.productType || initialQueueItem?.productType || "",
@@ -1116,7 +1117,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     impositionState: (data as any).impositionState || (initialQueueItem as any)?.impositionState || (data.dimensions as any)?.impositionState,
     flexoImpositionState: (data as any).flexoImpositionState || (initialQueueItem as any)?.flexoImpositionState || (data.dimensions as any)?.flexoImpositionState,
     dieline: (data as any).dieline || (initialQueueItem as any)?.dieline || (data.dimensions as any)?.dieline,
-  });
+  }));
 
   const [orderAttachments, setOrderAttachments] = useState<OrderAttachment[]>(() => {
     const list = initialAttachments && Array.isArray(initialAttachments) ? [...initialAttachments] : [];
@@ -2176,6 +2177,19 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         const decimals = (formData.currency || "UZS") === "UZS" ? 0 : 2;
         updates.priceTotal = Number(((oldTotal / oldQty) * newQty).toFixed(decimals));
       }
+    }
+
+    // Kashirovka layers print what the order prints: face liner = front, back liner = reverse
+    if (["frontColors", "backColors", "spotColorItems", "colorsConfig", "kashirovkaLayers", "kashirovkaMode"].some((f) => f in updates)) {
+      const merged = { ...formData, ...updates };
+      const synced = syncKashirovkaLayerColors(
+        merged.kashirovkaLayers,
+        merged.frontColors,
+        merged.backColors,
+        merged.spotColorItems,
+        merged.colorsConfig
+      );
+      if (synced !== merged.kashirovkaLayers) updates.kashirovkaLayers = synced;
     }
 
     setFormErrors((prev) => {

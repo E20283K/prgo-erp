@@ -73,6 +73,7 @@ import {
   resolveKashirovkaGlueGsm,
   KASHIROVKA_LAYER_LABELS,
   kashirovkaPlatesPerForm,
+  syncKashirovkaLayerColors,
   parseGrammageFromStock,
   WorkOrderSampleData,
   OrderAttachment,
@@ -872,8 +873,24 @@ export function SpecificationsTab({
     if (formData.kashirovkaLayers && formData.kashirovkaLayers.length > 0) {
       return formData.kashirovkaLayers;
     }
-    return getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating, formData.paperDensity);
-  }, [kashirovkaMode, formData.kashirovkaLayers, formData.paperStock, formData.coating, formData.paperDensity]);
+    return syncKashirovkaLayerColors(
+      getDefaultKashirovkaLayers(kashirovkaMode, formData.paperStock, formData.coating, formData.paperDensity),
+      formData.frontColors,
+      formData.backColors,
+      formData.spotColorItems,
+      formData.colorsConfig
+    );
+  }, [
+    kashirovkaMode,
+    formData.kashirovkaLayers,
+    formData.paperStock,
+    formData.coating,
+    formData.paperDensity,
+    formData.frontColors,
+    formData.backColors,
+    formData.spotColorItems,
+    formData.colorsConfig,
+  ]);
 
   const kashirovkaTotals = useMemo(
     () => calculateKashirovkaTotals(kashirovkaMode, kashirovkaLayers, formData.kashirovkaGlueGsm),
@@ -3104,28 +3121,22 @@ export function SpecificationsTab({
                               }
                               className="h-7 text-xs font-mono text-right"
                             />
-                            <select
+                            <span
                               aria-label={`${roleLabel} bosmasi`}
-                              disabled={isOperator}
-                              value={layer.colors}
-                              onChange={(e) =>
-                                updateKashirovkaLayer(idx, {
-                                  colors: e.target.value as SubstrateLayer["colors"],
-                                })
+                              title={
+                                layer.role === "top_liner"
+                                  ? "Old tomon ranglaridan"
+                                  : layer.role === "bottom_liner"
+                                    ? "Orqa tomon ranglaridan"
+                                    : "O'rta qatlam bosilmaydi"
                               }
-                              className="h-7 w-full rounded-md border border-border bg-background px-1.5 text-xs font-mono text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {layer.role !== "core_board" && (
-                                <>
-                                  <option value="4+0">4+0</option>
-                                  <option value="5+0">5+0</option>
-                                  <option value="2+0">2+0</option>
-                                  <option value="1+0">1+0</option>
-                                </>
+                              className={cn(
+                                "h-7 flex items-center justify-center rounded-md border border-border bg-muted text-xs font-mono",
+                                layer.colors === "0+0" ? "text-muted-foreground" : "text-foreground"
                               )}
-                              <option value="0+0">0+0</option>
-                              {layer.colors === "4+4" && <option value="4+4">4+4</option>}
-                            </select>
+                            >
+                              {layer.colors}
+                            </span>
                           </div>
                         );
                       })}
