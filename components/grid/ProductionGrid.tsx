@@ -164,6 +164,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     loadMachines,
     isMachinesLoading,
     upsertMachineAsync,
+    deleteMachineAsync,
     diesTooling,
     loadDiesToolingAsync,
     isDiesToolingLoading,
@@ -203,6 +204,8 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     []
   );
   const [specToDelete, setSpecToDelete] = useState<any | null>(null);
+  const [machineToDelete, setMachineToDelete] = useState<any | null>(null);
+  const [isMachineDeleting, setIsMachineDeleting] = useState(false);
   const [toolModalOpen, setToolModalOpen] = useState(false);
   const [toolFormData, setToolFormData] = useState<any>(null);
   const [toolToDelete, setToolToDelete] = useState<any>(null);
@@ -1055,6 +1058,31 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     }
   };
 
+  const handleDeleteMachine = async () => {
+    if (!machineToDelete || !deleteMachineAsync) return;
+    const target = machineToDelete.realId || machineToDelete.id;
+    setIsMachineDeleting(true);
+    try {
+      const ok = await deleteMachineAsync(target);
+      if (ok) {
+        addNotification({
+          title: "Uskuna o'chirildi",
+          description: `${machineToDelete.id} bazadan butunlay o'chirildi.`,
+          severity: "info",
+        });
+        setMachineToDelete(null);
+      } else {
+        addNotification({
+          title: "O'chirishda xatolik",
+          description: "Uskunani o'chirib bo'lmadi. U buyurtmalar yoki rejada ishlatilayotgan bo'lishi mumkin.",
+          severity: "error",
+        });
+      }
+    } finally {
+      setIsMachineDeleting(false);
+    }
+  };
+
   const handleSaveDrawer = () => {
     if (!selectedRecord) return;
     if (type === "machines") {
@@ -1104,6 +1132,31 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     }
     setIsDrawerOpen(false);
   };
+
+  // Del: selected machine -> delete confirmation
+  useEffect(() => {
+    if (type !== "machines") return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Delete") return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable ||
+        target?.closest?.("[role='dialog']")
+      ) {
+        return;
+      }
+      const selectedRowIdx = selection.rows.toArray()[0];
+      const row = selectedRowIdx !== undefined ? filteredRows[selectedRowIdx] : undefined;
+      if (row) {
+        e.preventDefault();
+        setMachineToDelete(row);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [type, selection, filteredRows]);
 
   // Keep Workspace Status Bar in sync
   useEffect(() => {
@@ -1808,6 +1861,26 @@ export function ProductionGrid({ type }: ProductionGridProps) {
               </ContextMenuItem>
             </>
           )}
+          {type === "machines" && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={() => {
+                  const selectedRowIdx = selection.rows.toArray()[0];
+                  const targetRow = filteredRows[selectedRowIdx];
+                  if (targetRow) {
+                    setMachineToDelete(targetRow);
+                  }
+                }}
+                disabled={selection.rows.toArray().length === 0}
+                className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Bazadan o'chirish</span>
+                <span className="ml-auto text-[10px] text-muted-foreground font-mono">Del</span>
+              </ContextMenuItem>
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
 
@@ -1983,6 +2056,48 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                   });
                 }
               }}
+              className="h-8 text-xs gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Ha, o'chirilsin</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Uskunani o'chirish dialogi */}
+      <Dialog
+        open={Boolean(machineToDelete)}
+        onOpenChange={(open) => !open && !isMachineDeleting && setMachineToDelete(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="w-5 h-5 text-destructive" />
+              Uskunani o'chirish
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Haqiqatan ham <strong className="font-semibold text-foreground">{machineToDelete?.id}: {machineToDelete?.name}</strong> uskunasini bazadan butunlay o'chirmoqchimisiz?
+              Bu amalni orqaga qaytarib bo'lmaydi.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isMachineDeleting}
+              onClick={() => setMachineToDelete(null)}
+              className="h-8 text-xs"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={isMachineDeleting}
+              onClick={handleDeleteMachine}
               className="h-8 text-xs gap-1.5"
             >
               <Trash2 className="w-3.5 h-3.5" />
