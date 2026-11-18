@@ -342,6 +342,9 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       kashirovkaStrategy: dims.kashirovkaStrategy || "split_half_sheet",
       kashirovkaLayers: dims.kashirovkaLayers || [],
       kashirovkaGlueGsm: dims.kashirovkaGlueGsm ?? 0,
+      kashirovkaGlueStockSku: dims.kashirovkaGlueStockSku || "",
+      kashirovkaGlueStockName: dims.kashirovkaGlueStockName || "",
+      bomDismissedAutoSources: dims.bomDismissedAutoSources || [],
       kashirovkaMakeReadySheets: dims.kashirovkaMakeReadySheets ?? 0,
       kashirovkaCuringHours: dims.kashirovkaCuringHours ?? 0,
 
@@ -701,6 +704,10 @@ export async function upsertWorkOrder(
       kashirovkaStrategy: data.kashirovkaStrategy,
       kashirovkaLayers: data.kashirovkaLayers,
       kashirovkaGlueGsm: data.kashirovkaGlueGsm,
+      kashirovkaGlueStockSku: data.kashirovkaGlueStockSku,
+      kashirovkaGlueStockName: data.kashirovkaGlueStockName,
+      bomDismissedAutoSources:
+        (data as any).bomDismissedAutoSources ?? (existingOrder?.dimensions as any)?.bomDismissedAutoSources ?? [],
       kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets,
       kashirovkaCuringHours: data.kashirovkaCuringHours,
       toolingItems: (data as any).toolingItems || (data as any).dimensions?.toolingItems || [],

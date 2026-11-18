@@ -969,6 +969,11 @@ export interface WorkOrderFormData {
   kashirovkaStrategy?: KashirovkaImpositionStrategy;
   kashirovkaLayers?: SubstrateLayer[];
   kashirovkaGlueGsm?: number;
+  /** Warehouse glue for kashirovka; the BOM glue row exists only when this is set. */
+  kashirovkaGlueStockSku?: string;
+  kashirovkaGlueStockName?: string;
+  /** Auto BOM rows (BomItem.autoSource) the user deleted; the spec sync does not re-add them. */
+  bomDismissedAutoSources?: string[];
   kashirovkaMakeReadySheets?: number;
   kashirovkaCuringHours?: number;
   colorsConfig?: string;

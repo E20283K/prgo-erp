@@ -57,7 +57,11 @@ export function syncKashirovkaBomRows(
     if (!key) return undefined;
     return stockList.find((s) => s.name.toLowerCase() === key || s.sku.toLowerCase() === key);
   };
-  const lockedKeys = new Set(items.filter(isAuto).map((i) => i.autoSource as string));
+  // Locked rows stay as the user left them; dismissed ones were deleted by the user.
+  const lockedKeys = new Set([
+    ...items.filter(isAuto).map((i) => i.autoSource as string),
+    ...(form.bomDismissedAutoSources || []),
+  ]);
 
   const buildRow = (
     key: string,
@@ -111,7 +115,9 @@ export function syncKashirovkaBomRows(
   const strategy = form.kashirovkaStrategy || "split_half_sheet";
   const bottom = layers.find((l) => l.role === "bottom_liner");
   const backSharesSheet = strategy === "split_half_sheet" && kashirovkaLayerInks(bottom?.colors) > 0;
-  const mountedSheets = backSharesSheet ? Math.ceil(parentSheets / 2) : parentSheets;
+  // Kashirovka make-ready ("Priladka") sheets are mounted too, so they need backing paper and glue.
+  const makeReadySheets = Math.max(0, Math.round(Number(form.kashirovkaMakeReadySheets) || 0));
+  const mountedSheets = (backSharesSheet ? Math.ceil(parentSheets / 2) : parentSheets) + makeReadySheets;
 
   const layerRows: BomItem[] = [];
   for (const layer of layers) {
@@ -140,20 +146,19 @@ export function syncKashirovkaBomRows(
 
   const glueKey = `${KASHIROVKA_AUTO_PREFIX}glue`;
   if (!lockedKeys.has(glueKey)) {
-    const adhesives = stockList.filter((s) => s.category === "Adhesives & Binding");
-    const prevGlueSku = previous.get(glueKey)?.id;
-    const glue =
-      (prevGlueSku && adhesives.find((s) => s.sku === prevGlueSku)) ||
-      adhesives.find((s) => /kashir|pva|yelim|glue|клей/i.test(s.name)) ||
-      adhesives[0];
+    // The glue is the one picked on the Kashirovka card; nothing is guessed from the catalogue.
+    const glueSku = (form.kashirovkaGlueStockSku || "").trim().toLowerCase();
+    const glue = glueSku ? stockList.find((s) => s.sku.toLowerCase() === glueSku) : undefined;
     const sheetW = Number(form.parentSheetW) || 0;
     const sheetH = Number(form.parentSheetH) || 0;
     if (glue && sheetW > 0 && sheetH > 0) {
       const bonds = layers.length - 1;
       const gsm = resolveKashirovkaGlueGsm(form.kashirovkaGlueGsm);
-      const glueKg = Number(((((sheetW * sheetH) / 1e6) * mountedSheets * bonds * gsm) / 1000).toFixed(2));
-      if (glueKg > 0) {
-        items = [...items, buildRow(glueKey, glue, glueKg, "kg", "Kashirovka · Yelim")];
+      const glueGrams = ((sheetW * sheetH) / 1e6) * mountedSheets * bonds * gsm;
+      const inGrams = /^(g|gr|гр|г)$/i.test((glue.unit || "").trim());
+      const glueQty = Number((inGrams ? glueGrams : glueGrams / 1000).toFixed(2));
+      if (glueQty > 0) {
+        items = [...items, buildRow(glueKey, glue, glueQty, "kg", "Kashirovka · Yelim")];
       }
     }
   }

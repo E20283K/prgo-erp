@@ -629,6 +629,9 @@ export interface ProductionQueueItem {
   kashirovkaStrategy?: any;
   kashirovkaLayers?: any[];
   kashirovkaGlueGsm?: number;
+  kashirovkaGlueStockSku?: string;
+  kashirovkaGlueStockName?: string;
+  bomDismissedAutoSources?: string[];
   kashirovkaMakeReadySheets?: number;
   kashirovkaCuringHours?: number;
   selectedToolingId?: string;

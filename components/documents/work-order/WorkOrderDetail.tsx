@@ -1088,6 +1088,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     kashirovkaStrategy: data.kashirovkaStrategy || initialQueueItem?.kashirovkaStrategy || "split_half_sheet",
     kashirovkaLayers: (data.kashirovkaLayers && data.kashirovkaLayers.length > 0) ? data.kashirovkaLayers : (initialQueueItem?.kashirovkaLayers || []),
     kashirovkaGlueGsm: data.kashirovkaGlueGsm ?? initialQueueItem?.kashirovkaGlueGsm ?? 0,
+    kashirovkaGlueStockSku: data.kashirovkaGlueStockSku || initialQueueItem?.kashirovkaGlueStockSku || "",
+    kashirovkaGlueStockName: data.kashirovkaGlueStockName || initialQueueItem?.kashirovkaGlueStockName || "",
+    bomDismissedAutoSources:
+      (data as any).bomDismissedAutoSources || (initialQueueItem as any)?.bomDismissedAutoSources || [],
     kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets ?? initialQueueItem?.kashirovkaMakeReadySheets ?? 0,
     kashirovkaCuringHours: data.kashirovkaCuringHours ?? initialQueueItem?.kashirovkaCuringHours ?? 0,
     selectedToolingId: data.selectedToolingId || initialQueueItem?.selectedToolingId || "",
@@ -1269,6 +1273,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             ? data.kashirovkaLayers
             : initialQueueItem?.kashirovkaLayers,
         kashirovkaGlueGsm: data.kashirovkaGlueGsm ?? initialQueueItem?.kashirovkaGlueGsm,
+        kashirovkaGlueStockSku: data.kashirovkaGlueStockSku || initialQueueItem?.kashirovkaGlueStockSku,
+        kashirovkaMakeReadySheets: data.kashirovkaMakeReadySheets ?? initialQueueItem?.kashirovkaMakeReadySheets,
+        bomDismissedAutoSources:
+          (data as any).bomDismissedAutoSources || (initialQueueItem as any)?.bomDismissedAutoSources,
       } as Partial<WorkOrderFormData>,
       useWorkspaceStore.getState().warehouseStock
     );
@@ -2194,6 +2202,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       }
     }
 
+    // Switching the kashirovka mode starts its auto BOM rows afresh, including ones deleted before
+    if ("kashirovkaMode" in updates && updates.kashirovkaMode !== formData.kashirovkaMode) {
+      updates.bomDismissedAutoSources = [];
+    }
+
     // Kashirovka layers print what the order prints: face liner = front, back liner = reverse
     if (["frontColors", "backColors", "spotColorItems", "colorsConfig", "kashirovkaLayers", "kashirovkaMode"].some((f) => f in updates)) {
       const merged = { ...formData, ...updates };
@@ -2241,6 +2254,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         "kashirovkaStrategy",
         "kashirovkaLayers",
         "kashirovkaGlueGsm",
+        "kashirovkaGlueStockSku",
+        "kashirovkaMakeReadySheets",
       ].includes(f)
     );
 
@@ -4289,7 +4304,21 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     (i) => i.category === "Paper & Board" || i.category === "Roll & Label"
                   );
                   setCurrentBomItems(newItems);
-                  handleFieldChange("materials", newItems);
+                  // An auto row the user deleted stays deleted: remember it so the spec sync skips it.
+                  const keptSources = new Set(newItems.map((i) => i.autoSource).filter(Boolean));
+                  const removedSources = currentBomItems
+                    .map((i) => i.autoSource)
+                    .filter((s): s is string => Boolean(s) && !keptSources.has(s));
+                  if (removedSources.length > 0) {
+                    handleFieldChange({
+                      materials: newItems,
+                      bomDismissedAutoSources: Array.from(
+                        new Set([...(formData.bomDismissedAutoSources || []), ...removedSources])
+                      ),
+                    });
+                  } else {
+                    handleFieldChange("materials", newItems);
+                  }
                   const primarySubstrate = newItems.find(
                     (i) => i.category === "Paper & Board" || i.category === "Roll & Label"
                   );

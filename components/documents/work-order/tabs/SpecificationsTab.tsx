@@ -392,6 +392,26 @@ export function SpecificationsTab({
     return options;
   }, [warehouseStock, formData.laminationStockSku, formData.laminationStockName]);
 
+  // Warehouse glue for kashirovka (Adhesives & Binding)
+  const glueStockOptions = useMemo<ComboboxOption[]>(() => {
+    const options: ComboboxOption[] = (warehouseStock || [])
+      .filter((w) => w.category === "Adhesives & Binding")
+      .map((ws) => {
+        const avail = ws.available ?? ws.stockLevel ?? 0;
+        return {
+          value: ws.sku,
+          label: ws.name,
+          description: [ws.sku, `Omborda: ${avail.toLocaleString()} ${ws.unit || "kg"}`].join(" • "),
+          code: ws.sku,
+        };
+      });
+    const sku = formData.kashirovkaGlueStockSku;
+    if (sku && !options.some((o) => o.value.toLowerCase() === sku.toLowerCase())) {
+      options.unshift({ value: sku, label: formData.kashirovkaGlueStockName || sku, description: "Omborda topilmadi" });
+    }
+    return options;
+  }, [warehouseStock, formData.kashirovkaGlueStockSku, formData.kashirovkaGlueStockName]);
+
   const matchedLaminationStock = useMemo(() => {
     if (!formData.laminationStockSku && !formData.lamination) return null;
     const cleanSku = (formData.laminationStockSku || "").toLowerCase().trim();
@@ -3142,8 +3162,46 @@ export function SpecificationsTab({
                       })}
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
-                      {numberField("kashirovkaGlueGsm", "Yelim", "g/m²", 1, String(resolveKashirovkaGlueGsm()))}
+                    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_4rem_4.25rem] items-center gap-1.5 pt-2 border-t border-border">
+                      <span className="text-[11px] font-medium text-foreground truncate">Yelim</span>
+                      <ComboboxSelect
+                        items={glueStockOptions}
+                        value={formData.kashirovkaGlueStockSku || ""}
+                        onValueChange={(val) => {
+                          const matched = warehouseStock.find((w) => w.sku === val || w.name === val);
+                          handleFieldChange({
+                            kashirovkaGlueStockSku: matched ? matched.sku : val,
+                            kashirovkaGlueStockName: matched ? matched.name : val,
+                          });
+                          onMarkUnsaved();
+                        }}
+                        placeholder="Ombordan yelim"
+                        disabled={isOperator}
+                        className="h-7 text-xs font-mono"
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1}
+                        aria-label="Yelim normasi"
+                        disabled={isOperator}
+                        value={formData.kashirovkaGlueGsm || ""}
+                        placeholder={String(resolveKashirovkaGlueGsm())}
+                        onChange={(e) => {
+                          handleFieldChange(
+                            "kashirovkaGlueGsm",
+                            e.target.value === "" ? undefined : Number(e.target.value)
+                          );
+                          onMarkUnsaved();
+                        }}
+                        className="h-7 text-xs font-mono text-right"
+                      />
+                      <span className="h-7 flex items-center justify-center rounded-md border border-border bg-muted text-[10px] font-mono text-muted-foreground">
+                        g/m²
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
                       {numberField("kashirovkaMakeReadySheets", "Priladka", "list", 5)}
                       {numberField("kashirovkaCuringHours", "Quritish", "soat", 1)}
                     </div>
