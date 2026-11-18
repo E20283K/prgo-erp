@@ -23,6 +23,21 @@ export interface WorkRateRecord {
   updatedAt?: string;
 }
 
+/**
+ * Department of a catalog operation: its default machine's department when it has one
+ * (the machine card is the one place it is kept), else the department picked for machine-less work.
+ */
+export function operationDepartment(
+  rate: Pick<WorkRateRecord, "department" | "defaultMachineId">,
+  machines: { id: string; department?: string }[]
+): string {
+  if (rate.defaultMachineId) {
+    const m = machines.find((x) => x.id === rate.defaultMachineId);
+    if (m) return m.department || "";
+  }
+  return rate.department || "";
+}
+
 /** Converts a work rate's per-unit pay into USD per unit. */
 export function workRateToUsd(rate: number, currency: string, exchangeRate: number): number {
   const fx = Number(exchangeRate) || 12850;

@@ -190,6 +190,7 @@ import { FILE_KIND_ICON, getFileKind, isPreviewable, downloadFile, ViewableFile 
 import { useLookupStore } from "@/store/lookupStore";
 import { calculatePrintPlanning } from "../planningEngine";
 import { calculateWorkOrderFinancials } from "../utils/financialsEngine";
+import { currentProductiveTimePercent } from "../utils/useProductiveTimePercent";
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 
 const FOLD_TYPE_LABELS: Record<string, string> = {
@@ -2302,6 +2303,7 @@ export function OverviewTab({
             operations,
             machines,
             employees,
+            productiveTimePercent: currentProductiveTimePercent(),
             overheadPercent: 0,
           });
           const operationsCost = opsCosts.machineCost + opsCosts.laborCost + opsCosts.packagingCost;

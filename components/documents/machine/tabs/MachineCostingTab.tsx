@@ -306,7 +306,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
               </div>
               <div className="grid grid-cols-3 gap-2 text-[11px]">
                 <div>
-                  <Label className="text-[10px] text-muted-foreground">Investitsiya ($):</Label>
+                  <Label className="text-[10px] text-muted-foreground">Investitsiya ($) *</Label>
                   <MoneyInput
                     thousandSeparator=" "
                     decimalScale={2}
@@ -327,7 +327,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                   />
                 </div>
                 <div>
-                  <Label className="text-[10px] text-muted-foreground">Yillik ish soati:</Label>
+                  <Label className="text-[10px] text-muted-foreground">Yillik ish soati *</Label>
                   <Input
                     type="number"
                     value={annualHours || ""}

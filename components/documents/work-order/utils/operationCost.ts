@@ -17,8 +17,25 @@ export function calcUnitLabel(unit: string | undefined): string {
  * All amounts are USD, like every other route money field.
  */
 
-/** Norm working hours per month used to turn a monthly salary into an hourly wage (40-hour week). */
+/** Calendar working hours per month (40-hour week). */
 export const MONTHLY_WORK_HOURS = 168;
+
+/**
+ * Share of paid hours that actually go into orders (the rest is idle, cleaning, breakdowns).
+ * A monthly salary is spread over these productive hours so the whole salary lands on orders.
+ */
+export const DEFAULT_PRODUCTIVE_TIME_PERCENT = 75;
+
+/** A company's productive-time percent, clamped to 10–100, else the default. */
+export function normalizeProductiveTimePercent(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(100, Math.max(10, n)) : DEFAULT_PRODUCTIVE_TIME_PERCENT;
+}
+
+/** Productive hours per month a monthly salary is divided by. */
+export function productiveHoursPerMonth(productiveTimePercent?: number): number {
+  return (MONTHLY_WORK_HOURS * normalizeProductiveTimePercent(productiveTimePercent)) / 100;
+}
 
 export type OperationCostMode = "auto" | "outsourced" | "manual";
 
@@ -33,11 +50,49 @@ export interface CostEmployee {
   pieceworkMultiplier?: number;
 }
 
+/**
+ * Machine rates a step was costed at, frozen when the step was first saved with that machine,
+ * so later edits to the machine card do not change the cost of orders already planned.
+ */
+export interface FrozenCostRates {
+  machineId: string;
+  /** Machine hourly cost without crew wages, USD. */
+  machineRateUsd: number;
+  /** Crew wage per hour, USD. */
+  crewRateUsd: number;
+  frozenAt: string;
+}
+
+/** Today's machine rates as a frozen snapshot for `machine`. */
+export function freezeMachineRates(machine: MachineRecord): FrozenCostRates {
+  const { machineRate, crewRate } = getMachineCostRates(machine);
+  return { machineId: machine.id, machineRateUsd: machineRate, crewRateUsd: crewRate, frozenAt: new Date().toISOString() };
+}
+
+/** The step's frozen rates when they belong to its current machine, else null. */
+export function frozenRatesFor(
+  op: Pick<RouteStep, "costRates">,
+  machine: MachineRecord | null
+): FrozenCostRates | null {
+  const r = op.costRates;
+  return r && machine && r.machineId === machine.id ? r : null;
+}
+
+export interface OperationCostContext {
+  machines?: MachineRecord[];
+  employees?: CostEmployee[];
+  exchangeRate?: number;
+  /** Company setting: share of paid hours that go into orders. */
+  productiveTimePercent?: number;
+}
+
 export interface OperationCostBreakdown {
   mode: OperationCostMode;
   machine: MachineRecord | null;
   machineRateUsd: number;
   machineCostUsd: number;
+  /** When the machine rates were frozen on the step; absent while they are read live from the card. */
+  ratesFrozenAt?: string;
   laborBasis: LaborBasis;
   /** USD per hour (employees / crew) or USD per calc unit (piecework). */
   laborRateUsd: number;
@@ -154,13 +209,17 @@ const splitOperators = (op: Pick<RouteStep, "operator" | "operators">): string[]
     ? op.operators
     : (op.operator || "").split(",").map((s) => s.trim()).filter(Boolean);
 
-/** Hourly wage of one employee in UZS (HR keeps wages in UZS). */
-function employeeHourlyWageUzs(emp: CostEmployee): number {
+/**
+ * Cost of one productive hour of an employee in UZS (HR keeps wages in UZS).
+ * A monthly salary is spread over the productive hours, not the calendar ones.
+ */
+export function employeeHourlyWageUzs(emp: CostEmployee, productiveTimePercent?: number): number {
   const hourly = Number(emp.hourlyRate) || 0;
   const monthly = Number(emp.baseSalary) || 0;
+  const hours = productiveHoursPerMonth(productiveTimePercent);
   if (emp.wageType === "hourly") return hourly;
-  if (emp.wageType === "salary") return monthly > 0 ? monthly / MONTHLY_WORK_HOURS : hourly;
-  return hourly > 0 ? hourly : monthly > 0 ? monthly / MONTHLY_WORK_HOURS : 0;
+  if (emp.wageType === "salary") return monthly > 0 ? monthly / hours : hourly;
+  return hourly > 0 ? hourly : monthly > 0 ? monthly / hours : 0;
 }
 
 /**
@@ -204,7 +263,7 @@ function completedRatio(op: Partial<RouteStep> & { plannedQty?: number; complete
  */
 export function computeOperationActualCost(
   op: RouteStep,
-  ctx: { machines?: MachineRecord[]; employees?: CostEmployee[]; exchangeRate?: number }
+  ctx: OperationCostContext
 ): (OperationCostBreakdown & { hours: number }) | null {
   if (op.status !== "Finished") return null;
   const hours = getActualHours(op) ?? (Number(op.duration) || 0);
@@ -220,9 +279,18 @@ export function computeOperationActualCost(
 export function computeOperationCost(
   op: Pick<
     RouteStep,
-    "machine" | "machineId" | "operator" | "operators" | "duration" | "pieceworkTotalUsd" | "pieceworkRateUsd" | "costMode" | "manualCostUsd"
+        | "machine"
+    | "machineId"
+    | "operator"
+    | "operators"
+    | "duration"
+    | "pieceworkTotalUsd"
+    | "pieceworkRateUsd"
+    | "costMode"
+    | "manualCostUsd"
+    | "costRates"
   >,
-  ctx: { machines?: MachineRecord[]; employees?: CostEmployee[]; exchangeRate?: number }
+  ctx: OperationCostContext
 ): OperationCostBreakdown {
   const machine = resolveMachine(op, ctx.machines || []);
   const mode: OperationCostMode = op.costMode || "auto";
@@ -244,7 +312,10 @@ export function computeOperationCost(
 
   const hours = Math.max(0, Number(op.duration) || 0);
   const fx = Number(ctx.exchangeRate) || 12850;
-  const { machineRate, crewRate } = getMachineCostRates(machine);
+  const frozen = frozenRatesFor(op, machine);
+  const { machineRate, crewRate } = frozen
+    ? { machineRate: Number(frozen.machineRateUsd) || 0, crewRate: Number(frozen.crewRateUsd) || 0 }
+    : getMachineCostRates(machine);
   const machineCostUsd = hours * machineRate;
 
   const names = splitOperators(op);
@@ -266,7 +337,7 @@ export function computeOperationCost(
     laborRateUsd = Number(op.pieceworkRateUsd) || 0;
     laborCostUsd = pieceworkFund * laborMultiplier;
   } else {
-    const wageUzs = assigned.reduce((s, e) => s + employeeHourlyWageUzs(e), 0);
+    const wageUzs = assigned.reduce((s, e) => s + employeeHourlyWageUzs(e, ctx.productiveTimePercent), 0);
     if (wageUzs > 0) {
       laborBasis = "employees";
       laborRateUsd = wageUzs / fx;
@@ -283,6 +354,7 @@ export function computeOperationCost(
     machine,
     machineRateUsd: machineRate,
     machineCostUsd: round(machineCostUsd),
+    ...(frozen ? { ratesFrozenAt: frozen.frozenAt } : {}),
     laborBasis,
     laborRateUsd: round(laborRateUsd),
     laborMultiplier,

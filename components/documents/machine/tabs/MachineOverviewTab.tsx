@@ -24,6 +24,7 @@ import {
   Building,
   Building2,
   Users,
+  TriangleAlert,
   Activity,
   Sliders,
   Camera,
@@ -126,15 +127,20 @@ export function MachineOverviewTab({
   }, [availablePlants]);
 
   // Employee Combobox items
+  // Operators are picked from HR only: costing reads their wage, so a typed name would cost nothing real.
   const employeeOptions: ComboboxItem[] = useMemo(() => {
-    return employees.map((emp) => ({
+    const staff = employees.filter((emp) => emp.status !== "terminated");
+    return [{ value: "—", label: "—" }, ...staff.map((emp) => ({
       value: emp.fullName,
       label: emp.fullName,
       code: emp.badgeNo,
       description: [emp.positionTitle || emp.position, emp.department].filter(Boolean).join(" • "),
       badge: emp.badgeNo ? `#${emp.badgeNo}` : undefined,
-    }));
+    }))];
   }, [employees]);
+  const notInHr = (name?: string) =>
+    Boolean(name && name.trim() && name.trim() !== "—" && employees.length > 0) &&
+    !employees.some((e) => e.status !== "terminated" && e.fullName === name!.trim());
 
   const handleCompanyChange = (newCompId: string) => {
     const matched = companiesList.find(
@@ -646,23 +652,35 @@ export function MachineOverviewTab({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1 min-w-0">
-                  <Label className="text-[11px] font-medium text-muted-foreground">
-                    Mas&apos;ul Bosh Operator
+                  <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                    <span>Mas&apos;ul Bosh Operator</span>
+                    {notInHr(machine.leadOperator) && (
+                      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-500">
+                        <TriangleAlert className="size-3" />
+                        HR&apos;da yo&apos;q
+                      </span>
+                    )}
                   </Label>
                   <SmartCombobox
                     value={machine.leadOperator}
                     onChange={(val) => onUpdate({ leadOperator: val })}
                     options={employeeOptions}
-                    placeholder="Bosh operatorni tanlang yoki yozing..."
+                    placeholder="Bosh operatorni tanlang..."
                     searchPlaceholder="F.I.Sh. yoki tabel raqami..."
-                    allowCustom={true}
+                    allowCustom={false}
                     className="h-8 text-xs bg-background font-medium"
                   />
                 </div>
 
                 <div className="space-y-1 min-w-0">
-                  <Label className="text-[11px] font-medium text-muted-foreground">
-                    Yordamchi Operator
+                  <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                    <span>Yordamchi Operator</span>
+                    {notInHr(machine.assistantOperator) && (
+                      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-500">
+                        <TriangleAlert className="size-3" />
+                        HR&apos;da yo&apos;q
+                      </span>
+                    )}
                   </Label>
                   <SmartCombobox
                     value={machine.assistantOperator}
@@ -670,7 +688,7 @@ export function MachineOverviewTab({
                     options={employeeOptions}
                     placeholder="Yordamchi operatorni tanlang..."
                     searchPlaceholder="F.I.Sh. yoki tabel raqami..."
-                    allowCustom={true}
+                    allowCustom={false}
                     className="h-8 text-xs bg-background"
                   />
                 </div>

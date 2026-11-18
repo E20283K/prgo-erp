@@ -1,3 +1,4 @@
+import { normalizeProductiveTimePercent } from "@/components/documents/work-order/utils/operationCost";
 export interface PlantDepartment {
   id: string;
   name: string;
@@ -71,6 +72,8 @@ export interface PlantRecord {
   workingHours: string;
   daysOfWeek: string;
   totalFloorAreaM2?: number;
+  /** Share of paid hours that go into orders; monthly salaries are spread over these hours. */
+  productiveTimePercent?: number;
   machinesCount: number;
   status: "Active" | "Maintenance" | "Inactive";
   isMain?: boolean;
@@ -243,6 +246,7 @@ export function companyToPlantRecord(c: any): PlantRecord {
     workingHours: settings.workingHours || "08:00 – 17:00",
     daysOfWeek: settings.daysOfWeek || "Dushanba – Shanba",
     totalFloorAreaM2: Number(settings.totalFloorAreaM2) || 0,
+    productiveTimePercent: normalizeProductiveTimePercent(settings.productiveTimePercent),
     machinesCount: Number(c.machinesCount || settings.machinesCount) || 0,
     status: (c.status as any) || "Active",
     isMain: Boolean(settings.isMain),

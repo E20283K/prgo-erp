@@ -16,6 +16,7 @@ import { relations } from "drizzle-orm";
 import { companies, branches } from "./core";
 import { departments, employees } from "./hr";
 import { clients } from "./crm";
+import type { FrozenCostRates } from "@/components/documents/work-order/utils/operationCost";
 
 // ─── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -525,6 +526,8 @@ export const workOrderOperations = pgTable(
     pieceworkRateUsd: numeric("piecework_rate_usd", { precision: 14, scale: 4 }).default("0.0000"),
     plannedCostUsd: numeric("planned_cost_usd", { precision: 14, scale: 2 }).default("0.00"),
     pieceworkTotalUsd: numeric("piecework_total_usd", { precision: 14, scale: 2 }).default("0.00"),
+    // Machine rates frozen at planning: { machineId, machineRateUsd, crewRateUsd, frozenAt }
+    costRates: jsonb("cost_rates").$type<FrozenCostRates>(),
     sequence: integer("sequence").default(1).notNull(),
     status: varchar("status", { length: 32 }).default("pending").notNull(),
     plannedQty: numeric("planned_qty", { precision: 14, scale: 2 }).default("0").notNull(),

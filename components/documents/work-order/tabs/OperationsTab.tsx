@@ -65,6 +65,7 @@ import { useWorkspaceStore, ProductionReadinessChecks } from "@/store/workspaceS
 import { formatMoney } from "@/components/documents/common/DocumentShell";
 import { useShallow } from "zustand/react/shallow";
 import { computeOperationCost, calcUnitLabel } from "../utils/operationCost";
+import { useProductiveTimePercent } from "../utils/useProductiveTimePercent";
 
 interface OperationsTabProps {
   workOrderId?: string;
@@ -168,10 +169,11 @@ export function OperationsTab({
     if (s.workRates.length === 0) s.fetchWorkRates();
   }, []);
 
+  const productiveTimePercent = useProductiveTimePercent();
   // Planned cost per step (USD), the same numbers the Financials tab uses.
   const opCosts = useMemo(
-    () => operations.map((op) => computeOperationCost(op, { machines, employees, exchangeRate })),
-    [operations, machines, employees, exchangeRate]
+    () => operations.map((op) => computeOperationCost(op, { machines, employees, exchangeRate, productiveTimePercent })),
+    [operations, machines, employees, exchangeRate, productiveTimePercent]
   );
   const opCostsUsd = useMemo(() => opCosts.map((c) => c.totalUsd), [opCosts]);
 

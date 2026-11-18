@@ -269,6 +269,8 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
         address: plantData.address?.trim() || plantData.legalAddress?.trim() || undefined,
         notes: plantData.notes?.trim() || undefined,
         settings: {
+          // Keep keys this form does not edit (Telegram, notifications, exchange rate).
+          ...(companiesList.find((c) => c.id === plantData.id)?.settings || {}),
           shortName: plantData.shortName,
           branchType: plantData.branchType,
           oked: plantData.oked,
@@ -287,6 +289,7 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
           workingHours: plantData.workingHours,
           daysOfWeek: plantData.daysOfWeek,
           totalFloorAreaM2: plantData.totalFloorAreaM2,
+          productiveTimePercent: plantData.productiveTimePercent,
           machinesCount: plantData.machinesCount,
           isMain: plantData.isMain,
           bankAccounts: plantData.bankAccounts,

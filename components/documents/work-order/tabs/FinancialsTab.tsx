@@ -51,6 +51,7 @@ import {
   type CostGroup,
   type FinancialCostResult,
 } from "../utils/financialsEngine";
+import { useProductiveTimePercent } from "../utils/useProductiveTimePercent";
 
 const GROUP_COLORS: Partial<Record<CostGroup, { dark: string; light: string }>> = {
   material: { dark: "#60a5fa", light: "#2563eb" },
@@ -118,6 +119,7 @@ export function FinancialsTab({
 
 
   // ─── 3. COST BREAKDOWN VIA UNIFIED ENGINE ────────────────────────────────────
+  const productiveTimePercent = useProductiveTimePercent();
   const [overheadPercent, setOverheadPercent] = useState<number>(
     formData?.financials?.overheadPercent ?? DEFAULT_OVERHEAD_PERCENT
   );
@@ -134,12 +136,14 @@ export function FinancialsTab({
         shiftEvents,
         machines,
         employees,
+        productiveTimePercent,
         overheadPercent: pct,
         packagingData: formData?.packagingData,
         materialReturns,
       }),
     [
       materialReturns,
+      productiveTimePercent,
       targetQty,
       currency,
       exchangeRate,
@@ -627,7 +631,7 @@ export function FinancialsTab({
             ))}
           </div>
           <Separator orientation="vertical" className="h-4 mx-1" />
-          <span className="text-[11px] text-muted-foreground font-medium whitespace-nowrap">Umumzavod:</span>
+          <span className="text-[11px] text-muted-foreground font-medium whitespace-nowrap">Ma&apos;muriy:</span>
           <div className="relative w-16">
             <MoneyInput
               decimalScale={1}

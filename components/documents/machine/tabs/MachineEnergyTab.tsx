@@ -196,7 +196,7 @@ export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
           <div className="p-3.5 space-y-3 text-xs">
             <div className="space-y-1">
               <Label className="text-[11px] font-medium text-muted-foreground">
-                Faol Elektr Quvvati (Active Load kW):
+                Faol elektr quvvati (kW) *
               </Label>
               <Input
                 type="number"

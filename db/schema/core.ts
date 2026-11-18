@@ -61,6 +61,8 @@ export interface CompanySettings {
   exchangeRateUsd?: number;
   allowNegativeStock?: boolean;
   workOrderPrefix?: string;
+  /** Share of paid hours that go into orders (10–100); monthly salaries are spread over these hours. */
+  productiveTimePercent?: number;
   telegram?: TelegramCompanySettings;
   notifications?: NotificationRulesConfig;
 }

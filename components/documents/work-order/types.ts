@@ -10,6 +10,7 @@ export {
   migrateLegacyWorkOrderNo,
 } from "./utils/workOrderNumbering";
 import type { WorkOrderDepartment } from "./utils/workOrderNumbering";
+import type { FrozenCostRates } from "./utils/operationCost";
 import type { ProductionQueueStage, ProductionReadinessChecks } from "@/store/workspaceStore";
 
 export type KashirovkaMode = "none" | "duplex" | "triplex";
@@ -614,6 +615,8 @@ export interface RouteStep {
   pieceworkRateUsd?: number;
   plannedCostUsd?: number;
   pieceworkTotalUsd?: number;
+  /** Machine rates frozen when the step was first saved with its machine. */
+  costRates?: FrozenCostRates | null;
   startedAt?: string;
   pausedAt?: string;
   completedAt?: string;

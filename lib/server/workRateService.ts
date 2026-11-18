@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { workRates } from "@/db/schema";
+import { productionMachines, workRates } from "@/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import type { WorkRateRecord } from "@/components/documents/work-rate/types";
 import { getCompanyIdByCode } from "./tariffService";
@@ -53,10 +53,20 @@ export async function upsertWorkRate(
   const name = (data.name || "").trim();
   if (!name) return { success: false, error: "Operatsiya nomi kiritilmagan" };
 
+  // An operation with a default machine takes that machine's department; only machine-less work picks its own.
+  const defaultMachineId = data.defaultMachineId && isUuid(data.defaultMachineId) ? data.defaultMachineId : null;
+  const machine = defaultMachineId
+    ? await db.query.productionMachines.findFirst({
+        where: eq(productionMachines.id, defaultMachineId),
+        columns: { department: true },
+      })
+    : null;
+  const department = machine ? machine.department : data.department?.trim() || null;
+
   const values = {
     name,
-    department: data.department?.trim() || null,
-    defaultMachineId: data.defaultMachineId && isUuid(data.defaultMachineId) ? data.defaultMachineId : null,
+    department: department || null,
+    defaultMachineId: machine ? defaultMachineId : null,
     unit: data.unit || "1,000 sheets",
     unitDivisor: Math.max(1, Math.round(Number(data.unitDivisor) || 1000)),
     currency: (data.currency || "UZS").toUpperCase() === "USD" ? "USD" : "UZS",

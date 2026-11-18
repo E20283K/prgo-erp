@@ -162,6 +162,13 @@
       "when": 1795007427730,
       "tag": "0022_stock_paper_spec",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795028866405,
+      "tag": "0023_operation_cost_rates",
+      "breakpoints": true
     }
   ]
 }

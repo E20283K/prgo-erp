@@ -7,6 +7,8 @@ import {
   Users,
   Info,
   RotateCcw,
+  RefreshCw,
+  TriangleAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,15 +48,21 @@ import {
 import { cn } from "@/lib/utils";
 import { RouteStep, MACHINE_MAP } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { operationDepartment } from "@/components/documents/work-rate/types";
 import { useShallow } from "zustand/react/shallow";
 import { formatMoney, formatNumberWithSpaces } from "@/components/documents/common/DocumentShell";
 import {
   computeOperationCost,
   calcUnitLabel,
   estimateOperationHours,
+  freezeMachineRates,
+  frozenRatesFor,
+  getMachineCostRates,
   resolveMachine,
   type OperationCostMode,
 } from "../utils/operationCost";
+import { useProductiveTimePercent } from "../utils/useProductiveTimePercent";
+import { machineCostingGaps } from "@/components/documents/machine/costingGaps";
 
 interface OperationDialogProps {
   isOpen: boolean;
@@ -111,6 +119,8 @@ function resolveCalcBaseQty(
 interface OperatorItem {
   value: string;
   name: string;
+  /** False for a name kept on the step or machine card that HR does not know. */
+  inHr?: boolean;
   department?: string;
   avatar?: string;
   initials: string;
@@ -254,6 +264,7 @@ export function OperationDialog({
     () => estimateOperationHours(resolvedMachine, plannedSheets, orderQuantity),
     [resolvedMachine, plannedSheets, orderQuantity]
   );
+  const productiveTimePercent = useProductiveTimePercent();
   const opCost = React.useMemo(
     () =>
       computeOperationCost(
@@ -262,9 +273,9 @@ export function OperationDialog({
           pieceworkTotalUsd: (Number(form.pieceworkTotalUsd) || 0) / fx,
           manualCostUsd: (Number(form.manualCostUsd) || 0) / fx,
         },
-        { machines, employees, exchangeRate }
+        { machines, employees, exchangeRate, productiveTimePercent }
       ),
-    [form, machines, employees, exchangeRate, fx]
+    [form, machines, employees, exchangeRate, fx, productiveTimePercent]
   );
   const costMode: OperationCostMode = form.costMode || "auto";
   const money = (usd: number) => formatMoney(usd * fx, currency, moneyDecimals);
@@ -317,13 +328,18 @@ export function OperationDialog({
       void useWorkspaceStore.getState().saveWorkRate({
         ...linkedOp,
         defaultMachineId: byId.id,
-        department: linkedOp.department || byId.department || "",
+        department: byId.department || "",
       });
     }
     const name = byId ? byId.name : val;
+    // The machine's lead operator is filled in only when HR knows them: costing reads their wage.
+    const lead = byId?.leadOperator?.trim();
+    const leadInHr = Boolean(
+      lead && Array.isArray(employees) && employees.some((e) => e.status !== "terminated" && e.fullName === lead)
+    );
     const autoOps =
-      (!form.operators || form.operators.length === 0) && !form.operator && byId?.leadOperator
-        ? [byId.leadOperator]
+      (!form.operators || form.operators.length === 0) && !form.operator && lead && leadInHr
+        ? [lead]
         : form.operators;
     const estimate = estimateOperationHours(byId || null, plannedSheets, orderQuantity);
     setForm((p) => ({
@@ -347,11 +363,11 @@ export function OperationDialog({
     () =>
       workRates
         .filter((w) => w.status === "Active" || w.id === form.workRateId)
-        .map((w) => ({
-          value: w.id,
-          label: w.department ? `${w.code} — ${w.name} (${w.department})` : `${w.code} — ${w.name}`,
-        })),
-    [workRates, form.workRateId]
+        .map((w) => {
+          const dept = operationDepartment(w, machines);
+          return { value: w.id, label: dept ? `${w.code} — ${w.name} (${dept})` : `${w.code} — ${w.name}` };
+        }),
+    [workRates, machines, form.workRateId]
   );
 
   // Optional note appended to the catalog name: "UF lak (selektiv)".
@@ -408,6 +424,23 @@ export function OperationDialog({
       unit === "1 hour" ? "soat" : unit && SHEET_BASED_UNITS.has(unit) && plannedSheets > 0 ? "varaq" : "dona";
     return { unit, unitLabel: calcUnitLabel(unit), qty, divisor, units: qty / divisor, source };
   }, [selectedWorkRate, orderQuantity, plannedSheets, form.duration]);
+
+  // Machine card fields the cost cannot be exact without.
+  const machineGaps = React.useMemo(() => machineCostingGaps(resolvedMachine), [resolvedMachine]);
+
+  // Rates frozen on the step vs today's machine card: offer a refresh when the card has moved on.
+  const staleRates = React.useMemo(() => {
+    const frozen = frozenRatesFor(form, resolvedMachine);
+    if (!frozen || !resolvedMachine) return null;
+    const live = getMachineCostRates(resolvedMachine);
+    const moved =
+      Math.abs(live.machineRate - (Number(frozen.machineRateUsd) || 0)) > 0.0001 ||
+      Math.abs(live.crewRate - (Number(frozen.crewRateUsd) || 0)) > 0.0001;
+    return moved ? { frozen, live } : null;
+  }, [form, resolvedMachine]);
+  const refreshRates = () => {
+    if (resolvedMachine) setForm((p) => ({ ...p, costRates: freezeMachineRates(resolvedMachine) }));
+  };
 
   // Cost formula lines shown under the total: every number the cost is made of, in the order currency.
   const costLines = (() => {
@@ -535,8 +568,9 @@ export function OperationDialog({
         map.set(name, {
           value: name,
           name,
-          department: "Operator",
+          department: "HR'da yo'q",
           initials: getOperatorInitials(name),
+          inHr: false,
         });
       }
     });
@@ -767,11 +801,17 @@ export function OperationDialog({
                     <React.Fragment>
                       {values.map((val: string) => {
                         const op = operatorMap.get(val);
+                        const unknown = op?.inHr === false;
                         return (
                           <ComboboxChip
                             key={val}
-                            className="!h-7 py-0.5 pl-1 pr-1.5 gap-1.5 rounded-md bg-muted/80 hover:bg-muted border border-border text-xs font-medium shrink-0 inline-flex items-center shadow-xs transition-colors"
+                            title={unknown ? "HR'da yo'q" : undefined}
+                            className={cn(
+                              "!h-7 py-0.5 pl-1 pr-1.5 gap-1.5 rounded-md bg-muted/80 hover:bg-muted border border-border text-xs font-medium shrink-0 inline-flex items-center shadow-xs transition-colors",
+                              unknown && "border-amber-500/60 bg-amber-500/10"
+                            )}
                           >
+                            {unknown && <TriangleAlert className="size-3 shrink-0 text-amber-600 dark:text-amber-500" />}
                             <div className="size-4 shrink-0 rounded-full overflow-hidden flex items-center justify-center border border-border/40 shadow-2xs">
                               {op?.avatar ? (
                                 <img src={op.avatar} alt={val} className="size-full object-cover rounded-full" />
@@ -939,10 +979,30 @@ export function OperationDialog({
               <div className="space-y-0.5 border-t border-border/60 pt-1.5">
                 {costLines.map((line) => (
                   <div key={line.label} className="flex items-center gap-2 text-[11px] min-w-0">
-                    <span className="w-14 shrink-0 text-muted-foreground">{line.label}</span>
+                    <span className="w-14 shrink-0 text-muted-foreground inline-flex items-center gap-1">
+                      {line.label}
+                      {line.label === "Uskuna" && machineGaps.length > 0 && (
+                        <span title={`Kartada to'ldirilmagan: ${machineGaps.map((g) => g.label).join(", ")}`}>
+                          <TriangleAlert className="size-3 text-amber-600 dark:text-amber-500" />
+                        </span>
+                      )}
+                    </span>
                     <span className="flex-1 min-w-0 truncate font-mono text-muted-foreground" title={line.formula}>
                       {line.formula}
                     </span>
+                    {line.label === "Uskuna" && staleRates && (
+                      <button
+                        type="button"
+                        onClick={refreshRates}
+                        title={`Qotirilgan ${new Date(staleRates.frozen.frozenAt).toLocaleDateString("uz-UZ")}: ${money(
+                          Number(staleRates.frozen.machineRateUsd) || 0
+                        )}/soat. Kartada: ${money(staleRates.live.machineRate)}/soat`}
+                        className="shrink-0 inline-flex items-center gap-1 text-[11px] text-primary hover:underline cursor-pointer"
+                      >
+                        <RefreshCw className="size-3" />
+                        <span>Yangilash</span>
+                      </button>
+                    )}
                     <span className="shrink-0 font-mono text-foreground">{money(line.total)}</span>
                   </div>
                 ))}

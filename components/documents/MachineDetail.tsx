@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { DocumentTab, useWorkspaceStore } from "@/store/workspaceStore";
 import { MachineRecord, MachineStatus } from "./machine/types";
 import { getCleanBlankMachine } from "./machine/cleanBlankMachine";
+import { machineCostingGaps } from "./machine/costingGaps";
 import {
   DocumentHeader,
   DocumentSidebar,
@@ -38,6 +39,7 @@ import {
   Camera,
   AlertTriangle,
   type LucideIcon,
+  TriangleAlert,
 } from "lucide-react";
 import type { TerminalJob } from "@/lib/server/operatorTerminalService";
 import { MachineOverviewTab } from "./machine/tabs/MachineOverviewTab";
@@ -262,6 +264,15 @@ export function MachineDetail({ tab }: MachineDetailProps) {
         description: `${saved.name} bazada saqlandi.`,
         severity: "success",
       });
+      // Saving is allowed, but order costing cannot be exact until these are filled.
+      const gaps = machineCostingGaps(saved);
+      if (gaps.length > 0) {
+        addNotification?.({
+          title: "Tannarx uchun to'ldirilmagan",
+          description: gaps.map((g) => g.label).join(", "),
+          severity: "warning",
+        });
+      }
 
       setTimeout(() => setIsSaved(false), 3000);
     } catch (err) {
@@ -313,6 +324,8 @@ export function MachineDetail({ tab }: MachineDetailProps) {
   const handlePrint = () => {
     window.print();
   };
+
+  const costingGaps = useMemo(() => machineCostingGaps(machineData), [machineData]);
 
   const navItems: DocumentNavItem[] = [
     { id: "overview", label: "Xususiyatlar", icon: Cpu },
@@ -605,6 +618,24 @@ export function MachineDetail({ tab }: MachineDetailProps) {
 
         {/* Right Main Viewport driven by left DocumentSidebar */}
         <div className="flex-1 min-w-0 flex flex-col overflow-y-auto p-4 bg-background">
+          {costingGaps.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-[11px]">
+              <span className="inline-flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-500 mr-1">
+                <TriangleAlert className="size-3.5" />
+                Tannarx uchun to&apos;ldirilmagan
+              </span>
+              {costingGaps.map((g) => (
+                <button
+                  key={g.key}
+                  type="button"
+                  onClick={() => setActiveTab(g.tab)}
+                  className="h-5.5 px-2 rounded border border-border bg-card text-foreground hover:bg-muted cursor-pointer"
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          )}
           {activeTab === "overview" && (
             <MachineOverviewTab
               onUploadImage={handleTriggerUpload}

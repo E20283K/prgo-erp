@@ -44,6 +44,8 @@ import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-o
 import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
 import { syncOrderStageFromSteps, syncStepFromJournal, toShiftEvent } from "./workOrderEventService";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
+import type { MachineRecord } from "@/components/documents/machine/types";
+import { freezeMachineRates, type FrozenCostRates } from "@/components/documents/work-order/utils/operationCost";
 import { generateNextCode } from "@/lib/utils";
 import { deriveWorkOrderStatus, type WorkOrderStatus } from "@/lib/workOrderStatus";
 import { getNextSpecNumber, lockNumbering } from "./numberingService";
@@ -137,6 +139,17 @@ const toDateOrNull = (val: unknown): Date | null => {
 
 const isUuid = (val: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
+/** A step's frozen machine rates from the client, or null when they are missing or malformed. */
+function toFrozenRates(raw: unknown): FrozenCostRates | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.machineId !== "string" || !isUuid(r.machineId)) return null;
+  const machineRateUsd = Math.max(0, Number(r.machineRateUsd) || 0);
+  const crewRateUsd = Math.max(0, Number(r.crewRateUsd) || 0);
+  const frozenAt = typeof r.frozenAt === "string" && !Number.isNaN(Date.parse(r.frozenAt)) ? r.frozenAt : new Date().toISOString();
+  return { machineId: r.machineId, machineRateUsd, crewRateUsd, frozenAt };
+}
 
 /**
  * Matnli yoki formatlangan miqdorlardan sof sonni ajratib olish (PostgreSQL numeric uchun)
@@ -283,8 +296,13 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       startDate: wo.startDate || "",
       deadline: wo.deadline || "",
       actualEndDate: wo.actualEndDate || "",
-      // Imposition sheet count lives in dimensions; older orders without it fall back to the tiraj.
-      plannedSheets: Number(dims.plannedSheets) || Number(wo.quantity) || 0,
+      // Imposition sheet count lives in dimensions; orders saved before it was stored take it from
+      // the saved imposition summary, and only orders without any imposition fall back to the tiraj.
+      plannedSheets:
+        Number(dims.plannedSheets) ||
+        Number(dims.impositionState?.summary?.parentSheets) ||
+        Number(wo.quantity) ||
+        0,
       completedSheets: 0,
       operator: wo.operator || undefined,
       shift: wo.shift || undefined,
@@ -464,6 +482,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
           pieceworkRateUsd: Number(op.pieceworkRateUsd || 0),
           plannedCostUsd: Number(op.plannedCostUsd || 0),
           pieceworkTotalUsd: Number(op.pieceworkTotalUsd || 0),
+          costRates: op.costRates || undefined,
           plannedQty: plannedNum,
           completedQty: completedNum,
           qtyCompleted: qtyLabel,
@@ -912,6 +931,7 @@ export async function upsertWorkOrder(
       pieceworkRateUsd: pwRateNum.toFixed(4),
       plannedCostUsd: plannedCostNum.toFixed(2),
       pieceworkTotalUsd: pwTotalNum.toFixed(2),
+      costRates: toFrozenRates(op.costRates),
       sequence: seqNum,
       status: op.status || "Queued",
       plannedQty: parseSafePlannedQty(op, Number(data.quantity) || 0),
@@ -962,6 +982,22 @@ export async function upsertWorkOrder(
       const sentIds = new Set(incomingOps.map((op) => op?.id).filter((id) => typeof id === "string" && isUuid(id)));
       const kept = new Set<string>();
 
+      // Machine cards are read once, only for steps whose rates still have to be frozen.
+      let machineCards: Map<string, MachineRecord> | null = null;
+      const machineCard = async (id: string) => {
+        if (!machineCards) {
+          const ids = [...new Set(incomingOps.map((o) => o?.machineId).filter((v) => typeof v === "string" && isUuid(v)))];
+          const rows = ids.length
+            ? await tx
+                .select({ id: productionMachines.id, costing: productionMachines.costing })
+                .from(productionMachines)
+                .where(inArray(productionMachines.id, ids))
+            : [];
+          machineCards = new Map(rows.map((r) => [r.id, r as unknown as MachineRecord]));
+        }
+        return machineCards.get(id) || null;
+      };
+
       for (const [idx, op] of incomingOps.entries()) {
         const row = toOperationRow(op, idx);
         const sentId = typeof op.id === "string" && isUuid(op.id) ? (op.id as string) : null;
@@ -972,6 +1008,14 @@ export async function upsertWorkOrder(
                 (e) => !kept.has(e.id) && !sentIds.has(e.id) && e.sequence === row.sequence && e.name === row.name
               )
             : undefined);
+        // A step keeps the rates it was first costed at; a new machine (or none frozen yet) takes today's card.
+        if (row.costRates?.machineId !== row.machineId) row.costRates = null;
+        if (!row.costRates && match && match.costRates?.machineId === row.machineId) row.costRates = match.costRates;
+        if (!row.costRates && row.machineId && row.costMode === "auto") {
+          const card = await machineCard(row.machineId);
+          const frozen = card ? freezeMachineRates(card) : null;
+          if (frozen && (frozen.machineRateUsd > 0 || frozen.crewRateUsd > 0)) row.costRates = frozen;
+        }
         if (match) {
           kept.add(match.id);
           await tx.update(workOrderOperations).set(row).where(eq(workOrderOperations.id, match.id));

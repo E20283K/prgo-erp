@@ -2,6 +2,18 @@
 
 import React, { useMemo } from "react";
 import { PlantRecord } from "../types";
+import {
+  DEFAULT_PRODUCTIVE_TIME_PERCENT,
+  MONTHLY_WORK_HOURS,
+  normalizeProductiveTimePercent,
+  productiveHoursPerMonth,
+} from "@/components/documents/work-order/utils/operationCost";
+
+/** "168 soat × 75% = 126 soat/oy": the hours a monthly salary is divided by in order costing. */
+const formatProductiveHours = (pct?: number) =>
+  `${MONTHLY_WORK_HOURS} soat × ${normalizeProductiveTimePercent(pct)}% = ${Number(
+    productiveHoursPerMonth(pct).toFixed(1)
+  )} soat/oy`;
 import { Input } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
@@ -767,6 +779,25 @@ export function PlantOverviewTab({
                 </SelectItem>
               </SelectContent>
             </Select>
+          </div>
+        </div>
+
+        {/* Row 4: Productive time — monthly salaries are spread over these hours in order costing */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-end pt-1 border-t border-border/60">
+          <div className="lg:col-span-3 space-y-1">
+            <Label className="text-[11px] font-medium text-muted-foreground">Foydali vaqt (%)</Label>
+            <Input
+              type="number"
+              min={10}
+              max={100}
+              value={plant.productiveTimePercent ?? DEFAULT_PRODUCTIVE_TIME_PERCENT}
+              onChange={(e) => onUpdate({ productiveTimePercent: Number(e.target.value) || 0 })}
+              onBlur={(e) => onUpdate({ productiveTimePercent: normalizeProductiveTimePercent(e.target.value) })}
+              className="h-7 text-xs font-mono"
+            />
+          </div>
+          <div className="lg:col-span-9 text-[11px] font-mono text-muted-foreground pb-1.5">
+            {formatProductiveHours(plant.productiveTimePercent)}
           </div>
         </div>
       </div>

@@ -59,6 +59,8 @@ export interface FinancialCostParams {
   machines?: MachineRecord[];
   /** HR employees: assigned operators' wages drive hourly labor cost. */
   employees?: CostEmployee[];
+  /** Company setting: share of paid hours that go into orders (salary → hourly cost). */
+  productiveTimePercent?: number;
   overheadPercent?: number;
   packagingData?: WorkOrderPackagingSummary;
   materialReturns?: MaterialReturnCredit[];
@@ -148,7 +150,7 @@ const GROUP_LABELS: Record<CostGroup, string> = {
   machine: "Uskuna",
   labor: "Mehnat haqi",
   defect: "Brak",
-  overhead: "Umumzavod xarajatlari",
+  overhead: "Ma'muriy xarajatlar",
   recharge: "Mijozga hisob",
   claim: "Da'vo",
 };
@@ -193,6 +195,7 @@ export function calculateWorkOrderFinancials({
   shiftEvents = [],
   machines = [],
   employees = [],
+  productiveTimePercent,
   overheadPercent = DEFAULT_OVERHEAD_PERCENT,
   packagingData,
   materialReturns = [],
@@ -345,7 +348,7 @@ export function calculateWorkOrderFinancials({
   // ──────────────────────────────────────────────────────────────────────────
   const routeLines: RouteCostLine[] = [];
   (operations || []).forEach((op, idx) => {
-    const ctx = { machines, employees, exchangeRate: rate };
+    const ctx = { machines, employees, exchangeRate: rate, productiveTimePercent };
     const plan = computeOperationCost(op, ctx);
     const actual = computeOperationActualCost(op, ctx);
     const cost = actual ?? plan;
@@ -435,7 +438,9 @@ export function calculateWorkOrderFinancials({
     .reduce((s, ev) => s + (Number(ev.wasteQty) || 0), 0);
 
   // ──────────────────────────────────────────────────────────────────────────
-  // E. UMUMZAVOD XARAJATLARI VA JAMI
+  // E. MA'MURIY XARAJATLAR VA JAMI
+  // Sex xarajatlari (ijara, kommunal, sex boshqaruvi) uskuna soat stavkasida turadi
+  // ("Sex / Zavod umumiy xarajati"); bu foiz faqat ofis, buxgalteriya va boshqaruvni qoplaydi.
   // ──────────────────────────────────────────────────────────────────────────
   const cogsRows = rows.filter((r) => !NON_COGS_GROUPS.includes(r.group));
   const nonCogsRows = rows.filter((r) => NON_COGS_GROUPS.includes(r.group));
@@ -451,7 +456,7 @@ export function calculateWorkOrderFinancials({
       id: "overhead",
       group: "overhead",
       category: GROUP_LABELS.overhead,
-      name: "Ijara, ma'muriyat, kommunal",
+      name: "Boshqaruv, ofis, buxgalteriya",
       quantity: `${pct}%`,
       unitRate: formatMoney(directCost, currency, 2),
       totalCost: overheadCost,

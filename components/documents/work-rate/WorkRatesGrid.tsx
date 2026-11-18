@@ -13,7 +13,7 @@ import {
   Item,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
-import { Plus, Save, Trash2, Search, Edit3, Archive, ArchiveRestore, Hammer } from "lucide-react";
+import { Plus, Save, Trash2, Search, Edit3, Archive, ArchiveRestore, Hammer, Calculator } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,7 +50,9 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid"
 import { formatNumberWithSpaces } from "@/components/documents/common/DocumentShell";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { TARIFF_CALC_UNITS } from "@/components/documents/tariff/types";
-import type { WorkRateRecord } from "./types";
+import { operationDepartment, type WorkRateRecord } from "./types";
+import { suggestPieceRates, type PieceRateSuggestion } from "./pieceRateSuggestion";
+import { useProductiveTimePercent } from "@/components/documents/work-order/utils/useProductiveTimePercent";
 
 const emptyRecord = (): WorkRateRecord => ({
   id: "",
@@ -69,23 +71,26 @@ const emptyRecord = (): WorkRateRecord => ({
 
 const unitLabel = (unit: string) => TARIFF_CALC_UNITS.find((u) => u.value === unit)?.label || unit;
 
-const INLINE_EDIT_COLUMNS = ["name", "department", "pieceRate", "helperPieceRate"];
+const INLINE_EDIT_COLUMNS = ["name", "pieceRate", "helperPieceRate"];
 
 /**
  * Operation catalog (Operatsiyalar): route steps pick name, default machine and piecework pay from here.
  * Glide grid like the other registries: simple fields edit in the cell, the rest in the side panel.
  */
 export function WorkRatesGrid() {
-  const { workRates, machines, isLoading, theme, addNotification } = useWorkspaceStore(
+  const { workRates, machines, employees, departmentsList, isLoading, theme, addNotification } = useWorkspaceStore(
     useShallow((s) => ({
       workRates: s.workRates,
       machines: s.machines,
+      employees: s.employees,
+      departmentsList: s.departmentsList,
       isLoading: s.isWorkRatesLoading,
       theme: s.theme,
       addNotification: s.addNotification,
     }))
   );
   const isDark = theme === "dark";
+  const productiveTimePercent = useProductiveTimePercent();
 
   const [query, setQuery] = React.useState("");
   const [selection, setSelection] = React.useState<GridSelection>({
@@ -95,11 +100,15 @@ export function WorkRatesGrid() {
   const [draft, setDraft] = React.useState<WorkRateRecord | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [pendingDelete, setPendingDelete] = React.useState<WorkRateRecord | null>(null);
+  // What the last "Hisoblash" was based on, shown under the rate inputs.
+  const [suggestion, setSuggestion] = React.useState<PieceRateSuggestion | null>(null);
 
   React.useEffect(() => {
     const st = useWorkspaceStore.getState();
     st.fetchWorkRates();
     if (st.machines.length === 0 && st.loadMachines) st.loadMachines();
+    if (st.employees.length === 0) void st.loadEmployees();
+    if (st.departmentsList.length === 0) void st.loadDepartments();
   }, []);
 
   const machineName = React.useCallback(
@@ -107,11 +116,23 @@ export function WorkRatesGrid() {
     [machines]
   );
 
+  const departmentOf = React.useCallback((r: WorkRateRecord) => operationDepartment(r, machines), [machines]);
+
+  // Departments offered for machine-less operations: the HR department registry, the same list machine cards pick from.
+  const departmentOptions = React.useMemo(
+    () =>
+      departmentsList
+        .filter((d) => d.isActive !== false && d.name?.trim())
+        .map((d) => d.name.trim())
+        .sort((a, b) => a.localeCompare(b)),
+    [departmentsList]
+  );
+
   const rows = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return workRates;
-    return workRates.filter((r) => `${r.code} ${r.name} ${r.department}`.toLowerCase().includes(q));
-  }, [workRates, query]);
+    return workRates.filter((r) => `${r.code} ${r.name} ${departmentOf(r)}`.toLowerCase().includes(q));
+  }, [workRates, query, departmentOf]);
 
   const columns = React.useMemo<GridColumn[]>(
     () => [
@@ -167,7 +188,7 @@ export function WorkRatesGrid() {
         case "name":
           return text(r.name, true);
         case "department":
-          return text(r.department, true);
+          return text(departmentOf(r));
         case "machine":
           return text(r.defaultMachineId ? machineName(r.defaultMachineId) : "");
         case "unit":
@@ -184,7 +205,7 @@ export function WorkRatesGrid() {
           return text("");
       }
     },
-    [rows, columns, machineName, muted]
+    [rows, columns, machineName, departmentOf, muted]
   );
 
   const save = React.useCallback(
@@ -205,7 +226,7 @@ export function WorkRatesGrid() {
       const id = columns[col]?.id;
       if (!r || !id) return;
       let patch: Partial<WorkRateRecord> | null = null;
-      if (value.kind === GridCellKind.Text && (id === "name" || id === "department")) {
+      if (value.kind === GridCellKind.Text && id === "name") {
         const v = value.data.trim();
         if (id === "name" && !v) return;
         patch = { [id]: v };
@@ -220,7 +241,29 @@ export function WorkRatesGrid() {
   const selectedRow = selection.rows.first();
   const selected = selectedRow !== undefined ? rows[selectedRow] : undefined;
 
-  const openEditor = (r?: WorkRateRecord) => setDraft(r ? { ...r } : emptyRecord());
+  const openEditor = (r?: WorkRateRecord) => {
+    setSuggestion(null);
+    setDraft(r ? { ...r } : emptyRecord());
+  };
+
+  const calculateRates = () => {
+    if (!draft) return;
+    const result = suggestPieceRates({
+      unit: draft.unit,
+      unitDivisor: draft.unitDivisor,
+      currency: draft.currency,
+      machine: machines.find((m) => m.id === draft.defaultMachineId) || null,
+      employees,
+      productiveTimePercent,
+    });
+    if (!result.ok) {
+      setSuggestion(null);
+      addNotification({ title: "Hisoblanmadi", description: result.error, severity: "warning" });
+      return;
+    }
+    setSuggestion(result.value);
+    patchDraft({ pieceRate: result.value.pieceRate, helperPieceRate: result.value.helperPieceRate });
+  };
 
   const handleSaveDraft = async () => {
     if (!draft) return;
@@ -246,6 +289,7 @@ export function WorkRatesGrid() {
   };
 
   const patchDraft = (patch: Partial<WorkRateRecord>) => setDraft((d) => (d ? { ...d, ...patch } : d));
+  const fmtRate = (v: number) => formatNumberWithSpaces(v, draft?.currency === "USD" ? 4 : 0);
   const draftDecimals = draft?.currency === "USD" ? 4 : 0;
 
   return (
@@ -398,7 +442,7 @@ export function WorkRatesGrid() {
                       const m = machines.find((x) => x.id === val);
                       patchDraft({
                         defaultMachineId: val === "none" ? null : String(val),
-                        department: draft.department || m?.department || "",
+                        department: m ? m.department || "" : draft.department,
                       });
                     }}
                   >
@@ -417,11 +461,33 @@ export function WorkRatesGrid() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs font-medium">Bo&apos;lim</Label>
-                  <Input
-                    value={draft.department}
-                    onChange={(e) => patchDraft({ department: e.target.value })}
-                    className="h-8 text-xs"
-                  />
+                  {draft.defaultMachineId ? (
+                    <div className="h-8 px-2.5 flex items-center rounded-md border border-border bg-muted/40 text-xs text-muted-foreground truncate">
+                      {departmentOf(draft) || "—"}
+                    </div>
+                  ) : (
+                    <Select
+                      value={draft.department || "none"}
+                      onValueChange={(val) => patchDraft({ department: val === "none" ? "" : String(val) })}
+                    >
+                      <SelectTrigger className="h-8 text-xs w-full">
+                        <SelectValue>{draft.department || "—"}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-xs">—</SelectItem>
+                        {draft.department && !departmentOptions.includes(draft.department) && (
+                          <SelectItem value={draft.department} className="text-xs text-muted-foreground">
+                            {draft.department}
+                          </SelectItem>
+                        )}
+                        {departmentOptions.map((d) => (
+                          <SelectItem key={d} value={d} className="text-xs">
+                            {d}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
 
@@ -463,7 +529,17 @@ export function WorkRatesGrid() {
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium">Sdelka</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium">Sdelka</Label>
+                    <button
+                      type="button"
+                      onClick={calculateRates}
+                      className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline cursor-pointer"
+                    >
+                      <Calculator className="size-3" />
+                      <span>Hisoblash</span>
+                    </button>
+                  </div>
                   <MoneyInput
                     thousandSeparator=" "
                     decimalScale={draftDecimals}
@@ -483,6 +559,25 @@ export function WorkRatesGrid() {
                   />
                 </div>
               </div>
+
+              {suggestion && (
+                <div className="rounded-md border border-border bg-muted/30 px-2.5 py-1.5 space-y-0.5 font-mono text-[11px] text-muted-foreground">
+                  <div className="flex justify-between gap-2">
+                    <span>Norma</span>
+                    <span>{formatNumberWithSpaces(suggestion.normHours, 3)} soat</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="truncate">Operator · {suggestion.lead.source}</span>
+                    <span className="shrink-0">{fmtRate(suggestion.lead.hourly)}/soat</span>
+                  </div>
+                  {suggestion.helper && (
+                    <div className="flex justify-between gap-2">
+                      <span className="truncate">Yordamchi · {suggestion.helper.source}</span>
+                      <span className="shrink-0">{fmtRate(suggestion.helper.hourly)}/soat</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-1">
                 <Label className="text-xs font-medium">Holat</Label>

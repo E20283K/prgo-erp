@@ -1,0 +1,1 @@
+ALTER TABLE "work_order_operations" ADD COLUMN "cost_rates" jsonb;

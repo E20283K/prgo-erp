@@ -145,6 +145,7 @@ import {
   getWorkOrderMaterialReturns,
   resolveEffectiveCost,
 } from "./utils/financialsEngine";
+import { currentProductiveTimePercent } from "./utils/useProductiveTimePercent";
 import { elapsedRunMinutes } from "./utils/operationCost";
 import { PrepressToolingTab } from "./tabs/PrepressToolingTab";
 import { calculatePrintPlanning } from "./planningEngine";
@@ -1715,6 +1716,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         shiftEvents,
         machines: storeMachines,
         employees: useWorkspaceStore.getState().employees,
+        productiveTimePercent: currentProductiveTimePercent(),
         overheadPercent: formData.financials?.overheadPercent ?? DEFAULT_OVERHEAD_PERCENT,
         packagingData: { ...summary, isCompleted: true },
         materialReturns: getWorkOrderMaterialReturns(
