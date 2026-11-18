@@ -128,6 +128,36 @@ export function rebuildKashirovkaLayers(
   });
 }
 
+/** Inks in a layer's print scheme: "4+0" → 4, "5+0" → 5, "4+4" → 8, "0+0" → 0. */
+export function kashirovkaLayerInks(colors?: string): number {
+  if (!colors) return 0;
+  return colors
+    .split("+")
+    .reduce((sum, part) => sum + (Number.parseInt(part, 10) || 0), 0);
+}
+
+/**
+ * CTP plates per plate set for a kashirovka order, from the layers' print schemes.
+ * 1-CTP (half sheet): the liners share one plate set, so it needs as many plates
+ * as the most colourful liner. 2-CTP (separate sheets): each liner has its own set.
+ * Returns null when the order is not kashirovka, so callers keep their own count.
+ */
+export function kashirovkaPlatesPerForm(
+  mode: KashirovkaMode | undefined,
+  layers: SubstrateLayer[] | undefined,
+  strategy: KashirovkaImpositionStrategy | undefined
+): number | null {
+  if (!mode || mode === "none" || !layers || layers.length === 0) return null;
+  const inks = layers
+    .filter((l) => l.role !== "core_board")
+    .map((l) => kashirovkaLayerInks(l.colors))
+    .filter((n) => n > 0);
+  if (inks.length === 0) return 0;
+  return (strategy || "split_half_sheet") === "separate_sheets"
+    ? inks.reduce((sum, n) => sum + n, 0)
+    : Math.max(...inks);
+}
+
 export function calculateKashirovkaTotals(
   mode: KashirovkaMode = "none",
   layers: SubstrateLayer[] = [],

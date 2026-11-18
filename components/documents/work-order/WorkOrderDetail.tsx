@@ -138,7 +138,7 @@ import {
   BomItem,
   normalizeBomItem,
 } from "../BomMaterialsGrid";
-import { WorkOrderPackagingSummary, WorkOrderToolingItem, ensurePackagingStep } from "./types";
+import { WorkOrderPackagingSummary, WorkOrderToolingItem, ensurePackagingStep, kashirovkaPlatesPerForm } from "./types";
 import {
   calculateWorkOrderFinancials,
   DEFAULT_OVERHEAD_PERCENT,
@@ -2866,10 +2866,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         parentSheetH: formData.parentSheetH || 700,
         pressSheetW: formData.pressSheetW || 500,
         pressSheetH: formData.pressSheetH || 700,
+        kashirovkaPlates: kashirovkaPlatesPerForm(
+          formData.kashirovkaMode,
+          formData.kashirovkaLayers,
+          formData.kashirovkaStrategy
+        ),
       }),
     [
       formData.quantity,
       formData.sizes,
+      formData.kashirovkaMode,
+      formData.kashirovkaLayers,
+      formData.kashirovkaStrategy,
       formData.frontColors,
       formData.backColors,
       formData.spotColorItems,
@@ -3927,6 +3935,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     backColors={formData.backColors}
                     spotColors={formData.spotColorItems}
                     printMethod={formData.printMethod}
+                    kashirovkaPlates={kashirovkaPlatesPerForm(
+                      formData.kashirovkaMode,
+                      formData.kashirovkaLayers,
+                      formData.kashirovkaStrategy
+                    )}
                     onPrintMethodChange={(method) => handleFieldChange("printMethod", method)}
                     pressMachine={formData.pressMachine}
                     activeMachine={activeMachine}

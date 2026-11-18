@@ -81,6 +81,8 @@ export interface LayoutCalcTabProps {
   backColors?: SideColorConfig;
   spotColors?: SpotColorItem[];
   printMethod?: PrintMethod;
+  /** Plates per form for a kashirovka order (kashirovkaPlatesPerForm); null when not kashirovka. */
+  kashirovkaPlates?: number | null;
   onPrintMethodChange?: (method: PrintMethod) => void;
   pressMachine?: string;
   activeMachine?: PressMachineLike | null;

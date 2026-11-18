@@ -127,6 +127,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     backColors = { c: false, m: false, y: false, k: false },
     spotColors = [],
     printMethod,
+    kashirovkaPlates,
     onPrintMethodChange,
     pressMachine,
     activeMachine,
@@ -525,7 +526,9 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     const divisor = Math.max(1, settings.cutDivisor);
     const parentSheets = Math.ceil(pressSheets / divisor);
     const platesPerForm =
-      settings.mode === "single_sided"
+      typeof kashirovkaPlates === "number"
+        ? kashirovkaPlates
+        : settings.mode === "single_sided"
         ? frontColorCount
         : settings.mode === "work_and_turn"
           ? Math.max(frontColorCount, backColorCount)
@@ -549,7 +552,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       overprintPct,
       extraPct,
     };
-  }, [calc, variants, settings.cutDivisor, settings.mode, frontColorCount, backColorCount]);
+  }, [calc, variants, settings.cutDivisor, settings.mode, frontColorCount, backColorCount, kashirovkaPlates]);
 
   // ---------------------------------------------------------------- analyze / generate
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);

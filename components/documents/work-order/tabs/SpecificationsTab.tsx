@@ -72,6 +72,7 @@ import {
   rebuildKashirovkaLayers,
   resolveKashirovkaGlueGsm,
   KASHIROVKA_LAYER_LABELS,
+  kashirovkaPlatesPerForm,
   parseGrammageFromStock,
   WorkOrderSampleData,
   OrderAttachment,
@@ -2962,6 +2963,7 @@ export function SpecificationsTab({
               (l) => l.role !== "core_board" && l.colors !== "0+0"
             ).length;
             const strategy = formData.kashirovkaStrategy || "split_half_sheet";
+            const kashirovkaPlates = kashirovkaPlatesPerForm(kashirovkaMode, kashirovkaLayers, strategy) ?? 0;
             const segmentClass = (active: boolean) =>
               cn(
                 "h-6 px-2 rounded text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
@@ -3136,7 +3138,16 @@ export function SpecificationsTab({
                     </div>
 
                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
-                      <span className="text-xs text-muted-foreground font-medium">Bosma usuli</span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs text-muted-foreground font-medium">Bosma usuli</span>
+                        <Badge
+                          variant="secondary"
+                          title="Bitta forma uchun CTP plastinalar"
+                          className="h-5 px-1.5 text-[10px] font-mono"
+                        >
+                          {kashirovkaPlates} CTP
+                        </Badge>
+                      </div>
                       <div
                         role="group"
                         aria-label="Bosma usuli"

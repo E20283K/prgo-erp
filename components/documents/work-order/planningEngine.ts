@@ -31,6 +31,8 @@ export interface PrintPlanningInput {
   paperPricePerTon?: number; // USD per metric ton (e.g. 1100)
   ctpPlateCost?: number; // Cost per CTP plate USD (e.g. 12)
   pressHourRate?: number; // Machine hourly rate USD (e.g. 65)
+  /** Kashirovka plate count from the layers (kashirovkaPlatesPerForm); overrides the side colours. */
+  kashirovkaPlates?: number | null;
 }
 
 export interface PrintPlanningResult {
@@ -198,6 +200,14 @@ export function calculatePrintPlanning(inputs: PrintPlanningInput): PrintPlannin
 
   // Ensure at least 1 plate if 0 colors
   totalCtpPlates = Math.max(totalCtpPlates, frontTotalColors > 0 ? 1 : 0);
+
+  // Kashirovka: the plates follow the printed liners, not the order's side colours
+  if (typeof inputs.kashirovkaPlates === "number") {
+    totalCtpPlates = inputs.kashirovkaPlates;
+    frontPlates = inputs.kashirovkaPlates;
+    backPlates = 0;
+    savedPlatesFromWorkAndTurn = 0;
+  }
 
   // 4. Net Press Sheets
   // If work & turn: each press sheet produces 2x the cards after cutting in half, but requires printing on both sides

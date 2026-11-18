@@ -138,6 +138,7 @@ import {
   MASTER_SPECIFICATIONS,
   calculateKashirovkaTotals,
   getDefaultKashirovkaLayers,
+  kashirovkaPlatesPerForm,
   WorkOrderSampleData,
   generateSuggestedProductName,
   ProductNameNamingPreset,
@@ -659,8 +660,12 @@ export function OverviewTab({
       pressSheetW: formData.pressSheetW || 500,
       pressSheetH: formData.pressSheetH || 700,
       paperGsm: 300,
+      kashirovkaPlates: kashirovkaPlatesPerForm(kashirovkaMode, kashirovkaLayers, formData.kashirovkaStrategy),
     });
   }, [
+    kashirovkaMode,
+    kashirovkaLayers,
+    formData.kashirovkaStrategy,
     formData.quantity,
     hasSizes,
     formData.sizes,
