@@ -170,21 +170,42 @@ export async function deleteWarehouse(id: string, companyCode: string = "PRINTGO
 
 // ─── 2. Stock Balances (Joriy Qoldiqlar Registri) ───────────────────────────────
 
+const numOrUndef = (v: unknown) => (v === null || v === undefined || v === "" ? undefined : Number(v));
+
+// numeric ustunlar Postgres'dan matn bo'lib keladi — kartochka sonlar bilan ishlaydi
+function mapStockBalanceRow(r: typeof warehouseStockBalances.$inferSelect) {
+  return {
+    ...r,
+    stockLevel: Number(r.stockLevel) || 0,
+    reserved: Number(r.reserved) || 0,
+    available: Number(r.available) || 0,
+    reorder: Number(r.reorder) || 0,
+    unitPriceUsd: Number(r.unitPriceUsd) || 0,
+    unitPriceUzs: numOrUndef(r.unitPriceUzs),
+    unitPrice: r.currency === "UZS" ? Number(r.unitPriceUzs) || 0 : Number(r.unitPriceUsd) || 0,
+    rollWidthMm: numOrUndef(r.rollWidthMm),
+    rollLengthM: numOrUndef(r.rollLengthM),
+    location: r.locationName,
+    supplier: r.supplier || "",
+    batchNo: r.batchNo || "",
+    grainDirection: r.grainDirection || undefined,
+    expiryDate: r.expiryDate ? r.expiryDate.toISOString().split("T")[0] : undefined,
+    paperSpec: (r.paperSpec as Record<string, unknown> | null) || undefined,
+  };
+}
+
 export async function getStockBalances(companyCode: string = "PRINTGOO", locationName?: string) {
   const companyId = await getCompanyIdByCode(companyCode);
-  if (locationName) {
-    return db.query.warehouseStockBalances.findMany({
-      where: and(
-        eq(warehouseStockBalances.companyId, companyId),
-        eq(warehouseStockBalances.locationName, locationName)
-      ),
-      orderBy: [desc(warehouseStockBalances.updatedAt)],
-    });
-  }
-  return db.query.warehouseStockBalances.findMany({
-    where: eq(warehouseStockBalances.companyId, companyId),
+  const rows = await db.query.warehouseStockBalances.findMany({
+    where: locationName
+      ? and(
+          eq(warehouseStockBalances.companyId, companyId),
+          eq(warehouseStockBalances.locationName, locationName)
+        )
+      : eq(warehouseStockBalances.companyId, companyId),
     orderBy: [desc(warehouseStockBalances.updatedAt)],
   });
+  return rows.map(mapStockBalanceRow);
 }
 
 export async function upsertStockBalance(payload: any, companyCode: string = "PRINTGOO") {
@@ -192,7 +213,10 @@ export async function upsertStockBalance(payload: any, companyCode: string = "PR
   const stockLevel = Number(payload.stockLevel) || 0;
   const reserved = Number(payload.reserved) || 0;
   const available = Math.max(0, stockLevel - reserved);
-  const reorder = Number(payload.reorder) || 1000;
+  const reorder =
+    payload.reorder === undefined || payload.reorder === null || payload.reorder === ""
+      ? 1000
+      : Math.max(0, Number(payload.reorder) || 0);
 
   let computedStatus: "In Stock" | "Low Stock" | "Critical" | "Out of Stock" = "In Stock";
   if (stockLevel <= 0) computedStatus = "Out of Stock";
@@ -229,10 +253,20 @@ export async function upsertStockBalance(payload: any, companyCode: string = "PR
     unit: payload.unit || "sheets",
     reorder: reorder.toString(),
     unitPriceUsd: (Number(payload.unitPriceUsd) || 0).toString(),
+    unitPriceUzs: payload.unitPriceUzs ? String(Number(payload.unitPriceUzs) || 0) : null,
+    currency: payload.currency === "UZS" ? "UZS" : "USD",
+    supplier: payload.supplier || null,
+    batchNo: payload.batchNo || null,
+    grainDirection: payload.grainDirection || null,
+    rollWidthMm: payload.rollWidthMm ? String(Number(payload.rollWidthMm) || 0) : null,
+    rollLengthM: payload.rollLengthM ? String(Number(payload.rollLengthM) || 0) : null,
+    expiryDate: payload.expiryDate ? new Date(payload.expiryDate) : null,
+    paperSpec: payload.paperSpec && typeof payload.paperSpec === "object" ? payload.paperSpec : null,
     locationShelf: payload.locationShelf || null,
     imageUrl: payload.imageUrl || null,
     lastReceived: payload.lastReceived ? new Date(payload.lastReceived) : new Date(),
-    status: (payload.status as any) || computedStatus,
+    // Holat har doim qoldiq va chegaradan hisoblanadi — klient yuborgan eski holat qabul qilinmaydi
+    status: computedStatus,
     updatedAt: new Date(),
   };
 
@@ -318,7 +352,7 @@ export async function upsertStockBalance(payload: any, companyCode: string = "PR
     }
   }
 
-  return record;
+  return record ? mapStockBalanceRow(record) : record;
 }
 
 // ─── 3. Warehouse Receipts (Kirim Orderlari) ───────────────────────────────────

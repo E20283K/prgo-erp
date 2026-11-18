@@ -376,6 +376,23 @@ export interface MasterSpecificationRecord {
   updatedAt?: string;
 }
 
+/** Qog'oz / karton pasporti — bosmaxona tasnifi uchun texnik ko'rsatkichlar */
+export interface PaperSpec {
+  paperType?: "offset" | "coated" | "board" | "kraft" | "self_adhesive" | "designer" | "synthetic" | "newsprint";
+  boardGrade?: "GC1" | "GC2" | "GD2" | "GD3" | "GT" | "SBS";
+  finish?: "gloss" | "matt" | "silk" | "uncoated" | "textured";
+  coatedSides?: 0 | 1 | 2;
+  caliperUm?: number;
+  whitenessCie?: number;
+  opacityPct?: number;
+  color?: string;
+  brand?: string;
+  manufacturer?: string;
+  sheetsPerPack?: number;
+  packsPerPallet?: number;
+  certification?: "FSC" | "PEFC" | "none";
+}
+
 export interface WarehouseStockRecord {
   id?: string;
   sku: string;
@@ -383,7 +400,7 @@ export interface WarehouseStockRecord {
   category: "Paper & Board" | "Roll & Label" | "Inks & Plates" | "Foil & Film" | "Adhesives & Binding" | "Offcuts & Scraps";
   grammage?: number;
   sheetFormat?: string;
-  unit: "sheets" | "rolls" | "kg" | "pcs" | "m²";
+  unit: "sheets" | "rolls" | "kg" | "pcs" | "m²" | "m" | "liters" | "drums";
   location: string;
   warehouseId?: string;
   locationShelf?: string;
@@ -396,7 +413,7 @@ export interface WarehouseStockRecord {
   unitPrice?: number;
   currency?: "USD" | "UZS";
   lastReceived: string;
-  status: "In Stock" | "Low Stock" | "Critical";
+  status: "In Stock" | "Low Stock" | "Critical" | "Out of Stock";
   isOffcut?: boolean;
   parentMaterialSku?: string;
   cutDimensions?: string;
@@ -408,6 +425,7 @@ export interface WarehouseStockRecord {
   supplier?: string;
   grainDirection?: "Long Grain" | "Short Grain";
   imageUrl?: string;
+  paperSpec?: PaperSpec;
 }
 
 /**

@@ -133,7 +133,7 @@ export interface BomItem {
   originalCurrency?: "USD" | "UZS";
   originalUnitPrice?: number;
   supplier: string;
-  availability: "In Stock" | "Reserved" | "Low Stock" | "On Order";
+  availability: "In Stock" | "Reserved" | "Low Stock" | "On Order" | "Out of Stock";
   issueType?: MaterialIssueType;
   faultParty?: FaultParty;
   notes?: string;
@@ -1073,6 +1073,8 @@ export function BomMaterialsGrid({
             ? "Kam qolgan"
             : item.availability === "On Order"
             ? "Buyurtmada"
+            : item.availability === "Out of Stock"
+            ? "Tugagan"
             : item.availability;
 
           return {

@@ -19,6 +19,7 @@ import {
   DocumentTab,
   WarehouseStockRecord,
   WarehouseMovementRecord,
+  type PaperSpec,
 } from "@/store/workspaceStore";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,21 @@ import {
   InfoRow,
   DocumentNavItem,
 } from "./common/DocumentShell";
+import { HintLabel } from "./common/HintLabel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  USD_UZS_RATE,
+  FIELD_HINTS,
+  PAPER_TYPE_OPTIONS,
+  BOARD_GRADE_OPTIONS,
+  FINISH_OPTIONS,
+  COATED_SIDES_OPTIONS,
+  CERTIFICATION_OPTIONS,
+  composeFormat,
+  computeSheetMetrics,
+  fitCount,
+  parseFormat,
+} from "@/lib/paperSpec";
 import { ReturnOffcutDialog } from "@/components/grid/ReturnOffcutDialog";
 import { WarehouseSelect } from "@/components/common/WarehouseSelect";
 import { MaterialImageModal } from "@/components/documents/MaterialImageModal";
@@ -94,19 +110,19 @@ const STOCK_CATEGORY_OPTIONS: ComboboxOption[] = [
 ];
 
 const STOCK_UNIT_OPTIONS: ComboboxOption[] = [
-  { value: "m", label: "Metr (m)", description: "Chiziqli uzunlik (plyonka va lenta)" },
-  { value: "kg", label: "Kilogramm (kg)", description: "Bo'yoq, lak va yelim xomashyosi" },
-  { value: "sheets", label: "Varaq (sheets)", description: "Listli qog'oz va karton" },
-  { value: "rolls", label: "Rulon (rolls)", description: "Rulonli xomashyolar" },
-  { value: "pcs", label: "Dona (pcs)", description: "Donali buyum va materiallar" },
-  { value: "m²", label: "Kvadrat metr (m²)", description: "Maydon birligi" },
-  { value: "liters", label: "Litr (liters)", description: "Suyuqlik hajmi" },
-  { value: "drums", label: "Bochka (drums)", description: "Yirik hajmli idish" },
+  { value: "m", label: "Metr", description: "Plyonka va lenta" },
+  { value: "kg", label: "Kilogramm", description: "Bo'yoq, lak va yelim" },
+  { value: "sheets", label: "Varaq", description: "Listli qog'oz va karton" },
+  { value: "rolls", label: "Rulon", description: "Rulonli xomashyo" },
+  { value: "pcs", label: "Dona", description: "Donali buyum" },
+  { value: "m²", label: "Kvadrat metr", description: "Maydon birligi" },
+  { value: "liters", label: "Litr", description: "Suyuqlik hajmi" },
+  { value: "drums", label: "Bochka", description: "Yirik idish" },
 ];
 
 const GRAIN_DIRECTION_OPTIONS: ComboboxOption[] = [
-  { value: "Long Grain", label: "Long Grain", description: "Bo'yiga tola yo'nalishi" },
-  { value: "Short Grain", label: "Short Grain", description: "Eniga tola yo'nalishi" },
+  { value: "Long Grain", label: "Uzun tomon bo'ylab", description: "Long grain" },
+  { value: "Short Grain", label: "Qisqa tomon bo'ylab", description: "Short grain" },
 ];
 
 export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
@@ -165,7 +181,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       currency: d.currency || (d.unitPriceUzs && !d.unitPriceUsd ? "UZS" : "USD"),
       unitPrice: d.unitPrice !== undefined ? Number(d.unitPrice) : (Number(d.unitPriceUsd) || 0),
       unitPriceUsd: Number(d.unitPriceUsd) || 0,
-      unitPriceUzs: d.unitPriceUzs ? Number(d.unitPriceUzs) : Math.round((Number(d.unitPriceUsd) || 0) * 12850),
+      unitPriceUzs: d.unitPriceUzs ? Number(d.unitPriceUzs) : Math.round((Number(d.unitPriceUsd) || 0) * USD_UZS_RATE),
       lastReceived: d.lastReceived || new Date().toISOString().split("T")[0],
       status: d.status || "In Stock",
       isOffcut: d.isOffcut,
@@ -173,7 +189,8 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       cutDimensions: d.cutDimensions,
       sourceWorkOrder: d.sourceWorkOrder,
       supplier: d.supplier || "",
-      grainDirection: d.grainDirection || "Long Grain",
+      grainDirection: d.grainDirection || undefined,
+      paperSpec: d.paperSpec || undefined,
       rollWidthMm: d.rollWidthMm,
       rollLengthM: d.rollLengthM,
       batchNo: d.batchNo || "",
@@ -368,8 +385,75 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  const handleSave = async () => {
-    const rate = 12850;
+  // Bazada saqlangan kartochka: qoldiq faqat hujjatlar orqali o'zgaradi
+  const isPersisted = Boolean(stockItem.id);
+  const isPaper = doc.category === "Paper & Board" || doc.category === "Offcuts & Scraps" || Boolean(doc.isOffcut);
+  const isRollMaterial =
+    doc.unit === "rolls" || doc.unit === "m" || doc.category === "Roll & Label" || doc.category === "Foil & Film";
+  const spec: PaperSpec = doc.paperSpec || {};
+
+  const handleSpecChange = <K extends keyof PaperSpec>(field: K, val: PaperSpec[K]) => {
+    setDoc((prev) => {
+      const next: PaperSpec = { ...(prev.paperSpec || {}), [field]: val };
+      if (field === "paperType" && val !== "board") delete next.boardGrade;
+      return { ...prev, paperSpec: next };
+    });
+    setTabUnsaved(tab.id, true);
+  };
+
+  // Format "700×1000" ko'rinishida saqlanadi (kirim, BOM va boshqa modullar shuni o'qiydi)
+  const formatDims = useMemo(() => {
+    const [w, h] = (doc.sheetFormat || "").split(/\s*[x×х*]\s*/i);
+    const num = (v?: string) => {
+      const n = v ? parseFloat(v.replace(",", ".")) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+    return { w: num(w), h: num(h) };
+  }, [doc.sheetFormat]);
+
+  const handleFormatChange = (side: "w" | "h", raw: string) => {
+    const v = raw ? Number(raw) : undefined;
+    const w = side === "w" ? v : formatDims.w;
+    const h = side === "h" ? v : formatDims.h;
+    handleFieldChange("sheetFormat", composeFormat(w, h));
+  };
+
+  const sheetMetrics = useMemo(
+    () =>
+      computeSheetMetrics({
+        grammage: doc.grammage,
+        format: doc.sheetFormat,
+        sheetsPerPack: doc.paperSpec?.sheetsPerPack,
+        stockLevel: Number(doc.stockLevel) || 0,
+        unit: doc.unit,
+        unitPriceUsd: Number(doc.unitPriceUsd) || 0,
+      }),
+    [doc.grammage, doc.sheetFormat, doc.paperSpec?.sheetsPerPack, doc.stockLevel, doc.unit, doc.unitPriceUsd]
+  );
+
+  const handleCurrencySwitch = (cur: "USD" | "UZS") => {
+    setDoc((prev) => {
+      if (cur === "USD") {
+        const p = prev.unitPriceUsd || (prev.unitPriceUzs ? Number((prev.unitPriceUzs / USD_UZS_RATE).toFixed(4)) : 0);
+        return { ...prev, currency: cur, unitPrice: p, unitPriceUsd: p, unitPriceUzs: Math.round(p * USD_UZS_RATE) };
+      }
+      const p = prev.unitPriceUzs || Math.round((prev.unitPriceUsd || 0) * USD_UZS_RATE);
+      return { ...prev, currency: cur, unitPrice: p, unitPriceUzs: p, unitPriceUsd: p > 0 ? Number((p / USD_UZS_RATE).toFixed(4)) : 0 };
+    });
+    setTabUnsaved(tab.id, true);
+  };
+
+  const handlePriceChange = (val: number) => {
+    setDoc((prev) =>
+      prev.currency === "UZS"
+        ? { ...prev, unitPrice: val, unitPriceUzs: val, unitPriceUsd: val > 0 ? Number((val / USD_UZS_RATE).toFixed(4)) : 0 }
+        : { ...prev, unitPrice: val, unitPriceUsd: val, unitPriceUzs: Math.round(val * USD_UZS_RATE) }
+    );
+    setTabUnsaved(tab.id, true);
+  };
+
+  const handleSave = async (): Promise<boolean> => {
+    const rate = USD_UZS_RATE;
     const cur: "USD" | "UZS" = doc.currency || "USD";
     let pUsd = Number(doc.unitPriceUsd) || 0;
     let pUzs = Number(doc.unitPriceUzs) || 0;
@@ -385,33 +469,55 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       pUzs = Math.round(pBase * rate);
     }
 
+    const stockLevel = Number(doc.stockLevel) || 0;
+    const reserved = Number(doc.reserved) || 0;
+    const available = Math.max(0, stockLevel - reserved);
+    const reorder = Number(doc.reorder) || 0;
+    // Server bilan bir xil qoida: holat qoldiq va chegaradan hisoblanadi
+    const status: WarehouseStockRecord["status"] =
+      stockLevel <= 0 ? "Out of Stock" : available <= reorder * 0.3 ? "Critical" : available <= reorder ? "Low Stock" : "In Stock";
+    // Bo'sh qiymatlarni pasportdan olib tashlash
+    const cleanSpec = Object.fromEntries(
+      Object.entries(doc.paperSpec || {}).filter(([, v]) => v !== undefined && v !== "" && !(typeof v === "number" && Number.isNaN(v)))
+    ) as PaperSpec;
+
     const updated: WarehouseStockRecord = {
       ...doc,
+      status,
+      paperSpec: Object.keys(cleanSpec).length > 0 ? cleanSpec : undefined,
       currency: cur,
       unitPrice: pBase,
       unitPriceUsd: pUsd,
       unitPriceUzs: pUzs,
-      stockLevel: Number(doc.stockLevel) || 0,
-      reserved: Number(doc.reserved) || 0,
-      available: Math.max(0, (Number(doc.stockLevel) || 0) - (Number(doc.reserved) || 0)),
-      reorder: Number(doc.reorder) || 0,
+      stockLevel,
+      reserved,
+      available,
+      reorder,
       grammage: doc.grammage ? Number(doc.grammage) : undefined,
       warehouseId: doc.warehouseId || activeWarehouseId || undefined,
       locationShelf: doc.locationShelf || undefined,
     };
-    await upsertWarehouseStockAsync(updated);
+    const ok = await upsertWarehouseStockAsync(updated);
+    if (!ok) {
+      addNotification({
+        title: "Saqlanmadi",
+        description: `${updated.sku}: server xatolik qaytardi, o'zgarishlar bazaga yozilmadi.`,
+        severity: "error",
+      });
+      return false;
+    }
     setDoc(updated);
     setTabUnsaved(tab.id, false);
     addNotification({
-      title: "Xomashyo muvaffaqiyatli saqlandi",
+      title: "Xomashyo saqlandi",
       description: `${updated.sku}: ${updated.name || "Material"} bazaga yozildi.`,
       severity: "success",
     });
+    return true;
   };
 
   const handleSaveAndClose = async () => {
-    await handleSave();
-    closeTab(tab.id);
+    if (await handleSave()) closeTab(tab.id);
   };
 
   // Find Parent Material if this is an Offcut
@@ -435,13 +541,15 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     if (!qSku && !qName) return [];
 
     return warehouseMovements.filter((m) => {
-      const mSku = (m.materialSku || "").toLowerCase();
-      const mMat = (m.material || "").toLowerCase();
-      const mParent = (m.parentMaterialSku || "").toLowerCase();
+      const mSku = (m.materialSku || "").trim().toLowerCase();
+      const mMat = (m.material || "").trim().toLowerCase();
+      const mParent = (m.parentMaterialSku || "").trim().toLowerCase();
+      const lineSkus = (m.items || []).map((it) => (it.sku || "").trim().toLowerCase());
 
-      return (
-        (qSku && mSku === qSku) ||
-        (qName.length >= 3 && (mMat.includes(qName) || qName.includes(mMat))) ||
+      return Boolean(
+        (qSku && (mSku === qSku || lineSkus.includes(qSku))) ||
+        // SKU yozilmagan eski harakatlar — faqat nom to'liq mos kelsa
+        (!mSku && lineSkus.length === 0 && qName.length >= 3 && mMat === qName) ||
         (doc.isOffcut && parentSku && mParent === parentSku && m.isOffcut)
       );
     });
@@ -459,12 +567,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
       const usedInMovements = itemMovements.some((m) => m.workOrderId === wo.id);
       // Check if offcut was created from this WO
       const isSourceWo = Boolean(doc.sourceWorkOrder && doc.sourceWorkOrder === wo.id);
-      // Check if WO product mentions the material name
-      const matchesProduct = Boolean(
-        qName.length >= 3 && wo.product.toLowerCase().includes(qName)
-      );
-
-      return usedInMovements || isSourceWo || matchesProduct;
+      return usedInMovements || isSourceWo;
     });
   }, [productionQueue, itemMovements, doc.name, doc.sku, doc.sourceWorkOrder]);
 
@@ -475,30 +578,56 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     const cutFormat = doc.cutDimensions || doc.sheetFormat || "";
     const parentFormat = parentMaterial?.sheetFormat || "";
     const area = (f: string) => {
-      const m = f.match(/(\d+(?:[.,]\d+)?)\s*[x×х*]\s*(\d+(?:[.,]\d+)?)/i);
-      return m ? Number(m[1].replace(",", ".")) * Number(m[2].replace(",", ".")) : 0;
+      const d = parseFormat(f);
+      return d ? d.w * d.h : 0;
     };
     const cutArea = area(cutFormat);
     const parentArea = area(parentFormat);
     if (!cutArea || !parentArea) return null;
 
     const ratio = Math.round((cutArea / parentArea) * 100);
-    const virginCost = parentMaterial?.unitPriceUsd || (parentMaterial?.unitPriceUzs ? Number((parentMaterial.unitPriceUzs / 12850).toFixed(4)) : 0);
-    const offcutCost = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / 12850).toFixed(4)) : 0);
+    const virginCost = parentMaterial?.unitPriceUsd || (parentMaterial?.unitPriceUzs ? Number((parentMaterial.unitPriceUzs / USD_UZS_RATE).toFixed(4)) : 0);
+    const offcutCost = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / USD_UZS_RATE).toFixed(4)) : 0);
     const savedPerSheet = Math.max(0, virginCost - offcutCost);
     const totalSavedUsd = Math.round(savedPerSheet * doc.stockLevel);
-    const totalSavedUzs = Math.round(totalSavedUsd * 12850);
+    const totalSavedUzs = Math.round(totalSavedUsd * USD_UZS_RATE);
 
     return {
       ratio,
       cutFormat,
       parentFormat,
       savedPerSheet: Number(savedPerSheet.toFixed(3)),
-      savedPerSheetUzs: Math.round(savedPerSheet * 12850),
+      savedPerSheetUzs: Math.round(savedPerSheet * USD_UZS_RATE),
       totalSavedUsd,
       totalSavedUzs,
     };
   }, [doc, parentMaterial]);
+
+  // Otxod varag'iga standart detallardan nechtasi sig'adi — haqiqiy o'lchamdan hisoblanadi
+  const offcutFits = useMemo(() => {
+    if (!doc.isOffcut) return [];
+    const cut = parseFormat(doc.cutDimensions || doc.sheetFormat);
+    if (!cut) return [];
+    const candidates = [
+      { label: "A4", w: 210, h: 297 },
+      { label: "A5", w: 148, h: 210 },
+      { label: "A6", w: 105, h: 148 },
+      { label: "Vizitka", w: 90, h: 50 },
+      { label: "Yorliq", w: 50, h: 90 },
+    ];
+    const seen = new Set<string>();
+    return candidates
+      .map((c) => {
+        const count = fitCount(cut.w, cut.h, c.w, c.h);
+        return { ...c, count, coverage: Math.round(((count * c.w * c.h) / (cut.w * cut.h)) * 100) };
+      })
+      .filter((c) => {
+        const key = `${Math.min(c.w, c.h)}x${Math.max(c.w, c.h)}`;
+        if (c.count <= 0 || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [doc.isOffcut, doc.cutDimensions, doc.sheetFormat]);
 
   // Quick Action: Open New Warehouse Receipt with this item pre-selected
   const handleCreateReceipt = () => {
@@ -544,15 +673,15 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     () => [
       { id: "date", title: "Sana", width: 100, icon: GridColumnIcon.HeaderDate },
       { id: "id", title: "Hujjat ID", width: 110, icon: GridColumnIcon.HeaderReference },
-      { id: "movementType", title: "Operatsiya Turi", width: 165, icon: GridColumnIcon.HeaderLookup },
-      { id: "workOrderId", title: "Buyurtma / Asos", width: 135, icon: GridColumnIcon.HeaderReference },
+      { id: "movementType", title: "Operatsiya", width: 165, icon: GridColumnIcon.HeaderLookup },
+      { id: "workOrderId", title: "Asos", width: 135, icon: GridColumnIcon.HeaderReference },
       { id: "inQty", title: "Kirim (+)", width: 95, icon: GridColumnIcon.HeaderNumber },
       { id: "outQty", title: "Chiqim (-)", width: 95, icon: GridColumnIcon.HeaderNumber },
       { id: "unit", title: "Birlik", width: 75, icon: GridColumnIcon.HeaderString },
       { id: "from", title: "Qayerdan", width: 180, icon: GridColumnIcon.HeaderString },
-      { id: "to", title: "Qayerga / Sex", width: 180, icon: GridColumnIcon.HeaderString },
-      { id: "operator", title: "Mas'ul Shaxs", width: 130, icon: GridColumnIcon.HeaderString },
-      { id: "reason", title: "Izoh / Texnik sabab", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
+      { id: "to", title: "Qayerga", width: 180, icon: GridColumnIcon.HeaderString },
+      { id: "operator", title: "Mas'ul", width: 130, icon: GridColumnIcon.HeaderString },
+      { id: "reason", title: "Izoh", width: 250, icon: GridColumnIcon.HeaderTextTemplate },
     ],
     []
   );
@@ -566,11 +695,11 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
         return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
       }
 
-      const isOut =
-        mov.movementType === "ProductionIssue" ||
-        mov.movementType === "WriteOff" ||
-        mov.reason.toLowerCase().includes("issue") ||
-        mov.reason.toLowerCase().includes("sarf");
+      // Yo'nalish hujjat turidan aniqlanadi; turi yo'q eski yozuvlar uchungina izohga qaraladi
+      const reasonText = (mov.reason || "").toLowerCase();
+      const isOut = mov.movementType
+        ? mov.movementType === "ProductionIssue" || mov.movementType === "WriteOff"
+        : reasonText.includes("issue") || reasonText.includes("sarf");
 
       if (column.id === "inQty") {
         if (!isOut) {
@@ -617,15 +746,19 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
           dark = "#f59e0b";
           light = "#b45309";
         } else if (mType === "CuttingReturn") {
-          label = "Delovoy Otxod qaytarish";
+          label = "Otxod qaytarish";
           dark = "#ec4899";
           light = "#be185d";
         } else if (mType === "Transfer") {
           label = "Omborlararo ko'chirish";
           dark = "#a855f7";
           light = "#7e22ce";
+        } else if (mType === "ProductionReturn") {
+          label = "Sexdan qaytarish";
+          dark = "#4ade80";
+          light = "#15803d";
         } else if (mType === "WriteOff") {
-          label = "Spisaniye (Texnik brak)";
+          label = "Spisaniye";
           dark = "#f87171";
           light = "#dc2626";
         }
@@ -681,14 +814,14 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
   const woColumns = useMemo<GridColumn[]>(
     () => [
       { id: "id", title: "Buyurtma ID", width: 110, icon: GridColumnIcon.HeaderReference },
-      { id: "customer", title: "Mijoz (Kontragent)", width: 180, icon: GridColumnIcon.HeaderString },
-      { id: "product", title: "Mahsulot Nomi", width: 240, icon: GridColumnIcon.HeaderString },
-      { id: "pressMachine", title: "Uskuna / Stanok", width: 200, icon: GridColumnIcon.HeaderLookup },
-      { id: "stage", title: "Ishlab Chiqarish Bosqichi", width: 145, icon: GridColumnIcon.HeaderSingleValue },
-      { id: "plannedSheets", title: "Reja Sarf", width: 105, icon: GridColumnIcon.HeaderNumber },
-      { id: "completedSheets", title: "Fakt Sarf", width: 105, icon: GridColumnIcon.HeaderNumber },
-      { id: "deadline", title: "Muddati (Deadline)", width: 110, icon: GridColumnIcon.HeaderDate },
-      { id: "operator", title: "Smena / Usta", width: 140, icon: GridColumnIcon.HeaderString },
+      { id: "customer", title: "Mijoz", width: 180, icon: GridColumnIcon.HeaderString },
+      { id: "product", title: "Mahsulot", width: 240, icon: GridColumnIcon.HeaderString },
+      { id: "pressMachine", title: "Uskuna", width: 200, icon: GridColumnIcon.HeaderLookup },
+      { id: "stage", title: "Bosqich", width: 145, icon: GridColumnIcon.HeaderSingleValue },
+      { id: "plannedSheets", title: "Reja sarf", width: 105, icon: GridColumnIcon.HeaderNumber },
+      { id: "completedSheets", title: "Fakt sarf", width: 105, icon: GridColumnIcon.HeaderNumber },
+      { id: "deadline", title: "Muddat", width: 110, icon: GridColumnIcon.HeaderDate },
+      { id: "operator", title: "Usta", width: 140, icon: GridColumnIcon.HeaderString },
     ],
     []
   );
@@ -767,18 +900,18 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     const list: DocumentNavItem[] = [
       {
         id: "specs",
-        label: "Texnik Pasport va Parametrlar",
+        label: "Texnik pasport",
         icon: FileText,
       },
       {
         id: "ledger",
-        label: "Kirim-Chiqim Tarixi (Ledger)",
+        label: "Kirim-chiqim",
         icon: History,
         badge: itemMovements.length > 0 ? itemMovements.length : null,
       },
       {
         id: "consumption",
-        label: "Buyurtmalar Sarfi va Rezervlar",
+        label: "Buyurtmalar",
         icon: Factory,
         badge: linkedWorkOrders.length > 0 ? linkedWorkOrders.length : null,
       },
@@ -787,7 +920,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     if (doc.category === "Paper & Board" && !doc.isOffcut) {
       list.push({
         id: "offcuts",
-        label: "Hosil bo'lgan Delovoy Otxodlar",
+        label: "Otxodlar",
         icon: Scissors,
         badge: derivedOffcuts.length > 0 ? derivedOffcuts.length : null,
       });
@@ -796,7 +929,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
     if (doc.isOffcut) {
       list.push({
         id: "savings",
-        label: "Mos Formatlar va Tejamkorlik",
+        label: "Tejamkorlik",
         icon: Sparkles,
       });
     }
@@ -827,7 +960,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                   className="h-7 px-2.5 text-xs font-medium gap-1 rounded bg-amber-600 hover:bg-amber-700 text-white shadow-none cursor-pointer"
                 >
                   <Scissors className="size-3.5" />
-                  <span className="hidden sm:inline">Qoldiq (Otxod) qaytarish</span>
+                  <span className="hidden sm:inline">Otxod qaytarish</span>
                 </Button>
               )}
 
@@ -959,7 +1092,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     <span className="font-mono text-[10px] text-muted-foreground">
                       {doc.currency === "UZS"
                         ? `~$${(doc.unitPriceUsd || 0).toFixed(3)}`
-                        : `~${(doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * 12850)).toLocaleString()} UZS`}
+                        : `~${(doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * USD_UZS_RATE)).toLocaleString()} UZS`}
                     </span>
                   </div>
                 </InfoRow>
@@ -1097,9 +1230,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     </div>
 
                     <div className="space-y-1">
-                      <Label className="text-[11px] font-semibold text-muted-foreground">
-                        Material To&apos;liq Nomi *
-                      </Label>
+                      <HintLabel hint={FIELD_HINTS.name} required>Material nomi</HintLabel>
                       <Input
                         value={doc.name}
                         onChange={(e) => handleFieldChange("name", e.target.value)}
@@ -1110,17 +1241,16 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                   </div>
                 </div>
 
-                {/* ─── 2. Texnik Parametrlar (Technical Specs) ────────────────── */}
+                {/* ─── 2. Asosiy parametrlar ──────────────────────────────────── */}
                 <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground border-b border-border/50 pb-2">
                     <FileText className="size-3.5 text-primary" />
-                    <span>Texnik parametrlar</span>
+                    <span>Asosiy parametrlar</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {/* Artikul */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Artikul (SKU) *</Label>
+                      <HintLabel hint={FIELD_HINTS.sku} required>Artikul (SKU)</HintLabel>
                       <Input
                         value={doc.sku}
                         onChange={(e) => handleFieldChange("sku", e.target.value)}
@@ -1129,9 +1259,8 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                       />
                     </div>
 
-                    {/* Toifa */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Asosiy Toifa *</Label>
+                      <HintLabel hint={FIELD_HINTS.category} required>Toifa</HintLabel>
                       <ComboboxSelect
                         items={STOCK_CATEGORY_OPTIONS}
                         value={doc.category}
@@ -1141,9 +1270,8 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                       />
                     </div>
 
-                    {/* O'lchov Birligi */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">O&apos;lchov Birligi *</Label>
+                      <HintLabel hint={FIELD_HINTS.unit} required>O&apos;lchov birligi</HintLabel>
                       <ComboboxSelect
                         items={STOCK_UNIT_OPTIONS}
                         value={doc.unit}
@@ -1153,56 +1281,25 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                       />
                     </div>
 
-                    {/* Format */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Format / O&apos;lcham (mm)</Label>
-                      <Input
-                        value={doc.sheetFormat || ""}
-                        onChange={(e) => handleFieldChange("sheetFormat", e.target.value)}
-                        placeholder="700×1000"
-                        className="h-7 text-xs font-mono"
-                      />
-                    </div>
-
-                    {/* Zichlik */}
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Zichlik (g/m²)</Label>
-                      <Input
-                        type="number"
-                        value={doc.grammage !== undefined ? doc.grammage : ""}
-                        onChange={(e) => handleFieldChange("grammage", e.target.value ? Number(e.target.value) : undefined)}
-                        placeholder="150"
-                        className="h-7 text-xs font-mono"
-                      />
-                    </div>
-
-                    {/* Tola Yo'nalishi */}
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Tola Yo&apos;nalishi</Label>
-                      <ComboboxSelect
-                        items={GRAIN_DIRECTION_OPTIONS}
-                        value={doc.grainDirection || "Long Grain"}
-                        onValueChange={(val) => handleFieldChange("grainDirection", val)}
-                        placeholder="Yo'nalishni tanlang..."
-                        className="w-full h-7 text-xs bg-background"
-                      />
-                    </div>
-
-                    {/* Boshlang'ich Qoldiq */}
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Boshlang&apos;ich Qoldiq</Label>
+                      <HintLabel hint={isPersisted ? FIELD_HINTS.stockLevel : FIELD_HINTS.stockLevelNew}>
+                        {isPersisted ? "Qoldiq" : "Boshlang'ich qoldiq"}
+                      </HintLabel>
                       <Input
                         type="number"
                         value={doc.stockLevel || ""}
                         onChange={(e) => handleFieldChange("stockLevel", Number(e.target.value) || 0)}
+                        readOnly={isPersisted}
                         placeholder="0"
-                        className="h-7 text-xs font-mono font-bold text-foreground"
+                        className={cn(
+                          "h-7 text-xs font-mono font-bold text-foreground",
+                          isPersisted && "bg-muted/40 cursor-not-allowed"
+                        )}
                       />
                     </div>
 
-                    {/* Minimal Zaxira */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Minimal Chegara (Reorder)</Label>
+                      <HintLabel hint={FIELD_HINTS.reorder}>Minimal chegara</HintLabel>
                       <Input
                         type="number"
                         value={doc.reorder || ""}
@@ -1212,83 +1309,32 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                       />
                     </div>
 
-                    {/* Birlik narxi */}
                     <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-[11px] text-muted-foreground font-semibold">Birlik Narxi</Label>
+                      <div className="flex items-center justify-between gap-2">
+                        <HintLabel hint={FIELD_HINTS.price}>Birlik narxi</HintLabel>
                         <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newCur = "USD";
-                              const p = doc.unitPriceUsd || (doc.unitPriceUzs ? Number((doc.unitPriceUzs / 12850).toFixed(4)) : 0);
-                              setDoc((prev) => ({
-                                ...prev,
-                                currency: newCur,
-                                unitPrice: p,
-                                unitPriceUsd: p,
-                                unitPriceUzs: Math.round(p * 12850),
-                              }));
-                              setTabUnsaved(tab.id, true);
-                            }}
-                            className={cn(
-                              "px-1.5 py-0.2 text-[9px] font-mono rounded border transition-colors cursor-pointer",
-                              doc.currency !== "UZS"
-                                ? "border-primary bg-primary text-primary-foreground font-bold"
-                                : "border-border text-muted-foreground hover:bg-muted"
-                            )}
-                          >
-                            USD ($)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newCur = "UZS";
-                              const p = doc.unitPriceUzs || Math.round((doc.unitPriceUsd || 0) * 12850);
-                              setDoc((prev) => ({
-                                ...prev,
-                                currency: newCur,
-                                unitPrice: p,
-                                unitPriceUzs: p,
-                                unitPriceUsd: p > 0 ? Number((p / 12850).toFixed(4)) : 0,
-                              }));
-                              setTabUnsaved(tab.id, true);
-                            }}
-                            className={cn(
-                              "px-1.5 py-0.2 text-[9px] font-mono rounded border transition-colors cursor-pointer",
-                              doc.currency === "UZS"
-                                ? "border-primary bg-primary text-primary-foreground font-bold"
-                                : "border-border text-muted-foreground hover:bg-muted"
-                            )}
-                          >
-                            UZS
-                          </button>
+                          {(["USD", "UZS"] as const).map((cur) => (
+                            <button
+                              key={cur}
+                              type="button"
+                              onClick={() => handleCurrencySwitch(cur)}
+                              className={cn(
+                                "px-1.5 text-[9px] font-mono rounded border transition-colors cursor-pointer",
+                                (doc.currency || "USD") === cur
+                                  ? "border-primary bg-primary text-primary-foreground font-bold"
+                                  : "border-border text-muted-foreground hover:bg-muted"
+                              )}
+                            >
+                              {cur}
+                            </button>
+                          ))}
                         </div>
                       </div>
-
                       <MoneyInput
                         thousandSeparator=" "
-                        decimalScale={doc.currency === "UZS" ? 0 : 3}
+                        decimalScale={doc.currency === "UZS" ? 0 : 4}
                         value={doc.currency === "UZS" ? (doc.unitPriceUzs || doc.unitPrice || "") : (doc.unitPriceUsd || doc.unitPrice || "")}
-                        onValueChange={(values) => {
-                          const val = values.floatValue ?? 0;
-                          if (doc.currency === "UZS") {
-                            setDoc((prev) => ({
-                              ...prev,
-                              unitPrice: val,
-                              unitPriceUzs: val,
-                              unitPriceUsd: val > 0 ? Number((val / 12850).toFixed(4)) : 0,
-                            }));
-                          } else {
-                            setDoc((prev) => ({
-                              ...prev,
-                              unitPrice: val,
-                              unitPriceUsd: val,
-                              unitPriceUzs: Math.round(val * 12850),
-                            }));
-                          }
-                          setTabUnsaved(tab.id, true);
-                        }}
+                        onValueChange={(values) => handlePriceChange(values.floatValue ?? 0)}
                         placeholder={doc.currency === "UZS" ? "0" : "0.00"}
                         className="h-7 text-xs font-mono"
                       />
@@ -1296,7 +1342,281 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                   </div>
                 </div>
 
-                {/* ─── 3. Manzilli Saqlash — WMS (To'liq kenglikdagi kaskadli panel) ─ */}
+                {/* ─── 3. Qog'oz pasporti / O'lcham ───────────────────────────── */}
+                <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground border-b border-border/50 pb-2">
+                    <Layers className="size-3.5 text-primary" />
+                    <span>{isPaper ? "Qog'oz pasporti" : "O'lcham"}</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.paperType}>Qog&apos;oz turi</HintLabel>
+                        <ComboboxSelect
+                          items={PAPER_TYPE_OPTIONS}
+                          value={spec.paperType || ""}
+                          onValueChange={(val) => handleSpecChange("paperType", (val || undefined) as PaperSpec["paperType"])}
+                          placeholder="Turini tanlang..."
+                          className="w-full h-7 text-xs bg-background"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && spec.paperType === "board" && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.boardGrade}>Karton markasi</HintLabel>
+                        <ComboboxSelect
+                          items={BOARD_GRADE_OPTIONS}
+                          value={spec.boardGrade || ""}
+                          onValueChange={(val) => handleSpecChange("boardGrade", (val || undefined) as PaperSpec["boardGrade"])}
+                          placeholder="Sinfni tanlang..."
+                          className="w-full h-7 text-xs bg-background"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.finish}>Yuza</HintLabel>
+                        <ComboboxSelect
+                          items={FINISH_OPTIONS}
+                          value={spec.finish || ""}
+                          onValueChange={(val) => handleSpecChange("finish", (val || undefined) as PaperSpec["finish"])}
+                          placeholder="Yuzani tanlang..."
+                          className="w-full h-7 text-xs bg-background"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.coatedSides}>Bo&apos;r qatlami</HintLabel>
+                        <ComboboxSelect
+                          items={COATED_SIDES_OPTIONS}
+                          value={spec.coatedSides !== undefined ? String(spec.coatedSides) : ""}
+                          onValueChange={(val) =>
+                            handleSpecChange("coatedSides", val === "" ? undefined : (Number(val) as PaperSpec["coatedSides"]))
+                          }
+                          placeholder="Tanlang..."
+                          className="w-full h-7 text-xs bg-background"
+                        />
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <HintLabel hint={FIELD_HINTS.format}>Format, mm</HintLabel>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          value={formatDims.w ?? ""}
+                          onChange={(e) => handleFormatChange("w", e.target.value)}
+                          placeholder="700"
+                          aria-label="Eni"
+                          className="h-7 text-xs font-mono"
+                        />
+                        <span className="text-muted-foreground">×</span>
+                        <Input
+                          type="number"
+                          value={formatDims.h ?? ""}
+                          onChange={(e) => handleFormatChange("h", e.target.value)}
+                          placeholder="1000"
+                          aria-label="Bo'yi"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.grammage}>Zichlik, g/m²</HintLabel>
+                        <Input
+                          type="number"
+                          value={doc.grammage !== undefined ? doc.grammage : ""}
+                          onChange={(e) => handleFieldChange("grammage", e.target.value ? Number(e.target.value) : undefined)}
+                          placeholder="150"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.caliper}>Qalinlik, mkm</HintLabel>
+                        <Input
+                          type="number"
+                          value={spec.caliperUm ?? ""}
+                          onChange={(e) => handleSpecChange("caliperUm", e.target.value ? Number(e.target.value) : undefined)}
+                          placeholder="140"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.grain}>Tola yo&apos;nalishi</HintLabel>
+                        <ComboboxSelect
+                          items={GRAIN_DIRECTION_OPTIONS}
+                          value={doc.grainDirection || ""}
+                          onValueChange={(val) => handleFieldChange("grainDirection", val || undefined)}
+                          placeholder="Yo'nalishni tanlang..."
+                          className="w-full h-7 text-xs bg-background"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.whiteness}>Oqlik, CIE</HintLabel>
+                        <Input
+                          type="number"
+                          value={spec.whitenessCie ?? ""}
+                          onChange={(e) => handleSpecChange("whitenessCie", e.target.value ? Number(e.target.value) : undefined)}
+                          placeholder="130"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.opacity}>Shaffofmaslik, %</HintLabel>
+                        <Input
+                          type="number"
+                          value={spec.opacityPct ?? ""}
+                          onChange={(e) => handleSpecChange("opacityPct", e.target.value ? Number(e.target.value) : undefined)}
+                          placeholder="96"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.color}>Rangi</HintLabel>
+                        <Input
+                          value={spec.color || ""}
+                          onChange={(e) => handleSpecChange("color", e.target.value || undefined)}
+                          placeholder="Oq"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.brand}>Marka</HintLabel>
+                        <Input
+                          value={spec.brand || ""}
+                          onChange={(e) => handleSpecChange("brand", e.target.value || undefined)}
+                          placeholder="Galerie Art Silk"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.manufacturer}>Ishlab chiqaruvchi</HintLabel>
+                        <Input
+                          value={spec.manufacturer || ""}
+                          onChange={(e) => handleSpecChange("manufacturer", e.target.value || undefined)}
+                          placeholder="Sappi"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.sheetsPerPack}>Pachkada, varaq</HintLabel>
+                        <Input
+                          type="number"
+                          value={spec.sheetsPerPack ?? ""}
+                          onChange={(e) => handleSpecChange("sheetsPerPack", e.target.value ? Number(e.target.value) : undefined)}
+                          placeholder="250"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.packsPerPallet}>Palletda, pachka</HintLabel>
+                        <Input
+                          type="number"
+                          value={spec.packsPerPallet ?? ""}
+                          onChange={(e) => handleSpecChange("packsPerPallet", e.target.value ? Number(e.target.value) : undefined)}
+                          placeholder="40"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+
+                    {isPaper && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.certification}>Sertifikat</HintLabel>
+                        <ComboboxSelect
+                          items={CERTIFICATION_OPTIONS}
+                          value={spec.certification || ""}
+                          onValueChange={(val) => handleSpecChange("certification", (val || undefined) as PaperSpec["certification"])}
+                          placeholder="Tanlang..."
+                          className="w-full h-7 text-xs bg-background"
+                        />
+                      </div>
+                    )}
+
+                    {isRollMaterial && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.rollWidth}>Rulon eni, mm</HintLabel>
+                        <Input
+                          type="number"
+                          value={doc.rollWidthMm ?? ""}
+                          onChange={(e) => handleFieldChange("rollWidthMm", e.target.value ? Number(e.target.value) : undefined)}
+                          placeholder="330"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+
+                    {isRollMaterial && (
+                      <div className="space-y-1">
+                        <HintLabel hint={FIELD_HINTS.rollLength}>Rulon uzunligi, m</HintLabel>
+                        <Input
+                          type="number"
+                          value={doc.rollLengthM ?? ""}
+                          onChange={(e) => handleFieldChange("rollLengthM", e.target.value ? Number(e.target.value) : undefined)}
+                          placeholder="1000"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {isPaper && sheetMetrics && (
+                    <div className="bg-muted/40 rounded px-3 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                      <MetricItem label="1 varaq" hint={FIELD_HINTS.sheetWeight} value={`${sheetMetrics.sheetWeightG.toFixed(1)} g`} />
+                      <MetricItem label="1000 varaq" hint={FIELD_HINTS.weight1000} value={`${sheetMetrics.kgPer1000.toFixed(1)} kg`} />
+                      <MetricItem label="1 kg" hint={FIELD_HINTS.sheetsPerKg} value={`${sheetMetrics.sheetsPerKg.toFixed(1)} varaq`} />
+                      {sheetMetrics.packWeightKg !== undefined && (
+                        <MetricItem label="Pachka" hint={FIELD_HINTS.packWeight} value={`${sheetMetrics.packWeightKg.toFixed(1)} kg`} />
+                      )}
+                      {sheetMetrics.stockWeightKg !== undefined && (
+                        <MetricItem label="Qoldiq" hint={FIELD_HINTS.stockWeight} value={`${Math.round(sheetMetrics.stockWeightKg).toLocaleString()} kg`} />
+                      )}
+                      {sheetMetrics.pricePerKgUsd !== undefined && (
+                        <MetricItem
+                          label="1 kg narxi"
+                          hint={FIELD_HINTS.pricePerKg}
+                          value={`$${sheetMetrics.pricePerKgUsd.toFixed(2)} · ${Math.round(sheetMetrics.pricePerKgUsd * USD_UZS_RATE).toLocaleString()} UZS`}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ─── 4. Manzilli Saqlash — WMS (To'liq kenglikdagi kaskadli panel) ─ */}
                 <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
                   <div className="flex items-center justify-between border-b border-border/50 pb-2">
                     <div className="flex items-center gap-2">
@@ -1331,10 +1651,10 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     {/* 1. Ombor */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold flex items-center justify-between">
-                        <span>1. Ombor *</span>
+                      <div className="flex items-center justify-between">
+                        <HintLabel hint={FIELD_HINTS.warehouse} required>Ombor</HintLabel>
                         {isWmsLoading && <span className="text-[9px] text-primary animate-pulse font-normal">Yuklanmoqda...</span>}
-                      </Label>
+                      </div>
                       <WarehouseSelect
                         value={doc.location || ""}
                         warehouseId={doc.warehouseId || activeWarehouseId}
@@ -1352,9 +1672,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     {/* 2. Stelaj */}
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <Label className="text-[11px] text-muted-foreground font-semibold">
-                          2. Stelaj (Qator)
-                        </Label>
+                        <HintLabel hint={FIELD_HINTS.rack}>Stelaj</HintLabel>
                         {selectedRackId && (
                           <button
                             type="button"
@@ -1389,9 +1707,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     {/* 3. Katak */}
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <Label className="text-[11px] text-muted-foreground font-semibold">
-                          3. Katak (Yacheyka)
-                        </Label>
+                        <HintLabel hint={FIELD_HINTS.bin}>Katak</HintLabel>
                         {doc.locationShelf && (
                           <button
                             type="button"
@@ -1443,22 +1759,22 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                         <span>Maksimal: <strong className="font-mono text-foreground">{selectedBinInfo.maxWeight} kg</strong></span>
                       </div>
                     ) : (
-                      <span>Ombor va stelaj tanlanganda tegishli kataklar avtomatik filtrlanadi.</span>
+                      <span>Katak tanlanmagan</span>
                     )}
                   </div>
                 </div>
 
-                {/* ─── 4. Ta'minot va Partiya ─────────────────────────────────── */}
+                {/* ─── 5. Ta'minot va partiya ─────────────────────────────────── */}
                 <div className="rounded-lg border border-border bg-card p-3.5 space-y-3">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground border-b border-border/50 pb-2">
                     <Building2 className="size-3.5 text-primary" />
-                    <span>Ta&apos;minot va Partiya</span>
+                    <span>Ta&apos;minot va partiya</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                     {/* Yetkazib beruvchi */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Yetkazib Beruvchi</Label>
+                      <HintLabel hint={FIELD_HINTS.supplier}>Yetkazib beruvchi</HintLabel>
                       <SupplierSelect
                         value={doc.supplier || ""}
                         onValueChange={(val) => handleFieldChange("supplier", val)}
@@ -1469,7 +1785,7 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
 
                     {/* Partiya */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Partiya / Batch</Label>
+                      <HintLabel hint={FIELD_HINTS.batch}>Partiya</HintLabel>
                       <Input
                         value={doc.batchNo || ""}
                         onChange={(e) => handleFieldChange("batchNo", e.target.value)}
@@ -1480,11 +1796,21 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
 
                     {/* Oxirgi Kirim Sanasi */}
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground font-semibold">Oxirgi Kirim Sanasi</Label>
+                      <HintLabel hint={FIELD_HINTS.lastReceived}>Oxirgi kirim</HintLabel>
                       <Input
                         type="date"
                         value={doc.lastReceived ? doc.lastReceived.split("T")[0] : ""}
                         onChange={(e) => handleFieldChange("lastReceived", e.target.value)}
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <HintLabel hint={FIELD_HINTS.expiry}>Yaroqlilik muddati</HintLabel>
+                      <Input
+                        type="date"
+                        value={doc.expiryDate ? doc.expiryDate.split("T")[0] : ""}
+                        onChange={(e) => handleFieldChange("expiryDate", e.target.value || undefined)}
                         className="h-7 text-xs font-mono"
                       />
                     </div>
@@ -1580,33 +1906,23 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
               <TabsContent value="offcuts" className="flex-1 w-full h-full m-0 p-4 overflow-y-auto">
                 <div className="max-w-4xl space-y-4">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">
-                        Shu qog&apos;ozdan ({doc.sheetFormat || "Standart format"}) kesilgan Delovoy Otxodlar
-                      </h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Gilotina kesimidan keyin omborga qayta kirim qilingan yaroqli qoldiqlar ro&apos;yxati
-                      </p>
-                    </div>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Otxodlar{doc.sheetFormat ? ` · ${doc.sheetFormat}` : ""}
+                    </h3>
                     <Button
                       size="sm"
                       onClick={() => setIsOffcutDialogOpen(true)}
                       className="h-8 text-xs gap-1.5 bg-amber-600 hover:bg-amber-700 text-white shadow-none"
                     >
                       <Scissors className="size-3.5" />
-                      <span>Yangi qoldiqni kirim qilish</span>
+                      <span>Otxod qaytarish</span>
                     </Button>
                   </div>
 
                   {derivedOffcuts.length === 0 ? (
                     <div className="p-8 border border-dashed border-border rounded-lg text-center space-y-2">
                       <Scissors className="size-8 mx-auto text-muted-foreground/40" />
-                      <p className="text-xs font-medium text-foreground">
-                        Ushbu formatdan hali delovoy otxodlar hosil qilinmagan
-                      </p>
-                      <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
-                        Ishlab chiqarishda qog&apos;oz kesilganda uning foydali qoldig&apos;ini Return Offcut dialogi orqali omborga qaytarishingiz mumkin.
-                      </p>
+                      <p className="text-xs font-medium text-foreground">Otxod yo&apos;q</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1673,9 +1989,8 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                         <Sparkles className="size-4 text-emerald-600 dark:text-emerald-400" />
                         Tejamkorlik hisoboti
                       </h3>
-                      <p className="text-xs text-emerald-800/80 dark:text-emerald-300/80 mt-1">
-                        Kichik tirajlarda har bir varaqdan{" "}
-                        <b>${offcutAreaStats.savedPerSheet} USD</b> (~{offcutAreaStats.savedPerSheetUzs.toLocaleString()} UZS) tejaladi.
+                      <p className="text-xs font-mono text-emerald-800/80 dark:text-emerald-300/80 mt-1">
+                        1 varaq: ${offcutAreaStats.savedPerSheet} · ~{offcutAreaStats.savedPerSheetUzs.toLocaleString()} UZS
                       </p>
                     </div>
                     <div className="text-right shrink-0">
@@ -1689,42 +2004,26 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     </div>
                   </div>
 
-                  <div>
-                    <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2">
-                      Ushbu {offcutAreaStats.cutFormat} o&apos;lchamga mos keluvchi tavsiya etilgan formatlar:
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="p-3 rounded border border-border bg-card space-y-1">
-                        <div className="flex items-center justify-between text-xs font-semibold">
-                          <span>A4 Format (210×297)</span>
-                          <Badge variant="outline" className="text-[10px]">2-up</Badge>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          Bitta otxod varag&apos;iga 2 ta A4 bemalol joylashadi. Sertifikat, flayer va kichik blankalar uchun ideal.
-                        </p>
-                      </div>
-
-                      <div className="p-3 rounded border border-border bg-card space-y-1">
-                        <div className="flex items-center justify-between text-xs font-semibold">
-                          <span>A5 Buklet (148×210)</span>
-                          <Badge variant="outline" className="text-[10px]">4-up</Badge>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          Bitta varaqqa 4 ta A5 joylashadi. Reklama varaqalari va restoran menyulari uchun yangi qog&apos;oz kesish shart emas.
-                        </p>
-                      </div>
-
-                      <div className="p-3 rounded border border-border bg-card space-y-1">
-                        <div className="flex items-center justify-between text-xs font-semibold">
-                          <span>Kiyim Yorliqlari / Birkalar</span>
-                          <Badge variant="outline" className="text-[10px]">24-up</Badge>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          50×90mm o&apos;lchamdagi osma teglardan 20-24 ta sig&apos;adi. Qoldiqdan maksimal 94% foydali qoplama.
-                        </p>
+                  {offcutFits.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-foreground mb-2">
+                        Mos formatlar · {offcutAreaStats.cutFormat}
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {offcutFits.map((f) => (
+                          <div key={f.label} className="p-3 rounded border border-border bg-card space-y-1">
+                            <div className="flex items-center justify-between text-xs font-semibold">
+                              <span>{f.label}</span>
+                              <Badge variant="outline" className="text-[10px]">{f.count}-up</Badge>
+                            </div>
+                            <div className="text-[11px] text-muted-foreground font-mono">
+                              {f.w}×{f.h} mm · qoplama {f.coverage}%
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </TabsContent>
             )}
@@ -1762,5 +2061,22 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
         onSave={handleSaveImage}
       />
     </div>
+  );
+}
+
+function MetricItem({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex items-center gap-1 cursor-help">
+            {label}: <strong className="font-mono text-foreground">{value}</strong>
+          </span>
+        }
+      />
+      <TooltipContent side="top" sideOffset={4} className="max-w-72 text-[11px] leading-snug whitespace-normal block">
+        {hint}
+      </TooltipContent>
+    </Tooltip>
   );
 }
