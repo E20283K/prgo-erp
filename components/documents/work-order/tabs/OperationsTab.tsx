@@ -65,6 +65,8 @@ import { useWorkspaceStore, ProductionReadinessChecks } from "@/store/workspaceS
 import { formatMoney } from "@/components/documents/common/DocumentShell";
 import { useShallow } from "zustand/react/shallow";
 import { computeOperationCost, calcUnitLabel } from "../utils/operationCost";
+import { FieldCombobox } from "@/components/ui/field-combobox";
+import { operationDepartment } from "@/components/documents/work-rate/types";
 import { useProductiveTimePercent } from "../utils/useProductiveTimePercent";
 
 interface OperationsTabProps {
@@ -88,6 +90,8 @@ interface OperationsTabProps {
   opSelection: GridSelection;
   setOpSelection: React.Dispatch<React.SetStateAction<GridSelection>>;
   onOpenAddOperation: () => void;
+  /** Adds a catalog operation as a ready step in one click. */
+  onQuickAddOperation?: (workRateId: string) => void;
   onOpenEditOperation: (index: number) => void;
   onDeleteSelectedOperation: () => void;
   isDark: boolean;
@@ -120,6 +124,7 @@ export function OperationsTab({
   opSelection,
   setOpSelection,
   onOpenAddOperation,
+  onQuickAddOperation,
   onOpenEditOperation,
   onDeleteSelectedOperation,
   isDark,
@@ -168,6 +173,17 @@ export function OperationsTab({
     if (s.employees.length === 0 && s.loadEmployees) s.loadEmployees();
     if (s.workRates.length === 0) s.fetchWorkRates();
   }, []);
+
+  const quickOptions = useMemo(
+    () =>
+      workRates
+        .filter((w) => w.status === "Active")
+        .map((w) => {
+          const dept = operationDepartment(w, machines);
+          return { value: w.id, label: dept ? `${w.code} — ${w.name} (${dept})` : `${w.code} — ${w.name}` };
+        }),
+    [workRates, machines]
+  );
 
   const productiveTimePercent = useProductiveTimePercent();
   // Planned cost per step (USD), the same numbers the Financials tab uses.
@@ -614,6 +630,20 @@ export function OperationsTab({
               <Plus className="w-3.5 h-3.5" />
               <span>Bosqich qo&apos;shish</span>
             </Button>
+          )}
+
+          {!isOperator && onQuickAddOperation && (
+            <div className="w-56 shrink-0">
+              <FieldCombobox
+                value=""
+                onChange={(id) => id && onQuickAddOperation(id)}
+                options={quickOptions}
+                placeholder="Tez qo'shish..."
+                searchPlaceholder="Operatsiya nomi yoki kodi..."
+                className="h-6.5 text-xs"
+                popoverClassName="w-[380px]"
+              />
+            </div>
           )}
 
           {!isOperator && (

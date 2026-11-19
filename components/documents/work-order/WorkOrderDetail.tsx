@@ -126,6 +126,7 @@ import {
   stepGoodOutput,
 } from "./utils/stepTimeline";
 import { OperationDialog } from "./dialogs/OperationDialog";
+import { buildQuickStep } from "./utils/quickStep";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
 import { DowntimeLogDialog } from "./dialogs/DowntimeLogDialog";
@@ -3001,11 +3002,10 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     manualCostUsd: Number(((Number(op.manualCostUsd) || 0) * factor).toFixed(6)),
   });
 
-  const handleOpenAddOperation = () => {
-    setEditingOpIndex(null);
-    // A new step goes after the last production step; packaging always stays the final step.
-    const nextStepNum = (operations.filter((op) => op.kind !== "packaging").length + 1) * 10;
-    setOpDialogForm({
+  // A new step goes after the last production step; packaging always stays the final step.
+  const blankOpForm = (route: RouteStep[]): Omit<RouteStep, "id"> => {
+    const nextStepNum = (route.filter((op) => op.kind !== "packaging").length + 1) * 10;
+    return {
       stepNumber: nextStepNum,
       name: "",
       machine: formData.pressMachine || "",
@@ -3023,10 +3023,40 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       pieceworkRateUsd: 0,
       plannedCostUsd: 0,
       pieceworkTotalUsd: 0,
-      costMode: "auto",
+      costMode: "auto" as const,
       manualCostUsd: 0,
-    });
+    };
+  };
+
+  const handleOpenAddOperation = () => {
+    setEditingOpIndex(null);
+    setOpDialogForm(blankOpForm(operations));
     setIsOpDialogOpen(true);
+  };
+
+  /** One-click add: the catalog operation becomes a finished step with machine, hours and operator filled in. */
+  const handleQuickAddOperation = (workRateId: string) => {
+    const state = useWorkspaceStore.getState();
+    const rate = state.workRates.find((w) => w.id === workRateId);
+    if (!rate) return;
+    const production = operations.filter((op) => op.kind !== "packaging");
+    const step = buildQuickStep(rate, {
+      machines: state.machines,
+      employees: state.employees,
+      orderQuantity: Number(formData.quantity) || 0,
+      plannedSheets: Number(formData.plannedSheets) || 0,
+      exchangeRate: Number(formData.exchangeRate) || 12850,
+      stepNumber: (production.length + 1) * 10,
+      fallbackMachine: formData.pressMachine || "",
+    });
+    const nextOps = placeRouteStep(operations, step);
+    setOperations(nextOps);
+    updateTabData(tab.id, { operations: nextOps });
+    setTabUnsaved(tab.id, true);
+    setOpSelection({
+      columns: CompactSelection.empty(),
+      rows: CompactSelection.fromSingleSelection(nextOps.findIndex((o) => o.id === step.id)),
+    });
   };
 
   const handleOpenEditOperation = (index: number) => {
@@ -3073,7 +3103,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setIsOpDialogOpen(true);
   };
 
-  const handleSaveOperationDialog = () => {
+  const handleSaveOperationDialog = (addNext = false) => {
     const savedForm = convertOpMoney(opDialogForm, 1 / opDialogFx);
     const editing = editingOpIndex !== null ? operations[editingOpIndex] : undefined;
     const step: RouteStep = editing ? { ...editing, ...savedForm } : { id: String(Date.now()), ...savedForm };
@@ -3085,7 +3115,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     setOperations(nextOps);
     updateTabData(tab.id, { operations: nextOps });
     setTabUnsaved(tab.id, true);
-    setIsOpDialogOpen(false);
+    if (addNext) {
+      setEditingOpIndex(null);
+      setOpDialogForm(blankOpForm(nextOps));
+    } else {
+      setIsOpDialogOpen(false);
+    }
   };
 
   const handleDeleteSelectedOperation = () => {
@@ -4356,6 +4391,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 opSelection={opSelection}
                 setOpSelection={setOpSelection}
                 onOpenAddOperation={handleOpenAddOperation}
+                onQuickAddOperation={handleQuickAddOperation}
                 onOpenEditOperation={handleOpenEditOperation}
                 onDeleteSelectedOperation={handleDeleteSelectedOperation}
                 isDark={isDark}
@@ -4484,7 +4520,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           editingOpIndex={editingOpIndex}
           form={opDialogForm}
           setForm={setOpDialogForm}
-          onSave={handleSaveOperationDialog}
+          onSave={() => handleSaveOperationDialog()}
+          onSaveAndNext={() => handleSaveOperationDialog(true)}
           customerName={formData.customer}
           orderQuantity={formData.quantity}
           plannedSheets={formData.plannedSheets}

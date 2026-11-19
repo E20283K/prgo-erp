@@ -9,6 +9,7 @@ import {
   RotateCcw,
   RefreshCw,
   TriangleAlert,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +62,7 @@ import {
   resolveMachine,
   type OperationCostMode,
 } from "../utils/operationCost";
+import { SHEET_BASED_UNITS, resolveCalcBaseQty } from "../utils/quickStep";
 import { useProductiveTimePercent } from "../utils/useProductiveTimePercent";
 import { machineCostingGaps } from "@/components/documents/machine/costingGaps";
 
@@ -71,6 +73,8 @@ interface OperationDialogProps {
   form: Omit<RouteStep, "id">;
   setForm: React.Dispatch<React.SetStateAction<Omit<RouteStep, "id">>>;
   onSave: () => void;
+  /** Saves the step and opens a blank form for the next one. */
+  onSaveAndNext?: () => void;
   customerName?: string;
   orderQuantity?: number;
   plannedSheets?: number;
@@ -93,28 +97,6 @@ const COST_MODE_LABEL: Record<OperationCostMode, string> = {
   outsourced: "Autsors",
   manual: "Qo'lda",
 };
-
-const SHEET_BASED_UNITS = new Set([
-  "1,000 sheets",
-  "1,000 impressions",
-  "1,000 strokes",
-  "1,000 glue passes",
-]);
-
-function resolveCalcBaseQty(
-  calcUnit: string | undefined,
-  orderQuantity: number,
-  plannedSheets: number,
-  duration: number
-): number {
-  if (calcUnit === "1 hour") {
-    return Math.max(0, duration || 0);
-  }
-  if (calcUnit && SHEET_BASED_UNITS.has(calcUnit) && plannedSheets > 0) {
-    return plannedSheets;
-  }
-  return Math.max(0, orderQuantity || 0);
-}
 
 interface OperatorItem {
   value: string;
@@ -180,6 +162,7 @@ export function OperationDialog({
   form,
   setForm,
   onSave,
+  onSaveAndNext,
   orderQuantity = 0,
   plannedSheets = 0,
   currency = "UZS",
@@ -198,6 +181,8 @@ export function OperationDialog({
     }))
   );
   const anchor = useComboboxAnchor();
+  // New steps start collapsed: operation, machine and operators are enough; the rest is auto-filled.
+  const [showMore, setShowMore] = React.useState(editingOpIndex !== null);
   const [stepNumberInput, setStepNumberInput] = React.useState(String(form.stepNumber ?? 10));
   const [durationInput, setDurationInput] = React.useState(String(form.duration ?? 1));
 
@@ -614,34 +599,9 @@ export function OperationDialog({
         </DialogHeader>
 
         <div className="space-y-3 py-1.5">
-          {/* Row 1: Step # & Operation Description */}
-          <div className="grid grid-cols-6 gap-2.5">
+          {/* Operation */}
+          <div>
             <div>
-              <label className="text-xs font-medium block mb-1">
-                Tartib #
-              </label>
-              <Input
-                type="number"
-                step="10"
-                value={stepNumberInput}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  setStepNumberInput(raw);
-                  const parsed = parseInt(raw, 10);
-                  if (!Number.isNaN(parsed) && parsed > 0) {
-                    setForm((p) => ({ ...p, stepNumber: parsed }));
-                  }
-                }}
-                onBlur={() => {
-                  const parsed = parseInt(stepNumberInput, 10);
-                  const valid = !Number.isNaN(parsed) && parsed > 0 ? parsed : 10;
-                  setStepNumberInput(String(valid));
-                  setForm((p) => ({ ...p, stepNumber: valid }));
-                }}
-                className="h-8 text-xs font-mono"
-              />
-            </div>
-            <div className="col-span-3">
               <label className="text-xs font-medium flex items-center mb-1">
                 <span>Operatsiya *</span>
                 <FieldInfoTooltip text="Operatsiyalar spravochnigidan tanlanadi: nom, standart uskuna va sdelka stavkasi shundan olinadi. Ro'yxatda yo'q bo'lsa, nomini yozib ro'yxatga qo'shing." />
@@ -659,21 +619,11 @@ export function OperationDialog({
                 popoverClassName="w-[420px]"
               />
             </div>
-            <div className="col-span-2">
-              <label className="text-xs font-medium block mb-1">Izoh</label>
-              <Input
-                value={operationNote}
-                disabled={!selectedWorkRate}
-                onChange={(e) => handleNoteChange(e.target.value)}
-                placeholder="Ixtiyoriy"
-                className="h-8 text-xs"
-              />
-            </div>
           </div>
 
-          {/* Row 2: Assigned Machine & Planned Duration */}
-          <div className="grid grid-cols-3 gap-2.5">
-            <div className="col-span-2 space-y-1">
+          {/* Machine */}
+          <div>
+            <div className="space-y-1">
               <label className="text-xs font-medium block">
                 Uskuna / Ish markazi *
               </label>
@@ -688,88 +638,9 @@ export function OperationDialog({
                 popoverClassName="w-[360px]"
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium block">
-                Me&apos;yoriy vaqt (soat)
-              </label>
-              <Input
-                type="number"
-                step="0.1"
-                min="0.1"
-                value={durationInput}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  setDurationInput(raw);
-                  const parsed = parseFloat(raw);
-                  if (!Number.isNaN(parsed) && parsed > 0) {
-                    if (form.calcUnit === "1 hour") {
-                      handleRecalculateCosts({ duration: parsed });
-                    } else {
-                      setForm((p) => ({ ...p, duration: parsed }));
-                    }
-                  }
-                }}
-                onBlur={() => {
-                  const parsed = parseFloat(durationInput);
-                  applyDuration(!Number.isNaN(parsed) && parsed > 0 ? parsed : 0.5);
-                }}
-                className="h-8 text-xs font-mono"
-              />
-            </div>
-            {durationEstimate && (
-              <div className="col-span-3 -mt-1 flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground font-mono">
-                <span>
-                  {durationEstimate.throughput.makeReadyMinutes} daq + {formatNumberWithSpaces(durationEstimate.qty)} ÷{" "}
-                  {formatNumberWithSpaces(durationEstimate.throughput.perHour)}{" "}
-                  {THROUGHPUT_UNIT_LABEL[durationEstimate.throughput.unit]}/soat = {durationEstimate.hours} soat
-                </span>
-                {durationEstimate.hours !== Number(form.duration) && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          onClick={() => applyDuration(durationEstimate.hours)}
-                          className="inline-flex items-center justify-center size-5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-                        >
-                          <RotateCcw className="size-3" />
-                        </button>
-                      }
-                    />
-                    <TooltipContent side="top" className="text-xs">
-                      Me&apos;yorni qo&apos;llash
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
-            )}
           </div>
 
-          {form.status === "Finished" && (
-            <div className="flex items-center justify-end gap-2 -mt-1">
-              <label className="text-xs font-medium flex items-center">
-                <span>Fakt vaqt (soat)</span>
-                <FieldInfoTooltip text="Bosqich boshlanishidan tugashigacha, to'xtalishlar chiqarilgan holda. Smenalar orasidagi tanaffus kirib qolgan bo'lsa, shu yerda tuzating — fakt tannarx shundan hisoblanadi." />
-              </label>
-              <Input
-                type="number"
-                step="0.1"
-                min="0"
-                value={form.actualDurationMinutes !== undefined && form.actualDurationMinutes !== null ? String(Number((form.actualDurationMinutes / 60).toFixed(2))) : ""}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  const hours = parseFloat(raw);
-                  setForm((p) => ({
-                    ...p,
-                    actualDurationMinutes: raw === "" || Number.isNaN(hours) ? undefined : Math.max(0, Math.round(hours * 60)),
-                  }));
-                }}
-                placeholder="—"
-                className="h-8 w-28 text-xs font-mono"
-              />
-            </div>
-          )}
-
+          {/* Operators: moved up, before the optional block */}
           {/* Row 4: Assigned Operators */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
@@ -889,6 +760,136 @@ export function OperationDialog({
             </Combobox>
           </div>
 
+          {/* Collapsed summary of the auto-filled values */}
+          <button
+            type="button"
+            onClick={() => setShowMore((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-2.5 h-8 text-xs cursor-pointer hover:bg-muted/40"
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              <ChevronDown className={cn("size-3.5 transition-transform", !showMore && "-rotate-90")} />
+              Qo&apos;shimcha
+            </span>
+            <span className="font-mono text-muted-foreground truncate">
+              {Number(form.duration) || 0} soat · {money(opCost.totalUsd)}
+            </span>
+          </button>
+
+          {showMore && <div className="space-y-3">
+          <div className="grid grid-cols-6 gap-2.5">
+            <div>
+              <label className="text-xs font-medium block mb-1">Tartib #</label>
+              <Input
+                type="number"
+                step="10"
+                value={stepNumberInput}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setStepNumberInput(raw);
+                  const parsed = parseInt(raw, 10);
+                  if (!Number.isNaN(parsed) && parsed > 0) {
+                    setForm((p) => ({ ...p, stepNumber: parsed }));
+                  }
+                }}
+                onBlur={() => {
+                  const parsed = parseInt(stepNumberInput, 10);
+                  const valid = !Number.isNaN(parsed) && parsed > 0 ? parsed : 10;
+                  setStepNumberInput(String(valid));
+                  setForm((p) => ({ ...p, stepNumber: valid }));
+                }}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium block mb-1">Me&apos;yoriy vaqt (soat)</label>
+              <Input
+                type="number"
+                step="0.1"
+                min="0.1"
+                value={durationInput}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setDurationInput(raw);
+                  const parsed = parseFloat(raw);
+                  if (!Number.isNaN(parsed) && parsed > 0) {
+                    if (form.calcUnit === "1 hour") {
+                      handleRecalculateCosts({ duration: parsed });
+                    } else {
+                      setForm((p) => ({ ...p, duration: parsed }));
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  const parsed = parseFloat(durationInput);
+                  applyDuration(!Number.isNaN(parsed) && parsed > 0 ? parsed : 0.5);
+                }}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+            <div className="col-span-3">
+              <label className="text-xs font-medium block mb-1">Izoh</label>
+              <Input
+                value={operationNote}
+                disabled={!selectedWorkRate}
+                onChange={(e) => handleNoteChange(e.target.value)}
+                placeholder="Ixtiyoriy"
+                className="h-8 text-xs"
+              />
+            </div>
+            {durationEstimate && (
+              <div className="col-span-6 -mt-1 flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground font-mono">
+                <span>
+                  {durationEstimate.throughput.makeReadyMinutes} daq + {formatNumberWithSpaces(durationEstimate.qty)} ÷{" "}
+                  {formatNumberWithSpaces(durationEstimate.throughput.perHour)}{" "}
+                  {THROUGHPUT_UNIT_LABEL[durationEstimate.throughput.unit]}/soat = {durationEstimate.hours} soat
+                </span>
+                {durationEstimate.hours !== Number(form.duration) && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => applyDuration(durationEstimate.hours)}
+                          className="inline-flex items-center justify-center size-5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+                        >
+                          <RotateCcw className="size-3" />
+                        </button>
+                      }
+                    />
+                    <TooltipContent side="top" className="text-xs">
+                      Me&apos;yorni qo&apos;llash
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            )}
+          </div>
+
+          {form.status === "Finished" && (
+            <div className="flex items-center justify-end gap-2 -mt-1">
+              <label className="text-xs font-medium flex items-center">
+                <span>Fakt vaqt (soat)</span>
+                <FieldInfoTooltip text="Bosqich boshlanishidan tugashigacha, to'xtalishlar chiqarilgan holda. Smenalar orasidagi tanaffus kirib qolgan bo'lsa, shu yerda tuzating — fakt tannarx shundan hisoblanadi." />
+              </label>
+              <Input
+                type="number"
+                step="0.1"
+                min="0"
+                value={form.actualDurationMinutes !== undefined && form.actualDurationMinutes !== null ? String(Number((form.actualDurationMinutes / 60).toFixed(2))) : ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const hours = parseFloat(raw);
+                  setForm((p) => ({
+                    ...p,
+                    actualDurationMinutes: raw === "" || Number.isNaN(hours) ? undefined : Math.max(0, Math.round(hours * 60)),
+                  }));
+                }}
+                placeholder="—"
+                className="h-8 w-28 text-xs font-mono"
+              />
+            </div>
+          )}
+
           {/* Technological Tooling & Step Status */}
           <div className="grid grid-cols-3 gap-2.5">
             <div className={cn("space-y-1", editingOpIndex !== null ? "col-span-2" : "col-span-3")}>
@@ -970,7 +971,7 @@ export function OperationDialog({
                   onClick={() => setForm((p) => ({ ...p, costMode: costMode === "auto" ? "outsourced" : "auto" }))}
                   className="text-[11px] text-primary hover:underline cursor-pointer shrink-0"
                 >
-                  {costMode === "auto" ? "Qo'lda" : "Avto"}
+                  {costMode === "auto" ? "Autsors" : "Avto"}
                 </button>
               </span>
             </div>
@@ -1047,12 +1048,24 @@ export function OperationDialog({
               </div>
             )}
           </div>
+          </div>}
         </div>
 
         <DialogFooter className="gap-2 pt-2 border-t border-border/60">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="h-8 text-xs">
             Bekor qilish
           </Button>
+          {editingOpIndex === null && onSaveAndNext && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onSaveAndNext}
+              disabled={!form.name?.trim() || needsReason}
+              className="h-8 text-xs"
+            >
+              Qo&apos;shish va keyingisi
+            </Button>
+          )}
           <Button
             size="sm"
             onClick={onSave}
