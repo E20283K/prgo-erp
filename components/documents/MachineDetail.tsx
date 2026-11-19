@@ -619,8 +619,8 @@ export function MachineDetail({ tab }: MachineDetailProps) {
         {/* Right Main Viewport driven by left DocumentSidebar */}
         <div className="flex-1 min-w-0 flex flex-col overflow-y-auto p-4 bg-background">
           {costingGaps.length > 0 && (
-            <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-[11px]">
-              <span className="inline-flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-500 mr-1">
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-1.5 text-[11px]">
+              <span className="inline-flex items-center gap-1.5 font-medium text-destructive mr-1">
                 <TriangleAlert className="size-3.5" />
                 Tannarx uchun to&apos;ldirilmagan
               </span>
@@ -629,7 +629,7 @@ export function MachineDetail({ tab }: MachineDetailProps) {
                   key={g.key}
                   type="button"
                   onClick={() => setActiveTab(g.tab)}
-                  className="h-5.5 px-2 rounded border border-border bg-card text-foreground hover:bg-muted cursor-pointer"
+                  className="h-5.5 px-2 rounded border border-destructive/40 bg-card text-foreground hover:bg-muted cursor-pointer"
                 >
                   {g.label}
                 </button>

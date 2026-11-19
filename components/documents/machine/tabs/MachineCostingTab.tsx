@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { MachineRecord } from "../types";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
@@ -27,11 +28,15 @@ interface MachineCostingTabProps {
   onUpdate: (updated: Partial<MachineRecord>) => void;
 }
 
+/** Outline of a field order costing cannot do without, while it is empty. */
+const REQUIRED_EMPTY = "border-destructive ring-1 ring-destructive/30";
+
 export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps) {
   // Costing settings state (clean defaults, no hardcoded Heidelberg rates)
   const [investment, setInvestment] = useState<number>(machine.costing?.investmentUsd || 0);
   const [deprecYears, setDeprecYears] = useState<number>(machine.costing?.depreciationYears || 8);
-  const [annualHours, setAnnualHours] = useState<number>(machine.costing?.annualWorkHours || 2000);
+  // Left empty until entered: a guessed default would hide that the yearly hours were never set.
+  const [annualHours, setAnnualHours] = useState<number>(machine.costing?.annualWorkHours || 0);
   const [maintenanceFund, setMaintenanceFund] = useState<number>(machine.costing?.hourlyMaintenanceReserveUsd || 0);
   const [operatorWage, setOperatorWage] = useState<number>(machine.costing?.operatorHourlyWageUsd || 0);
   const [assistantWage, setAssistantWage] = useState<number>(machine.costing?.assistantHourlyWageUsd || 0);
@@ -41,7 +46,8 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
   // Dynamic calculations
   const electricityRate = machine.energy?.hourlyElectricityCostUsd || 0;
   const totalDeprecHours = Math.max(1, deprecYears * annualHours);
-  const hourlyDepreciation = investment > 0 ? Number((investment / totalDeprecHours).toFixed(2)) : 0;
+  const hourlyDepreciation =
+    investment > 0 && annualHours > 0 ? Number((investment / totalDeprecHours).toFixed(2)) : 0;
   const totalBaseCost = Number(
     (
       hourlyDepreciation +
@@ -166,7 +172,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
   const handleResetCosting = () => {
     setInvestment(machine.costing?.investmentUsd || 0);
     setDeprecYears(machine.costing?.depreciationYears || 8);
-    setAnnualHours(machine.costing?.annualWorkHours || 2000);
+    setAnnualHours(machine.costing?.annualWorkHours || 0);
     setMaintenanceFund(machine.costing?.hourlyMaintenanceReserveUsd || 0);
     setOperatorWage(machine.costing?.operatorHourlyWageUsd || 0);
     setAssistantWage(machine.costing?.assistantHourlyWageUsd || 0);
@@ -313,7 +319,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                     value={investment || ""}
                     onValueChange={(values) => setInvestment(values.floatValue ?? 0)}
                     placeholder="0"
-                    className="h-7 text-xs font-mono"
+                    className={cn("h-7 text-xs font-mono", !(investment > 0) && REQUIRED_EMPTY)}
                   />
                 </div>
                 <div>
@@ -331,9 +337,9 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                   <Input
                     type="number"
                     value={annualHours || ""}
-                    onChange={(e) => setAnnualHours(Number(e.target.value) || 1)}
+                    onChange={(e) => setAnnualHours(Number(e.target.value) || 0)}
                     placeholder="2000"
-                    className="h-7 text-xs font-mono"
+                    className={cn("h-7 text-xs font-mono", !(annualHours > 0) && REQUIRED_EMPTY)}
                   />
                 </div>
               </div>

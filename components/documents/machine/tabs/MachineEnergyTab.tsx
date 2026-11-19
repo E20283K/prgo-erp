@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { MachineRecord } from "../types";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -204,7 +205,7 @@ export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
                 value={activeLoad || ""}
                 onChange={(e) => setActiveLoad(Number(e.target.value) || 0)}
                 placeholder="0"
-                className="h-8 text-xs font-mono font-bold"
+                className={cn("h-8 text-xs font-mono font-bold", !(activeLoad > 0) && "border-destructive ring-1 ring-destructive/30")}
               />
             </div>
 

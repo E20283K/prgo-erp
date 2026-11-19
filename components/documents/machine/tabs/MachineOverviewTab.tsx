@@ -32,6 +32,18 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { cn } from "@/lib/utils";
+import { machineCostingGaps, type MachineCostingGap } from "../costingGaps";
+
+const MAKE_READY_SPEC_KEY: Record<string, string> = {
+  offset: "offsetSpecs",
+  flexo: "flexoSpecs",
+  "die-cutting": "dieCuttingSpecs",
+  lamination: "laminationSpecs",
+  jacquard: "jacquardSpecs",
+  mounting: "mountingSpecs",
+  "casing-in": "casingInSpecs",
+};
 import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
 
 const CATEGORY_OPTIONS: { value: MachineCategory; label: string }[] = [
@@ -138,6 +150,13 @@ export function MachineOverviewTab({
       badge: emp.badgeNo ? `#${emp.badgeNo}` : undefined,
     }))];
   }, [employees]);
+  // Fields order costing cannot do without are outlined in red until filled.
+  const gapKeys = useMemo(() => new Set(machineCostingGaps(machine).map((g) => g.key)), [machine]);
+  const gapClass = (key: MachineCostingGap["key"]) =>
+    gapKeys.has(key) ? "border-destructive ring-1 ring-destructive/30" : "";
+  // Spec block that holds the make-ready time for this category (a guillotine has none).
+  const makeReadyKey = MAKE_READY_SPEC_KEY[machine.category] as keyof MachineRecord | undefined;
+
   const notInHr = (name?: string) =>
     Boolean(name && name.trim() && name.trim() !== "—" && employees.length > 0) &&
     !employees.some((e) => e.status !== "terminated" && e.fullName === name!.trim());
@@ -485,7 +504,7 @@ export function MachineOverviewTab({
                     if (val) handleCategoryChange(val);
                   }}
                 >
-                  <SelectTrigger className="h-8 text-xs font-semibold w-full">
+                  <SelectTrigger className={cn("h-8 text-xs font-semibold w-full", gapClass("category"))}>
                     <SelectValue placeholder="Kategoriyani tanlang">
                       {CATEGORY_OPTIONS.find((c) => c.value === machine.category)?.label || machine.category}
                     </SelectValue>
@@ -902,7 +921,7 @@ export function MachineOverviewTab({
                         })
                       }
                       placeholder="11000"
-                      className="h-8 text-xs font-mono"
+                      className={cn("h-8 text-xs font-mono", gapClass("speed"))}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1029,7 +1048,7 @@ export function MachineOverviewTab({
                         })
                       }
                       placeholder="120"
-                      className="h-8 text-xs font-mono"
+                      className={cn("h-8 text-xs font-mono", gapClass("speed"))}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1115,7 +1134,7 @@ export function MachineOverviewTab({
                         })
                       }
                       placeholder="6500"
-                      className="h-8 text-xs font-mono"
+                      className={cn("h-8 text-xs font-mono", gapClass("speed"))}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1181,7 +1200,7 @@ export function MachineOverviewTab({
                         })
                       }
                       placeholder="1.8"
-                      className="h-8 text-xs font-mono"
+                      className={cn("h-8 text-xs font-mono", gapClass("speed"))}
                     />
                   </div>
                 </div>
@@ -1245,7 +1264,7 @@ export function MachineOverviewTab({
                         })
                       }
                       placeholder="45"
-                      className="h-8 text-xs font-mono"
+                      className={cn("h-8 text-xs font-mono", gapClass("speed"))}
                     />
                   </div>
                 </div>
@@ -1328,7 +1347,7 @@ export function MachineOverviewTab({
                         })
                       }
                       placeholder="4000"
-                      className="h-8 text-xs font-mono"
+                      className={cn("h-8 text-xs font-mono", gapClass("speed"))}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1391,7 +1410,7 @@ export function MachineOverviewTab({
                         })
                       }
                       placeholder="2000"
-                      className="h-8 text-xs font-mono"
+                      className={cn("h-8 text-xs font-mono", gapClass("speed"))}
                     />
                   </div>
                 </div>
@@ -1458,7 +1477,7 @@ export function MachineOverviewTab({
                         })
                       }
                       placeholder="720"
-                      className="h-8 text-xs font-mono"
+                      className={cn("h-8 text-xs font-mono", gapClass("speed"))}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1482,6 +1501,28 @@ export function MachineOverviewTab({
                   </div>
                 </div>
               </>
+            )}
+
+            {makeReadyKey && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-border/60">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground">Pril&apos;adka vaqti (daq) *</Label>
+                  <Input
+                    type="number"
+                    value={(machine[makeReadyKey] as { makeReadyMinutes?: number } | undefined)?.makeReadyMinutes || ""}
+                    onChange={(e) =>
+                      onUpdate({
+                        [makeReadyKey]: {
+                          ...((machine[makeReadyKey] as object) || {}),
+                          makeReadyMinutes: Number(e.target.value) || 0,
+                        },
+                      } as Partial<MachineRecord>)
+                    }
+                    placeholder="20"
+                    className={cn("h-8 text-xs font-mono", gapClass("makeReady"))}
+                  />
+                </div>
+              </div>
             )}
           </div>
         </div>
