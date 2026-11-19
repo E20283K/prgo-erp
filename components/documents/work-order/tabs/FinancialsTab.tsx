@@ -235,32 +235,30 @@ export function FinancialsTab({
   };
 
   // ─── 4. PRICING & MARKUP CALCULATOR STATE ────────────────────────────────────
-  const [markupPercent, setMarkupPercent] = useState<number>(() => {
-    if (totalBaseCost <= 0) return 30;
-    const currentMarkup = ((currentSellingPrice - totalBaseCost) / totalBaseCost) * 100;
-    return Number(Math.max(5, currentMarkup).toFixed(1));
-  });
+  // Markup is only known once a price exists (saved, typed, or picked via a preset) — never invented.
+  const deriveMarkup = (price: number, cost: number) =>
+    price > 0 && cost > 0 ? Number((((price - cost) / cost) * 100).toFixed(1)) : null;
+
+  const [markupPercent, setMarkupPercent] = useState<number | null>(() =>
+    deriveMarkup(currentSellingPrice, totalBaseCost)
+  );
 
   // Cost data can arrive after mount: derive the markup from the saved price once it does.
   const [markupSynced, setMarkupSynced] = useState(totalBaseCost > 0);
   if (!markupSynced && totalBaseCost > 0) {
     setMarkupSynced(true);
-    if (currentSellingPrice > totalBaseCost) {
-      setMarkupPercent(Number((((currentSellingPrice - totalBaseCost) / totalBaseCost) * 100).toFixed(1)));
-    }
+    setMarkupPercent(deriveMarkup(currentSellingPrice, totalBaseCost));
   }
 
-  const [customPriceInput, setCustomPriceInput] = useState<string>(String(currentSellingPrice));
+  const [customPriceInput, setCustomPriceInput] = useState<string>(
+    currentSellingPrice > 0 ? String(currentSellingPrice) : ""
+  );
 
-  const calculatedSellingPrice = useMemo(() => {
-    if (totalBaseCost <= 0) return 0;
-    return Number((totalBaseCost * (1 + markupPercent / 100)).toFixed(2));
-  }, [totalBaseCost, markupPercent]);
-
-  const activeSellingPrice = Number(customPriceInput) > 0 ? Number(customPriceInput) : (totalBaseCost > 0 ? calculatedSellingPrice : 0);
+  const activeSellingPrice = Number(customPriceInput) > 0 ? Number(customPriceInput) : 0;
+  const hasPricing = activeSellingPrice > 0 && totalBaseCost > 0;
   const unitSellingPrice = targetQty > 0 && activeSellingPrice > 0 ? Number((activeSellingPrice / targetQty).toFixed(4)) : 0;
-  const grossProfit = (activeSellingPrice > 0 && totalBaseCost > 0) ? Number((activeSellingPrice - totalBaseCost).toFixed(2)) : 0;
-  const profitMarginPercent = (activeSellingPrice > 0 && totalBaseCost > 0) ? Number(((grossProfit / activeSellingPrice) * 100).toFixed(1)) : 0;
+  const grossProfit = hasPricing ? Number((activeSellingPrice - totalBaseCost).toFixed(2)) : 0;
+  const profitMarginPercent = hasPricing ? Number(((grossProfit / activeSellingPrice) * 100).toFixed(1)) : 0;
 
   // Handlers
   const handleSelectMarkupPreset = (pct: number) => {
@@ -271,17 +269,13 @@ export function FinancialsTab({
 
   const handleCustomPriceChange = (valStr: string) => {
     setCustomPriceInput(valStr);
-    const val = parseFloat(valStr);
-    if (!isNaN(val) && val > totalBaseCost && totalBaseCost > 0) {
-      const derivedMarkup = Number((((val - totalBaseCost) / totalBaseCost) * 100).toFixed(1));
-      setMarkupPercent(derivedMarkup);
-    }
+    setMarkupPercent(deriveMarkup(parseFloat(valStr) || 0, totalBaseCost));
   };
 
   // A cost change keeps the markup and re-derives the price from the new cost.
   const commitCost = (mode: "auto" | "manual", manualTotal: number) => {
     const eff = resolveEffectiveCost(costs, { costMode: mode, manualTotalCost: manualTotal });
-    if (eff.total > 0) {
+    if (eff.total > 0 && markupPercent !== null) {
       setCustomPriceInput(String(Number((eff.total * (1 + markupPercent / 100)).toFixed(2))));
     }
     onFinancialsChange?.(toFinancials(costs, formData?.financials?.margin ?? 25, mode, manualTotal));
@@ -309,7 +303,7 @@ export function FinancialsTab({
   };
 
   const handleApplyPriceToOrder = () => {
-    if (onPriceChange) {
+    if (onPriceChange && activeSellingPrice > 0) {
       onPriceChange(activeSellingPrice, {
         ...toFinancials(costs, profitMarginPercent, costMode, Number(manualTotalInput) || 0),
         itemsCount: rawCostRows.length,
@@ -566,10 +560,10 @@ export function FinancialsTab({
             <Percent className="size-3 text-blue-500" />
           </div>
           <div className="text-sm font-bold font-mono text-blue-600 dark:text-blue-400 tracking-tight">
-            {totalBaseCost > 0 ? `+${markupPercent.toFixed(1)}%` : "—"}
+            {totalBaseCost > 0 && markupPercent !== null ? `${markupPercent >= 0 ? "+" : ""}${markupPercent.toFixed(1)}%` : "—"}
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
-            Foyda: <strong className="text-blue-700 dark:text-blue-300">{grossProfit > 0 ? `+${formatMoney(grossProfit, currency)}` : "—"}</strong>
+            Foyda: <strong className="text-blue-700 dark:text-blue-300">{hasPricing ? `${grossProfit >= 0 ? "+" : ""}${formatMoney(grossProfit, currency)}` : "—"}</strong>
           </div>
         </div>
 
@@ -597,7 +591,7 @@ export function FinancialsTab({
             <TrendingUp className="size-3 text-emerald-500" />
           </div>
           <div className="text-sm font-bold font-mono text-foreground tracking-tight">
-            {profitMarginPercent > 0 ? `${profitMarginPercent.toFixed(1)}%` : "—"}
+            {hasPricing ? `${profitMarginPercent.toFixed(1)}%` : "—"}
           </div>
           <div className="text-[9.5px] text-muted-foreground font-mono truncate">
             Kurs: <strong className="font-mono text-foreground">1 USD = {exchangeRate.toLocaleString()} UZS</strong>
@@ -680,6 +674,7 @@ export function FinancialsTab({
           <Button
             type="button"
             onClick={handleApplyPriceToOrder}
+            disabled={activeSellingPrice <= 0}
             className="h-6.5 px-2.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1 shadow-2xs cursor-pointer"
           >
             <Check className="size-3" />
