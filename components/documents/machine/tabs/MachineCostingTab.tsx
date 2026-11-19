@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Button } from "@/components/ui/button";
 import {
   DollarSign,
   Calculator,
@@ -18,8 +17,6 @@ import {
   Users,
   Building2,
   TrendingUp,
-  Save,
-  RotateCcw,
   Sparkles,
 } from "lucide-react";
 
@@ -31,35 +28,76 @@ interface MachineCostingTabProps {
 /** Outline of a field order costing cannot do without, while it is empty. */
 const REQUIRED_EMPTY = "border-destructive ring-1 ring-destructive/30";
 
-export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps) {
-  // Costing settings state (clean defaults, no hardcoded Heidelberg rates)
-  const [investment, setInvestment] = useState<number>(machine.costing?.investmentUsd || 0);
-  const [deprecYears, setDeprecYears] = useState<number>(machine.costing?.depreciationYears || 8);
-  // Left empty until entered: a guessed default would hide that the yearly hours were never set.
-  const [annualHours, setAnnualHours] = useState<number>(machine.costing?.annualWorkHours || 0);
-  const [maintenanceFund, setMaintenanceFund] = useState<number>(machine.costing?.hourlyMaintenanceReserveUsd || 0);
-  const [operatorWage, setOperatorWage] = useState<number>(machine.costing?.operatorHourlyWageUsd || 0);
-  const [assistantWage, setAssistantWage] = useState<number>(machine.costing?.assistantHourlyWageUsd || 0);
-  const [factoryOverhead, setFactoryOverhead] = useState<number>(machine.costing?.factoryOverheadUsd || 0);
-  const [billingRate, setBillingRate] = useState<number>(machine.costing?.standardHourlyRateUsd || 0);
+interface CostingInputs {
+  investment: number;
+  deprecYears: number;
+  annualHours: number;
+  maintenanceFund: number;
+  operatorWage: number;
+  assistantWage: number;
+  factoryOverhead: number;
+  billingRate: number;
+}
 
-  // Dynamic calculations
-  const electricityRate = machine.energy?.hourlyElectricityCostUsd || 0;
-  const totalDeprecHours = Math.max(1, deprecYears * annualHours);
+function deriveCosting(i: CostingInputs, electricityRate: number) {
+  const totalDeprecHours = Math.max(1, i.deprecYears * i.annualHours);
   const hourlyDepreciation =
-    investment > 0 && annualHours > 0 ? Number((investment / totalDeprecHours).toFixed(2)) : 0;
+    i.investment > 0 && i.annualHours > 0 ? Number((i.investment / totalDeprecHours).toFixed(2)) : 0;
   const totalBaseCost = Number(
     (
       hourlyDepreciation +
       electricityRate +
-      maintenanceFund +
-      operatorWage +
-      assistantWage +
-      factoryOverhead
+      i.maintenanceFund +
+      i.operatorWage +
+      i.assistantWage +
+      i.factoryOverhead
     ).toFixed(2)
   );
+  const margin = i.billingRate - totalBaseCost;
+  const markupPercent = totalBaseCost > 0 ? Number(((margin / totalBaseCost) * 100).toFixed(1)) : 0;
+  return { hourlyDepreciation, totalBaseCost, markupPercent };
+}
+
+export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps) {
+  // Inputs are read straight from the machine record so the header "Saqlash" always persists
+  // what is on screen. Yearly hours stay empty until entered: a guessed default would hide that.
+  const inputs: CostingInputs = {
+    investment: machine.costing?.investmentUsd || 0,
+    deprecYears: machine.costing?.depreciationYears || 8,
+    annualHours: machine.costing?.annualWorkHours || 0,
+    maintenanceFund: machine.costing?.hourlyMaintenanceReserveUsd || 0,
+    operatorWage: machine.costing?.operatorHourlyWageUsd || 0,
+    assistantWage: machine.costing?.assistantHourlyWageUsd || 0,
+    factoryOverhead: machine.costing?.factoryOverheadUsd || 0,
+    billingRate: machine.costing?.standardHourlyRateUsd || 0,
+  };
+  const { investment, deprecYears, annualHours, maintenanceFund, operatorWage, assistantWage, factoryOverhead, billingRate } = inputs;
+
+  const electricityRate = machine.energy?.hourlyElectricityCostUsd || 0;
+  const { hourlyDepreciation, totalBaseCost, markupPercent } = deriveCosting(inputs, electricityRate);
   const profitMarginUsd = Number((billingRate - totalBaseCost).toFixed(2));
-  const markupPercent = totalBaseCost > 0 ? Number(((profitMarginUsd / totalBaseCost) * 100).toFixed(1)) : 0;
+
+  const commit = (patch: Partial<CostingInputs>) => {
+    const next = { ...inputs, ...patch };
+    const derived = deriveCosting(next, electricityRate);
+    onUpdate({
+      costing: {
+        ...machine.costing,
+        investmentUsd: next.investment,
+        depreciationYears: next.deprecYears,
+        annualWorkHours: next.annualHours,
+        hourlyDepreciationUsd: derived.hourlyDepreciation,
+        hourlyElectricityUsd: electricityRate,
+        hourlyMaintenanceReserveUsd: next.maintenanceFund,
+        operatorHourlyWageUsd: next.operatorWage,
+        assistantHourlyWageUsd: next.assistantWage,
+        factoryOverheadUsd: next.factoryOverhead,
+        totalBaseCostPerHourUsd: derived.totalBaseCost,
+        standardHourlyRateUsd: next.billingRate,
+        markupPercent: derived.markupPercent,
+      },
+    });
+  };
 
   // ── Live Unit Production Cost Calculator State ──────────────────────────
   const getDefaultRunQty = () => {
@@ -149,36 +187,6 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
   const simPowerCost = simTotalHours * electricityRate;
   const simCostPer1000Base = simRunQty > 0 ? (simTotalBaseCost / simRunQty) * 1000 : 0;
   const simPricePer1000Billing = simRunQty > 0 ? (simTotalBillingPrice / simRunQty) * 1000 : 0;
-
-  const handleSaveCosting = () => {
-    onUpdate({
-      costing: {
-        investmentUsd: investment,
-        depreciationYears: deprecYears,
-        annualWorkHours: annualHours,
-        hourlyDepreciationUsd: hourlyDepreciation,
-        hourlyElectricityUsd: electricityRate,
-        hourlyMaintenanceReserveUsd: maintenanceFund,
-        operatorHourlyWageUsd: operatorWage,
-        assistantHourlyWageUsd: assistantWage,
-        factoryOverheadUsd: factoryOverhead,
-        totalBaseCostPerHourUsd: totalBaseCost,
-        standardHourlyRateUsd: billingRate,
-        markupPercent: markupPercent,
-      },
-    });
-  };
-
-  const handleResetCosting = () => {
-    setInvestment(machine.costing?.investmentUsd || 0);
-    setDeprecYears(machine.costing?.depreciationYears || 8);
-    setAnnualHours(machine.costing?.annualWorkHours || 0);
-    setMaintenanceFund(machine.costing?.hourlyMaintenanceReserveUsd || 0);
-    setOperatorWage(machine.costing?.operatorHourlyWageUsd || 0);
-    setAssistantWage(machine.costing?.assistantHourlyWageUsd || 0);
-    setFactoryOverhead(machine.costing?.factoryOverheadUsd || 0);
-    setBillingRate(machine.costing?.standardHourlyRateUsd || 0);
-  };
 
   return (
     <div className="space-y-4">
@@ -276,26 +284,6 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                 Soatlik Xarajatlar Tarkibi (Cost Structure)
               </span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleResetCosting}
-                className="h-6 text-[10px] gap-1 px-1.5"
-                title="Boshlang'ich holatga qaytarish"
-              >
-                <RotateCcw className="w-3 h-3" />
-                Qaytarish
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleSaveCosting}
-                className="h-6 text-[10px] gap-1 px-2 bg-primary text-primary-foreground"
-              >
-                <Save className="w-3 h-3" />
-                Saqlash
-              </Button>
-            </div>
           </div>
 
           <div className="p-3.5 space-y-3 text-xs flex-1">
@@ -317,7 +305,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                     thousandSeparator=" "
                     decimalScale={2}
                     value={investment || ""}
-                    onValueChange={(values) => setInvestment(values.floatValue ?? 0)}
+                    onValueChange={(values) => commit({ investment: values.floatValue ?? 0 })}
                     placeholder="0"
                     className={cn("h-7 text-xs font-mono", !(investment > 0) && REQUIRED_EMPTY)}
                   />
@@ -327,7 +315,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                   <Input
                     type="number"
                     value={deprecYears || ""}
-                    onChange={(e) => setDeprecYears(Number(e.target.value) || 1)}
+                    onChange={(e) => commit({ deprecYears: Number(e.target.value) || 1 })}
                     placeholder="8"
                     className="h-7 text-xs font-mono"
                   />
@@ -337,7 +325,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                   <Input
                     type="number"
                     value={annualHours || ""}
-                    onChange={(e) => setAnnualHours(Number(e.target.value) || 0)}
+                    onChange={(e) => commit({ annualHours: Number(e.target.value) || 0 })}
                     placeholder="2000"
                     className={cn("h-7 text-xs font-mono", !(annualHours > 0) && REQUIRED_EMPTY)}
                   />
@@ -376,7 +364,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                   type="number"
                   step="0.5"
                   value={maintenanceFund || ""}
-                  onChange={(e) => setMaintenanceFund(Number(e.target.value) || 0)}
+                  onChange={(e) => commit({ maintenanceFund: Number(e.target.value) || 0 })}
                   placeholder="0"
                   className="h-7 text-xs font-mono"
                 />
@@ -401,7 +389,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                     thousandSeparator=" "
                     decimalScale={2}
                     value={operatorWage || ""}
-                    onValueChange={(values) => setOperatorWage(values.floatValue ?? 0)}
+                    onValueChange={(values) => commit({ operatorWage: values.floatValue ?? 0 })}
                     placeholder="0"
                     className="h-7 text-xs font-mono"
                   />
@@ -412,7 +400,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                     thousandSeparator=" "
                     decimalScale={2}
                     value={assistantWage || ""}
-                    onValueChange={(values) => setAssistantWage(values.floatValue ?? 0)}
+                    onValueChange={(values) => commit({ assistantWage: values.floatValue ?? 0 })}
                     placeholder="0"
                     className="h-7 text-xs font-mono"
                   />
@@ -428,7 +416,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                   thousandSeparator=" "
                   decimalScale={2}
                   value={factoryOverhead || ""}
-                  onValueChange={(values) => setFactoryOverhead(values.floatValue ?? 0)}
+                  onValueChange={(values) => commit({ factoryOverhead: values.floatValue ?? 0 })}
                   placeholder="0"
                   className="h-7 text-xs font-mono"
                 />
@@ -439,7 +427,7 @@ export function MachineCostingTab({ machine, onUpdate }: MachineCostingTabProps)
                   thousandSeparator=" "
                   decimalScale={2}
                   value={billingRate || ""}
-                  onValueChange={(values) => setBillingRate(values.floatValue ?? 0)}
+                  onValueChange={(values) => commit({ billingRate: values.floatValue ?? 0 })}
                   placeholder="0"
                   className="h-7 text-xs font-mono font-bold text-primary"
                 />

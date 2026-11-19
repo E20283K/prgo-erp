@@ -1,19 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { MachineRecord } from "../types";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import {
   Zap,
   DollarSign,
   Gauge,
   Flame,
-  CheckCircle2,
-  RotateCcw,
-  Save,
   Sliders,
   TrendingDown,
 } from "lucide-react";
@@ -24,9 +20,10 @@ interface MachineEnergyTabProps {
 }
 
 export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
-  const [tariff, setTariff] = useState<number>(machine.energy?.electricityTariffUsd ?? 0.08);
-  const [activeLoad, setActiveLoad] = useState<number>(machine.energy?.activePowerKw ?? 0);
-  const [monthlyHours, setMonthlyHours] = useState<number>(machine.energy?.monthlyHoursPlanned ?? 176);
+  // Read straight from the machine record so the header "Saqlash" always persists what is on screen.
+  const tariff = machine.energy?.electricityTariffUsd ?? 0.08;
+  const activeLoad = machine.energy?.activePowerKw ?? 0;
+  const monthlyHours = machine.energy?.monthlyHoursPlanned ?? 176;
 
   // Computed values
   const hourlyCost = activeLoad * tariff;
@@ -44,23 +41,29 @@ export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
   const chillerPower = machine.energy?.chillerPowerKw ?? 0;
   const driveMotorPower = Math.max(0, Number((activeLoad - (dryerPower * 0.6) - chillerPower).toFixed(1)));
 
-  const handleApply = () => {
+  const commit = (patch: { tariff?: number; activeLoad?: number; monthlyHours?: number }) => {
+    const nextTariff = patch.tariff ?? tariff;
+    const nextLoad = patch.activeLoad ?? activeLoad;
+    const nextHours = patch.monthlyHours ?? monthlyHours;
+    const nextHourlyCost = Number((nextLoad * nextTariff).toFixed(2));
+    const nextMonthlyCost = Number((nextLoad * nextHours * nextTariff).toFixed(2));
+
     onUpdate({
       energy: {
         ...machine.energy,
-        electricityTariffUsd: tariff,
-        activePowerKw: activeLoad,
-        monthlyHoursPlanned: monthlyHours,
-        hourlyElectricityCostUsd: Number(hourlyCost.toFixed(2)),
-        monthlyPowerCostUsd: Number(monthlyCost.toFixed(2)),
+        electricityTariffUsd: nextTariff,
+        activePowerKw: nextLoad,
+        monthlyHoursPlanned: nextHours,
+        hourlyElectricityCostUsd: nextHourlyCost,
+        monthlyPowerCostUsd: nextMonthlyCost,
       },
       costing: {
         ...machine.costing,
-        hourlyElectricityUsd: Number(hourlyCost.toFixed(2)),
+        hourlyElectricityUsd: nextHourlyCost,
         totalBaseCostPerHourUsd: Number(
           (
             (machine.costing?.hourlyDepreciationUsd || 0) +
-            hourlyCost +
+            nextHourlyCost +
             (machine.costing?.hourlyMaintenanceReserveUsd || 0) +
             (machine.costing?.operatorHourlyWageUsd || 0) +
             (machine.costing?.assistantHourlyWageUsd || 0) +
@@ -69,12 +72,6 @@ export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
         ),
       },
     });
-  };
-
-  const handleReset = () => {
-    setTariff(machine.energy?.electricityTariffUsd ?? 0.08);
-    setActiveLoad(machine.energy?.activePowerKw ?? 0);
-    setMonthlyHours(machine.energy?.monthlyHoursPlanned ?? 176);
   };
 
   return (
@@ -173,25 +170,6 @@ export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
                 Energetik Parametrlar & Tarif
               </span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleReset}
-                className="h-6 text-[10px] gap-1 px-1.5"
-              >
-                <RotateCcw className="w-3 h-3" />
-                Qaytarish
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleApply}
-                className="h-6 text-[10px] gap-1 px-2 bg-primary text-primary-foreground"
-              >
-                <Save className="w-3 h-3" />
-                Qo'llash
-              </Button>
-            </div>
           </div>
 
           <div className="p-3.5 space-y-3 text-xs">
@@ -203,7 +181,7 @@ export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
                 type="number"
                 step="0.5"
                 value={activeLoad || ""}
-                onChange={(e) => setActiveLoad(Number(e.target.value) || 0)}
+                onChange={(e) => commit({ activeLoad: Number(e.target.value) || 0 })}
                 placeholder="0"
                 className={cn("h-8 text-xs font-mono font-bold", !(activeLoad > 0) && "border-destructive ring-1 ring-destructive/30")}
               />
@@ -218,7 +196,7 @@ export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
                   type="number"
                   step="0.005"
                   value={tariff || ""}
-                  onChange={(e) => setTariff(Number(e.target.value) || 0)}
+                  onChange={(e) => commit({ tariff: Number(e.target.value) || 0 })}
                   placeholder="0.08"
                   className="h-8 text-xs font-mono font-semibold"
                 />
@@ -234,7 +212,7 @@ export function MachineEnergyTab({ machine, onUpdate }: MachineEnergyTabProps) {
                 <Input
                   type="number"
                   value={monthlyHours || ""}
-                  onChange={(e) => setMonthlyHours(Number(e.target.value) || 0)}
+                  onChange={(e) => commit({ monthlyHours: Number(e.target.value) || 0 })}
                   placeholder="176"
                   className="h-8 text-xs font-mono"
                 />
