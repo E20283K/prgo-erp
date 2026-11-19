@@ -57,7 +57,8 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
 
       <div className="flex flex-col gap-0.5">
         <span className="text-[11px] text-muted-foreground">Kesim</span>
-        <div className="grid grid-cols-4 gap-1">
+        <div className="flex gap-2">
+        <div className="grid grid-cols-4 gap-1 flex-1 content-start">
           {c.cutOptions.map((o) => (
             <button
               key={o.divisor}
@@ -76,6 +77,8 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
               1/{o.divisor}
             </button>
           ))}
+        </div>
+        <CutSketch parentW={s.parentSheetW} parentH={s.parentSheetH} pressW={s.sheetW} pressH={s.sheetH} />
         </div>
       </div>
 
@@ -120,5 +123,62 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
         />
       </div>
     </Section>
+  );
+}
+
+/** Parent sheet drawn to scale with the press sheets that fit on it; the leftover is waste. */
+function CutSketch({ parentW, parentH, pressW, pressH }: { parentW: number; parentH: number; pressW: number; pressH: number }) {
+  if (!(parentW > 0 && parentH > 0 && pressW > 0 && pressH > 0)) return null;
+
+  const straight = { w: pressW, h: pressH, cols: Math.floor(parentW / pressW), rows: Math.floor(parentH / pressH) };
+  const rotated = { w: pressH, h: pressW, cols: Math.floor(parentW / pressH), rows: Math.floor(parentH / pressW) };
+  const g = rotated.cols * rotated.rows > straight.cols * straight.rows ? rotated : straight;
+  const count = g.cols * g.rows;
+  const usedPct = Math.round(((count * pressW * pressH) / (parentW * parentH)) * 100);
+
+  const BOX = 60;
+  const scale = BOX / Math.max(parentW, parentH);
+  const W = parentW * scale;
+  const H = parentH * scale;
+
+  const cells: React.ReactNode[] = [];
+  for (let r = 0; r < g.rows; r++) {
+    for (let col = 0; col < g.cols; col++) {
+      cells.push(
+        <rect
+          key={`${r}-${col}`}
+          x={col * g.w * scale}
+          y={r * g.h * scale}
+          width={g.w * scale}
+          height={g.h * scale}
+          className={r === 0 && col === 0 ? "fill-primary/40 stroke-primary" : "fill-primary/15 stroke-primary/60"}
+          strokeWidth={0.75}
+          vectorEffect="non-scaling-stroke"
+        />
+      );
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-0.5 shrink-0" title={`${count} × ${pressW}×${pressH} mm · ${usedPct}%`}>
+      <svg width={BOX + 2} height={BOX + 2} viewBox={`-1 -1 ${BOX + 2} ${BOX + 2}`} className="overflow-visible">
+        <g transform={`translate(${(BOX - W) / 2} ${(BOX - H) / 2})`}>
+          <rect width={W} height={H} className="fill-muted stroke-border" strokeWidth={1} />
+          {count === 0 ? (
+            <rect
+              width={Math.min(pressW * scale, W)}
+              height={Math.min(pressH * scale, H)}
+              className="fill-destructive/20 stroke-destructive"
+              strokeWidth={0.75}
+            />
+          ) : (
+            cells
+          )}
+        </g>
+      </svg>
+      <span className={cn("text-[10px] font-mono leading-none", count === 0 ? "text-destructive" : "text-muted-foreground")}>
+        {count} · {usedPct}%
+      </span>
+    </div>
   );
 }
