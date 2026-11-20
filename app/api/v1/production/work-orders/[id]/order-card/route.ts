@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { renderWorkOrderCardPreview } from "@/lib/server/orderCardGenerator";
+import { parseOrderCardLogo, renderWorkOrderCardPreview } from "@/lib/server/orderCardGenerator";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,8 @@ export async function GET(
   const companyCode = request.nextUrl.searchParams.get("companyCode") || "PRINTGOO";
 
   try {
-    const png = await renderWorkOrderCardPreview(id, companyCode, note);
+    const logo = parseOrderCardLogo(request.nextUrl.searchParams.get("logo"));
+    const png = await renderWorkOrderCardPreview(id, companyCode, note, logo);
     if (!png) {
       return NextResponse.json({ success: false, error: "Buyurtma topilmadi" }, { status: 404 });
     }

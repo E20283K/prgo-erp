@@ -327,6 +327,7 @@ class OrderCardRequest(BaseModel):
 
     paperStock: Optional[str] = None
     grammage: Optional[float] = None
+    targetGsm: Optional[float] = None
     kashirovkaMode: Optional[str] = None
     kashirovkaLayers: List[OrderCardLayer] = Field(default_factory=list)
     kashirovkaTotalGsm: Optional[float] = None
@@ -351,6 +352,8 @@ class OrderCardRequest(BaseModel):
     notes: Optional[str] = None
     customNote: Optional[str] = None
     erpUrl: Optional[str] = None
+    # Header logo: "printgoo" (default), "label" or "none"
+    logo: Optional[str] = None
 
     format: str = "png"
     dpi: int = 200

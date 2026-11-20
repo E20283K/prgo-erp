@@ -3,6 +3,7 @@ import {
   sendWorkOrderToOrdersGroup,
   updateTelegramOrderCardStatus,
 } from "@/lib/server/telegramService";
+import { parseOrderCardLogo } from "@/lib/server/orderCardGenerator";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export async function POST(
       alertReply,
       companyCode = "PRINTGOO",
     } = body;
+    const logo = parseOrderCardLogo(body.logo);
 
     // 1. Agar mavjud xabarning biriktirilgan PDF faylini almashtirish (editMessageMedia)
     if (replacePdf) {
@@ -29,7 +31,8 @@ export async function POST(
         companyCode,
         true,
         Boolean(alertReply),
-        customNote
+        customNote,
+        logo
       );
 
       if (!updateResult.success) {
@@ -82,6 +85,7 @@ export async function POST(
       customNote: customNote || undefined,
       companyCode,
       alertReply: Boolean(alertReply),
+      logo,
     });
 
     if (!result.success) {

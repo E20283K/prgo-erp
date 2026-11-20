@@ -350,6 +350,8 @@ export interface WorkOrderTelegramMeta {
   channelTitle?: string;
   /** Public download link to the order card PDF shown in the message caption */
   cardPdfUrl?: string;
+  /** Header logo the card was last sent with: "printgoo" | "label" | "none" */
+  cardLogo?: string;
 }
 
 export const workOrders = pgTable(

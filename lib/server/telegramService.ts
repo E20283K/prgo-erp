@@ -22,7 +22,7 @@ import { eq, desc, asc, and, sql, or, ilike, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
 import { generateTechCardImage } from "./techCardGenerator";
-import { generateOrderCardMedia } from "./orderCardGenerator";
+import { generateOrderCardMedia, resolveOrderCardLogo, type OrderCardLogo } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -1336,6 +1336,7 @@ export async function sendWorkOrderToOrdersGroup(params: {
   companyCode?: string;
   sendCardImage?: boolean;
   alertReply?: boolean;
+  logo?: OrderCardLogo;
 }): Promise<{
   success: boolean;
   message?: TelegramMessage;
@@ -1393,7 +1394,8 @@ export async function sendWorkOrderToOrdersGroup(params: {
   }
 
   // One-page visual order card (PNG); PDF job ticket only if doc-service cannot render it
-  const cardMedia = await generateOrderCardMedia(order, params.customNote);
+  const cardLogo = resolveOrderCardLogo(order, params.logo);
+  const cardMedia = await generateOrderCardMedia(order, params.customNote, cardLogo);
   const caption = formatWorkOrderTelegramCaption(order, params.customNote, cardMedia.pdfUrl);
 
   const messageText = params.alertReply
@@ -1420,6 +1422,7 @@ export async function sendWorkOrderToOrdersGroup(params: {
       lastSentAt: new Date().toISOString(),
       channelTitle: targetChatRecord.title,
       cardPdfUrl: cardMedia.pdfUrl,
+      cardLogo,
     };
 
     await db
@@ -1456,7 +1459,8 @@ export async function updateTelegramOrderCardStatus(
   companyCode: string = "PRINTGOO",
   replacePdf: boolean = false,
   alertReply?: boolean,
-  alertComment?: string
+  alertComment?: string,
+  logo?: OrderCardLogo
 ): Promise<{
   success: boolean;
   updated?: boolean;
@@ -1504,7 +1508,8 @@ export async function updateTelegramOrderCardStatus(
 
     if (replacePdf) {
       try {
-        const cardMedia = await generateOrderCardMedia(order, alertComment);
+        const cardLogo = resolveOrderCardLogo(order, logo);
+        const cardMedia = await generateOrderCardMedia(order, alertComment, cardLogo);
         const mediaType = cardMedia.isPhoto ? "photo" : "document";
         const mediaCaption = formatWorkOrderTelegramCaption(order, undefined, cardMedia.pdfUrl);
 
@@ -1535,6 +1540,7 @@ export async function updateTelegramOrderCardStatus(
             ...meta,
             lastSentAt: new Date().toISOString(),
             cardPdfUrl: cardMedia.pdfUrl,
+            cardLogo,
           };
 
           await db

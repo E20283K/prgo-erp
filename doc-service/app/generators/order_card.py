@@ -625,10 +625,15 @@ def _spec_rows_plain(req: OrderCardRequest) -> List[Tuple[str, str]]:
         formula = "+".join(_fmt_num(l.grammage) for l in layers)
         total = f" = {_fmt_num(req.kashirovkaTotalGsm)} g/m²" if req.kashirovkaTotalGsm else ""
         rows.append(("Grammaj", f"{formula}{total}"))
+        if req.targetGsm:
+            rows.append(("Maqsadli GSM", f"{_fmt_num(req.targetGsm)} g/m²"))
         stocks = " + ".join((l.paperStock or l.label or "").strip() for l in layers if (l.paperStock or l.label))
         rows.append(("Kashirovka", f"{KASH_LABELS.get(kash, kash)}" + (f" · {stocks}" if stocks else "")))
-    elif req.grammage:
-        rows.append(("Grammaj", f"{_fmt_num(req.grammage)} g/m²"))
+    else:
+        if req.grammage:
+            rows.append(("Grammaj", f"{_fmt_num(req.grammage)} g/m²"))
+        if req.targetGsm:
+            rows.append(("Maqsadli GSM", f"{_fmt_num(req.targetGsm)} g/m²"))
 
     formula = (req.colorsConfig or "").strip()
     front_l = _process_letters(req.frontColors)
@@ -673,7 +678,7 @@ def _section_title(pen: Pen, x: float, y: float, w: float, title: str) -> float:
 
 def _draw_spec(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float, max_y: float) -> float:
     y = _section_title(pen, x, y, w, "Spetsifikatsiya")
-    label_w = 23.0
+    label_w = 26.0
     for label, value, color in _spec_rows(req):
         if y + SPEC_ROW > max_y:
             break
@@ -782,32 +787,65 @@ def _draw_quantity(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float
     return y + 6
 
 
-_LOGO_PATH = os.path.join(os.path.dirname(__file__), "..", "core", "printgoo_logo.svg")
-_LOGO_PDF: Optional[bytes] = None
+_CORE_DIR = os.path.join(os.path.dirname(__file__), "..", "core")
+# Selectable header logos; "none" leaves the header without one
+LOGO_FILES = {
+    "printgoo": "printgoo_logo.svg",
+    "label": "printgoo_label_logo.svg",
+}
+DEFAULT_LOGO = "printgoo"
+_LOGO_CACHE: Dict[str, Optional[Tuple[bytes, Tuple[float, float, float, float]]]] = {}
 
 
 def _inline_svg_classes(svg: str) -> str:
-    """MuPDF ignores <style> class rules, so copy each rule onto its elements as attributes."""
+    """MuPDF ignores <style> class rules, so copy them onto each element as attributes.
+    Handles grouped selectors (`.a, .b {}`) and several classes per element."""
     import re
-    rules = {}
-    for m in re.finditer(r"\.([\w-]+)\s*\{([^}]*)\}", svg):
-        decls = [d.split(":", 1) for d in m.group(2).split(";") if ":" in d]
-        rules[m.group(1)] = " ".join(f'{k.strip()}="{v.strip()}"' for k, v in decls)
+    rules: Dict[str, List[Tuple[str, str]]] = {}
+    style = "".join(re.findall(r"<style[^>]*>([\s\S]*?)</style>", svg))
+    for m in re.finditer(r"([^{}]+)\{([^}]*)\}", style):
+        decls = [tuple(x.strip() for x in d.split(":", 1)) for d in m.group(2).split(";") if ":" in d]
+        for sel in m.group(1).split(","):
+            sel = sel.strip()
+            if sel.startswith("."):
+                rules.setdefault(sel[1:], []).extend(decls)
     svg = re.sub(r"<style[\s\S]*?</style>", "", svg)
-    return re.sub(r'class="([\w-]+)"', lambda m: rules.get(m.group(1), ""), svg)
+
+    def repl(m):
+        props: Dict[str, str] = {}
+        for cls in m.group(1).split():
+            for k, v in rules.get(cls, []):
+                props[k] = v
+        return " ".join(f'{k}="{v}"' for k, v in props.items())
+
+    return re.sub(r'class="([^"]*)"', repl, svg)
 
 
-def _logo_doc() -> Optional[fitz.Document]:
-    global _LOGO_PDF
-    if _LOGO_PDF is None:
+def _logo_doc(key: Optional[str]) -> Optional[Tuple[fitz.Document, fitz.Rect]]:
+    """The logo as a one-page PDF plus the bounding box of its visible content."""
+    key = key or DEFAULT_LOGO
+    if key not in LOGO_FILES:
+        return None
+    if key not in _LOGO_CACHE:
         try:
-            with open(_LOGO_PATH, encoding="utf-8") as f:
+            with open(os.path.join(_CORE_DIR, LOGO_FILES[key]), encoding="utf-8") as f:
                 svg = _inline_svg_classes(f.read())
-            _LOGO_PDF = fitz.open(stream=svg.encode("utf-8"), filetype="svg").convert_to_pdf()
+            pdf = fitz.open(stream=svg.encode("utf-8"), filetype="svg").convert_to_pdf()
+            # Trim the artboard's empty margin so the logo sizes by what is drawn
+            page = fitz.open("pdf", pdf)[0]
+            pix = page.get_pixmap(dpi=72, alpha=False)
+            from PIL import Image, ImageOps
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            bbox = ImageOps.invert(img).getbbox() or (0, 0, pix.width, pix.height)
+            sx, sy = page.rect.width / pix.width, page.rect.height / pix.height
+            _LOGO_CACHE[key] = (pdf, (bbox[0] * sx, bbox[1] * sy, bbox[2] * sx, bbox[3] * sy))
         except Exception as e:
-            print(f"[order_card] logo unavailable: {e}", flush=True)
-            _LOGO_PDF = b""
-    return fitz.open("pdf", _LOGO_PDF) if _LOGO_PDF else None
+            print(f"[order_card] logo {key} unavailable: {e}", flush=True)
+            _LOGO_CACHE[key] = None
+    cached = _LOGO_CACHE[key]
+    if not cached:
+        return None
+    return fitz.open("pdf", cached[0]), fitz.Rect(*cached[1])
 
 
 def _draw_header(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float) -> float:
@@ -828,15 +866,16 @@ def _draw_header(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float) 
             print(f"[order_card] qr failed: {e}", flush=True)
 
     # Company logo, then a divider; the order text starts after it
-    logo = _logo_doc()
+    logo = _logo_doc(req.logo)
     if logo is not None:
-        lh = 14.0
-        lr = logo[0].rect
-        lw = lh * lr.width / max(1.0, lr.height)
+        logo_doc, clip = logo
+        lh = 19.0
+        lw = min(62.0, lh * clip.width / max(1.0, clip.height))
+        lh = lw * clip.height / max(1.0, clip.width)
         top = y + (qr_size - lh) / 2
-        pen.page.show_pdf_page(fitz.Rect(x * MM, top * MM, (x + lw) * MM, (top + lh) * MM), logo, 0)
-        pen.line(x + lw + 4, y + 1, x + lw + 4, y + qr_size - 1, color=LINE, width=0.6)
-        x += lw + 8
+        pen.page.show_pdf_page(fitz.Rect(x * MM, top * MM, (x + lw) * MM, (top + lh) * MM), logo_doc, 0, clip=clip)
+        pen.line(x + lw + 5, y + 1, x + lw + 5, y + qr_size - 1, color=LINE, width=0.6)
+        x += lw + 10
 
     client = (req.clientName or "Mijoz").strip().upper()
     pen.text(x, y + 8.5, client, size=19, bold=True, color=ACCENT, max_w=right - x - 2)

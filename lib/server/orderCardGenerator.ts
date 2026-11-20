@@ -44,6 +44,12 @@ function pickArtwork(url?: string, thumb?: string): string | undefined {
   return str(url) || str(thumb);
 }
 
+/** "210g Kraft Paper" / "Coated Cardboard 300g/m²" -> 210 / 300 */
+function gsmFromStock(stock?: string): number | undefined {
+  const m = /(\d{2,4})\s*(?:g(?![a-z])|g\/m|gsm|гр)/i.exec(stock || "");
+  return m ? Number(m[1]) : undefined;
+}
+
 function erpOrderUrl(docNo: string): string {
   const base = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
   return `${base}?wo=${encodeURIComponent(docNo)}`;
@@ -53,7 +59,19 @@ function erpOrderUrl(docNo: string): string {
  * Maps a work order row (with its `dimensions` jsonb and `client`) to the
  * doc-service order card request.
  */
-export function buildOrderCardPayload(order: any, customNote?: string) {
+export const ORDER_CARD_LOGOS = ["printgoo", "label", "none"] as const;
+export type OrderCardLogo = (typeof ORDER_CARD_LOGOS)[number];
+
+export function parseOrderCardLogo(value: unknown): OrderCardLogo | undefined {
+  return ORDER_CARD_LOGOS.includes(value as OrderCardLogo) ? (value as OrderCardLogo) : undefined;
+}
+
+/** Explicit choice, else the logo the order's Telegram card was last sent with. */
+export function resolveOrderCardLogo(order: any, logo?: OrderCardLogo): OrderCardLogo {
+  return logo ?? parseOrderCardLogo(order?.telegramMeta?.cardLogo) ?? "printgoo";
+}
+
+export function buildOrderCardPayload(order: any, customNote?: string, logo?: OrderCardLogo) {
   const dims = (order.dimensions || {}) as Record<string, any>;
   const colors = (order.colorsConfig || {}) as Record<string, any>;
 
@@ -105,7 +123,8 @@ export function buildOrderCardPayload(order: any, customNote?: string) {
     holeOffset: Number(dims.holeOffset) || 0,
 
     paperStock: order.paperStock || dims.paperStock || undefined,
-    grammage: num(dims.targetGsm) ?? num(dims.grammage) ?? num(dims.paperDensity),
+    grammage: num(dims.paperDensity) ?? num(dims.grammage) ?? gsmFromStock(order.paperStock || dims.paperStock),
+    targetGsm: num(dims.targetGsm),
     kashirovkaMode: kashMode,
     kashirovkaLayers: kashLayers.map((l) => ({
       label: l.label,
@@ -139,6 +158,7 @@ export function buildOrderCardPayload(order: any, customNote?: string) {
 
     notes: order.notes || undefined,
     customNote: customNote?.trim() || undefined,
+    logo: resolveOrderCardLogo(order, logo),
     erpUrl: erpOrderUrl(order.docNo),
   };
 }
@@ -149,9 +169,10 @@ type CardFormat = "png" | "both";
 async function renderOrderCard(
   order: any,
   customNote: string | undefined,
-  format: CardFormat
+  format: CardFormat,
+  logo?: OrderCardLogo
 ): Promise<{ png: Buffer; pdf?: Buffer }> {
-  const payload = buildOrderCardPayload(order, customNote);
+  const payload = buildOrderCardPayload(order, customNote, logo);
   const res = await fetch(`${DOC_SERVICE_URL}/generate/pdf/order-card`, {
     method: "POST",
     signal: AbortSignal.timeout(CARD_TIMEOUT_MS),
@@ -166,15 +187,16 @@ async function renderOrderCard(
   return { png: Buffer.from(json.png, "base64"), pdf: Buffer.from(json.pdf, "base64") };
 }
 
-export async function renderOrderCardPng(order: any, customNote?: string): Promise<Buffer> {
-  return (await renderOrderCard(order, customNote, "png")).png;
+export async function renderOrderCardPng(order: any, customNote?: string, logo?: OrderCardLogo): Promise<Buffer> {
+  return (await renderOrderCard(order, customNote, "png", logo)).png;
 }
 
 /** PNG preview for the send dialog, built from the saved order. */
 export async function renderWorkOrderCardPreview(
   workOrderId: string,
   companyCode: string = "PRINTGOO",
-  customNote?: string
+  customNote?: string,
+  logo?: OrderCardLogo
 ): Promise<Buffer | null> {
   const companyId = await getCompanyIdByCode(companyCode);
   const matchOrder = UUID_REGEX.test(workOrderId)
@@ -185,7 +207,7 @@ export async function renderWorkOrderCardPreview(
     with: { client: true },
   });
   if (!order) return null;
-  return renderOrderCardPng(order, customNote);
+  return renderOrderCardPng(order, customNote, logo);
 }
 
 /** File names served by the public PDF route: `{docNo}-{sha1 prefix}.pdf`. */
@@ -219,10 +241,14 @@ export interface OrderCardMedia {
  * Media for the Telegram orders group: the one-page PNG card plus its PDF, or
  * the PDF job ticket when doc-service cannot render the card.
  */
-export async function generateOrderCardMedia(order: any, customNote?: string): Promise<OrderCardMedia> {
+export async function generateOrderCardMedia(
+  order: any,
+  customNote?: string,
+  logo?: OrderCardLogo
+): Promise<OrderCardMedia> {
   const safeDocNo = String(order.docNo || "ZAKAZ").replace(/[^a-zA-Z0-9_-]/g, "_");
   try {
-    const { png, pdf } = await renderOrderCard(order, customNote, "both");
+    const { png, pdf } = await renderOrderCard(order, customNote, "both", logo);
     if (!fs.existsSync(CARD_CACHE_DIR)) fs.mkdirSync(CARD_CACHE_DIR, { recursive: true });
     const hash = createHash("sha1").update(png).digest("hex").slice(0, 20);
     const pngName = `${safeDocNo}-${hash}.png`;

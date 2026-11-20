@@ -9,7 +9,6 @@ import {
   FileText,
   AlertTriangle,
   Loader2,
-  ImageIcon,
   ImageOff,
 } from "lucide-react";
 import {
@@ -22,7 +21,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -65,6 +63,14 @@ interface ChatOption {
 
 type UpdateMode = "caption_only" | "replace_pdf" | "resend_new";
 
+type CardLogo = "printgoo" | "label" | "none";
+
+const CARD_LOGO_OPTIONS: { value: CardLogo; label: string }[] = [
+  { value: "printgoo", label: "PrintGoo" },
+  { value: "label", label: "Label" },
+  { value: "none", label: "Yo'q" },
+];
+
 export function TelegramOrdersGroupModal({
   isOpen,
   onClose,
@@ -101,44 +107,57 @@ export function TelegramOrdersGroupModal({
   const [sendAlertReply, setSendAlertReply] = useState<boolean>(true);
 
   // Buyurtma kartasi (PNG) preview — saqlangan buyurtma holatidan
-  const [cardUrl, setCardUrl] = useState<string | null>(null);
-  const [cardLoading, setCardLoading] = useState(false);
-  const [cardError, setCardError] = useState(false);
   const [cardNote, setCardNote] = useState("");
   const [cardNonce, setCardNonce] = useState(0);
+  // null = oxirgi yuborilgan logotip (telegramMeta), aks holda foydalanuvchi tanlovi
+  const [cardLogoChoice, setCardLogoChoice] = useState<CardLogo | null>(null);
+  const cardLogo: CardLogo =
+    cardLogoChoice ?? CARD_LOGO_OPTIONS.find((o) => o.value === telegramMeta?.cardLogo)?.value ?? "printgoo";
+  const setCardLogo = (logo: CardLogo) => setCardLogoChoice(logo);
+
+  // So'ralgan preview kaliti; natija shu kalit bilan saqlanadi, mos kelmasa — yuklanmoqda
+  const cardKey = `${workOrderId}|${cardLogo}|${cardNote}|${cardNonce}`;
+  const [cardResult, setCardResult] = useState<{ key: string; url: string | null; error: boolean }>({
+    key: "",
+    url: null,
+    error: false,
+  });
+  const cardLoading = isOpen && cardResult.key !== cardKey;
+  const cardUrl = cardResult.url;
+  const cardError = cardResult.error;
 
   useEffect(() => {
     if (!isOpen || !workOrderId) return;
     const controller = new AbortController();
     let objectUrl: string | null = null;
-    setCardLoading(true);
-    setCardError(false);
 
-    const qs = cardNote ? `?note=${encodeURIComponent(cardNote)}` : "";
-    fetch(`/api/v1/production/work-orders/${encodeURIComponent(workOrderId)}/order-card${qs}`, {
+    const params = new URLSearchParams({ logo: cardLogo });
+    if (cardNote) params.set("note", cardNote);
+    fetch(`/api/v1/production/work-orders/${encodeURIComponent(workOrderId)}/order-card?${params.toString()}`, {
       signal: controller.signal,
       cache: "no-store",
     })
       .then(async (r) => {
         if (!r.ok || !r.headers.get("content-type")?.includes("image")) throw new Error(String(r.status));
         objectUrl = URL.createObjectURL(await r.blob());
-        setCardUrl(objectUrl);
+        setCardResult({ key: cardKey, url: objectUrl, error: false });
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
         console.warn("order card preview:", err);
-        setCardUrl(null);
-        setCardError(true);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setCardLoading(false);
+        setCardResult({ key: cardKey, url: null, error: true });
       });
 
     return () => {
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isOpen, workOrderId, cardNote, cardNonce]);
+  }, [isOpen, workOrderId, cardNote, cardNonce, cardLogo, cardKey]);
+
+  const closeDialog = () => {
+    setCardLogoChoice(null);
+    onClose();
+  };
 
   const refreshCard = () => {
     const note = customNote.trim();
@@ -251,6 +270,7 @@ export function TelegramOrdersGroupModal({
             updateOnly: isUpdatingCaption,
             replacePdf: isReplacingPdf,
             alertReply: isAlreadySent ? sendAlertReply : false,
+            logo: cardLogo,
           }),
         }
       );
@@ -275,7 +295,7 @@ export function TelegramOrdersGroupModal({
         });
 
         if (onSuccess) onSuccess(json.telegramMeta);
-        onClose();
+        closeDialog();
       } else {
         addNotification({
           title: "Xatolik",
@@ -296,7 +316,12 @@ export function TelegramOrdersGroupModal({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) closeDialog();
+      }}
+    >
       <DialogContent className="p-4 sm:max-w-5xl">
         <DialogHeader className="pb-1">
           <DialogTitle className="text-xs font-semibold flex items-center gap-1.5">
@@ -310,11 +335,25 @@ export function TelegramOrdersGroupModal({
         <div className="flex flex-col gap-1 min-h-0">
           <div className="flex items-center justify-between">
             <Label className="text-[11px] font-medium">Buyurtma kartasi</Label>
-            <div className="flex items-center gap-1">
-              <Badge variant="outline" className="h-4 text-[9px] px-1 font-mono gap-1">
-                <ImageIcon className="size-2.5 text-primary" />
-                <span>PNG</span>
-              </Badge>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted-foreground">Logotip</span>
+              <div className="flex items-center rounded border border-border bg-muted/30 p-0.5">
+                {CARD_LOGO_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setCardLogo(opt.value)}
+                    disabled={cardLoading}
+                    className={`h-5 px-2 rounded-sm text-[10px] transition-colors ${
+                      cardLogo === opt.value
+                        ? "bg-card text-foreground font-medium shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
               <Button
                 type="button"
                 variant="ghost"
@@ -535,7 +574,7 @@ export function TelegramOrdersGroupModal({
             variant="outline"
             size="sm"
             className="h-7 text-xs"
-            onClick={onClose}
+            onClick={closeDialog}
             disabled={isSubmitting}
           >
             Bekor qilish

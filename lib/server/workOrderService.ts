@@ -316,6 +316,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
 
       // Asosiy spetsifikatsiya materiallari va pardozlash
       paperStock: wo.paperStock || dims.paperStock || "",
+      targetGsm: dims.targetGsm ?? undefined,
+      paperDensity: dims.paperDensity ?? undefined,
       coating: wo.coating || dims.coating || "",
       lamination: wo.lamination || dims.lamination || "",
       laminationSides: dims.laminationSides || "1s",
@@ -719,6 +721,8 @@ export async function upsertWorkOrder(
       holeOffset: data.holeOffset,
       sizes: data.sizes ?? (data as any).dimensions?.sizes ?? (existingOrder?.dimensions as any)?.sizes ?? [],
       skuArtworks: resolvedSkuArtworks,
+      targetGsm: data.targetGsm,
+      paperDensity: data.paperDensity,
       kashirovkaMode: data.kashirovkaMode,
       kashirovkaStrategy: data.kashirovkaStrategy,
       kashirovkaLayers: data.kashirovkaLayers,
