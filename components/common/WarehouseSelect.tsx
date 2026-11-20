@@ -57,12 +57,10 @@ function WarehouseRow({
   wh,
   isCurrent,
   onSelect,
-  showCompany,
 }: {
   wh: WarehouseItem;
   isCurrent: boolean;
   onSelect: (item: WarehouseItem) => void;
-  showCompany: boolean;
 }) {
   return (
     <Button
@@ -77,10 +75,7 @@ function WarehouseRow({
     >
       <div className="flex items-center gap-1.5 min-w-0">
         <Warehouse className="size-3 text-muted-foreground shrink-0" />
-        <span className="truncate">{wh.name}</span>
-        {showCompany && (
-          <span className="truncate text-[10px] text-muted-foreground">{wh.companyName}</span>
-        )}
+        <span className="truncate">{wh.companyName}</span>
       </div>
       {isCurrent && <Check className="size-3 text-primary shrink-0 ml-1" />}
     </Button>
@@ -111,8 +106,6 @@ export function WarehouseSelect({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const multiCompany = companiesList.length > 1;
-
   // Company -> warehouses. Warehouses always belong to a company.
   const groups = React.useMemo<CompanyGroup[]>(() => {
     return companiesList
@@ -131,12 +124,12 @@ export function WarehouseSelect({
               branchId: w.branchId ?? null,
               companyId: company.id,
               companyName: company.name,
-              fullLabel: multiCompany ? `${company.name} • ${w.name}` : w.name,
+              fullLabel: company.name,
             })
           ),
       }))
       .filter((g) => g.warehouses.length > 0);
-  }, [companiesList, warehousesList, multiCompany]);
+  }, [companiesList, warehousesList]);
 
   const allWarehouses = React.useMemo<WarehouseItem[]>(
     () => groups.flatMap((g) => g.warehouses),
@@ -265,7 +258,6 @@ export function WarehouseSelect({
                     wh={wh}
                     isCurrent={selectedItem?.id === wh.id}
                     onSelect={handleSelect}
-                    showCompany={multiCompany}
                   />
                 ))}
             </div>
