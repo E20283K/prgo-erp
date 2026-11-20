@@ -9,6 +9,8 @@ import {
   FileText,
   AlertTriangle,
   Loader2,
+  ImageIcon,
+  ImageOff,
 } from "lucide-react";
 import {
   Dialog,
@@ -97,6 +99,52 @@ export function TelegramOrdersGroupModal({
   const isAlreadySent = Boolean(telegramMeta?.messageId);
   const [updateMode, setUpdateMode] = useState<UpdateMode>("replace_pdf");
   const [sendAlertReply, setSendAlertReply] = useState<boolean>(true);
+
+  // Buyurtma kartasi (PNG) preview — saqlangan buyurtma holatidan
+  const [cardUrl, setCardUrl] = useState<string | null>(null);
+  const [cardLoading, setCardLoading] = useState(false);
+  const [cardError, setCardError] = useState(false);
+  const [cardNote, setCardNote] = useState("");
+  const [cardNonce, setCardNonce] = useState(0);
+
+  useEffect(() => {
+    if (!isOpen || !workOrderId) return;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setCardLoading(true);
+    setCardError(false);
+
+    const qs = cardNote ? `?note=${encodeURIComponent(cardNote)}` : "";
+    fetch(`/api/v1/production/work-orders/${encodeURIComponent(workOrderId)}/order-card${qs}`, {
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then(async (r) => {
+        if (!r.ok || !r.headers.get("content-type")?.includes("image")) throw new Error(String(r.status));
+        objectUrl = URL.createObjectURL(await r.blob());
+        setCardUrl(objectUrl);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        console.warn("order card preview:", err);
+        setCardUrl(null);
+        setCardError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCardLoading(false);
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [isOpen, workOrderId, cardNote, cardNonce]);
+
+  const refreshCard = () => {
+    const note = customNote.trim();
+    if (note !== cardNote) setCardNote(note);
+    else setCardNonce((n) => n + 1);
+  };
 
   // Guruhlarni va tizim sozlamalarini yuklash
   useEffect(() => {
@@ -213,8 +261,8 @@ export function TelegramOrdersGroupModal({
         let successDesc = `Buyurtma ${orderNumber} Telegram guruhga muvaffaqiyatli jo'natildi.`;
 
         if (isReplacingPdf) {
-          successTitle = "PDF yangilandi";
-          successDesc = "Guruhdagi mavjud xabarning PDF pasporti yangilandi.";
+          successTitle = "Karta yangilandi";
+          successDesc = "Guruhdagi mavjud xabarning buyurtma kartasi yangilandi.";
         } else if (isUpdatingCaption) {
           successTitle = "Status yangilandi";
           successDesc = "Guruhdagi mavjud xabar matni va jarayon bosqichi yangilandi.";
@@ -294,10 +342,10 @@ export function TelegramOrdersGroupModal({
                 >
                   <div className="flex items-center gap-1 text-[11px]">
                     <FileUp className="size-3" />
-                    <span>PDF almashtirish</span>
+                    <span>Kartani almashtirish</span>
                   </div>
                   <span className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
-                    Faylni o&apos;zgartirish
+                    Rasmni yangilash
                   </span>
                 </button>
 
@@ -389,15 +437,52 @@ export function TelegramOrdersGroupModal({
             </div>
           )}
 
-          {/* Oldindan ko'rish (Telegram xabari) */}
+          {/* Buyurtma kartasi (rasm) */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <Label className="text-[11px] font-medium">Xabar va biriktirilgan fayl</Label>
-              <Badge variant="outline" className="h-4 text-[9px] px-1 font-mono gap-1">
-                <FileText className="size-2.5 text-primary" />
-                <span>PDF Texnik Pasport (A4)</span>
-              </Badge>
+              <Label className="text-[11px] font-medium">Buyurtma kartasi</Label>
+              <div className="flex items-center gap-1">
+                <Badge variant="outline" className="h-4 text-[9px] px-1 font-mono gap-1">
+                  <ImageIcon className="size-2.5 text-primary" />
+                  <span>PNG</span>
+                </Badge>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1.5 text-[10px] gap-1"
+                  onClick={refreshCard}
+                  disabled={cardLoading}
+                >
+                  <RefreshCw className={`size-3 ${cardLoading ? "animate-spin" : ""}`} />
+                  <span>Yangilash</span>
+                </Button>
+              </div>
             </div>
+            <div className="relative h-64 rounded border border-border bg-muted/30 flex items-center justify-center overflow-hidden">
+              {cardUrl && !cardError ? (
+                <a href={cardUrl} target="_blank" rel="noreferrer" className="h-full w-full flex items-center justify-center">
+                  <img
+                    src={cardUrl}
+                    alt={`${orderNumber} buyurtma kartasi`}
+                    className={`max-h-full max-w-full object-contain bg-white transition-opacity ${cardLoading ? "opacity-40" : ""}`}
+                  />
+                </a>
+              ) : cardError && !cardLoading ? (
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <ImageOff className="size-3.5" />
+                  <span>Karta yaratilmadi — PDF yuboriladi</span>
+                </div>
+              ) : null}
+              {cardLoading && (
+                <Loader2 className="absolute size-4 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          </div>
+
+          {/* Oldindan ko'rish (Telegram xabari) */}
+          <div className="space-y-1">
+            <Label className="text-[11px] font-medium">Xabar matni</Label>
             <div className="p-2.5 rounded border border-border bg-card font-mono text-[11px] space-y-1.5 leading-relaxed">
               <div className="text-primary font-bold">🏭 {clientTag || customerName.toUpperCase()}</div>
               <div className="font-bold text-foreground">📋 BUYURTMA: {orderNumber}</div>
@@ -476,7 +561,7 @@ export function TelegramOrdersGroupModal({
             <span>
               {isAlreadySent
                 ? updateMode === "replace_pdf"
-                  ? "PDF almashtirish"
+                  ? "Kartani almashtirish"
                   : updateMode === "caption_only"
                   ? "Statusni yangilash"
                   : "Qayta yuborish"

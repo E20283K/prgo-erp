@@ -7,6 +7,7 @@ from app.schemas.documents import (
     ImpositionPdfRequest,
     ArtworkAnalysisRequest,
     ArtworkAnalysisResponse,
+    OrderCardRequest,
 )
 from app.generators.flexo_spec import generate_flexo_pdf
 from app.generators.job_ticket import generate_job_ticket_pdf
@@ -14,6 +15,7 @@ from app.generators.pallet_passport import generate_pallet_passport_pdf
 from app.generators.box_labels import generate_box_labels_pdf
 from app.generators.imposition import generate_imposition_pdf
 from app.generators.artwork_analyzer import analyze_artwork_payload
+from app.generators.order_card import generate_order_card
 
 router = APIRouter(prefix="/generate/pdf", tags=["PDF Generation"])
 
@@ -24,6 +26,10 @@ def flexo_spec_endpoint(req: FlexoPdfRequest):
 @router.post("/job-ticket")
 def job_ticket_endpoint(req: JobTicketPdfRequest):
     return generate_job_ticket_pdf(req)
+
+@router.post("/order-card")
+def order_card_endpoint(req: OrderCardRequest):
+    return generate_order_card(req)
 
 @router.post("/pallet-passport")
 def pallet_passport_endpoint(req: PalletPassportPdfRequest):

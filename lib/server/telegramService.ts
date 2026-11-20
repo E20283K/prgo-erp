@@ -22,7 +22,7 @@ import { eq, desc, asc, and, sql, or, ilike, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
 import { generateTechCardImage } from "./techCardGenerator";
-import { generateJobTicketPdf } from "./jobTicketPdfGenerator";
+import { generateOrderCardMedia, renderOrderCardPng } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -1389,36 +1389,8 @@ export async function sendWorkOrderToOrdersGroup(params: {
 
   const caption = formatWorkOrderTelegramCaption(order, params.customNote);
 
-  const dims = order.dimensions as any;
-  const embellishments: string[] = [];
-  if (order.coating) embellishments.push(order.coating);
-  if (order.lamination) embellishments.push(order.lamination);
-  if (order.embellishment) embellishments.push(order.embellishment);
-
-  // Rasmiy A4 PDF Texnik Pasport (Job Ticket) generatsiyasi
-  const pdfResult = await generateJobTicketPdf({
-    docNo: order.docNo,
-    clientName: order.client?.name || order.customerName || "Mijoz",
-    productName: order.productName || "Poligrafiya mahsuloti",
-    quantity: order.quantity,
-    unit: order.unit,
-    department: order.department,
-    site: order.site || undefined,
-    pressMachine: order.pressMachine || undefined,
-    orderDate: order.orderDate || undefined,
-    deadline: order.deadline || undefined,
-    paperStock: order.paperStock || undefined,
-    coating: order.coating || undefined,
-    lamination: order.lamination || undefined,
-    embellishment: order.embellishment || undefined,
-    width: dims?.width ? Number(dims.width) : undefined,
-    height: dims?.height ? Number(dims.height) : undefined,
-    status: order.status,
-    stage: order.stage,
-    priority: order.priority,
-    operations: (order as any).operations || [],
-    notes: order.notes || undefined,
-  });
+  // One-page visual order card (PNG); PDF job ticket only if doc-service cannot render it
+  const cardMedia = await generateOrderCardMedia(order, params.customNote);
 
   const messageText = params.alertReply
     ? `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\n\n${caption}`
@@ -1428,10 +1400,10 @@ export async function sendWorkOrderToOrdersGroup(params: {
     chatId: targetChatRecord.id,
     text: messageText,
     senderName: "PrintGoo ERP",
-    mediaBuffer: pdfResult.buffer,
-    fileName: pdfResult.fileName,
-    documentUrl: pdfResult.publicUrl,
-    isPhoto: false,
+    mediaBuffer: cardMedia.buffer,
+    fileName: cardMedia.fileName,
+    documentUrl: cardMedia.publicUrl,
+    isPhoto: cardMedia.isPhoto,
     replyToTelegramMessageId:
       params.alertReply && order.telegramMeta?.messageId ? order.telegramMeta.messageId : undefined,
     parseMode: "HTML",
@@ -1524,33 +1496,11 @@ export async function updateTelegramOrderCardStatus(
     }
 
     const updatedCaption = formatWorkOrderTelegramCaption(order);
-    const dims = order.dimensions as any;
 
     if (replacePdf) {
       try {
-        const pdfResult = await generateJobTicketPdf({
-          docNo: order.docNo,
-          clientName: order.client?.name || order.customerName || "Mijoz",
-          productName: order.productName || "Poligrafiya mahsuloti",
-          quantity: order.quantity,
-          unit: order.unit,
-          department: order.department,
-          site: order.site || undefined,
-          pressMachine: order.pressMachine || undefined,
-          orderDate: order.orderDate || undefined,
-          deadline: order.deadline || undefined,
-          paperStock: order.paperStock || undefined,
-          coating: order.coating || undefined,
-          lamination: order.lamination || undefined,
-          embellishment: order.embellishment || undefined,
-          width: dims?.width ? Number(dims.width) : undefined,
-          height: dims?.height ? Number(dims.height) : undefined,
-          status: order.status,
-          stage: order.stage,
-          priority: order.priority,
-          operations: (order as any).operations || [],
-          notes: order.notes || undefined,
-        });
+        const cardMedia = await generateOrderCardMedia(order, alertComment);
+        const mediaType = cardMedia.isPhoto ? "photo" : "document";
 
         const form = new FormData();
         form.append("chat_id", chatRecord.chatId);
@@ -1558,14 +1508,16 @@ export async function updateTelegramOrderCardStatus(
         form.append(
           "media",
           JSON.stringify({
-            type: "document",
-            media: "attach://document",
+            type: mediaType,
+            media: `attach://${mediaType}`,
             caption: updatedCaption,
             parse_mode: "HTML",
           })
         );
-        const blob = new Blob([new Uint8Array(pdfResult.buffer)], { type: "application/pdf" });
-        form.append("document", blob, pdfResult.fileName);
+        const blob = new Blob([new Uint8Array(cardMedia.buffer)], {
+          type: cardMedia.isPhoto ? "image/png" : "application/pdf",
+        });
+        form.append(mediaType, blob, cardMedia.fileName);
 
         const mediaRes = await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageMedia`, {
           method: "POST",
@@ -1591,7 +1543,7 @@ export async function updateTelegramOrderCardStatus(
             try {
               const alertText = alertComment?.trim()
                 ? `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\nBuyurtma raqami: <b>#${escapeTelegramHtml(order.docNo)}</b>\nIzoh: <i>${escapeTelegramHtml(alertComment.trim())}</i>`
-                : `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\nBuyurtma raqami: <b>#${escapeTelegramHtml(order.docNo)}</b>\nYangi PDF texnik pasport yuklandi va spetsifikatsiyalar yangilandi.`;
+                : `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\nBuyurtma raqami: <b>#${escapeTelegramHtml(order.docNo)}</b>\nBuyurtma kartasi va spetsifikatsiyalar yangilandi.`;
 
               await sendTelegramMessage({
                 chatId: chatRecord.id,
@@ -2341,4 +2293,21 @@ export async function seedDefaultQuickReplies(companyId: string) {
       .values(item)
       .onConflictDoNothing();
   }
+}
+
+/**
+ * Renders the order card PNG for the send dialog preview, from the saved order.
+ */
+export async function renderWorkOrderCardPreview(
+  workOrderId: string,
+  companyCode: string = "PRINTGOO",
+  customNote?: string
+): Promise<Buffer | null> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const order = await db.query.workOrders.findFirst({
+    where: and(eq(workOrders.companyId, companyId), workOrderMatchWhere(workOrderId)),
+    with: { client: true },
+  });
+  if (!order) return null;
+  return renderOrderCardPng(order, customNote);
 }

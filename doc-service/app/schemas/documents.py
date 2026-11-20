@@ -278,3 +278,79 @@ class ArtworkAnalysisResponse(BaseModel):
     widthMm: Optional[float] = None
     heightMm: Optional[float] = None
     notes: Optional[str] = None
+
+
+class OrderCardSize(BaseModel):
+    id: Optional[str] = None
+    size: str = ""
+    sizeCode: Optional[str] = None
+    model: Optional[str] = None
+    quantity: float = 0
+
+
+class OrderCardLayer(BaseModel):
+    label: Optional[str] = None
+    paperStock: Optional[str] = None
+    grammage: float = 0
+    colors: Optional[str] = None
+
+
+class OrderCardSpot(BaseModel):
+    name: str = ""
+    code: Optional[str] = None
+    hex: Optional[str] = None
+    side: Optional[str] = None
+
+
+class OrderCardRequest(BaseModel):
+    """One-page visual order card sent to the Telegram orders group."""
+    docNo: str = ""
+    clientName: str = ""
+    productName: Optional[str] = None
+    itemCategory: Optional[str] = None
+    quantity: float = 0
+    unit: Optional[str] = None
+    orderDate: Optional[str] = None
+    deadline: Optional[str] = None
+    statusLabel: Optional[str] = None
+    stageLabel: Optional[str] = None
+
+    width: Optional[float] = None
+    height: Optional[float] = None
+    bleed: Optional[float] = 0
+    shapeType: Optional[str] = None
+    cornerType: Optional[str] = None
+    cornerRadius: Optional[float] = None
+    holeSize: Optional[float] = 0
+    holePosition: Optional[str] = None
+    holeOffset: Optional[float] = 0
+
+    paperStock: Optional[str] = None
+    grammage: Optional[float] = None
+    kashirovkaMode: Optional[str] = None
+    kashirovkaLayers: List[OrderCardLayer] = Field(default_factory=list)
+    kashirovkaTotalGsm: Optional[float] = None
+
+    colorsConfig: Optional[str] = None
+    frontColors: Optional[Dict[str, Any]] = None
+    backColors: Optional[Dict[str, Any]] = None
+    spotColorItems: List[OrderCardSpot] = Field(default_factory=list)
+
+    lamination: Optional[str] = None
+    laminationSides: Optional[str] = None
+    laminationMicron: Optional[float] = None
+    coating: Optional[str] = None
+    coatingZone: Optional[str] = None
+    embellishment: Optional[str] = None
+
+    sizes: List[OrderCardSize] = Field(default_factory=list)
+    skuArtworks: List[Dict[str, Any]] = Field(default_factory=list)
+    artworkFront: Optional[str] = None
+    artworkBack: Optional[str] = None
+
+    notes: Optional[str] = None
+    customNote: Optional[str] = None
+    erpUrl: Optional[str] = None
+
+    format: str = "png"
+    dpi: int = 200

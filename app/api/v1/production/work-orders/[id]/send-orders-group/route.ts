@@ -34,14 +34,14 @@ export async function POST(
 
       if (!updateResult.success) {
         return NextResponse.json(
-          { success: false, error: updateResult.error || "PDF ni yangilab bo'lmadi" },
+          { success: false, error: updateResult.error || "Kartani yangilab bo'lmadi" },
           { status: 400 }
         );
       }
 
       return NextResponse.json({
         success: true,
-        message: "Telegram guruhidagi PDF texnik pasport muvaffaqiyatli yangilandi",
+        message: "Telegram guruhidagi buyurtma kartasi yangilandi",
         updated: updateResult.updated,
         mediaReplaced: updateResult.mediaReplaced,
         alertSent: updateResult.alertSent,
