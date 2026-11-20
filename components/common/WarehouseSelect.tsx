@@ -4,8 +4,6 @@ import * as React from "react";
 import {
   Check,
   ChevronsUpDown,
-  ChevronRight,
-  Building2,
   Search,
   Warehouse,
 } from "lucide-react";
@@ -59,12 +57,12 @@ function WarehouseRow({
   wh,
   isCurrent,
   onSelect,
-  indented,
+  showCompany,
 }: {
   wh: WarehouseItem;
   isCurrent: boolean;
   onSelect: (item: WarehouseItem) => void;
-  indented: boolean;
+  showCompany: boolean;
 }) {
   return (
     <Button
@@ -74,71 +72,18 @@ function WarehouseRow({
       onClick={() => onSelect(wh)}
       className={cn(
         "w-full justify-between h-6 px-1.5 text-xs font-normal hover:bg-accent/60 cursor-pointer",
-        indented && "pl-4",
         isCurrent && "bg-accent/80 font-semibold text-primary"
       )}
     >
       <div className="flex items-center gap-1.5 min-w-0">
         <Warehouse className="size-3 text-muted-foreground shrink-0" />
         <span className="truncate">{wh.name}</span>
+        {showCompany && (
+          <span className="truncate text-[10px] text-muted-foreground">{wh.companyName}</span>
+        )}
       </div>
       {isCurrent && <Check className="size-3 text-primary shrink-0 ml-1" />}
     </Button>
-  );
-}
-
-// Company header with its warehouses; only rendered when there is more than one company.
-function CompanySection({
-  company,
-  selectedItem,
-  onSelect,
-  forceOpen,
-}: {
-  company: CompanyGroup;
-  selectedItem: WarehouseItem | null;
-  onSelect: (item: WarehouseItem) => void;
-  forceOpen: boolean;
-}) {
-  const [isOpen, setIsOpen] = React.useState(true);
-  const open = forceOpen || isOpen;
-
-  return (
-    <div className="rounded-md border border-border/70 overflow-hidden bg-card/80">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!open)}
-        className="w-full flex items-center justify-between px-2 py-1.5 bg-muted/40 hover:bg-muted/70 transition-colors text-left cursor-pointer select-none"
-      >
-        <div className="flex items-center gap-1.5 min-w-0">
-          <ChevronRight
-            className={cn(
-              "size-3 text-muted-foreground transition-transform duration-200 shrink-0",
-              open && "rotate-90"
-            )}
-          />
-          <Building2 className="size-3 text-primary shrink-0" />
-          <span className="text-[11px] font-semibold text-foreground truncate">
-            {company.companyName}
-          </span>
-        </div>
-        <span className="text-[9px] font-mono text-muted-foreground/80 shrink-0 ml-1.5">
-          {company.warehouses.length}
-        </span>
-      </button>
-      {open && (
-        <div className="p-1 space-y-0.5 bg-background">
-          {company.warehouses.map((wh) => (
-            <WarehouseRow
-              key={wh.id}
-              wh={wh}
-              isCurrent={selectedItem?.id === wh.id}
-              onSelect={onSelect}
-              indented
-            />
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -198,7 +143,6 @@ export function WarehouseSelect({
     [groups]
   );
 
-  const isSearching = Boolean(searchQuery.trim());
   const filteredGroups = React.useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return groups;
@@ -311,16 +255,6 @@ export function WarehouseSelect({
             <div className="py-4 text-center text-xs text-muted-foreground">
               Ombor topilmadi
             </div>
-          ) : multiCompany ? (
-            filteredGroups.map((company) => (
-              <CompanySection
-                key={company.companyId}
-                company={company}
-                selectedItem={selectedItem}
-                onSelect={handleSelect}
-                forceOpen={isSearching}
-              />
-            ))
           ) : (
             <div className="space-y-0.5">
               {filteredGroups
@@ -331,7 +265,7 @@ export function WarehouseSelect({
                     wh={wh}
                     isCurrent={selectedItem?.id === wh.id}
                     onSelect={handleSelect}
-                    indented={false}
+                    showCompany={multiCompany}
                   />
                 ))}
             </div>
