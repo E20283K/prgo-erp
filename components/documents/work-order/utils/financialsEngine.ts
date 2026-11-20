@@ -9,6 +9,7 @@ import type {
   WorkOrderToolingItem,
 } from "../types";
 import type { MachineRecord } from "@/components/documents/machine/types";
+import { toolingDeliveryCost, toolingItemTotalCost } from "../toolingItems";
 import { formatMoney } from "../../common/DocumentShell";
 import { computeOperationCost, computeOperationActualCost, type CostEmployee } from "./operationCost";
 
@@ -303,14 +304,16 @@ export function calculateWorkOrderFinancials({
   let platesCostedAsTooling = false;
 
   (toolingItems || []).forEach((tool, idx) => {
-    const rawCost = Number(tool.actualCost !== undefined ? tool.actualCost : tool.estimatedCost || 0);
     const toolCur = (tool.currency || cur).toUpperCase();
-    let cost = rawCost;
-    if (toolCur === "USD" && cur === "UZS") {
-      cost = Number((rawCost * rate).toFixed(2));
-    } else if (toolCur === "UZS" && cur === "USD") {
-      cost = Number((rawCost / rate).toFixed(2));
-    }
+    const toCur = (v: number) =>
+      toolCur === "USD" && cur === "UZS"
+        ? Number((v * rate).toFixed(2))
+        : toolCur === "UZS" && cur === "USD"
+        ? Number((v / rate).toFixed(2))
+        : v;
+    // Purchase price and delivery are separate rows so the delivery share stays visible
+    const delivery = toCur(toolingDeliveryCost(tool));
+    const cost = toCur(toolingItemTotalCost(tool) - toolingDeliveryCost(tool));
     const qty = Number(tool.quantity || 1);
     const unitP = qty > 0 ? Number((cost / qty).toFixed(2)) : cost;
 
@@ -322,7 +325,7 @@ export function calculateWorkOrderFinancials({
     }
 
     const isPlate = tool.category === "ctp_plates" || tool.category === "flexo_polymer";
-    if (isPlate && cost > 0 && !NON_COGS_GROUPS.includes(group)) {
+    if (isPlate && cost + delivery > 0 && !NON_COGS_GROUPS.includes(group)) {
       platesCostedAsTooling = true;
     }
 
@@ -337,6 +340,20 @@ export function calculateWorkOrderFinancials({
       share: 0,
       type: tool.actualCost !== undefined ? "Fakt" : "Reja",
     });
+
+    if (delivery > 0) {
+      rows.push({
+        id: `tool-delivery-${tool.id || idx}`,
+        group,
+        category: GROUP_LABELS[group],
+        name: `Dostavka · ${tool.purchaseOrderNo || tool.name}`,
+        quantity: "—",
+        unitRate: "—",
+        totalCost: delivery,
+        share: 0,
+        type: tool.deliveryMethod === "pickup" ? "O'zimiz" : "Ta'minotchi",
+      });
+    }
   });
 
   // ──────────────────────────────────────────────────────────────────────────

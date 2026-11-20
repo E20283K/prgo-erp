@@ -147,6 +147,7 @@ import {
   RouteStep,
 } from "../types";
 import { ProductTypeSelect } from "../ProductTypeSelect";
+import { toolingItemTotalCost } from "../toolingItems";
 import { BomItem } from "../../BomMaterialsGrid";
 import { formatMoney, getCurrencySymbol } from "../../common/DocumentShell";
 
@@ -2295,7 +2296,7 @@ export function OverviewTab({
 
           // Real Tooling Costs (Pre-press / CTP / Shtans-forma only if entered)
           const toolingCost = (formData.toolingItems || []).reduce(
-            (sum, t) => sum + (Number(t.actualCost !== undefined ? t.actualCost : t.estimatedCost) || 0),
+            (sum, t) => sum + toolingItemTotalCost(t),
             0
           );
 

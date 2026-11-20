@@ -155,7 +155,7 @@ import { WarehouseStockRecord } from "@/store/workspaceStore";
 import { computeTariffEstimate, TariffRecord } from "@/components/documents/tariff/types";
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 
-import { getInitialToolingItems } from "./toolingItems";
+import { getInitialToolingItems, toolingItemTotalCost } from "./toolingItems";
 import { syncKashirovkaBomRows } from "./utils/kashirovkaBom";
 import { buildReorderDocument } from "./reorder";
 export { getInitialToolingItems };
@@ -4085,7 +4085,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       }
 
                       const totalCost = nextTooling.reduce(
-                        (sum, it) => sum + (it.actualCost !== undefined ? it.actualCost : it.estimatedCost || 0),
+                        (sum, it) => sum + toolingItemTotalCost(it),
                         0
                       );
 
@@ -4215,7 +4215,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                           ];
                         }
                         const totalCost = nextTooling.reduce(
-                          (sum, it) => sum + (it.actualCost !== undefined ? it.actualCost : it.estimatedCost || 0),
+                          (sum, it) => sum + toolingItemTotalCost(it),
                           0
                         );
                         return {
@@ -4248,7 +4248,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                   onUpdateTooling={(newItems) => {
                     handleFieldChange("toolingItems", newItems);
                     const totalCost = newItems.reduce(
-                      (sum, it) => sum + (it.actualCost !== undefined ? it.actualCost : it.estimatedCost || 0),
+                      (sum, it) => sum + toolingItemTotalCost(it),
                       0
                     );
                     handleFieldChange("toolingProcurementCost", totalCost);

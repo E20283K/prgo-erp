@@ -47,6 +47,7 @@ import type { ShiftEvent } from "@/components/documents/work-order/types";
 import type { MachineRecord } from "@/components/documents/machine/types";
 import { freezeMachineRates, type FrozenCostRates } from "@/components/documents/work-order/utils/operationCost";
 import { generateNextCode } from "@/lib/utils";
+import { applySupplierOrders, type ToolingOrderLink } from "@/components/documents/work-order/toolingItems";
 import { deriveWorkOrderStatus, type WorkOrderStatus } from "@/lib/workOrderStatus";
 import { getNextSpecNumber, lockNumbering } from "./numberingService";
 import { getClientCreditState } from "./financeService";
@@ -254,6 +255,34 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       .groupBy(deliveryActs.workOrderId),
   ]);
   const shippedByNo = new Map(shippedRows.filter((r) => r.woNo).map((r) => [r.woNo as string, Number(r.qty) || 0]));
+
+  // Tooling & CTP orders are the source of truth for each tooling item's PO, supplier, progress and delivery cost.
+  const toolingOrders = await db.query.supplierOrders.findMany({
+    where: and(
+      eq(supplierOrders.companyId, companyId),
+      inArray(supplierOrders.orderType, ["ctp_plates", "die_tooling", "cliche"]),
+      inArray(supplierOrders.status, ["Ordered", "In_Production", "Ready", "Delivered"])
+    ),
+    with: { supplier: { columns: { name: true } } },
+    orderBy: [supplierOrders.orderNo],
+  });
+  const deliveryByWo = new Map<string, ToolingOrderLink[]>();
+  for (const o of toolingOrders) {
+    if (!o.workOrderId && !o.workOrderNo) continue;
+    const link: ToolingOrderLink = {
+      orderNo: o.orderNo,
+      orderType: o.orderType,
+      title: o.title,
+      status: o.status,
+      supplierId: o.supplierId,
+      supplierName: o.supplier?.name || undefined,
+      deliveryMethod: (o.deliveryMethod as ToolingOrderLink["deliveryMethod"]) || undefined,
+      deliveryCost: Number(o.deliveryCost) || 0,
+    };
+    for (const key of new Set([o.workOrderId, o.workOrderNo?.trim().toLowerCase()].filter(Boolean) as string[])) {
+      deliveryByWo.set(key, [...(deliveryByWo.get(key) || []), link]);
+    }
+  }
   const invoicedById = new Map(invoicedRows.filter((r) => r.woId).map((r) => [r.woId as string, Number(r.qty) || 0]));
 
   return rawOrders.map((wo, index) => {
@@ -369,7 +398,10 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       kashirovkaCuringHours: dims.kashirovkaCuringHours ?? 0,
 
       // Shtansforma / Asbob-uskuna
-      toolingItems: dims.toolingItems || [],
+      toolingItems: applySupplierOrders(
+        dims.toolingItems || [],
+        deliveryByWo.get(wo.id) || deliveryByWo.get((wo.docNo || "").trim().toLowerCase()) || []
+      ),
       materials: dims.materials || [],
       selectedToolingId: dims.selectedToolingId || "",
       selectedToolingName: dims.selectedToolingName || "",

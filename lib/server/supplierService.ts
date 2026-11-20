@@ -69,6 +69,13 @@ export interface SupplierContractRecord {
   updatedAt?: string;
 }
 
+export type SupplierOrderDeliveryMethod = "included" | "supplier" | "pickup";
+
+/** Delivery the supplier billed us for — only then it is part of what we owe them. */
+function supplierBilledDelivery(o: { deliveryMethod?: string | null; deliveryCost?: string | number | null }): number {
+  return o.deliveryMethod === "supplier" ? Number(o.deliveryCost) || 0 : 0;
+}
+
 export interface SupplierOrderRecord {
   id: string;
   supplierId: string;
@@ -83,6 +90,11 @@ export interface SupplierOrderRecord {
   unit: string;
   amount: number;
   currency: string;
+  /** Set when the order is received: who brought it and what the delivery cost */
+  deliveryMethod?: SupplierOrderDeliveryMethod;
+  deliveryCost?: number;
+  /** When the order became Delivered — drives the archive period */
+  receivedAt?: string;
   status: "Draft" | "Ordered" | "In_Production" | "Ready" | "Delivered" | "Cancelled";
   specDetails?: string;
   notes?: string;
@@ -351,6 +363,9 @@ export async function getSupplierOrders(supplierIdOrCode: string, companyCode: s
     unit: o.unit || "dona",
     amount: Number(o.amount) || 0,
     currency: o.currency || "UZS",
+    deliveryMethod: (o.deliveryMethod as SupplierOrderDeliveryMethod) || undefined,
+    deliveryCost: Number(o.deliveryCost) || 0,
+    receivedAt: o.receivedAt?.toISOString() || undefined,
     status: o.status as any,
     specDetails: o.specDetails || undefined,
     notes: o.notes || undefined,
@@ -418,6 +433,9 @@ export async function getAllToolingOrders(
       unit: o.unit || "dona",
       amount: Number(o.amount) || 0,
       currency: o.currency || "UZS",
+      deliveryMethod: (o.deliveryMethod as SupplierOrderDeliveryMethod) || undefined,
+      deliveryCost: Number(o.deliveryCost) || 0,
+      receivedAt: o.receivedAt?.toISOString() || undefined,
       status: o.status as any,
       specDetails: o.specDetails || undefined,
       notes: o.notes || undefined,
@@ -504,7 +522,14 @@ export async function upsertSupplierOrder(
         unit: data.unit || existing.unit,
         amount: (data.amount || 0).toString(),
         currency: data.currency || existing.currency,
+        deliveryMethod: data.deliveryMethod !== undefined ? data.deliveryMethod : existing.deliveryMethod,
+        deliveryCost: data.deliveryCost !== undefined ? (data.deliveryCost || 0).toString() : existing.deliveryCost,
         status: data.status || existing.status,
+        // Stamp the receipt once when it turns Delivered; clear it if the order is reopened
+        receivedAt:
+          (data.status || existing.status) === "Delivered"
+            ? existing.receivedAt || new Date()
+            : null,
         specDetails: data.specDetails !== undefined ? data.specDetails : existing.specDetails,
         notes: data.notes !== undefined ? data.notes : existing.notes,
         fileUrl: data.fileUrl !== undefined ? data.fileUrl : existing.fileUrl,
@@ -535,7 +560,10 @@ export async function upsertSupplierOrder(
         unit: data.unit || "dona",
         amount: (data.amount || 0).toString(),
         currency: data.currency || "UZS",
+        deliveryMethod: data.deliveryMethod || null,
+        deliveryCost: (data.deliveryCost || 0).toString(),
         status: data.status || "Ordered",
+        receivedAt: data.status === "Delivered" ? new Date() : null,
         specDetails: data.specDetails || null,
         notes: data.notes || null,
         fileUrl: data.fileUrl || null,
@@ -747,7 +775,7 @@ export async function getSupplierSettlementLedger(supplierIdOrCode: string, comp
       docType: "Buyurtma",
       description: `${o.title} (${o.workOrderNo ? `WO: ${o.workOrderNo}` : o.orderType})`,
       debit: 0,
-      credit: Number(o.amount) || 0,
+      credit: (Number(o.amount) || 0) + supplierBilledDelivery(o),
       createdAt: o.createdAt,
     });
   }
@@ -852,7 +880,7 @@ export async function syncSupplierBalance(companyId: string, supplierId: string)
     ),
   });
 
-  let totalCredit = orders.reduce((sum, o) => sum + Number(o.amount), 0);
+  let totalCredit = orders.reduce((sum, o) => sum + Number(o.amount) + supplierBilledDelivery(o), 0);
   for (const r of receipts) {
     const poNum = (r.poNumber || "").toLowerCase().trim();
     if (!poNum || !orderNoSet.has(poNum)) {

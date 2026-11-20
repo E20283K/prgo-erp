@@ -16,7 +16,7 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { useWorkspaceStore, ProductionQueueItem } from "@/store/workspaceStore";
 import { ToolingOrderRecord } from "@/lib/server/supplierService";
-import { getInitialToolingItems } from "@/components/documents/work-order/toolingItems";
+import { getInitialToolingItems, findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
 import { computeToolingDeficits } from "@/lib/deficits";
 import { WorkOrderToolingItem } from "@/components/documents/work-order/types";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useAskDialog } from "@/components/documents/work-order/dialogs/AskDialog";
+import { ToolingReceiveDialog, type ToolingReceipt } from "./ToolingReceiveDialog";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +74,7 @@ import {
   Send,
   MessageSquare,
   Trash2,
+  Archive,
 } from "lucide-react";
 
 const DataEditor = dynamic(
@@ -89,6 +91,30 @@ const ORDER_TYPE_LABELS: Record<string, string> = {
   raw_materials: "Material xaridi",
   service: "Texnik servis",
 };
+
+const CLOSED_STATUSES: ReadonlyArray<string> = ["Delivered", "Cancelled"];
+
+type ArchivePeriod = "30d" | "90d" | "year" | "all";
+
+const ARCHIVE_PERIOD_LABELS: Record<ArchivePeriod, string> = {
+  "30d": "30 kun",
+  "90d": "90 kun",
+  year: "Bu yil",
+  all: "Hammasi",
+};
+
+function archivePeriodStart(period: ArchivePeriod): string | null {
+  const now = new Date();
+  if (period === "all") return null;
+  if (period === "year") return `${now.getFullYear()}-01-01`;
+  const d = new Date(now.getTime() - (period === "30d" ? 30 : 90) * 86400000);
+  return d.toISOString().split("T")[0];
+}
+
+/** Archive date: when it was received, else (cancelled / legacy rows) the order date */
+function archiveDate(o: ToolingOrderRecord): string {
+  return (o.receivedAt || o.orderDate || "").slice(0, 10);
+}
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   Draft: "Qoralama",
@@ -121,7 +147,10 @@ export function ToolingOrdersGrid() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
-  const [viewMode, setViewMode] = useState<"orders" | "deficits">("orders");
+  const [viewMode, setViewMode] = useState<"orders" | "archive" | "deficits">("orders");
+  // Archive shows received/cancelled orders for a period, so the active list stays short
+  const [archivePeriod, setArchivePeriod] = useState<ArchivePeriod>("30d");
+  const isOrderList = viewMode !== "deficits";
 
   // Automatic filter & view mode when opened from Work Order
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId]);
@@ -143,6 +172,11 @@ export function ToolingOrdersGrid() {
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   });
+
+  // Receive (Qabul qilish) dialog: one or several orders that arrived together
+  const [receiveOrders, setReceiveOrders] = useState<ToolingOrderRecord[] | null>(null);
+  // "modal": the edit modal is being saved as Delivered and waits for the delivery answer
+  const [receiveSource, setReceiveSource] = useState<"grid" | "modal">("grid");
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -275,8 +309,17 @@ export function ToolingOrdersGrid() {
   const deficitRows = useMemo(() => computeToolingDeficits(productionQueue, orders), [productionQueue, orders]);
 
   // Filtered orders
+  const activeOrders = useMemo(() => orders.filter((o) => !CLOSED_STATUSES.includes(o.status)), [orders]);
+  const archivedOrders = useMemo(() => {
+    const from = archivePeriodStart(archivePeriod);
+    return orders
+      .filter((o) => CLOSED_STATUSES.includes(o.status) && (!from || archiveDate(o) >= from))
+      .sort((a, b) => archiveDate(b).localeCompare(archiveDate(a)));
+  }, [orders, archivePeriod]);
+
   const filteredOrders = useMemo(() => {
-    return orders.filter((o) => {
+    const base = viewMode === "archive" ? archivedOrders : activeOrders;
+    return base.filter((o) => {
       if (selectedType !== "all" && o.orderType !== selectedType) return false;
       if (selectedStatus !== "all" && o.status !== selectedStatus) return false;
       if (searchQuery.trim()) {
@@ -289,35 +332,35 @@ export function ToolingOrdersGrid() {
       }
       return true;
     });
-  }, [orders, selectedType, selectedStatus, searchQuery]);
+  }, [viewMode, activeOrders, archivedOrders, selectedType, selectedStatus, searchQuery]);
 
   // KPI calculations
   const stats = useMemo(() => {
-    const totalCount = orders.length;
-    const inTransitCount = orders.filter(
-      (o) => o.status === "Ordered" || o.status === "In_Production"
-    ).length;
     const todayStr = new Date().toISOString().split("T")[0];
-    const dueTodayCount = orders.filter(
-      (o) =>
-        (o.status === "Ordered" || o.status === "In_Production") &&
-        o.deliveryDeadline === todayStr
-    ).length;
-    const readyCount = orders.filter(
-      (o) => o.status === "Ready" || o.status === "Delivered"
-    ).length;
-    const totalSum = orders.reduce((sum, o) => sum + (o.amount || 0), 0);
-    const deficitCount = deficitRows.length;
+    const waiting = (o: ToolingOrderRecord) => o.status === "Ordered" || o.status === "In_Production";
+    const delivered = archivedOrders.filter((o) => o.status === "Delivered");
+    const deliveryOf = (o: ToolingOrderRecord) =>
+      o.deliveryMethod && o.deliveryMethod !== "included" ? o.deliveryCost || 0 : 0;
 
     return {
-      totalCount,
-      inTransitCount,
-      dueTodayCount,
-      readyCount,
-      totalSum,
-      deficitCount,
+      activeCount: activeOrders.length,
+      inTransitCount: activeOrders.filter(waiting).length,
+      overdueCount: activeOrders.filter((o) => waiting(o) && o.deliveryDeadline && o.deliveryDeadline < todayStr).length,
+      readyCount: activeOrders.filter((o) => o.status === "Ready").length,
+      activeSum: activeOrders.reduce((sum, o) => sum + (o.amount || 0), 0),
+      receivedCount: delivered.length,
+      cancelledCount: archivedOrders.length - delivered.length,
+      receivedSum: delivered.reduce((sum, o) => sum + (o.amount || 0), 0),
+      deliverySum: delivered.reduce((sum, o) => sum + deliveryOf(o), 0),
+      deficitCount: deficitRows.length,
     };
-  }, [orders, deficitRows]);
+  }, [activeOrders, archivedOrders, deficitRows]);
+
+  const switchView = (mode: "orders" | "archive" | "deficits") => {
+    setViewMode(mode);
+    setSelectedStatus("all");
+    setGridSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
+  };
 
   // Columns definition
   const columns: GridColumn[] = useMemo(() => {
@@ -331,12 +374,14 @@ export function ToolingOrdersGrid() {
       { id: "quantity", title: "Miqdor", width: 85, icon: GridColumnIcon.HeaderNumber },
       { id: "amount", title: "Summa", width: 130, icon: GridColumnIcon.HeaderNumber },
       { id: "orderDate", title: "Buyurtma sanasi", width: 110, icon: GridColumnIcon.HeaderDate },
-      { id: "deliveryDeadline", title: "Yetkazish muddati", width: 120, icon: GridColumnIcon.HeaderDate },
+      viewMode === "archive"
+        ? { id: "receivedAt", title: "Qabul sanasi", width: 120, icon: GridColumnIcon.HeaderDate }
+        : { id: "deliveryDeadline", title: "Yetkazish muddati", width: 120, icon: GridColumnIcon.HeaderDate },
       { id: "status", title: "Holati", width: 125, icon: GridColumnIcon.HeaderSingleValue },
       { id: "specDetails", title: "Texnik parametrlar", width: 230, icon: GridColumnIcon.HeaderString },
       { id: "notes", title: "Izoh", width: 180, icon: GridColumnIcon.HeaderString },
     ];
-  }, []);
+  }, [viewMode]);
 
   // Cell Content Provider
   const getCellContent = useCallback(
@@ -439,7 +484,10 @@ export function ToolingOrdersGrid() {
       }
 
       if (colId === "amount") {
-        const formatted = `${(order.amount || 0).toLocaleString("uz-UZ")} ${order.currency || "UZS"}`;
+        const delivery = order.deliveryMethod && order.deliveryMethod !== "included" ? order.deliveryCost || 0 : 0;
+        const formatted =
+          `${(order.amount || 0).toLocaleString("uz-UZ")} ${order.currency || "UZS"}` +
+          (delivery > 0 ? ` + ${delivery.toLocaleString("uz-UZ")}` : "");
         return {
           kind: GridCellKind.Text,
           data: formatted,
@@ -462,6 +510,18 @@ export function ToolingOrdersGrid() {
           themeOverride: {
             baseFontStyle: "11px monospace",
           },
+        };
+      }
+
+      if (colId === "receivedAt") {
+        const d = order.receivedAt ? order.receivedAt.slice(0, 10) : "—";
+        return {
+          kind: GridCellKind.Text,
+          data: d,
+          displayData: d,
+          allowOverlay: false,
+          contentAlign: "center",
+          themeOverride: { baseFontStyle: "11px monospace" },
         };
       }
 
@@ -541,6 +601,19 @@ export function ToolingOrdersGrid() {
     if (rowIndex < 0 || rowIndex >= filteredOrders.length) return null;
     return filteredOrders[rowIndex] || null;
   }, [gridSelection, filteredOrders]);
+
+  // All checked rows (row markers) plus the focused row — candidates for receiving
+  const receivableOrders = (() => {
+    const idx = new Set<number>(gridSelection.rows.toArray());
+    if (gridSelection.current?.cell) idx.add(gridSelection.current.cell[1]);
+    return [...idx]
+      .sort((a, b) => a - b)
+      .map((i) => filteredOrders[i])
+      .filter(
+        (o): o is ToolingOrderRecord =>
+          Boolean(o) && o.status !== "Cancelled" && o.status !== "Draft"
+      );
+  })();
 
   // Deficit Columns definition
   const deficitColumns: GridColumn[] = useMemo(() => {
@@ -909,7 +982,7 @@ export function ToolingOrdersGrid() {
   };
 
   // Submit order to API
-  const handleSaveOrder = async () => {
+  const handleSaveOrder = async (delivery?: Pick<ToolingReceipt, "deliveryMethod" | "deliveryCost">) => {
     if (!formData.supplierId || !formData.title.trim()) {
       addNotification({
         title: "To'ldirilmagan maydonlar",
@@ -932,10 +1005,25 @@ export function ToolingOrdersGrid() {
       return;
     }
 
+    // Becoming Delivered: ask how it arrived and what the delivery cost before saving
+    if (formData.status === "Delivered" && editingOrder?.status !== "Delivered" && !delivery) {
+      setReceiveSource("modal");
+      setReceiveOrders([
+        {
+          ...(editingOrder || {}),
+          ...formData,
+          id: editingOrder?.id || "new",
+          orderNo: editingOrder?.orderNo || "Yangi",
+        } as ToolingOrderRecord,
+      ]);
+      return;
+    }
+
     try {
       const payload = {
         ...(editingOrder ? { id: editingOrder.id, orderNo: editingOrder.orderNo } : {}),
         ...formData,
+        ...(delivery || {}),
       };
 
       const res = await fetch("/api/v1/production/tooling-orders", {
@@ -967,16 +1055,23 @@ export function ToolingOrdersGrid() {
                 : getInitialToolingItems(targetQ as any, targetQ.id || targetQ.docNo || "");
 
             const chosenSupplier = suppliers.find((s) => s.id === formData.supplierId);
-            const poNo = json.data?.orderNo || editingOrder?.orderNo;
+            const poNo = json.order?.orderNo || json.data?.orderNo || editingOrder?.orderNo;
 
-            const updatedTools = currentTools.map((t) => {
-              const isMatch =
+            const isMatchTool = (t: WorkOrderToolingItem) =>
                 (t.name && formData.title && t.name.toLowerCase() === formData.title.toLowerCase()) ||
                 (t.category && formData.orderType && (
                   (formData.orderType === "ctp_plates" && (t.category === "ctp_plates" || t.category === "flexo_polymer")) ||
                   (formData.orderType === "die_tooling" && t.category === "die_cutting") ||
                   (formData.orderType === "cliche" && (t.category === "foil_cliche" || t.category === "emboss_cliche"))
                 ));
+
+            // Delivery cost lands on one item only (the PO's own item, else the first match)
+            const deliveryTargetId = delivery
+              ? findDeliveryTarget(currentTools, { orderNo: poNo, orderType: formData.orderType, title: formData.title })?.id
+              : undefined;
+
+            const updatedTools = currentTools.map((t) => {
+              const isMatch = isMatchTool(t);
 
               if (isMatch) {
                 return {
@@ -991,6 +1086,9 @@ export function ToolingOrdersGrid() {
                   fileUrl: formData.fileUrl || t.fileUrl,
                   fileName: formData.fileName || t.fileName,
                   imageUrl: formData.imageUrl || t.imageUrl,
+                  ...(delivery && t.id === deliveryTargetId
+                    ? { deliveryMethod: delivery.deliveryMethod, deliveryCost: delivery.deliveryCost }
+                    : {}),
                 } as WorkOrderToolingItem;
               }
               return t;
@@ -1027,7 +1125,7 @@ export function ToolingOrdersGrid() {
 
         if (formData.status === "Delivered") {
           void registerDeliveredTooling({
-            orderNo: json.data?.orderNo || editingOrder?.orderNo,
+            orderNo: json.order?.orderNo || json.data?.orderNo || editingOrder?.orderNo,
             title: formData.title,
             orderType: formData.orderType,
             workOrderNo: formData.workOrderNo,
@@ -1088,25 +1186,40 @@ export function ToolingOrdersGrid() {
   };
 
   // Quick Status Change (Ready / Delivered / etc.)
-  const handleUpdateStatus = async (order: ToolingOrderRecord, newStatus: ToolingOrderRecord["status"]) => {
+  const handleUpdateStatus = async (
+    order: ToolingOrderRecord,
+    newStatus: ToolingOrderRecord["status"],
+    delivery?: Pick<ToolingReceipt, "deliveryMethod" | "deliveryCost">,
+    opts?: { quiet?: boolean }
+  ): Promise<boolean> => {
     try {
+      // Send the full record: the upsert rewrites quantity/amount and the API requires the drawing file
       const res = await fetch("/api/v1/production/tooling-orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: order.id,
-          supplierId: order.supplierId,
-          orderNo: order.orderNo,
+          ...order,
+          ...(delivery || {}),
           status: newStatus,
         }),
       });
       const json = await res.json();
-      if (json.success) {
+      if (!json.success) {
         addNotification({
-          title: "Holat yangilandi",
-          description: `${order.orderNo}: ${ORDER_STATUS_LABELS[newStatus]}`,
-          severity: "info",
+          title: "Holat yangilanmadi",
+          description: `${order.orderNo}: ${json.error || "xatolik"}`,
+          severity: "error",
         });
+        return false;
+      }
+      if (json.success) {
+        if (!opts?.quiet) {
+          addNotification({
+            title: "Holat yangilandi",
+            description: `${order.orderNo}: ${ORDER_STATUS_LABELS[newStatus]}`,
+            severity: "info",
+          });
+        }
 
         // Bidirectional sync with Work Order toolingItems & readiness checks
         if (order.workOrderNo) {
@@ -1129,8 +1242,7 @@ export function ToolingOrdersGrid() {
                 ? "Draft"
                 : "Ordered";
 
-            const updatedTools = currentTools.map((t) => {
-              const isMatch =
+            const matchesOrder = (t: WorkOrderToolingItem) =>
                 (t.purchaseOrderNo && order.orderNo && t.purchaseOrderNo === order.orderNo) ||
                 (t.name && order.title && t.name.toLowerCase() === order.title.toLowerCase()) ||
                 (t.category && order.orderType && (
@@ -1139,13 +1251,18 @@ export function ToolingOrdersGrid() {
                   (order.orderType === "cliche" && (t.category === "foil_cliche" || t.category === "emboss_cliche"))
                 ));
 
-              if (isMatch) {
-                return {
-                  ...t,
-                  status: nextToolStatus,
-                } as WorkOrderToolingItem;
-              }
-              return t;
+            // Delivery cost lands on exactly one item (the PO's own item, else the first match) so it is never counted twice
+            const deliveryTargetId = delivery ? findDeliveryTarget(currentTools, order)?.id : undefined;
+
+            const updatedTools = currentTools.map((t) => {
+              if (!matchesOrder(t)) return t;
+              return {
+                ...t,
+                status: nextToolStatus,
+                ...(delivery && t.id === deliveryTargetId
+                  ? { deliveryMethod: delivery.deliveryMethod, deliveryCost: delivery.deliveryCost }
+                  : {}),
+              } as WorkOrderToolingItem;
             });
 
             useWorkspaceStore.getState().upsertProductionQueueItem({
@@ -1180,11 +1297,31 @@ export function ToolingOrdersGrid() {
           void registerDeliveredTooling(order);
         }
 
-        fetchOrders();
+        if (!opts?.quiet) fetchOrders();
       }
+      return true;
     } catch (err) {
       console.error("Failed to update status:", err);
+      return false;
     }
+  };
+
+  const handleReceive = async (receipts: ToolingReceipt[]) => {
+    let ok = 0;
+    for (const r of receipts) {
+      if (await handleUpdateStatus(r.order, "Delivered", r, { quiet: true })) ok++;
+    }
+    const deliveryTotal = receipts.reduce((sum, r) => sum + r.deliveryCost, 0);
+    const cur = receipts[0]?.order.currency || "UZS";
+    addNotification({
+      title: "Qabul qilindi",
+      description:
+        `${ok}/${receipts.length} ta buyurtma` +
+        (deliveryTotal > 0 ? ` · dostavka ${deliveryTotal.toLocaleString("uz-UZ")} ${cur}` : ""),
+      severity: ok === receipts.length ? "success" : "warning",
+    });
+    setGridSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
+    fetchOrders();
   };
 
   // Buyurtmani bazadan butunlay o'chirish
@@ -1284,6 +1421,14 @@ export function ToolingOrdersGrid() {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
       {askDialog}
+      <ToolingReceiveDialog
+        key={(receiveOrders || []).map((o) => o.id).join(",")}
+        orders={receiveOrders}
+        onOpenChange={(o) => !o && setReceiveOrders(null)}
+        onConfirm={(receipts) =>
+          receiveSource === "modal" && receipts[0] ? handleSaveOrder(receipts[0]) : handleReceive(receipts)
+        }
+      />
       {/* 1. Industrial KPI Metric Ribbon */}
       <div className="border-b border-border bg-card px-3 py-2 flex flex-wrap items-center gap-2 justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -1300,18 +1445,27 @@ export function ToolingOrdersGrid() {
               variant={viewMode === "orders" ? "default" : "ghost"}
               size="sm"
               className="h-6 px-2.5 text-xs rounded-sm gap-1.5"
-              onClick={() => setViewMode("orders")}
+              onClick={() => switchView("orders")}
             >
               <span>Buyurtmalar</span>
               <Badge variant="secondary" className="px-1 py-0 h-4 text-[10px] font-mono">
-                {stats.totalCount}
+                {stats.activeCount}
               </Badge>
+            </Button>
+            <Button
+              variant={viewMode === "archive" ? "default" : "ghost"}
+              size="sm"
+              className="h-6 px-2.5 text-xs rounded-sm gap-1.5"
+              onClick={() => switchView("archive")}
+            >
+              <Archive className="size-3" />
+              <span>Arxiv</span>
             </Button>
             <Button
               variant={viewMode === "deficits" ? "default" : "ghost"}
               size="sm"
               className="h-6 px-2.5 text-xs rounded-sm gap-1.5"
-              onClick={() => setViewMode("deficits")}
+              onClick={() => switchView("deficits")}
             >
               <AlertTriangle className="size-3 text-amber-500" />
               <span>Ehtiyojlar</span>
@@ -1374,7 +1528,7 @@ export function ToolingOrdersGrid() {
             </span>
           </Button>
 
-          {viewMode === "orders" && selectedOrder && (selectedOrder.status === "Ordered" || selectedOrder.status === "In_Production") && (
+          {isOrderList && selectedOrder && (selectedOrder.status === "Ordered" || selectedOrder.status === "In_Production") && (
             <Button
               size="sm"
               variant="outline"
@@ -1386,7 +1540,22 @@ export function ToolingOrdersGrid() {
             </Button>
           )}
 
-          {viewMode === "orders" && (
+          {isOrderList && receivableOrders.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5"
+              onClick={() => {
+                setReceiveSource("grid");
+                setReceiveOrders(receivableOrders);
+              }}
+            >
+              <Truck className="size-3.5" />
+              <span>Qabul qilish{receivableOrders.length > 1 ? ` (${receivableOrders.length})` : ""}</span>
+            </Button>
+          )}
+
+          {isOrderList && (
             <Button
               size="sm"
               variant="outline"
@@ -1415,28 +1584,27 @@ export function ToolingOrdersGrid() {
 
       {/* 2. Top Summary KPI Row */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 px-3 py-1.5 bg-muted/30 border-b border-border text-xs shrink-0">
-        <div className="flex items-center justify-between border border-border bg-card px-2.5 py-1.5 rounded">
-          <span className="text-muted-foreground">Jami buyurtmalar:</span>
-          <span className="font-mono font-semibold text-foreground">{stats.totalCount} dona</span>
-        </div>
-        <div className="flex items-center justify-between border border-border bg-card px-2.5 py-1.5 rounded">
-          <span className="text-muted-foreground">Kutilmoqda / Yo&apos;lda:</span>
-          <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">{stats.inTransitCount} dona</span>
-        </div>
-        <div className="flex items-center justify-between border border-border bg-card px-2.5 py-1.5 rounded">
-          <span className="text-muted-foreground">Bugun muddati:</span>
-          <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">{stats.dueTodayCount} dona</span>
-        </div>
-        <div className="flex items-center justify-between border border-border bg-card px-2.5 py-1.5 rounded">
-          <span className="text-muted-foreground">Tayyor / Qabul qilindi:</span>
-          <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">{stats.readyCount} dona</span>
-        </div>
-        <div className="flex items-center justify-between border border-border bg-card px-2.5 py-1.5 rounded">
-          <span className="text-muted-foreground">Jami qiymat:</span>
-          <span className="font-mono font-semibold text-foreground">
-            {stats.totalSum.toLocaleString("uz-UZ")} UZS
-          </span>
-        </div>
+        {(viewMode === "archive"
+          ? [
+              { label: "Qabul qilingan", value: `${stats.receivedCount} dona`, tone: "text-emerald-600 dark:text-emerald-400" },
+              { label: "Bekor qilingan", value: `${stats.cancelledCount} dona`, tone: "text-muted-foreground" },
+              { label: "Summa", value: `${stats.receivedSum.toLocaleString("uz-UZ")} UZS`, tone: "text-foreground" },
+              { label: "Dostavka", value: `${stats.deliverySum.toLocaleString("uz-UZ")} UZS`, tone: "text-foreground" },
+              { label: "Davr", value: ARCHIVE_PERIOD_LABELS[archivePeriod], tone: "text-foreground" },
+            ]
+          : [
+              { label: "Faol", value: `${stats.activeCount} dona`, tone: "text-foreground" },
+              { label: "Yo'lda", value: `${stats.inTransitCount} dona`, tone: "text-blue-600 dark:text-blue-400" },
+              { label: "Muddati o'tgan", value: `${stats.overdueCount} dona`, tone: stats.overdueCount > 0 ? "text-destructive" : "text-foreground" },
+              { label: "Tayyor", value: `${stats.readyCount} dona`, tone: "text-emerald-600 dark:text-emerald-400" },
+              { label: "Summa", value: `${stats.activeSum.toLocaleString("uz-UZ")} UZS`, tone: "text-foreground" },
+            ]
+        ).map((k) => (
+          <div key={k.label} className="flex items-center justify-between gap-2 border border-border bg-card px-2.5 py-1.5 rounded min-w-0">
+            <span className="text-muted-foreground truncate">{k.label}</span>
+            <span className={cn("font-mono font-semibold whitespace-nowrap", k.tone)}>{k.value}</span>
+          </div>
+        ))}
       </div>
 
       {/* 3. Filter Toolbar */}
@@ -1446,7 +1614,7 @@ export function ToolingOrdersGrid() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
               placeholder={
-                viewMode === "orders"
+                isOrderList
                   ? "PO raqam, WO №, jihoz yoki ta'minotchi..."
                   : "WO №, mijoz, mahsulot yoki jihoz..."
               }
@@ -1471,24 +1639,46 @@ export function ToolingOrdersGrid() {
             </SelectContent>
           </Select>
 
-          {viewMode === "orders" && (
+          {viewMode === "archive" && (
+            <Select value={archivePeriod} onValueChange={(val) => setArchivePeriod((val as ArchivePeriod) || "30d")}>
+              <SelectTrigger className="h-7 w-[120px] text-xs">
+                <SelectValue>{(val) => ARCHIVE_PERIOD_LABELS[(val as ArchivePeriod) || "30d"]}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(ARCHIVE_PERIOD_LABELS) as ArchivePeriod[]).map((p) => (
+                  <SelectItem key={p} value={p} className="text-xs">
+                    {ARCHIVE_PERIOD_LABELS[p]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {isOrderList && (
             <Select value={selectedStatus} onValueChange={(val) => setSelectedStatus(val || "all")}>
               <SelectTrigger className="h-7 w-[150px] text-xs">
                 <SelectValue placeholder="Holati" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Barcha holatlar</SelectItem>
-                <SelectItem value="Draft">Qoralama</SelectItem>
-                <SelectItem value="Ordered">Buyurtma berildi</SelectItem>
-                <SelectItem value="In_Production">Ishlab chiqarilmoqda</SelectItem>
-                <SelectItem value="Ready">Tayyor</SelectItem>
-                <SelectItem value="Delivered">Yetkazildi</SelectItem>
-                <SelectItem value="Cancelled">Bekor qilindi</SelectItem>
+                {viewMode === "archive" ? (
+                  <>
+                    <SelectItem value="Delivered">Yetkazildi</SelectItem>
+                    <SelectItem value="Cancelled">Bekor qilindi</SelectItem>
+                  </>
+                ) : (
+                  <>
+                    <SelectItem value="Draft">Qoralama</SelectItem>
+                    <SelectItem value="Ordered">Buyurtma berildi</SelectItem>
+                    <SelectItem value="In_Production">Ishlab chiqarilmoqda</SelectItem>
+                    <SelectItem value="Ready">Tayyor</SelectItem>
+                  </>
+                )}
               </SelectContent>
             </Select>
           )}
 
-          {(selectedType !== "all" || (viewMode === "orders" && selectedStatus !== "all") || searchQuery) && (
+          {(selectedType !== "all" || (isOrderList && selectedStatus !== "all") || searchQuery) && (
             <Button
               variant="ghost"
               size="sm"
@@ -1507,7 +1697,7 @@ export function ToolingOrdersGrid() {
 
       {/* 4. Main Data Area (100% Glide Data Grid for Both Modes) */}
       <div className="flex-1 overflow-hidden relative">
-        {viewMode === "orders" ? (
+        {isOrderList ? (
           <ContextMenu>
             <ContextMenuTrigger className="w-full h-full block">
               <DataEditor
@@ -1534,6 +1724,7 @@ export function ToolingOrdersGrid() {
                   }
                 }}
                 rowMarkers="both"
+                rowSelectionMode="multi"
                 rowHeight={32}
                 headerHeight={30}
                 freezeColumns={2}
@@ -1607,8 +1798,12 @@ export function ToolingOrdersGrid() {
               </ContextMenuItem>
 
               <ContextMenuItem
-                onClick={() => selectedOrder && handleUpdateStatus(selectedOrder, "Delivered")}
-                disabled={!selectedOrder || selectedOrder.status === "Delivered"}
+                onClick={() => {
+                  if (receivableOrders.length === 0) return;
+                  setReceiveSource("grid");
+                  setReceiveOrders(receivableOrders);
+                }}
+                disabled={receivableOrders.length === 0}
               >
                 <Truck className="size-3.5 mr-2 text-emerald-600" />
                 <span>Yetkazildi deb qabul qilish</span>
@@ -2229,7 +2424,7 @@ export function ToolingOrdersGrid() {
                 type="button"
                 size="sm"
                 className="h-7 text-xs px-4 bg-primary text-primary-foreground font-medium"
-                onClick={handleSaveOrder}
+                onClick={() => handleSaveOrder()}
               >
                 Saqlash
               </Button>

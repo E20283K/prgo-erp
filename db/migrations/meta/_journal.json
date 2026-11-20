@@ -169,6 +169,20 @@
       "when": 1795028866405,
       "tag": "0023_operation_cost_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795208725056,
+      "tag": "0024_supplier_order_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795210036273,
+      "tag": "0025_supplier_order_received_at",
+      "breakpoints": true
     }
   ]
 }

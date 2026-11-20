@@ -374,6 +374,10 @@ export const supplierOrders = pgTable(
     unit: varchar("unit", { length: 32 }).default("dona").notNull(),
     amount: numeric("amount", { precision: 18, scale: 2 }).default("0.00").notNull(),
     currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
+    // Qabul qilishda: "supplier" (ta'minotchi yetkazdi, qarzga qo'shiladi) | "pickup" (o'zimiz) | "included"
+    deliveryMethod: varchar("delivery_method", { length: 16 }),
+    deliveryCost: numeric("delivery_cost", { precision: 18, scale: 2 }).default("0.00").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }), // Yetkazildi holatiga o'tgan payt (arxiv davri)
     status: supplierOrderStatusEnum("status").default("Ordered").notNull(),
     specDetails: text("spec_details"), // "Format: 745x605mm, 4 rang (CMYK), 0.3mm metall"
     notes: text("notes"),

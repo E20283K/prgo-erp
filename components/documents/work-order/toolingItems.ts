@@ -1,6 +1,116 @@
 // Ish buyrug'i uchun boshlang'ich jihoz (qolip/klishe) ro'yxati. "use client" siz: server ham ishlatadi.
 import type { WorkOrderFormData, WorkOrderToolingItem } from "./types";
 
+/** Delivery cost that counts toward the item's landed cost (zero when it is included in the price). */
+export function toolingDeliveryCost(item: Pick<WorkOrderToolingItem, "deliveryMethod" | "deliveryCost">): number {
+  if (!item.deliveryMethod || item.deliveryMethod === "included") return 0;
+  return Number(item.deliveryCost) || 0;
+}
+
+/** Landed cost of a tooling item: purchase price (fact over plan) plus delivery. */
+export function toolingItemTotalCost(
+  item: Pick<WorkOrderToolingItem, "actualCost" | "estimatedCost" | "deliveryMethod" | "deliveryCost">
+): number {
+  const base = Number(item.actualCost !== undefined ? item.actualCost : item.estimatedCost || 0) || 0;
+  return base + toolingDeliveryCost(item);
+}
+
+/** The supplier-order fields needed to tie an order (and its delivery) to a work-order tooling item. */
+export interface ToolingOrderLink {
+  orderNo?: string;
+  orderType?: string;
+  title?: string;
+  status?: string;
+  supplierId?: string;
+  supplierName?: string;
+  deliveryMethod?: WorkOrderToolingItem["deliveryMethod"];
+  deliveryCost?: number;
+}
+
+/** Same rule the Tooling & CTP grid uses for status sync: PO number, else name, else category. */
+export function toolingItemMatchesOrder(t: WorkOrderToolingItem, order: ToolingOrderLink): boolean {
+  if (t.purchaseOrderNo && order.orderNo && t.purchaseOrderNo === order.orderNo) return true;
+  if (t.name && order.title && t.name.toLowerCase() === order.title.toLowerCase()) return true;
+  return (
+    (order.orderType === "ctp_plates" && (t.category === "ctp_plates" || t.category === "flexo_polymer")) ||
+    (order.orderType === "die_tooling" && t.category === "die_cutting") ||
+    (order.orderType === "cliche" && (t.category === "foil_cliche" || t.category === "emboss_cliche"))
+  );
+}
+
+/** The one item that carries an order's delivery: the PO's own item, else the first unclaimed match. */
+export function findDeliveryTarget(
+  items: WorkOrderToolingItem[],
+  order: ToolingOrderLink,
+  claimed: ReadonlySet<string> = new Set()
+): WorkOrderToolingItem | undefined {
+  return (
+    items.find((t) => order.orderNo && t.purchaseOrderNo === order.orderNo) ||
+    items.find((t) => !claimed.has(t.id) && toolingItemMatchesOrder(t, order)) ||
+    items.find((t) => toolingItemMatchesOrder(t, order))
+  );
+}
+
+// Tooling item lifecycle order; a supplier order may move an item forward, never back (e.g. Mounted stays Mounted)
+const TOOLING_STATUS_RANK: Record<string, number> = {
+  Draft: 0,
+  Ordered: 1,
+  In_Production: 2,
+  Ready: 3,
+  Delivered: 4,
+  Mounted: 5,
+};
+
+const SUPPLIER_TO_TOOLING_STATUS: Record<string, WorkOrderToolingItem["status"]> = {
+  Ordered: "Ordered",
+  In_Production: "In_Production",
+  Ready: "Ready",
+  Delivered: "Delivered",
+};
+
+/**
+ * Supplier orders (Tooling & CTP) are the source of truth for what was ordered from whom, how far it got
+ * and what its delivery cost: fold them into the work order's tooling items. Cancelled and draft orders
+ * are ignored; several orders landing on one item have their delivery summed.
+ */
+export function applySupplierOrders(items: WorkOrderToolingItem[], orders: ToolingOrderLink[]): WorkOrderToolingItem[] {
+  if (!items.length || !orders.length) return items;
+  const patches = new Map<string, Partial<WorkOrderToolingItem>>();
+  const claimed = new Set<string>();
+
+  for (const order of orders) {
+    const nextStatus = order.status ? SUPPLIER_TO_TOOLING_STATUS[order.status] : undefined;
+    if (!nextStatus) continue;
+    const target = findDeliveryTarget(items, order, claimed);
+    if (!target) continue;
+    claimed.add(target.id);
+
+    const prev = patches.get(target.id) || {};
+    const current = (prev.status || target.status) as string;
+    const patch: Partial<WorkOrderToolingItem> = {
+      ...prev,
+      purchaseOrderNo: order.orderNo || target.purchaseOrderNo,
+      supplierId: order.supplierId || target.supplierId,
+      supplierName: order.supplierName || target.supplierName,
+      status: (TOOLING_STATUS_RANK[nextStatus] ?? 0) > (TOOLING_STATUS_RANK[current] ?? 0) ? nextStatus : (current as WorkOrderToolingItem["status"]),
+    };
+    if (order.deliveryMethod) {
+      const cost = order.deliveryMethod !== "included" ? Number(order.deliveryCost) || 0 : 0;
+      const prevCost = prev.deliveryMethod ? Number(prev.deliveryCost) || 0 : 0;
+      patch.deliveryMethod =
+        prev.deliveryMethod && prev.deliveryMethod !== "included" ? prev.deliveryMethod : order.deliveryMethod;
+      patch.deliveryCost = prevCost + cost;
+    }
+    patches.set(target.id, patch);
+  }
+
+  if (patches.size === 0) return items;
+  return items.map((t) => {
+    const p = patches.get(t.id);
+    return p ? { ...t, ...p } : t;
+  });
+}
+
 export function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string): WorkOrderToolingItem[] {
   const hasAppliedImposition = Boolean((data as any).plannedSheets && Number((data as any).plannedSheets) > 0);
 

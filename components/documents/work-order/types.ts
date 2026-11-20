@@ -837,6 +837,8 @@ export type ToolingCategory =
   | "varnish_plate"
   | "flexo_polymer";
 
+export type ToolingDeliveryMethod = "included" | "supplier" | "pickup";
+
 export type ToolingStatus =
   | "Draft"
   | "Ordered"
@@ -858,6 +860,10 @@ export interface WorkOrderToolingItem {
   purchaseOrderNo?: string;
   estimatedCost: number;
   actualCost?: number;
+  /** How the item reaches us: supplier ships it, delivery is in the price, or we pick it up */
+  deliveryMethod?: ToolingDeliveryMethod;
+  /** Delivery / pickup cost in the item's currency; part of the tooling landed cost */
+  deliveryCost?: number;
   currency: string;
   status: ToolingStatus;
   isRemake?: boolean;

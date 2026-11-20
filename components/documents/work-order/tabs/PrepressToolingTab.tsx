@@ -96,6 +96,7 @@ import {
   WorkOrderFormData,
   OrderAttachment,
 } from "../types";
+import { toolingDeliveryCost, toolingItemTotalCost } from "../toolingItems";
 import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
@@ -320,7 +321,7 @@ export function PrepressToolingTab({
       (i) => i.status === "Ready" || i.status === "Delivered" || i.status === "Mounted"
     ).length;
     const totalCost = items.reduce(
-      (sum, i) => sum + (i.actualCost !== undefined ? i.actualCost : i.estimatedCost || 0),
+      (sum, i) => sum + toolingItemTotalCost(i),
       0
     );
 
@@ -379,6 +380,7 @@ export function PrepressToolingTab({
     { id: "supplierName", title: "Pudratchi / Ta'minotchi", width: 165, icon: GridColumnIcon.HeaderReference },
     { id: "attachments", title: "Chizma & Fayl", width: 110, icon: GridColumnIcon.HeaderReference },
     { id: "purchaseOrderNo", title: "Xarid PO №", width: 120, icon: GridColumnIcon.HeaderReference },
+    { id: "delivery", title: "Dostavka", width: 105, icon: GridColumnIcon.HeaderNumber },
     { id: "cost", title: `Summasi (${formData.currency || "UZS"})`, width: 135, icon: GridColumnIcon.HeaderNumber },
     { id: "status", title: "Holati", width: 130, icon: GridColumnIcon.HeaderSingleValue },
   ]);
@@ -521,8 +523,24 @@ export function PrepressToolingTab({
         };
       }
 
+      if (column.id === "delivery") {
+        const d = toolingDeliveryCost(item);
+        const display = d > 0 ? d.toLocaleString("uz-UZ") : "—";
+        return {
+          kind: GridCellKind.Text,
+          data: display,
+          displayData: display,
+          allowOverlay: false,
+          contentAlign: "right",
+          themeOverride: {
+            baseFontStyle: "11px monospace",
+            textDark: d > 0 ? undefined : isDark ? "#71717a" : "#a1a1aa",
+          },
+        };
+      }
+
       if (column.id === "cost") {
-        const val = item.actualCost !== undefined ? item.actualCost : item.estimatedCost || 0;
+        const val = toolingItemTotalCost(item);
         const display = `${val.toLocaleString("uz-UZ")} ${item.currency || formData.currency || "UZS"}`;
         return {
           kind: GridCellKind.Text,
@@ -689,6 +707,9 @@ export function PrepressToolingTab({
       unit: editingItem.unit || "dona",
       estimatedCost: Number(editingItem.estimatedCost) || 0,
       actualCost: editingItem.actualCost,
+      // Delivery is set when the supplier order is received (Tooling & CTP), kept as-is here
+      deliveryMethod: editingItem.deliveryMethod,
+      deliveryCost: editingItem.deliveryCost,
       currency: editingItem.currency || formData.currency || "UZS",
       status: (editingItem.status as ToolingStatus) || "Draft",
       supplierId: editingItem.supplierId,
