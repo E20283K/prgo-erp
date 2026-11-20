@@ -1201,7 +1201,10 @@
     "notLinked": "Не привязан",
     "customerNotSet": "Клиент не указан",
     "untitledOrder": "Заказ",
-    "createDeliveryAct": "Создать акт"
+    "createDeliveryAct": "Создать акт",
+    "presenceLabel": "Сейчас просматривают",
+    "presenceViewing": "Просматривает",
+    "presenceEditing": "Редактирует"
   },
   "WorkOrderHistory": {
     "title": "История изменений и аудит документа",

@@ -1201,7 +1201,10 @@
     "notLinked": "Biriktirilmagan",
     "customerNotSet": "Mijoz ko'rsatilmagan",
     "untitledOrder": "Buyurtma",
-    "createDeliveryAct": "Topshirish dalolatnomasi"
+    "createDeliveryAct": "Topshirish dalolatnomasi",
+    "presenceLabel": "Hujjatni ko'rayotganlar",
+    "presenceViewing": "Ko'rmoqda",
+    "presenceEditing": "Tahrirlamoqda"
   },
   "WorkOrderHistory": {
     "title": "Hujjat tarixi va audit jurnali",

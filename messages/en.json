@@ -1201,7 +1201,10 @@
     "notLinked": "Not linked",
     "customerNotSet": "No customer",
     "untitledOrder": "Untitled order",
-    "createDeliveryAct": "Create delivery act"
+    "createDeliveryAct": "Create delivery act",
+    "presenceLabel": "Viewing now",
+    "presenceViewing": "Viewing",
+    "presenceEditing": "Editing"
   },
   "WorkOrderHistory": {
     "title": "Document Audit Trail & History",

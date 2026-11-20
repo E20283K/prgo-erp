@@ -510,7 +510,7 @@ export function Workspace({ children }: { children: React.ReactNode }) {
       {/* Main Workspace Body */}
       <div className="flex-1 overflow-hidden relative">
         {tabs.map((tab) => (
-          <TabContentWrapper key={tab.id} isActive={activeTabId === tab.id}>
+          <TabContentWrapper key={tab.id} tabId={tab.id} tabType={tab.type} isActive={activeTabId === tab.id}>
             {renderTabType(tab)}
           </TabContentWrapper>
         ))}

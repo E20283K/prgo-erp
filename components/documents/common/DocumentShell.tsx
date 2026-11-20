@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { DocumentPresence } from "./DocumentPresence";
 
 /* ───────────────────────── Status / priority badges ───────────────────────── */
 
@@ -135,7 +136,10 @@ export function DocumentHeader({
           <PriorityBadge priority={priority} />
         </span>
       </div>
-      <div className="flex items-center gap-1 shrink-0">{actions}</div>
+      <div className="flex items-center gap-1 shrink-0">
+        <DocumentPresence />
+        {actions}
+      </div>
     </div>
   );
 }

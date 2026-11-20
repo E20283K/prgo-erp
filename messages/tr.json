@@ -1201,7 +1201,10 @@
     "notLinked": "Bağlı değil",
     "customerNotSet": "Müşteri yok",
     "untitledOrder": "Sipariş",
-    "createDeliveryAct": "Teslim tutanağı oluştur"
+    "createDeliveryAct": "Teslim tutanağı oluştur",
+    "presenceLabel": "Şu an görüntüleyenler",
+    "presenceViewing": "Görüntülüyor",
+    "presenceEditing": "Düzenliyor"
   },
   "WorkOrderHistory": {
     "title": "Belge Denetim İzi ve Geçmişi",
