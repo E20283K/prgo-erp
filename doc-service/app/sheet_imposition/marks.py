@@ -417,11 +417,12 @@ class MarksGenerator:
             # 2-rasm uslubi (Compact / Digital): faqat chap hoshiya
             notes_suffix = f"    [{job.custom_notes}]" if job.custom_notes else ""
             left = (
+                # Muhim ma'lumotlar boshida: joy yetmasa, oxiri (fayl nomi, izoh) qisqartiriladi
                 (
-                    f"Fayl: {safe_job_name}    "
                     f"Forma: {job.sheet_form_str}    "
                     f"Buyurtma soni: {job.order_quantity:,} dona    "
-                    f"Bosilishi kerak: {job.calculated_sheets:,} list"
+                    f"Bosilishi kerak: {job.calculated_sheets:,} list    "
+                    f"Fayl: {safe_job_name}"
                     f"{notes_suffix}"
                 ).replace(",", " "),
                 f"Sana: {job.date_str}    Sahifa: {side_title}    Rang: ",
@@ -429,11 +430,12 @@ class MarksGenerator:
             right = None
         else:
             # 3-rasm uslubi (Packaging) & Standard: chapda ish nomi + ranglar, o'ngda o'lchamlar
-            notes_str = f"    List: {job.calculated_sheets:,}".replace(",", " ")
-            if job.custom_notes:
-                notes_str += f" ({job.custom_notes})"
+            # Muhim ma'lumotlar boshida: joy yetmasa, oxiri (ish nomi, izoh) qisqartiriladi
+            notes_str = f" ({job.custom_notes})" if job.custom_notes else ""
             left = (
-                f"Ish nomi: {safe_job_name}    Sahifa: {side_title}{notes_str}",
+                f"Sahifa: {side_title}    "
+                f"List: {job.calculated_sheets:,}    ".replace(",", " ")
+                + f"Ish nomi: {safe_job_name}{notes_str}",
                 "Rang: ",
             )
             right = (
