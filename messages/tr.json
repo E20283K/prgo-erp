@@ -969,7 +969,8 @@
     "saveBlocker": "Bloke Et",
     "cancel": "İptal",
     "gatesCleared": "{ready} / {total} Tamamlandı",
-    "scopeDetails": "Kontrol Kriterleri"
+    "scopeDetails": "Kontrol Kriterleri",
+    "gateLocked": "Tasarım onayını yönetici veya prepress işaretler"
   },
   "PlanningBoard": {
     "title": "Makine İş Kuyrukları ve Planlama",

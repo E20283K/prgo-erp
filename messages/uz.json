@@ -969,7 +969,8 @@
     "saveBlocker": "To'xtatish",
     "cancel": "Bekor qilish",
     "gatesCleared": "{ready} / {total} o'tildi",
-    "scopeDetails": "Tekshiruv mezonlari"
+    "scopeDetails": "Tekshiruv mezonlari",
+    "gateLocked": "Dizayn tasdig'ini menejer yoki prepress belgilaydi"
   },
   "PlanningBoard": {
     "title": "Stanoklar navbati va Rejalashtirish",

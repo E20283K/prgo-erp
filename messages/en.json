@@ -969,7 +969,8 @@
     "saveBlocker": "Flag as Blocked",
     "cancel": "Cancel",
     "gatesCleared": "{ready} of {total} Cleared",
-    "scopeDetails": "Inspection Criteria"
+    "scopeDetails": "Inspection Criteria",
+    "gateLocked": "Design approval is set by a manager or prepress"
   },
   "PlanningBoard": {
     "title": "Live Machine Queue & Planning",

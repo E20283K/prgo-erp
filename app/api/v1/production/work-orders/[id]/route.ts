@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { deleteWorkOrder, updateWorkOrderReadiness } from "@/lib/server/workOrderService";
 import { validateSession } from "@/lib/server/authService";
+import { isFloorOperator } from "@/lib/floorOperator";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +127,25 @@ export async function PATCH(
         }
       : undefined;
     delete body.author;
+
+    // Floor operators confirm paper / plates / tooling only. Design approval and the stage are
+    // not theirs; the stage still follows the gates through the automatic promotion below.
+    if (isFloorOperator(sessionUser)) {
+      if (body.stage !== undefined && body.checks === undefined) {
+        return NextResponse.json(
+          { success: false, error: "Bosqichni operator o'zgartira olmaydi" },
+          { status: 403 }
+        );
+      }
+      // A gate toggle carries the stage it computed; the server recomputes it from the gates.
+      delete body.stage;
+      if (body.checks && typeof body.checks === "object") {
+        delete body.checks.designReady;
+        if (body.checks.audit && typeof body.checks.audit === "object") {
+          delete body.checks.audit.designReady;
+        }
+      }
+    }
 
     const result = await updateWorkOrderReadiness(
       id,

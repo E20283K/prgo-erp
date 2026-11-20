@@ -969,7 +969,8 @@
     "saveBlocker": "Заблокировать",
     "cancel": "Отмена",
     "gatesCleared": "{ready} из {total} пройдено",
-    "scopeDetails": "Критерии контроля"
+    "scopeDetails": "Критерии контроля",
+    "gateLocked": "Утверждение дизайна отмечает менеджер или препресс"
   },
   "PlanningBoard": {
     "title": "Очередь станков и Планирование",

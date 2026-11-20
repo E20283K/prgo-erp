@@ -76,6 +76,7 @@ import { useWorkspaceStore, DocumentTab } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
 import { useLookupStore } from "@/store/lookupStore";
 import { useTranslations } from "next-intl";
+import { isFloorOperator } from "@/lib/floorOperator";
 import { CompactSelection, GridSelection } from "@glideapps/glide-data-grid";
 
 import {
@@ -910,23 +911,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     : (initialQueueItem?.attachments && initialQueueItem.attachments.length > 0 ? initialQueueItem.attachments : []);
 
   // Role-Based Access Control (RBAC): Determine operator mode automatically from currentUser
-  const isOperator = useMemo(() => {
-    if (!currentUser) return false;
-    // Admins and managers have full access
-    if (currentUser.role === "admin" || currentUser.role === "System Administrator") {
-      return false;
-    }
-    const role = (currentUser.role || "").toLowerCase();
-    // If role indicates an operator / pressman / floor technician
-    if (role.includes("operator") || role.includes("pressman") || role.includes("stanokchi")) {
-      return true;
-    }
-    // If user explicitly lacks production edit permissions
-    if (currentUser.permissions?.production && !currentUser.permissions.production.edit) {
-      return true;
-    }
-    return false;
-  }, [currentUser]);
+  const isOperator = useMemo(() => isFloorOperator(currentUser), [currentUser]);
 
   const isAdmin = useMemo(() => {
     if (!currentUser) return false;

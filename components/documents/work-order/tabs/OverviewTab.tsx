@@ -55,6 +55,7 @@ import {
   Scissors,
   ShieldCheck,
   FlaskConical,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore, type CrmCustomerRecord } from "@/store/workspaceStore";
@@ -590,6 +591,7 @@ export function OverviewTab({
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
 
   const tEnhance = useTranslations("OverviewEnhancements");
+  const tFileViewer = useTranslations("FileViewer");
 
   // Department technology flags
   const isTermo = formData.department === "Termo";
@@ -1134,7 +1136,10 @@ export function OverviewTab({
               <span className="font-semibold text-sm text-foreground truncate">{tOrder("docRequisites")}</span>
             </div>
             {isOperator && (
-              <span className="text-[11px] font-mono text-muted-foreground">🔒 Read-only</span>
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Lock className="size-3" />
+                {tFileViewer("readOnly")}
+              </span>
             )}
           </div>
 

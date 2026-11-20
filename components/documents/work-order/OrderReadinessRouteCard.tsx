@@ -20,6 +20,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Factory,
+  Lock,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FLOOR_OPERATOR_GATES, isFloorOperator } from "@/lib/floorOperator";
 import { Input } from "@/components/ui/input";
 import {
   useWorkspaceStore,
@@ -86,6 +88,10 @@ export function OrderReadinessRouteCard({
     upsertProductionQueueItem,
     currentUser,
   } = useWorkspaceStore();
+
+  const floorOperator = isFloorOperator(currentUser);
+  const canEditGate = (key: ReadinessCheckKey) =>
+    !floorOperator || (FLOOR_OPERATOR_GATES as readonly string[]).includes(key);
 
   const currentUserName =
     currentUser?.fullName || currentUser?.name || currentUser?.username || "Operator";
@@ -183,24 +189,28 @@ export function OrderReadinessRouteCard({
   const isAllReady = readyCount === 4;
 
   const handleToggle = (key: ReadinessCheckKey) => {
+    if (!canEditGate(key)) return;
     const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     toggleReadinessCheck(targetId, key, { verifiedBy: currentUserName });
   };
 
   const handleSetReady = (key: ReadinessCheckKey) => {
+    if (!canEditGate(key)) return;
     const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     toggleReadinessCheck(targetId, key, { forceStatus: "ready", verifiedBy: currentUserName });
   };
 
   const handleResetPending = (key: ReadinessCheckKey) => {
+    if (!canEditGate(key)) return;
     const targetId = currentItem?.docNo || currentItem?.id || workOrderId;
     if (!targetId || targetId.startsWith("draft-") || targetId.startsWith("temp-")) return;
     toggleReadinessCheck(targetId, key, { forceStatus: "pending", verifiedBy: currentUserName });
   };
 
   const handleOpenBlocker = (key: ReadinessCheckKey) => {
+    if (!canEditGate(key)) return;
     setBlockerModalKey(key);
     setBlockerReason("");
   };
@@ -220,7 +230,8 @@ export function OrderReadinessRouteCard({
 
   // "In Production" and "Completed" follow the route steps (shift journal); the planner only releases.
   const isDerivedStage = (stage: ProductionQueueStage) => stage === "In Production" || stage === "Completed";
-  const stageLocked = isDerivedStage(currentStage);
+  // Floor operators confirm gates only; the stage follows the gates on the server.
+  const stageLocked = isDerivedStage(currentStage) || floorOperator;
 
   const handleStageChange = (stage: ProductionQueueStage) => {
     if (isDerivedStage(stage) || stageLocked) return;
@@ -568,7 +579,7 @@ export function OrderReadinessRouteCard({
                                   : s.stage === "Ready to Print"
                                   ? "bg-emerald-600 text-white shadow-xs font-semibold"
                                   : "bg-background text-foreground shadow-xs font-semibold border border-border"
-                                : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                                : "text-muted-foreground hover:text-foreground hover:bg-background/50 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
                             )}
                           >
                             {s.icon}
@@ -794,8 +805,10 @@ export function OrderReadinessRouteCard({
                     render={
                       <button
                         type="button"
+                        disabled={!canEditGate(item.key)}
+                        title={!canEditGate(item.key) ? t("gateLocked") : undefined}
                         className={cn(
-                          "h-6 px-2 rounded border text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer select-none",
+                          "h-6 px-2 rounded border text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer select-none disabled:cursor-default disabled:opacity-70",
                           isBlocked
                             ? "bg-rose-500/15 text-rose-700 dark:text-rose-400 border-rose-500/30 hover:bg-rose-500/25"
                             : isReady
@@ -817,7 +830,11 @@ export function OrderReadinessRouteCard({
                             ? t("statusReady")
                             : t("statusPending")}
                         </span>
-                        <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
+                        {canEditGate(item.key) ? (
+                          <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
+                        ) : (
+                          <Lock className="w-3 h-3 opacity-60 shrink-0" />
+                        )}
                       </button>
                     }
                   />
@@ -863,7 +880,7 @@ export function OrderReadinessRouteCard({
       </div>
 
       {/* Auto-Prompt Notice when all 4 checks are ready */}
-      {isAllReady && currentStage === "Queue" && (
+      {isAllReady && currentStage === "Queue" && !floorOperator && (
         <div className="flex items-center justify-between p-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs">
           <div className="flex items-center gap-1.5 min-w-0">
             <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -910,7 +927,7 @@ export function OrderReadinessRouteCard({
                                 : s.stage === "Ready to Print"
                                 ? "bg-emerald-600 text-white shadow-xs font-semibold"
                                 : "bg-background text-foreground shadow-xs font-semibold border border-border"
-                              : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                              : "text-muted-foreground hover:text-foreground hover:bg-background/50 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
                           )}
                         >
                           {s.icon}
