@@ -46,6 +46,7 @@ export async function POST(
       fileSize,
       category = "docs",
       uploadedBy,
+      skipOrderPhoto = false,
     } = body;
 
     if (!fileName) {
@@ -94,7 +95,7 @@ export async function POST(
         });
 
         // Agar bu proof yoki rasm bo'lsa, work_orders jadvalidagi photo_url/photo_urls ustunlarini ham yangilaymiz
-        if (category === "proofs" || (fileType && fileType.startsWith("image/"))) {
+        if (!skipOrderPhoto && (category === "proofs" || (fileType && fileType.startsWith("image/")))) {
           const wo = await db.query.workOrders.findFirst({
             where: (w, { eq }) => eq(w.id, targetWorkOrderId),
           });

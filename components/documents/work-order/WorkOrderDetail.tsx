@@ -4059,11 +4059,19 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       const isDraftOrder = !rawOrderNo || rawOrderNo.startsWith("draft-") || rawOrderNo.startsWith("temp-");
                       const displayOrderNo = !isDraftOrder ? rawOrderNo : (formData.product ? formData.product : "");
                       const ctpItemName = displayOrderNo ? `${displayOrderNo} CTP Metall Formalar Komplekti` : "CTP Metall Formalar Komplekti";
+                      const montajFiles = payload.montaj
+                        ? {
+                            fileUrl: payload.montaj.fileUrl,
+                            fileName: payload.montaj.fileName,
+                            ...(payload.montaj.imageUrl ? { imageUrl: payload.montaj.imageUrl } : {}),
+                          }
+                        : {};
 
                       if (ctpIdx >= 0) {
                         if (payload.totalCtpPlates > 0) {
                           nextTooling[ctpIdx] = {
                             ...nextTooling[ctpIdx],
+                            ...montajFiles,
                             name: ctpItemName,
                             quantity: payload.totalCtpPlates,
                             specDetails: payload.ctpSpecDetails,
@@ -4085,6 +4093,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                             currency: formData.currency || "UZS",
                             status: "Draft",
                             createdAt: new Date().toISOString(),
+                            ...montajFiles,
                           },
                           ...nextTooling,
                         ];

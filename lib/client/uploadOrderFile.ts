@@ -39,6 +39,8 @@ export async function uploadOrderFile(
     category?: OrderFileCategory;
     onProgress?: (pct: number) => void;
     signal?: AbortSignal;
+    /** Keep the file out of the order's product photos (e.g. a montaj preview) */
+    skipOrderPhoto?: boolean;
   } = {}
 ): Promise<OrderAttachment> {
   const category = options.category ?? categoryForFile(file.name);
@@ -51,6 +53,7 @@ export async function uploadOrderFile(
       fileType: file.type || "application/octet-stream",
       fileSize: formatBytes(file.size),
       category,
+      skipOrderPhoto: options.skipOrderPhoto || undefined,
     }),
     signal: options.signal,
   });

@@ -56,6 +56,8 @@ export interface ApplyImpositionPayload {
   totalCtpPlates: number;
   ctpSpecDetails: string;
   printMethod?: PrintMethod;
+  /** Generated montaj stored in the order files; attached to the CTP tooling item */
+  montaj?: { fileUrl: string; fileName: string; imageUrl?: string };
 }
 
 export interface LayoutCalcTabProps {

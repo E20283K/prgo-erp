@@ -1112,7 +1112,12 @@ export interface PersistedImpositionState {
   exportSeparate: boolean;
   jobId?: string;
   pdfUrl?: string;
+  /** First page preview (PNG) of the generated montaj, doc-service cache URL */
+  previewUrl?: string;
   generatedAt?: string;
+  /** Permanent storage copies made when the montaj was applied to the order */
+  storedPdfUrl?: string;
+  storedPreviewUrl?: string;
   summary?: {
     forms: number;
     itemsPerSheet: number;

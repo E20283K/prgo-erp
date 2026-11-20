@@ -19,6 +19,7 @@ import type {
   GenerateResponse,
   LayoutParams,
 } from "@/lib/sheet-imposition/types";
+import { PresignUnavailableError, uploadOrderFile } from "@/lib/client/uploadOrderFile";
 import {
   calculateSheetCutOptions,
   doesSheetFitMachine,
@@ -217,6 +218,9 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       delete rest.jobId;
       delete rest.pdfUrl;
       delete rest.generatedAt;
+      delete rest.previewUrl;
+      delete rest.storedPdfUrl;
+      delete rest.storedPreviewUrl;
       delete rest.summary;
       return rest as ImpositionSettings;
     }
@@ -558,7 +562,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [analysisKey, setAnalysisKey] = useState<string | null>(null);
   const [generated, setGenerated] = useState<GenerateResponse | null>(null);
-  const [busy, setBusy] = useState<"analyze" | "generate" | null>(null);
+  const [busy, setBusy] = useState<"analyze" | "generate" | "apply" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const sourceKey = useMemo(
@@ -625,10 +629,15 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     lastPersisted.current = pending.json;
     persistCb.current?.(pending.state);
   }, []);
-  const [pdfMeta, setPdfMeta] = useState<Pick<PersistedImpositionState, "jobId" | "pdfUrl" | "generatedAt">>({
+  const [pdfMeta, setPdfMeta] = useState<
+    Pick<PersistedImpositionState, "jobId" | "pdfUrl" | "previewUrl" | "generatedAt" | "storedPdfUrl" | "storedPreviewUrl">
+  >({
     jobId: saved?.jobId,
     pdfUrl: saved?.pdfUrl,
+    previewUrl: saved?.previewUrl,
     generatedAt: saved?.generatedAt,
+    storedPdfUrl: saved?.storedPdfUrl,
+    storedPreviewUrl: saved?.storedPreviewUrl,
   });
 
   const runGenerate = useCallback(async () => {
@@ -657,7 +666,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       if (main) {
         const now = new Date();
         const safeDoc = (docNo || "buyurtma").replace(/[^a-zA-Z0-9_-]/g, "_");
-        setPdfMeta({ jobId: res.job_id, pdfUrl: main.url, generatedAt: now.toISOString() });
+        setPdfMeta({ jobId: res.job_id, pdfUrl: main.url, previewUrl: res.pages[0]?.url, generatedAt: now.toISOString() });
         onAddAttachment?.({
           id: `ATT-MONTAJ-${safeDoc}`,
           name: `Montaj_${safeDoc}.pdf`,
@@ -708,8 +717,60 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
   useEffect(() => () => flushPersist(), [flushPersist]);
 
   // ---------------------------------------------------------------- apply to order
-  const applyToOrder = useCallback(() => {
+  /**
+   * Copies the generated montaj (PDF + first page preview) from the doc-service cache into the
+   * order's storage folder, so the CTP tooling item and Files & Documents get permanent links.
+   * Reuses the copies already made for the same generation.
+   */
+  const storeMontaj = useCallback(async (): Promise<ApplyImpositionPayload["montaj"]> => {
+    if (!pdfMeta.pdfUrl) return undefined;
+    const safeDoc = (docNo || "buyurtma").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const pdfName = `Montaj_${safeDoc}.pdf`;
+    const previewName = `Montaj_${safeDoc}_preview.png`;
+    if (pdfMeta.storedPdfUrl) {
+      return { fileUrl: pdfMeta.storedPdfUrl, fileName: pdfName, imageUrl: pdfMeta.storedPreviewUrl };
+    }
+    if (!docNo) return { fileUrl: pdfMeta.pdfUrl, fileName: pdfName, imageUrl: pdfMeta.previewUrl };
+
+    const copy = async (url: string, name: string, type: string) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Montaj faylini olib bo'lmadi: ${name}`);
+      const file = new File([await res.blob()], name, { type });
+      return uploadOrderFile(docNo, file, { category: "docs", skipOrderPhoto: true });
+    };
+
+    try {
+      const pdfAtt = await copy(pdfMeta.pdfUrl, pdfName, "application/pdf");
+      const previewAtt = pdfMeta.previewUrl
+        ? await copy(pdfMeta.previewUrl, previewName, "image/png").catch(() => null)
+        : null;
+      // Same id/name as the cache entry added on generate, so the permanent copy replaces it
+      onAddAttachment?.({ ...pdfAtt, id: `ATT-MONTAJ-${safeDoc}` });
+      if (previewAtt) onAddAttachment?.({ ...previewAtt, id: `ATT-MONTAJ-PREVIEW-${safeDoc}` });
+      setPdfMeta((prev) => ({ ...prev, storedPdfUrl: pdfAtt.url, storedPreviewUrl: previewAtt?.url }));
+      return { fileUrl: pdfAtt.url!, fileName: pdfName, imageUrl: previewAtt?.url };
+    } catch (err: unknown) {
+      // Storage not configured: keep the cache links, the order save persists them server-side
+      if (err instanceof PresignUnavailableError) {
+        return { fileUrl: pdfMeta.pdfUrl, fileName: pdfName, imageUrl: pdfMeta.previewUrl };
+      }
+      throw err;
+    }
+  }, [pdfMeta, docNo, onAddAttachment]);
+
+  const applyToOrder = useCallback(async () => {
     if (!onApplyToOrder || !summary) return;
+    setBusy("apply");
+    setActionError(null);
+    let montaj: ApplyImpositionPayload["montaj"];
+    try {
+      montaj = await storeMontaj();
+    } catch (err: unknown) {
+      setActionError(errorMessage(err, "Montaj faylini saqlab bo'lmadi"));
+      setBusy(null);
+      return;
+    }
+    setBusy(null);
     const modeLabel =
       settings.mode === "single_sided" ? `${frontColorCount}+0` : `${frontColorCount}+${backColorCount}`;
     const payload: ApplyImpositionPayload = {
@@ -723,9 +784,10 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       totalCtpPlates: summary.ctpPlates,
       ctpSpecDetails: `${summary.forms} forma × ${summary.platesPerForm} plastina (${modeLabel}) · ${machine.plateW}×${machine.plateH} mm · ${machine.machineName}`,
       printMethod: settings.mode,
+      montaj,
     };
     onApplyToOrder(payload);
-  }, [onApplyToOrder, summary, settings, frontColorCount, backColorCount, machine]);
+  }, [onApplyToOrder, summary, settings, frontColorCount, backColorCount, machine, storeMontaj]);
 
   const isApplied =
     !!summary &&

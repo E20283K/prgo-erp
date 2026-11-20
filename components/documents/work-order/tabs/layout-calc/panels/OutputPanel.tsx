@@ -89,10 +89,17 @@ export function OutputPanel({ c, readOnly }: { c: SheetImpositionController; rea
           size="sm"
           variant={c.isApplied ? "secondary" : "default"}
           className="h-7 w-full text-xs"
-          onClick={c.applyToOrder}
+          disabled={!!c.busy}
+          onClick={() => void c.applyToOrder()}
           title="Listlar soni va CTP plastinalarni buyurtmaga yozish"
         >
-          {c.isApplied ? <Check className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}
+          {c.busy === "apply" ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : c.isApplied ? (
+            <Check className="size-3.5" />
+          ) : (
+            <CheckCircle2 className="size-3.5" />
+          )}
           {c.isApplied ? "Qo'llangan" : "Buyurtmaga qo'llash"}
         </Button>
       )}
