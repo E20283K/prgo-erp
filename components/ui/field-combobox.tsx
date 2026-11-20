@@ -133,6 +133,7 @@ export function FieldCombobox({
                 <CommandItem
                   key={option.value}
                   value={option.value}
+                  keywords={[option.label]}
                   onSelect={(current) => {
                     onChange(current === value ? "" : current);
                     setOpen(false);

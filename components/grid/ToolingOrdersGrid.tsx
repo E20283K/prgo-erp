@@ -1025,6 +1025,15 @@ export function ToolingOrdersGrid() {
           }
         }
 
+        if (formData.status === "Delivered") {
+          void registerDeliveredTooling({
+            orderNo: json.data?.orderNo || editingOrder?.orderNo,
+            title: formData.title,
+            orderType: formData.orderType,
+            workOrderNo: formData.workOrderNo,
+          });
+        }
+
         setIsModalOpen(false);
         fetchOrders();
       } else {
@@ -1033,6 +1042,48 @@ export function ToolingOrdersGrid() {
     } catch (err) {
       console.error("Save tooling order error:", err);
       alert("Buyurtmani saqlashda xatolik yuz berdi");
+    }
+  };
+
+  /**
+   * A delivered die or cliche becomes a Tooling record (reusable, tracked by life and location).
+   * One-off CTP plates are not registered. The PO number is the record code, so a re-save never duplicates it.
+   */
+  const registerDeliveredTooling = async (order: {
+    orderNo?: string;
+    title: string;
+    orderType: ToolingOrderRecord["orderType"];
+    workOrderNo?: string;
+  }) => {
+    if (!order.orderNo || (order.orderType !== "die_tooling" && order.orderType !== "cliche")) return;
+    const store = useWorkspaceStore.getState();
+    if (store.diesTooling.length === 0) await store.loadDiesToolingAsync();
+    const code = order.orderNo.trim().toUpperCase();
+    if (useWorkspaceStore.getState().diesTooling.some((d) => (d.code || "").toUpperCase() === code)) return;
+
+    const woKey = (order.workOrderNo || "").trim().toLowerCase();
+    const wo = woKey
+      ? store.productionQueue.find((q) => (q.id || q.docNo || "").trim().toLowerCase() === woKey)
+      : undefined;
+    const customerName = wo?.customer?.trim() || null;
+
+    const saved = await store.upsertDieToolingAsync({
+      code,
+      name: order.title,
+      dieType: order.orderType === "cliche" ? "hot_stamp" : "flatbed",
+      location: "",
+      status: "available",
+      customerName,
+      ownership: customerName ? "customer_owned" : "in_house",
+      isDedicated: Boolean(customerName),
+      notes: `Yetkazib berilgan buyurtma: ${order.orderNo}${order.workOrderNo ? ` · ${order.workOrderNo}` : ""}`,
+    });
+    if (saved) {
+      addNotification({
+        title: "Tooling ro'yxatiga qo'shildi",
+        description: `${order.title}: javon belgilanmagan`,
+        severity: "info",
+      });
     }
   };
 
@@ -1123,6 +1174,10 @@ export function ToolingOrdersGrid() {
               toggleReadinessCheck(woUpper, "toolingReady", { forceStatus: "ready" });
             }
           }
+        }
+
+        if (newStatus === "Delivered") {
+          void registerDeliveredTooling(order);
         }
 
         fetchOrders();
