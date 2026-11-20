@@ -2,9 +2,9 @@ import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
 import { calculateKashirovkaTotals } from "@/components/documents/work-order/types";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, like, or } from "drizzle-orm";
 import { db } from "@/db";
-import { workOrders } from "@/db/schema";
+import { telegramMessages, workOrders } from "@/db/schema";
 import { getCompanyIdByCode } from "./crmService";
 import { generateJobTicketPdf } from "./jobTicketPdfGenerator";
 
@@ -235,6 +235,53 @@ export interface OrderCardMedia {
   isPhoto: boolean;
   /** Public link to the vector PDF of the same card, when the ERP has a public URL */
   pdfUrl?: string;
+}
+
+const CARD_URL_PREFIX = "/cache/telegram/order-cards/";
+
+/**
+ * Keeps only the card that was just delivered for this order: older PNG/PDF
+ * pairs are deleted, and ERP chat rows that showed an older card image are
+ * pointed at the new one so the chat history keeps a picture.
+ * Call it only after Telegram accepted the new card, so a failed send never
+ * removes the files the existing message still links to.
+ */
+export async function retireOldOrderCards(order: any, media: OrderCardMedia): Promise<void> {
+  if (!media.isPhoto || !media.publicUrl.startsWith(CARD_URL_PREFIX)) return;
+  const keepPng = media.publicUrl.slice(CARD_URL_PREFIX.length);
+  const keepStem = keepPng.replace(/\.png$/, "");
+  const safeDocNo = String(order.docNo || "ZAKAZ").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const ownFile = new RegExp(`^${safeDocNo.replace(/[-]/g, "\\-")}-[a-f0-9]{20}\\.(png|pdf)$`);
+
+  try {
+    if (order.id) {
+      await db
+        .update(telegramMessages)
+        .set({ mediaUrl: media.publicUrl })
+        .where(
+          and(
+            eq(telegramMessages.workOrderId, order.id),
+            like(telegramMessages.mediaUrl, `${CARD_URL_PREFIX}${safeDocNo}-%`)
+          )
+        );
+    }
+  } catch (err) {
+    // Keep the old files when chat rows could not be repointed
+    console.warn("[orderCard] could not repoint chat media, keeping old cards:", err);
+    return;
+  }
+
+  let names: string[] = [];
+  try {
+    names = await fs.promises.readdir(CARD_CACHE_DIR);
+  } catch {
+    return;
+  }
+  await Promise.all(
+    names
+      .filter((n) => ownFile.test(n) && !n.startsWith(`${keepStem}.`))
+      .map((n) => fs.promises.unlink(path.join(CARD_CACHE_DIR, n)).catch(() => undefined))
+  );
 }
 
 /**

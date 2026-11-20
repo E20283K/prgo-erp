@@ -5,10 +5,36 @@ import { jsPDF } from "jspdf";
 const DOC_SERVICE_URL = process.env.DOC_SERVICE_URL ?? "http://localhost:8000";
 const PDF_CACHE_DIR = path.join(process.cwd(), "public", "cache", "telegram", "job-tickets");
 
+const PDF_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+let lastPruneAt = 0;
+
+/** Deletes job ticket PDFs older than 30 days; runs at most once an hour. */
+function pruneOldPdfs() {
+  const now = Date.now();
+  if (now - lastPruneAt < PRUNE_INTERVAL_MS) return;
+  lastPruneAt = now;
+  fs.promises
+    .readdir(PDF_CACHE_DIR)
+    .then((names) =>
+      Promise.all(
+        names
+          .filter((n) => n.endsWith(".pdf"))
+          .map(async (n) => {
+            const file = path.join(PDF_CACHE_DIR, n);
+            const stat = await fs.promises.stat(file);
+            if (now - stat.mtimeMs > PDF_MAX_AGE_MS) await fs.promises.unlink(file);
+          })
+      )
+    )
+    .catch((err) => console.warn("[jobTicketPdf] cache prune failed:", err));
+}
+
 function ensurePdfDir() {
   if (!fs.existsSync(PDF_CACHE_DIR)) {
     fs.mkdirSync(PDF_CACHE_DIR, { recursive: true });
   }
+  pruneOldPdfs();
 }
 
 export interface JobTicketOrderData {

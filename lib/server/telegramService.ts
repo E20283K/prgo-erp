@@ -22,7 +22,12 @@ import { eq, desc, asc, and, sql, or, ilike, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
 import { generateTechCardImage } from "./techCardGenerator";
-import { generateOrderCardMedia, resolveOrderCardLogo, type OrderCardLogo } from "./orderCardGenerator";
+import {
+  generateOrderCardMedia,
+  resolveOrderCardLogo,
+  retireOldOrderCards,
+  type OrderCardLogo,
+} from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -1441,6 +1446,8 @@ export async function sendWorkOrderToOrdersGroup(params: {
       })
       .where(eq(telegramMessages.id, sendResult.message.id));
 
+    await retireOldOrderCards(order, cardMedia);
+
     return {
       ...sendResult,
       telegramMeta: updatedMeta,
@@ -1550,6 +1557,9 @@ export async function updateTelegramOrderCardStatus(
               updatedAt: new Date(),
             })
             .where(eq(workOrders.id, order.id));
+
+          // Telegram now shows the new card; older card files are no longer linked
+          await retireOldOrderCards(order, cardMedia);
 
           let alertSent = false;
           if (alertReply && meta.messageId) {
