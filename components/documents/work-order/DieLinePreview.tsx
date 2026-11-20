@@ -204,9 +204,14 @@ export function DieLinePreview({
   const effectiveHoleOffset = holeOffset !== undefined ? holeOffset : 6;
 
   // Hole center on a flat card (proof / single views), honoring position + offset
-  const getCardHolePoint = (x: number, y: number, w: number, h: number) => {
-    const d = Math.max(8, (effectiveHoleOffset / safeH) * h);
-    switch (effectiveHolePos) {
+  const getCardHolePoint = (x: number, y: number, w: number, h: number, mirrorX = false) => {
+    // Offset is measured from the cut edge to the hole edge (same as CAD view)
+    const r = Math.max(3.5, (effectiveHoleDiameter / safeH) * h * 0.5);
+    const d = (effectiveHoleOffset / safeH) * h + r;
+    // Back side is seen through the sheet: the hole is mirrored horizontally
+    const flip = (pos: string) =>
+      !mirrorX ? pos : pos === "top-left" ? "top-right" : pos === "top-right" ? "top-left" : pos === "left-center" ? "right-center" : pos === "right-center" ? "left-center" : pos;
+    switch (flip(effectiveHolePos)) {
       case "top-left":
         return { x: x + d, y: y + d, isTop: true };
       case "top-right":
@@ -305,7 +310,7 @@ export function DieLinePreview({
 
     const holeRadius = Math.max(3.5, (effectiveHoleDiameter / safeH) * cardH * 0.5);
     const leftHole = getCardHolePoint(leftX, startY, cardW, cardH);
-    const rightHole = getCardHolePoint(rightX, startY, cardW, cardH);
+    const rightHole = getCardHolePoint(rightX, startY, cardW, cardH, true);
     const leftHoleCx = leftHole.x;
     const leftHoleCy = leftHole.y;
     const rightHoleCx = rightHole.x;
@@ -401,14 +406,14 @@ export function DieLinePreview({
           <g className="text-rose-500">
             {/* Guide line from top cut edge */}
             <line x1={leftHoleCx + holeRadius + 4} y1={startY} x2={leftX + cardW + 12} y2={startY} stroke="#ef4444" strokeWidth="0.75" strokeDasharray="2 2" />
-            {/* Guide line from hole center */}
-            <line x1={leftHoleCx + holeRadius + 4} y1={leftHoleCy} x2={leftX + cardW + 12} y2={leftHoleCy} stroke="#ef4444" strokeWidth="0.75" strokeDasharray="2 2" />
+            {/* Guide line from hole edge */}
+            <line x1={leftHoleCx + holeRadius + 4} y1={leftHoleCy - holeRadius} x2={leftX + cardW + 12} y2={leftHoleCy - holeRadius} stroke="#ef4444" strokeWidth="0.75" strokeDasharray="2 2" />
             {/* Dimension line with arrows */}
-            <line x1={leftX + cardW + 10} y1={startY} x2={leftX + cardW + 10} y2={leftHoleCy} stroke="#ef4444" strokeWidth="0.9" />
+            <line x1={leftX + cardW + 10} y1={startY} x2={leftX + cardW + 10} y2={leftHoleCy - holeRadius} stroke="#ef4444" strokeWidth="0.9" />
             <polygon points={`${leftX + cardW + 8.5},${startY + 2.5} ${leftX + cardW + 11.5},${startY + 2.5} ${leftX + cardW + 10},${startY}`} fill="#ef4444" />
-            <polygon points={`${leftX + cardW + 8.5},${leftHoleCy - 2.5} ${leftX + cardW + 11.5},${leftHoleCy - 2.5} ${leftX + cardW + 10},${leftHoleCy}`} fill="#ef4444" />
+            <polygon points={`${leftX + cardW + 8.5},${leftHoleCy - holeRadius - 2.5} ${leftX + cardW + 11.5},${leftHoleCy - holeRadius - 2.5} ${leftX + cardW + 10},${leftHoleCy - holeRadius}`} fill="#ef4444" />
             {/* Dimension Text */}
-            <text x={leftX + cardW + 15} y={startY + (leftHoleCy - startY) / 2 + 3} fontFamily="sans-serif" fontSize="8.5" fontWeight="bold" fill="#ef4444">
+            <text x={leftX + cardW + 15} y={startY + (leftHoleCy - holeRadius - startY) / 2 + 3} fontFamily="sans-serif" fontSize="8.5" fontWeight="bold" fill="#ef4444">
               {effectiveHoleOffset || 5.5} {dimensionUnit || "mm"}
             </text>
           </g>
@@ -510,7 +515,7 @@ export function DieLinePreview({
     const clipId = `single-artwork-${side}-clip`;
 
     const holeRadius = Math.max(3.5, (effectiveHoleDiameter / safeH) * cardH * 0.5);
-    const holePt = getCardHolePoint(tX, tY, cardW, cardH);
+    const holePt = getCardHolePoint(tX, tY, cardW, cardH, side === "back");
     const holeCx = holePt.x;
     const holeCy = holePt.y;
 
