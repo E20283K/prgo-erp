@@ -297,7 +297,7 @@ export function TelegramOrdersGroupModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-xl p-4">
+      <DialogContent className="p-4 sm:max-w-5xl">
         <DialogHeader className="pb-1">
           <DialogTitle className="text-xs font-semibold flex items-center gap-1.5">
             <FileText className="size-3.5 text-primary" />
@@ -305,7 +305,51 @@ export function TelegramOrdersGroupModal({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3 py-1 text-xs">
+        <div className="grid gap-4 py-1 text-xs md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        {/* Buyurtma kartasi (rasm) */}
+        <div className="flex flex-col gap-1 min-h-0">
+          <div className="flex items-center justify-between">
+            <Label className="text-[11px] font-medium">Buyurtma kartasi</Label>
+            <div className="flex items-center gap-1">
+              <Badge variant="outline" className="h-4 text-[9px] px-1 font-mono gap-1">
+                <ImageIcon className="size-2.5 text-primary" />
+                <span>PNG</span>
+              </Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-5 px-1.5 text-[10px] gap-1"
+                onClick={refreshCard}
+                disabled={cardLoading}
+              >
+                <RefreshCw className={`size-3 ${cardLoading ? "animate-spin" : ""}`} />
+                <span>Yangilash</span>
+              </Button>
+            </div>
+          </div>
+          <div className="relative h-[300px] md:h-[min(70vh,640px)] rounded border border-border bg-muted/30 flex items-center justify-center overflow-hidden p-2">
+            {cardUrl && !cardError ? (
+              <a href={cardUrl} target="_blank" rel="noreferrer" className="h-full w-full flex items-center justify-center">
+                <img
+                  src={cardUrl}
+                  alt={`${orderNumber} buyurtma kartasi`}
+                  className={`max-h-full max-w-full object-contain bg-white transition-opacity ${cardLoading ? "opacity-40" : ""}`}
+                />
+              </a>
+            ) : cardError && !cardLoading ? (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <ImageOff className="size-3.5" />
+                <span>Karta yaratilmadi — PDF yuboriladi</span>
+              </div>
+            ) : null}
+            {cardLoading && (
+              <Loader2 className="absolute size-4 animate-spin text-muted-foreground" />
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-3 min-w-0 md:max-h-[min(70vh,640px)] md:overflow-y-auto md:pr-1">
           {/* Oldin yuborilganlik holati va Rejim tanlash */}
           {isAlreadySent && telegramMeta && (
             <div className="p-2.5 rounded border border-border bg-muted/30 space-y-2">
@@ -437,49 +481,6 @@ export function TelegramOrdersGroupModal({
             </div>
           )}
 
-          {/* Buyurtma kartasi (rasm) */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <Label className="text-[11px] font-medium">Buyurtma kartasi</Label>
-              <div className="flex items-center gap-1">
-                <Badge variant="outline" className="h-4 text-[9px] px-1 font-mono gap-1">
-                  <ImageIcon className="size-2.5 text-primary" />
-                  <span>PNG</span>
-                </Badge>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-5 px-1.5 text-[10px] gap-1"
-                  onClick={refreshCard}
-                  disabled={cardLoading}
-                >
-                  <RefreshCw className={`size-3 ${cardLoading ? "animate-spin" : ""}`} />
-                  <span>Yangilash</span>
-                </Button>
-              </div>
-            </div>
-            <div className="relative h-64 rounded border border-border bg-muted/30 flex items-center justify-center overflow-hidden">
-              {cardUrl && !cardError ? (
-                <a href={cardUrl} target="_blank" rel="noreferrer" className="h-full w-full flex items-center justify-center">
-                  <img
-                    src={cardUrl}
-                    alt={`${orderNumber} buyurtma kartasi`}
-                    className={`max-h-full max-w-full object-contain bg-white transition-opacity ${cardLoading ? "opacity-40" : ""}`}
-                  />
-                </a>
-              ) : cardError && !cardLoading ? (
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <ImageOff className="size-3.5" />
-                  <span>Karta yaratilmadi — PDF yuboriladi</span>
-                </div>
-              ) : null}
-              {cardLoading && (
-                <Loader2 className="absolute size-4 animate-spin text-muted-foreground" />
-              )}
-            </div>
-          </div>
-
           {/* Oldindan ko'rish (Telegram xabari) */}
           <div className="space-y-1">
             <Label className="text-[11px] font-medium">Xabar matni</Label>
@@ -526,6 +527,7 @@ export function TelegramOrdersGroupModal({
               className="h-14 text-xs resize-none"
             />
           </div>
+        </div>
         </div>
 
         <DialogFooter className="pt-2 gap-1.5 sm:gap-0">

@@ -29,7 +29,12 @@ async function guardApi(request: NextRequest) {
     return new NextResponse(null, { status: 404 });
   }
 
-  if (PUBLIC_API_PATHS.has(pathname) || request.method === 'OPTIONS') {
+  // Telegram'dagi buyurtma kartasi PDF havolalari (fayl nomida taxmin qilib bo'lmaydigan hash bor)
+  if (
+    PUBLIC_API_PATHS.has(pathname) ||
+    pathname.startsWith('/api/public/order-cards/') ||
+    request.method === 'OPTIONS'
+  ) {
     return NextResponse.next();
   }
 

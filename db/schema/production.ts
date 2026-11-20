@@ -348,6 +348,8 @@ export interface WorkOrderTelegramMeta {
   messageId?: number;
   lastSentAt?: string;
   channelTitle?: string;
+  /** Public download link to the order card PDF shown in the message caption */
+  cardPdfUrl?: string;
 }
 
 export const workOrders = pgTable(

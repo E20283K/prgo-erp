@@ -22,7 +22,7 @@ import { eq, desc, asc, and, sql, or, ilike, isNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
 import { generateTechCardImage } from "./techCardGenerator";
-import { generateOrderCardMedia, renderOrderCardPng } from "./orderCardGenerator";
+import { generateOrderCardMedia } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -1253,7 +1253,7 @@ export function escapeTelegramHtml(str: string): string {
 /**
  * Telegram guruh uchun professional spetsifikatsiya va Stepper matnini shakllantirish
  */
-export function formatWorkOrderTelegramCaption(order: any, customNote?: string): string {
+export function formatWorkOrderTelegramCaption(order: any, customNote?: string, pdfUrl?: string): string {
   const orderNo = order.docNo || "ZAKAZ";
   const clientName = (order.client?.name || order.customerName || "MIJOZ").toUpperCase();
   const productName = order.productName || "Poligrafiya mahsuloti";
@@ -1312,6 +1312,11 @@ export function formatWorkOrderTelegramCaption(order: any, customNote?: string):
   if (customNote?.trim()) {
     lines.push(``);
     lines.push(`💬 <i>Izoh: ${escapeHtml(customNote.trim())}</i>`);
+  }
+
+  if (pdfUrl) {
+    lines.push(``);
+    lines.push(`📄 <a href="${escapeHtml(pdfUrl)}">PDF yuklab olish</a>`);
   }
 
   lines.push(``);
@@ -1387,10 +1392,9 @@ export async function sendWorkOrderToOrdersGroup(params: {
     };
   }
 
-  const caption = formatWorkOrderTelegramCaption(order, params.customNote);
-
   // One-page visual order card (PNG); PDF job ticket only if doc-service cannot render it
   const cardMedia = await generateOrderCardMedia(order, params.customNote);
+  const caption = formatWorkOrderTelegramCaption(order, params.customNote, cardMedia.pdfUrl);
 
   const messageText = params.alertReply
     ? `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\n\n${caption}`
@@ -1415,6 +1419,7 @@ export async function sendWorkOrderToOrdersGroup(params: {
       messageId: sendResult.message.telegramMessageId,
       lastSentAt: new Date().toISOString(),
       channelTitle: targetChatRecord.title,
+      cardPdfUrl: cardMedia.pdfUrl,
     };
 
     await db
@@ -1495,12 +1500,13 @@ export async function updateTelegramOrderCardStatus(
       return { success: false, error: "Telegram bot token topilmadi" };
     }
 
-    const updatedCaption = formatWorkOrderTelegramCaption(order);
+    const updatedCaption = formatWorkOrderTelegramCaption(order, undefined, meta.cardPdfUrl);
 
     if (replacePdf) {
       try {
         const cardMedia = await generateOrderCardMedia(order, alertComment);
         const mediaType = cardMedia.isPhoto ? "photo" : "document";
+        const mediaCaption = formatWorkOrderTelegramCaption(order, undefined, cardMedia.pdfUrl);
 
         const form = new FormData();
         form.append("chat_id", chatRecord.chatId);
@@ -1510,7 +1516,7 @@ export async function updateTelegramOrderCardStatus(
           JSON.stringify({
             type: mediaType,
             media: `attach://${mediaType}`,
-            caption: updatedCaption,
+            caption: mediaCaption,
             parse_mode: "HTML",
           })
         );
@@ -1528,6 +1534,7 @@ export async function updateTelegramOrderCardStatus(
           const updatedMeta: WorkOrderTelegramMeta = {
             ...meta,
             lastSentAt: new Date().toISOString(),
+            cardPdfUrl: cardMedia.pdfUrl,
           };
 
           await db
@@ -2295,19 +2302,3 @@ export async function seedDefaultQuickReplies(companyId: string) {
   }
 }
 
-/**
- * Renders the order card PNG for the send dialog preview, from the saved order.
- */
-export async function renderWorkOrderCardPreview(
-  workOrderId: string,
-  companyCode: string = "PRINTGOO",
-  customNote?: string
-): Promise<Buffer | null> {
-  const companyId = await getCompanyIdByCode(companyCode);
-  const order = await db.query.workOrders.findFirst({
-    where: and(eq(workOrders.companyId, companyId), workOrderMatchWhere(workOrderId)),
-    with: { client: true },
-  });
-  if (!order) return null;
-  return renderOrderCardPng(order, customNote);
-}

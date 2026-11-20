@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { renderWorkOrderCardPreview } from "@/lib/server/telegramService";
+import { renderWorkOrderCardPreview } from "@/lib/server/orderCardGenerator";
 
 export const dynamic = "force-dynamic";
 

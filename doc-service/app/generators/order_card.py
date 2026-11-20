@@ -13,7 +13,9 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import pymupdf as fitz
-from fastapi.responses import Response
+import base64
+
+from fastapi.responses import JSONResponse, Response
 
 from app.generators.job_ticket import get_raw_artwork
 from app.schemas.documents import OrderCardRequest
@@ -584,7 +586,22 @@ def _draw_visual(pen: Pen, req: OrderCardRequest, cards: List[CardSpec], x: floa
 
 
 # ── Panels ─────────────────────────────────────────────────────────────────
-def _spec_rows(req: OrderCardRequest) -> List[Tuple[str, str]]:
+def _deadline_color(req: OrderCardRequest):
+    dl = _parse_date(req.deadline)
+    return DANGER if dl and (dl - date.today()).days <= 2 else INK
+
+
+def _spec_rows(req: OrderCardRequest) -> List[Tuple[str, str, Any]]:
+    head: List[Tuple[str, str, Any]] = []
+    if req.deadline:
+        head.append(("Muddat", _fmt_date(req.deadline), _deadline_color(req)))
+    status = " · ".join(p for p in [req.statusLabel, req.stageLabel] if p)
+    if status:
+        head.append(("Holati", status, INK))
+    return head + [(l, v, INK) for l, v in _spec_rows_plain(req)]
+
+
+def _spec_rows_plain(req: OrderCardRequest) -> List[Tuple[str, str]]:
     rows: List[Tuple[str, str]] = []
     W, H = req.width, req.height
     product = req.itemCategory or ""
@@ -642,34 +659,40 @@ def _spec_rows(req: OrderCardRequest) -> List[Tuple[str, str]]:
     return rows
 
 
+SPEC_LABEL = 7.8
+SPEC_VALUE = 8.6
+SPEC_ROW = 5.6
+SPEC_WRAP = 4.0
+
+
 def _section_title(pen: Pen, x: float, y: float, w: float, title: str) -> float:
-    pen.text(x, y + 3, title.upper(), size=6.2, bold=True, color=MUTED)
-    pen.line(x, y + 4.6, x + w, y + 4.6, color=LINE, width=0.5)
-    return y + 7.6
+    pen.text(x, y + 3, title.upper(), size=7, bold=True, color=MUTED)
+    pen.line(x, y + 4.8, x + w, y + 4.8, color=LINE, width=0.5)
+    return y + 8.6
 
 
 def _draw_spec(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float, max_y: float) -> float:
     y = _section_title(pen, x, y, w, "Spetsifikatsiya")
-    label_w = 19.0
-    for label, value in _spec_rows(req):
-        if y + 4.6 > max_y:
+    label_w = 23.0
+    for label, value, color in _spec_rows(req):
+        if y + SPEC_ROW > max_y:
             break
-        pen.text(x, y, label, size=6.6, color=MUTED)
+        pen.text(x, y, label, size=SPEC_LABEL, color=MUTED)
         vx = x + label_w
         if label == "Pantone":
             for sp in [s for s in req.spotColorItems if s.name][:6]:
-                pen.rect(vx, y - 2.5, vx + 2.6, y + 0.1, fill=_hex(sp.hex or "#888888"), color=LINE, width=0.3, radius_mm=0.4)
-                vx += 3.4
+                pen.rect(vx, y - 2.9, vx + 3, y + 0.1, fill=_hex(sp.hex or "#888888"), color=LINE, width=0.3, radius_mm=0.4)
+                vx += 3.8
             vx += 0.6
-        lines = pen.wrap(value, x + w - vx, 7.0, 2, bold=True)
+        lines = pen.wrap(value, x + w - vx, SPEC_VALUE, 2, bold=True)
         for i, ln in enumerate(lines):
-            pen.text(vx, y + i * 3.4, ln, size=7.0, bold=True, color=INK)
-        y += 4.6 + (len(lines) - 1) * 3.4
+            pen.text(vx, y + i * SPEC_WRAP, ln, size=SPEC_VALUE, bold=True, color=color)
+        y += SPEC_ROW + (len(lines) - 1) * SPEC_WRAP
     return y
 
 
 def _spec_height(req: OrderCardRequest) -> float:
-    return 7.6 + len(_spec_rows(req)) * 4.6 + 2
+    return 8.6 + len(_spec_rows(req)) * SPEC_ROW + 2
 
 
 def _quantity_height(req: OrderCardRequest) -> float:
@@ -712,12 +735,14 @@ def _draw_schematic(pen: Pen, req: OrderCardRequest, x: float, y: float, w: floa
         pen.circle(hx, hy, hr, fill=WHITE, color=CUT, width=0.5)
         off = float(req.holeOffset or 0)
         pos = req.holePosition or ""
-        # Offset from the top (or side) edge to the hole edge
-        if pos.startswith("top") and off > 0:
-            pen.line(hx, cy, hx, hy - hr, color=DIM, width=0.35)
-        elif pos in ("left-center", "right-center") and off > 0:
-            ex = cx if pos == "left-center" else cx + cw
-            pen.line(ex, hy, hx - hr if pos == "left-center" else hx + hr, hy, color=DIM, width=0.35)
+        # Offset lines from each edge the position is measured from to the hole edge
+        if off > 0:
+            if pos.startswith("top"):
+                pen.line(hx, cy, hx, hy - hr, color=DIM, width=0.35)
+            if pos in ("top-left", "left-center"):
+                pen.line(cx, hy, hx - hr, hy, color=DIM, width=0.35)
+            if pos in ("top-right", "right-center"):
+                pen.line(cx + cw, hy, hx + hr, hy, color=DIM, width=0.35)
         label = f"Ø{_fmt_num(req.holeSize)} · {_fmt_num(off)} mm"
         lx = cx + cw + 1.2 if hx >= cx + cw / 2 else cx - 1.2
         pen.text(lx, hy + 1, label, size=5.8, color=DIM, align="left" if hx >= cx + cw / 2 else "right")
@@ -757,9 +782,37 @@ def _draw_quantity(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float
     return y + 6
 
 
+_LOGO_PATH = os.path.join(os.path.dirname(__file__), "..", "core", "printgoo_logo.svg")
+_LOGO_PDF: Optional[bytes] = None
+
+
+def _inline_svg_classes(svg: str) -> str:
+    """MuPDF ignores <style> class rules, so copy each rule onto its elements as attributes."""
+    import re
+    rules = {}
+    for m in re.finditer(r"\.([\w-]+)\s*\{([^}]*)\}", svg):
+        decls = [d.split(":", 1) for d in m.group(2).split(";") if ":" in d]
+        rules[m.group(1)] = " ".join(f'{k.strip()}="{v.strip()}"' for k, v in decls)
+    svg = re.sub(r"<style[\s\S]*?</style>", "", svg)
+    return re.sub(r'class="([\w-]+)"', lambda m: rules.get(m.group(1), ""), svg)
+
+
+def _logo_doc() -> Optional[fitz.Document]:
+    global _LOGO_PDF
+    if _LOGO_PDF is None:
+        try:
+            with open(_LOGO_PATH, encoding="utf-8") as f:
+                svg = _inline_svg_classes(f.read())
+            _LOGO_PDF = fitz.open(stream=svg.encode("utf-8"), filetype="svg").convert_to_pdf()
+        except Exception as e:
+            print(f"[order_card] logo unavailable: {e}", flush=True)
+            _LOGO_PDF = b""
+    return fitz.open("pdf", _LOGO_PDF) if _LOGO_PDF else None
+
+
 def _draw_header(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float) -> float:
     qr_size = 20.0
-    right = x + w
+    right = right_edge = x + w
     # QR code to the order in the ERP
     if req.erpUrl:
         try:
@@ -774,9 +827,19 @@ def _draw_header(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float) 
         except Exception as e:
             print(f"[order_card] qr failed: {e}", flush=True)
 
+    # Company logo, then a divider; the order text starts after it
+    logo = _logo_doc()
+    if logo is not None:
+        lh = 14.0
+        lr = logo[0].rect
+        lw = lh * lr.width / max(1.0, lr.height)
+        top = y + (qr_size - lh) / 2
+        pen.page.show_pdf_page(fitz.Rect(x * MM, top * MM, (x + lw) * MM, (top + lh) * MM), logo, 0)
+        pen.line(x + lw + 4, y + 1, x + lw + 4, y + qr_size - 1, color=LINE, width=0.6)
+        x += lw + 8
+
     client = (req.clientName or "Mijoz").strip().upper()
-    title = f"{client} — ZAKAZ"
-    pen.text(x, y + 8.5, title, size=19, bold=True, color=ACCENT, max_w=right - x - 2)
+    pen.text(x, y + 8.5, client, size=19, bold=True, color=ACCENT, max_w=right - x - 2)
     meta = [req.docNo]
     if req.productName:
         meta.append(req.productName)
@@ -789,43 +852,25 @@ def _draw_header(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float) 
     if dates:
         pen.text(x, y + 20, "   ".join(dates), size=7, color=MUTED, max_w=right - x - 2)
     bottom = y + qr_size + 2
-    pen.line(x, bottom, x + w, bottom, color=INK, width=0.8)
+    pen.line(right_edge - w, bottom, right_edge, bottom, color=INK, width=0.8)
     return bottom
+
+
+def _note_text(req: OrderCardRequest) -> str:
+    return "  ·  ".join(p.strip() for p in [req.customNote or "", req.notes or ""] if p and p.strip())
 
 
 def _draw_footer(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float, h: float):
     pen.rect(x, y, x + w, y + h, fill=PANEL, color=LINE, width=0.5, radius_mm=1.2)
-    cells: List[Tuple[str, str, Any, float]] = []
-    dl = _parse_date(req.deadline)
-    dl_color = INK
-    if dl:
-        days = (dl - date.today()).days
-        if days <= 2:
-            dl_color = DANGER
-    cells.append(("Muddat", _fmt_date(req.deadline) or "—", dl_color, 0.2))
-    status = " · ".join(p for p in [req.statusLabel, req.stageLabel] if p)
-    cells.append(("Holati", status or "—", INK, 0.24))
-    note = "  ·  ".join(p.strip() for p in [req.customNote or "", req.notes or ""] if p and p.strip())
-    cells.append(("Izoh", note or "—", TEXT, 0.56))
-
-    cx = x + 3
-    inner_w = w - 6
-    for i, (label, value, color, frac) in enumerate(cells):
-        cw = inner_w * frac
-        pen.text(cx, y + 4, label.upper(), size=5.8, bold=True, color=MUTED)
-        if label == "Izoh":
-            lines = pen.wrap(value, cw - 3, 6.8, max(1, int((h - 6) // 3.3)))
-            for li, ln in enumerate(lines):
-                pen.text(cx, y + 8.2 + li * 3.3, ln, size=6.8, color=color)
-        else:
-            pen.text(cx, y + 9, value, size=9 if label == "Muddat" else 7.6, bold=True, color=color, max_w=cw - 3)
-        if i < len(cells) - 1:
-            pen.line(cx + cw - 2, y + 2, cx + cw - 2, y + h - 2, color=LINE, width=0.5)
-        cx += cw
+    pen.text(x + 3, y + 4.4, "IZOH", size=6.4, bold=True, color=MUTED)
+    lines = pen.wrap(_note_text(req), w - 6, 8.0, max(1, int((h - 6) // 3.8)))
+    for li, ln in enumerate(lines):
+        pen.text(x + 3, y + 9 + li * 3.8, ln, size=8.0, color=TEXT)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────
-def render_order_card(req: OrderCardRequest) -> Tuple[bytes, str, str]:
+def render_order_card(req: OrderCardRequest) -> Tuple[bytes, bytes, str]:
+    """Returns (png, pdf, orientation). The page is a vector PDF; the PNG is its raster."""
     cache: Dict[str, Any] = {}
     cards = _build_cards(req, cache)
     landscape = len(cards) > 2
@@ -838,25 +883,29 @@ def render_order_card(req: OrderCardRequest) -> Tuple[bytes, str, str]:
 
     m = 10.0
     header_bottom = _draw_header(pen, req, m, m, pw - 2 * m)
-    footer_h = 16.0
-    footer_y = ph - m - footer_h
-    _draw_footer(pen, req, m, footer_y, pw - 2 * m, footer_h)
+    if _note_text(req):
+        footer_h = 15.0
+        footer_y = ph - m - footer_h
+        _draw_footer(pen, req, m, footer_y, pw - 2 * m, footer_h)
+        body_bottom = footer_y - 4
+    else:
+        body_bottom = ph - m
 
     body_top = header_bottom + 4
-    body_bottom = footer_y - 4
 
     if landscape:
-        panel_w = 82.0
+        panel_w = 92.0
         vis_w = pw - 2 * m - panel_w - 6
         _draw_visual(pen, req, cards, m, body_top, vis_w, body_bottom - body_top, cache)
         px = m + vis_w + 6
         pen.line(px - 3, body_top, px - 3, body_bottom, color=LINE, width=0.5)
-        sch_h = 30.0
+        sch_h = 28.0
         _draw_schematic(pen, req, px, body_top, panel_w, sch_h)
-        y = _draw_spec(pen, req, px, body_top + sch_h + 2, panel_w, body_bottom - 26)
-        _draw_quantity(pen, req, px, max(y + 1, body_bottom - 40) if y + 1 < body_bottom - 40 else y + 1, panel_w, body_bottom)
+        qty_h = _quantity_height(req)
+        y = _draw_spec(pen, req, px, body_top + sch_h + 2, panel_w, body_bottom - qty_h)
+        _draw_quantity(pen, req, px, max(y + 1, body_bottom - qty_h), panel_w, body_bottom)
     else:
-        sch_h = 34.0
+        sch_h = 44.0
         bottom_h = max(_spec_height(req), sch_h + 4 + _quantity_height(req), 52.0) + 3
         vis_h = max((body_bottom - body_top) * 0.5, body_bottom - body_top - bottom_h)
         _draw_visual(pen, req, cards, m, body_top, pw - 2 * m, vis_h, cache)
@@ -875,19 +924,25 @@ def render_order_card(req: OrderCardRequest) -> Tuple[bytes, str, str]:
             except Exception:
                 pass
 
-    pdf_bytes = doc.tobytes(garbage=3, deflate=True)
-    if (req.format or "png") == "pdf":
-        doc.close()
-        return pdf_bytes, "application/pdf", "landscape" if landscape else "portrait"
-    pix = page.get_pixmap(dpi=req.dpi or 200, alpha=False)
-    png = pix.tobytes("png")
+    fmt = req.format or "png"
+    pdf_bytes = doc.tobytes(garbage=3, deflate=True) if fmt in ("pdf", "both") else b""
+    png = b""
+    if fmt in ("png", "both"):
+        png = page.get_pixmap(dpi=req.dpi or 200, alpha=False).tobytes("png")
     doc.close()
-    return png, "image/png", "landscape" if landscape else "portrait"
+    return png, pdf_bytes, "landscape" if landscape else "portrait"
 
 
 def generate_order_card(req: OrderCardRequest) -> Response:
-    data, mime, orientation = render_order_card(req)
-    ext = "pdf" if mime == "application/pdf" else "png"
+    png, pdf_bytes, orientation = render_order_card(req)
+    fmt = req.format or "png"
+    if fmt == "both":
+        return JSONResponse({
+            "png": base64.b64encode(png).decode("ascii"),
+            "pdf": base64.b64encode(pdf_bytes).decode("ascii"),
+            "orientation": orientation,
+        })
+    data, mime, ext = (pdf_bytes, "application/pdf", "pdf") if fmt == "pdf" else (png, "image/png", "png")
     safe = str(req.docNo or "order").replace("/", "_")
     return Response(
         content=data,

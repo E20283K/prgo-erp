@@ -2,11 +2,16 @@ import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
 import { calculateKashirovkaTotals } from "@/components/documents/work-order/types";
+import { and, eq, or } from "drizzle-orm";
+import { db } from "@/db";
+import { workOrders } from "@/db/schema";
+import { getCompanyIdByCode } from "./crmService";
 import { generateJobTicketPdf } from "./jobTicketPdfGenerator";
 
 const DOC_SERVICE_URL = process.env.DOC_SERVICE_URL ?? "http://localhost:8000";
 const CARD_CACHE_DIR = path.join(process.cwd(), "public", "cache", "telegram", "order-cards");
 const CARD_TIMEOUT_MS = 20_000;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const STATUS_LABELS: Record<string, string> = {
   Draft: "Qoralama",
@@ -138,19 +143,66 @@ export function buildOrderCardPayload(order: any, customNote?: string) {
   };
 }
 
-/** Renders the order card PNG in doc-service. Throws when the service fails. */
-export async function renderOrderCardPng(order: any, customNote?: string): Promise<Buffer> {
+type CardFormat = "png" | "both";
+
+/** Renders the order card in doc-service. Throws when the service fails. */
+async function renderOrderCard(
+  order: any,
+  customNote: string | undefined,
+  format: CardFormat
+): Promise<{ png: Buffer; pdf?: Buffer }> {
   const payload = buildOrderCardPayload(order, customNote);
   const res = await fetch(`${DOC_SERVICE_URL}/generate/pdf/order-card`, {
     method: "POST",
     signal: AbortSignal.timeout(CARD_TIMEOUT_MS),
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, format: "png" }),
+    body: JSON.stringify({ ...payload, format }),
   });
   if (!res.ok) {
     throw new Error(`doc-service order-card ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
-  return Buffer.from(await res.arrayBuffer());
+  if (format === "png") return { png: Buffer.from(await res.arrayBuffer()) };
+  const json = (await res.json()) as { png: string; pdf: string };
+  return { png: Buffer.from(json.png, "base64"), pdf: Buffer.from(json.pdf, "base64") };
+}
+
+export async function renderOrderCardPng(order: any, customNote?: string): Promise<Buffer> {
+  return (await renderOrderCard(order, customNote, "png")).png;
+}
+
+/** PNG preview for the send dialog, built from the saved order. */
+export async function renderWorkOrderCardPreview(
+  workOrderId: string,
+  companyCode: string = "PRINTGOO",
+  customNote?: string
+): Promise<Buffer | null> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const matchOrder = UUID_REGEX.test(workOrderId)
+    ? or(eq(workOrders.id, workOrderId), eq(workOrders.docNo, workOrderId))
+    : eq(workOrders.docNo, workOrderId);
+  const order = await db.query.workOrders.findFirst({
+    where: and(eq(workOrders.companyId, companyId), matchOrder),
+    with: { client: true },
+  });
+  if (!order) return null;
+  return renderOrderCardPng(order, customNote);
+}
+
+/** File names served by the public PDF route: `{docNo}-{sha1 prefix}.pdf`. */
+export const ORDER_CARD_PDF_NAME = /^[A-Za-z0-9_-]+-[a-f0-9]{20}\.pdf$/;
+
+export function orderCardPdfPath(fileName: string): string | null {
+  return ORDER_CARD_PDF_NAME.test(fileName) ? path.join(CARD_CACHE_DIR, fileName) : null;
+}
+
+/**
+ * Absolute download link for Telegram. Telegram cannot open a local address,
+ * so no link is produced while the ERP runs on localhost.
+ */
+function publicPdfLink(fileName: string): string | undefined {
+  const base = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+  if (!/^https?:\/\//.test(base) || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(base)) return undefined;
+  return `${base}/api/public/order-cards/${fileName}`;
 }
 
 export interface OrderCardMedia {
@@ -159,25 +211,34 @@ export interface OrderCardMedia {
   publicUrl: string;
   /** true for the PNG card; false when the PDF job ticket fallback was used */
   isPhoto: boolean;
+  /** Public link to the vector PDF of the same card, when the ERP has a public URL */
+  pdfUrl?: string;
 }
 
 /**
- * Media for the Telegram orders group: the one-page PNG card, or the PDF job
- * ticket when doc-service cannot render the card.
+ * Media for the Telegram orders group: the one-page PNG card plus its PDF, or
+ * the PDF job ticket when doc-service cannot render the card.
  */
 export async function generateOrderCardMedia(order: any, customNote?: string): Promise<OrderCardMedia> {
   const safeDocNo = String(order.docNo || "ZAKAZ").replace(/[^a-zA-Z0-9_-]/g, "_");
   try {
-    const buffer = await renderOrderCardPng(order, customNote);
+    const { png, pdf } = await renderOrderCard(order, customNote, "both");
     if (!fs.existsSync(CARD_CACHE_DIR)) fs.mkdirSync(CARD_CACHE_DIR, { recursive: true });
-    const hash = createHash("sha1").update(buffer).digest("hex").slice(0, 10);
-    const cacheName = `${safeDocNo}-${hash}.png`;
-    fs.writeFileSync(path.join(CARD_CACHE_DIR, cacheName), buffer);
+    const hash = createHash("sha1").update(png).digest("hex").slice(0, 20);
+    const pngName = `${safeDocNo}-${hash}.png`;
+    fs.writeFileSync(path.join(CARD_CACHE_DIR, pngName), png);
+    let pdfUrl: string | undefined;
+    if (pdf?.length) {
+      const pdfName = `${safeDocNo}-${hash}.pdf`;
+      fs.writeFileSync(path.join(CARD_CACHE_DIR, pdfName), pdf);
+      pdfUrl = publicPdfLink(pdfName);
+    }
     return {
-      buffer,
+      buffer: png,
       fileName: `${safeDocNo}.png`,
-      publicUrl: `/cache/telegram/order-cards/${cacheName}`,
+      publicUrl: `/cache/telegram/order-cards/${pngName}`,
       isPhoto: true,
+      pdfUrl,
     };
   } catch (err) {
     console.warn("[orderCard] PNG card failed, falling back to PDF job ticket:", err);
