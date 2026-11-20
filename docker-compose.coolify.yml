@@ -123,6 +123,11 @@ services:
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET_DOCS: ${S3_BUCKET_DOCS:-printgoo-docs}
       TZ: Asia/Tashkent
+      # Fallback for "/artwork/..." files not found on the shared volume
+      ERP_URL: http://app:3000
+    # Uploaded SKU artwork, read for the job ticket and the Telegram order card
+    volumes:
+      - app_artwork:/app/public/artwork:ro
     depends_on:
       minio:
         condition: service_healthy
