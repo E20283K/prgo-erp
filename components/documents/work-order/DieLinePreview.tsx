@@ -203,6 +203,23 @@ export function DieLinePreview({
   const effectiveHolePos = holePosition || "top-center";
   const effectiveHoleOffset = holeOffset !== undefined ? holeOffset : 6;
 
+  // Hole center on a flat card (proof / single views), honoring position + offset
+  const getCardHolePoint = (x: number, y: number, w: number, h: number) => {
+    const d = Math.max(8, (effectiveHoleOffset / safeH) * h);
+    switch (effectiveHolePos) {
+      case "top-left":
+        return { x: x + d, y: y + d, isTop: true };
+      case "top-right":
+        return { x: x + w - d, y: y + d, isTop: true };
+      case "left-center":
+        return { x: x + d, y: y + h / 2, isTop: false };
+      case "right-center":
+        return { x: x + w - d, y: y + h / 2, isTop: false };
+      default:
+        return { x: x + w / 2, y: y + d, isTop: true };
+    }
+  };
+
   // Net Area calculation in cm²
   const netAreaCm2 = useMemo(() => {
     if (isCircle) {
@@ -286,14 +303,14 @@ export function DieLinePreview({
     const cornerRadius = isRounded ? Math.min(10, cardW * 0.18) : 0;
     const chamferCut = cornerType?.toLowerCase().includes("chamfer") ? Math.min(12, cardW * 0.2) : 0;
 
-    const holeRelX = 0.5;
     const holeRadius = Math.max(3.5, (effectiveHoleDiameter / safeH) * cardH * 0.5);
-    const holeDistance = Math.max(8, (effectiveHoleOffset / safeH) * cardH);
-
-    const leftHoleCx = leftX + cardW * holeRelX;
-    const leftHoleCy = startY + holeDistance;
-    const rightHoleCx = rightX + cardW * holeRelX;
-    const rightHoleCy = startY + holeDistance;
+    const leftHole = getCardHolePoint(leftX, startY, cardW, cardH);
+    const rightHole = getCardHolePoint(rightX, startY, cardW, cardH);
+    const leftHoleCx = leftHole.x;
+    const leftHoleCy = leftHole.y;
+    const rightHoleCx = rightHole.x;
+    const rightHoleCy = rightHole.y;
+    const isTopHole = leftHole.isTop;
 
     const frontImg = effectiveFront || artworkFront || "";
     const backImg = effectiveBack || artworkBack || "";
@@ -380,7 +397,7 @@ export function DieLinePreview({
         )}
 
         {/* Dimension callout for Hole Offset (shows when overlay is ON) */}
-        {showDielineOverlay && hasHole && holeSize && holeSize > 0 && (
+        {showDielineOverlay && hasHole && isTopHole && holeSize && holeSize > 0 && (
           <g className="text-rose-500">
             {/* Guide line from top cut edge */}
             <line x1={leftHoleCx + holeRadius + 4} y1={startY} x2={leftX + cardW + 12} y2={startY} stroke="#ef4444" strokeWidth="0.75" strokeDasharray="2 2" />
@@ -492,11 +509,10 @@ export function DieLinePreview({
     const cornerRadius = isRounded ? Math.min(14, cardW * 0.18) : 0;
     const clipId = `single-artwork-${side}-clip`;
 
-    const holeRelX = 0.5;
     const holeRadius = Math.max(3.5, (effectiveHoleDiameter / safeH) * cardH * 0.5);
-    const holeDistance = Math.max(8, (effectiveHoleOffset / safeH) * cardH);
-    const holeCx = tX + cardW * holeRelX;
-    const holeCy = tY + holeDistance;
+    const holePt = getCardHolePoint(tX, tY, cardW, cardH);
+    const holeCx = holePt.x;
+    const holeCy = holePt.y;
 
     return (
       <svg viewBox={`0 0 ${cW} ${cH}`} className="w-full h-full overflow-visible select-none drop-shadow-sm">
