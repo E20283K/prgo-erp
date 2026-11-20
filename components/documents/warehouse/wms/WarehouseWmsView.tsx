@@ -469,7 +469,7 @@ export function WarehouseWmsView({ tab }: { tab?: any } = {}) {
         value: w.id,
         label: w.name || w.code || "Ombor",
         code: w.code || undefined,
-        description: w.branch?.name ? `Filial: ${w.branch.name}` : (w.company?.name ? `Korxona: ${w.company.name}` : undefined),
+        description: w.company?.name || undefined,
         badge: typeLabel,
         group: w.branch?.name || (w.company?.name || "Omborlar"),
         icon: Warehouse,
@@ -498,7 +498,7 @@ export function WarehouseWmsView({ tab }: { tab?: any } = {}) {
               onChange={handleWarehouseChange}
               options={warehouseOptions}
               placeholder="Omborni tanlang..."
-              searchPlaceholder="Ombor nomi, kodi yoki filiali..."
+              searchPlaceholder="Ombor nomi yoki kodi..."
               emptyText="Bunday ombor topilmadi"
               allowCustom={false}
               popoverWidth="w-[360px]"

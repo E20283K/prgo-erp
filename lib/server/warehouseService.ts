@@ -12,7 +12,6 @@ import {
   warehouseDispatchManifests,
   workOrders,
   carriers,
-  branches,
   wmsBins,
   wmsBinItems,
   tradingCatalog,
@@ -104,20 +103,13 @@ export async function getWarehouses(companyCode: string = "PRINTGOO", all: boole
 export async function upsertWarehouse(payload: any, companyCode: string = "PRINTGOO") {
   let targetCompanyId = payload.companyId;
 
-  if (payload.branchId && !targetCompanyId) {
-    const br = await db.query.branches.findFirst({
-      where: eq(branches.id, payload.branchId),
-    });
-    if (br) targetCompanyId = br.companyId;
-  }
-
   if (!targetCompanyId) {
     targetCompanyId = await getCompanyIdByCode(companyCode);
   }
 
   const values = {
     companyId: targetCompanyId,
-    branchId: payload.branchId || null,
+    branchId: null,
     code: payload.code || `WH-${Date.now().toString().slice(-4)}`,
     name: payload.name || "Yangi Ombor",
     type: payload.type || "raw_materials",
@@ -139,6 +131,13 @@ export async function upsertWarehouse(payload: any, companyCode: string = "PRINT
       .returning();
     record = updated;
   } else {
+    // Har bir tashkilotda faqat bitta ombor bo'ladi.
+    const existing = await db.query.warehouses.findFirst({
+      where: eq(warehouses.companyId, targetCompanyId),
+    });
+    if (existing) {
+      throw new Error("Tashkilotda allaqachon ombor mavjud: bitta tashkilotga bitta ombor.");
+    }
     const [inserted] = await db
       .insert(warehouses)
       .values(values)
