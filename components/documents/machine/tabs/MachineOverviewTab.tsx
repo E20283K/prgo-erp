@@ -70,44 +70,20 @@ export function MachineOverviewTab({
   onUploadImage,
   onOpenPreviewModal,
 }: MachineOverviewTabProps) {
-  const { companiesList, plants, departmentsList, employees } = useWorkspaceStore();
+  const { companiesList, departmentsList, employees } = useWorkspaceStore();
 
   // Deduce or determine selected companyId
-  const effectiveCompanyId = useMemo(() => {
-    if (machine.companyId) return machine.companyId;
-    if (machine.branchId) {
-      const foundPlant = plants.find((p) => p.id === machine.branchId);
-      if (foundPlant?.companyId) return foundPlant.companyId;
-    }
-    return companiesList[0]?.id || "";
-  }, [machine.companyId, machine.branchId, plants, companiesList]);
+  const effectiveCompanyId = useMemo(
+    () => machine.companyId || companiesList[0]?.id || "",
+    [machine.companyId, companiesList]
+  );
 
-  // Plants filtered by company
-  const availablePlants = useMemo(() => {
-    if (!effectiveCompanyId) return plants;
-    const filtered = plants.filter((p) => p.companyId === effectiveCompanyId);
-    return filtered.length > 0 ? filtered : plants;
-  }, [plants, effectiveCompanyId]);
-
-  // Departments filtered by selected branch
+  // Departments filtered by selected company
   const availableDepartments = useMemo(() => {
-    if (!machine.branchId) return departmentsList;
-    const pId = machine.branchId.toLowerCase();
-    const plantObj = plants.find((p) => p.id === machine.branchId);
-    const pName = (plantObj?.name || "").toLowerCase();
-
-    const filtered = departmentsList.filter((d) => {
-      if (d.branchId && (d.branchId === machine.branchId || d.branchId.toLowerCase() === pId)) {
-        return true;
-      }
-      if (pName && d.plant && d.plant.toLowerCase().includes(pName)) {
-        return true;
-      }
-      return false;
-    });
-
+    if (!effectiveCompanyId) return departmentsList;
+    const filtered = departmentsList.filter((d) => d.companyId === effectiveCompanyId);
     return filtered.length > 0 ? filtered : departmentsList;
-  }, [departmentsList, machine.branchId, plants]);
+  }, [departmentsList, effectiveCompanyId]);
 
   // Department Combobox items
   const departmentOptions: ComboboxItem[] = useMemo(() => {
@@ -115,7 +91,6 @@ export function MachineOverviewTab({
       value: d.name,
       label: d.name,
       code: d.code,
-      description: d.plant ? `Filial: ${d.plant}` : undefined,
     }));
   }, [availableDepartments]);
 
@@ -127,16 +102,6 @@ export function MachineOverviewTab({
       code: c.code,
     }));
   }, [companiesList]);
-
-  // Plant options for SmartCombobox
-  const plantOptions: ComboboxItem[] = useMemo(() => {
-    return availablePlants.map((p) => ({
-      value: p.id,
-      label: p.name,
-      code: p.code,
-      description: p.shortName || undefined,
-    }));
-  }, [availablePlants]);
 
   // Employee Combobox items
   // Operators are picked from HR only: costing reads their wage, so a typed name would cost nothing real.
@@ -166,27 +131,7 @@ export function MachineOverviewTab({
       (c) => c.id === newCompId || c.code.toLowerCase() === newCompId.toLowerCase() || c.name.toLowerCase() === newCompId.toLowerCase()
     );
     const resolvedCompId = matched ? matched.id : newCompId;
-    const compPlants = plants.filter((p) => p.companyId === resolvedCompId);
-    const keepCurrent = compPlants.some((p) => p.id === machine.branchId);
-    const defaultPlant = keepCurrent ? compPlants.find((p) => p.id === machine.branchId) : compPlants[0];
-
-    onUpdate({
-      companyId: resolvedCompId,
-      branchId: defaultPlant?.id || undefined,
-      location: defaultPlant?.name || machine.location,
-    });
-  };
-
-  const handleBranchChange = (newBranchId: string) => {
-    const matched = plants.find(
-      (p) => p.id === newBranchId || p.code.toLowerCase() === newBranchId.toLowerCase() || p.name.toLowerCase() === newBranchId.toLowerCase()
-    );
-    const resolvedBranchId = matched ? matched.id : newBranchId;
-    onUpdate({
-      branchId: resolvedBranchId,
-      companyId: matched?.companyId || machine.companyId,
-      location: matched?.name || machine.location,
-    });
+    onUpdate({ companyId: resolvedCompId });
   };
 
   const handleDepartmentChange = (val: string) => {
@@ -555,23 +500,6 @@ export function MachineOverviewTab({
                   />
                 </div>
 
-                <div className="space-y-1 min-w-0">
-                  <Label className="text-[11px] font-medium text-muted-foreground">
-                    Filial / Zavod
-                  </Label>
-                  <SmartCombobox
-                    value={machine.branchId || ""}
-                    onChange={handleBranchChange}
-                    options={plantOptions}
-                    placeholder="Filialni tanlang..."
-                    searchPlaceholder="Filial qidirish..."
-                    allowCustom={false}
-                    className="h-8 text-xs bg-background"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1 min-w-0">
                   <Label className="text-[11px] font-medium text-muted-foreground">
                     Bo&apos;lim / Ishlab chiqarish sexi
