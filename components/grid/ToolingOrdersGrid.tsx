@@ -1132,6 +1132,13 @@ export function ToolingOrdersGrid() {
           });
         }
 
+        // A placed order (not a draft) goes to the supplier's Telegram group once, right away
+        const saved = json.order as { id?: string; orderNo?: string; telegramSentAt?: string | null } | undefined;
+        const wasPlaced = editingOrder ? editingOrder.status !== "Draft" : false;
+        if (saved?.id && (formData.status === "Ordered" || formData.status === "In_Production") && !wasPlaced && !saved.telegramSentAt) {
+          void handleSendToTelegram({ id: saved.id, orderNo: saved.orderNo || "" }, { auto: true });
+        }
+
         setIsModalOpen(false);
         fetchOrders();
         void loadProductionQueue();
@@ -1362,32 +1369,40 @@ export function ToolingOrdersGrid() {
   };
 
   // Telegram guruhga buyurtma (PO) yuborish
-  const handleSendToTelegram = async (order: ToolingOrderRecord) => {
+  const handleSendToTelegram = async (
+    order: Pick<ToolingOrderRecord, "id" | "orderNo"> & { fileUrl?: string; fileName?: string },
+    opts?: { auto?: boolean }
+  ) => {
     try {
+      // The server reads the drawing from the saved order / work order; only a file just picked in the modal is sent
       const res = await fetch(
         `/api/v1/production/tooling-orders/${encodeURIComponent(order.id)}/send-telegram`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileUrl: order.fileUrl,
-            fileName: order.fileName,
-          }),
+          body: JSON.stringify(order.fileUrl ? { fileUrl: order.fileUrl, fileName: order.fileName } : {}),
         }
       );
       const json = await res.json();
       if (json.success) {
         addNotification({
           title: "Telegramga yuborildi",
-          description: `${order.orderNo} ta'minotchi guruhiga inline tugmalar bilan jo'natildi.`,
+          description: `${order.orderNo} ta'minotchi guruhiga jo'natildi.`,
           severity: "success",
         });
+        if (json.mediaError) {
+          addNotification({
+            title: "Fayl yuborilmadi",
+            description: `${order.orderNo}: ${json.mediaError}`,
+            severity: "warning",
+          });
+        }
         fetchOrders();
       } else {
         addNotification({
-          title: "Yuborilmadi",
+          title: opts?.auto && json.noGroup ? "Telegram guruh ulanmagan" : "Yuborilmadi",
           description: json.error || "Guruhga yuborishda xatolik",
-          severity: "error",
+          severity: opts?.auto && json.noGroup ? "warning" : "error",
         });
       }
     } catch (err) {
@@ -1776,7 +1791,7 @@ export function ToolingOrdersGrid() {
               <ContextMenuSeparator />
 
               <ContextMenuItem
-                onClick={() => selectedOrder && handleSendToTelegram(selectedOrder)}
+                onClick={() => selectedOrder && handleSendToTelegram({ id: selectedOrder.id, orderNo: selectedOrder.orderNo })}
                 disabled={!selectedOrder}
                 className="gap-2 text-blue-600 dark:text-blue-400 font-medium"
               >
@@ -2401,10 +2416,11 @@ export function ToolingOrdersGrid() {
                 className="h-7 text-xs px-2.5 text-blue-600 dark:text-blue-400 border-blue-500/30 hover:bg-blue-500/10 gap-1.5 cursor-pointer"
                 onClick={() => {
                   if (editingOrder) {
+                    const picked = formData.fileUrl && formData.fileUrl !== editingOrder.fileUrl;
                     handleSendToTelegram({
-                      ...editingOrder,
-                      fileUrl: formData.fileUrl || editingOrder.fileUrl,
-                      fileName: formData.fileName || editingOrder.fileName,
+                      id: editingOrder.id,
+                      orderNo: editingOrder.orderNo,
+                      ...(picked ? { fileUrl: formData.fileUrl, fileName: formData.fileName } : {}),
                     });
                   }
                 }}

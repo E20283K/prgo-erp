@@ -500,6 +500,13 @@ export async function upsertSupplierOrder(
       validWorkOrderId = data.workOrderId!;
     }
   }
+  if (!validWorkOrderId && data.workOrderNo?.trim()) {
+    const woByNo = await db.query.workOrders.findFirst({
+      where: and(eq(workOrders.companyId, companyId), eq(workOrders.docNo, data.workOrderNo.trim())),
+      columns: { id: true },
+    });
+    if (woByNo) validWorkOrderId = woByNo.id;
+  }
 
   const existing = data.id
     ? await db.query.supplierOrders.findFirst({
@@ -516,7 +523,10 @@ export async function upsertSupplierOrder(
         deliveryDeadline: data.deliveryDeadline !== undefined ? data.deliveryDeadline : existing.deliveryDeadline,
         orderType: data.orderType || existing.orderType,
         title: data.title || existing.title,
-        workOrderId: data.workOrderId !== undefined ? validWorkOrderId : existing.workOrderId,
+        workOrderId:
+          data.workOrderId !== undefined || data.workOrderNo !== undefined
+            ? validWorkOrderId || existing.workOrderId
+            : existing.workOrderId,
         workOrderNo: data.workOrderNo !== undefined ? data.workOrderNo : existing.workOrderNo,
         quantity: (data.quantity || 1).toString(),
         unit: data.unit || existing.unit,

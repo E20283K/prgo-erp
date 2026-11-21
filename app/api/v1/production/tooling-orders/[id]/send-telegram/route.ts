@@ -21,7 +21,7 @@ export async function POST(
 
     if (!result.success) {
       return NextResponse.json(
-        { success: false, error: result.error },
+        { success: false, error: result.error, noGroup: result.noGroup || false },
         { status: 400 }
       );
     }
@@ -30,6 +30,7 @@ export async function POST(
       success: true,
       message: "Buyurtma yetkazib beruvchi guruhiga inline tugmalar bilan yuborildi",
       data: result.message,
+      mediaError: result.mediaError,
     });
   } catch (error) {
     console.error("[POST /api/v1/production/tooling-orders/[id]/send-telegram] Error:", error);

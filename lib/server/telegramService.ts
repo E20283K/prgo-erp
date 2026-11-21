@@ -29,6 +29,8 @@ import {
   type OrderCardLogo,
 } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
+import { findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
+import type { WorkOrderToolingItem } from "@/components/documents/work-order/types";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
@@ -827,7 +829,7 @@ function resolveMediaBuffer(
  */
 export async function sendTelegramMessage(
   params: SendTelegramMessageParams
-): Promise<{ success: boolean; message?: TelegramMessage; error?: string }> {
+): Promise<{ success: boolean; message?: TelegramMessage; error?: string; mediaError?: string }> {
   const chatRecord = await db.query.telegramChats.findFirst({
     where: chatMatchWhere(params.chatId),
   });
@@ -838,6 +840,8 @@ export async function sendTelegramMessage(
 
   let tgMsgId = Math.floor(Date.now() / 1000);
   const token = await getEffectiveTelegramBotToken();
+  // Set when the file could not be delivered; the text still goes out so the buttons keep working
+  let mediaError: string | undefined;
 
   let storedMediaUrl = params.photoUrl || params.documentUrl || null;
   const mediaBufferInfo = params.mediaBuffer
@@ -885,6 +889,20 @@ export async function sendTelegramMessage(
           tgMsgId = data.result.message_id;
         } else {
           console.warn(`[sendTelegramMessage] ${endpoint} error:`, data);
+          mediaError = data.description || `${endpoint} failed`;
+          const fallback = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatRecord.chatId,
+              text: params.text,
+              parse_mode: params.parseMode || "HTML",
+              reply_to_message_id: params.replyToTelegramMessageId,
+              reply_markup: params.replyMarkup,
+            }),
+          });
+          const fb = await fallback.json();
+          if (fb.ok && fb.result?.message_id) tgMsgId = fb.result.message_id;
         }
       } else if (params.photoUrl && (params.photoUrl.startsWith("http://") || params.photoUrl.startsWith("https://"))) {
         // Rasm URL bilan yuborish
@@ -957,8 +975,14 @@ export async function sendTelegramMessage(
       senderAvatarUrl: botAvatarUrl || "/cache/telegram/avatars/bot.jpg",
       isOutgoing: true,
       text: params.text,
-      mediaType: mediaBufferInfo?.isPhoto || params.photoUrl ? "photo" : mediaBufferInfo || params.documentUrl ? "document" : null,
-      mediaUrl: storedMediaUrl,
+      mediaType: mediaError
+        ? null
+        : mediaBufferInfo?.isPhoto || params.photoUrl
+        ? "photo"
+        : mediaBufferInfo || params.documentUrl
+        ? "document"
+        : null,
+      mediaUrl: mediaError ? null : storedMediaUrl,
       mediaFileName: mediaBufferInfo?.fileName || params.fileName || null,
       replyToTelegramMessageId: params.replyToTelegramMessageId,
       sentAt: new Date(),
@@ -976,7 +1000,7 @@ export async function sendTelegramMessage(
     })
     .where(eq(telegramChats.id, chatRecord.id));
 
-  return { success: true, message: newMsg };
+  return { success: true, message: newMsg, mediaError };
 }
 
 /**
@@ -1655,7 +1679,7 @@ export async function sendPurchaseOrderToTelegram(params: {
   fileName?: string;
   mediaBuffer?: Buffer;
   isPhoto?: boolean;
-}): Promise<{ success: boolean; message?: TelegramMessage; error?: string }> {
+}): Promise<{ success: boolean; message?: TelegramMessage; error?: string; mediaError?: string; noGroup?: boolean }> {
   const companyCode = params.companyCode || "PRINTGOO";
   const companyId = await getCompanyIdByCode(companyCode);
 
@@ -1685,6 +1709,7 @@ export async function sendPurchaseOrderToTelegram(params: {
   if (!linkedChat) {
     return {
       success: false,
+      noGroup: true,
       error: `"${order.supplier?.name || "Yetkazib beruvchi"}" uchun biriktirilgan faol Telegram guruh topilmadi. Avval ta'minotchi profilidan guruhni ulang.`,
     };
   }
@@ -1693,10 +1718,31 @@ export async function sendPurchaseOrderToTelegram(params: {
   let fileUrl = params.fileUrl || order.fileUrl || null;
   let fileName = params.fileName || order.fileName || null;
 
-  if (!fileUrl && order.workOrderId) {
+  // Orders made from Ehtiyojlar are often linked by doc number only
+  const linkedWo =
+    order.workOrder ||
+    (order.workOrderNo
+      ? await db.query.workOrders.findFirst({
+          where: and(eq(workOrders.companyId, companyId), eq(workOrders.docNo, order.workOrderNo)),
+        })
+      : null);
+
+  // The drawing attached to the work order's own tooling item for this order
+  if (!fileUrl && linkedWo) {
+    const tools = (((linkedWo.dimensions as { toolingItems?: WorkOrderToolingItem[] } | null)?.toolingItems) || []).filter(
+      (t) => t.fileUrl
+    );
+    const tool = findDeliveryTarget(tools, { orderNo: order.orderNo, orderType: order.orderType, title: order.title });
+    if (tool?.fileUrl) {
+      fileUrl = tool.fileUrl;
+      fileName = tool.fileName || fileName;
+    }
+  }
+
+  if (!fileUrl && linkedWo) {
     try {
       const woAttachments = await db.query.workOrderAttachments.findMany({
-        where: eq(workOrderAttachments.workOrderId, order.workOrderId),
+        where: eq(workOrderAttachments.workOrderId, linkedWo.id),
       });
 
       if (woAttachments && woAttachments.length > 0) {
@@ -1730,8 +1776,8 @@ export async function sendPurchaseOrderToTelegram(params: {
       console.warn("[sendPurchaseOrderToTelegram] Error fetching wo attachments:", woAttErr);
     }
 
-    if (!fileUrl && order.workOrder?.photoUrl) {
-      fileUrl = order.workOrder.photoUrl;
+    if (!fileUrl && linkedWo?.photoUrl) {
+      fileUrl = linkedWo.photoUrl;
       fileName = `${order.workOrderNo || "buyurtma"}_namuna.jpg`;
     }
   }
