@@ -12,6 +12,7 @@ import { parsePayoutLocally, parsePayoutMessage } from "@/lib/ai/payoutParser";
 import {
   createPayoutTx,
   getEmployeeDirectory,
+  getAdvanceLimitCheck,
   getPeriodSummary,
   matchEmployees,
   todayIso,
@@ -450,6 +451,7 @@ async function renderDraftCard(draft: TelegramPayoutDraft, directory?: Directory
   const items = draft.items;
   const lines: string[] = [];
   const keyboard: { text: string; callback_data: string }[][] = [];
+  const draftAdvanced = new Map<string, number>(); // employee|period -> advances already counted from this draft
 
   if (draft.transcript) lines.push(`<i>«${esc(draft.transcript)}»</i>\n`);
 
@@ -459,9 +461,27 @@ async function renderDraftCard(draft: TelegramPayoutDraft, directory?: Directory
     const head = `${i + 1}. ${KIND_LABEL[it.kind]} · ${dmy(it.advanceDate)}${it.period !== it.advanceDate.slice(0, 7) ? ` · ${it.period} uchun` : ""}`;
     if (emp) {
       const s = await getPeriodSummary(emp.id, it.period);
+
+      // Limit control before saving: earlier advances + this and the draft's earlier rows for the same month.
+      let limitLine = "";
+      if (it.kind === "advance" && it.currency.toUpperCase() === emp.currency.toUpperCase()) {
+        const key = `${emp.id}|${it.period}`;
+        const inDraft = draftAdvanced.get(key) ?? 0;
+        draftAdvanced.set(key, inDraft + it.amount);
+        const check = await getAdvanceLimitCheck(db, emp.id, it.period, inDraft + it.amount);
+        if (check) {
+          limitLine =
+            `\n${check.basis === "payroll" ? "Hisoblangan" : "Oklad"}: ${money(check.limit, it.currency)}, bu bilan jami avans: ${money(check.total, it.currency)}` +
+            (check.over > 0
+              ? `\n<b>Oylikdan ${money(check.over, it.currency)} oshadi, keyingi oyga qarz bo'ladi</b>`
+              : `\nQoladi: ${money(check.limit - check.total, it.currency)}`);
+        }
+      }
+
       lines.push(
         `${head}\n<b>${esc(emp.fullName)}</b>${emp.position ? ` (${esc(emp.position)})` : ""} — <b>${money(it.amount, it.currency)}</b>` +
           `\nShu oy berilgan: ${money(s.advances + s.settlements, it.currency)}` +
+          limitLine +
           (it.note ? `\nIzoh: ${esc(it.note)}` : "")
       );
     } else if (it.candidates.length > 0) {

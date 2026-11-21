@@ -31,6 +31,13 @@ import { getCompanyIdByCode } from "./crmService";
 import { getCompanyExchangeRate } from "./financeService";
 import { syncEmployeeToAllActiveDevices, removeEmployeeFromAllActiveDevices } from "./hikvisionService";
 import { generateNextCode } from "@/lib/utils";
+import {
+  PAID_ATTENDANCE_STATUSES,
+  computeTotals,
+  previousPeriod,
+  prorateSalary,
+  workingDaysInPeriod,
+} from "./payrollMath";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -681,12 +688,15 @@ export async function upsertShiftRecord(
 
 export async function getAttendanceList(
   companyCode: string = "PRINTGOO",
-  filters?: { workDate?: string; employeeId?: string; status?: string }
+  filters?: { workDate?: string; employeeId?: string; status?: string; period?: string }
 ): Promise<AttendanceRecord[]> {
   const companyId = await getCompanyIdByCode(companyCode);
 
   const rawLogs = await db.query.attendanceLogs.findMany({
-    where: eq(attendanceLogs.companyId, companyId),
+    where: and(
+      eq(attendanceLogs.companyId, companyId),
+      filters?.period ? sql`${attendanceLogs.workDate}::text LIKE ${filters.period + "%"}` : undefined
+    ),
     with: {
       employee: {
         with: { department: true },
@@ -797,6 +807,11 @@ export async function recordBiometricTurnstileEvent(
 
     return { success: true, message: "Kirish (Check-in) muvaffaqiyatli qayd etildi", recordId: newLog.id };
   } else {
+    // Qo'lda belgilangan kunni turniket qayta yozmaydi (buxgalter tuzatishi ustun).
+    if (existingLog.sourceDevice?.includes("manual")) {
+      return { success: true, message: "Bu kun qo'lda belgilangan, turniket yozuvi e'tiborga olinmadi", recordId: existingLog.id };
+    }
+
     // Agar mavjud yozuv bo'lsa - Oflayn va tartibsiz kelgan loglarni aqlli rekonsilyatsiya qilish
     const currentCheckIn = existingLog.checkIn ? new Date(existingLog.checkIn) : null;
     const currentCheckOut = existingLog.checkOut ? new Date(existingLog.checkOut) : null;
@@ -872,6 +887,96 @@ export async function recordBiometricTurnstileEvent(
 }
 
 // ─── 6. Piecework Service ─────────────────────────────────────────────────────
+
+export type ManualAttendanceStatus = "present" | "late" | "absent" | "sick_leave" | "vacation" | "day_off";
+const MANUAL_STATUSES: ManualAttendanceStatus[] = ["present", "late", "absent", "sick_leave", "vacation", "day_off"];
+
+export interface ManualAttendanceEntry {
+  employeeId: string;
+  workDate: string; // YYYY-MM-DD
+  /** null removes a manual mark (turnstile records cannot be removed). */
+  status: ManualAttendanceStatus | null;
+}
+
+/**
+ * Qo'lda yo'qlama (oylik tabel): belgi `sourceDevice = "manual"` bilan saqlanadi va turniketdan ustun.
+ * Tasdiqlangan yoki yopilgan oyning tabeli o'zgarmaydi.
+ */
+export async function setManualAttendance(
+  entries: ManualAttendanceEntry[],
+  companyCode: string = "PRINTGOO",
+  actorName?: string
+): Promise<{ success: boolean; saved: number; skipped: { employeeId: string; workDate: string; reason: string }[] }> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const skipped: { employeeId: string; workDate: string; reason: string }[] = [];
+  let saved = 0;
+
+  await db.transaction(async (tx) => {
+    for (const e of entries) {
+      const skip = (reason: string) => skipped.push({ employeeId: e.employeeId, workDate: e.workDate, reason });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(e.workDate)) { skip("Sana noto'g'ri"); continue; }
+      if (e.status !== null && !MANUAL_STATUSES.includes(e.status)) { skip("Holat noto'g'ri"); continue; }
+
+      const emp = await tx.query.employees.findFirst({
+        where: and(eq(employees.id, e.employeeId), eq(employees.companyId, companyId)),
+      });
+      if (!emp) { skip("Hodim topilmadi"); continue; }
+      if (e.workDate < emp.hireDate) { skip("Ishga kirishdan oldingi sana"); continue; }
+
+      const period = e.workDate.slice(0, 7);
+      const payroll = await tx.query.payrollRecords.findFirst({
+        where: and(eq(payrollRecords.employeeId, emp.id), eq(payrollRecords.period, period)),
+      });
+      if (payroll && (payroll.status === "approved" || payroll.status === "paid")) {
+        skip(`${period} oyi tasdiqlangan`);
+        continue;
+      }
+
+      const existing = await tx.query.attendanceLogs.findFirst({
+        where: and(eq(attendanceLogs.employeeId, emp.id), eq(attendanceLogs.workDate, e.workDate)),
+      });
+
+      if (e.status === null) {
+        if (existing && existing.sourceDevice === "manual") {
+          await tx.delete(attendanceLogs).where(eq(attendanceLogs.id, existing.id));
+          saved++;
+        } else if (existing) {
+          skip("Turniket yozuvini o'chirib bo'lmaydi");
+        }
+        continue;
+      }
+
+      const worked = e.status === "present" || e.status === "late";
+      const note = `Qo'lda belgilandi${actorName ? ` (${actorName})` : ""}`;
+      if (existing) {
+        await tx
+          .update(attendanceLogs)
+          .set({
+            status: e.status,
+            sourceDevice: "manual",
+            workedHours: worked ? (Number(existing.workedHours) > 0 ? existing.workedHours : "8") : "0",
+            overtimeHours: worked ? existing.overtimeHours : "0",
+            notes: note,
+          })
+          .where(eq(attendanceLogs.id, existing.id));
+      } else {
+        await tx.insert(attendanceLogs).values({
+          companyId,
+          employeeId: emp.id,
+          workDate: e.workDate,
+          shiftType: emp.currentShift || "day",
+          status: e.status,
+          sourceDevice: "manual",
+          workedHours: worked ? "8" : "0",
+          notes: note,
+        });
+      }
+      saved++;
+    }
+  });
+
+  return { success: true, saved, skipped };
+}
 
 export async function getPieceworkList(
   companyCode: string = "PRINTGOO",
@@ -1041,6 +1146,10 @@ export async function getPayrollList(
     penaltyDeduction: Number(p.penaltyDeduction) || 0,
     totalDeductions: Number(p.totalDeductions) || 0,
     netPay: Number(p.netPay) || 0,
+    carriedDebtIn: Number(p.carriedDebtIn) || 0,
+    carriedDebtOut: Number(p.carriedDebtOut) || 0,
+    workedDays: p.workedDays,
+    workingDays: p.workingDays,
     currency: p.currency,
     status: p.status as any,
     paymentDate: p.paymentDate || undefined,
@@ -1116,13 +1225,23 @@ export async function calculatePeriodPayroll(
       const totalWorkedHours = attList.reduce((sum, item) => sum + Number(item.workedHours || 0), 0);
       const totalOvertimeHours = attList.reduce((sum, item) => sum + Number(item.overtimeHours || 0), 0);
 
-      // 3. Asosiy oklad yoki soatbay stavka bo'yicha to'lov
-      let basePay = Number(emp.baseSalary) || 0;
+      // 3. Oklad tabelga proporsional (ish kuni bo'yicha) yoki soatbay stavka bo'yicha to'lov.
+      // Tabel yo'q xodim (shu oyda birorta davomat yozuvi yo'q) to'liq oklad oladi.
+      const paidDates = attList
+        .filter((a) => (PAID_ATTENDANCE_STATUSES as readonly string[]).includes(a.status))
+        .map((a) => String(a.workDate));
+      const workingDays = workingDaysInPeriod(period, emp.hireDate, emp.terminationDate);
+      const proration = prorateSalary(Number(emp.baseSalary) || 0, workingDays, paidDates, attList.length > 0);
+      let basePay = proration.amount;
       if (emp.wageType === "hourly") {
         basePay = totalWorkedHours * (Number(emp.hourlyRate) || 0);
-      } else if (emp.wageType === "piecework") {
-        basePay = Number(emp.baseSalary) || 0; // minimal oklad
       }
+
+      // Oldingi oydan o'tgan qarz (avans oylikdan oshib ketgan edi)
+      const prevRecord = await tx.query.payrollRecords.findFirst({
+        where: and(eq(payrollRecords.employeeId, emp.id), eq(payrollRecords.period, previousPeriod(period))),
+      });
+      const carriedDebtIn = Number(prevRecord?.carriedDebtOut) || 0;
 
       // Overtime to'lovi: soatbay stavka × 1.5
       const hourlyBase = Number(emp.hourlyRate) > 0 ? Number(emp.hourlyRate) : (basePay / 168);
@@ -1153,21 +1272,28 @@ export async function calculatePeriodPayroll(
         .filter((adj) => adj.adjustmentType === "penalty")
         .reduce((sum, a) => sum + Number(a.amount || 0), 0);
 
-      // 6. Gross Pay hisoblash
-      const grossPay = Math.round(basePay + pieceworkSum + overtimePay + totalBonus);
-
-      // 7. Soliqlar (O'zbekiston soliq stavkalari: 12% JShODS)
-      const taxDeduction = Math.round(grossPay * 0.12);
-
-      // 8. Total Deductions & Net Pay
-      const totalDeductions = Math.round(totalAdvance + totalPenalty + taxDeduction);
-      const netPay = Math.max(0, grossPay - totalDeductions);
+      // 6-8. Soliq ushlanmaydi (gross = net). Avans oylikdan oshsa, ortig'i keyingi oyga qarz bo'lib o'tadi.
+      const taxDeduction = 0;
+      const { grossPay, netPay, carriedDebtOut, totalDeductions } = computeTotals({
+        gross: basePay + pieceworkSum + overtimePay + totalBonus,
+        penalty: totalPenalty,
+        advances: totalAdvance,
+        carriedDebtIn,
+        tax: taxDeduction,
+      });
+      const daysFields = {
+        carriedDebtIn: String(carriedDebtIn),
+        carriedDebtOut: String(carriedDebtOut),
+        workedDays: proration.workedDays,
+        workingDays: proration.workingDays,
+      };
 
       // Payroll yozuvini kiritish yoki yangilash
       if (existingRecord) {
         await tx
           .update(payrollRecords)
           .set({
+            ...daysFields,
             baseSalary: String(basePay),
             pieceworkAmount: String(pieceworkSum),
             overtimeAmount: String(overtimePay),
@@ -1184,6 +1310,7 @@ export async function calculatePeriodPayroll(
           .where(eq(payrollRecords.id, existingRecord.id));
       } else {
         await tx.insert(payrollRecords).values({
+          ...daysFields,
           companyId,
           period,
           employeeId: emp.id,
@@ -1209,6 +1336,36 @@ export async function calculatePeriodPayroll(
   } catch (err) {
     return { success: false, count: 0, error: err instanceof Error ? err.message : "Hisoblashda xatolik" };
   }
+}
+
+/**
+ * Oyni tasdiqlash: hisoblangan yozuvlar qulflanadi (qayta hisoblanmaydi, avans yozib bo'lmaydi).
+ * `reopen` tasdiqlangan (lekin hali to'lanmagan) yozuvlarni qayta "hisoblangan" holatiga qaytaradi.
+ */
+export async function setPeriodApproval(
+  period: string,
+  action: "approve" | "reopen",
+  companyCode: string = "PRINTGOO"
+): Promise<{ success: boolean; changed: number; error?: string }> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return { success: false, changed: 0, error: "Davr noto'g'ri" };
+  const companyId = await getCompanyIdByCode(companyCode);
+  const from = action === "approve" ? "calculated" : "approved";
+  const to = action === "approve" ? "approved" : "calculated";
+  const rows = await db
+    .update(payrollRecords)
+    .set({ status: to, updatedAt: new Date() })
+    .where(
+      and(
+        eq(payrollRecords.companyId, companyId),
+        eq(payrollRecords.period, period),
+        eq(payrollRecords.status, from)
+      )
+    )
+    .returning({ id: payrollRecords.id });
+  if (action === "approve" && rows.length === 0) {
+    return { success: false, changed: 0, error: "Tasdiqlanadigan hisoblangan yozuv yo'q. Avval hisoblang." };
+  }
+  return { success: true, changed: rows.length };
 }
 
 // ─── 8. Employee History & Advances ───────────────────────────────────────────

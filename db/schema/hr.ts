@@ -379,6 +379,13 @@ export const payrollRecords = pgTable(
     penaltyDeduction: numeric("penalty_deduction", { precision: 15, scale: 2 }).default("0").notNull(),
     totalDeductions: numeric("total_deductions", { precision: 15, scale: 2 }).notNull(),
     netPay: numeric("net_pay", { precision: 15, scale: 2 }).notNull(), // Qo'lga tegadigan summa
+    /** Debt brought in from the previous month (advances that exceeded its pay), deducted here. */
+    carriedDebtIn: numeric("carried_debt_in", { precision: 15, scale: 2 }).default("0").notNull(),
+    /** Advances beyond this month's pay: moves on to the next month as debt. */
+    carriedDebtOut: numeric("carried_debt_out", { precision: 15, scale: 2 }).default("0").notNull(),
+    /** Timesheet basis of the salary; null when salary was paid in full without a timesheet. */
+    workedDays: integer("worked_days"),
+    workingDays: integer("working_days"),
     currency: varchar("currency", { length: 3 }).default("UZS").notNull(),
     status: payrollStatusEnum("status").default("calculated").notNull(),
     paymentDate: date("payment_date"),

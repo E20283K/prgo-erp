@@ -39,7 +39,7 @@ export function PayrollGrid() {
   const [loading, setLoading] = useState(true);
   const [calculating, setCalculating] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
-  const [selectedPeriod, setSelectedPeriod] = useState("2026-10");
+  const [selectedPeriod, setSelectedPeriod] = useState(() => new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 7));
 
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -99,12 +99,16 @@ export function PayrollGrid() {
       { id: "employeeName", title: "Xodim F.I.O.", width: 210, icon: GridColumnIcon.HeaderString },
       { id: "department", title: "Sex / Bo'lim", width: 170, icon: GridColumnIcon.HeaderString },
       { id: "wageType", title: "Stavka", width: 100, icon: GridColumnIcon.HeaderString },
-      { id: "baseSalary", title: "Oklad (UZS)", width: 130, icon: GridColumnIcon.HeaderNumber },
-      { id: "pieceworkAmount", title: "Ishbay summa", width: 140, icon: GridColumnIcon.HeaderNumber },
-      { id: "bonusAmount", title: "Bonus", width: 110, icon: GridColumnIcon.HeaderNumber },
-      { id: "grossPay", title: "Jami hisoblangan", width: 150, icon: GridColumnIcon.HeaderNumber },
-      { id: "totalDeductions", title: "Ushlanmalar", width: 130, icon: GridColumnIcon.HeaderNumber },
-      { id: "netPay", title: "Sof maosh (Net)", width: 160, icon: GridColumnIcon.HeaderNumber },
+      { id: "days", title: "Kun", width: 70, icon: GridColumnIcon.HeaderString },
+      { id: "baseSalary", title: "Oklad", width: 120, icon: GridColumnIcon.HeaderNumber },
+      { id: "pieceworkAmount", title: "Ishbay", width: 120, icon: GridColumnIcon.HeaderNumber },
+      { id: "bonusAmount", title: "Bonus", width: 100, icon: GridColumnIcon.HeaderNumber },
+      { id: "grossPay", title: "Hisoblangan", width: 130, icon: GridColumnIcon.HeaderNumber },
+      { id: "advanceDeduction", title: "Avans", width: 120, icon: GridColumnIcon.HeaderNumber },
+      { id: "carriedDebtIn", title: "Oldingi qarz", width: 120, icon: GridColumnIcon.HeaderNumber },
+      { id: "penaltyDeduction", title: "Jarima", width: 100, icon: GridColumnIcon.HeaderNumber },
+      { id: "netPay", title: "Qoldiq", width: 130, icon: GridColumnIcon.HeaderNumber },
+      { id: "carriedDebtOut", title: "Qarz", width: 110, icon: GridColumnIcon.HeaderNumber },
       { id: "status", title: "Holati", width: 110, icon: GridColumnIcon.HeaderString },
     ],
     []
@@ -120,23 +124,44 @@ export function PayrollGrid() {
         return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
       }
 
+      if (col.id === "days") {
+        const d = row.workingDays
+          ? row.workedDays == null
+            ? `- / ${row.workingDays}`
+            : `${row.workedDays} / ${row.workingDays}`
+          : "";
+        return {
+          kind: GridCellKind.Text,
+          data: d,
+          displayData: d,
+          allowOverlay: false,
+          // No timesheet rows for the month: salary was paid in full, flag it.
+          themeOverride: row.workedDays == null ? { textDark: "#d97706" } : undefined,
+        };
+      }
+
       if (
         col.id === "baseSalary" ||
         col.id === "pieceworkAmount" ||
         col.id === "bonusAmount" ||
         col.id === "grossPay" ||
-        col.id === "totalDeductions" ||
+        col.id === "advanceDeduction" ||
+        col.id === "carriedDebtIn" ||
+        col.id === "penaltyDeduction" ||
+        col.id === "carriedDebtOut" ||
         col.id === "netPay"
       ) {
         const num = Number((row as any)[col.id]) || 0;
         return {
           kind: GridCellKind.Text,
           data: String(num),
-          displayData: `${num.toLocaleString("uz-UZ")} UZS`,
+          displayData: num ? num.toLocaleString("uz-UZ") : "-",
           allowOverlay: true,
           themeOverride:
             col.id === "netPay"
               ? { textDark: "#059669", baseFontStyle: "bold 12px monospace" }
+              : col.id === "carriedDebtOut"
+              ? { textDark: num > 0 ? "#dc2626" : undefined, baseFontStyle: "bold 12px monospace" }
               : col.id === "grossPay"
               ? { textDark: "#2563eb", baseFontStyle: "bold 12px monospace" }
               : { baseFontStyle: "12px monospace" },
@@ -155,14 +180,15 @@ export function PayrollGrid() {
       }
 
       if (col.id === "status") {
-        const isApproved = row.status === "approved" || row.status === "paid";
+        const label =
+          row.status === "paid" ? "Yopilgan" : row.status === "approved" ? "Tasdiqlangan" : "Hisoblangan";
         return {
           kind: GridCellKind.Text,
           data: row.status,
-          displayData: isApproved ? "Tasdiqlangan" : "Hisoblangan",
+          displayData: label,
           allowOverlay: false,
           themeOverride: {
-            textDark: isApproved ? "#059669" : "#d97706",
+            textDark: row.status === "paid" ? "#059669" : row.status === "approved" ? "#2563eb" : "#d97706",
             baseFontStyle: "bold 11px sans-serif",
           },
         };
@@ -230,6 +256,41 @@ export function PayrollGrid() {
     }
   };
 
+  // Month state is derived from the records: closed = every employee paid out, locked = approved.
+  const monthState = useMemo(() => {
+    if (data.length === 0) return null;
+    if (data.every((p) => p.status === "paid")) return "closed";
+    if (data.every((p) => p.status === "approved" || p.status === "paid")) return "approved";
+    return "open";
+  }, [data]);
+  const hasCalculated = data.some((p) => p.status === "calculated");
+  const hasApproved = data.some((p) => p.status === "approved");
+  const unpaidCount = data.filter((p) => p.status !== "paid").length;
+  const withoutTimesheet = data.filter((p) => p.workedDays == null && Number(p.baseSalary) > 0).length;
+  const debtTotal = data.reduce((s, p) => s + (p.carriedDebtOut || 0), 0);
+
+  const handleApproval = async (action: "approve" | "reopen") => {
+    setCalculating(true);
+    try {
+      const res = await fetch("/api/v1/hr/payroll/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period: selectedPeriod, action }),
+      });
+      const json = await res.json();
+      addNotification({
+        title: json.success ? (action === "approve" ? "Oy tasdiqlandi" : "Oy qayta ochildi") : "Bajarilmadi",
+        description: json.success ? `${json.changed} ta yozuv, ${selectedPeriod}` : json.error || "Xatolik",
+        severity: json.success ? "success" : "error",
+      });
+      if (json.success) fetchPayroll();
+    } catch {
+      addNotification({ title: "Xatolik", description: "Server xatosi yuz berdi", severity: "error" });
+    } finally {
+      setCalculating(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-background select-none">
       {/* ── 1C Enterprise Industrial Toolbar ── */}
@@ -243,8 +304,32 @@ export function PayrollGrid() {
             onClick={handleCalculatePayroll}
           >
             <Coins className={`w-3.5 h-3.5 ${calculating ? "animate-spin" : ""}`} />
-            <span>{calculating ? "Hisoblanmoqda..." : "Avtomatik hisoblash"}</span>
+            <span>{calculating ? "Hisoblanmoqda..." : "Hisoblash"}</span>
           </Button>
+
+          {hasCalculated && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2.5 text-xs gap-1 shadow-none rounded cursor-pointer"
+              disabled={calculating}
+              onClick={() => handleApproval("approve")}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Tasdiqlash</span>
+            </Button>
+          )}
+          {hasApproved && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2.5 text-xs shadow-none rounded cursor-pointer"
+              disabled={calculating}
+              onClick={() => handleApproval("reopen")}
+            >
+              Qayta ochish
+            </Button>
+          )}
 
           <Separator orientation="vertical" className="h-4 mx-1" />
 
@@ -295,11 +380,30 @@ export function PayrollGrid() {
           </Button>
 
           <div className="flex items-center gap-1.5 font-mono text-[11px]">
+            {monthState && (
+              <Badge variant="outline" className="h-6 px-1.5 font-normal">
+                {monthState === "closed"
+                  ? "Oy yopilgan"
+                  : monthState === "approved"
+                  ? `Tasdiqlangan, to'lanmagan: ${unpaidCount}`
+                  : "Oy ochiq"}
+              </Badge>
+            )}
+            {withoutTimesheet > 0 && (
+              <Badge variant="outline" className="h-6 px-1.5 font-normal text-amber-600 border-amber-300">
+                Tabelsiz: {withoutTimesheet}
+              </Badge>
+            )}
+            {debtTotal > 0 && (
+              <Badge variant="outline" className="h-6 px-1.5 font-normal text-red-600 border-red-300">
+                Qarz: {debtTotal.toLocaleString("uz-UZ")}
+              </Badge>
+            )}
             <Badge variant="outline" className="h-6 px-1.5 font-normal">
               FOT: {totalGross.toLocaleString("uz-UZ")}
             </Badge>
             <Badge variant="outline" className="h-6 px-1.5 font-normal text-emerald-600 border-emerald-300">
-              Sof: {totalNet.toLocaleString("uz-UZ")}
+              Qoldiq: {totalNet.toLocaleString("uz-UZ")}
             </Badge>
           </div>
         </div>

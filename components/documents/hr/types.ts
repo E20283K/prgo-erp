@@ -208,6 +208,10 @@ export interface PayrollRecord {
   penaltyDeduction: number;
   totalDeductions: number;
   netPay: number;
+  carriedDebtIn?: number;
+  carriedDebtOut?: number;
+  workedDays?: number | null;
+  workingDays?: number | null;
   currency?: string;
   status: PayrollStatus;
   paymentDate?: string;
@@ -242,10 +246,11 @@ export type PayoutSource = "ui" | "telegram";
 /** One month of an employee's pay account: what was accrued vs. what was handed out. */
 export interface EmployeeLedgerPeriod {
   period: string;
-  accrued: number | null; // gross − tax − penalty; null until payroll is calculated
+  accrued: number | null; // gross − tax − penalty − carried debt; null until payroll is calculated
   advances: number;
   settlements: number;
-  balance: number | null; // accrued − advances − settlements
+  balance: number | null; // accrued − advances − settlements; negative = advances exceed pay (debt)
+  carriedDebtIn: number;
   payrollStatus: string | null;
 }
 

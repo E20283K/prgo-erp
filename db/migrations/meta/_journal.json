@@ -183,6 +183,13 @@
       "when": 1795210036273,
       "tag": "0025_supplier_order_received_at",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795277123661,
+      "tag": "0026_payroll_carried_debt",
+      "breakpoints": true
     }
   ]
 }

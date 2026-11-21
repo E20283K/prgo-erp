@@ -70,6 +70,7 @@ import {
   // HR icons
   UserCheck,
   CalendarClock,
+  ScanFace,
   Clock,
   Award,
   Server,
@@ -239,7 +240,8 @@ export const MODULE_NAV: ModuleDef[] = [
         icon: CalendarClock,
         defaultOpen: true,
         items: [
-          { id: "attendance", label: "Timesheet", icon: CalendarClock },
+          { id: "timesheet", label: "Monthly timesheet", icon: CalendarClock },
+          { id: "attendance", label: "Gate log", icon: ScanFace },
           { id: "shifts", label: "Shifts", icon: Clock },
           { id: "devices", label: "Biometrics", icon: Server },
         ],

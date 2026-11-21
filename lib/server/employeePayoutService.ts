@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db, type DbExec } from "@/db";
 import { employeeAdvances, employees, payrollRecords, positions, users } from "@/db/schema";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type {
@@ -37,6 +37,58 @@ export interface CreatePayoutResult {
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+export function fmtMoney(n: number): string {
+  return Math.round(n).toLocaleString("ru-RU");
+}
+
+export interface AdvanceLimitCheck {
+  /** What the employee earns for the month: calculated pay (before advances) or, until then, the salary. */
+  limit: number;
+  /** Advances already recorded for the month plus `extra`. */
+  total: number;
+  /** How much the advances exceed the limit (0 when within). */
+  over: number;
+  currency: string;
+  basis: "payroll" | "salary";
+}
+
+/** Advance control for one employee/month; `extra` is an amount not recorded yet (a draft). Null when no limit is known. */
+export async function getAdvanceLimitCheck(
+  exec: DbExec,
+  employeeId: string,
+  period: string,
+  extra: number
+): Promise<AdvanceLimitCheck | null> {
+  const emp = await exec.query.employees.findFirst({ where: eq(employees.id, employeeId) });
+  if (!emp) return null;
+  const payroll = await exec.query.payrollRecords.findFirst({
+    where: and(eq(payrollRecords.employeeId, emp.id), eq(payrollRecords.period, period)),
+  });
+  const [{ total }] = await exec
+    .select({ total: sql<string>`coalesce(sum(${employeeAdvances.amount}), 0)` })
+    .from(employeeAdvances)
+    .where(
+      and(
+        eq(employeeAdvances.employeeId, emp.id),
+        eq(employeeAdvances.period, period),
+        eq(employeeAdvances.kind, "advance"),
+        ne(employeeAdvances.status, "cancelled")
+      )
+    );
+  const limit = payroll
+    ? Number(payroll.grossPay) - Number(payroll.penaltyDeduction) - Number(payroll.carriedDebtIn)
+    : Number(emp.baseSalary) || 0;
+  if (!(limit > 0)) return null;
+  const sum = Number(total) + extra;
+  return {
+    limit,
+    total: sum,
+    over: Math.max(0, sum - limit),
+    currency: (emp.currency || "UZS").toUpperCase(),
+    basis: payroll ? "payroll" : "salary",
+  };
+}
+
 export function todayIso(): string {
   // Tashkent business day (UTC+5) — payouts are recorded in local time.
   return new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
@@ -63,6 +115,9 @@ export async function createPayoutTx(tx: Tx, input: CreatePayoutInput): Promise<
   if (input.kind === "advance" && payroll?.status === "paid") {
     throw new Error(`${emp.fullName}: ${period} oyligi to'liq to'langan, avans yozib bo'lmaydi`);
   }
+  if (input.kind === "advance" && payroll?.status === "approved") {
+    throw new Error(`${emp.fullName}: ${period} oyi tasdiqlangan, avans yozib bo'lmaydi (faqat raschot)`);
+  }
 
   const [row] = await tx
     .insert(employeeAdvances)
@@ -85,6 +140,14 @@ export async function createPayoutTx(tx: Tx, input: CreatePayoutInput): Promise<
     .returning({ id: employeeAdvances.id });
 
   const result: CreatePayoutResult = { id: row.id };
+
+  if (input.kind === "advance") {
+    // Control: advances of the month must not exceed what the employee earns (carried debt moves on otherwise).
+    const check = await getAdvanceLimitCheck(tx, emp.id, period, 0);
+    if (check && check.over > 0 && check.currency === (input.currency || emp.currency || "UZS").toUpperCase()) {
+      result.warning = `${emp.fullName}: ${period} avanslari ${fmtMoney(check.total)} — oylikdan ${fmtMoney(check.over)} oshdi, keyingi oyga qarz bo'ladi`;
+    }
+  }
 
   if (input.kind === "settlement") {
     if (!payroll) {
@@ -224,7 +287,7 @@ export async function getEmployeeLedger(employeeId: string, months = 12): Promis
   const ensure = (period: string) => {
     let p = map.get(period);
     if (!p) {
-      p = { period, accrued: null, advances: 0, settlements: 0, balance: null, payrollStatus: null };
+      p = { period, accrued: null, advances: 0, settlements: 0, balance: null, carriedDebtIn: 0, payrollStatus: null };
       map.set(period, p);
     }
     return p;
@@ -233,7 +296,8 @@ export async function getEmployeeLedger(employeeId: string, months = 12): Promis
 
   for (const pr of payrolls) {
     const p = ensure(pr.period);
-    p.accrued = Number(pr.grossPay) - Number(pr.taxDeduction) - Number(pr.penaltyDeduction);
+    p.carriedDebtIn = Number(pr.carriedDebtIn) || 0;
+    p.accrued = Number(pr.grossPay) - Number(pr.taxDeduction) - Number(pr.penaltyDeduction) - p.carriedDebtIn;
     p.payrollStatus = pr.status;
   }
   for (const e of entries) {
@@ -261,6 +325,7 @@ export async function getPeriodSummary(employeeId: string, period: string) {
       advances: 0,
       settlements: 0,
       balance: null,
+      carriedDebtIn: 0,
       payrollStatus: null,
     }
   );

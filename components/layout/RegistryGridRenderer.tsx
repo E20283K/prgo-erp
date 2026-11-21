@@ -19,6 +19,7 @@ const TradingGrid = dynamic(() => import("@/components/grid/TradingGrid").then((
 const EmployeesGrid = dynamic(() => import("@/components/documents/hr/employees/EmployeesGrid").then((mod) => mod.EmployeesGrid), { ssr: false });
 const DepartmentsGrid = dynamic(() => import("@/components/documents/hr/departments/DepartmentsGrid").then((mod) => mod.DepartmentsGrid), { ssr: false });
 const PositionsGrid = dynamic(() => import("@/components/documents/hr/positions/PositionsGrid").then((mod) => mod.PositionsGrid), { ssr: false });
+const TimesheetGrid = dynamic(() => import("@/components/documents/hr/attendance/TimesheetGrid").then((mod) => mod.TimesheetGrid), { ssr: false });
 const AttendanceGrid = dynamic(() => import("@/components/documents/hr/attendance/AttendanceGrid").then((mod) => mod.AttendanceGrid), { ssr: false });
 const ShiftsGrid = dynamic(() => import("@/components/documents/hr/shifts/ShiftsGrid").then((mod) => mod.ShiftsGrid), { ssr: false });
 const PieceworkGrid = dynamic(() => import("@/components/documents/hr/piecework/PieceworkGrid").then((mod) => mod.PieceworkGrid), { ssr: false });
@@ -87,6 +88,7 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
   } else if (tab.module === "hr") {
     if (tab.id.includes("departments")) return <DepartmentsGrid />;
     if (tab.id.includes("positions")) return <PositionsGrid />;
+    if (tab.id.includes("timesheet")) return <TimesheetGrid />;
     if (tab.id.includes("attendance")) return <AttendanceGrid />;
     if (tab.id.includes("shifts")) return <ShiftsGrid />;
     if (tab.id.includes("devices") || tab.id.includes("biometric")) return <DevicesGrid />;
