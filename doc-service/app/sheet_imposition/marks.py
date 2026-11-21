@@ -21,10 +21,9 @@ from .models import (
 MM_TO_PT = 72.0 / 25.4
 PT_TO_MM = 25.4 / 72.0
 
-# Poligrafik Registration rangi (barcha kanallarda 100% chiqishi uchun)
-# ReportLab da CMYKColor(1, 1, 1, 1) yoki alohida separatsiya orqali
-REG_COLOR = CMYKColor(1.0, 1.0, 1.0, 1.0)
-BLACK_COLOR = CMYKColor(0.0, 0.0, 0.0, 1.0)
+# Poligrafik Registration rangi: PDF dagi maxsus "/Separation /All" bo'yog'i barcha qoliplarga,
+# shu jumladan Pantone (spot) qoliplariga ham 100% chiqadi. Alternativ (ekran) ko'rinishi 100/100/100/100.
+REG_COLOR = CMYKColorSep(1.0, 1.0, 1.0, 1.0, spotName="All", density=1.0)
 
 # Belgilar va qog'oz cheti / tashqi fon orasidagi xavfsiz oraliqlar
 EDGE_SAFE_PT = 1.0 * MM_TO_PT     # Gilotina kesish xatoligi (list cheti)
@@ -362,7 +361,8 @@ class MarksGenerator:
         canv.setFont(INFO_FONT, font_size)
         tags_w = MarksGenerator._color_tags_width(colors, INFO_FONT, font_size) if colors else 0.0
         text = MarksGenerator._fit_text(canv, text, max(0.0, max_w - tags_w), INFO_FONT, font_size)
-        canv.setFillColor(BLACK_COLOR)
+        # Pasport har bir qolipda o'qilishi uchun Registration rangida
+        canv.setFillColor(REG_COLOR)
         canv.drawString(0, 0, text)
         if colors and tags_w <= max_w:
             MarksGenerator._draw_color_tags(canv, canv.stringWidth(text, INFO_FONT, font_size), colors, INFO_FONT, font_size)
