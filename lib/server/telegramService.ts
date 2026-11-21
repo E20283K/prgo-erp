@@ -30,6 +30,7 @@ import {
 } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 import { findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
+import { readStoredFile } from "./storage";
 import type { WorkOrderToolingItem } from "@/components/documents/work-order/types";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -825,6 +826,36 @@ function resolveMediaBuffer(
 }
 
 /**
+ * Files kept in MinIO/S3 or behind "/api/v1/storage/file?key=..." links (montaj PDFs, order files):
+ * Telegram cannot fetch those itself, so the bytes are uploaded.
+ */
+async function resolveStoredMedia(
+  rawUrl?: string,
+  defaultFileName?: string
+): Promise<{ buffer: Buffer; mimeType: string; fileName: string; isPhoto: boolean } | null> {
+  if (!rawUrl || rawUrl.startsWith("data:")) return null;
+  const isRemoteHttp = /^https?:\/\//.test(rawUrl) && !rawUrl.includes("/api/v1/storage/file");
+  if (isRemoteHttp) return null; // public http(s) links are passed to Telegram as URLs
+  try {
+    const file = await readStoredFile(rawUrl);
+    if (!file) {
+      console.warn("[resolveStoredMedia] stored file not found:", rawUrl.slice(0, 200));
+      return null;
+    }
+    const isPhoto = file.contentType.startsWith("image/") && !file.contentType.includes("svg");
+    return {
+      buffer: file.buffer,
+      mimeType: file.contentType,
+      fileName: defaultFileName || path.basename(file.key) || "file.pdf",
+      isPhoto,
+    };
+  } catch (err) {
+    console.warn("[resolveStoredMedia] read failed:", err);
+    return null;
+  }
+}
+
+/**
  * 3. ERP orqali mijoz yoki ta'minotchi guruhiga xabar/buyurtma jo'natish
  */
 export async function sendTelegramMessage(
@@ -851,7 +882,8 @@ export async function sendTelegramMessage(
         fileName: params.fileName || "tech_card.png",
         isPhoto: params.isPhoto !== false,
       }
-    : resolveMediaBuffer(params.photoUrl || params.documentUrl, params.fileName);
+    : resolveMediaBuffer(params.photoUrl || params.documentUrl, params.fileName) ||
+      (await resolveStoredMedia(params.photoUrl || params.documentUrl, params.fileName));
 
   if (mediaBufferInfo && storedMediaUrl && storedMediaUrl.startsWith("data:")) {
     ensureFilesCacheDir();

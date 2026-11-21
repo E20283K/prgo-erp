@@ -9,6 +9,8 @@ import {
   PutBucketCorsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import fs from "fs";
+import path from "path";
 
 export const S3_BUCKETS = {
   prepress: process.env.S3_BUCKET_PREPRESS ?? "printgoo-prepress",
@@ -183,3 +185,85 @@ export async function ensureStorageBuckets(): Promise<string[]> {
   return createdOrVerified;
 }
 
+const LOCAL_MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".pdf": "application/pdf",
+};
+
+/**
+ * Turns any stored-file link the app hands out ("/api/v1/storage/file?key=...", a MinIO/S3 URL,
+ * "/artwork/...", a bare object key) into the object key / public path it points at.
+ */
+export function storedFileKey(url: string): string {
+  let key = url;
+  // Unwrap (possibly nested) /api/v1/storage/file?key=|path= links
+  while (key.includes("/api/v1/storage/file")) {
+    try {
+      const sub = new URL(key, "http://localhost");
+      const nextKey = sub.searchParams.get("key") || sub.searchParams.get("path");
+      if (!nextKey || nextKey === key) break;
+      key = nextKey;
+    } catch {
+      break;
+    }
+  }
+  if (key.startsWith("http://") || key.startsWith("https://")) {
+    try {
+      key = new URL(key).pathname;
+    } catch {}
+  }
+  let clean = key.split("?")[0].split("#")[0].replace(/^\/+/, "");
+  if (clean.startsWith("printgoo-prepress/")) clean = clean.replace(/^printgoo-prepress\//, "");
+  else if (clean.startsWith("printgoo-crm/")) clean = clean.replace(/^printgoo-crm\//, "");
+  return clean;
+}
+
+/**
+ * Reads a stored file from the local public/ folder (uploads, artwork, cache volumes) or MinIO/S3.
+ * Server-side twin of GET /api/v1/storage/file, for code that needs the bytes (e.g. Telegram uploads).
+ */
+export async function readStoredFile(
+  url: string,
+  bucketHint?: StorageBucketKey
+): Promise<{ buffer: Buffer; contentType: string; key: string; source: "local" | "s3" } | null> {
+  const key = storedFileKey(url);
+  if (!key) return null;
+
+  const localPath = path.join(process.cwd(), "public", key);
+  if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+    return {
+      buffer: fs.readFileSync(localPath),
+      contentType: LOCAL_MIME[path.extname(key).toLowerCase()] || "application/octet-stream",
+      key,
+      source: "local",
+    };
+  }
+
+  const buckets = Array.from(
+    new Set([
+      S3_BUCKETS[bucketHint || "prepress"] || S3_BUCKETS.prepress,
+      S3_BUCKETS.docs,
+      S3_BUCKETS.prepress,
+      S3_BUCKETS.thumbnails,
+    ])
+  );
+  for (const bucket of buckets) {
+    try {
+      const res = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      if (!res.Body) continue;
+      return {
+        buffer: Buffer.from(await res.Body.transformToByteArray()),
+        contentType: res.ContentType || "application/octet-stream",
+        key,
+        source: "s3",
+      };
+    } catch {
+      // try the next bucket
+    }
+  }
+  return null;
+}
