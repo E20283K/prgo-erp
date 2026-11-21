@@ -277,6 +277,7 @@ class ArtworkAnalysisResponse(BaseModel):
     pageCount: int = 1
     widthMm: Optional[float] = None
     heightMm: Optional[float] = None
+    bleedMm: Optional[float] = None
     notes: Optional[str] = None
 
 

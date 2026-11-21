@@ -762,6 +762,28 @@ export function SpecificationsTab({
 
       if (!result || !result.success) return;
 
+      // Finished size from the PDF TrimBox: one design per order → it is the product size
+      const fileW = Number(result.widthMm) || 0;
+      const fileH = Number(result.heightMm) || 0;
+      const singleDesign = (formData.sizes?.length ?? 0) <= 1 && !isSticker && !isTermo && !isFlexo;
+      if (singleDesign && fileW >= 5 && fileH >= 5) {
+        const w = Math.round(fileW * 10) / 10;
+        const h = Math.round(fileH * 10) / 10;
+        const bleed = result.bleedMm != null && result.bleedMm > 0 ? Math.round(result.bleedMm * 10) / 10 : undefined;
+        const sizeChanged = Math.abs(w - (formData.width || 0)) > 0.2 || Math.abs(h - (formData.height || 0)) > 0.2;
+        const bleedChanged = bleed != null && Math.abs(bleed - (formData.bleed ?? 0)) > 0.05;
+        if (sizeChanged || bleedChanged) {
+          handleFieldChange({ width: w, height: h, ...(bleed != null ? { bleed } : {}) });
+          if (lockedRatioRef.current != null) lockedRatioRef.current = h / w;
+          addNotification({
+            severity: "success",
+            title: "O'lcham fayldan olindi",
+            description: `${w} × ${h} mm${bleed != null ? ` · bleed ${bleed} mm` : ""}`,
+          });
+          onMarkUnsaved();
+        }
+      }
+
       const df = result.front;
       const db = result.back;
       const formula = result.detectedFormula;

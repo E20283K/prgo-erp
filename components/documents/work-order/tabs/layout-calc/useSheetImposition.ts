@@ -222,6 +222,11 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       delete rest.storedPdfUrl;
       delete rest.storedPreviewUrl;
       delete rest.summary;
+      // The order spec owns the product size; a saved layout must not keep a stale/swapped trim
+      if (defaultProdW && defaultProdH) {
+        rest.trimW = defaultProdW;
+        rest.trimH = defaultProdH;
+      }
       return rest as ImpositionSettings;
     }
     const stock = paperStock
@@ -297,6 +302,18 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     if (printMethod === "single_sided" || printMethod === "sheetwise" || printMethod === "work_and_turn") {
       if (printMethod !== settings.mode) setSettings((prev) => ({ ...prev, mode: printMethod }));
     }
+  }
+
+  // Follow the spec's product size / bleed when they change (e.g. read from the uploaded PDF)
+  const specSizeKey = `${defaultProdW ?? ""}x${defaultProdH ?? ""}|${defaultBleed ?? ""}`;
+  const [seenSpecSize, setSeenSpecSize] = useState(specSizeKey);
+  if (specSizeKey !== seenSpecSize) {
+    setSeenSpecSize(specSizeKey);
+    setSettings((prev) => ({
+      ...prev,
+      ...(defaultProdW && defaultProdH ? { trimW: defaultProdW, trimH: defaultProdH } : {}),
+      ...(defaultBleed != null ? { bleed: defaultBleed } : {}),
+    }));
   }
 
   // When the order's die appears or goes away, switch the job type to match (user can still override)

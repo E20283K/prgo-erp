@@ -57,6 +57,8 @@ export interface ArtworkColorAnalysisResult {
   pageCount: number;
   widthMm?: number;
   heightMm?: number;
+  /** MediaBox − TrimBox margin, when the PDF carries a TrimBox */
+  bleedMm?: number;
   notes?: string | null;
 }
 

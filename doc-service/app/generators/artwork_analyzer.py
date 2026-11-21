@@ -438,8 +438,22 @@ def analyze_artwork_payload(req: ArtworkAnalysisRequest) -> ArtworkAnalysisRespo
 
         p1 = doc[0]
         pt_per_mm = 72.0 / 25.4
-        w_mm = round(p1.rect.width / pt_per_mm, 1)
-        h_mm = round(p1.rect.height / pt_per_mm, 1)
+        # Finished size comes from the TrimBox (falls back to CropBox when the PDF has none);
+        # the bleed is whatever the MediaBox adds around it.
+        trim = p1.trimbox
+        media = p1.mediabox
+        tw, th = trim.width, trim.height
+        if p1.rotation in (90, 270):
+            tw, th = th, tw
+        w_mm = round(tw / pt_per_mm, 1)
+        h_mm = round(th / pt_per_mm, 1)
+        bleed_pts = min(
+            trim.x0 - media.x0,
+            trim.y0 - media.y0,
+            media.x1 - trim.x1,
+            media.y1 - trim.y1,
+        )
+        bleed_mm = round(max(0.0, bleed_pts) / pt_per_mm, 1)
 
         commercial_spots, technical_dielines = _extract_pdf_spot_colors(doc)
 
@@ -489,6 +503,7 @@ def analyze_artwork_payload(req: ArtworkAnalysisRequest) -> ArtworkAnalysisRespo
             pageCount=page_count,
             widthMm=w_mm,
             heightMm=h_mm,
+            bleedMm=bleed_mm,
         )
 
     # ── CASE 2: RASTER IMAGE (PNG/JPG) ARTWORK ──
