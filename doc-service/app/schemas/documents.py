@@ -278,6 +278,10 @@ class ArtworkAnalysisResponse(BaseModel):
     widthMm: Optional[float] = None
     heightMm: Optional[float] = None
     bleedMm: Optional[float] = None
+    # Full page (MediaBox) size and where widthMm/heightMm came from: "trimbox" | "standard" | "page"
+    pageWidthMm: Optional[float] = None
+    pageHeightMm: Optional[float] = None
+    sizeSource: Optional[str] = None
     notes: Optional[str] = None
 
 

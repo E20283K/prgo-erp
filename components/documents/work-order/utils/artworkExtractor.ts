@@ -57,9 +57,65 @@ export interface ArtworkColorAnalysisResult {
   pageCount: number;
   widthMm?: number;
   heightMm?: number;
-  /** MediaBox − TrimBox margin, when the PDF carries a TrimBox */
+  /** MediaBox − TrimBox margin (or the standard-format match's bleed) */
   bleedMm?: number;
+  /** Full page (MediaBox) size, bleed included */
+  pageWidthMm?: number;
+  pageHeightMm?: number;
+  /** Where widthMm/heightMm came from */
+  sizeSource?: "trimbox" | "standard" | "page";
   notes?: string | null;
+}
+
+export type ArtworkSizeResolution =
+  | { kind: "apply"; w: number; h: number; bleed: number; guessed: boolean }
+  | { kind: "mismatch"; pageW: number; pageH: number };
+
+const round1 = (v: number) => Math.round(v * 10) / 10;
+const MAX_BLEED_MM = 10;
+
+/**
+ * Decides the product size and bleed an uploaded PDF implies, given the size already in the order.
+ * A PDF without a TrimBox is often exported with bleed baked into the page (60×100 + 3 mm → 66×106):
+ * when the page is the order size plus an even margin on every side, the order size stays and the
+ * margin becomes the bleed. Returns null when the file says nothing usable.
+ */
+export function resolveArtworkSize(
+  result: Pick<ArtworkColorAnalysisResult, "widthMm" | "heightMm" | "bleedMm" | "pageWidthMm" | "pageHeightMm" | "sizeSource">,
+  orderW?: number,
+  orderH?: number
+): ArtworkSizeResolution | null {
+  const w = Number(result.widthMm) || 0;
+  const h = Number(result.heightMm) || 0;
+  if (w < 5 || h < 5) return null;
+  const pageW = Number(result.pageWidthMm) || w;
+  const pageH = Number(result.pageHeightMm) || h;
+
+  const fileBleed = round1(Math.max(0, result.bleedMm ?? 0));
+  // A TrimBox is the designer's own statement of the finished size
+  if (result.sizeSource === "trimbox") {
+    return { kind: "apply", w: round1(w), h: round1(h), bleed: fileBleed, guessed: false };
+  }
+
+  const oW = Number(orderW) || 0;
+  const oH = Number(orderH) || 0;
+  if (oW < 5 || oH < 5) {
+    // No order size to compare with: a standard format + bleed match, else the bare page
+    if (result.sizeSource === "standard") {
+      return { kind: "apply", w: round1(w), h: round1(h), bleed: fileBleed, guessed: false };
+    }
+    return { kind: "apply", w: round1(pageW), h: round1(pageH), bleed: 0, guessed: true };
+  }
+
+  // Page = order size + 2×bleed, in the file's orientation (either way round)
+  for (const [tw, th] of [[oW, oH], [oH, oW]] as const) {
+    const bw = (pageW - tw) / 2;
+    const bh = (pageH - th) / 2;
+    if (bw >= -0.3 && bw <= MAX_BLEED_MM && Math.abs(bw - bh) <= 0.3) {
+      return { kind: "apply", w: round1(tw), h: round1(th), bleed: round1(Math.max(0, Math.min(bw, bh))), guessed: false };
+    }
+  }
+  return { kind: "mismatch", pageW: round1(pageW), pageH: round1(pageH) };
 }
 
 /**

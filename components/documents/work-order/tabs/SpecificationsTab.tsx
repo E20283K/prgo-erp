@@ -20,7 +20,7 @@ import {
   Unlock,
   Info,
 } from "lucide-react";
-import { requestArtworkColorAnalysis } from "../utils/artworkExtractor";
+import { requestArtworkColorAnalysis, resolveArtworkSize } from "../utils/artworkExtractor";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -762,26 +762,29 @@ export function SpecificationsTab({
 
       if (!result || !result.success) return;
 
-      // Finished size from the PDF TrimBox: one design per order → it is the product size
-      const fileW = Number(result.widthMm) || 0;
-      const fileH = Number(result.heightMm) || 0;
+      // Product size / bleed from the PDF (one design per order → the file is the product)
       const singleDesign = (formData.sizes?.length ?? 0) <= 1 && !isSticker && !isTermo && !isFlexo;
-      if (singleDesign && fileW >= 5 && fileH >= 5) {
-        const w = Math.round(fileW * 10) / 10;
-        const h = Math.round(fileH * 10) / 10;
-        const bleed = result.bleedMm != null && result.bleedMm > 0 ? Math.round(result.bleedMm * 10) / 10 : undefined;
+      const fileSize = singleDesign ? resolveArtworkSize(result, formData.width, formData.height) : null;
+      if (fileSize?.kind === "apply") {
+        const { w, h, bleed } = fileSize;
         const sizeChanged = Math.abs(w - (formData.width || 0)) > 0.2 || Math.abs(h - (formData.height || 0)) > 0.2;
-        const bleedChanged = bleed != null && Math.abs(bleed - (formData.bleed ?? 0)) > 0.05;
+        const bleedChanged = Math.abs(bleed - (formData.bleed ?? 0)) > 0.05;
         if (sizeChanged || bleedChanged) {
-          handleFieldChange({ width: w, height: h, ...(bleed != null ? { bleed } : {}) });
+          handleFieldChange({ width: w, height: h, bleed });
           if (lockedRatioRef.current != null) lockedRatioRef.current = h / w;
           addNotification({
-            severity: "success",
+            severity: fileSize.guessed ? "warning" : "success",
             title: "O'lcham fayldan olindi",
-            description: `${w} × ${h} mm${bleed != null ? ` · bleed ${bleed} mm` : ""}`,
+            description: `${w} × ${h} mm · bleed ${bleed} mm${fileSize.guessed ? " · TrimBox yo'q, tekshiring" : ""}`,
           });
           onMarkUnsaved();
         }
+      } else if (fileSize?.kind === "mismatch") {
+        addNotification({
+          severity: "warning",
+          title: "Fayl o'lchami mos emas",
+          description: `Fayl ${fileSize.pageW} × ${fileSize.pageH} mm, buyurtma ${formData.width} × ${formData.height} mm`,
+        });
       }
 
       const df = result.front;

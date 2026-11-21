@@ -438,22 +438,35 @@ def analyze_artwork_payload(req: ArtworkAnalysisRequest) -> ArtworkAnalysisRespo
 
         p1 = doc[0]
         pt_per_mm = 72.0 / 25.4
-        # Finished size comes from the TrimBox (falls back to CropBox when the PDF has none);
-        # the bleed is whatever the MediaBox adds around it.
+        # Finished size: the TrimBox when the PDF has one; otherwise a standard format + bleed match;
+        # otherwise only the page size is known (it may still include bleed — the client decides).
         trim = p1.trimbox
         media = p1.mediabox
-        tw, th = trim.width, trim.height
-        if p1.rotation in (90, 270):
-            tw, th = th, tw
-        w_mm = round(tw / pt_per_mm, 1)
-        h_mm = round(th / pt_per_mm, 1)
-        bleed_pts = min(
-            trim.x0 - media.x0,
-            trim.y0 - media.y0,
-            media.x1 - trim.x1,
-            media.y1 - trim.y1,
-        )
-        bleed_mm = round(max(0.0, bleed_pts) / pt_per_mm, 1)
+        rotated = p1.rotation in (90, 270)
+
+        def _dims(r: Any) -> Tuple[float, float]:
+            w, h = r.width / pt_per_mm, r.height / pt_per_mm
+            return (h, w) if rotated else (w, h)
+
+        page_w_mm, page_h_mm = (round(v, 1) for v in _dims(media))
+        has_trim_box = abs(trim.width - media.width) > 0.5 or abs(trim.height - media.height) > 0.5
+        bleed_mm: Optional[float] = None
+        size_source = "page"
+        if has_trim_box:
+            tw, th = _dims(trim)
+            w_mm, h_mm = round(tw, 1), round(th, 1)
+            bleed_pts = min(trim.x0 - media.x0, trim.y0 - media.y0, media.x1 - trim.x1, media.y1 - trim.y1)
+            bleed_mm = round(max(0.0, bleed_pts) / pt_per_mm, 1)
+            size_source = "trimbox"
+        else:
+            from app.sheet_imposition.preflight import PreflightChecker
+
+            matched = PreflightChecker.match_standard_trim_with_bleed(page_w_mm, page_h_mm)
+            if matched:
+                w_mm, h_mm, bleed_mm = matched
+                size_source = "standard"
+            else:
+                w_mm, h_mm = page_w_mm, page_h_mm
 
         commercial_spots, technical_dielines = _extract_pdf_spot_colors(doc)
 
@@ -504,6 +517,9 @@ def analyze_artwork_payload(req: ArtworkAnalysisRequest) -> ArtworkAnalysisRespo
             widthMm=w_mm,
             heightMm=h_mm,
             bleedMm=bleed_mm,
+            pageWidthMm=page_w_mm,
+            pageHeightMm=page_h_mm,
+            sizeSource=size_source,
         )
 
     # ── CASE 2: RASTER IMAGE (PNG/JPG) ARTWORK ──
