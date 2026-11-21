@@ -1134,6 +1134,7 @@ export function ToolingOrdersGrid() {
 
         setIsModalOpen(false);
         fetchOrders();
+        void loadProductionQueue();
       } else {
         alert(json.error || "Xatolik yuz berdi");
       }
@@ -1297,7 +1298,10 @@ export function ToolingOrdersGrid() {
           void registerDeliveredTooling(order);
         }
 
-        if (!opts?.quiet) fetchOrders();
+        if (!opts?.quiet) {
+          fetchOrders();
+          void loadProductionQueue();
+        }
       }
       return true;
     } catch (err) {
@@ -1322,6 +1326,7 @@ export function ToolingOrdersGrid() {
     });
     setGridSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
     fetchOrders();
+    void loadProductionQueue();
   };
 
   // Buyurtmani bazadan butunlay o'chirish

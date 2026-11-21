@@ -1962,6 +1962,7 @@ export async function processTelegramWebhookUpdate(
               .set({
                 status: newStatus as any,
                 telegramConfirmedBy: confirmedBy,
+                ...(newStatus === "Delivered" && !order.receivedAt ? { receivedAt: new Date() } : {}),
                 updatedAt: new Date(),
               })
               .where(eq(supplierOrders.id, order.id));

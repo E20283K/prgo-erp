@@ -111,6 +111,43 @@ export function applySupplierOrders(items: WorkOrderToolingItem[], orders: Tooli
   });
 }
 
+const SUPPLIER_SOURCED_FIELDS = [
+  "purchaseOrderNo",
+  "supplierId",
+  "supplierName",
+  "status",
+  "deliveryMethod",
+  "deliveryCost",
+] as const;
+
+/**
+ * An open work order keeps its own copy of the tooling list. Supplier-order facts (PO, supplier,
+ * progress, delivery) arrive with the refreshed server copy: copy just those fields onto matching
+ * items. Returns the same array when nothing changed, so callers can skip a state update.
+ */
+export function mergeSupplierSourcedFields(
+  local: WorkOrderToolingItem[],
+  server: WorkOrderToolingItem[]
+): WorkOrderToolingItem[] {
+  if (!local.length || !server.length) return local;
+  const byId = new Map(server.map((t) => [t.id, t]));
+  let changed = false;
+  const next = local.map((t) => {
+    const src = byId.get(t.id);
+    if (!src) return t;
+    const patch: Partial<WorkOrderToolingItem> = {};
+    for (const f of SUPPLIER_SOURCED_FIELDS) {
+      if (src[f] === undefined || src[f] === t[f]) continue;
+      if (f === "status" && (TOOLING_STATUS_RANK[src.status] ?? 0) <= (TOOLING_STATUS_RANK[t.status] ?? 0)) continue;
+      (patch as Record<string, unknown>)[f] = src[f];
+    }
+    if (Object.keys(patch).length === 0) return t;
+    changed = true;
+    return { ...t, ...patch };
+  });
+  return changed ? next : local;
+}
+
 export function getInitialToolingItems(data: Partial<WorkOrderFormData>, docNo: string): WorkOrderToolingItem[] {
   const hasAppliedImposition = Boolean((data as any).plannedSheets && Number((data as any).plannedSheets) > 0);
 

@@ -155,7 +155,7 @@ import { WarehouseStockRecord } from "@/store/workspaceStore";
 import { computeTariffEstimate, TariffRecord } from "@/components/documents/tariff/types";
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 
-import { getInitialToolingItems, toolingItemTotalCost } from "./toolingItems";
+import { getInitialToolingItems, toolingItemTotalCost, mergeSupplierSourcedFields } from "./toolingItems";
 import { syncKashirovkaBomRows } from "./utils/kashirovkaBom";
 import { buildReorderDocument } from "./reorder";
 export { getInitialToolingItems };
@@ -1321,6 +1321,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       if (queueItem.toolingItems && queueItem.toolingItems.length > 0 && (!formData.toolingItems || formData.toolingItems.length === 0)) {
         setFormData((prev) => ({ ...prev, toolingItems: queueItem.toolingItems }));
       }
+    }
+
+    // PO, supplier, status and delivery come from Tooling & CTP orders: apply them even while the form has edits
+    if (queueItem?.toolingItems?.length) {
+      const serverTools = queueItem.toolingItems;
+      setFormData((prev) => {
+        const merged = mergeSupplierSourcedFields(prev.toolingItems || [], serverTools);
+        return merged === prev.toolingItems ? prev : { ...prev, toolingItems: merged };
+      });
+    }
+
+    if (queueItem && !tab.isUnsaved) {
       if (queueItem.materials && queueItem.materials.length > 0 && (!currentBomItems || currentBomItems.length === 0)) {
         const synced = syncBomWithSpecs(
           queueItem.materials.map(normalizeBomItem),

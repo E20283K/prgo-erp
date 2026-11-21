@@ -400,7 +400,15 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       // Shtansforma / Asbob-uskuna
       toolingItems: applySupplierOrders(
         dims.toolingItems || [],
-        deliveryByWo.get(wo.id) || deliveryByWo.get((wo.docNo || "").trim().toLowerCase()) || []
+        // Linked by id, by doc number, or both — union, one entry per PO
+        [
+          ...new Map(
+            [
+              ...(deliveryByWo.get(wo.id) || []),
+              ...(deliveryByWo.get((wo.docNo || "").trim().toLowerCase()) || []),
+            ].map((l) => [l.orderNo, l])
+          ).values(),
+        ]
       ),
       materials: dims.materials || [],
       selectedToolingId: dims.selectedToolingId || "",
