@@ -257,6 +257,30 @@ export const attendanceLogs = pgTable(
   ]
 );
 
+/**
+ * One shift's roll call in the company's Telegram attendance group: the reminder the bot
+ * posted, the summary it posted after the master saved, and when that happened.
+ */
+export const attendanceRollCalls = pgTable(
+  "attendance_roll_calls",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    workDate: date("work_date").notNull(),
+    shiftType: varchar("shift_type", { length: 16 }).notNull(), // "day" | "night"
+    chatId: varchar("chat_id", { length: 64 }),
+    reminderMessageId: integer("reminder_message_id"),
+    reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
+    summaryMessageId: integer("summary_message_id"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    completedBy: varchar("completed_by", { length: 255 }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("attendance_roll_calls_uq").on(table.companyId, table.workDate, table.shiftType)]
+);
+
 // ─── 7. Piecework Wages (Ishlab Chiqarishdan Ishbay Hisobi - Сдельный Наряд) ───
 
 export const pieceworkLogs = pgTable(

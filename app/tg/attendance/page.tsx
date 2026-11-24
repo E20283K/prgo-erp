@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check, ChevronLeft, ChevronRight, Clock, Loader2, Lock, Minus, Moon, Plus, Search, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { telegramApp, useTelegramBackButton, useTgSession } from "../TgSession";
@@ -340,13 +340,26 @@ function TimeSheet({
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
-export default function AttendanceScreen() {
+/** `?shift=night&date=2026-11-25` comes from the group buttons. */
+export default function AttendancePage() {
+  return (
+    <React.Suspense fallback={null}>
+      <AttendanceScreen />
+    </React.Suspense>
+  );
+}
+
+function AttendanceScreen() {
   const router = useRouter();
   const { api } = useTgSession();
   const today = React.useMemo(() => isoDate(new Date()), []);
 
-  const [date, setDate] = React.useState(today);
-  const [shift, setShift] = React.useState<RollCallShift>("day");
+  const params = useSearchParams();
+  const [date, setDate] = React.useState(() => {
+    const d = params.get("date");
+    return d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today ? d : today;
+  });
+  const [shift, setShift] = React.useState<RollCallShift>(() => (params.get("shift") === "night" ? "night" : "day"));
   const [query, setQuery] = React.useState("");
   const [sheet, setSheet] = React.useState<RollCallSheet | null>(null);
   const [draft, setDraft] = React.useState<Map<string, Mark>>(new Map());

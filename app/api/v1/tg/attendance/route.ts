@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiUser, type PermissionRule } from "@/lib/server/apiAuth";
-import { getRollCallSheet, saveRollCall, type RollCallEntry } from "@/lib/server/tgAttendanceService";
+import { getRollCallSheet, resolveUserCompany, saveRollCall, type RollCallEntry } from "@/lib/server/tgAttendanceService";
+import { publishRollCallSummaries } from "@/lib/server/rollCallGroupService";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,12 @@ export async function POST(request: NextRequest) {
     const entries = Array.isArray(body.entries) ? body.entries : [];
     if (entries.length === 0) throw new Error("Saqlanadigan belgi yo'q");
     if (entries.length > 1000) throw new Error("Bir so'rovda 1000 tadan ko'p belgi bo'lmaydi");
-    const result = await saveRollCall(auth.user.id, auth.user.fullName, body.date ?? "", entries);
+    const date = body.date ?? "";
+    const result = await saveRollCall(auth.user.id, auth.user.fullName, date, entries);
+    if (result.saved > 0) {
+      const company = await resolveUserCompany(auth.user.id);
+      await publishRollCallSummaries(company.id, date, entries, auth.user.fullName);
+    }
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     return NextResponse.json(

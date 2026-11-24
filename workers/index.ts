@@ -7,6 +7,7 @@ import {
   type NotificationJobPayload,
 } from "../lib/server/queue";
 import { ensureStorageBuckets } from "../lib/server/storage";
+import { runRollCallReminders } from "../lib/server/rollCallGroupService";
 
 console.log("🚀 [PrintGoo Worker] Fon xizmati (BullMQ) ishga tushmoqda...");
 
@@ -45,8 +46,23 @@ const notificationsWorker = new Worker<NotificationJobPayload>(
   { connection: redis, concurrency: 5 }
 );
 
+// 3. Telegram guruhiga yo'qlama eslatmasi: har daqiqada vaqti kelgan smenani tekshiradi
+let rollCallBusy = false;
+const rollCallTimer = setInterval(async () => {
+  if (rollCallBusy) return;
+  rollCallBusy = true;
+  try {
+    await runRollCallReminders();
+  } catch (err) {
+    console.warn("[RollCall] eslatma xatosi:", err);
+  } finally {
+    rollCallBusy = false;
+  }
+}, 60_000);
+
 const shutdown = async () => {
   console.log("🛑 [PrintGoo Worker] To'xtatilmoqda...");
+  clearInterval(rollCallTimer);
   await Promise.all([prepressWorker.close(), notificationsWorker.close()]);
   process.exit(0);
 };

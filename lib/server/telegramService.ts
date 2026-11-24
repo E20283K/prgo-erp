@@ -31,6 +31,7 @@ import {
 } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 import { setWebAppMenuButton, telegramWebAppUrl } from "./telegramWebApp";
+import { tryHandleRollCallCommand } from "./rollCallGroupService";
 import { findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
 import { readStoredFile } from "./storage";
 import type { WorkOrderToolingItem } from "@/components/documents/work-order/types";
@@ -1982,6 +1983,11 @@ export async function processTelegramWebhookUpdate(
 
     // ── 0. Avans/raschot boti: ERP userga bog'langan buxgalter/direktor shaxsiy chatlari ──
     if (await tryHandlePayoutBotUpdate(update, companyId, token)) {
+      return { success: true, handled: true };
+    }
+
+    // ── 0b. Yo'qlama guruhi buyruqlari (/yoqlama, /yoqlama_ulash, /yoqlama_vaqt) ──
+    if (await tryHandleRollCallCommand(update.message, companyId, token)) {
       return { success: true, handled: true };
     }
 

@@ -43,6 +43,14 @@ export interface TelegramCompanySettings {
   ordersChatId?: string;
   ordersChatTitle?: string;
   autoSendNewOrders?: boolean;
+  /** Group where the bot asks for and reports the daily roll call. */
+  attendanceChatId?: string;
+  attendanceChatTitle?: string;
+  /** Plant time "HH:MM" of the roll call reminders. */
+  attendanceDayReminder?: string;
+  attendanceNightReminder?: string;
+  /** Short name of the Mini App registered in BotFather (/newapp); empty = the bot's main Mini App. */
+  miniAppName?: string;
 }
 
 export interface NotificationRulesConfig {

@@ -1,12 +1,22 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ChevronRight } from "lucide-react";
-import { useTgSession } from "./TgSession";
+import { takeStartRoute, useTgSession } from "./TgSession";
 import { TG_MODULES, canOpenModule } from "./modules";
 
 export default function TgHome() {
   const { state } = useTgSession();
+  const router = useRouter();
+
+  // Opened from a group button: go straight to the screen it points at.
+  React.useEffect(() => {
+    if (state.status !== "ready") return;
+    const route = takeStartRoute();
+    if (route) router.replace(route);
+  }, [state.status, router]);
   if (state.status !== "ready") return null;
   const user = state.user;
   const modules = TG_MODULES.filter((m) => canOpenModule(user, m));

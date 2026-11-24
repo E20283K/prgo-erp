@@ -6,6 +6,8 @@ import type { SanitizedUser } from "@/lib/server/authService";
 /** Minimal surface of `window.Telegram.WebApp` used by the Mini App. */
 export interface TelegramWebApp {
   initData: string;
+  /** `start_param` is the `startapp` value of the link that opened the app. */
+  initDataUnsafe?: { start_param?: string };
   colorScheme: "light" | "dark";
   ready(): void;
   expand(): void;
@@ -156,6 +158,27 @@ export function TgSessionProvider({ children }: { children: React.ReactNode }) {
 
   const value = React.useMemo(() => ({ state, api }), [state, api]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+const START_HANDLED_KEY = "printgoo_tg_start_handled";
+
+/**
+ * Screen a launch link asks for (`startapp=att_d_20261125` → day shift roll call of that date),
+ * returned once per Telegram launch so going back to the home screen does not bounce again.
+ */
+export function takeStartRoute(): string | null {
+  const param = telegramApp()?.initDataUnsafe?.start_param;
+  if (!param) return null;
+  try {
+    if (sessionStorage.getItem(START_HANDLED_KEY) === param) return null;
+    sessionStorage.setItem(START_HANDLED_KEY, param);
+  } catch {
+    /* storage blocked: route anyway */
+  }
+  const m = param.match(/^att_([dn])_(\d{4})(\d{2})(\d{2})$/);
+  if (m) return `/tg/attendance?shift=${m[1] === "n" ? "night" : "day"}&date=${m[2]}-${m[3]}-${m[4]}`;
+  if (param === "att") return "/tg/attendance";
+  return null;
 }
 
 /** Hooks the Telegram back button to `onBack` while the calling screen is shown. */
