@@ -8,6 +8,7 @@ import {
   type TelegramPayoutDraft,
 } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
+import { setWebAppMenuButton, telegramWebAppUrl } from "./telegramWebApp";
 import { parsePayoutLocally, parsePayoutMessage } from "@/lib/ai/payoutParser";
 import {
   createPayoutTx,
@@ -294,9 +295,12 @@ async function handleLink(arg: string, tgUserId: string, chatId: number, token: 
     chat_id: chatId,
     parse_mode: "HTML",
     text: u
-      ? `Telegram <b>${esc(u.fullName)}</b> profiliga bog'landi. Endi hodimlarga berilgan avans va raschotni shu yerga yozishingiz mumkin.`
+      ? `Telegram <b>${esc(u.fullName)}</b> profiliga bog'landi. Endi hodimlarga berilgan avans va raschotni shu yerga yozishingiz mumkin. ERP bo'limlari pastdagi <b>PrintGoo</b> tugmasida.`
       : "Foydalanuvchi topilmadi.",
   });
+  // Mini App button appears only in chats of linked ERP users.
+  const appUrl = telegramWebAppUrl();
+  if (u && appUrl) await setWebAppMenuButton(token, chatId, appUrl);
 }
 
 // ─── Message → AI → draft card ───────────────────────────────────────────────

@@ -11,6 +11,7 @@ import {
   workOrders,
   workOrderAttachments,
   companies,
+  users,
   type TelegramChat,
   type TelegramMessage,
   type QuickReplyTemplate,
@@ -18,7 +19,7 @@ import {
   type TelegramChatSettings,
   type WorkOrderTelegramMeta,
 } from "@/db/schema";
-import { eq, desc, asc, and, sql, or, ilike, isNull } from "drizzle-orm";
+import { eq, desc, asc, and, sql, or, ilike, isNull, isNotNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
 import { generateTechCardImage } from "./techCardGenerator";
@@ -29,6 +30,7 @@ import {
   type OrderCardLogo,
 } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
+import { setWebAppMenuButton, telegramWebAppUrl } from "./telegramWebApp";
 import { findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
 import { readStoredFile } from "./storage";
 import type { WorkOrderToolingItem } from "@/components/documents/work-order/types";
@@ -531,6 +533,17 @@ export async function configureTelegramWebhook(
         }),
       });
       const data = await res.json();
+      if (data.ok) {
+        // Already linked ERP users get the Mini App button in their private chat with the bot.
+        const appUrl = telegramWebAppUrl(new URL(webhookUrl).origin);
+        if (appUrl) {
+          const linked = await db
+            .select({ telegramUserId: users.telegramUserId })
+            .from(users)
+            .where(isNotNull(users.telegramUserId));
+          for (const u of linked) await setWebAppMenuButton(token, u.telegramUserId!, appUrl);
+        }
+      }
       return { ok: !!data.ok, description: data.description };
     } else {
       const res = await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteWebhook`, { method: "POST" });

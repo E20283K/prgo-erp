@@ -12,6 +12,8 @@ const SESSION_COOKIE = 'printgoo_session';
 const PUBLIC_API_PATHS = new Set([
   '/api/v1/auth/login',
   '/api/v1/auth/logout',
+  '/api/v1/auth/telegram', // Mini App: Telegram imzosi route ichida tekshiriladi
+
   '/api/v1/health',
   '/api/v1/hr/attendance/hikvision-event',
   '/api/telegram/webhook',
