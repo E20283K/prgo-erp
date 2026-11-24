@@ -2,10 +2,11 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, Loader2, Lock, Minus, Moon, Plus, Search, Sun } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Clock, Loader2, Lock, Minus, Moon, Plus, Search, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { telegramApp, useTelegramBackButton, useTgSession } from "../TgSession";
 import type { RollCallRow, RollCallSheet, RollCallShift, RollCallStatus } from "@/lib/server/tgAttendanceService";
+import { LATE_THRESHOLD_MIN, formatMinutes, shiftTimeFacts, type ShiftWindow } from "@/lib/rollCallTime";
 
 // ─── Labels & helpers ────────────────────────────────────────────────────────
 
@@ -44,13 +45,39 @@ interface Mark {
   status: RollCallStatus | null;
   shiftType: RollCallShift;
   overtimeHours: number;
+  checkIn: string | null;
+  checkOut: string | null;
 }
 
+const NO_TIMES = { checkIn: null, checkOut: null } as const;
+
 function markOf(row: RollCallRow): Mark {
-  return { status: row.status, shiftType: row.shiftType ?? row.defaultShift, overtimeHours: row.overtimeHours };
+  return {
+    status: row.status,
+    shiftType: row.shiftType ?? row.defaultShift,
+    overtimeHours: row.overtimeHours,
+    checkIn: row.checkIn,
+    checkOut: row.checkOut,
+  };
 }
 function sameMark(a: Mark, b: Mark): boolean {
-  return a.status === b.status && a.overtimeHours === b.overtimeHours && (a.status === null || a.shiftType === b.shiftType);
+  return (
+    a.status === b.status &&
+    a.overtimeHours === b.overtimeHours &&
+    a.checkIn === b.checkIn &&
+    a.checkOut === b.checkOut &&
+    (a.status === null || a.shiftType === b.shiftType)
+  );
+}
+
+/** "12:00 – 20:00 · kech 4 s" for a row with recorded times. */
+function timeLine(mark: Mark, window: ShiftWindow): string | null {
+  if (!mark.checkIn && !mark.checkOut) return null;
+  const f = shiftTimeFacts(window, mark.checkIn, mark.checkOut);
+  const parts = [`${mark.checkIn ?? window.start} – ${mark.checkOut ?? window.end}`];
+  if (f.delayMinutes > 0) parts.push(`kech ${formatMinutes(f.delayMinutes)}`);
+  if (f.earlyLeaveMinutes > 0) parts.push(`erta ${formatMinutes(f.earlyLeaveMinutes)}`);
+  return parts.join(" · ");
 }
 
 function confirmDiscard(message: string): Promise<boolean> {
@@ -75,28 +102,37 @@ function RollCallItem({
   mark,
   dirty,
   shift,
+  window,
   onChange,
+  onEditTime,
 }: {
   row: RollCallRow;
   mark: Mark;
   dirty: boolean;
   shift: RollCallShift;
+  window: ShiftWindow;
   onChange: (next: Mark) => void;
+  onEditTime: () => void;
 }) {
   const working = mark.status !== null && WORKING.has(mark.status);
   const otherShift: RollCallShift = shift === "day" ? "night" : "day";
 
   const toggle = () => {
     if (row.locked) return;
-    onChange(mark.status === "present" ? { ...mark, status: null, overtimeHours: 0 } : { ...mark, status: "present", shiftType: shift });
+    onChange(working ? { ...mark, status: null, overtimeHours: 0, ...NO_TIMES } : { ...mark, status: "present", shiftType: shift });
   };
 
   const onSelect = (value: string) => {
-    if (value === "move") onChange({ ...mark, status: mark.status ?? "present", shiftType: otherShift });
-    else if (value === "clear") onChange({ ...mark, status: null, overtimeHours: 0 });
+    if (value === "time") onEditTime();
+    else if (value === "move") onChange({ ...mark, status: mark.status ?? "present", shiftType: otherShift });
+    else if (value === "clear") onChange({ ...mark, status: null, overtimeHours: 0, ...NO_TIMES });
     else {
       const status = value as RollCallStatus;
-      onChange({ ...mark, status, shiftType: shift, overtimeHours: WORKING.has(status) ? mark.overtimeHours : 0 });
+      onChange(
+        WORKING.has(status)
+          ? { ...mark, status, shiftType: shift }
+          : { ...mark, status, shiftType: shift, overtimeHours: 0, ...NO_TIMES }
+      );
     }
   };
 
@@ -116,9 +152,16 @@ function RollCallItem({
         </span>
         <span className="min-w-0">
           <span className="block truncate text-sm leading-tight">{row.fullName}</span>
-          <span className="block truncate text-[11px] leading-tight text-muted-foreground">
-            {row.position || row.badgeNumber}
-          </span>
+          {working && timeLine(mark, window) ? (
+            <span className="flex items-center gap-1 truncate text-[11px] leading-tight text-amber-700 dark:text-amber-400">
+              <Clock className="size-3 shrink-0" />
+              <span className="truncate">{timeLine(mark, window)}</span>
+            </span>
+          ) : (
+            <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+              {row.position || row.badgeNumber}
+            </span>
+          )}
         </span>
       </button>
 
@@ -163,11 +206,134 @@ function RollCallItem({
                 {STATUS_LABEL[s]}
               </option>
             ))}
+            <option value="time">Vaqt kiritish</option>
             {mark.status !== null && <option value="clear">Belgini olib tashlash</option>}
             <option value="move">{otherShift === "night" ? "Tungi smenaga" : "Kunduzgi smenaga"}</option>
           </select>
         </label>
       )}
+    </div>
+  );
+}
+
+// ─── Arrival / departure sheet ───────────────────────────────────────────────
+
+function TimeSheet({
+  row,
+  mark,
+  shift,
+  window,
+  onApply,
+  onClose,
+}: {
+  row: RollCallRow;
+  mark: Mark;
+  shift: RollCallShift;
+  window: ShiftWindow;
+  onApply: (next: Mark) => void;
+  onClose: () => void;
+}) {
+  const [checkIn, setCheckIn] = React.useState(mark.checkIn ?? window.start);
+  const [checkOut, setCheckOut] = React.useState(mark.checkOut ?? window.end);
+  const [overtime, setOvertime] = React.useState(mark.overtimeHours);
+
+  const valid = /^\d{2}:\d{2}$/.test(checkIn) && /^\d{2}:\d{2}$/.test(checkOut);
+  const facts = valid ? shiftTimeFacts(window, checkIn, checkOut) : null;
+
+  const apply = () => {
+    if (!facts) return;
+    // A time equal to the shift boundary is the default and is not stored.
+    onApply({
+      status: facts.delayMinutes > LATE_THRESHOLD_MIN ? "late" : "present",
+      shiftType: shift,
+      overtimeHours: overtime,
+      checkIn: checkIn === window.start ? null : checkIn,
+      checkOut: checkOut === window.end ? null : checkOut,
+    });
+  };
+
+  const field =
+    "h-9 w-full rounded-md border border-border bg-background px-2 text-sm tabular-nums outline-none focus:border-foreground/30";
+
+  return (
+    <div className="fixed inset-0 z-30 flex items-end bg-black/40" onClick={onClose}>
+      <div
+        className="mx-auto w-full max-w-lg space-y-3 rounded-t-lg border-t border-border bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div>
+          <div className="truncate text-sm font-medium">{row.fullName}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {shift === "day" ? "Kunduzgi" : "Tungi"} · {window.start}–{window.end}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="space-y-1">
+            <span className="text-[11px] text-muted-foreground">Keldi</span>
+            <input type="time" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className={field} />
+          </label>
+          <label className="space-y-1">
+            <span className="text-[11px] text-muted-foreground">Ketdi</span>
+            <input type="time" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className={field} />
+          </label>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-muted-foreground">Ortiqcha</span>
+          <div className="flex h-8 items-center rounded-md border border-border">
+            <button
+              type="button"
+              aria-label="Kamaytirish"
+              onClick={() => setOvertime((v) => Math.max(0, v - 0.5))}
+              className="flex h-full w-8 items-center justify-center text-muted-foreground active:bg-muted"
+            >
+              <Minus className="size-3.5" />
+            </button>
+            <span className="w-10 text-center text-sm tabular-nums">{overtime > 0 ? `+${overtime}` : "0"}</span>
+            <button
+              type="button"
+              aria-label="Ko'paytirish"
+              onClick={() => setOvertime((v) => Math.min(16, v + 0.5))}
+              className="flex h-full w-8 items-center justify-center text-muted-foreground active:bg-muted"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {facts && (
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 border-t border-border pt-2 text-[11px] text-muted-foreground">
+            <span>
+              Ishladi <b className="font-medium tabular-nums text-foreground">{facts.workedHours} s</b>
+            </span>
+            {facts.delayMinutes > 0 && (
+              <span>
+                Kechikish <b className="font-medium text-foreground">{formatMinutes(facts.delayMinutes)}</b>
+              </span>
+            )}
+            {facts.earlyLeaveMinutes > 0 && (
+              <span>
+                Erta ketdi <b className="font-medium text-foreground">{formatMinutes(facts.earlyLeaveMinutes)}</b>
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={onClose} className="h-10 rounded-md border border-border text-sm active:bg-muted">
+            Bekor
+          </button>
+          <button
+            type="button"
+            onClick={apply}
+            disabled={!facts}
+            className="h-10 rounded-md bg-primary text-sm font-medium text-primary-foreground disabled:opacity-40"
+          >
+            Tayyor
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -186,6 +352,7 @@ export default function AttendanceScreen() {
   const [draft, setDraft] = React.useState<Map<string, Mark>>(new Map());
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
+  const [timeRow, setTimeRow] = React.useState<RollCallRow | null>(null);
   const [message, setMessage] = React.useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
   /** Fetches the day's sheet; returns an error message instead of throwing. */
@@ -240,6 +407,7 @@ export default function AttendanceScreen() {
   };
 
   const rows = sheet?.rows ?? [];
+  const windowOf = (s: RollCallShift): ShiftWindow => sheet?.shifts[s] ?? { start: "08:00", end: "20:00" };
   const current = (row: RollCallRow): Mark => draft.get(row.employeeId) ?? markOf(row);
 
   const setMark = (row: RollCallRow, next: Mark) => {
@@ -289,7 +457,13 @@ export default function AttendanceScreen() {
     setSaving(true);
     setMessage(null);
     try {
-      const entries = [...draft.entries()].map(([employeeId, m]) => ({ employeeId, ...m }));
+      // Times go out only when changed, so a turnstile record keeps its own stamps.
+      const entries = [...draft.entries()].map(([employeeId, m]) => {
+        const row = sheet.rows.find((r) => r.employeeId === employeeId);
+        const timesChanged = !row || row.checkIn !== m.checkIn || row.checkOut !== m.checkOut;
+        const { checkIn, checkOut, ...rest } = m;
+        return { employeeId, ...rest, ...(timesChanged ? { checkIn, checkOut } : {}) };
+      });
       const res = await api("/api/v1/tg/attendance", { method: "POST", body: JSON.stringify({ date: sheet.date, entries }) });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || "Saqlab bo'lmadi");
@@ -391,7 +565,9 @@ export default function AttendanceScreen() {
                   mark={current(r)}
                   dirty={draft.has(r.employeeId)}
                   shift={shift}
+                  window={windowOf(shift)}
                   onChange={(m) => setMark(r, m)}
+                  onEditTime={() => setTimeRow(r)}
                 />
               ))}
             </div>
@@ -425,6 +601,19 @@ export default function AttendanceScreen() {
           </button>
         </div>
       </footer>
+      {timeRow && (
+        <TimeSheet
+          row={timeRow}
+          mark={current(timeRow)}
+          shift={shift}
+          window={windowOf(shift)}
+          onApply={(m) => {
+            setMark(timeRow, m);
+            setTimeRow(null);
+          }}
+          onClose={() => setTimeRow(null)}
+        />
+      )}
     </main>
   );
 }

@@ -2,13 +2,23 @@ import { and, asc, eq, inArray, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema/users";
 import { companies } from "@/db/schema/core";
-import { attendanceLogs, employees, payrollRecords } from "@/db/schema/hr";
+import { attendanceLogs, employees, payrollRecords, shifts } from "@/db/schema/hr";
 import { getCompanyIdByCode } from "./crmService";
+import {
+  DEFAULT_SHIFT_WINDOWS,
+  LATE_THRESHOLD_MIN,
+  isClockTime,
+  plantTime,
+  shiftTimeFacts,
+  timelineToDate,
+  type ShiftWindow,
+} from "@/lib/rollCallTime";
 
 /**
  * Daily roll call from the Telegram Mini App: a shift master marks who came,
  * which shift they worked and their overtime hours, for every employee of the
- * organisation the master's ERP user belongs to.
+ * organisation the master's ERP user belongs to. Arrival and departure times are
+ * recorded only: they do not change salaried pay (see lib/rollCallTime.ts).
  */
 
 export type RollCallStatus = "present" | "late" | "absent" | "sick_leave" | "vacation" | "day_off";
@@ -29,6 +39,11 @@ export interface RollCallRow {
   status: RollCallStatus | null;
   shiftType: RollCallShift | null;
   overtimeHours: number;
+  /** Plant wall-clock "HH:MM", null when not recorded. */
+  checkIn: string | null;
+  checkOut: string | null;
+  workedHours: number;
+  delayMinutes: number;
   /** "manual" = marked by a person, anything else = turnstile / device. */
   source: string | null;
   /** Month already approved in payroll: the mark cannot change. */
@@ -38,6 +53,7 @@ export interface RollCallRow {
 export interface RollCallSheet {
   date: string;
   company: { id: string; name: string };
+  shifts: Record<RollCallShift, ShiftWindow>;
   rows: RollCallRow[];
 }
 
@@ -47,10 +63,26 @@ export interface RollCallEntry {
   status: RollCallStatus | null;
   shiftType: RollCallShift;
   overtimeHours: number;
+  /** "HH:MM" sets the time, null clears it, omitted keeps what is stored. */
+  checkIn?: string | null;
+  checkOut?: string | null;
 }
 
 function toShift(value: string | null | undefined): RollCallShift {
   return value?.toLowerCase().startsWith("night") ? "night" : "day";
+}
+
+/** Working hours of the company's day and night shifts (first active one of each type). */
+export async function getShiftWindows(companyId: string): Promise<Record<RollCallShift, ShiftWindow>> {
+  const rows = await db.query.shifts.findMany({
+    where: and(eq(shifts.companyId, companyId), eq(shifts.isActive, true)),
+    orderBy: [asc(shifts.startTime)],
+  });
+  const pick = (type: RollCallShift): ShiftWindow => {
+    const row = rows.find((r) => r.shiftType === type && isClockTime(r.startTime) && isClockTime(r.endTime));
+    return row ? { start: row.startTime, end: row.endTime } : DEFAULT_SHIFT_WINDOWS[type];
+  };
+  return { day: pick("day"), night: pick("night") };
 }
 
 /** Organisation the user is attached to; users without one (global admins) act for the default company. */
@@ -96,6 +128,7 @@ export async function getRollCallSheet(userId: string, date: string): Promise<Ro
     : [];
   const logByEmployee = new Map(logs.map((l) => [l.employeeId, l]));
   const locked = await lockedEmployees(ids, date.slice(0, 7));
+  const shiftWindows = await getShiftWindows(company.id);
 
   const rows: RollCallRow[] = active.map((e) => {
     const log = logByEmployee.get(e.id);
@@ -110,6 +143,10 @@ export async function getRollCallSheet(userId: string, date: string): Promise<Ro
       status: (log?.status as RollCallStatus | undefined) ?? null,
       shiftType: log ? toShift(log.shiftType) : null,
       overtimeHours: Number(log?.overtimeHours) || 0,
+      checkIn: log?.checkIn ? plantTime(log.checkIn) : null,
+      checkOut: log?.checkOut ? plantTime(log.checkOut) : null,
+      workedHours: Number(log?.workedHours) || 0,
+      delayMinutes: log?.delayMinutes ?? 0,
       source: log?.sourceDevice ?? null,
       locked: locked.has(e.id),
     };
@@ -122,7 +159,7 @@ export async function getRollCallSheet(userId: string, date: string): Promise<Ro
       a.fullName.localeCompare(b.fullName)
   );
 
-  return { date, company, rows };
+  return { date, company, shifts: shiftWindows, rows };
 }
 
 export async function saveRollCall(
@@ -138,6 +175,7 @@ export async function saveRollCall(
 
   const ids = [...new Set(entries.map((e) => e.employeeId))];
   const locked = await lockedEmployees(ids, date.slice(0, 7));
+  const shiftWindows = await getShiftWindows(company.id);
   const note = `Telegram orqali belgilandi (${actorName})`;
 
   await db.transaction(async (tx) => {
@@ -168,28 +206,57 @@ export async function saveRollCall(
         continue;
       }
 
+      if ((e.checkIn != null && !isClockTime(e.checkIn)) || (e.checkOut != null && !isClockTime(e.checkOut))) {
+        skip("Vaqt noto'g'ri");
+        continue;
+      }
       const worked = e.status === "present" || e.status === "late";
+      let status: RollCallStatus = e.status;
+
+      // Times: a new value is placed on the shift timeline; omitted keeps the stored one.
+      const timeGiven = e.checkIn !== undefined || e.checkOut !== undefined;
+      const nextIn = e.checkIn !== undefined ? e.checkIn : existing?.checkIn ? plantTime(existing.checkIn) : null;
+      const nextOut = e.checkOut !== undefined ? e.checkOut : existing?.checkOut ? plantTime(existing.checkOut) : null;
+      let timeValues: Partial<typeof attendanceLogs.$inferInsert> = {};
+      let timedHours: string | null = null;
+      if (worked && timeGiven) {
+        if (nextIn || nextOut) {
+          const facts = shiftTimeFacts(shiftWindows[shiftType], nextIn, nextOut);
+          timeValues = {
+            checkIn: nextIn ? timelineToDate(date, facts.inMin) : null,
+            checkOut: nextOut ? timelineToDate(date, facts.outMin) : null,
+            delayMinutes: facts.delayMinutes,
+          };
+          timedHours = String(facts.workedHours);
+          if (status === "present" && facts.delayMinutes > LATE_THRESHOLD_MIN) status = "late";
+        } else {
+          timeValues = { checkIn: null, checkOut: null, delayMinutes: 0 };
+          timedHours = "8";
+        }
+      } else if (!worked) {
+        timeValues = { checkIn: null, checkOut: null, delayMinutes: 0 };
+      }
+
       const values = {
-        status: e.status,
+        status,
         shiftType,
         sourceDevice: "manual",
         overtimeHours: String(worked ? overtime : 0),
         notes: note,
+        ...timeValues,
       };
       if (existing) {
+        const keptHours = Number(existing.workedHours) > 0 ? existing.workedHours : "8";
         await tx
           .update(attendanceLogs)
-          .set({
-            ...values,
-            workedHours: worked ? (Number(existing.workedHours) > 0 ? existing.workedHours : "8") : "0",
-          })
+          .set({ ...values, workedHours: worked ? (timedHours ?? keptHours) : "0" })
           .where(eq(attendanceLogs.id, existing.id));
       } else {
         await tx.insert(attendanceLogs).values({
           companyId: company.id,
           employeeId: emp.id,
           workDate: date,
-          workedHours: worked ? "8" : "0",
+          workedHours: worked ? (timedHours ?? "8") : "0",
           ...values,
         });
       }
