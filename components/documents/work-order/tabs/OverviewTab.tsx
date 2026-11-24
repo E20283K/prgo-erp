@@ -41,6 +41,8 @@ import {
   Maximize2,
   UploadCloud,
   FolderOpen,
+  Loader2,
+  AlertCircle,
   FileText,
   Ruler,
   ChevronLeft,
@@ -724,12 +726,38 @@ export function OverviewTab({
   const [isPhotoAddOpen, setIsPhotoAddOpen] = useState(false);
   const [isPhotoDragOver, setIsPhotoDragOver] = useState(false);
 
+  const [proofUploads, setProofUploads] = useState<
+    { id: string; name: string; size: number; loaded: number; state: "uploading" | "done" | "error" }[]
+  >([]);
+
+  const setProofUploadState = (id: string, patch: Partial<(typeof proofUploads)[number]>) =>
+    setProofUploads((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
+
+  const putWithProgress = (url: string, file: File, onProgress: (loaded: number) => void) =>
+    new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", url);
+      xhr.setRequestHeader("Content-Type", file.type);
+      xhr.upload.onprogress = (ev) => onProgress(ev.loaded);
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`HTTP ${xhr.status}`)));
+      xhr.onerror = () => reject(new Error("network"));
+      xhr.onabort = () => reject(new Error("aborted"));
+      xhr.send(file);
+    });
+
   const uploadProofFiles = async (files: File[]) => {
     if (files.length === 0) return;
+    const batchId = Date.now();
+    const uploadIds = files.map((_, i) => `proof-up-${batchId}-${i}`);
+    setProofUploads((prev) => [
+      ...prev,
+      ...files.map((f, i) => ({ id: uploadIds[i], name: f.name, size: f.size, loaded: 0, state: "uploading" as const })),
+    ]);
     const uploadedUrls: string[] = [];
     const newAttachments: OrderAttachment[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      const uploadId = uploadIds[i];
       let finalUrl = "";
       try {
         const res = await fetch(`/api/v1/production/work-orders/${data?.docNo || tabId}/files`, {
@@ -745,11 +773,7 @@ export function OverviewTab({
         });
         const resData = await res.json();
         if (resData.success && resData.uploadUrl) {
-          await fetch(resData.uploadUrl, {
-            method: "PUT",
-            headers: { "Content-Type": file.type },
-            body: file,
-          });
+          await putWithProgress(resData.uploadUrl, file, (loaded) => setProofUploadState(uploadId, { loaded }));
           finalUrl = resData.downloadUrl;
           uploadedUrls.push(finalUrl);
         } else {
@@ -761,10 +785,17 @@ export function OverviewTab({
         finalUrl = await new Promise((resolve) => {
           const reader = new FileReader();
           reader.onload = (ev) => resolve(ev.target?.result as string || "");
+          reader.onerror = () => resolve("");
+          reader.onprogress = (ev) => setProofUploadState(uploadId, { loaded: ev.loaded });
           reader.readAsDataURL(file);
         });
+        if (!finalUrl) {
+          setProofUploadState(uploadId, { state: "error" });
+          continue;
+        }
         uploadedUrls.push(finalUrl);
       }
+      setProofUploadState(uploadId, { loaded: file.size, state: "done" });
 
       newAttachments.push({
         id: `att-proof-${Date.now()}-${i}`,
@@ -790,6 +821,15 @@ export function OverviewTab({
     }
 
     onMarkUnsaved();
+
+    // Keep finished rows visible briefly, failed ones a bit longer
+    const doneIds = new Set(uploadIds);
+    setTimeout(() => {
+      setProofUploads((prev) => prev.filter((u) => !(doneIds.has(u.id) && u.state === "done")));
+    }, 1200);
+    setTimeout(() => {
+      setProofUploads((prev) => prev.filter((u) => !doneIds.has(u.id)));
+    }, 5000);
   };
 
   const pickImageFiles = (list: FileList | DataTransferItemList | null | undefined): File[] => {
@@ -1220,6 +1260,40 @@ export function OverviewTab({
               >
                 <ImageIcon className="w-5 h-5 text-muted-foreground mb-1.5" />
                 <p className="text-xs text-muted-foreground">{tOrder("attachSamplePhoto")}</p>
+              </div>
+            )}
+
+            {proofUploads.length > 0 && (
+              <div className="shrink-0 mt-2 space-y-1">
+                {proofUploads.map((u) => {
+                  const pct = u.size > 0 ? Math.min(100, Math.round((u.loaded / u.size) * 100)) : 0;
+                  return (
+                    <div key={u.id} className="rounded border border-border bg-muted/20 px-2 py-1">
+                      <div className="flex items-center gap-1.5 text-[11px]">
+                        {u.state === "uploading" ? (
+                          <Loader2 className="w-3 h-3 shrink-0 animate-spin text-muted-foreground" />
+                        ) : u.state === "done" ? (
+                          <Check className="w-3 h-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        ) : (
+                          <AlertCircle className="w-3 h-3 shrink-0 text-destructive" />
+                        )}
+                        <span className="flex-1 min-w-0 truncate text-foreground">{u.name}</span>
+                        <span className="shrink-0 font-mono text-muted-foreground tabular-nums">
+                          {u.state === "error" ? tOrder("uploadFailed") : `${pct}%`}
+                        </span>
+                      </div>
+                      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-[width] duration-150",
+                            u.state === "error" ? "bg-destructive" : u.state === "done" ? "bg-emerald-500" : "bg-primary"
+                          )}
+                          style={{ width: `${u.state === "error" ? 100 : pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
