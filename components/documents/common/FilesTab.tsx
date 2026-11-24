@@ -242,7 +242,7 @@ export function FilesTab({
   );
 
   const handleAddFiles = useCallback(
-    (files: FileList | null) => {
+    (files: FileList | File[] | null) => {
       if (!files || files.length === 0) return;
 
       const newTaskList: { task: UploadTask; file: File }[] = [];
@@ -288,6 +288,45 @@ export function FilesTab({
       handleAddFiles(e.dataTransfer.files);
     }
   };
+
+  // Ctrl+V anywhere on the visible Files tab pastes clipboard files / images / SVG markup
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (isOperator) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const zone = dropZoneRef.current;
+      if (!zone || zone.offsetParent === null || !e.clipboardData) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+
+      const stamp = Date.now();
+      const files: File[] = [];
+      for (let i = 0; i < e.clipboardData.items.length; i++) {
+        const it = e.clipboardData.items[i];
+        if (it.kind !== "file") continue;
+        const f = it.getAsFile();
+        if (!f) continue;
+        // Screenshots arrive as a generic "image.png" — give each a unique name
+        const generic = !f.name || /^image\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name);
+        files.push(
+          generic
+            ? new File([f], `clipboard-${stamp}-${i}.${f.type.split("/")[1] || "png"}`, { type: f.type })
+            : f
+        );
+      }
+      if (files.length === 0) {
+        const text = (e.clipboardData.getData("image/svg+xml") || e.clipboardData.getData("text/plain") || "").trim();
+        if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(text)) {
+          files.push(new File([text], `clipboard-${stamp}.svg`, { type: "image/svg+xml" }));
+        }
+      }
+      if (files.length === 0) return;
+      e.preventDefault();
+      handleAddFiles(files);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [isOperator, handleAddFiles]);
 
   const activeUploadsCount = useMemo(() => {
     return uploadTasks.filter((t) => t.state === "uploading" || t.state === "processing").length;
@@ -350,11 +389,15 @@ export function FilesTab({
       {/* Upload Drag & Drop Area */}
       {!isOperator && (
         <div
+          ref={dropZoneRef}
           onDragOver={(e) => {
             e.preventDefault();
             setIsDragOver(true);
           }}
-          onDragLeave={() => setIsDragOver(false)}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setIsDragOver(false);
+          }}
           onDrop={handleDrop}
           onClick={() => document.getElementById(uploadInputId)?.click()}
           className={cn(
@@ -368,6 +411,10 @@ export function FilesTab({
           <div className="font-semibold text-xs text-foreground">
             Fayllarni shu yerga tashlang yoki tanlash uchun bosing
           </div>
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <kbd className="rounded border border-border bg-background px-1 py-px font-mono text-[10px]">Ctrl+V</kbd>
+            <span>buferdan qo&apos;shish</span>
+          </div>
           <div className="text-[11px] text-muted-foreground">
             PDF, AI, CDR, DXF shtans-forma, ZIP va yuqori aniqlikdagi maketlar qabul qilinadi
           </div>
@@ -376,7 +423,11 @@ export function FilesTab({
             id={uploadInputId}
             className="hidden"
             multiple
-            onChange={(e) => handleAddFiles(e.target.files)}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              handleAddFiles(e.target.files ? Array.from(e.target.files) : null);
+              e.target.value = "";
+            }}
           />
         </div>
       )}
