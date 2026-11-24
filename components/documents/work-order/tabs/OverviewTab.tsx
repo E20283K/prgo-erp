@@ -40,6 +40,7 @@ import {
   Image as ImageIcon,
   Maximize2,
   UploadCloud,
+  FolderOpen,
   FileText,
   Ruler,
   ChevronLeft,
@@ -720,6 +721,138 @@ export function OverviewTab({
     };
   }, [carouselApi]);
 
+  const [isPhotoAddOpen, setIsPhotoAddOpen] = useState(false);
+  const [isPhotoDragOver, setIsPhotoDragOver] = useState(false);
+
+  const uploadProofFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    const uploadedUrls: string[] = [];
+    const newAttachments: OrderAttachment[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      let finalUrl = "";
+      try {
+        const res = await fetch(`/api/v1/production/work-orders/${data?.docNo || tabId}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            docNo: data?.docNo || tabId,
+            fileName: file.name,
+            fileType: file.type,
+            fileSize: `${(file.size / 1024).toFixed(1)} KB`,
+            category: "proofs",
+          }),
+        });
+        const resData = await res.json();
+        if (resData.success && resData.uploadUrl) {
+          await fetch(resData.uploadUrl, {
+            method: "PUT",
+            headers: { "Content-Type": file.type },
+            body: file,
+          });
+          finalUrl = resData.downloadUrl;
+          uploadedUrls.push(finalUrl);
+        } else {
+          finalUrl = URL.createObjectURL(file);
+          uploadedUrls.push(finalUrl);
+        }
+      } catch {
+        // Fallback to durable base64 DataURL if S3/network is unreachable
+        finalUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target?.result as string || "");
+          reader.readAsDataURL(file);
+        });
+        uploadedUrls.push(finalUrl);
+      }
+
+      newAttachments.push({
+        id: `att-proof-${Date.now()}-${i}`,
+        name: file.name,
+        size: `${(file.size / 1024).toFixed(1)} KB`,
+        type: file.type || "image/jpeg",
+        date: new Date().toISOString().slice(0, 16).replace("T", " "),
+        isImage: true,
+        url: finalUrl,
+      });
+    }
+
+    // 1. Yangilangan rasmlar galereyasi
+    const updatedPhotos = [...photos, ...uploadedUrls];
+    handleFieldChange("photoUrls", updatedPhotos);
+    if (!formData.photoUrl && uploadedUrls[0]) {
+      handleFieldChange("photoUrl", uploadedUrls[0]);
+    }
+
+    // 2. "Fayllar va hujjatlar" (FilesTab) bo'limiga biriktirish
+    if (setOrderAttachments) {
+      setOrderAttachments((prev) => [...newAttachments, ...prev]);
+    }
+
+    onMarkUnsaved();
+  };
+
+  const pickImageFiles = (list: FileList | DataTransferItemList | null | undefined): File[] => {
+    if (!list) return [];
+    const out: File[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const entry = list[i];
+      const file = entry instanceof File ? entry : entry.kind === "file" ? entry.getAsFile() : null;
+      if (file && file.type.startsWith("image/")) {
+        out.push(
+          file.name && file.name !== "image.png"
+            ? file
+            : new File([file], `paste-${Date.now()}-${i}.${file.type.split("/")[1] || "png"}`, { type: file.type })
+        );
+      }
+    }
+    return out;
+  };
+
+  const handlePhotoDrop = (e: React.DragEvent) => {
+    if (isOperator) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsPhotoDragOver(false);
+    const files = pickImageFiles(e.dataTransfer.files);
+    if (files.length > 0) {
+      setIsPhotoAddOpen(false);
+      void uploadProofFiles(files);
+    }
+  };
+
+  const photoDragProps = isOperator
+    ? {}
+    : {
+        onDragOver: (e: React.DragEvent) => {
+          if (!Array.from(e.dataTransfer.types).includes("Files")) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = "copy";
+          if (!isPhotoDragOver) setIsPhotoDragOver(true);
+        },
+        onDragLeave: (e: React.DragEvent) => {
+          e.stopPropagation();
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          setIsPhotoDragOver(false);
+        },
+        onDrop: handlePhotoDrop,
+      };
+
+  // Ctrl+V while the add-photo popover is open pastes images from the clipboard
+  useEffect(() => {
+    if (!isPhotoAddOpen || isOperator) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const files = pickImageFiles(e.clipboardData?.items);
+      if (files.length === 0) return;
+      e.preventDefault();
+      setIsPhotoAddOpen(false);
+      void uploadProofFiles(files);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  });
+
   const handleRemovePhoto = (indexToRemove: number) => {
     const removedUrl = photos[indexToRemove];
     const updated = photos.filter((_, idx) => idx !== indexToRemove);
@@ -904,7 +1037,19 @@ export function OverviewTab({
         <div className="@container @7xl:col-span-2 space-y-4">
           <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-4 items-start @3xl:items-stretch">
         {/* Card 1: Order Photo & Sample Reference — square when stacked, matches Requisites height side by side */}
-        <div className="@container p-4 bg-card border border-border rounded-lg flex flex-col w-full aspect-square @3xl:aspect-auto @3xl:h-0 @3xl:min-h-full">
+        <div
+          className={cn(
+            "@container relative p-4 bg-card border rounded-lg flex flex-col w-full aspect-square @3xl:aspect-auto @3xl:h-0 @3xl:min-h-full transition-colors",
+            isPhotoDragOver && !isPhotoAddOpen ? "border-primary" : "border-border"
+          )}
+          {...photoDragProps}
+        >
+          {isPhotoDragOver && !isPhotoAddOpen && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-1.5 rounded-lg bg-background/85">
+              <UploadCloud className="w-5 h-5 text-primary" />
+              <span className="text-xs font-medium text-foreground">{tOrder("dropPhotoHint")}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between pb-2 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
               <Camera className="w-4 h-4 text-primary shrink-0" />
@@ -916,16 +1061,46 @@ export function OverviewTab({
               )}
             </div>
             {!isOperator && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                title={tOrder("addPhoto")}
-                onClick={() => document.getElementById("wo-photo-add-input")?.click()}
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </Button>
+              <Popover open={isPhotoAddOpen} onOpenChange={setIsPhotoAddOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                      title={tOrder("addPhoto")}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </Button>
+                  }
+                />
+                <PopoverContent align="end" className="w-64 p-2">
+                  <div
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1.5 rounded border border-dashed px-3 py-5 text-center transition-colors",
+                      isPhotoDragOver ? "border-primary bg-primary/5" : "border-border bg-muted/20"
+                    )}
+                    {...photoDragProps}
+                  >
+                    <UploadCloud className="w-5 h-5 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">{tOrder("dropPhotoHint")}</span>
+                    <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      Ctrl+V
+                    </kbd>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 h-7 w-full text-xs"
+                    onClick={() => document.getElementById("wo-photo-add-input")?.click()}
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    {tOrder("choosePhotoFile")}
+                  </Button>
+                </PopoverContent>
+              </Popover>
             )}
           </div>
 
@@ -1041,7 +1216,7 @@ export function OverviewTab({
                   "border border-dashed border-border rounded p-4 flex flex-col items-center justify-center text-center bg-muted/20 transition-colors w-full h-full flex-1",
                   !isOperator && "hover:border-border/80 cursor-pointer"
                 )}
-                onClick={!isOperator ? () => document.getElementById("wo-photo-add-input")?.click() : undefined}
+                onClick={!isOperator ? () => setIsPhotoAddOpen(true) : undefined}
               >
                 <ImageIcon className="w-5 h-5 text-muted-foreground mb-1.5" />
                 <p className="text-xs text-muted-foreground">{tOrder("attachSamplePhoto")}</p>
@@ -1055,74 +1230,11 @@ export function OverviewTab({
                 className="hidden"
                 accept="image/*"
                 multiple
-                onChange={async (e) => {
-                  const files = e.target.files;
-                  if (files && files.length > 0) {
-                    const uploadedUrls: string[] = [];
-                    const newAttachments: OrderAttachment[] = [];
-                    for (let i = 0; i < files.length; i++) {
-                      const file = files[i];
-                      let finalUrl = "";
-                      try {
-                        const res = await fetch(`/api/v1/production/work-orders/${data?.docNo || tabId}/files`, {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            docNo: data?.docNo || tabId,
-                            fileName: file.name,
-                            fileType: file.type,
-                            fileSize: `${(file.size / 1024).toFixed(1)} KB`,
-                            category: "proofs",
-                          }),
-                        });
-                        const resData = await res.json();
-                        if (resData.success && resData.uploadUrl) {
-                          await fetch(resData.uploadUrl, {
-                            method: "PUT",
-                            headers: { "Content-Type": file.type },
-                            body: file,
-                          });
-                          finalUrl = resData.downloadUrl;
-                          uploadedUrls.push(finalUrl);
-                        } else {
-                          finalUrl = URL.createObjectURL(file);
-                          uploadedUrls.push(finalUrl);
-                        }
-                      } catch {
-                        // Fallback to durable base64 DataURL if S3/network is unreachable
-                        finalUrl = await new Promise((resolve) => {
-                          const reader = new FileReader();
-                          reader.onload = (ev) => resolve(ev.target?.result as string || "");
-                          reader.readAsDataURL(file);
-                        });
-                        uploadedUrls.push(finalUrl);
-                      }
-
-                      newAttachments.push({
-                        id: `att-proof-${Date.now()}-${i}`,
-                        name: file.name,
-                        size: `${(file.size / 1024).toFixed(1)} KB`,
-                        type: file.type || "image/jpeg",
-                        date: new Date().toISOString().slice(0, 16).replace("T", " "),
-                        isImage: true,
-                        url: finalUrl,
-                      });
-                    }
-
-                    // 1. Yangilangan rasmlar galereyasi
-                    const updatedPhotos = [...photos, ...uploadedUrls];
-                    handleFieldChange("photoUrls", updatedPhotos);
-                    if (!formData.photoUrl && uploadedUrls[0]) {
-                      handleFieldChange("photoUrl", uploadedUrls[0]);
-                    }
-
-                    // 2. "Fayllar va hujjatlar" (FilesTab) bo'limiga biriktirish
-                    if (setOrderAttachments) {
-                      setOrderAttachments((prev) => [...newAttachments, ...prev]);
-                    }
-
-                    onMarkUnsaved();
-                  }
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  setIsPhotoAddOpen(false);
+                  void uploadProofFiles(files);
                 }}
               />
             )}
