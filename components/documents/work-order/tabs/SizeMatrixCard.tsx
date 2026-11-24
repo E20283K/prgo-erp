@@ -1540,6 +1540,119 @@ export function SizeMatrixCard({
     xhr.send(fd);
   };
 
+  // ── Drag & drop / Ctrl+V into artwork slots ──
+  const [artworkDragKey, setArtworkDragKey] = useState<string | null>(null);
+  const hoveredArtworkSlotRef = React.useRef<{
+    key: string;
+    item: { id: string; model?: string; sizeCode?: string; size?: string };
+    side: "front" | "back";
+  } | null>(null);
+
+  const isArtworkFile = (f: File) => {
+    const n = f.name.toLowerCase();
+    return f.type === "application/pdf" || f.type === "image/svg+xml" || n.endsWith(".pdf") || n.endsWith(".svg");
+  };
+
+  const rejectArtworkFile = (key: string, file: File) => {
+    setUploadTasks((prev) => ({
+      ...prev,
+      [key]: {
+        progress: 0,
+        state: "error",
+        fileName: file.name || "clipboard",
+        fileSize: formatBytes(file.size),
+        errorMessage: "Faqat PDF / SVG",
+      },
+    }));
+  };
+
+  const startArtworkFromFiles = (
+    item: { id: string; model?: string; sizeCode?: string; size?: string },
+    side: "front" | "back",
+    files: File[]
+  ) => {
+    const key = `${item.id}-${side}`;
+    if (files.length === 0) return false;
+    const file = files.find(isArtworkFile);
+    if (!file) {
+      rejectArtworkFile(key, files[0]);
+      return true;
+    }
+    handleArtworkUpload(item, side, file);
+    return true;
+  };
+
+  const artworkSlotProps = (
+    item: { id: string; model?: string; sizeCode?: string; size?: string },
+    side: "front" | "back",
+    disabled: boolean
+  ) => {
+    const key = `${item.id}-${side}`;
+    if (disabled) return {};
+    return {
+      tabIndex: 0,
+      onMouseEnter: () => {
+        hoveredArtworkSlotRef.current = { key, item, side };
+      },
+      onFocus: () => {
+        hoveredArtworkSlotRef.current = { key, item, side };
+      },
+      onMouseLeave: (e: React.MouseEvent) => {
+        // Keep the slot as paste target while it still has keyboard focus
+        if (hoveredArtworkSlotRef.current?.key === key && !e.currentTarget.contains(document.activeElement)) {
+          hoveredArtworkSlotRef.current = null;
+        }
+      },
+      onBlur: () => {
+        if (hoveredArtworkSlotRef.current?.key === key) hoveredArtworkSlotRef.current = null;
+      },
+      onDragOver: (e: React.DragEvent) => {
+        if (!Array.from(e.dataTransfer.types).includes("Files")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        if (artworkDragKey !== key) setArtworkDragKey(key);
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setArtworkDragKey((k) => (k === key ? null : k));
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        setArtworkDragKey(null);
+        startArtworkFromFiles(item, side, Array.from(e.dataTransfer.files));
+      },
+    };
+  };
+
+  // Ctrl+V while hovering (or focused on) an empty artwork slot
+  useEffect(() => {
+    if (isOperator) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const slot = hoveredArtworkSlotRef.current;
+      if (!slot || !e.clipboardData) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+
+      const files: File[] = [];
+      for (let i = 0; i < e.clipboardData.items.length; i++) {
+        const it = e.clipboardData.items[i];
+        if (it.kind !== "file") continue;
+        const f = it.getAsFile();
+        if (f) files.push(f);
+      }
+      if (files.length === 0) {
+        // Vector editors (Figma, Illustrator, Inkscape) can copy SVG markup as text
+        const text = (e.clipboardData.getData("image/svg+xml") || e.clipboardData.getData("text/plain") || "").trim();
+        if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(text)) {
+          files.push(new File([text], `clipboard-${Date.now()}.svg`, { type: "image/svg+xml" }));
+        }
+      }
+      if (startArtworkFromFiles(slot.item, slot.side, files)) e.preventDefault();
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  });
+
   const handleArtworkRemove = async (skuId: string, side: "front" | "back") => {
     const key = `${skuId}-${side}`;
     cancelUpload(key);
@@ -3355,7 +3468,13 @@ export function SizeMatrixCard({
                               </AttachmentActions>
                             </Attachment>
                           ) : (
-                            <div>
+                            <div
+                              {...artworkSlotProps(item, "front", isOperator || isUploadingFront)}
+                              className={cn(
+                                "group/slot inline-flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                                artworkDragKey === `${item.id}-front` && "ring-2 ring-primary/50 bg-primary/5"
+                              )}
+                            >
                               <input
                                 type="file"
                                 accept=".pdf,.svg,application/pdf,image/svg+xml"
@@ -3380,6 +3499,11 @@ export function SizeMatrixCard({
                                 <Upload className="size-3 text-muted-foreground" />
                                 <span>PDF / SVG yuklash</span>
                               </label>
+                              {!isOperator && (
+                                <kbd className="hidden group-hover/slot:inline-block group-focus-visible/slot:inline-block rounded border border-border bg-background px-1 py-px font-mono text-[10px] text-muted-foreground">
+                                  Ctrl+V
+                                </kbd>
+                              )}
                             </div>
                           )}
                         </TableCell>
@@ -3484,7 +3608,13 @@ export function SizeMatrixCard({
                               </AttachmentActions>
                             </Attachment>
                           ) : (
-                            <div>
+                            <div
+                              {...artworkSlotProps(item, "back", isOperator || isUploadingBack)}
+                              className={cn(
+                                "group/slot inline-flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                                artworkDragKey === `${item.id}-back` && "ring-2 ring-primary/50 bg-primary/5"
+                              )}
+                            >
                               <input
                                 type="file"
                                 accept=".pdf,.svg,application/pdf,image/svg+xml"
@@ -3509,6 +3639,11 @@ export function SizeMatrixCard({
                                 <Upload className="size-3 text-muted-foreground" />
                                 <span>PDF / SVG yuklash</span>
                               </label>
+                              {!isOperator && (
+                                <kbd className="hidden group-hover/slot:inline-block group-focus-visible/slot:inline-block rounded border border-border bg-background px-1 py-px font-mono text-[10px] text-muted-foreground">
+                                  Ctrl+V
+                                </kbd>
+                              )}
                             </div>
                           )}
                         </TableCell>
