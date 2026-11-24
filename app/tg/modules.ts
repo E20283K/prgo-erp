@@ -1,4 +1,4 @@
-import { ClipboardCheck, type LucideIcon } from "lucide-react";
+import { ClipboardCheck, ClipboardList, type LucideIcon } from "lucide-react";
 import type { SanitizedUser } from "@/lib/server/authService";
 
 /**
@@ -24,6 +24,16 @@ export const TG_MODULES: TgModule[] = [
       ["hr", "edit"],
       ["production", "create"],
       ["production", "edit"],
+    ],
+  },
+  {
+    key: "orders",
+    title: "Buyurtmalar",
+    href: "/tg/orders",
+    icon: ClipboardList,
+    rules: [
+      ["production", "view"],
+      ["crm", "view"],
     ],
   },
 ];
