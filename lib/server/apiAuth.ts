@@ -32,7 +32,7 @@ function readToken(request: NextRequest): string | null {
   return m ? m[1].trim() : null;
 }
 
-function hasAny(user: ApiUser, rules: PermissionRule[]): boolean {
+export function hasAny(user: ApiUser, rules: PermissionRule[]): boolean {
   if (user.role === "admin") return true;
   const perms = (user.permissions || {}) as Partial<Record<ModulePermissionKey, Partial<ActionPermission>>>;
   return rules.some(([mod, action]) => perms[mod]?.[action] === true);

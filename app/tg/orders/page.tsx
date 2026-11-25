@@ -3,11 +3,11 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronRight, Flame, Loader2, Search } from "lucide-react";
+import { ChevronRight, Flame, Loader2, Package, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTelegramBackButton, useTgSession } from "../TgSession";
 import type { TgOrderRow, TgOrderScope } from "@/lib/server/tgOrdersService";
-import { STAGE_LABEL, TONE_CLASS, formatQty, shortDate, stageTone, todayIso } from "./labels";
+import { ORDER_TYPE_LABEL, STAGE_LABEL, TONE_CLASS, formatQty, shortDate, stageTone, todayIso } from "./labels";
 
 const SCOPES: Array<{ key: TgOrderScope; label: string }> = [
   { key: "active", label: "Faol" },
@@ -105,18 +105,37 @@ function OrdersScreen() {
         ) : (
           <ul>
             {rows.map((o) => {
-              const overdue = !!o.deadline && o.deadline.slice(0, 10) < today && o.status !== "Completed" && o.status !== "Cancelled";
+              const finished = o.status === "Completed" || o.status === "Cancelled";
+              const overdue = !!o.deadline && o.deadline.slice(0, 10) < today && !finished;
               return (
                 <li key={o.id} className="border-b border-border">
                   <Link href={`/tg/orders/${o.id}`} className="flex items-center gap-2 px-3 py-2 active:bg-muted">
+                    <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-muted">
+                      {o.photo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={o.photo} alt="" loading="lazy" className="size-full object-cover" />
+                      ) : (
+                        <Package className="size-4 text-muted-foreground" />
+                      )}
+                    </div>
                     <div className="min-w-0 flex-1 space-y-0.5">
                       <div className="flex items-center gap-1.5 text-xs">
                         <span className="font-medium tabular-nums">{o.docNo}</span>
                         {o.priority === "Urgent" && <Flame className="size-3.5 text-destructive" aria-label="Shoshilinch" />}
                         {o.priority === "High" && <Flame className="size-3.5 text-amber-600" aria-label="Yuqori" />}
+                        {o.orderType !== "Production" && (
+                          <span className="shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground">
+                            {ORDER_TYPE_LABEL[o.orderType] ?? o.orderType}
+                          </span>
+                        )}
                         <span className="truncate text-muted-foreground">{o.customer}</span>
                       </div>
                       <div className="truncate text-sm">{o.product}</div>
+                      {o.currentStep && !finished && (
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {[o.currentStep, o.department].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                         <span
                           className={cn(
@@ -138,6 +157,14 @@ function OrdersScreen() {
                           </span>
                         )}
                       </div>
+                      {o.stepsTotal > 0 && (
+                        <div className="h-0.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full bg-foreground/50"
+                            style={{ width: `${Math.round((o.stepsDone / o.stepsTotal) * 100)}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                     <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
                   </Link>

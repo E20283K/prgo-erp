@@ -15,6 +15,7 @@ export interface TelegramWebApp {
   BackButton: { show(): void; hide(): void; onClick(cb: () => void): void; offClick(cb: () => void): void };
   HapticFeedback?: { notificationOccurred(type: "success" | "error" | "warning"): void };
   showConfirm?(message: string, cb: (ok: boolean) => void): void;
+  openLink?(url: string): void;
 }
 
 declare global {

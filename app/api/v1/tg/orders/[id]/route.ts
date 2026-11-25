@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireApiUser } from "@/lib/server/apiAuth";
+import { hasAny, requireApiUser } from "@/lib/server/apiAuth";
 import { getTgOrder } from "@/lib/server/tgOrdersService";
-import { TG_ORDERS_RULES } from "../../ordersRules";
+import { TG_ORDER_PRICE_RULES, TG_ORDERS_RULES } from "../../ordersRules";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   if ("response" in auth) return auth.response;
   try {
     const { id } = await context.params;
-    const data = await getTgOrder(auth.user.id, id);
+    const data = await getTgOrder(auth.user.id, id, { withPrice: hasAny(auth.user, TG_ORDER_PRICE_RULES) });
     if (!data) return NextResponse.json({ success: false, error: "Buyurtma topilmadi" }, { status: 404 });
     return NextResponse.json({ success: true, data });
   } catch (error) {
