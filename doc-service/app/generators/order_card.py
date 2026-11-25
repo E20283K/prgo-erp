@@ -665,50 +665,96 @@ def _spec_rows_plain(req: OrderCardRequest) -> List[Tuple[str, str]]:
     return rows
 
 
-SPEC_LABEL = 7.8
-SPEC_VALUE = 8.6
-SPEC_ROW = 5.6
-SPEC_WRAP = 4.0
+SECTION_H = 8.6
+GRID = FAINT
+SPEC_LABEL_W = 30.0
+QTY_ROW = 7.6
+QTY_TOTAL = 9.5
+
+
+class _SpecStyle:
+    """Row height and type sizes of the spec table: as large as the free space allows."""
+
+    def __init__(self, s: float):
+        self.row = 8.0 * s
+        self.label = 8.6 * s
+        self.value = 10.6 * s
+        self.wrap = self.value * 0.42
 
 
 def _section_title(pen: Pen, x: float, y: float, w: float, title: str) -> float:
     pen.text(x, y + 3, title.upper(), size=7, bold=True, color=MUTED)
     pen.line(x, y + 4.8, x + w, y + 4.8, color=LINE, width=0.5)
-    return y + 8.6
+    return y + SECTION_H
+
+
+def _spots(req: OrderCardRequest):
+    return [s for s in req.spotColorItems if s.name][:6]
+
+
+def _spec_cells(pen: Pen, req: OrderCardRequest, w: float, st: _SpecStyle):
+    """(label, color, value lines, row height, value x offset) per spec row."""
+    cells = []
+    for label, value, color in _spec_rows(req):
+        vx_off = SPEC_LABEL_W + 2.5
+        if label == "Pantone":
+            vx_off += len(_spots(req)) * 4.4 + 0.6
+        lines = pen.wrap(value, w - vx_off - 2, st.value, 2, bold=True)
+        cells.append((label, color, lines, st.row + (len(lines) - 1) * st.wrap, vx_off))
+    return cells
+
+
+def _spec_height(pen: Pen, req: OrderCardRequest, w: float, st: _SpecStyle) -> float:
+    return SECTION_H + sum(c[3] for c in _spec_cells(pen, req, w, st))
+
+
+def _spec_style(pen: Pen, req: OrderCardRequest, w: float, avail: float) -> _SpecStyle:
+    st = _SpecStyle(1.0)
+    for s in (1.2, 1.1, 1.0, 0.93, 0.86, 0.8, 0.74, 0.68):
+        st = _SpecStyle(s)
+        if _spec_height(pen, req, w, st) <= avail:
+            break
+    return st
 
 
 def _draw_spec(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float, max_y: float) -> float:
+    """Spec as a ruled two-column table: shaded label cell, large bold value."""
+    st = _spec_style(pen, req, w, max_y - y)
     y = _section_title(pen, x, y, w, "Spetsifikatsiya")
-    label_w = 26.0
-    for label, value, color in _spec_rows(req):
-        if y + SPEC_ROW > max_y:
+    top = y
+    for label, color, lines, h, vx_off in _spec_cells(pen, req, w, st):
+        if y + h > max_y + 0.01:
             break
-        pen.text(x, y, label, size=SPEC_LABEL, color=MUTED)
-        vx = x + label_w
+        pen.rect(x, y, x + SPEC_LABEL_W, y + h, fill=PANEL)
+        mid = y + h / 2
+        pen.text(x + 2, mid + st.label * 0.13, label, size=st.label, color=MUTED, max_w=SPEC_LABEL_W - 3)
         if label == "Pantone":
-            for sp in [s for s in req.spotColorItems if s.name][:6]:
-                pen.rect(vx, y - 2.9, vx + 3, y + 0.1, fill=_hex(sp.hex or "#888888"), color=LINE, width=0.3, radius_mm=0.4)
-                vx += 3.8
-            vx += 0.6
-        lines = pen.wrap(value, x + w - vx, SPEC_VALUE, 2, bold=True)
+            sx = x + SPEC_LABEL_W + 2.5
+            for sp in _spots(req):
+                pen.rect(sx, mid - 1.8, sx + 3.6, mid + 1.8, fill=_hex(sp.hex or "#888888"), color=LINE, width=0.3,
+                         radius_mm=0.4)
+                sx += 4.4
+        base = mid - (len(lines) - 1) * st.wrap / 2 + st.value * 0.13
         for i, ln in enumerate(lines):
-            pen.text(vx, y + i * SPEC_WRAP, ln, size=SPEC_VALUE, bold=True, color=color)
-        y += SPEC_ROW + (len(lines) - 1) * SPEC_WRAP
+            pen.text(x + vx_off, base + i * st.wrap, ln, size=st.value, bold=True, color=color)
+        y += h
+        pen.line(x, y, x + w, y, color=GRID, width=0.4)
+    if y > top:
+        pen.rect(x, top, x + w, y, color=GRID, width=0.4)
+        pen.line(x + SPEC_LABEL_W, top, x + SPEC_LABEL_W, y, color=GRID, width=0.4)
     return y
 
 
-def _spec_height(req: OrderCardRequest) -> float:
-    return 8.6 + len(_spec_rows(req)) * SPEC_ROW + 2
+def _qty_rows(req: OrderCardRequest):
+    sizes = [s for s in req.sizes if (s.quantity or 0) > 0]
+    show = len(sizes) > 1 or (len(sizes) == 1 and not _is_plain_code(sizes[0].sizeCode or sizes[0].size))
+    return sizes if show else []
 
 
 def _quantity_height(req: OrderCardRequest) -> float:
-    sizes = [s for s in req.sizes if (s.quantity or 0) > 0]
-    show_rows = len(sizes) > 1 or (len(sizes) == 1 and not _is_plain_code(sizes[0].sizeCode or sizes[0].size))
-    h = 7.6 + 8
-    if show_rows:
-        cols = 2 if len(sizes) > 5 else 1
-        h += math.ceil(len(sizes) / cols) * 3.9 + 3.2
-    return h
+    rows = _qty_rows(req)
+    cols = 2 if len(rows) > 8 else 1
+    return SECTION_H + math.ceil(len(rows) / cols) * QTY_ROW + QTY_TOTAL
 
 
 def _draw_schematic(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float, h: float):
@@ -758,34 +804,40 @@ def _draw_schematic(pen: Pen, req: OrderCardRequest, x: float, y: float, w: floa
 
 
 def _draw_quantity(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float, max_y: float) -> float:
+    """Quantity per size as a ruled table, with the order total in a shaded bottom row."""
     y = _section_title(pen, x, y, w, "Tiraj")
     unit = req.unit or "dona"
-    sizes = [s for s in req.sizes if (s.quantity or 0) > 0]
-    show_rows = len(sizes) > 1 or (len(sizes) == 1 and not _is_plain_code(sizes[0].sizeCode or sizes[0].size))
-    if show_rows:
-        cols = 2 if len(sizes) > 5 else 1
-        col_w = (w - (cols - 1) * 4) / cols
-        per_col = math.ceil(len(sizes) / cols)
-        avail = int(max(1, (max_y - y - 10) // 3.9))
-        per_col = min(per_col, avail)
+    sizes = _qty_rows(req)
+    top = y
+    if sizes:
+        cols = 2 if len(sizes) > 8 else 1
+        col_w = w / cols
+        per_col = min(math.ceil(len(sizes) / cols), int(max(1, (max_y - y - QTY_TOTAL) // QTY_ROW)))
         shown = sizes[:per_col * cols]
+        many_models = len({z.model for z in sizes}) > 1
         for i, s in enumerate(shown):
             c, rr = divmod(i, per_col)
-            sx = x + c * (col_w + 4)
-            sy = y + rr * 3.9
+            sx = x + c * col_w
+            base = y + rr * QTY_ROW + QTY_ROW / 2 + 10.5 * 0.13
             code = s.sizeCode or s.size or "—"
-            name = f"{s.model} · {code}" if s.model and len(sizes) > 1 and len({z.model for z in sizes}) > 1 else code
-            pen.text(sx, sy, name, size=6.8, color=TEXT, max_w=col_w * 0.6)
-            pen.text(sx + col_w, sy, _fmt_int(s.quantity), size=6.8, bold=True, color=INK, align="right")
-        y += per_col * 3.9
+            name = f"{s.model} · {code}" if s.model and many_models else code
+            pen.text(sx + 2, base, name, size=10.5, color=TEXT, max_w=col_w * 0.6)
+            pen.text(sx + col_w - 2, base, _fmt_int(s.quantity), size=11, bold=True, color=INK, align="right")
+        rows_h = per_col * QTY_ROW
+        for rr in range(1, per_col + 1):
+            pen.line(x, y + rr * QTY_ROW, x + w, y + rr * QTY_ROW, color=GRID, width=0.4)
+        if cols > 1:
+            pen.line(x + col_w, y, x + col_w, y + rows_h, color=GRID, width=0.4)
         if len(sizes) > len(shown):
-            pen.text(x, y, f"+{len(sizes) - len(shown)} razmer", size=6.2, color=MUTED)
-            y += 3.6
-        pen.line(x, y - 1.8, x + w, y - 1.8, color=LINE, width=0.5)
-        y += 3.2
-    pen.text(x, y + 1.4, "JAMI", size=7.5, bold=True, color=MUTED)
-    pen.text(x + w, y + 1.8, f"{_fmt_int(req.quantity)} {unit}", size=13, bold=True, color=ACCENT, align="right")
-    return y + 6
+            pen.text(x + w - 2, y - 3.6, f"+{len(sizes) - len(shown)} razmer", size=6.5, color=MUTED, align="right")
+        y += rows_h
+    pen.rect(x, y, x + w, y + QTY_TOTAL, fill=PANEL)
+    pen.text(x + 2, y + QTY_TOTAL / 2 + 8 * 0.13, "JAMI", size=8, bold=True, color=MUTED)
+    pen.text(x + w - 2, y + QTY_TOTAL / 2 + 14 * 0.13, f"{_fmt_int(req.quantity)} {unit}", size=14, bold=True,
+             color=ACCENT, align="right")
+    y += QTY_TOTAL
+    pen.rect(x, top, x + w, y, color=GRID, width=0.4)
+    return y
 
 
 _CORE_DIR = os.path.join(os.path.dirname(__file__), "..", "core")
@@ -878,12 +930,12 @@ def _draw_header(pen: Pen, req: OrderCardRequest, x: float, y: float, w: float) 
         pen.line(x + lw + 5, y + 1, x + lw + 5, y + qr_size - 1, color=LINE, width=0.6)
         x += lw + 10
 
-    client = (req.clientName or "Mijoz").strip().upper()
-    pen.text(x, y + 8.5, client, size=19, bold=True, color=ACCENT, max_w=right - x - 2)
-    meta = [req.docNo]
+    # The order number leads; the customer and product follow on the second line
+    pen.text(x, y + 8.5, req.docNo or "", size=19, bold=True, color=ACCENT, max_w=right - x - 2)
+    meta = [(req.clientName or "").strip().upper()]
     if req.productName:
         meta.append(req.productName)
-    pen.text(x, y + 15, "  ·  ".join(m for m in meta if m), size=9, bold=True, color=INK, max_w=right - x - 2)
+    pen.text(x, y + 15, "  ·  ".join(m for m in meta if m), size=9.5, bold=True, color=INK, max_w=right - x - 2)
     dates = []
     if req.orderDate:
         dates.append(f"Sana: {_fmt_date(req.orderDate)}")
@@ -933,29 +985,33 @@ def render_order_card(req: OrderCardRequest) -> Tuple[bytes, bytes, str]:
 
     body_top = header_bottom + 4
 
+    # The text tables get the room first; the artwork sketch takes what is left, capped
     if landscape:
-        panel_w = 92.0
+        panel_w = 122.0
         vis_w = pw - 2 * m - panel_w - 6
         _draw_visual(pen, req, cards, m, body_top, vis_w, body_bottom - body_top, cache)
         px = m + vis_w + 6
         pen.line(px - 3, body_top, px - 3, body_bottom, color=LINE, width=0.5)
-        sch_h = 28.0
+        sch_h = 26.0
         _draw_schematic(pen, req, px, body_top, panel_w, sch_h)
         qty_h = _quantity_height(req)
-        y = _draw_spec(pen, req, px, body_top + sch_h + 2, panel_w, body_bottom - qty_h)
-        _draw_quantity(pen, req, px, max(y + 1, body_bottom - qty_h), panel_w, body_bottom)
+        y = _draw_spec(pen, req, px, body_top + sch_h + 2, panel_w, body_bottom - qty_h - 3)
+        _draw_quantity(pen, req, px, max(y + 3, body_bottom - qty_h), panel_w, body_bottom)
     else:
-        sch_h = 44.0
-        bottom_h = max(_spec_height(req), sch_h + 4 + _quantity_height(req), 52.0) + 3
-        vis_h = max((body_bottom - body_top) * 0.5, body_bottom - body_top - bottom_h)
-        _draw_visual(pen, req, cards, m, body_top, pw - 2 * m, vis_h, cache)
+        body_h = body_bottom - body_top
+        sch_h = 36.0
+        content_w = pw - 2 * m
+        spec_w = (content_w - 8) * 0.58
+        side_w = content_w - 8 - spec_w
+        need = max(_spec_height(pen, req, spec_w, _SpecStyle(1.0)), sch_h + 4 + _quantity_height(req)) + 4
+        vis_h = max(55.0, min(body_h * 0.35, body_h - need))
+        _draw_visual(pen, req, cards, m, body_top, content_w, vis_h, cache)
         y0 = body_top + vis_h + 3
         pen.line(m, y0 - 1.5, pw - m, y0 - 1.5, color=LINE, width=0.5)
-        col_w = (pw - 2 * m - 8) / 2
-        _draw_spec(pen, req, m, y0, col_w, body_bottom)
-        rx = m + col_w + 8
-        _draw_schematic(pen, req, rx, y0 + 1, col_w, sch_h)
-        _draw_quantity(pen, req, rx, y0 + sch_h + 4, col_w, body_bottom)
+        _draw_spec(pen, req, m, y0, spec_w, body_bottom)
+        rx = m + spec_w + 8
+        _draw_schematic(pen, req, rx, y0 + 1, side_w, sch_h)
+        _draw_quantity(pen, req, rx, y0 + sch_h + 4, side_w, body_bottom)
 
     if (req.pages or 1) >= 2:
         from app.generators.order_card_production import PAGE_H, PAGE_W, draw_production_page
