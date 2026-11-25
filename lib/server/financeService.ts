@@ -30,6 +30,18 @@ export async function getCompanyExchangeRate(exec: DbExec, companyId: string): P
   return companyExchangeRate(company);
 }
 
+/** The company's VAT rate in percent: 0 for a non-payer, else settings.defaultTaxPercent (12 by default). */
+function companyVatRate(company: { isVatPayer?: boolean | null; settings?: { defaultTaxPercent?: number } | null } | null | undefined): number {
+  if (company?.isVatPayer === false) return 0;
+  const r = Number(company?.settings?.defaultTaxPercent ?? 12);
+  return Number.isFinite(r) && r >= 0 ? r : 12;
+}
+
+export async function getCompanyVatRate(exec: DbExec, companyId: string): Promise<number> {
+  const company = await exec.query.companies.findFirst({ where: eq(companies.id, companyId) });
+  return companyVatRate(company);
+}
+
 // ─── 1. Delivery Acts ──────────────────────────────────────────────────────────
 
 export async function getDeliveryActs(companyCode: string = "PRINTGOO"): Promise<DeliveryActRecord[]> {
@@ -185,7 +197,7 @@ export async function upsertDeliveryAct(
 
   // VAT: what the document says (0 included); only a missing rate falls back to the company's.
   const company = await exec.query.companies.findFirst({ where: eq(companies.id, companyId) });
-  const defaultVatRate = company?.isVatPayer === false ? 0 : Number(company?.settings?.defaultTaxPercent ?? 12);
+  const defaultVatRate = companyVatRate(company);
   const vatRateOf = (v: unknown) => {
     const n = v === undefined || v === null || v === "" ? NaN : Number(v);
     return Number.isFinite(n) && n >= 0 ? n : defaultVatRate;

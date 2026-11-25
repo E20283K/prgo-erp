@@ -14,6 +14,7 @@ import {
   clients,
   clientPayments,
   clientSettlements,
+  companies,
   crmLeads,
   deliveryActs,
   deliveryActItems,
@@ -38,6 +39,7 @@ import {
 import {
   getClientCreditState,
   getCompanyExchangeRate,
+  getCompanyVatRate,
   recordPayment,
   syncClientSettlement,
   upsertDeliveryAct,
@@ -184,37 +186,47 @@ async function main() {
   });
 
   // ── A2 + A3: akt valyutasi va QQS ──
-  await scenario("A2/A3 chiqim → akt: buyurtma valyutasi, QQS 0 saqlanadi", async (tx) => {
-    const f = await seedOrder(tx, "USD", 1000, 100, 3);
-    const res = await upsertWarehouseShipmentTx(
-      tx,
-      {
-        companyId: f.companyId,
-        shipmentNumber: `TST-SHP-${f.woNo}`,
-        status: "Dispatched",
-        shipmentType: "CustomerDelivery",
-        customerName: f.clientName,
-        workOrderId: f.woNo,
-        fromLocationName: "Tayyor mahsulotlar ombori",
-        items: [
-          { sku: f.fgSku, name: "Test etiketka", quantity: 40, unitPrice: 10, finishedGoodId: f.fgId, accountCode: "2810" },
-        ],
-      },
-      f.companyId,
-      ctx()
-    );
-    const [act] = await tx
-      .select()
-      .from(deliveryActs)
-      .where(and(eq(deliveryActs.companyId, f.companyId), eq(deliveryActs.docNo, res.deliveryActId!)));
-    assert.equal(act.currency, "USD", "akt buyurtma valyutasida");
-    assert.equal(Number(act.totalAmountUsd), 400);
-    assert.equal(Number(act.vatRate), 0, "QQS 0 → 12 bo'lib ketmasligi kerak");
-    assert.equal(act.clientId, f.clientId);
-    const items = await tx.select().from(deliveryActItems).where(eq(deliveryActItems.actId, act.id));
-    assert.equal(Number(items[0].vatRate), 0);
-    assert.equal(Number(items[0].unitPriceUsd), 10);
-  });
+  // Buyurtma narxi QQS ichida: akt jami o'zgarmaydi, QQS undan ajratiladi, qatorlar QQSsiz saqlanadi.
+  for (const vatPayer of [true, false]) {
+    await scenario(`A2/A3 chiqim → akt: buyurtma valyutasi, QQS ichida (${vatPayer ? "QQS to'lovchi" : "to'lovchi emas"})`, async (tx) => {
+      const f = await seedOrder(tx, "USD", 1000, 100, 3);
+      await tx.update(companies).set({ isVatPayer: vatPayer }).where(eq(companies.id, f.companyId));
+      const rate = await getCompanyVatRate(tx, f.companyId);
+      assert.equal(rate === 0, !vatPayer);
+      const res = await upsertWarehouseShipmentTx(
+        tx,
+        {
+          companyId: f.companyId,
+          shipmentNumber: `TST-SHP-${f.woNo}`,
+          status: "Dispatched",
+          shipmentType: "CustomerDelivery",
+          customerName: f.clientName,
+          workOrderId: f.woNo,
+          fromLocationName: "Tayyor mahsulotlar ombori",
+          items: [
+            { sku: f.fgSku, name: "Test etiketka", quantity: 40, unitPrice: 10, finishedGoodId: f.fgId, accountCode: "2810" },
+          ],
+        },
+        f.companyId,
+        ctx()
+      );
+      const [act] = await tx
+        .select()
+        .from(deliveryActs)
+        .where(and(eq(deliveryActs.companyId, f.companyId), eq(deliveryActs.docNo, res.deliveryActId!)));
+      const net = Number((400 / (1 + rate / 100)).toFixed(2));
+      assert.equal(act.currency, "USD", "akt buyurtma valyutasida");
+      assert.equal(Number(act.totalAmountUsd), 400, "jami buyurtma narxiga teng");
+      assert.equal(Number(act.vatRate), rate);
+      assert.equal(Number(act.subtotalUsd), net);
+      assert.equal(Number(act.vatAmountUsd), Number((400 - net).toFixed(2)));
+      assert.equal(act.clientId, f.clientId);
+      const items = await tx.select().from(deliveryActItems).where(eq(deliveryActItems.actId, act.id));
+      assert.equal(Number(items[0].vatRate), rate);
+      assert.ok(Math.abs(Number(items[0].totalUsd) - net) < 0.01, "qator jami QQSsiz");
+      assert.ok(Math.abs(Number(items[0].unitPriceUsd) * 40 * (1 + rate / 100) - 400) < 0.01, "qator + QQS = buyurtma narxi");
+    });
+  }
 
   await scenario("A2 turli valyutali buyurtmalar bitta chiqimga tushmaydi", async (tx) => {
     const a = await seedOrder(tx, "USD", 1000, 100, 3);

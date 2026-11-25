@@ -22,7 +22,7 @@ import {
 import { eq, desc, and, or, sql, inArray, isNull } from "drizzle-orm";
 import { getNextReceiptNumber, getNextShipmentNumber, getNextMaterialSku, getNextMovementNumber, getNextInventoryCountNumber, getNextManifestNumber, lockNumbering } from "./numberingService";
 import { emitNotification } from "./notificationService";
-import { upsertDeliveryAct, cancelDeliveryAct } from "./financeService";
+import { upsertDeliveryAct, cancelDeliveryAct, getCompanyVatRate } from "./financeService";
 import { applySalePostedEffects, reverseSalePostedEffects } from "./tradingService";
 import { getCompanyIdByCode as resolveCompanyId, resolveClient, unknownClientMessage } from "./crmService";
 import {
@@ -1065,23 +1065,32 @@ export async function upsertWarehouseShipmentTx(
 
   const invoiceable = shipmentType === "CustomerDelivery" || shipmentType === "MaterialSale";
   if (isPosting && invoiceable && effectiveItems.length > 0 && (!linkedAct || linkedAct.status === "cancelled")) {
+    // The order's selling price includes VAT: the invoice keeps that total and carries the company's
+    // VAT inside it. Lines are stored net of VAT, as the SF screen adds each line's VAT on top.
+    const vatRate = await getCompanyVatRate(tx, companyId);
+    const vatFactor = 1 + vatRate / 100;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const invoiceItems = (effectiveItems as any[]).map((it, idx) => {
       const q = Number(it.quantity ?? it.shippedQty) || 0;
-      const p = Number(it.unitPrice) || 0;
+      const gross = Number(it.unitPrice) || 0;
+      const net = Number((gross / vatFactor).toFixed(4));
+      const lineGross = q * gross;
+      const lineNet = Number((lineGross / vatFactor).toFixed(2));
       return {
         id: `act-item-${idx + 1}`,
         sku: it.sku || `SKU-${idx + 1}`,
         name: it.name || it.product || "Mahsulot",
         unit: it.unit || "dona",
         quantity: q,
-        unitPrice: p,
-        totalPrice: q * p,
-        vatRate: 0,
-        vatAmount: 0,
+        unitPrice: net,
+        totalPrice: lineNet,
+        grossTotal: lineGross,
+        vatRate,
+        vatAmount: Number((lineGross - lineNet).toFixed(2)),
       };
     });
-    const total = invoiceItems.reduce((acc, it) => acc + it.totalPrice, 0);
+    const total = Number(invoiceItems.reduce((acc, it) => acc + it.grossTotal, 0).toFixed(2));
+    const subtotal = Number((total / vatFactor).toFixed(2));
     const actCurrency = await resolveShipmentCurrency(tx, companyId, workOrderId, effectiveItems);
     const act = await upsertDeliveryAct(
       {
@@ -1094,9 +1103,9 @@ export async function upsertWarehouseShipmentTx(
         product: invoiceItems.map((i) => i.name).join(", "),
         quantity: invoiceItems.reduce((acc, i) => acc + i.quantity, 0),
         unit: invoiceItems[0]?.unit || "dona",
-        subtotal: total,
-        vatRate: 0,
-        vatAmount: 0,
+        subtotal,
+        vatRate,
+        vatAmount: Number((total - subtotal).toFixed(2)),
         totalAmount: total,
         currency: actCurrency,
         warehouse: fromLocationName,
