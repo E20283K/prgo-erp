@@ -17,6 +17,7 @@ import { AttendanceRecord } from "../types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +65,7 @@ export function AttendanceGrid() {
   const [data, setData] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchFilter, setSearchFilter] = useState("");
+  const searchInputRef = useFindShortcut();
   const [dateFilter, setDateFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [isFaceIdSimOpen, setIsFaceIdSimOpen] = useState(false);
@@ -418,6 +420,7 @@ export function AttendanceGrid() {
           <div className="relative w-44">
             <Search className="absolute left-2 top-1.5 size-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Qidiruv..."

@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -119,6 +120,7 @@ export function WorkRatesGrid() {
   const productiveTimePercent = useProductiveTimePercent();
 
   const [query, setQuery] = React.useState("");
+  const searchInputRef = useFindShortcut();
   const [selection, setSelection] = React.useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
@@ -352,6 +354,7 @@ export function WorkRatesGrid() {
         <div className="relative w-56">
           <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Qidirish"

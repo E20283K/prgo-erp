@@ -15,6 +15,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Separator } from "@/components/ui/separator";
 import { 
   Plus, 
@@ -933,6 +934,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   ]);
 
   const [searchFilter, setSearchFilter] = useState("");
+  const searchInputRef = useFindShortcut();
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -1828,6 +1830,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               <div className="relative w-52">
                 <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
+                  ref={searchInputRef}
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   placeholder={

@@ -16,6 +16,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -682,6 +683,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
   }, [type, planningData, machinesData, mappedMachines, mappedTooling, productionQueue, masterSpecifications]);
 
   const [searchFilter, setSearchFilter] = useState("");
+  const searchInputRef = useFindShortcut();
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [orderTypeFilter, setOrderTypeFilter] = useState<string>("ALL");
   const [machineFilter, setMachineFilter] = useState<string>("ALL");
@@ -1673,6 +1675,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                 <div className="relative w-36 sm:w-44">
                   <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
                   <Input
+                    ref={searchInputRef}
                     value={searchFilter}
                     onChange={(e) => setSearchFilter(e.target.value)}
                     placeholder={`Search ${type}...`}

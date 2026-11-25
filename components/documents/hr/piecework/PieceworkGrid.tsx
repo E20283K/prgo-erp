@@ -17,6 +17,7 @@ import { PieceworkRecord } from "../types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,7 @@ export function PieceworkGrid() {
   const [data, setData] = useState<PieceworkRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchFilter, setSearchFilter] = useState("");
+  const searchInputRef = useFindShortcut();
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -322,6 +324,7 @@ export function PieceworkGrid() {
           <div className="relative w-52">
             <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="F.I.O. yoki Work Order..."

@@ -14,6 +14,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -105,6 +106,7 @@ export function TradingGrid({ type }: TradingGridProps) {
 
   const isDark = theme === "dark";
   const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useFindShortcut();
   const [gridSelection, setGridSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
@@ -1047,6 +1049,7 @@ export function TradingGrid({ type }: TradingGridProps) {
           <div className="relative w-36 sm:w-44">
             <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={`${tCommon("search")}...`}

@@ -18,6 +18,7 @@ import { EmployeeRecord } from "../types";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -44,6 +45,7 @@ export function EmployeesGrid() {
   const [data, setData] = useState<EmployeeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchFilter, setSearchFilter] = useState("");
+  const searchInputRef = useFindShortcut();
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
 
   const [selection, setSelection] = useState<GridSelection>({
@@ -431,6 +433,7 @@ export function EmployeesGrid() {
           <div className="relative w-52">
             <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="F.I.O. yoki tabel №..."

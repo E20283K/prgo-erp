@@ -16,6 +16,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Separator } from "@/components/ui/separator";
 import {
   Plus,
@@ -60,6 +61,7 @@ import { TaskCalendarView } from "@/components/tasks/TaskCalendarView";
 export function TaskGrid() {
   const t = useTranslations("Tasks");
   const tCommon = useTranslations("Common");
+  const searchInputRef = useFindShortcut();
   const {
     tasks,
     filter,
@@ -460,6 +462,7 @@ export function TaskGrid() {
           <div className="relative w-48 sm:w-64">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={filter.searchQuery}
               onChange={(e) => setFilter({ searchQuery: e.target.value })}
               placeholder={t("searchPlaceholder")}

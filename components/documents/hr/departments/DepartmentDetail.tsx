@@ -13,6 +13,7 @@ import {
 } from "../../common/DocumentShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -107,6 +108,7 @@ export function DepartmentDetail({ tab }: DepartmentDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("overview");
   const [isSaved, setIsSaved] = useState(false);
   const [staffSearch, setStaffSearch] = useState("");
+  const searchInputRef = useFindShortcut();
 
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -491,6 +493,7 @@ export function DepartmentDetail({ tab }: DepartmentDetailProps) {
                   <div className="relative w-56">
                     <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
                     <Input
+                      ref={searchInputRef}
                       value={staffSearch}
                       onChange={(e) => setStaffSearch(e.target.value)}
                       placeholder="Xodim F.I.O. yoki tabel №..."

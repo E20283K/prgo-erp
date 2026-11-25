@@ -18,6 +18,7 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid"
 import { generateNextCode } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Building2, Plus, Search, RefreshCw, Printer, ExternalLink, CheckCircle2 } from "lucide-react";
@@ -30,6 +31,7 @@ export function DepartmentsGrid() {
   const [data, setData] = useState<DepartmentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchFilter, setSearchFilter] = useState("");
+  const searchInputRef = useFindShortcut();
 
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -211,6 +213,7 @@ export function DepartmentsGrid() {
           <div className="relative w-52">
             <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Bo'lim nomi yoki kodi..."

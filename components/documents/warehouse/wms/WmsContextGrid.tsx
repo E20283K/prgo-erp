@@ -15,6 +15,7 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { WmsMode, WmsRack, WmsBin, WmsBinItem, WmsZone } from "./types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Plus, Download, Search, RefreshCw } from "lucide-react";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -57,6 +58,7 @@ export function WmsContextGrid({
   const { theme } = useWorkspaceStore();
   const isDark = theme === "dark";
   const [filterText, setFilterText] = useState("");
+  const searchInputRef = useFindShortcut();
 
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -351,6 +353,7 @@ export function WmsContextGrid({
           <div className="relative w-full">
             <Search className="size-3.5 absolute left-2 top-2 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
               placeholder="Jadvaldan qidirish..."

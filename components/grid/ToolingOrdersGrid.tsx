@@ -21,6 +21,7 @@ import { computeToolingDeficits } from "@/lib/deficits";
 import { WorkOrderToolingItem } from "@/components/documents/work-order/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -145,6 +146,7 @@ export function ToolingOrdersGrid() {
   const [orders, setOrders] = useState<ToolingOrderRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useFindShortcut();
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"orders" | "archive" | "deficits">("orders");
@@ -1633,6 +1635,7 @@ export function ToolingOrdersGrid() {
           <div className="relative w-full">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               placeholder={
                 isOrderList
                   ? "PO raqam, WO №, jihoz yoki ta'minotchi..."

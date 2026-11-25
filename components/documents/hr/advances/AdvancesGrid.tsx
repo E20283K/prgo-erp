@@ -16,6 +16,7 @@ import { useWorkspaceStore } from "@/store/workspaceStore";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -41,6 +42,7 @@ export function AdvancesGrid() {
   const [period, setPeriod] = useState(currentPeriod());
   const [kind, setKind] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const searchInputRef = useFindShortcut();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -217,6 +219,7 @@ export function AdvancesGrid() {
           <div className="relative w-52">
             <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Hodim yoki tabel"

@@ -17,6 +17,7 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -320,6 +321,7 @@ export function DataGrid() {
   const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
   const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
   const [searchFilter, setSearchFilter] = useState("");
+  const searchInputRef = useFindShortcut();
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [techFilter, setTechFilter] = useState<string>("ALL");
   const [sortConfig, setSortConfig] = useState<{ colId: string; asc: boolean } | null>(null);
@@ -1086,6 +1088,7 @@ export function DataGrid() {
               <div className="relative w-52">
                 <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
+                  ref={searchInputRef}
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   placeholder={tGrid("quickFilterPlaceholder")}
