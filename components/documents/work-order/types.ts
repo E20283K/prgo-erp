@@ -278,6 +278,10 @@ export interface WorkOrderSampleData {
   testPurpose: SampleTestPurpose;
   testMachine: string;
   substrateSource?: "precut" | "parent_sheet";
+  /** Warehouse paper the sample is printed on (often the mass-run paper, sometimes a test stock). */
+  paperStock?: string;
+  /** Sheets issued for the sample run, make-ready included. */
+  paperSheets?: number;
   technicalNotes?: string;
   isProduced: boolean;
   producedAt?: string;

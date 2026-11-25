@@ -158,6 +158,7 @@ import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 
 import { getInitialToolingItems, toolingItemTotalCost, mergeSupplierSourcedFields } from "./toolingItems";
 import { syncKashirovkaBomRows } from "./utils/kashirovkaBom";
+import { syncSampleBomRow } from "./utils/sampleBom";
 import { buildReorderDocument } from "./reorder";
 export { getInitialToolingItems };
 
@@ -1377,6 +1378,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     testPurpose: data.sampleTestPurpose || "color_proof",
     testMachine: data.sampleTestMachine || "",
     substrateSource: data.sampleSubstrateSource || "precut",
+    paperStock: data.sampleData?.paperStock || undefined,
+    paperSheets: Number(data.sampleData?.paperSheets) || undefined,
     technicalNotes: data.sampleTechNotes || "",
     isProduced: data.sampleProduced || false,
     producedAt: data.sampleProducedAt || undefined,
@@ -1394,6 +1397,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   const handleSampleChange = (field: keyof WorkOrderSampleData, val: any) => {
     setSampleData((prev) => ({ ...prev, [field]: val }));
+    // The sample paper is its own BOM row, so it is issued and costed apart from the mass run
+    if (field === "paperStock" || field === "paperSheets" || field === "isRequired") {
+      const nextSample = { ...sampleData, [field]: val };
+      const nextForm = field === "isRequired" ? { ...formData, orderType: val ? "Sample" : "Production" } : formData;
+      const synced = syncSampleBomRow(currentBomItems, nextSample, nextForm, warehouseStock);
+      if (synced !== currentBomItems) {
+        setCurrentBomItems(synced);
+        updateTabData(tab.id, { [field]: val, materials: synced });
+        setTabUnsaved(tab.id, true);
+        return;
+      }
+    }
     updateTabData(tab.id, { [field]: val });
     setTabUnsaved(tab.id, true);
   };

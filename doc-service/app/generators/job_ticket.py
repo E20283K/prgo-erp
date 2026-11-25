@@ -210,9 +210,10 @@ def draw_fitted_text(
 # Blank grid the operators fill in by hand on the shop floor: one row per route step,
 # the plate split, material usage and hand-over signatures. Row heights shrink to keep
 # it on one page.
-P_CARD_H = 60.0  # page-1 proof cards
-SIDE_INFO_MIN_W = 24.0  # free width beside the artwork that gets the side facts
-BELOW_INFO_MIN_H = 21.0  # free height under a wide artwork (two fact rows) that gets them instead
+GEO_BODY_MIN_H = 75.5  # page-1 drawings + spec panel
+GEO_BODY_MAX_H = 125.0
+KASH_ROW_H = 6.4
+GEO_INFO_MIN_W = 84.0  # the spec panel never gets narrower than this (two columns)
 REPORT_TOP_MM = 25.0
 REPORT_BOTTOM_MM = 284.0
 REPORT_GAP_MM = 3.0
@@ -223,6 +224,19 @@ REPORT_MAT_ROW_H = 7.0
 REPORT_MAT_BLANK_ROWS = 2
 REPORT_SIGN_H = 27.0
 EMPTY_ROUTE_ROWS = 6
+
+SAMPLE_PURPOSE_LABELS = {
+    "color_proof": "Rang sinovi",
+    "dieline_structure": "Konstruksiya sinovi",
+    "full_finished": "To'liq namuna",
+    "substrate_test": "Material sinovi",
+}
+SAMPLE_STATUS = {
+    "pending_production": ("BOSILMAGAN", True, "#b45309"),
+    "awaiting_approval": ("MIJOZ KO'RIGIDA", True, "#b45309"),
+    "approved": ("TASDIQLANDI", True, "#15803d"),
+    "revision_requested": ("QAYTA ISHLASH", True, "#dc2626"),
+}
 
 REPORT_OP_COLS = [
     ("№", 7), ("OPERATSIYA / DASTGOH", 43), ("REJA", 17), ("KIRISH", 15), ("PRILADKA", 15),
@@ -486,7 +500,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     draw_fitted_text(c, status_text, 163.5, y_mm(req_top + 9.6), 20.0, font_name=FONT_BOLD, base_font_size=7.4, min_font_size=5.0, align="center")
     c.setFillColor(colors.HexColor("#64748b"))
     c.setFont(FONT_REGULAR, 6.6)
-    c.drawString(153 * mm, y_mm(req_top + 15.0), datetime.now().strftime("%Y-%m-%d"))
+    draw_fitted_text(c, str(od.get("stage") or "—"), 153.0, y_mm(req_top + 15.0), 22.0, font_name=FONT_REGULAR,
+                     base_font_size=6.6, min_font_size=5.0, color="#64748b", max_lines=1)
 
     # Col 6: Priority
     c.setFillColor(colors.HexColor("#64748b"))
@@ -523,18 +538,40 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         draw_fitted_text(c, val, cx, y_mm(kpi_top + 11.0), 45.0, font_name=FONT_BOLD, base_font_size=11.5,
                          min_font_size=7.5, color=col_hex, max_lines=1)
 
-    # ─── 3. PHYSICAL GEOMETRY (3 SIDE-BY-SIDE PROOFS: FRONT, BACK, DIELINE) ───
+    # ─── 3. GEOMETRY: FRONT, BACK AND DIELINE DRAWINGS + SPEC PANEL ──────────
+    note_text = "  •  ".join(
+        p.strip() for p in [req.customNote or "", str(od.get("notes") or "")] if p and p.strip()
+    )
+    note_h = 13.0 if note_text else 0.0
+    p1_bottom = 284.0 - (note_h + 2.0 if note_text else 0.0)
+
+    # Page-1 budget: the readiness table and the kashirovka block get their room first,
+    # the drawings take the rest (capped so a light order does not get giant drawings).
+    kash_mode = str(od.get("kashirovkaMode") or "none")
+    kash_layers = [l for l in (od.get("kashirovkaLayers") or []) if isinstance(l, dict)]
+    kash_on = kash_mode != "none"
+    kash_h = 18.0 + REPORT_HEAD_H + max(1, len(kash_layers)) * KASH_ROW_H + 1.0
+    # Sample run ahead of the mass run: its own row in the readiness table, its own block on the route
+    sample = od.get("sampleData") or {}
+    sample_on = bool(sample.get("isRequired")) or str(od.get("orderType") or "") == "Sample"
+    sample_status = str(sample.get("approvalStatus") or "pending_production")
+    sample_qty = int(sample.get("sampleQty") or 0)
+    sample_sheets = int(sample.get("paperSheets") or 0)
+    sample_paper = str(sample.get("paperStock") or "").strip()
+    ready_block_h = 7.0 + REPORT_HEAD_H + (6 if sample_on else 5) * 7.0 + 1.0
     sec3_top = kpi_top + kpi_h + 1.5
-    sec3_h = 7.0 + P_CARD_H + 1.0 + 12.5 + 2.0
+    geo_free = p1_bottom - sec3_top - 9.0 - (kash_h + 2.0 if kash_on else 0.0) - (ready_block_h + 2.0)
+    geo_body_h = max(GEO_BODY_MIN_H, min(GEO_BODY_MAX_H, geo_free))
+    sec3_h = 7.0 + geo_body_h + 2.0
     draw_box(9, sec3_top, full_w_mm, sec3_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
     panel3_badge = f"{width:g}×{height:g} {dim_unit} (+{bleed:g}{dim_unit})"
     if od.get("shapeType"):
         panel3_badge += f" • {str(od.get('shapeType')).upper()}"
     draw_panel_header(9.8, sec3_top + 0.8, full_w_mm - 1.6, L["physicalSpecs"], panel3_badge)
 
-    hole_size = float(od.get("holeSize") if od.get("holeSize") is not None else (4 if od.get("itemCategory") == "Hangtag" else 0))
-    hole_pos = str(od.get("holePosition") or ("top-center" if od.get("itemCategory") == "Hangtag" else "none"))
-    hole_offset = float(od.get("holeOffset") if od.get("holeOffset") is not None else 6)
+    hole_size = float(od.get("holeSize") or 0)
+    hole_pos = str(od.get("holePosition") or "none")
+    hole_offset = float(od.get("holeOffset") or 0)
 
     # Extract artwork sources
     sku_artworks_raw = od.get("skuArtworks") or od.get("artworks") or []
@@ -552,11 +589,9 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
                 u = att.get("url") or att.get("storagePath")
                 cat = str(att.get("category", "")).lower()
                 nm = str(att.get("name", "")).lower()
-                if cat in ("artwork", "proofs") or att.get("isImage") or "front" in nm or "oldi" in nm or str(u).endswith(".pdf"):
+                if cat in ("artwork", "proofs") and "back" not in nm and "orqa" not in nm or "front" in nm or "oldi" in nm:
                     front_src = u
                     break
-    if not front_src:
-        front_src = od.get("photoUrl") or ((od.get("photoUrls") or [None])[0])
     if not front_src or str(front_src).startswith("data:image"):
         probed_f = probe_artwork_url(doc_no, "ALL", "front")
         if probed_f:
@@ -595,480 +630,267 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
                 break
     dieline_raw = get_raw_artwork(dieline_src) if dieline_src else None
 
-    # 3 Proof Cards Geometry
-    p_card_top = sec3_top + 7.0
-    p_card_h = P_CARD_H
-    gap_p = 3.0
-    p_card_w = (full_w_mm - 4.0 - 2 * gap_p) / 3.0  # ~60.6 mm each
+    # Drawings left, one spec panel right. Front, back and dieline sit side by side at the
+    # same scale; the panel takes whatever width the drawings leave and lists every fact
+    # about the cut piece once.
     aspect = width / height if width > 0 and height > 0 else 1.0
+    geo_top = sec3_top + 7.0
+    geo_x0, geo_x1 = 11.0, 9.0 + full_w_mm - 2.0
+    dim_top = 7.5   # room for the width dimension above the drawings
+    cap_h = 6.0     # caption under each drawing
+    dim_gap = 7.0   # left margin for the height dimension
+    sk_gap = 5.0
+    max_zone_w = (geo_x1 - geo_x0) - GEO_INFO_MIN_W - 4.0
+    avail_h = geo_body_h - dim_top
 
-    # Artwork as large as the card allows. A tall, narrow product leaves room at the
-    # side: the artwork then sits left and the facts for that side fill the column.
-    slot_w = p_card_w - 4.0
-    slot_h = p_card_h - 10.0
-    if aspect >= slot_w / slot_h:
-        art_w = slot_w
-        art_h = max(8.0, art_w / aspect)
+    def fit(cell_w: float, cell_h: float) -> Tuple[float, float]:
+        if aspect >= cell_w / cell_h:
+            return cell_w, max(6.0, cell_w / aspect)
+        return max(6.0, cell_h * aspect), cell_h
+
+    # One row (front | back | dieline) suits tall pieces; a wide piece gets two rows
+    # (front | back, dieline under the front) so it is drawn larger.
+    one_row = fit((max_zone_w - dim_gap - 2 * sk_gap) / 3.0, avail_h - cap_h)
+    two_rows = fit((max_zone_w - dim_gap - sk_gap) / 2.0, (avail_h - 2 * cap_h - 2.0) / 2.0)
+    stacked = two_rows[0] * two_rows[1] > one_row[0] * one_row[1] * 1.15
+    art_w, art_h = two_rows if stacked else one_row
+    if stacked:
+        zone_w = dim_gap + 2 * art_w + sk_gap
+        block_h = 2 * (art_h + cap_h) + 2.0
+        row0 = geo_top + dim_top + (avail_h - block_h) / 2.0
+        spots_xy = [
+            (geo_x0 + dim_gap, row0),
+            (geo_x0 + dim_gap + art_w + sk_gap, row0),
+            (geo_x0 + dim_gap, row0 + art_h + cap_h + 2.0),
+        ]
     else:
-        art_h = slot_h
-        art_w = max(8.0, art_h * aspect)
-    side_info = slot_w - art_w >= SIDE_INFO_MIN_W
-    # A wide product leaves room under the artwork instead: the facts go there in two columns.
-    # When that room is just short, the artwork gives up to a quarter of its size to make it.
-    if not side_info and slot_h - art_h < BELOW_INFO_MIN_H and (slot_h - BELOW_INFO_MIN_H) >= art_h * 0.75:
-        art_h = slot_h - BELOW_INFO_MIN_H
-        art_w = art_h * aspect
-    below_info = not side_info and slot_h - art_h >= BELOW_INFO_MIN_H
-    art_top = p_card_top + 5.5 if below_info else p_card_top + 5.0 + (slot_h - art_h) / 2.0
+        zone_w = dim_gap + 3 * art_w + 2 * sk_gap
+        row0 = geo_top + dim_top + (avail_h - art_h - cap_h) / 2.0
+        spots_xy = [(geo_x0 + dim_gap + i * (art_w + sk_gap), row0) for i in range(3)]
+    xs = [p[0] for p in spots_xy]
+    art_y = row0  # top of the first row; the dimension lines hang off the front drawing
 
-    def art_left(card_x: float) -> float:
-        return card_x + 3.0 if side_info else card_x + 2.0 + (slot_w - art_w) / 2.0
-
-    def draw_side_info(card_x: float, rows: List[Tuple[str, str]]):
-        """Label/value pairs in the free space beside (or under) the artwork."""
-        if side_info:
-            cols_xy = [(art_left(card_x) + art_w + 3.0, card_x + p_card_w - 2.0)]
-            iy0 = p_card_top + 6.5
-        elif below_info:
-            half = (p_card_w - 4.0) / 2.0
-            cols_xy = [(card_x + 2.0, card_x + 2.0 + half - 1.5), (card_x + 2.0 + half + 1.5, card_x + p_card_w - 2.0)]
-            iy0 = art_top + art_h + 2.5
-        else:
-            return
-        bottom = p_card_top + p_card_h - 4.0
-        per_col = max(1, int((bottom - iy0) // 8.4))
-        for idx, (label, value) in enumerate(rows):
-            col_i, row_i = divmod(idx, per_col)
-            if col_i >= len(cols_xy):
-                break
-            ix, ix_end = cols_xy[col_i]
-            iy = iy0 + row_i * 8.4
-            c.setFillColor(colors.HexColor("#64748b"))
-            c.setFont(FONT_BOLD, 5.6)
-            c.drawString(ix * mm, y_mm(iy + 2.4), label.upper())
-            draw_fitted_text(c, value or "—", ix, y_mm(iy + 6.2), ix_end - ix, font_name=FONT_BOLD,
-                             base_font_size=7.6, min_font_size=5.4, max_lines=1)
-
-    def process_letters(ch_map: Dict[str, Any]) -> str:
-        letters = [k.upper() for k in ("c", "m", "y", "k") if (ch_map or {}).get(k)]
-        return "CMYK" if len(letters) == 4 else " ".join(letters)
-
-    spot_list = od.get("spotColorItems") or [
-        {"name": s, "side": "front"} for s in (od.get("spotColors") or [])
-    ]
-
-    def spots_for(side: str) -> str:
-        return ", ".join(str(s.get("name")) for s in spot_list if (s.get("side") or "front") == side and s.get("name"))
-
-    hole_text = (f"Ø{hole_size:g} mm • {hole_pos}" + (f" • {hole_offset:g} mm" if hole_offset else "")
-                 if hole_size > 0 and hole_pos != "none" else "—")
-    lam_text = str(od.get("lamination") or "")
-    lam_text = "" if lam_text.lower() in ("", "none", "-", "yo'q") else lam_text
-
-    # ── CARD 1: OLDI / FRONT PROOF ──
-    c1_x = 11.0
-    draw_box(c1_x, p_card_top, p_card_w, p_card_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1", lw=0.5)
-    draw_box(c1_x, p_card_top, p_card_w, 4.2, fill_hex="#0f172a", stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 5.8)
-    c.drawString((c1_x + 2.0) * mm, y_mm(p_card_top + 3.0), "OLDI / FRONT PROOF")
-    c.setFillColor(colors.HexColor("#93c5fd"))
-    c.setFont(FONT_BOLD, 5.2)
-    c.drawRightString((c1_x + p_card_w - 2.0) * mm, y_mm(p_card_top + 3.0), "1:1 PREPRESS")
-
-    art1_x = art_left(c1_x)
-    art1_top = art_top
-
-    if front_raw_p1 and front_raw_p1["kind"] == "pdf":
-        vector_overlays.append({
-            "page_idx": 0,
-            "x_mm": art1_x,
-            "y_mm": art1_top,
-            "w_mm": art_w,
-            "h_mm": art_h,
-            "pdf_bytes": front_raw_p1["bytes"],
-            "draw_contour": True,
-            "draw_bleed_box": True,
-            "bleed_mm": bleed,
-            "hole_size": hole_size,
-            "hole_pos": hole_pos,
-        })
-    elif front_raw_p1:
-        draw_raster_or_svg(c, front_raw_p1, art1_x, art1_top, art_w, art_h, y_mm)
-        c.setStrokeColor(colors.HexColor("#10b981"))
-        c.setLineWidth(0.6)
-        c.rect(art1_x * mm, y_mm(art1_top + art_h), art_w * mm, art_h * mm, fill=0, stroke=1)
-    else:
-        draw_box(art1_x, art1_top, art_w, art_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-        c.setFillColor(colors.HexColor("#94a3b8"))
-        c.setFont(FONT_REGULAR, 5.0)
-        c.drawCentredString((art1_x + art_w / 2) * mm, y_mm(art1_top + art_h / 2 + 1.0), "FRONT ARTWORK")
-
-    c.setFillColor(colors.HexColor("#475569"))
-    c.setFont(FONT_BOLD, 4.8)
-    c.drawCentredString((c1_x + p_card_w / 2) * mm, y_mm(p_card_top + p_card_h - 1.8), f"OLD YUZI • {width:g}×{height:g}{dim_unit}")
-    draw_side_info(c1_x, [
-        ("O'lcham", f"{width:g}×{height:g} {dim_unit}"),
-        ("Bleed", f"{bleed:g} {dim_unit}" if bleed else "yo'q"),
-        ("Bo'yoq", " • ".join(p for p in [str(od.get("colorsConfig") or ""), process_letters(od.get("frontColors") or {})] if p)),
-        ("Pantone", spots_for("front")),
-        ("Lak", str(od.get("coating") or "")),
-        ("Pardoz", "" if str(od.get("embellishment") or "").lower() in ("", "none") else str(od.get("embellishment"))),
-    ])
-
-    # ── CARD 2: ORQA / BACK PROOF ──
-    c2_x = c1_x + p_card_w + gap_p
-    draw_box(c2_x, p_card_top, p_card_w, p_card_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1", lw=0.5)
-    draw_box(c2_x, p_card_top, p_card_w, 4.2, fill_hex="#0f172a", stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 5.8)
-    c.drawString((c2_x + 2.0) * mm, y_mm(p_card_top + 3.0), "ORQA / BACK PROOF")
     back_printed = any(bool(v) for v in (od.get("backColors") or {}).values()) or bool(back_raw_p1)
-    c.setFillColor(colors.HexColor("#93c5fd" if back_printed else "#cbd5e1"))
-    c.setFont(FONT_BOLD, 5.2)
-    c.drawRightString((c2_x + p_card_w - 2.0) * mm, y_mm(p_card_top + 3.0), "2 TOMON" if back_printed else "1 TOMON")
+    hole_on = hole_size > 0 and hole_pos != "none"
 
-    art2_x = art_left(c2_x)
-    art2_top = art1_top
-
-    if back_raw_p1 and back_raw_p1["kind"] == "pdf":
-        vector_overlays.append({
-            "page_idx": 0,
-            "x_mm": art2_x,
-            "y_mm": art2_top,
-            "w_mm": art_w,
-            "h_mm": art_h,
-            "pdf_bytes": back_raw_p1["bytes"],
-            "draw_contour": True,
-            "draw_bleed_box": True,
-            "bleed_mm": bleed,
-            "hole_size": hole_size,
-            "hole_pos": hole_pos,
-        })
-    elif back_raw_p1:
-        draw_raster_or_svg(c, back_raw_p1, art2_x, art2_top, art_w, art_h, y_mm)
-        c.setStrokeColor(colors.HexColor("#10b981"))
+    def hole_mark(x0: float, y0: float):
+        if not hole_on:
+            return
+        r = max(0.6, hole_size / 2.0 * (art_h / height if height else 0.4))
+        off = (hole_offset * (art_h / height) if height else 2.0) + r
+        hx = {"top-left": x0 + off, "top-right": x0 + art_w - off}.get(hole_pos, x0 + art_w / 2.0)
+        hy = y0 + (art_h / 2.0 if "center" in hole_pos and not hole_pos.startswith("top") else off)
+        c.setStrokeColor(colors.HexColor("#2563eb"))
+        c.setFillColor(colors.white)
         c.setLineWidth(0.6)
-        c.rect(art2_x * mm, y_mm(art2_top + art_h), art_w * mm, art_h * mm, fill=0, stroke=1)
-    else:
-        draw_box(art2_x, art2_top, art_w, art_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-        c.setFillColor(colors.HexColor("#94a3b8"))
-        c.setFont(FONT_REGULAR, 5.0)
-        c.drawCentredString((art2_x + art_w / 2) * mm, y_mm(art2_top + art_h / 2 + 1.0), "ORQA MAKET YO'Q" if back_printed else "ORQASI BOSILMAYDI")
+        c.circle(hx * mm, y_mm(hy), r * mm, fill=1, stroke=1)
 
-    c.setFillColor(colors.HexColor("#475569"))
-    c.setFont(FONT_BOLD, 4.8)
-    back_lbl = f"ORQA YUZI • {width:g}×{height:g}{dim_unit}" if back_printed else "ORQA BOSMA MAVJUD EMAS"
-    c.drawCentredString((c2_x + p_card_w / 2) * mm, y_mm(p_card_top + p_card_h - 1.8), back_lbl)
-    draw_side_info(c2_x, [
-        ("Bosma", "2 tomon" if back_printed else "1 tomon"),
-        ("Bo'yoq", process_letters(od.get("backColors") or {}) or "—"),
-        ("Pantone", spots_for("back")),
-        ("Laminatsiya", " • ".join(p for p in [lam_text, {"1s": "1 tomon", "2s": "2 tomon"}.get(str(od.get("laminationSides") or ""), ""),
-                                                 f"{od.get('laminationMicron')} mkm" if od.get("laminationMicron") else ""] if p)),
-        ("Qog'oz", str(od.get("paperStock") or "")),
-    ])
-
-    # ── CARD 3: DIELINE / SHTANS CAD KONTUR ──
-    c3_x = c2_x + p_card_w + gap_p
-    draw_box(c3_x, p_card_top, p_card_w, p_card_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1", lw=0.5)
-    draw_box(c3_x, p_card_top, p_card_w, 4.2, fill_hex="#0f172a", stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 5.8)
-    c.drawString((c3_x + 2.0) * mm, y_mm(p_card_top + 3.0), "DIELINE / SHTANS KONTUR")
-    c.setFillColor(colors.HexColor("#93c5fd"))
-    c.setFont(FONT_BOLD, 5.2)
-    c.drawRightString((c3_x + p_card_w - 2.0) * mm, y_mm(p_card_top + 3.0), "CAD 1:1")
-
-    art3_x = art_left(c3_x)
-    art3_top = art1_top
-
-    if dieline_raw and dieline_raw["kind"] == "pdf":
-        vector_overlays.append({
-            "page_idx": 0,
-            "x_mm": art3_x,
-            "y_mm": art3_top,
-            "w_mm": art_w,
-            "h_mm": art_h,
-            "pdf_bytes": dieline_raw["bytes"],
-            "draw_contour": True,
-            "draw_bleed_box": True,
-            "bleed_mm": bleed,
-            "hole_size": hole_size,
-            "hole_pos": hole_pos,
-        })
-    elif dieline_raw:
-        draw_raster_or_svg(c, dieline_raw, art3_x, art3_top, art_w, art_h, y_mm)
-    else:
-        # High-Precision Parametric CAD Dieline
-        # 1. Outer Bleed box (Red dashed)
-        c.setStrokeColor(colors.HexColor("#ef4444"))
-        c.setFillColor(colors.HexColor("#fef2f2"))
-        c.setLineWidth(0.6)
+    def placeholder(x0: float, y0: float, text: str):
+        c.setStrokeColor(colors.HexColor("#cbd5e1"))
+        c.setFillColor(colors.HexColor("#f8fafc"))
+        c.setLineWidth(0.5)
         c.setDash(2, 1.5)
-        c.rect((art3_x - 1.2) * mm, y_mm(art3_top + art_h + 1.2), (art_w + 2.4) * mm, (art_h + 2.4) * mm, fill=1, stroke=1)
+        c.rect(x0 * mm, y_mm(y0 + art_h), art_w * mm, art_h * mm, fill=1, stroke=1)
         c.setDash()
+        c.saveState()
+        c.translate((x0 + art_w / 2.0 + 1.0) * mm, y_mm(y0 + art_h / 2.0))
+        if art_w < 20:
+            c.rotate(90)
+        c.setFillColor(colors.HexColor("#94a3b8"))
+        c.setFont(FONT_BOLD, 5.6)
+        c.drawCentredString(0, 0, text)
+        c.restoreState()
 
-        # 2. Main Cut rule (Blue solid)
+    def place(x0: float, y0: float, raw: Optional[Dict[str, Any]], bleed_box: bool):
+        if raw and raw["kind"] == "pdf":
+            vector_overlays.append({
+                "page_idx": 0, "x_mm": x0, "y_mm": y0, "w_mm": art_w, "h_mm": art_h,
+                "pdf_bytes": raw["bytes"], "draw_contour": True, "draw_bleed_box": bleed_box, "bleed_mm": bleed,
+            })
+            return True
+        if raw:
+            draw_raster_or_svg(c, raw, x0, y0, art_w, art_h, y_mm)
+            c.setStrokeColor(colors.HexColor("#10b981"))
+            c.setLineWidth(0.6)
+            c.rect(x0 * mm, y_mm(y0 + art_h), art_w * mm, art_h * mm, fill=0, stroke=1)
+            return True
+        return False
+
+    (fx, fy), (bx, by), (dx3, dy3) = spots_xy
+    # Front
+    if not place(fx, fy, front_raw_p1, bleed > 0):
+        placeholder(fx, fy, "MAKET YO'Q")
+    hole_mark(fx, fy)
+    # Back
+    if not place(bx, by, back_raw_p1, bleed > 0):
+        placeholder(bx, by, "ORQA MAKET YO'Q" if back_printed else "BOSILMAYDI")
+    if back_raw_p1 or back_printed:
+        hole_mark(bx, by)
+    # Dieline: the uploaded file, else the parametric cut line
+    if not place(dx3, dy3, dieline_raw, False):
+        if bleed > 0:
+            c.setStrokeColor(colors.HexColor("#ef4444"))
+            c.setLineWidth(0.5)
+            c.setDash(2, 1.5)
+            b = max(0.8, bleed * (art_h / height if height else 0.4))
+            c.rect((dx3 - b) * mm, y_mm(dy3 + art_h + b), (art_w + 2 * b) * mm, (art_h + 2 * b) * mm, fill=0, stroke=1)
+            c.setDash()
         c.setStrokeColor(colors.HexColor("#1d4ed8"))
         c.setFillColor(colors.white)
         c.setLineWidth(0.9)
-        c.rect(art3_x * mm, y_mm(art3_top + art_h), art_w * mm, art_h * mm, fill=1, stroke=1)
-
-        # 3. Crease / Bigma fold line (Magenta dashed if folded / box)
+        c.rect(dx3 * mm, y_mm(dy3 + art_h), art_w * mm, art_h * mm, fill=1, stroke=1)
         if od.get("shapeType") in ("folded", "carton_box") or od.get("foldType"):
             c.setStrokeColor(colors.HexColor("#d946ef"))
             c.setLineWidth(0.7)
             c.setDash(2.5, 1.5)
-            c.line(art3_x * mm, y_mm(art3_top + art_h / 2), (art3_x + art_w) * mm, y_mm(art3_top + art_h / 2))
+            c.line(dx3 * mm, y_mm(dy3 + art_h / 2), (dx3 + art_w) * mm, y_mm(dy3 + art_h / 2))
             c.setDash()
+        hole_mark(dx3, dy3)
 
-        # 4. Center crosshairs
-        c.setStrokeColor(colors.HexColor("#cbd5e1"))
-        c.setLineWidth(0.3)
-        c.setDash(1.5, 1.5)
-        c.line((art3_x + 1.5) * mm, y_mm(art3_top + art_h / 2), (art3_x + art_w - 1.5) * mm, y_mm(art3_top + art_h / 2))
-        c.line((art3_x + art_w / 2) * mm, y_mm(art3_top + 1.5), (art3_x + art_w / 2) * mm, y_mm(art3_top + art_h - 1.5))
-        c.setDash()
-
-        # 5. Punch Hole
-        if hole_size > 0 and hole_pos != "none":
-            c.setStrokeColor(colors.HexColor("#2563eb"))
-            c.setFillColor(colors.HexColor("#eff6ff"))
-            c.setLineWidth(0.8)
-            c.circle((art3_x + art_w / 2) * mm, y_mm(art3_top + 2.5), 1.0 * mm, fill=1, stroke=1)
-
-    c.setFillColor(colors.HexColor("#475569"))
-    c.setFont(FONT_BOLD, 4.8)
-    tooling_lbl = f"SHTAMP: {trunc(od.get('selectedToolingName') or '—', 18)} (+{bleed:g}mm)"
-    c.drawCentredString((c3_x + p_card_w / 2) * mm, y_mm(p_card_top + p_card_h - 1.8), tooling_lbl)
-    draw_side_info(c3_x, [
-        ("Shakl", str(od.get("shapeType") or "rectangle")),
-        ("Burchak", str(od.get("cornerType") or "")),
-        ("Teshik", hole_text),
-        ("Shtamp", str(od.get("selectedToolingName") or "")),
-        ("Bleed", f"{bleed:g} {dim_unit}" if bleed else "yo'q"),
-    ])
-
-    # Bottom Specs Bar inside Section 3
-    s3_bar_top = p_card_top + p_card_h + 1.0
-    s3_bar_h = 12.5
-    draw_box(11.0, s3_bar_top, full_w_mm - 4.0, s3_bar_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
-    phys_cells = [
-        (11.0, 46.0, L["trimDimensions"], f"{width:g} × {height:g} {dim_unit} (+{bleed:g}{dim_unit})"),
-        (57.0, 44.0, L["cornerCut"], str(od.get("cornerType") or "—")),
-        (101.0, 45.0, L["holeEyelet"], f"Ø{hole_size:g}mm • {hole_pos}" if hole_size > 0 and hole_pos != "none" else "—"),
-        (146.0, 53.0, L["paperSubstrate"], str(od.get("paperStock") or "—")),
-    ]
-    for (cx, cw, clbl, cval) in phys_cells:
-        c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont(FONT_BOLD, 6.0)
-        c.drawString((cx + 2.0) * mm, y_mm(s3_bar_top + 3.8), clbl.upper())
-        draw_fitted_text(c, cval, cx + 2.0, y_mm(s3_bar_top + 9.6), cw - 4.0, font_name=FONT_BOLD, base_font_size=8.6, min_font_size=5.6, max_lines=1)
-
-    # ─── 4. TECHNICAL COATINGS, LAK & KASHIROVKA SPECIFICATION ────────────────
-    sec4_top = sec3_top + sec3_h + 2.0
-    sec4_h = 79.0
-    draw_box(9, sec4_top, full_w_mm, sec4_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-    draw_panel_header(9.8, sec4_top + 0.8, full_w_mm - 1.6, "TEXNOLOGIK QOPLAMALAR, LAK VA KASHIROVKA SPECIFIKATSIYASI")
-
-    col_left_w = 93.0
-    col_right_w = full_w_mm - col_left_w - 6.0  # ~93.0mm
-    col_right_x = 9.0 + col_left_w + 4.0
-
-    # LEFT COLUMN: LAMINATION, VARNISH/COATING, INKS
-    # 1. Lamination Box
-    lam_top = sec4_top + 7.0
-    lam_h = 19.0
-    draw_box(11.0, lam_top, col_left_w, lam_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
-    draw_box(11.0, lam_top, col_left_w, 4.6, fill_hex="#334155", stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 6.4)
-    c.drawString(13.0 * mm, y_mm(lam_top + 3.3), "LAMINATSIYA (LAMINATION FILM)")
-    lam_name = str(od.get("lamination") or "None")
-    c.setFillColor(colors.HexColor("#93c5fd" if lam_name != "None" else "#94a3b8"))
-    c.drawRightString((11.0 + col_left_w - 2.0) * mm, y_mm(lam_top + 3.3), "MAVJUD" if lam_name != "None" else "YO'Q")
-
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont(FONT_REGULAR, 6.8)
-    c.drawString(13.0 * mm, y_mm(lam_top + 9.4), "Turi:")
-    draw_fitted_text(c, lam_name if lam_name != "None" else "—", 22.0, y_mm(lam_top + 9.4), col_left_w - 13.0, font_name=FONT_BOLD, base_font_size=8.2)
-
-    if lam_name != "None":
-        lam_sides = str(od.get("laminationSides") or "—").upper()
-        lam_micron = od.get("laminationMicron")
-        c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont(FONT_REGULAR, 6.8)
-        c.drawString(13.0 * mm, y_mm(lam_top + 15.6), "Parametr:")
-        draw_fitted_text(c, f"Tomoni: {lam_sides}  •  Qalinligi: {f'{lam_micron} μm' if lam_micron else '—'}", 25.0, y_mm(lam_top + 15.6), col_left_w - 16.0, font_name=FONT_REGULAR, base_font_size=7.2)
-
-    # 2. Varnish & Surface Coatings Box
-    coat_top = lam_top + lam_h + 2.5
-    coat_h = 19.0
-    draw_box(11.0, coat_top, col_left_w, coat_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
-    draw_box(11.0, coat_top, col_left_w, 4.6, fill_hex="#334155", stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 6.4)
-    c.drawString(13.0 * mm, y_mm(coat_top + 3.3), "LAK VA PARDOZLASH (COATING & EMBELLISHMENT)")
-    coat_val = str(od.get("coating") or "—")
-    emb_val = str(od.get("embellishment") or "None")
-
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont(FONT_REGULAR, 6.8)
-    c.drawString(13.0 * mm, y_mm(coat_top + 9.4), "Lak turi:")
-    draw_fitted_text(c, coat_val, 25.0, y_mm(coat_top + 9.4), col_left_w - 16.0, font_name=FONT_BOLD, base_font_size=8.2)
-
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont(FONT_REGULAR, 6.8)
-    c.drawString(13.0 * mm, y_mm(coat_top + 15.6), "Pardoz:")
-    draw_fitted_text(c, emb_val if emb_val != "None" else "—", 25.0, y_mm(coat_top + 15.6), col_left_w - 16.0, font_name=FONT_REGULAR, base_font_size=7.2)
-
-    # 3. Inks (CMYK + Spot/Pantone) Box
-    ink_top = coat_top + coat_h + 2.5
-    ink_h = 27.0
-    draw_box(11.0, ink_top, col_left_w, ink_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
-    draw_box(11.0, ink_top, col_left_w, 4.6, fill_hex="#334155", stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 6.4)
-    c.drawString(13.0 * mm, y_mm(ink_top + 3.3), "BO'YOQLAR (CMYK + SPOT STANSIYALARI)")
-    c.setFillColor(colors.HexColor("#93c5fd"))
-    c.drawRightString((11.0 + col_left_w - 2.0) * mm, y_mm(ink_top + 3.3), str(od.get("colorsConfig") or "—"))
-
-    front_colors = od.get("frontColors") or {}
-    back_colors = od.get("backColors") or {}
-
-    def draw_cmyk_row_p1(top_y: float, side_label: str, ch_map: Dict[str, Any]):
-        c.setFillColor(colors.HexColor("#475569"))
-        c.setFont(FONT_REGULAR, 6.8)
-        c.drawString(13.0 * mm, y_mm(top_y), f"{side_label}:")
-        ch_colors = [("c", "#06b6d4"), ("m", "#ec4899"), ("y", "#eab308"), ("k", "#0f172a")]
-        for idx, (ch_key, act_hex) in enumerate(ch_colors):
-            active = bool(ch_map.get(ch_key))
-            bx = (11.0 + col_left_w - 26) + idx * 6.0
-            draw_box(bx, top_y - 3.8, 5.2, 4.8, fill_hex=act_hex if active else "#e2e8f0", stroke_hex=None)
-            c.setFillColor(colors.white if active else colors.HexColor("#94a3b8"))
-            c.setFont(FONT_BOLD, 5.5)
-            c.drawCentredString((bx + 2.6) * mm, y_mm(top_y - 0.2), ch_key.upper())
-
-    draw_cmyk_row_p1(ink_top + 9.6, L["frontSide"], front_colors)
-    draw_cmyk_row_p1(ink_top + 16.2, L["backSide"], back_colors)
-
-    # Spot Color Chips
-    spot_items = od.get("spotColorItems") or []
-    if not spot_items and od.get("spotColors"):
-        spot_items = [{"name": s, "hex": "#fe5000", "side": "front"} for s in od.get("spotColors", [])]
-
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont(FONT_REGULAR, 6.8)
-    c.drawString(13.0 * mm, y_mm(ink_top + 22.8), "Pantone:")
-    if spot_items:
-        for s_idx, sp in enumerate(spot_items[:2]):
-            sx = 28.0 + s_idx * 36.0
-            draw_box(sx, ink_top + 19.6, 3.2, 3.2, fill_hex=sp.get("hex") or "#fe5000", stroke_hex=None)
-            draw_fitted_text(c, f"{sp.get('name')} ({sp.get('side', 'front').upper()})", sx + 4.5, y_mm(ink_top + 22.8), 31.0, font_name=FONT_BOLD, base_font_size=6.8)
-    else:
-        c.setFillColor(colors.HexColor("#94a3b8"))
-        c.setFont(FONT_REGULAR, 6.8)
-        c.drawString(28.0 * mm, y_mm(ink_top + 22.8), "—")
-
-    # RIGHT COLUMN: KASHIROVKA SPECIFICATION & SUBSTRATE LAYERS
-    kash_mode = str(od.get("kashirovkaMode") or "none")
-    kash_box_top = sec4_top + 7.0
-    kash_box_h = 70.0
-    draw_box(col_right_x, kash_box_top, col_right_w, kash_box_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
-    draw_box(col_right_x, kash_box_top, col_right_w, 4.6, fill_hex="#334155", stroke_hex=None)
-    c.setFillColor(colors.white)
-    c.setFont(FONT_BOLD, 5.5)
-    c.drawString((col_right_x + 2.0) * mm, y_mm(kash_box_top + 3.3), "KASHIROVKA VA QATLAMLAR MATRITSASI (SUBSTRATE)")
-    c.setFillColor(colors.HexColor("#93c5fd" if kash_mode != "none" else "#cbd5e1"))
-    c.drawRightString((col_right_x + col_right_w - 2.0) * mm, y_mm(kash_box_top + 3.3), kash_mode.upper())
-
-    if kash_mode != "none":
-        glue_gsm = float(od.get("kashirovkaGlueGsm") or 0)
-        curing_hours = od.get("kashirovkaCuringHours")
-        kash_strategy = str(od.get("kashirovkaStrategy") or "—")
-
-        c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont(FONT_REGULAR, 6.8)
-        c.drawString(
-            (col_right_x + 2.0) * mm,
-            y_mm(kash_box_top + 9.2),
-            f"Yelim sarfi: {f'{glue_gsm:g} g/m²' if glue_gsm else '—'} • Quritish: {f'{curing_hours}h' if curing_hours else '—'} • Priladka: {f'{make_ready} varaq' if make_ready else '—'}",
-        )
-        c.drawString((col_right_x + 2.0) * mm, y_mm(kash_box_top + 13.8), f"Strategiya: {kash_strategy}")
-
-        # Table Header
-        l_th_top = kash_box_top + 16.5
-        draw_box(col_right_x + 1.0, l_th_top, col_right_w - 2.0, 4.6, fill_hex="#e2e8f0", stroke_hex=None)
+    # Captions under each drawing
+    cap_pad = 1.2 + (max(0.8, bleed * (art_h / height)) if bleed and height else 0.0)
+    for (x0, y0), cap in zip(spots_xy, ["OLDI", "ORQA", "SHTANS" if dieline_raw else "KESIM KONTURI"]):
         c.setFillColor(colors.HexColor("#334155"))
-        c.setFont(FONT_BOLD, 5.8)
-        c.drawString((col_right_x + 2.5) * mm, y_mm(l_th_top + 3.3), "№")
-        c.drawString((col_right_x + 8.0) * mm, y_mm(l_th_top + 3.3), "QATLAM NOMI (ROLE)")
-        c.drawString((col_right_x + 40.0) * mm, y_mm(l_th_top + 3.3), "QOG'OZ MARKASI (STOCK)")
-        c.drawRightString((col_right_x + 78.0) * mm, y_mm(l_th_top + 3.3), "GSM")
-        c.drawRightString((col_right_x + col_right_w - 3.0) * mm, y_mm(l_th_top + 3.3), "BOSMA")
+        c.setFont(FONT_BOLD, 6.2)
+        c.drawCentredString((x0 + art_w / 2.0) * mm, y_mm(y0 + art_h + cap_pad + 2.8), cap)
 
-        layers = od.get("kashirovkaLayers") or []
-        if not layers:
-            c.setFillColor(colors.HexColor("#94a3b8"))
-            c.setFont(FONT_REGULAR, 6.8)
-            c.drawString((col_right_x + 2.5) * mm, y_mm(l_th_top + 8.4), "Qatlamlar kiritilmagan")
+    # Dimension lines on the front drawing: width above, height to the left
+    c.setStrokeColor(colors.HexColor("#0369a1"))
+    c.setFillColor(colors.HexColor("#0369a1"))
+    c.setLineWidth(0.4)
+    dy = art_y - 3.0
+    c.line(xs[0] * mm, y_mm(dy), (xs[0] + art_w) * mm, y_mm(dy))
+    for tx in (xs[0], xs[0] + art_w):
+        c.line(tx * mm, y_mm(dy - 1.2), tx * mm, y_mm(dy + 1.2))
+    c.setFont(FONT_BOLD, 6.0)
+    c.drawCentredString((xs[0] + art_w / 2.0) * mm, y_mm(dy + 0.9 - 2.4), f"{width:g}")
+    dx = xs[0] - 3.0
+    c.line(dx * mm, y_mm(art_y), dx * mm, y_mm(art_y + art_h))
+    for ty in (art_y, art_y + art_h):
+        c.line((dx - 1.2) * mm, y_mm(ty), (dx + 1.2) * mm, y_mm(ty))
+    c.saveState()
+    c.translate((dx - 1.0) * mm, y_mm(art_y + art_h / 2.0))
+    c.rotate(90)
+    c.drawCentredString(0, 0, f"{height:g}")
+    c.restoreState()
 
-        total_net_gsm = 0
-        for l_idx, layer in enumerate(layers[:3]):
-            ly_top = l_th_top + 4.6 + l_idx * 7.4
-            l_gsm = int(layer.get("grammage") or 0)
-            total_net_gsm += l_gsm
-            c.setFillColor(colors.HexColor("#475569"))
-            c.setFont(FONT_BOLD, 6.8)
-            c.drawString((col_right_x + 2.5) * mm, y_mm(ly_top + 4.9), str(l_idx + 1))
-            draw_fitted_text(c, layer.get("label") or f"Layer {l_idx+1}", col_right_x + 8.0, y_mm(ly_top + 4.9), 31.0, font_name=FONT_BOLD, base_font_size=6.8)
-            draw_fitted_text(c, layer.get("paperStock") or "—", col_right_x + 40.0, y_mm(ly_top + 4.9), 36.0, font_name=FONT_REGULAR, base_font_size=6.8)
-            c.drawRightString((col_right_x + 78.0) * mm, y_mm(ly_top + 4.9), f"{l_gsm}g" if l_gsm else "—")
-            c.drawRightString((col_right_x + col_right_w - 3.0) * mm, y_mm(ly_top + 4.9), str(layer.get("colors") or "—"))
+    # Spec panel on the right
+    # Paper the order asks for (type + density) is set before a stock item is picked
+    # from the warehouse, so both are printed: the request and the chosen stock.
+    _gsm = od.get("targetGsm") or od.get("paperDensity") or od.get("grammage")
+    paper_spec = " • ".join(p for p in [
+        str(od.get("targetPaperType") or "").strip(),
+        f"{float(_gsm):g} g/m²" if _gsm else "",
+    ] if p)
+    _imp = od.get("impositionState") or {}
+    press_sheet_w = _imp.get("sheetW") or od.get("pressSheetW")
+    press_sheet_h = _imp.get("sheetH") or od.get("pressSheetH")
+    def letters(ch_map: Dict[str, Any]) -> str:
+        got = [k.upper() for k in ("c", "m", "y", "k") if (ch_map or {}).get(k)]
+        return "CMYK" if len(got) == 4 else " ".join(got)
+
+    spot_list = od.get("spotColorItems") or [{"name": s, "side": "front"} for s in (od.get("spotColors") or [])]
+    spots = ", ".join(
+        f"{s.get('name')}"
+        + (" (orqa)" if (s.get("side") or "front") == "back" else "")
+        + (f" — {str(s.get('note')).strip()}" if str(s.get("note") or "").strip() else "")
+        for s in spot_list if s.get("name")
+    )
+    lam = str(od.get("lamination") or "")
+    lam = "" if lam.lower() in ("", "none", "-", "yo'q") else lam
+    lam_full = " • ".join(p for p in [
+        lam, {"1s": "1 tomon", "2s": "2 tomon"}.get(str(od.get("laminationSides") or ""), ""),
+        f"{od.get('laminationMicron')} mkm" if lam and od.get("laminationMicron") else "",
+    ] if p)
+    emb = str(od.get("embellishment") or "")
+    formula = str(od.get("colorsConfig") or "")
+    info_rows = [
+        (L["trimDimensions"], f"{width:g} × {height:g} {dim_unit}"),
+        ("Bleed", f"{bleed:g} {dim_unit}" if bleed else "yo'q"),
+        ("Shakl", str(od.get("shapeType") or "rectangle")),
+        (L["cornerCut"], str(od.get("cornerType") or "—")),
+        (L["holeEyelet"], (f"Ø{hole_size:g} mm • {hole_pos}" + (f" • {hole_offset:g} mm" if hole_offset else "")) if hole_on else "—"),
+        ("Shtamp", str(od.get("selectedToolingName") or "—")),
+        ("Qog'oz turi / GSM", paper_spec or "—"),
+        ("Ombordagi qog'oz", str(od.get("paperStock") or "tanlanmagan")),
+        ("Oldi bo'yoq", " • ".join(p for p in [formula, letters(od.get("frontColors") or {})] if p) or "—"),
+        ("Orqa bo'yoq", letters(od.get("backColors") or {}) or ("—" if back_printed else "bosilmaydi")),
+        ("Pantone", spots or "—"),
+        ("Laminatsiya", lam_full or "—"),
+        ("Lak / pardoz", " • ".join(p for p in [str(od.get("coating") or ""), "" if emb.lower() in ("", "none") else emb] if p) or "—"),
+        ("Kashirovka", kash_mode.capitalize() + f" • {len(kash_layers)} qatlam" if kash_on else "yo'q"),
+        ("Bosma varaq", f"{press_sheet_w:g} × {press_sheet_h:g} mm" if press_sheet_w and press_sheet_h else "—"),
+    ]
+    info_x = geo_x0 + zone_w + 4.0
+    info_w = geo_x1 - info_x
+    draw_box(info_x, geo_top, info_w, geo_body_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0", lw=0.5)
+    c.setStrokeColor(colors.HexColor("#e2e8f0"))
+    c.setLineWidth(0.5)
+    c.line((info_x - 2.0) * mm, y_mm(geo_top), (info_x - 2.0) * mm, y_mm(geo_top + geo_body_h))
+    info_cols = 2 if info_w >= 80.0 else 1
+    per_col = math.ceil(len(info_rows) / info_cols)
+    row_h = min(9.4, (geo_body_h - 3.0) / per_col)
+    col_w = (info_w - 4.0) / info_cols
+    val_size = 8.4 if row_h >= 8.0 else 7.4
+    for idx, (label, value) in enumerate(info_rows):
+        ci, ri = divmod(idx, per_col)
+        ix = info_x + 2.0 + ci * col_w
+        iy = geo_top + 1.5 + ri * row_h
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont(FONT_BOLD, 5.6)
+        c.drawString(ix * mm, y_mm(iy + 2.6), str(label).upper())
+        draw_fitted_text(c, value, ix, y_mm(iy + 2.6 + val_size * 0.3528 + 1.4), col_w - 3.0, font_name=FONT_BOLD,
+                         base_font_size=val_size, min_font_size=5.6, max_lines=1)
+        if ri < per_col - 1:
             c.setStrokeColor(colors.HexColor("#e2e8f0"))
             c.setLineWidth(0.3)
-            c.line((col_right_x + 1.0) * mm, y_mm(ly_top + 7.0), (col_right_x + col_right_w - 1.0) * mm, y_mm(ly_top + 7.0))
+            c.line(ix * mm, y_mm(iy + row_h - 0.4), (ix + col_w - 2.0) * mm, y_mm(iy + row_h - 0.4))
 
-        # Totals Strip
-        if layers and total_net_gsm:
-            total_mounted_gsm = round(total_net_gsm + max(0, len(layers) - 1) * glue_gsm)
-            tot_top = kash_box_top + kash_box_h - 12.0
-            draw_box(col_right_x + 1.0, tot_top, col_right_w - 2.0, 10.0, fill_hex="#eff6ff", stroke_hex="#bfdbfe")
-            c.setFillColor(colors.HexColor("#1d4ed8"))
-            c.setFont(FONT_BOLD, 7.6)
-            c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 4.4), f"ZICHLIK: {total_mounted_gsm} g/m²")
-            if curing_hours:
-                c.setFillColor(colors.HexColor("#475569"))
-                c.setFont(FONT_REGULAR, 6.0)
-                c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 7.8), f"Presslangandan so'ng {curing_hours} soat quritish shart.")
+    # ─── 4. KASHIROVKA (only when the order is mounted) ───────────────────────
+    # Lamination, coating, inks and paper are in the spec panel above; this block only
+    # carries what a mounted job adds: the layers, glue, curing and the mounted density.
+    sec4_top = sec3_top + sec3_h + 2.0
+    if kash_on:
+        sec4_h = kash_h
+        draw_box(9, sec4_top, full_w_mm, sec4_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
+        glue_gsm = float(od.get("kashirovkaGlueGsm") or 0)
+        curing_hours = od.get("kashirovkaCuringHours")
+        net_gsm = sum(int(l.get("grammage") or 0) for l in kash_layers)
+        mounted = round(net_gsm + max(0, len(kash_layers) - 1) * glue_gsm) if net_gsm else 0
+        draw_panel_header(9.8, sec4_top + 0.8, full_w_mm - 1.6, f"KASHIROVKA • {kash_mode.upper()}",
+                          f"ZICHLIK: {mounted} g/m²" if mounted else "")
+        cells = [
+            ("Yelim sarfi", f"{glue_gsm:g} g/m²" if glue_gsm else "—"),
+            ("Quritish", f"{curing_hours} soat" if curing_hours else "—"),
+            ("Priladka", f"{make_ready} varaq" if make_ready else "—"),
+            ("Strategiya", str(od.get("kashirovkaStrategy") or "—")),
+        ]
+        cw = (full_w_mm - 4.0) / len(cells)
+        for i, (lbl, val) in enumerate(cells):
+            cx = 11.0 + i * cw
+            c.setFillColor(colors.HexColor("#64748b"))
+            c.setFont(FONT_BOLD, 5.8)
+            c.drawString(cx * mm, y_mm(sec4_top + 10.0), lbl.upper())
+            draw_fitted_text(c, val, cx, y_mm(sec4_top + 15.2), cw - 3.0, font_name=FONT_BOLD, base_font_size=8.4,
+                             min_font_size=6.0, max_lines=1)
+        layer_cols = [("№", 10), ("QATLAM", 50), ("QOG'OZ", 80.4), ("GSM", 25), ("BOSMA", 25)]
+
+        def layer_cell(ri: int, ci: int):
+            if ri >= len(kash_layers):
+                return None
+            layer = kash_layers[ri]
+            gsm = int(layer.get("grammage") or 0)
+            return [
+                (str(ri + 1), True, "#64748b"),
+                (str(layer.get("label") or f"{ri + 1}-qatlam"), True, "#0f172a"),
+                (str(layer.get("paperStock") or "—"), False, "#334155"),
+                (f"{gsm} g/m²" if gsm else "—", True, "#0f172a"),
+                (str(layer.get("colors") or "—"), False, "#334155"),
+            ][ci]
+
+        draw_grid(sec4_top + 18.0, layer_cols, KASH_ROW_H, max(1, len(kash_layers)), layer_cell, x0=9.8, font=7.6)
     else:
-        # Monotype (Standard single substrate)
-        c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_BOLD, 7.4)
-        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 10.0), "YAGONA ASOSIY QOG'OZ SPECIFIKATSIYASI")
-        c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont(FONT_REGULAR, 6.8)
-        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 16.0), "Xomashyo markasi:")
-        draw_fitted_text(c, str(od.get("paperStock") or "—"), col_right_x + 3.0, y_mm(kash_box_top + 22.0), col_right_w - 6.0, font_name=FONT_BOLD, base_font_size=8.4)
-
-        imp_st = od.get("impositionState") or {}
-        press_w = imp_st.get("sheetW") or od.get("pressSheetW")
-        press_h = imp_st.get("sheetH") or od.get("pressSheetH")
-        c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont(FONT_REGULAR, 6.8)
-        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 29.0), f"Bosma varaq: {f'{press_w:g} × {press_h:g} mm' if press_w and press_h else '—'}")
-        c.drawString((col_right_x + 3.0) * mm, y_mm(kash_box_top + 35.0), f"Bitta varaqdan chiqish: {f'{yield_per_sheet} dona' if yield_per_sheet else '—'}")
-
-        tot_top = kash_box_top + kash_box_h - 14.0
-        draw_box(col_right_x + 1.0, tot_top, col_right_w - 2.0, 12.0, fill_hex="#f1f5f9", stroke_hex="#cbd5e1")
-        c.setFillColor(colors.HexColor("#0f172a"))
-        c.setFont(FONT_BOLD, 7.2)
-        c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 4.8), "STANDART MONOTIP QOG'OZ (KASHIROVKASIZ)")
-        c.setFillColor(colors.HexColor("#475569"))
-        c.setFont(FONT_REGULAR, 6.0)
-        c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 8.5), "Qatlamlar yopishtirilmaydi. To'g'ridan-to'g'ri ofset bosmaga uzatiladi.")
-
+        sec4_h = -2.0
 
     # Size breakdown (shown on page 2 with the SKU artworks)
     sizes_raw = od.get("sizes")
@@ -1084,11 +906,6 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     if not sizes_raw:
         sizes_raw = [{"size": "ALL", "quantity": net_qty}]
 
-    note_text = "  •  ".join(
-        p.strip() for p in [req.customNote or "", str(od.get("notes") or "")] if p and p.strip()
-    )
-    note_h = 13.0 if note_text else 0.0
-    p1_bottom = 284.0 - (note_h + 2.0 if note_text else 0.0)
 
     # ─── 5. READINESS: the order's own checks, plus the machines on the route ──
     # Status comes from the order's checks (set on the order screen); a step without a
@@ -1109,7 +926,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     mats = req.materials or []
     short = [m for m in mats if str(m.availability or "").lower() in ("low stock", "out of stock", "on order")]
     paper_detail = " • ".join(p for p in [
-        str(od.get("paperStock") or ""),
+        str(od.get("paperStock") or "") or (f"{paper_spec} (ombordan tanlanmagan)" if paper_spec else ""),
         f"{len(mats)} material" + (f", {len(short)} yetishmaydi" if short else "") if mats else "",
     ] if p) or "—"
     forms = int(imp_summary.get("forms") or 0)
@@ -1124,7 +941,14 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     for op in req.operations or []:
         if op.machine and op.machine != "—" and op.machine not in machine_names:
             machine_names.append(op.machine)
-    ready_rows = [
+    sample_detail = " • ".join(p for p in [
+        f"{sample_qty} {unit}" if sample_qty else "",
+        SAMPLE_PURPOSE_LABELS.get(str(sample.get("testPurpose") or ""), ""),
+        str(sample.get("testMachine") or ""),
+        sample_paper or ("asosiy qog'oz" if od.get("paperStock") else "qog'oz tanlanmagan"),
+        f"{sample_sheets} list" if sample_sheets else "",
+    ] if p)
+    ready_rows = ([("__sample__", "Namuna", sample_detail)] if sample_on else []) + [
         ("designReady", "Dizayn / maket", design_detail),
         ("paperReady", "Qog'oz / material", paper_detail),
         ("platesReady", "Bosma formalar", plates_detail),
@@ -1146,6 +970,16 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
             return (title, True, "#0f172a")
         if ci == 2:
             return (detail, False, "#334155")
+        if key == "__sample__":
+            if ci == 3:
+                return SAMPLE_STATUS.get(sample_status, ("—", True, "#64748b"))
+            if ci == 4:
+                who = " • ".join(str(v) for v in (
+                    [sample.get("approvedBy"), sample.get("approvedAt")] if sample_status == "approved"
+                    else [sample.get("producedBy"), sample.get("producedAt")]
+                ) if v)
+                return (who, False, "#475569") if who else None
+            return None
         if ci == 3 and key:
             return ("TAYYOR", True, "#15803d") if checks.get(key) else ("KUTILMOQDA", True, "#b45309")
         if ci == 4 and key:
@@ -1190,6 +1024,31 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     imp_state = od.get("impositionState") or {}
     plates_data = imp_state.get("plateCalculations") or od.get("plateCalculations") or []
     eff_pieces = int(imp_state.get("effectivePieces") or yield_per_sheet or 1)
+
+    def mass_plan(op) -> str:
+        return f"{op.plannedQty:,.0f} {op.planUnit or ''}".replace(",", " ").strip() if op.plannedQty else ""
+
+    def sample_plan(op) -> str:
+        unit_l = str(op.planUnit or "").lower()
+        if unit_l in ("varaq", "list", "sheets"):
+            return f"{sample_sheets} varaq" if sample_sheets else ""
+        if unit_l in ("metr", "m"):
+            return ""
+        return f"{sample_qty} {op.planUnit or unit}" if sample_qty else ""
+
+    # Until the sample is approved the route is printed twice: the sample run, then the mass run
+    sample_block = sample_on and sample_status != "approved" and bool(ops_all)
+    route_rows: List[Dict[str, Any]] = []
+    if sample_block:
+        route_rows.append({"kind": "banner", "color": "#b45309", "text": " • ".join(p for p in [
+            "NAMUNA", f"{sample_qty} {unit}" if sample_qty else "",
+            f"qog'oz: {sample_paper}" if sample_paper else "", f"{sample_sheets} list" if sample_sheets else "",
+            SAMPLE_STATUS.get(sample_status, ("",))[0],
+        ] if p)})
+        route_rows += [{"kind": "op", "op": op, "plan": sample_plan(op)} for op in ops_all]
+        route_rows.append({"kind": "banner", "color": "#1d4ed8",
+                           "text": f"TIRAJ • {net_qty:,} {unit}".replace(",", " ") + " • namuna tasdiqlangandan keyin"})
+    route_rows += [{"kind": "op", "op": op, "plan": mass_plan(op)} for op in ops_all]
 
     plate_rows: List[Dict[str, Any]] = []
     for p_idx, plate in enumerate(plates_data):
@@ -1272,7 +1131,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         return h + REPORT_SIGN_H
 
     avail2 = REPORT_BOTTOM_MM - REPORT_TOP_MM
-    n_ops, n_mats, plates_shown = len(ops_all), len(mats_all), plate_rows
+    n_ops, n_mats, plates_shown = len(route_rows), len(mats_all), plate_rows
     for s in (1.0, 0.9, 0.8, 0.7, 0.62, 0.55):
         op_h, mat_h, pl_h = max(5.0, REPORT_OP_ROW_H * s), max(5.0, REPORT_MAT_ROW_H * s), max(4.2, 5.4 * s)
         blank = REPORT_MAT_BLANK_ROWS
@@ -1367,15 +1226,21 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
                       x0=9.0 + h_idx * (block_w + 2.0), font=7.4 if size_row_h >= 6.0 else 6.6)
         cur += REPORT_PANEL_H + REPORT_HEAD_H + size_rows * size_row_h + REPORT_GAP_MM
 
-    # 1. Route with blank actuals the operators fill in by hand
-    hidden_ops = len(ops_all) - n_ops
-    badge = f"{len(ops_all)} BOSQICH" + (f" • +{hidden_ops} SIG'MADI" if hidden_ops > 0 else "")
+    # 1. Route with blank actuals the operators fill in by hand (sample block first, if any)
+    hidden_ops = sum(1 for r in route_rows[n_ops:] if r["kind"] == "op")
+    badge = f"{len(ops_all)} BOSQICH" + (" • NAMUNA + TIRAJ" if sample_block else "") + (
+        f" • +{hidden_ops} SIG'MADI" if hidden_ops > 0 else "")
     draw_panel_header(9.0, cur, full_w_mm, L["techRoute"], badge)
 
     def op_cell(ri: int, ci: int):
         if ri >= n_ops:
             return None
-        op = ops_all[ri]
+        row = route_rows[ri]
+        if row["kind"] == "banner":
+            return (row["text"], True, row["color"]) if ci == 1 else None
+        op = row["op"]
+        if ci == 2:
+            return (row["plan"], True, "#0f172a") if row["plan"] else None
         if ci == 0:
             return (str(op.stepNumber), True, "#475569")
         if ci == 1:
@@ -1383,13 +1248,13 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
             if machine and op_h >= 7.0:
                 return [(op.name, True, "#0f172a"), (machine, False, "#64748b")]
             return (f"{op.name} • {machine}" if machine else op.name, True, "#0f172a")
-        if ci == 2 and op.plannedQty:
-            return (f"{op.plannedQty:,.0f} {op.planUnit or ''}".replace(",", " ").strip(), True, "#0f172a")
         if ci == 9 and op.operator and op.operator != "—":
             return (op.operator, False, "#334155")
         return None
 
-    draw_grid(cur + REPORT_PANEL_H, REPORT_OP_COLS, op_h, n_ops or EMPTY_ROUTE_ROWS, op_cell, font=row_font)
+    banner_rows = [i for i, r in enumerate(route_rows[:n_ops]) if r["kind"] == "banner"]
+    draw_grid(cur + REPORT_PANEL_H, REPORT_OP_COLS, op_h, n_ops or EMPTY_ROUTE_ROWS, op_cell, font=row_font,
+              shaded_rows=banner_rows, merge=(1, len(REPORT_OP_COLS) - 1))
     cur += REPORT_PANEL_H + REPORT_HEAD_H + (n_ops or EMPTY_ROUTE_ROWS) * op_h + REPORT_GAP_MM
 
     # 2. Plates and the run split per SKU

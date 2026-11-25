@@ -6,6 +6,8 @@ import { resolveMachine } from "@/components/documents/work-order/utils/operatio
 import { and, asc, eq, like, or } from "drizzle-orm";
 import { db } from "@/db";
 import { productionMachines, telegramMessages, workOrderOperations, workOrders } from "@/db/schema";
+import { PAPER_TYPE_OPTIONS } from "@/lib/paperSpec";
+import { isSampleBomRow } from "@/components/documents/work-order/utils/sampleBom";
 import { getCompanyIdByCode } from "./crmService";
 
 const DOC_SERVICE_URL = process.env.DOC_SERVICE_URL ?? "http://localhost:8000";
@@ -19,6 +21,15 @@ const STATUS_LABELS: Record<string, string> = {
   "On Hold": "To'xtatilgan",
   Completed: "Tayyor",
   Cancelled: "Bekor qilingan",
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  Queue: "Navbatda",
+  "Ready to Print": "Bosmaga tayyor",
+  "In Production": "Ishlab chiqarishda",
+  "Post-press": "Ishlov",
+  Packaging: "Qadoqlash",
+  Completed: "Tayyor",
 };
 
 function str(v: unknown): string | undefined {
@@ -112,9 +123,11 @@ function passportMaterials(order: any) {
     .filter((m: any) => str(m?.name))
     .map((m: any) => {
       const spec = str(m.spec);
-      const name = String(m.name).trim();
+      const base = String(m.name).trim();
+      const name = spec && !base.includes(spec) ? `${base} • ${spec}` : base;
       return {
-        name: spec && !name.includes(spec) ? `${name} • ${spec}` : name,
+        // The sample's own paper is issued apart from the mass run
+        name: isSampleBomRow(m) ? `Namuna • ${name}` : name,
         req: Number(m.planQty) || Number(m.qty) || Number(m.quantity) || 0,
         unit: str(m.unit) || "dona",
         availability: str(m.availability),
@@ -147,7 +160,7 @@ export function buildJobTicketPayload(
     docNo: order.docNo,
     orderData: {
       ...dims,
-      customer: order.client?.name || order.customerName || "Mijoz",
+      customer: order.client?.name || order.customerName || undefined,
       product: order.productName || undefined,
       itemCategory: str(dims.itemCategory) || str(order.productType),
       quantity: Number(order.quantity) || 0,
@@ -157,10 +170,14 @@ export function buildJobTicketPayload(
       pressMachine: order.pressMachine || undefined,
       priority: order.priority || undefined,
       status: STATUS_LABELS[order.status] || order.status || undefined,
-      startDate: order.startDate || order.orderDate || undefined,
+      stage: STAGE_LABELS[order.stage] || order.stage || undefined,
+      startDate: order.startDate || undefined,
       deadline: order.deadline || undefined,
       recipe: order.recipeCode || undefined,
       paperStock: order.paperStock || dims.paperStock || undefined,
+      // Stored as a code ("kraft"); a type added in the reference list is stored by name
+      targetPaperType:
+        PAPER_TYPE_OPTIONS.find((o) => o.value === dims.targetPaperType)?.label || str(dims.targetPaperType),
       coating: order.coating || dims.coating || undefined,
       lamination: order.lamination || dims.lamination || undefined,
       embellishment: order.embellishment || dims.embellishment || undefined,
@@ -172,6 +189,8 @@ export function buildJobTicketPayload(
       notes: order.notes || undefined,
       // Readiness checks ticked on the order screen, with who verified them
       checks: order.checks || undefined,
+      orderType: order.orderType || undefined,
+      sampleData: order.sampleData || undefined,
       attachments,
       appUrl: erpBaseUrl(),
     },

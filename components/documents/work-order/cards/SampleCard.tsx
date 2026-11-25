@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { cn } from "cn";
 import {
   FlaskConical,
@@ -43,6 +43,9 @@ import {
   SampleRevisionRecord,
 } from "../types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
+
+const PAPER_CATEGORIES = ["Paper & Board", "Roll & Label", "Offcuts & Scraps"];
 
 const TEST_PURPOSE_OPTIONS: { value: SampleTestPurpose; label: string }[] = [
   { value: "color_proof", label: "Rang va Pantone sinovi (Цветопроба)" },
@@ -81,6 +84,24 @@ export function SampleCard({
   className,
 }: SampleCardProps) {
   const { currentUser } = useWorkspaceStore();
+  const warehouseStock = useWorkspaceStore((s) => s.warehouseStock);
+  const paperOptions = useMemo<ComboboxOption[]>(
+    () =>
+      warehouseStock
+        .filter((w) => PAPER_CATEGORIES.includes(w.category))
+        .map((w) => ({
+          value: w.name,
+          label: w.name,
+          description: [
+            w.grammage ? `${w.grammage} g/m²` : "",
+            w.sheetFormat || "",
+            `Omborda: ${(w.available ?? w.stockLevel ?? 0).toLocaleString()} ${w.unit || ""}`.trim(),
+          ]
+            .filter(Boolean)
+            .join(" • "),
+        })),
+    [warehouseStock]
+  );
   const [isRevisionBoxOpen, setIsRevisionBoxOpen] = useState(false);
   const [isApproveDialogOpen, setIsApproveDialogOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -223,6 +244,38 @@ export function SampleCard({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* Namuna qog'ozi: asosiy tiraj qog'ozidan alohida beriladi */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-foreground whitespace-nowrap">Qog&apos;oz:</span>
+            <ComboboxSelect
+              items={paperOptions}
+              value={sampleData?.paperStock || ""}
+              onValueChange={(val) => onSampleChange?.("paperStock", val || undefined)}
+              placeholder={formData.paperStock || "Ombordan tanlang"}
+              className="flex-1 h-7 text-xs"
+            />
+            {formData.paperStock && sampleData?.paperStock !== formData.paperStock && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onSampleChange?.("paperStock", formData.paperStock)}
+                className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                Asosiy
+              </Button>
+            )}
+            <Input
+              type="number"
+              min={0}
+              value={sampleData?.paperSheets ?? ""}
+              onChange={(e) => onSampleChange?.("paperSheets", Math.max(0, parseInt(e.target.value) || 0) || undefined)}
+              placeholder="0"
+              className="w-16 h-7 text-xs text-right bg-background font-mono"
+            />
+            <span className="text-[11px] text-muted-foreground">list</span>
           </div>
 
           {/* O'lcham tanlovi (agar ko'p o'lchamli bo'lsa) */}

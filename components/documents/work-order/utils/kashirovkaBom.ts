@@ -9,7 +9,7 @@ import {
 
 const KASHIROVKA_AUTO_PREFIX = "kashirovka:";
 
-function stockUnitPriceInOrderCurrency(ws: WarehouseStockRecord, form: Partial<WorkOrderFormData>) {
+export function stockUnitPriceInOrderCurrency(ws: WarehouseStockRecord, form: Partial<WorkOrderFormData>) {
   const orderCur = (form.currency || "UZS").toUpperCase();
   const fx = Number(form.exchangeRate) || 12850;
   const stockCur: "USD" | "UZS" =
