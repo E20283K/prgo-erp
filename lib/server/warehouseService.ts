@@ -17,6 +17,7 @@ import {
   tradingCatalog,
   tradingSales,
   clients,
+  clientContacts,
   deliveryActs,
 } from "@/db/schema";
 import { eq, desc, and, or, sql, inArray, isNull } from "drizzle-orm";
@@ -745,6 +746,38 @@ async function resolveShipmentCurrency(
   return currencies[0];
 }
 
+/**
+ * Who receives the goods and where. The payer is the client; the consignee may be its branch or
+ * warehouse, so these are kept on the shipment. An empty field falls back to what was saved before,
+ * then to the client card (delivery address, else legal address; the primary contact).
+ */
+async function resolveShipmentRecipient(
+  tx: DbExec,
+  clientId: string | null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  existing: { recipientName?: string | null; recipientPhone?: string | null; deliveryAddress?: string | null } | null | undefined
+) {
+  const pick = (key: "recipientName" | "recipientPhone" | "deliveryAddress") => {
+    const v = payload?.[key];
+    return (typeof v === "string" ? v.trim() : "") || existing?.[key] || null;
+  };
+  let recipientName = pick("recipientName");
+  let recipientPhone = pick("recipientPhone");
+  let deliveryAddress = pick("deliveryAddress");
+  if (clientId && (!recipientName || !deliveryAddress)) {
+    const client = await tx.query.clients.findFirst({ where: eq(clients.id, clientId) });
+    const contacts = await tx.query.clientContacts.findMany({ where: eq(clientContacts.clientId, clientId) });
+    const contact = contacts.find((c) => c.isPrimary) || contacts[0];
+    if (!deliveryAddress) deliveryAddress = client?.deliveryAddress || client?.legalAddress || null;
+    if (!recipientName && contact) {
+      recipientName = contact.name;
+      recipientPhone = recipientPhone || contact.phone || null;
+    }
+  }
+  return { recipientName, recipientPhone, deliveryAddress };
+}
+
 async function findDeliveryActByKey(tx: DbExec, companyId: string, key: string | null | undefined) {
   if (!key) return null;
   return (
@@ -944,9 +977,13 @@ export async function upsertWarehouseShipmentTx(
   if (isPosting) await postLines(tx, newCtx, newLines, -1);
   if (nextPhase === "holding") await reserveLines(tx, newCtx, newLines, 1);
 
+  // ── Yuk oluvchi: kiritilgani, avval saqlangani, bo'lmasa mijoz kartasidan (yetkazish manzili, asosiy kontakt) ──
+  const recipient = await resolveShipmentRecipient(tx, clientId, payload, existing);
+
   // ── Hujjat yozuvi ──
   const now = new Date();
   const shipmentValues = {
+    ...recipient,
     companyId,
     warehouseId: payload.warehouseId || existing?.warehouseId || null,
     manifestId: payload.manifestId || existing?.manifestId || null,
@@ -1064,13 +1101,18 @@ export async function upsertWarehouseShipmentTx(
   }
 
   const invoiceable = shipmentType === "CustomerDelivery" || shipmentType === "MaterialSale";
-  if (isPosting && invoiceable && effectiveItems.length > 0 && (!linkedAct || linkedAct.status === "cancelled")) {
+  // Accessories of a linked trading sale are sold by its seller (a YTT entity) and billed by the sale:
+  // the company's invoice leaves them out, or the client would owe them twice.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const companyInvoiceLines = (effectiveItems as any[]).filter(
+    (it) => !(saleKey && resolveShipmentAccount(it, shipmentType) === "2910")
+  );
+  if (isPosting && invoiceable && companyInvoiceLines.length > 0 && (!linkedAct || linkedAct.status === "cancelled")) {
     // The order's selling price includes VAT: the invoice keeps that total and carries the company's
     // VAT inside it. Lines are stored net of VAT, as the SF screen adds each line's VAT on top.
     const vatRate = await getCompanyVatRate(tx, companyId);
     const vatFactor = 1 + vatRate / 100;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const invoiceItems = (effectiveItems as any[]).map((it, idx) => {
+    const invoiceItems = companyInvoiceLines.map((it, idx) => {
       const q = Number(it.quantity ?? it.shippedQty) || 0;
       const gross = Number(it.unitPrice) || 0;
       const net = Number((gross / vatFactor).toFixed(4));
@@ -1091,7 +1133,7 @@ export async function upsertWarehouseShipmentTx(
     });
     const total = Number(invoiceItems.reduce((acc, it) => acc + it.grossTotal, 0).toFixed(2));
     const subtotal = Number((total / vatFactor).toFixed(2));
-    const actCurrency = await resolveShipmentCurrency(tx, companyId, workOrderId, effectiveItems);
+    const actCurrency = await resolveShipmentCurrency(tx, companyId, workOrderId, companyInvoiceLines);
     const act = await upsertDeliveryAct(
       {
         // Bekor qilingan SF bo'lsa — o'sha raqam qayta faollashtiriladi

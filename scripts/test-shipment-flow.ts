@@ -11,10 +11,14 @@ import { randomUUID } from "node:crypto";
 import { db, pgClient, type DbExec } from "@/db";
 import {
   clients,
+  clientContacts,
   tradingCatalog,
+  tradingSales,
+  tradingYttEntities,
   warehouseFinishedGoods,
   warehouseStockBalances,
   deliveryActs,
+  deliveryActItems,
   warehouseShipments,
 } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -284,6 +288,70 @@ async function main() {
     await upsertWarehouseShipmentTx(tx, shipment(f, no, "Reserved", { acc: 3 }), f.companyId, ctx());
     await upsertWarehouseShipmentTx(tx, shipment(f, no, "Reserved", { acc: 7 }), f.companyId, ctx());
     assert.deepEqual(await catalogRow(tx, f.catalogId), { stock: 10, reserved: 7 });
+  });
+
+  await scenario("savdo hujjatli aralash chiqim: aksessuar SF'ga tushmaydi, savdo orqali hisoblanadi", async (tx) => {
+    const f = await seed(tx);
+    const [client] = await tx.select().from(clients).where(and(eq(clients.companyId, f.companyId), eq(clients.name, f.clientName)));
+    const [ytt] = await tx
+      .insert(tradingYttEntities)
+      .values({ companyId: f.companyId, code: `ytt-${f.catalogSku}`, name: "Test YTT", inn: "000000000" })
+      .returning();
+    const saleNo = `TST-SALE-${f.catalogSku}`;
+    await tx.insert(tradingSales).values({
+      companyId: f.companyId,
+      docNo: saleNo,
+      date: "2026-11-25",
+      customer: f.clientName,
+      clientId: client.id,
+      sellerEntityId: ytt.id,
+      sellerEntityName: ytt.name,
+      totalAmount: "3000",
+      totalUzs: "3000",
+    });
+    const no = `TST-J-${f.catalogSku}`;
+    const res = await upsertWarehouseShipmentTx(
+      tx,
+      shipment(f, no, "Dispatched", { acc: 3, fg: 10 }, { tradingSaleId: saleNo }),
+      f.companyId,
+      ctx()
+    );
+    const [act] = await tx
+      .select()
+      .from(deliveryActs)
+      .where(and(eq(deliveryActs.companyId, f.companyId), eq(deliveryActs.docNo, res.deliveryActId!)));
+    assert.equal(Number(act.totalAmountUzs), 5000, "SF faqat tayyor mahsulot: 10 × 500");
+    const actLines = await tx.select().from(deliveryActItems).where(eq(deliveryActItems.actId, act.id));
+    assert.deepEqual(actLines.map((l) => l.sku), [f.fgSku]);
+    const [sale] = await tx.select().from(tradingSales).where(and(eq(tradingSales.companyId, f.companyId), eq(tradingSales.docNo, saleNo)));
+    assert.equal(sale.status, "Posted");
+  });
+
+  await scenario("savdo hujjatisiz aksessuar SF'ga kiradi", async (tx) => {
+    const f = await seed(tx);
+    const res = await upsertWarehouseShipmentTx(tx, shipment(f, `TST-K-${f.catalogSku}`, "Dispatched", { acc: 3, fg: 10 }), f.companyId, ctx());
+    const [act] = await tx
+      .select()
+      .from(deliveryActs)
+      .where(and(eq(deliveryActs.companyId, f.companyId), eq(deliveryActs.docNo, res.deliveryActId!)));
+    assert.equal(Number(act.totalAmountUzs), 8000, "3 × 1000 + 10 × 500");
+  });
+
+  await scenario("yuk oluvchi: bo'sh bo'lsa mijoz kartasidan, kiritilgani saqlanadi", async (tx) => {
+    const f = await seed(tx);
+    const [client] = await tx.select().from(clients).where(and(eq(clients.companyId, f.companyId), eq(clients.name, f.clientName)));
+    await tx.update(clients).set({ deliveryAddress: "Chilonzor, 5-ombor" }).where(eq(clients.id, client.id));
+    await tx.insert(clientContacts).values({ clientId: client.id, name: "Ali Valiyev", role: "procurement", phone: "+998901112233", isPrimary: true });
+    const no = `TST-L-${f.catalogSku}`;
+    await upsertWarehouseShipmentTx(tx, shipment(f, no, "Draft", { fg: 5 }, { recipientName: "" }), f.companyId, ctx());
+    const [a] = await tx.select().from(warehouseShipments).where(and(eq(warehouseShipments.companyId, f.companyId), eq(warehouseShipments.shipmentNumber, no)));
+    assert.equal(a.deliveryAddress, "Chilonzor, 5-ombor");
+    assert.equal(a.recipientName, "Ali Valiyev");
+    assert.equal(a.recipientPhone, "+998901112233");
+    await upsertWarehouseShipmentTx(tx, shipment(f, no, "Draft", { fg: 5 }, { recipientName: "Filial ombori", deliveryAddress: "Sergeli, 2-uy" }), f.companyId, ctx());
+    const [b] = await tx.select().from(warehouseShipments).where(eq(warehouseShipments.id, a.id));
+    assert.equal(b.recipientName, "Filial ombori");
+    assert.equal(b.deliveryAddress, "Sergeli, 2-uy");
   });
 
   // ── Hisobot ──

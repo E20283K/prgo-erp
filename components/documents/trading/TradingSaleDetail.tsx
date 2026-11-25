@@ -512,13 +512,17 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
       notes: `Savdo hujjati ${docNo} dan yuklangan`,
     }));
 
-    // Shu mijozning ochiq (Draft yoki Packed) Shipment hujjati borligini tekshiramiz
+    // Shu mijozning ochiq (Draft yoki Packed) Shipment hujjati borligini tekshiramiz.
+    // Mijoz CRM ID si bo'yicha: bir xil nomli boshqa mijozning chiqimiga tushib qolmasin.
     const normCust = (customer || "").trim().toLowerCase();
+    const crmClient = normCust ? crmCustomers?.find((c) => c.name.trim().toLowerCase() === normCust) : undefined;
+    const crmClientId = crmClient?.dbId || null;
     const existingCustomerShipment = normCust
       ? warehouseShipments.find(
           (s) =>
-            s.customer?.trim().toLowerCase() === normCust &&
-            (s.status === "Draft" || s.status === "Packed")
+            (s.status === "Draft" || s.status === "Packed") &&
+            !s.tradingSaleId &&
+            (crmClientId && s.clientId ? s.clientId === crmClientId : s.customer?.trim().toLowerCase() === normCust)
         )
       : undefined;
 
@@ -612,6 +616,7 @@ export function TradingSaleDetail({ tab }: { tab: DocumentTab }) {
         date: new Date().toISOString().split("T")[0],
         status: "Draft",
         customer: customer || "Mijoz",
+        clientId: crmClientId || undefined,
         tradingSaleId: docNo,
         notes: `Savdo hujjati ${docNo} bo'yicha aksessuarlar chiqimi`,
         items: shipmentItems,

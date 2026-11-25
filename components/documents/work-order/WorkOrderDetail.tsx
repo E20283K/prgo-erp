@@ -98,7 +98,6 @@ import {
   getInitialOperations,
   getNextWorkOrderNo,
   type WorkOrderDepartment,
-  type WorkOrderDeliveryBatch,
 } from "./types";
 import { EXAMPLE_ATTACHMENTS } from "@/components/file-viewer/file-utils";
 import { OverviewTab, getDisplayImageUrl } from "./tabs/OverviewTab";
@@ -2775,12 +2774,24 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     updateTabData,
   ]);
 
-  const handleCreateShipmentForBatch = useCallback(
-    async (batch: WorkOrderDeliveryBatch) => {
+  const orderDocNo = docNo || data.docNo || tab.id;
+  const orderShipmentCount = useWorkspaceStore(
+    (state) =>
+      (state.warehouseShipments || []).filter(
+        (s) =>
+          s.status !== "Cancelled" &&
+          (s.workOrder === orderDocNo || (s.items || []).some((l) => l.sourceWorkOrderId === orderDocNo))
+      ).length
+  );
+
+  // A shipment draft for what the FG warehouse holds of this order; the warehouse lowers the
+  // quantity for a partial (early) delivery.
+  const handleCreateShipment = useCallback(
+    async () => {
       const { upsertWarehouseShipmentAsync, loadFinishedGoods } = useWorkspaceStore.getState();
       const currentDocNo = docNo || data.docNo || tab.id;
 
-      // A batch ships only what the FG warehouse has received for this order (minus other reservations).
+      // Only what the FG warehouse has received for this order (minus other reservations) can ship.
       await loadFinishedGoods?.();
       const fg = useWorkspaceStore
         .getState()
@@ -2794,7 +2805,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         });
         return;
       }
-      const qty = Math.min(Number(batch.quantity) || 0, freeQty);
+      const qty = freeQty;
 
       // Raqamni server (numberingService: SHP-YY-NNNN) beradi
       const shipmentData = {
@@ -2807,11 +2818,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         customerName: formData.customer,
         workOrderId: currentDocNo,
         workOrder: currentDocNo,
-        batchId: batch.id,
-        batchNo: String(batch.batchNo),
         quantity: qty,
         unit: formData.unit || "dona",
-        notes: `Work Order ${currentDocNo} — Partiya #${batch.batchNo} (${qty.toLocaleString()} ${formData.unit || "dona"})`,
+        notes: `${currentDocNo} (${qty.toLocaleString()} ${formData.unit || "dona"})`,
         items: [
           {
             id: `item-${Date.now()}`,
@@ -2839,23 +2848,6 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       }
       const newShipmentId = saved.shipmentNumber;
 
-      // Chiqim hali qoralama: partiya "ready" bo'ladi; "dispatched" faqat ombor chiqarganda qo'yiladi
-      // The batch may be brand new (whole order shipped as one batch): add it before linking.
-      const known = formData.deliveryBatches || [];
-      const currentBatches = known.some((b) => b.id === batch.id) ? known : [...known, batch];
-      const updatedBatches = currentBatches.map((b) =>
-        b.id === batch.id
-          ? {
-              ...b,
-              linkedShipmentId: newShipmentId,
-              linkedShipmentNo: newShipmentId,
-              status: "ready" as const,
-            }
-          : b
-      );
-      handleFieldChange("deliveryBatches", updatedBatches);
-      setTabUnsaved(tab.id, true);
-
       openTab({
         id: newShipmentId,
         title: `${newShipmentId}: Chiqim`,
@@ -2871,7 +2863,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         severity: "success",
       });
     },
-    [docNo, data.docNo, tab.id, formData, handleFieldChange, setTabUnsaved, openTab, addNotification]
+    [docNo, data.docNo, tab.id, formData, openTab, addNotification]
   );
 
   const handleOpenShipmentTab = useCallback(
@@ -3905,7 +3897,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 id: "shipments",
                 label: tOrder("tabShipments"),
                 icon: Truck,
-                badge: (formData.deliveryBatches || []).length || null,
+                badge: orderShipmentCount || null,
               },
               ...(!isOperator
                 ? [
@@ -4494,11 +4486,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 docNo={docNo || data.docNo || tab.id}
                 operations={operations}
                 shiftEvents={shiftEvents}
-                onUpdateBatches={(newBatches) => {
-                  handleFieldChange("deliveryBatches", newBatches);
-                  setTabUnsaved(tab.id, true);
-                }}
-                onCreateShipment={handleCreateShipmentForBatch}
+                onCreateShipment={handleCreateShipment}
                 onOpenShipment={handleOpenShipmentTab}
                 onOpenDeliveryAct={handleOpenDeliveryActTab}
                 onOpenPrintLabels={() => setIsLabelPrintOpen(true)}

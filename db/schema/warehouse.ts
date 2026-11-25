@@ -245,6 +245,10 @@ export const warehouseShipments = pgTable(
     }),
     originSource: varchar("origin_source", { length: 64 }).default("WorkOrder").notNull(),
     fromLocationName: varchar("from_location_name", { length: 255 }),
+    // Yuk oluvchi: to'lovchi (clientId) bilan bir xil bo'lmasligi mumkin — filial, ombor, boshqa manzil
+    recipientName: varchar("recipient_name", { length: 255 }),
+    recipientPhone: varchar("recipient_phone", { length: 64 }),
+    deliveryAddress: text("delivery_address"),
     status: warehouseShipmentStatusEnum("status").default("Draft").notNull(),
     carrier: varchar("carrier", { length: 255 }),
     driverName: varchar("driver_name", { length: 255 }),

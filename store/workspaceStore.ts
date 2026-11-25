@@ -200,7 +200,10 @@ export interface WarehouseShipmentRecord {
   driverName?: string;
   driverPhone?: string;
   vehicleNo?: string;
+  /** Yuk oluvchi (to'lovchidan farq qilishi mumkin: filial, ombor) */
   recipientName?: string;
+  recipientPhone?: string;
+  deliveryAddress?: string;
   powerOfAttorney?: string;
   packagesCount?: number;
   grossWeightKg?: number;

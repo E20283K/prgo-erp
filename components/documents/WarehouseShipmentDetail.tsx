@@ -986,7 +986,6 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     replaceTabId,
     updateTabData,
     productionQueue,
-    upsertProductionQueueItem,
     crmCustomers,
     loadCrmCustomers,
     warehouseStock,
@@ -1176,6 +1175,8 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       driverPhone: d.driverPhone || "",
       vehicleNo: d.vehicleNo || "",
       recipientName: d.recipientName || "",
+      recipientPhone: d.recipientPhone || "",
+      deliveryAddress: d.deliveryAddress || "",
       powerOfAttorney: d.powerOfAttorney || "",
       packagesCount: Number(d.packagesCount) || totalPkg,
       grossWeightKg: Number(d.grossWeightKg) || Math.round(totalWt),
@@ -1883,70 +1884,6 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
     setTabUnsaved(tab.id, true);
   };
 
-  const handleBatchSelect = (batchId: string) => {
-    if (isLocked) return;
-    const wo = productionQueue.find((w) => w.id === doc.workOrder);
-    if (!wo || !wo.deliveryBatches) return;
-
-    if (!batchId || batchId === "all") {
-      setDoc((prev) => ({
-        ...prev,
-        batchId: undefined,
-        batchNo: undefined,
-      }));
-      setTabUnsaved(tab.id, true);
-      return;
-    }
-
-    const batch = wo.deliveryBatches.find((b) => b.id === batchId);
-    if (!batch) return;
-
-    const bQty = Number(batch.quantity) || 0;
-    const rawOrderNo = wo.id;
-    const updatedItems: ShipmentLineItem[] =
-      batch.sizeItems && batch.sizeItems.filter((si) => si.quantity > 0).length > 0
-        ? batch.sizeItems
-            .filter((si) => si.quantity > 0)
-            .map((si, idx) => ({
-              id: `ship-item-${Date.now()}-${idx}`,
-              sku: `PRN-${rawOrderNo}-${si.sizeName}`,
-              name: `${wo.product} (${si.sizeName})`,
-              orderQty: si.quantity,
-              shippedQty: si.quantity,
-              unit: wo.unit || "pcs",
-              packageCount: Math.ceil(si.quantity / 500) || 1,
-              packageType: "Gofroquti",
-              palletNo: `Pallet P-${batch.batchNo}`,
-              notes: `${batch.title} bo'yicha`,
-            }))
-        : [
-            {
-              id: `ship-item-${Date.now()}`,
-              sku: `PRN-${rawOrderNo}`,
-              name: wo.product,
-              orderQty: bQty,
-              shippedQty: bQty,
-              unit: wo.unit || "pcs",
-              packageCount: Math.ceil(bQty / 500) || 5,
-              packageType: "Gofroquti",
-              palletNo: `Pallet P-${batch.batchNo}`,
-              notes: `${batch.title} bo'yicha`,
-            },
-          ];
-
-    setDoc((prev) => ({
-      ...prev,
-      batchId: batch.id,
-      batchNo: batch.batchNo,
-      quantity: bQty,
-      packagesCount: Math.ceil(bQty / 500) || 5,
-      grossWeightKg: Math.round(bQty * 0.05) || 120,
-      notes: batch.notes || `${rawOrderNo} ${batch.title} jo'natmasi`,
-      items: updatedItems,
-    }));
-    setTabUnsaved(tab.id, true);
-  };
-
   const handleCustomerChange = (newCustomer: string) => {
     if (isLocked) return;
 
@@ -2100,48 +2037,6 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
       });
       return;
     }
-    // Storno: WO partiyasini yana "ready" holatiga qaytarish
-    const wasPosted = doc.status === "Dispatched" || doc.status === "In Transit";
-    if (doc.workOrder && wasPosted && status !== "Dispatched" && status !== "In Transit" && status !== "Delivered") {
-      const targetWo = productionQueue.find((w) => w.id === doc.workOrder || w.docNo === doc.workOrder);
-      if (targetWo?.deliveryBatches?.length) {
-        upsertProductionQueueItem({
-          ...targetWo,
-          deliveryBatches: targetWo.deliveryBatches.map((b) =>
-            b.linkedShipmentId === doc.id ? { ...b, status: "ready" as const, dispatchedAt: undefined } : b
-          ),
-        });
-      }
-    }
-
-    // Live sync with Work Order delivery batches
-    if (doc.workOrder && (status === "Dispatched" || status === "Delivered")) {
-      const targetWo = productionQueue.find((w) => w.id === doc.workOrder || w.docNo === doc.workOrder);
-      if (targetWo && targetWo.deliveryBatches && targetWo.deliveryBatches.length > 0) {
-        // Strict link only: the batch id the shipment was created for, or the shipment the batch points to.
-        const batchMatch = targetWo.deliveryBatches.find(
-          (b) => (doc.batchId && b.id === doc.batchId) || b.linkedShipmentId === doc.id
-        );
-        if (batchMatch) {
-          const nextBatches = targetWo.deliveryBatches.map((b) =>
-            b.id === batchMatch.id
-              ? {
-                  ...b,
-                  status: status === "Delivered" ? ("delivered" as const) : ("dispatched" as const),
-                  linkedShipmentId: doc.id,
-                  linkedShipmentNo: doc.id,
-                  dispatchedAt: new Date().toISOString(),
-                }
-              : b
-          );
-          upsertProductionQueueItem({
-            ...targetWo,
-            deliveryBatches: nextBatches,
-          });
-        }
-      }
-    }
-
     setTabUnsaved(tab.id, false);
   };
 
@@ -2854,6 +2749,48 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
         </div>
       </div>
 
+      {/* ─── Yuk oluvchi: to'lovchidan farq qilishi mumkin (filial, ombor). Bo'sh qolsa mijoz kartasidan to'ldiriladi ─── */}
+      {(doc.shipmentType === "CustomerDelivery" || doc.shipmentType === "MaterialSale" || !doc.shipmentType) && (
+        <div className="h-9 px-3 border-b border-border flex items-center gap-2.5 text-xs shrink-0">
+          <span className="text-[11px] text-muted-foreground font-medium shrink-0">Yuk oluvchi:</span>
+          <Input
+            value={doc.recipientName || ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDoc((prev) => ({ ...prev, recipientName: v }));
+              setTabUnsaved(tab.id, true);
+            }}
+            disabled={isLocked}
+            placeholder={doc.customer || "Mijoz"}
+            className="h-7 w-[200px] text-xs bg-background"
+          />
+          <Phone className="size-3.5 text-muted-foreground shrink-0" />
+          <Input
+            value={doc.recipientPhone || ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDoc((prev) => ({ ...prev, recipientPhone: v }));
+              setTabUnsaved(tab.id, true);
+            }}
+            disabled={isLocked}
+            placeholder="+998"
+            className="h-7 w-[140px] text-xs font-mono bg-background"
+          />
+          <span className="text-[11px] text-muted-foreground font-medium shrink-0">Manzil:</span>
+          <Input
+            value={doc.deliveryAddress || ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDoc((prev) => ({ ...prev, deliveryAddress: v }));
+              setTabUnsaved(tab.id, true);
+            }}
+            disabled={isLocked}
+            placeholder="Mijoz kartasidan"
+            className="h-7 flex-1 min-w-0 text-xs bg-background"
+          />
+        </div>
+      )}
+
       {/* ─── Contextual Transport Strip (Ultra-ixcham va to'liq sinxronlangan) ─── */}
       <div className="h-9 px-3 bg-muted/20 border-b border-border flex items-center justify-between gap-2.5 text-xs shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -3410,6 +3347,10 @@ export function WarehouseShipmentDetail({ tab }: { tab: DocumentTab }) {
               </div>
               <div>
                 <p><b className="text-zinc-700">Qabul qiluvchi mijoz:</b> <span className="font-semibold text-zinc-900">{doc.customer}</span></p>
+                {doc.recipientName && (
+                  <p><b className="text-zinc-700">Yuk oluvchi:</b> {doc.recipientName}{doc.recipientPhone ? ` • Tel: ${doc.recipientPhone}` : ""}</p>
+                )}
+                {doc.deliveryAddress && <p><b className="text-zinc-700">Manzil:</b> {doc.deliveryAddress}</p>}
                 <p><b className="text-zinc-700">Buyurtma / Asos:</b> {doc.workOrder}</p>
                 <p><b className="text-zinc-700">Ishonchnoma:</b> {doc.powerOfAttorney || "Talab etilmaydi (Firma yetkazmasi)"}</p>
               </div>
