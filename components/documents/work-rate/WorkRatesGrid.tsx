@@ -13,7 +13,8 @@ import {
   Item,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
-import { Plus, Save, Trash2, Search, Edit3, Archive, ArchiveRestore, Hammer, Calculator } from "lucide-react";
+import { Plus, Save, Trash2, Search, Edit3, Archive, ArchiveRestore, Hammer, Calculator, Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,6 +73,31 @@ const emptyRecord = (): WorkRateRecord => ({
 const unitLabel = (unit: string) => TARIFF_CALC_UNITS.find((u) => u.value === unit)?.label || unit;
 
 const INLINE_EDIT_COLUMNS = ["name", "pieceRate", "helperPieceRate"];
+
+const HELP = {
+  unit: "Sdelka nima bo'yicha hisoblanadi. Varaq, ottisk, zarba: rejalangan varaqlar soni. Dona, tayyor mahsulot: buyurtma miqdori. Soat: bosqichning me'yoriy vaqti.",
+  pieceRate:
+    "Bosh operatorga 1 birlik uchun to'lanadigan haq. Bosqichda: hajm ÷ birlik × sdelka. Misol: 1,000 varaq uchun 20 000, 5 000 varaq = 100 000. Hisoblash: operator soatlik maoshi × 1 birlikka ketadigan vaqt (uskuna tezligidan).",
+  helperPieceRate:
+    "Bosqichdagi har bir qo'shimcha operatorga 1 birlik uchun haq. Fond = birliklar × (sdelka + yordamchilar soni × yordamchi sdelka). Hisoblash: uskunadagi yordamchi operator maoshidan.",
+} as const;
+
+function InfoTip({ text }: { text: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex items-center text-muted-foreground/60 hover:text-foreground cursor-help">
+            <Info className="size-3" />
+          </span>
+        }
+      />
+      <TooltipContent side="top" className="max-w-[280px] text-xs leading-relaxed p-2 font-normal">
+        {text}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 /**
  * Operation catalog (Operatsiyalar): route steps pick name, default machine and piecework pay from here.
@@ -493,7 +519,10 @@ export function WorkRatesGrid() {
 
               <div className="grid grid-cols-3 gap-2.5">
                 <div className="col-span-2 space-y-1">
-                  <Label className="text-xs font-medium">Birlik</Label>
+                  <Label className="text-xs font-medium gap-1">
+                    Birlik
+                    <InfoTip text={HELP.unit} />
+                  </Label>
                   <Select
                     value={draft.unit}
                     onValueChange={(val) => {
@@ -530,7 +559,10 @@ export function WorkRatesGrid() {
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-medium">Sdelka</Label>
+                    <Label className="text-xs font-medium gap-1">
+                      Sdelka
+                      <InfoTip text={HELP.pieceRate} />
+                    </Label>
                     <button
                       type="button"
                       onClick={calculateRates}
@@ -549,7 +581,10 @@ export function WorkRatesGrid() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium">Yordamchi sdelka</Label>
+                  <Label className="text-xs font-medium gap-1">
+                    Yordamchi sdelka
+                    <InfoTip text={HELP.helperPieceRate} />
+                  </Label>
                   <MoneyInput
                     thousandSeparator=" "
                     decimalScale={draftDecimals}
