@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
-import { calculateKashirovkaTotals } from "@/components/documents/work-order/types";
 import { getCountingProfile, planInUnit } from "@/components/documents/work-order/utils/countingProfile";
 import { resolveMachine } from "@/components/documents/work-order/utils/operationCost";
 import { and, asc, eq, like, or } from "drizzle-orm";
@@ -22,44 +21,16 @@ const STATUS_LABELS: Record<string, string> = {
   Cancelled: "Bekor qilingan",
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  Queue: "Navbatda",
-  "Ready to Print": "Bosmaga tayyor",
-  "In Production": "Chop etilmoqda",
-  "Post-press": "Ishlov",
-  Packaging: "Qadoqlash",
-  Completed: "Tayyor",
-};
-
-function num(v: unknown): number | undefined {
-  const n = Number(v);
-  return Number.isFinite(n) && n !== 0 ? n : undefined;
-}
-
 function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
-/** A stored thumbnail is only needed when the original file URL is missing. */
-function pickArtwork(url?: string, thumb?: string): string | undefined {
-  return str(url) || str(thumb);
+/** ERP address the passport's QR code opens the order at (`{base}?wo={docNo}`). */
+function erpBaseUrl(): string {
+  return (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
 }
 
-/** "210g Kraft Paper" / "Coated Cardboard 300g/m²" -> 210 / 300 */
-function gsmFromStock(stock?: string): number | undefined {
-  const m = /(\d{2,4})\s*(?:g(?![a-z])|g\/m|gsm|гр)/i.exec(stock || "");
-  return m ? Number(m[1]) : undefined;
-}
-
-function erpOrderUrl(docNo: string): string {
-  const base = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
-  return `${base}?wo=${encodeURIComponent(docNo)}`;
-}
-
-/**
- * Maps a work order row (with its `dimensions` jsonb and `client`) to the
- * doc-service order card request.
- */
+/** Header logos the Telegram send dialog offers; "none" prints the passport without one. */
 export const ORDER_CARD_LOGOS = ["printgoo", "label", "none"] as const;
 export type OrderCardLogo = (typeof ORDER_CARD_LOGOS)[number];
 
@@ -134,34 +105,28 @@ export async function loadPassportRoute(order: any): Promise<PassportOperation[]
   });
 }
 
-/** Production page figures kept on the order itself (imposition, BOM). */
-function productionFields(order: any) {
+/** BOM rows kept on the order (`dimensions.materials`) as the passport's material lines. */
+function passportMaterials(order: any) {
   const dims = (order.dimensions || {}) as Record<string, any>;
-  const imp = (dims.impositionState || {}) as Record<string, any>;
-  const summary = (imp.summary || {}) as Record<string, any>;
-  const materials = (Array.isArray(dims.materials) ? dims.materials : [])
+  return (Array.isArray(dims.materials) ? dims.materials : [])
     .filter((m: any) => str(m?.name))
-    .map((m: any) => ({
-      name: String(m.name).trim(),
-      spec: str(m.spec),
-      planQty: Number(m.planQty) || Number(m.qty) || Number(m.quantity) || 0,
-      unit: str(m.unit),
-    }));
-  return {
-    department: str(order.department),
-    pressMachine: str(order.pressMachine),
-    itemsPerSheet: num(summary.itemsPerSheet),
-    pressSheets: num(summary.pressSheets),
-    parentSheets: num(summary.parentSheets),
-    forms: num(summary.forms),
-    makeReadySheets: num(dims.kashirovkaMakeReadySheets),
-    effectivePieces: num(imp.effectivePieces),
-    plateCalculations: Array.isArray(imp.plateCalculations) ? imp.plateCalculations : [],
-    materials,
-  };
+    .map((m: any) => {
+      const spec = str(m.spec);
+      const name = String(m.name).trim();
+      return {
+        name: spec && !name.includes(spec) ? `${name} • ${spec}` : name,
+        req: Number(m.planQty) || Number(m.qty) || Number(m.quantity) || 0,
+        unit: str(m.unit) || "dona",
+      };
+    });
 }
 
-export function buildOrderCardPayload(
+/**
+ * Maps a saved work order row to the doc-service job ticket request. `orderData`
+ * has the same keys as the order screen's form: `dimensions` holds most of them,
+ * the rest are columns of their own.
+ */
+export function buildJobTicketPayload(
   order: any,
   customNote?: string,
   logo?: OrderCardLogo,
@@ -169,103 +134,63 @@ export function buildOrderCardPayload(
 ) {
   const dims = (order.dimensions || {}) as Record<string, any>;
   const colors = (order.colorsConfig || {}) as Record<string, any>;
-
-  const kashMode = dims.kashirovkaMode || "none";
-  const kashLayers: any[] = Array.isArray(dims.kashirovkaLayers) ? dims.kashirovkaLayers : [];
-  const kashTotals =
-    kashMode !== "none" && kashLayers.length
-      ? calculateKashirovkaTotals(kashMode, kashLayers, Number(dims.kashirovkaGlueGsm) || undefined)
-      : null;
-
-  const skuArtworks = (Array.isArray(dims.skuArtworks) ? dims.skuArtworks : []).map((a: any) => ({
-    skuId: a.skuId,
-    model: a.model,
-    sizeCode: a.sizeCode,
-    frontArtworkUrl: pickArtwork(a.frontArtworkUrl, a.frontArtworkThumb),
-    backArtworkUrl: pickArtwork(a.backArtworkUrl, a.backArtworkThumb),
+  const attachments = (Array.isArray(order.attachments) ? order.attachments : []).map((a: any) => ({
+    name: a.name,
+    category: a.category,
+    url: a.url,
+    storagePath: a.storagePath,
+    isImage: /^image\//.test(a.fileType || ""),
   }));
-
-  const sizes = (Array.isArray(dims.sizes) ? dims.sizes : []).map((s: any) => ({
-    id: s.id != null ? String(s.id) : undefined,
-    size: String(s.size ?? ""),
-    sizeCode: s.sizeCode,
-    model: s.model,
-    quantity: Number(s.quantity) || 0,
-  }));
-
-  const termoRadius = num(dims.termoCornerRadius);
 
   return {
     docNo: order.docNo,
-    clientName: order.client?.name || order.customerName || "Mijoz",
-    productName: order.productName || undefined,
-    itemCategory: str(dims.itemCategory) || str(order.productType),
-    quantity: Number(order.quantity) || 0,
-    unit: order.unit || "dona",
-    orderDate: order.orderDate || undefined,
-    deadline: order.deadline || undefined,
-    statusLabel: STATUS_LABELS[order.status] || order.status || undefined,
-    stageLabel: STAGE_LABELS[order.stage] || order.stage || undefined,
-
-    width: num(dims.width),
-    height: num(dims.height),
-    bleed: Number(dims.bleed) || 0,
-    shapeType: dims.shapeType || "rectangle",
-    cornerType: dims.cornerType || "Square",
-    cornerRadius: termoRadius,
-    holeSize: Number(dims.holeSize) || 0,
-    holePosition: dims.holePosition || "none",
-    holeOffset: Number(dims.holeOffset) || 0,
-
-    paperStock: order.paperStock || dims.paperStock || undefined,
-    grammage: num(dims.paperDensity) ?? num(dims.grammage) ?? gsmFromStock(order.paperStock || dims.paperStock),
-    targetGsm: num(dims.targetGsm),
-    kashirovkaMode: kashMode,
-    kashirovkaLayers: kashLayers.map((l) => ({
-      label: l.label,
-      paperStock: l.paperStock,
-      grammage: Number(l.grammage) || 0,
-      colors: l.colors,
+    orderData: {
+      ...dims,
+      customer: order.client?.name || order.customerName || "Mijoz",
+      product: order.productName || undefined,
+      itemCategory: str(dims.itemCategory) || str(order.productType),
+      quantity: Number(order.quantity) || 0,
+      unit: order.unit || "dona",
+      department: order.department || undefined,
+      site: order.site || undefined,
+      pressMachine: order.pressMachine || undefined,
+      priority: order.priority || undefined,
+      status: STATUS_LABELS[order.status] || order.status || undefined,
+      startDate: order.startDate || order.orderDate || undefined,
+      deadline: order.deadline || undefined,
+      recipe: order.recipeCode || undefined,
+      paperStock: order.paperStock || dims.paperStock || undefined,
+      coating: order.coating || dims.coating || undefined,
+      lamination: order.lamination || dims.lamination || undefined,
+      embellishment: order.embellishment || dims.embellishment || undefined,
+      colorsConfig: colors.formula || undefined,
+      frontColors: colors.frontColors || undefined,
+      backColors: colors.backColors || undefined,
+      spotColors: colors.spotColors || undefined,
+      spotColorItems: colors.spotColorItems || undefined,
+      notes: order.notes || undefined,
+      attachments,
+      appUrl: erpBaseUrl(),
+    },
+    operations: operations.map((op) => ({
+      stepNumber: op.stepNumber,
+      name: op.name,
+      machine: op.machine || "—",
+      operator: op.operator || "—",
+      plannedQty: op.plannedQty,
+      planUnit: op.planUnit,
     })),
-    kashirovkaTotalGsm: kashTotals?.totalMountedGsm || undefined,
-
-    colorsConfig: colors.formula || undefined,
-    frontColors: colors.frontColors || undefined,
-    backColors: colors.backColors || undefined,
-    spotColorItems: (Array.isArray(colors.spotColorItems) ? colors.spotColorItems : []).map((s: any) => ({
-      name: s.name || s.code || "",
-      code: s.code,
-      hex: s.hex,
-      side: s.side,
-    })),
-
-    lamination: order.lamination || dims.lamination || undefined,
-    laminationSides: dims.laminationSides || undefined,
-    laminationMicron: num(dims.laminationMicron),
-    coating: order.coating || dims.coating || undefined,
-    coatingZone: str(dims.coatingZone),
-    embellishment: order.embellishment || dims.embellishment || undefined,
-
-    sizes,
-    skuArtworks,
-    artworkFront: str(dims.artworkFront),
-    artworkBack: str(dims.artworkBack),
-
-    notes: order.notes || undefined,
+    materials: passportMaterials(order),
     customNote: customNote?.trim() || undefined,
     logo: resolveOrderCardLogo(order, logo),
-    erpUrl: erpOrderUrl(order.docNo),
-
-    ...productionFields(order),
-    operations,
   };
 }
 
 type CardFormat = "png" | "pdf" | "both";
 
 /**
- * Renders the passport in doc-service: page 1 is the order card (also the PNG),
- * page 2 the production sheet. Throws when the service fails.
+ * Renders the two-page passport (job ticket) in doc-service: the PDF, page 1 as a
+ * PNG, or both. Throws when the service fails.
  */
 async function renderOrderCard(
   order: any,
@@ -273,17 +198,16 @@ async function renderOrderCard(
   format: CardFormat,
   logo?: OrderCardLogo
 ): Promise<{ png?: Buffer; pdf?: Buffer }> {
-  const pages = format === "png" ? 1 : 2;
-  const operations = pages === 2 ? await loadPassportRoute(order) : [];
-  const payload = buildOrderCardPayload(order, customNote, logo, operations);
-  const res = await fetch(`${DOC_SERVICE_URL}/generate/pdf/order-card`, {
+  const operations = await loadPassportRoute(order);
+  const payload = buildJobTicketPayload(order, customNote, logo, operations);
+  const res = await fetch(`${DOC_SERVICE_URL}/generate/pdf/job-ticket`, {
     method: "POST",
     signal: AbortSignal.timeout(CARD_TIMEOUT_MS),
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, format, pages }),
+    body: JSON.stringify({ ...payload, format }),
   });
   if (!res.ok) {
-    throw new Error(`doc-service order-card ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new Error(`doc-service job-ticket ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
   if (format === "png") return { png: Buffer.from(await res.arrayBuffer()) };
   if (format === "pdf") return { pdf: Buffer.from(await res.arrayBuffer()) };
@@ -298,7 +222,7 @@ async function findSavedOrder(workOrderId: string, companyCode: string) {
     : eq(workOrders.docNo, workOrderId);
   return db.query.workOrders.findFirst({
     where: and(eq(workOrders.companyId, companyId), matchOrder),
-    with: { client: true },
+    with: { client: true, attachments: true },
   });
 }
 

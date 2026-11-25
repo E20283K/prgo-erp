@@ -243,113 +243,27 @@ class ArtworkAnalysisResponse(BaseModel):
     notes: Optional[str] = None
 
 
-class OrderCardSize(BaseModel):
-    id: Optional[str] = None
-    size: str = ""
-    sizeCode: Optional[str] = None
-    model: Optional[str] = None
-    quantity: float = 0
+class JobTicketMaterialItem(BaseModel):
+    name: str
+    req: float = 0
+    unit: str = "pcs"
 
 
-class OrderCardLayer(BaseModel):
-    label: Optional[str] = None
-    paperStock: Optional[str] = None
-    grammage: float = 0
-    colors: Optional[str] = None
-
-
-class OrderCardSpot(BaseModel):
-    name: str = ""
-    code: Optional[str] = None
-    hex: Optional[str] = None
-    side: Optional[str] = None
-
-
-class OrderCardOperation(BaseModel):
-    stepNumber: int = 0
-    name: str = ""
-    machine: Optional[str] = None
-    operator: Optional[str] = None
-    # The step's plan in its own counting unit (sheets, metres or pieces)
-    plannedQty: Optional[float] = None
-    planUnit: Optional[str] = None
-
-
-class OrderCardMaterial(BaseModel):
-    name: str = ""
-    spec: Optional[str] = None
-    planQty: float = 0
-    unit: Optional[str] = None
-
-
-class OrderCardRequest(BaseModel):
-    """Work order passport: page 1 is the visual card sent to the Telegram orders
-    group, page 2 the production sheet (route, materials, press run)."""
-    docNo: str = ""
-    clientName: str = ""
-    productName: Optional[str] = None
-    itemCategory: Optional[str] = None
-    quantity: float = 0
-    unit: Optional[str] = None
-    orderDate: Optional[str] = None
-    deadline: Optional[str] = None
-    statusLabel: Optional[str] = None
-    stageLabel: Optional[str] = None
-
-    width: Optional[float] = None
-    height: Optional[float] = None
-    bleed: Optional[float] = 0
-    shapeType: Optional[str] = None
-    cornerType: Optional[str] = None
-    cornerRadius: Optional[float] = None
-    holeSize: Optional[float] = 0
-    holePosition: Optional[str] = None
-    holeOffset: Optional[float] = 0
-
-    paperStock: Optional[str] = None
-    grammage: Optional[float] = None
-    targetGsm: Optional[float] = None
-    kashirovkaMode: Optional[str] = None
-    kashirovkaLayers: List[OrderCardLayer] = Field(default_factory=list)
-    kashirovkaTotalGsm: Optional[float] = None
-
-    colorsConfig: Optional[str] = None
-    frontColors: Optional[Dict[str, Any]] = None
-    backColors: Optional[Dict[str, Any]] = None
-    spotColorItems: List[OrderCardSpot] = Field(default_factory=list)
-
-    lamination: Optional[str] = None
-    laminationSides: Optional[str] = None
-    laminationMicron: Optional[float] = None
-    coating: Optional[str] = None
-    coatingZone: Optional[str] = None
-    embellishment: Optional[str] = None
-
-    sizes: List[OrderCardSize] = Field(default_factory=list)
-    skuArtworks: List[Dict[str, Any]] = Field(default_factory=list)
-    artworkFront: Optional[str] = None
-    artworkBack: Optional[str] = None
-
-    notes: Optional[str] = None
-    customNote: Optional[str] = None
-    erpUrl: Optional[str] = None
+class JobTicketPdfRequest(BaseModel):
+    """Work order passport (Ish pasporti): page 1 the order and its spec, page 2 the
+    production sheet. Ctrl+P shows the PDF; the Telegram orders group gets page 1 as
+    a PNG and the PDF as a reply."""
+    docNo: str = "WO-00772"
+    orderData: Dict[str, Any] = Field(default_factory=dict)
+    operations: List[JobTicketOperationItem] = Field(default_factory=list)
+    materials: List[JobTicketMaterialItem] = Field(default_factory=list)
+    labels: Dict[str, str] = Field(default_factory=dict)
     # Header logo: "printgoo" (default), "label" or "none"
     logo: Optional[str] = None
-
-    # Page 2: production sheet
-    department: Optional[str] = None
-    pressMachine: Optional[str] = None
-    operations: List[OrderCardOperation] = Field(default_factory=list)
-    materials: List[OrderCardMaterial] = Field(default_factory=list)
-    itemsPerSheet: Optional[int] = None
-    pressSheets: Optional[int] = None
-    parentSheets: Optional[int] = None
-    forms: Optional[int] = None
-    makeReadySheets: Optional[int] = None
-    effectivePieces: Optional[int] = None
-    plateCalculations: List[Dict[str, Any]] = Field(default_factory=list)
-    # 1 = card only (chat preview), 2 = card + production sheet
-    pages: int = 2
-
-    format: str = "png"
+    # Note typed in the Telegram send dialog; printed with the order notes on page 1
+    customNote: Optional[str] = None
+    # "pdf" | "png" (page 1 only) | "both" (JSON with base64 png and pdf)
+    format: str = "pdf"
     dpi: int = 200
+    saveToS3: bool = False
+    s3Key: Optional[str] = None
