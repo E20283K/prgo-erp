@@ -22,6 +22,29 @@ export function resolveCalcBaseQty(
   return Math.max(0, orderQuantity || 0);
 }
 
+/** Operators on a step: the list, or the legacy comma-separated name. */
+export function stepOperatorCount(step: { operators?: string[]; operator?: string }): number {
+  if (step.operators && step.operators.length > 0) return step.operators.length;
+  return (step.operator || "").split(",").filter((x) => x.trim()).length;
+}
+
+/**
+ * Piecework of a step linked to a catalog operation, in USD: lead rate per the operation's unit, and
+ * the fund = units × (lead rate + assistants × assistant rate). The one formula for every route step.
+ */
+export function catalogPieceworkUsd(
+  op: Pick<WorkRateRecord, "unit" | "unitDivisor" | "currency" | "pieceRate" | "helperPieceRate">,
+  ctx: { orderQuantity: number; plannedSheets: number; duration: number; operatorCount: number; exchangeRate: number }
+): { leadRateUsd: number; totalUsd: number } {
+  const toUsd = (v: number) =>
+    (op.currency || "UZS").toUpperCase() === "USD" ? v : v / (Number(ctx.exchangeRate) || 12850);
+  const qty = resolveCalcBaseQty(op.unit, ctx.orderQuantity, ctx.plannedSheets, ctx.duration);
+  const units = qty / Math.max(1, op.unitDivisor || 1);
+  const helpers = Math.max(0, ctx.operatorCount - 1);
+  const leadRateUsd = toUsd(op.pieceRate || 0);
+  return { leadRateUsd, totalUsd: units * (leadRateUsd + helpers * toUsd(op.helperPieceRate || 0)) };
+}
+
 interface QuickStepContext {
   machines: MachineRecord[];
   employees: { fullName?: string; status?: string }[];
@@ -51,13 +74,13 @@ export function buildQuickStep(op: WorkRateRecord, ctx: QuickStepContext): Route
   const estimate = estimateOperationHours(machine, ctx.plannedSheets, ctx.orderQuantity);
   const duration = estimate?.hours ?? 1;
 
-  const toUsd = (v: number) =>
-    (op.currency || "UZS").toUpperCase() === "USD" ? v : v / (Number(ctx.exchangeRate) || 12850);
-  const qty = resolveCalcBaseQty(op.unit, ctx.orderQuantity, ctx.plannedSheets, duration);
-  const units = qty / Math.max(1, op.unitDivisor || 1);
-  const helpers = Math.max(0, operators.length - 1);
-  const leadRate = toUsd(op.pieceRate || 0);
-  const total = units * (leadRate + helpers * toUsd(op.helperPieceRate || 0));
+  const { leadRateUsd: leadRate, totalUsd: total } = catalogPieceworkUsd(op, {
+    orderQuantity: ctx.orderQuantity,
+    plannedSheets: ctx.plannedSheets,
+    duration,
+    operatorCount: operators.length,
+    exchangeRate: ctx.exchangeRate,
+  });
 
   return {
     id: `op-${Date.now()}`,

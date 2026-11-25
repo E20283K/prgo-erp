@@ -62,7 +62,7 @@ import {
   resolveMachine,
   type OperationCostMode,
 } from "../utils/operationCost";
-import { SHEET_BASED_UNITS, resolveCalcBaseQty } from "../utils/quickStep";
+import { SHEET_BASED_UNITS, catalogPieceworkUsd, resolveCalcBaseQty } from "../utils/quickStep";
 import { useProductiveTimePercent } from "../utils/useProductiveTimePercent";
 import { machineCostingGaps } from "@/components/documents/machine/costingGaps";
 
@@ -381,23 +381,21 @@ export function OperationDialog({
   // Lead rate + assistant rate for every additional operator, per the work type's unit, in the order currency.
   React.useEffect(() => {
     if (!selectedWorkRate) return;
-    const toOrderCur = (v: number) => {
-      const rateCur = (selectedWorkRate.currency || "UZS").toUpperCase();
-      if (rateCur === "USD" && !isUsd) return v * exchangeRate;
-      if (rateCur !== "USD" && isUsd) return v / exchangeRate;
-      return v;
-    };
-    const qty = resolveCalcBaseQty(selectedWorkRate.unit, orderQuantity, plannedSheets, form.duration);
-    const units = qty / Math.max(1, selectedWorkRate.unitDivisor || 1);
-    const helpers = Math.max(0, operatorCount - 1);
-    const lead = toOrderCur(selectedWorkRate.pieceRate);
-    const total = units * (lead + helpers * toOrderCur(selectedWorkRate.helperPieceRate));
+    const { leadRateUsd, totalUsd } = catalogPieceworkUsd(selectedWorkRate, {
+      orderQuantity,
+      plannedSheets,
+      duration: form.duration,
+      operatorCount,
+      exchangeRate,
+    });
+    const lead = leadRateUsd * fx;
+    const total = totalUsd * fx;
     const rate = Number(lead.toFixed(isUsd ? 4 : 2));
     const fund = isUsd ? Number(total.toFixed(2)) : Math.round(total);
     if (form.pieceworkRateUsd !== rate || form.pieceworkTotalUsd !== fund) {
       setForm((p) => ({ ...p, pieceworkRateUsd: rate, pieceworkTotalUsd: fund }));
     }
-  }, [selectedWorkRate, form.duration, form.pieceworkRateUsd, form.pieceworkTotalUsd, operatorCount, orderQuantity, plannedSheets, isUsd, exchangeRate, setForm]);
+  }, [selectedWorkRate, form.duration, form.pieceworkRateUsd, form.pieceworkTotalUsd, operatorCount, orderQuantity, plannedSheets, isUsd, exchangeRate, fx, setForm]);
 
   // What the piecework fund is counted from: the catalog operation's unit and the order's quantity.
   const pieceworkBasis = React.useMemo(() => {

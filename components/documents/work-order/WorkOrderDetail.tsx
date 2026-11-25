@@ -126,7 +126,8 @@ import {
   stepGoodOutput,
 } from "./utils/stepTimeline";
 import { OperationDialog } from "./dialogs/OperationDialog";
-import { buildQuickStep } from "./utils/quickStep";
+import { buildQuickStep, catalogPieceworkUsd, stepOperatorCount } from "./utils/quickStep";
+import type { WorkRateRecord } from "@/components/documents/work-rate/types";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
 import { DowntimeLogDialog } from "./dialogs/DowntimeLogDialog";
@@ -594,7 +595,8 @@ export function syncBomWithSpecs(
 export function recalculateRouteStepsForOrder(
   steps: RouteStep[],
   form: Partial<WorkOrderFormData>,
-  tariffs: TariffRecord[] = []
+  tariffs: TariffRecord[] = [],
+  workRates: WorkRateRecord[] = []
 ): RouteStep[] {
   const orderQty = Math.max(0, Number(form.quantity) || 0);
   const plannedSheets = Math.max(0, Number((form as any).plannedSheets) || 0);
@@ -706,6 +708,18 @@ export function recalculateRouteStepsForOrder(
     const units = targetNum / divisor;
     const hasRates = (op.rateUsd && op.rateUsd > 0) || (op.pieceworkRateUsd && op.pieceworkRateUsd > 0);
 
+    // A step from the operation catalog counts piecework by the operation's own unit and pays assistants too.
+    const catalogOp = op.workRateId ? workRates.find((w) => w.id === op.workRateId) : undefined;
+    const piecework = catalogOp
+      ? catalogPieceworkUsd(catalogOp, {
+          orderQuantity: orderQty,
+          plannedSheets,
+          duration: Number(op.duration) || 0,
+          operatorCount: stepOperatorCount(op),
+          exchangeRate: Number(form.exchangeRate) || 12850,
+        })
+      : null;
+
     return {
       ...op,
       stepNumber: (idx + 1) * 10,
@@ -714,6 +728,12 @@ export function recalculateRouteStepsForOrder(
         ? {
             plannedCostUsd: Number(((op.setupFeeUsd || 0) + units * (op.rateUsd || 0)).toFixed(2)),
             pieceworkTotalUsd: Number((units * (op.pieceworkRateUsd || 0)).toFixed(2)),
+          }
+        : {}),
+      ...(piecework
+        ? {
+            pieceworkRateUsd: Number(piecework.leadRateUsd.toFixed(6)),
+            pieceworkTotalUsd: Number(piecework.totalUsd.toFixed(6)),
           }
         : {}),
     };
@@ -2276,7 +2296,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
     let nextOps = operations;
     if (shouldSyncOperations && operations.length > 0) {
-      nextOps = recalculateRouteStepsForOrder(operations, nextForm, tariffs || []);
+      nextOps = recalculateRouteStepsForOrder(operations, nextForm, tariffs || [], useWorkspaceStore.getState().workRates);
       setOperations(nextOps);
     }
 
@@ -2315,7 +2335,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       setCurrentBomItems(synced);
       const nextOps =
         operations.length > 0
-          ? recalculateRouteStepsForOrder(operations, updatedForm, tariffs || [])
+          ? recalculateRouteStepsForOrder(operations, updatedForm, tariffs || [], useWorkspaceStore.getState().workRates)
           : operations;
       if (operations.length > 0) {
         setOperations(nextOps);
