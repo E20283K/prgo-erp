@@ -17,7 +17,7 @@ from svglib.svglib import svg2rlg
 
 from app.core.fonts import FONT_BOLD, FONT_REGULAR
 from app.core.s3 import upload_buffer_to_s3
-from app.generators.job_ticket import get_raw_artwork, probe_artwork_url
+from app.generators.artwork_utils import get_raw_artwork, probe_artwork_url
 from app.schemas.documents import ImpositionCellData, ImpositionPageData, ImpositionPdfRequest
 
 # Prepress Industrial Spot & Registration Separations

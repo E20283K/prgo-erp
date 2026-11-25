@@ -83,18 +83,6 @@ class TableExportRequest(BaseModel):
     saveToS3: bool = False
     s3Key: Optional[str] = None
 
-class JobTicketSizeItem(BaseModel):
-    id: Optional[str] = None
-    size: str = "ALL"
-    model: Optional[str] = None
-    quantity: int = 0
-
-class JobTicketMaterialItem(BaseModel):
-    name: str
-    req: float
-    unit: str = "pcs"
-    stock: float = 0
-
 class JobTicketOperationItem(BaseModel):
     id: Optional[str] = None
     stepNumber: int = 10
@@ -107,36 +95,6 @@ class JobTicketOperationItem(BaseModel):
     # The step's plan in its own counting unit (sheets, metres or pieces), for the output report.
     plannedQty: Optional[float] = None
     planUnit: Optional[str] = None
-
-class JobTicketSpotColor(BaseModel):
-    id: Optional[str] = None
-    name: str
-    code: Optional[str] = None
-    hex: str = "#fe5000"
-    side: str = "front"
-
-class JobTicketKashirovkaLayer(BaseModel):
-    id: Optional[str] = None
-    paperStock: str
-    grammage: float = 250
-    colors: str = "4+0"
-
-class JobTicketShiftNote(BaseModel):
-    id: Optional[str] = None
-    author: str
-    shift: str = "Morning"
-    time: str = ""
-    text: str
-
-class JobTicketPdfRequest(BaseModel):
-    docNo: str = "WO-00772"
-    orderData: Dict[str, Any] = Field(default_factory=dict)
-    operations: List[JobTicketOperationItem] = Field(default_factory=list)
-    materials: List[JobTicketMaterialItem] = Field(default_factory=list)
-    shiftNotes: List[JobTicketShiftNote] = Field(default_factory=list)
-    labels: Dict[str, str] = Field(default_factory=dict)
-    saveToS3: bool = False
-    s3Key: Optional[str] = None
 
 class PalletPassportItemData(BaseModel):
     id: Optional[str] = None
@@ -307,8 +265,26 @@ class OrderCardSpot(BaseModel):
     side: Optional[str] = None
 
 
+class OrderCardOperation(BaseModel):
+    stepNumber: int = 0
+    name: str = ""
+    machine: Optional[str] = None
+    operator: Optional[str] = None
+    # The step's plan in its own counting unit (sheets, metres or pieces)
+    plannedQty: Optional[float] = None
+    planUnit: Optional[str] = None
+
+
+class OrderCardMaterial(BaseModel):
+    name: str = ""
+    spec: Optional[str] = None
+    planQty: float = 0
+    unit: Optional[str] = None
+
+
 class OrderCardRequest(BaseModel):
-    """One-page visual order card sent to the Telegram orders group."""
+    """Work order passport: page 1 is the visual card sent to the Telegram orders
+    group, page 2 the production sheet (route, materials, press run)."""
     docNo: str = ""
     clientName: str = ""
     productName: Optional[str] = None
@@ -359,6 +335,21 @@ class OrderCardRequest(BaseModel):
     erpUrl: Optional[str] = None
     # Header logo: "printgoo" (default), "label" or "none"
     logo: Optional[str] = None
+
+    # Page 2: production sheet
+    department: Optional[str] = None
+    pressMachine: Optional[str] = None
+    operations: List[OrderCardOperation] = Field(default_factory=list)
+    materials: List[OrderCardMaterial] = Field(default_factory=list)
+    itemsPerSheet: Optional[int] = None
+    pressSheets: Optional[int] = None
+    parentSheets: Optional[int] = None
+    forms: Optional[int] = None
+    makeReadySheets: Optional[int] = None
+    effectivePieces: Optional[int] = None
+    plateCalculations: List[Dict[str, Any]] = Field(default_factory=list)
+    # 1 = card only (chat preview), 2 = card + production sheet
+    pages: int = 2
 
     format: str = "png"
     dpi: int = 200

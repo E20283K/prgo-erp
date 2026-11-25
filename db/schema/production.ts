@@ -348,8 +348,8 @@ export interface WorkOrderTelegramMeta {
   messageId?: number;
   lastSentAt?: string;
   channelTitle?: string;
-  /** Public download link to the order card PDF shown in the message caption */
-  cardPdfUrl?: string;
+  /** The reply message under the card photo that holds the two-page passport PDF */
+  cardPdfMessageId?: number;
   /** Header logo the card was last sent with: "printgoo" | "label" | "none" */
   cardLogo?: string;
 }

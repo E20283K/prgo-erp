@@ -1,4 +1,5 @@
-"""One-page order card for the Telegram orders group.
+"""Work order passport: page 1 is the order card (also sent to the Telegram
+orders group as a PNG), page 2 the production sheet (order_card_production.py).
 
 The card puts the product visual first: every printed side is drawn to scale
 with its real cut shape, bleed and hole, and the print spec sits beside it.
@@ -17,7 +18,7 @@ import base64
 
 from fastapi.responses import JSONResponse, Response
 
-from app.generators.job_ticket import get_raw_artwork
+from app.generators.artwork_utils import get_raw_artwork
 from app.schemas.documents import OrderCardRequest
 
 MM = 72.0 / 25.4
@@ -955,6 +956,14 @@ def render_order_card(req: OrderCardRequest) -> Tuple[bytes, bytes, str]:
         rx = m + col_w + 8
         _draw_schematic(pen, req, rx, y0 + 1, col_w, sch_h)
         _draw_quantity(pen, req, rx, y0 + sch_h + 4, col_w, body_bottom)
+
+    if (req.pages or 1) >= 2:
+        from app.generators.order_card_production import PAGE_H, PAGE_W, draw_production_page
+
+        sheet = doc.new_page(width=PAGE_W * MM, height=PAGE_H * MM)
+        sheet_pen = Pen(sheet)
+        sheet_pen.rect(0, 0, PAGE_W, PAGE_H, fill=WHITE)
+        draw_production_page(sheet_pen, req)
 
     for raw in cache.values():
         if raw and raw.get("doc"):

@@ -115,7 +115,7 @@ import { ShipmentsTab } from "./tabs/ShipmentsTab";
 import { getProducedOutputQty, isProductionRouteFinished } from "./utils/productionOutput";
 import { DEFAULT_SHIFTS, atPlantTime, occurredAtFromTime, plantClock, type ShiftInterval } from "@/lib/shiftSchedule";
 import { stepUnit } from "./utils/stepKpis";
-import { getCountingProfile, planInUnit } from "./utils/countingProfile";
+import { getCountingProfile } from "./utils/countingProfile";
 import { useAskDialog } from "./dialogs/AskDialog";
 import { resolveMachine } from "./utils/operationCost";
 import {
@@ -3001,12 +3001,28 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   );
 
   const [isJobTicketOpen, setIsJobTicketOpen] = useState(false);
+  // The passport is built on the server from the saved order (the same file the Telegram group
+  // gets), so unsaved edits are saved first.
+  const [passportDocNo, setPassportDocNo] = useState("");
+  const openPassport = async () => {
+    if (isSavingRef.current) return;
+    let target = savedDocNoRef.current || data.docNo || "";
+    if (tab.isUnsaved || !target) {
+      const savedId = await persistOrderDetails();
+      if (!savedId) return;
+      target = savedId;
+    }
+    setPassportDocNo(target);
+    setIsJobTicketOpen(true);
+  };
+  const openPassportRef = React.useRef(openPassport);
+  openPassportRef.current = openPassport;
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
         e.preventDefault();
-        setIsJobTicketOpen(true);
+        openPassportRef.current();
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
@@ -3632,7 +3648,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 icon={Printer}
                 label={`${tOrder("jobTicket")} (Ctrl+P)`}
                 variant="outline"
-                onClick={() => setIsJobTicketOpen(true)}
+                onClick={() => openPassport()}
               />
 
               {/* Telegram Buyurtmalar guruhiga yuborish */}
@@ -3708,7 +3724,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
                   <DropdownMenuSeparator />
 
-                  <DropdownMenuItem onClick={() => setIsJobTicketOpen(true)} className="gap-2 cursor-pointer">
+                  <DropdownMenuItem onClick={() => openPassport()} className="gap-2 cursor-pointer">
                     <Printer className="w-3.5 h-3.5" />
                     <span>{tOrder("jobTicket")}</span>
                     <DropdownMenuShortcut>Ctrl+P</DropdownMenuShortcut>
@@ -4631,21 +4647,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       )}
 
 
-      {/* Unified Order Passport / Job Ticket Dialog */}
-      {isJobTicketOpen && (
+      {/* Work order passport: the same two-page PDF the Telegram group receives */}
+      {isJobTicketOpen && passportDocNo && (
         <JobTicketDialog
           isOpen={isJobTicketOpen}
           onOpenChange={setIsJobTicketOpen}
-          workOrderId={data.docNo || tab.id}
-          formData={{ ...formData, skuArtworks }}
-          activeSpec={activeSpec}
-          activeMachine={activeMachine}
-          operations={operations.map((op) => {
-            const profile = profileOf(op);
-            return { ...op, plannedQty: planInUnit(Number(formData.quantity) || 0, profile), planUnit: profile.unit };
-          })}
-          materials={currentRecipeMaterials}
-          shiftEvents={shiftEvents}
+          workOrderId={passportDocNo}
         />
       )}
 

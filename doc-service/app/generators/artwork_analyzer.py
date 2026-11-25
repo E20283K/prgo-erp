@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import pymupdf as fitz
 from PIL import Image as PILImage
 
-from app.generators.job_ticket import get_raw_artwork
+from app.generators.artwork_utils import get_raw_artwork
 from app.schemas.documents import ArtworkAnalysisRequest, ArtworkAnalysisResponse, SideColorAnalysis
 
 # Non-printing technical dieline / finishing spot color names

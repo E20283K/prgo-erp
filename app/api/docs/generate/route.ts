@@ -5,7 +5,6 @@ const DOC_SERVICE_URL =
 
 const ENDPOINT_MAP: Record<string, string> = {
   "flexo-pdf": "/generate/pdf/flexo-spec",
-  "job-ticket-pdf": "/generate/pdf/job-ticket",
   "pallet-passport-pdf": "/generate/pdf/pallet-passport",
   "box-labels-pdf": "/generate/pdf/box-labels",
   "imposition-pdf": "/generate/pdf/imposition",

@@ -28,6 +28,7 @@ import {
   resolveOrderCardLogo,
   retireOldOrderCards,
   type OrderCardLogo,
+  type OrderCardMedia,
 } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 import { setWebAppMenuButton, telegramWebAppUrl } from "./telegramWebApp";
@@ -1328,7 +1329,7 @@ export function escapeTelegramHtml(str: string): string {
 /**
  * Telegram guruh uchun professional spetsifikatsiya va Stepper matnini shakllantirish
  */
-export function formatWorkOrderTelegramCaption(order: any, customNote?: string, pdfUrl?: string): string {
+export function formatWorkOrderTelegramCaption(order: any, customNote?: string): string {
   const orderNo = order.docNo || "ZAKAZ";
   const clientName = (order.client?.name || order.customerName || "MIJOZ").toUpperCase();
   const productName = order.productName || "Poligrafiya mahsuloti";
@@ -1387,11 +1388,6 @@ export function formatWorkOrderTelegramCaption(order: any, customNote?: string, 
   if (customNote?.trim()) {
     lines.push(``);
     lines.push(`💬 <i>Izoh: ${escapeHtml(customNote.trim())}</i>`);
-  }
-
-  if (pdfUrl) {
-    lines.push(``);
-    lines.push(`📄 <a href="${escapeHtml(pdfUrl)}">PDF yuklab olish</a>`);
   }
 
   lines.push(``);
@@ -1468,10 +1464,16 @@ export async function sendWorkOrderToOrdersGroup(params: {
     };
   }
 
-  // One-page visual order card (PNG); PDF job ticket only if doc-service cannot render it
+  // Page 1 of the passport as the photo; the two-page PDF follows as a reply
   const cardLogo = resolveOrderCardLogo(order, params.logo);
-  const cardMedia = await generateOrderCardMedia(order, params.customNote, cardLogo);
-  const caption = formatWorkOrderTelegramCaption(order, params.customNote, cardMedia.pdfUrl);
+  let cardMedia: OrderCardMedia;
+  try {
+    cardMedia = await generateOrderCardMedia(order, params.customNote, cardLogo);
+  } catch (err) {
+    console.error("[sendWorkOrderToOrdersGroup] passport render failed:", err);
+    return { success: false, error: "Ish pasportini yaratib bo'lmadi (doc-service)" };
+  }
+  const caption = formatWorkOrderTelegramCaption(order, params.customNote);
 
   const messageText = params.alertReply
     ? `⚠️ <b>DIQQAT: BUYURTMA PARAMETRLARI YANGILANDI!</b>\n\n${caption}`
@@ -1491,12 +1493,18 @@ export async function sendWorkOrderToOrdersGroup(params: {
   });
 
   if (sendResult.success && sendResult.message) {
+    const cardPdfMessageId = await sendPassportPdfReply(
+      targetChatRecord.id,
+      order,
+      cardMedia,
+      sendResult.message.telegramMessageId
+    );
     const updatedMeta: WorkOrderTelegramMeta = {
       chatId: targetChatRecord.id,
       messageId: sendResult.message.telegramMessageId,
       lastSentAt: new Date().toISOString(),
       channelTitle: targetChatRecord.title,
-      cardPdfUrl: cardMedia.pdfUrl,
+      cardPdfMessageId,
       cardLogo,
     };
 
@@ -1525,6 +1533,77 @@ export async function sendWorkOrderToOrdersGroup(params: {
   }
 
   return sendResult;
+}
+
+/**
+ * Sends the two-page passport PDF as a reply under the card photo and links the
+ * ERP chat row to the order. Returns the Telegram message id, or undefined when
+ * the file could not be delivered.
+ */
+async function sendPassportPdfReply(
+  chatRecordId: string,
+  order: any,
+  media: OrderCardMedia,
+  replyTo: number
+): Promise<number | undefined> {
+  const res = await sendTelegramMessage({
+    chatId: chatRecordId,
+    text: `Ish pasporti: <b>${escapeTelegramHtml(order.docNo || "")}</b>`,
+    senderName: "PrintGoo ERP",
+    mediaBuffer: media.pdfBuffer,
+    fileName: media.pdfFileName,
+    documentUrl: media.pdfPublicUrl,
+    isPhoto: false,
+    replyToTelegramMessageId: replyTo,
+    parseMode: "HTML",
+  });
+  if (!res.success || !res.message || res.mediaError) {
+    console.warn("[sendPassportPdfReply] PDF not delivered:", res.error || res.mediaError);
+    return undefined;
+  }
+  await db
+    .update(telegramMessages)
+    .set({ workOrderId: order.id, isAttachedToOrder: true })
+    .where(eq(telegramMessages.id, res.message.id));
+  return res.message.telegramMessageId;
+}
+
+/**
+ * Replaces the passport PDF under an existing card in place; sends a new reply
+ * when the old one is gone (deleted, or a card sent before the PDF existed).
+ */
+async function replacePassportPdf(
+  token: string,
+  chat: { id: string; chatId: string },
+  order: any,
+  media: OrderCardMedia,
+  cardMessageId: number,
+  pdfMessageId?: number
+): Promise<number | undefined> {
+  if (pdfMessageId) {
+    try {
+      const form = new FormData();
+      form.append("chat_id", chat.chatId);
+      form.append("message_id", String(pdfMessageId));
+      form.append(
+        "media",
+        JSON.stringify({
+          type: "document",
+          media: "attach://document",
+          caption: `Ish pasporti: <b>${escapeTelegramHtml(order.docNo || "")}</b>`,
+          parse_mode: "HTML",
+        })
+      );
+      form.append("document", new Blob([new Uint8Array(media.pdfBuffer)], { type: "application/pdf" }), media.pdfFileName);
+      const res = await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageMedia`, { method: "POST", body: form });
+      const json = await res.json();
+      if (json.ok) return pdfMessageId;
+      console.warn("[replacePassportPdf] editMessageMedia failed, sending a new reply:", json);
+    } catch (err) {
+      console.warn("[replacePassportPdf] editMessageMedia error, sending a new reply:", err);
+    }
+  }
+  return sendPassportPdfReply(chat.id, order, media, cardMessageId);
 }
 
 /**
@@ -1581,14 +1660,14 @@ export async function updateTelegramOrderCardStatus(
       return { success: false, error: "Telegram bot token topilmadi" };
     }
 
-    const updatedCaption = formatWorkOrderTelegramCaption(order, undefined, meta.cardPdfUrl);
+    const updatedCaption = formatWorkOrderTelegramCaption(order);
 
     if (replacePdf) {
       try {
         const cardLogo = resolveOrderCardLogo(order, logo);
         const cardMedia = await generateOrderCardMedia(order, alertComment, cardLogo);
         const mediaType = cardMedia.isPhoto ? "photo" : "document";
-        const mediaCaption = formatWorkOrderTelegramCaption(order, undefined, cardMedia.pdfUrl);
+        const mediaCaption = formatWorkOrderTelegramCaption(order);
 
         const form = new FormData();
         form.append("chat_id", chatRecord.chatId);
@@ -1613,10 +1692,18 @@ export async function updateTelegramOrderCardStatus(
         });
         const mediaJson = await mediaRes.json();
         if (mediaJson.ok) {
+          const cardPdfMessageId = await replacePassportPdf(
+            token,
+            chatRecord,
+            order,
+            cardMedia,
+            meta.messageId,
+            meta.cardPdfMessageId
+          );
           const updatedMeta: WorkOrderTelegramMeta = {
             ...meta,
             lastSentAt: new Date().toISOString(),
-            cardPdfUrl: cardMedia.pdfUrl,
+            cardPdfMessageId,
             cardLogo,
           };
 

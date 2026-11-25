@@ -2,11 +2,12 @@ import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
 import { calculateKashirovkaTotals } from "@/components/documents/work-order/types";
-import { and, eq, like, or } from "drizzle-orm";
+import { getCountingProfile, planInUnit } from "@/components/documents/work-order/utils/countingProfile";
+import { resolveMachine } from "@/components/documents/work-order/utils/operationCost";
+import { and, asc, eq, like, or } from "drizzle-orm";
 import { db } from "@/db";
-import { telegramMessages, workOrders } from "@/db/schema";
+import { productionMachines, telegramMessages, workOrderOperations, workOrders } from "@/db/schema";
 import { getCompanyIdByCode } from "./crmService";
-import { generateJobTicketPdf } from "./jobTicketPdfGenerator";
 
 const DOC_SERVICE_URL = process.env.DOC_SERVICE_URL ?? "http://localhost:8000";
 const CARD_CACHE_DIR = path.join(process.cwd(), "public", "cache", "telegram", "order-cards");
@@ -71,7 +72,101 @@ export function resolveOrderCardLogo(order: any, logo?: OrderCardLogo): OrderCar
   return logo ?? parseOrderCardLogo(order?.telegramMeta?.cardLogo) ?? "printgoo";
 }
 
-export function buildOrderCardPayload(order: any, customNote?: string, logo?: OrderCardLogo) {
+const PACKAGING_STEP_RE = /qadoq|upakov|pack/i;
+
+/** A route step as printed on the passport's production page. */
+export interface PassportOperation {
+  stepNumber: number;
+  name: string;
+  machine?: string;
+  operator?: string;
+  plannedQty?: number;
+  planUnit?: string;
+}
+
+/**
+ * The order's route with each step's plan in its own counting unit (sheets,
+ * metres or pieces), the same figures the operator terminal shows.
+ */
+export async function loadPassportRoute(order: any): Promise<PassportOperation[]> {
+  if (!order?.id) return [];
+  const ops: any[] = Array.isArray(order.operations)
+    ? [...order.operations].sort((a: any, b: any) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    : await db.query.workOrderOperations.findMany({
+        where: eq(workOrderOperations.workOrderId, order.id),
+        orderBy: [asc(workOrderOperations.sequence)],
+      });
+  if (!ops.length) return [];
+
+  const machines = order.companyId
+    ? await db.select().from(productionMachines).where(eq(productionMachines.companyId, order.companyId))
+    : [];
+  const dims = (order.dimensions || {}) as Record<string, any>;
+  const orderPieces = Number(order.quantity) || 0;
+  const itemsPerSheet = Number(dims.impositionState?.summary?.itemsPerSheet) || 0;
+
+  return ops.map((op, idx) => {
+    const machine = resolveMachine({ machine: op.machineStr, machineId: op.machineId }, machines as any[]) as any;
+    const pieces = Number(op.plannedQty) || orderPieces;
+    const base = {
+      stepNumber: Number(op.sequence) || idx + 1,
+      name: op.name || "",
+      machine: str(op.machineStr) || machine?.name || undefined,
+      operator: str(op.operator),
+    };
+    // Packing counts finished pieces whatever the department
+    if (PACKAGING_STEP_RE.test(op.name || "")) {
+      return { ...base, plannedQty: pieces || undefined, planUnit: order.unit || "dona" };
+    }
+    const profile = getCountingProfile({
+      machineCategory: machine?.category,
+      machineDepartment: machine?.department,
+      orderDepartment: order.department,
+      widthMm: Number(dims.width) || 0,
+      heightMm: Number(dims.height) || 0,
+      gapYMm: dims.flexoGapY ?? 3,
+      lanes: dims.flexoLanes ?? 1,
+      itemsPerSheet: itemsPerSheet || 1,
+    });
+    // A sheet plan needs the imposition; without it the plan is left for the planner to write in
+    if (profile.kind === "sheet" && !itemsPerSheet) return base;
+    return { ...base, plannedQty: planInUnit(pieces, profile) || undefined, planUnit: profile.unit };
+  });
+}
+
+/** Production page figures kept on the order itself (imposition, BOM). */
+function productionFields(order: any) {
+  const dims = (order.dimensions || {}) as Record<string, any>;
+  const imp = (dims.impositionState || {}) as Record<string, any>;
+  const summary = (imp.summary || {}) as Record<string, any>;
+  const materials = (Array.isArray(dims.materials) ? dims.materials : [])
+    .filter((m: any) => str(m?.name))
+    .map((m: any) => ({
+      name: String(m.name).trim(),
+      spec: str(m.spec),
+      planQty: Number(m.planQty) || Number(m.qty) || Number(m.quantity) || 0,
+      unit: str(m.unit),
+    }));
+  return {
+    department: str(order.department),
+    pressMachine: str(order.pressMachine),
+    itemsPerSheet: num(summary.itemsPerSheet),
+    pressSheets: num(summary.pressSheets),
+    parentSheets: num(summary.parentSheets),
+    forms: num(summary.forms),
+    makeReadySheets: num(dims.kashirovkaMakeReadySheets),
+    effectivePieces: num(imp.effectivePieces),
+    plateCalculations: Array.isArray(imp.plateCalculations) ? imp.plateCalculations : [],
+    materials,
+  };
+}
+
+export function buildOrderCardPayload(
+  order: any,
+  customNote?: string,
+  logo?: OrderCardLogo,
+  operations: PassportOperation[] = []
+) {
   const dims = (order.dimensions || {}) as Record<string, any>;
   const colors = (order.colorsConfig || {}) as Record<string, any>;
 
@@ -160,54 +255,76 @@ export function buildOrderCardPayload(order: any, customNote?: string, logo?: Or
     customNote: customNote?.trim() || undefined,
     logo: resolveOrderCardLogo(order, logo),
     erpUrl: erpOrderUrl(order.docNo),
+
+    ...productionFields(order),
+    operations,
   };
 }
 
-type CardFormat = "png" | "both";
+type CardFormat = "png" | "pdf" | "both";
 
-/** Renders the order card in doc-service. Throws when the service fails. */
+/**
+ * Renders the passport in doc-service: page 1 is the order card (also the PNG),
+ * page 2 the production sheet. Throws when the service fails.
+ */
 async function renderOrderCard(
   order: any,
   customNote: string | undefined,
   format: CardFormat,
   logo?: OrderCardLogo
-): Promise<{ png: Buffer; pdf?: Buffer }> {
-  const payload = buildOrderCardPayload(order, customNote, logo);
+): Promise<{ png?: Buffer; pdf?: Buffer }> {
+  const pages = format === "png" ? 1 : 2;
+  const operations = pages === 2 ? await loadPassportRoute(order) : [];
+  const payload = buildOrderCardPayload(order, customNote, logo, operations);
   const res = await fetch(`${DOC_SERVICE_URL}/generate/pdf/order-card`, {
     method: "POST",
     signal: AbortSignal.timeout(CARD_TIMEOUT_MS),
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, format }),
+    body: JSON.stringify({ ...payload, format, pages }),
   });
   if (!res.ok) {
     throw new Error(`doc-service order-card ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
   if (format === "png") return { png: Buffer.from(await res.arrayBuffer()) };
+  if (format === "pdf") return { pdf: Buffer.from(await res.arrayBuffer()) };
   const json = (await res.json()) as { png: string; pdf: string };
   return { png: Buffer.from(json.png, "base64"), pdf: Buffer.from(json.pdf, "base64") };
 }
 
-export async function renderOrderCardPng(order: any, customNote?: string, logo?: OrderCardLogo): Promise<Buffer> {
-  return (await renderOrderCard(order, customNote, "png", logo)).png;
+async function findSavedOrder(workOrderId: string, companyCode: string) {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const matchOrder = UUID_REGEX.test(workOrderId)
+    ? or(eq(workOrders.id, workOrderId), eq(workOrders.docNo, workOrderId))
+    : eq(workOrders.docNo, workOrderId);
+  return db.query.workOrders.findFirst({
+    where: and(eq(workOrders.companyId, companyId), matchOrder),
+    with: { client: true },
+  });
 }
 
-/** PNG preview for the send dialog, built from the saved order. */
+/** PNG preview of page 1 for the send dialog, built from the saved order. */
 export async function renderWorkOrderCardPreview(
   workOrderId: string,
   companyCode: string = "PRINTGOO",
   customNote?: string,
   logo?: OrderCardLogo
 ): Promise<Buffer | null> {
-  const companyId = await getCompanyIdByCode(companyCode);
-  const matchOrder = UUID_REGEX.test(workOrderId)
-    ? or(eq(workOrders.id, workOrderId), eq(workOrders.docNo, workOrderId))
-    : eq(workOrders.docNo, workOrderId);
-  const order = await db.query.workOrders.findFirst({
-    where: and(eq(workOrders.companyId, companyId), matchOrder),
-    with: { client: true },
-  });
+  const order = await findSavedOrder(workOrderId, companyCode);
   if (!order) return null;
-  return renderOrderCardPng(order, customNote, logo);
+  return (await renderOrderCard(order, customNote, "png", logo)).png ?? null;
+}
+
+/** The two-page passport PDF (Ctrl+P): the same file the Telegram group receives. */
+export async function renderWorkOrderPassportPdf(
+  workOrderId: string,
+  companyCode: string = "PRINTGOO",
+  logo?: OrderCardLogo
+): Promise<{ pdf: Buffer; docNo: string } | null> {
+  const order = await findSavedOrder(workOrderId, companyCode);
+  if (!order) return null;
+  const { pdf } = await renderOrderCard(order, undefined, "pdf", resolveOrderCardLogo(order, logo));
+  if (!pdf?.length) throw new Error("doc-service bo'sh PDF qaytardi");
+  return { pdf, docNo: order.docNo };
 }
 
 /** File names served by the public PDF route: `{docNo}-{sha1 prefix}.pdf`. */
@@ -217,32 +334,24 @@ export function orderCardPdfPath(fileName: string): string | null {
   return ORDER_CARD_PDF_NAME.test(fileName) ? path.join(CARD_CACHE_DIR, fileName) : null;
 }
 
-/**
- * Absolute download link for Telegram. Telegram cannot open a local address,
- * so no link is produced while the ERP runs on localhost.
- */
-function publicPdfLink(fileName: string): string | undefined {
-  const base = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
-  if (!/^https?:\/\//.test(base) || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(base)) return undefined;
-  return `${base}/api/public/order-cards/${fileName}`;
-}
-
 export interface OrderCardMedia {
+  /** Page 1 of the passport as a PNG, sent as the card photo */
   buffer: Buffer;
   fileName: string;
   publicUrl: string;
-  /** true for the PNG card; false when the PDF job ticket fallback was used */
   isPhoto: boolean;
-  /** Public link to the vector PDF of the same card, when the ERP has a public URL */
-  pdfUrl?: string;
+  /** The two-page passport PDF, sent as a reply document under the photo */
+  pdfBuffer: Buffer;
+  pdfFileName: string;
+  pdfPublicUrl: string;
 }
 
 const CARD_URL_PREFIX = "/cache/telegram/order-cards/";
 
 /**
- * Keeps only the card that was just delivered for this order: older PNG/PDF
- * pairs are deleted, and ERP chat rows that showed an older card image are
- * pointed at the new one so the chat history keeps a picture.
+ * Keeps only the passport that was just delivered for this order: older PNG/PDF
+ * pairs are deleted, and ERP chat rows that showed an older card image or PDF
+ * are pointed at the new files so the chat history keeps working.
  * Call it only after Telegram accepted the new card, so a failed send never
  * removes the files the existing message still links to.
  */
@@ -255,15 +364,20 @@ export async function retireOldOrderCards(order: any, media: OrderCardMedia): Pr
 
   try {
     if (order.id) {
-      await db
-        .update(telegramMessages)
-        .set({ mediaUrl: media.publicUrl })
-        .where(
-          and(
-            eq(telegramMessages.workOrderId, order.id),
-            like(telegramMessages.mediaUrl, `${CARD_URL_PREFIX}${safeDocNo}-%`)
-          )
-        );
+      for (const [ext, url] of [
+        ["png", media.publicUrl],
+        ["pdf", media.pdfPublicUrl],
+      ] as const) {
+        await db
+          .update(telegramMessages)
+          .set({ mediaUrl: url })
+          .where(
+            and(
+              eq(telegramMessages.workOrderId, order.id),
+              like(telegramMessages.mediaUrl, `${CARD_URL_PREFIX}${safeDocNo}-%.${ext}`)
+            )
+          );
+      }
     }
   } catch (err) {
     // Keep the old files when chat rows could not be repointed
@@ -285,8 +399,8 @@ export async function retireOldOrderCards(order: any, media: OrderCardMedia): Pr
 }
 
 /**
- * Media for the Telegram orders group: the one-page PNG card plus its PDF, or
- * the PDF job ticket when doc-service cannot render the card.
+ * Media for the Telegram orders group: page 1 of the passport as a PNG photo
+ * and the whole two-page passport PDF. Throws when doc-service cannot render it.
  */
 export async function generateOrderCardMedia(
   order: any,
@@ -294,52 +408,21 @@ export async function generateOrderCardMedia(
   logo?: OrderCardLogo
 ): Promise<OrderCardMedia> {
   const safeDocNo = String(order.docNo || "ZAKAZ").replace(/[^a-zA-Z0-9_-]/g, "_");
-  try {
-    const { png, pdf } = await renderOrderCard(order, customNote, "both", logo);
-    if (!fs.existsSync(CARD_CACHE_DIR)) fs.mkdirSync(CARD_CACHE_DIR, { recursive: true });
-    const hash = createHash("sha1").update(png).digest("hex").slice(0, 20);
-    const pngName = `${safeDocNo}-${hash}.png`;
-    fs.writeFileSync(path.join(CARD_CACHE_DIR, pngName), png);
-    let pdfUrl: string | undefined;
-    if (pdf?.length) {
-      const pdfName = `${safeDocNo}-${hash}.pdf`;
-      fs.writeFileSync(path.join(CARD_CACHE_DIR, pdfName), pdf);
-      pdfUrl = publicPdfLink(pdfName);
-    }
-    return {
-      buffer: png,
-      fileName: `${safeDocNo}.png`,
-      publicUrl: `/cache/telegram/order-cards/${pngName}`,
-      isPhoto: true,
-      pdfUrl,
-    };
-  } catch (err) {
-    console.warn("[orderCard] PNG card failed, falling back to PDF job ticket:", err);
-  }
-
-  const dims = (order.dimensions || {}) as Record<string, any>;
-  const pdf = await generateJobTicketPdf({
-    docNo: order.docNo,
-    clientName: order.client?.name || order.customerName || "Mijoz",
-    productName: order.productName || "Poligrafiya mahsuloti",
-    quantity: order.quantity,
-    unit: order.unit,
-    department: order.department,
-    site: order.site || undefined,
-    pressMachine: order.pressMachine || undefined,
-    orderDate: order.orderDate || undefined,
-    deadline: order.deadline || undefined,
-    paperStock: order.paperStock || undefined,
-    coating: order.coating || undefined,
-    lamination: order.lamination || undefined,
-    embellishment: order.embellishment || undefined,
-    width: dims.width ? Number(dims.width) : undefined,
-    height: dims.height ? Number(dims.height) : undefined,
-    status: order.status,
-    stage: order.stage,
-    priority: order.priority,
-    operations: order.operations || [],
-    notes: order.notes || undefined,
-  });
-  return { buffer: pdf.buffer, fileName: pdf.fileName, publicUrl: pdf.publicUrl, isPhoto: false };
+  const { png, pdf } = await renderOrderCard(order, customNote, "both", logo);
+  if (!png?.length || !pdf?.length) throw new Error("doc-service bo'sh karta qaytardi");
+  if (!fs.existsSync(CARD_CACHE_DIR)) fs.mkdirSync(CARD_CACHE_DIR, { recursive: true });
+  const hash = createHash("sha1").update(png).update(pdf).digest("hex").slice(0, 20);
+  const pngName = `${safeDocNo}-${hash}.png`;
+  const pdfName = `${safeDocNo}-${hash}.pdf`;
+  fs.writeFileSync(path.join(CARD_CACHE_DIR, pngName), png);
+  fs.writeFileSync(path.join(CARD_CACHE_DIR, pdfName), pdf);
+  return {
+    buffer: png,
+    fileName: `${safeDocNo}.png`,
+    publicUrl: `${CARD_URL_PREFIX}${pngName}`,
+    isPhoto: true,
+    pdfBuffer: pdf,
+    pdfFileName: `Ish_pasporti_${safeDocNo}.pdf`,
+    pdfPublicUrl: `${CARD_URL_PREFIX}${pdfName}`,
+  };
 }

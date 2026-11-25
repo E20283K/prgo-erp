@@ -1,311 +1,145 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import {
-  X,
-  RefreshCw,
-  FileText,
-  Sparkles,
-} from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { FileText, RefreshCw, X } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  WorkOrderFormData,
-  MasterSpecification,
-  MachineOption,
-  RouteStep,
-  ShiftEvent,
-  ShiftNote,
-} from "../types";
-
-/** A route step with its plan in the step's own counting unit, printed on the output report page. */
-export type JobTicketOperation = RouteStep & { plannedQty?: number; planUnit?: string };
 
 interface JobTicketDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Saved work order doc number (or id) */
   workOrderId: string;
-  formData: WorkOrderFormData;
-  activeSpec?: MasterSpecification;
-  activeMachine?: MachineOption;
-  operations?: JobTicketOperation[];
-  materials?: { name: string; req: number; unit: string; stock: number }[];
-  shiftEvents?: ShiftEvent[];
 }
 
-const LABEL_KEYS = [
-  "title",
-  "subtitle",
-  "badge",
-  "status",
-  "priority",
-  "priorityNormal",
-  "priorityUrgent",
-  "priorityHigh",
-  "customer",
-  "product",
-  "departmentSite",
-  "pressMachine",
-  "netRun",
-  "grossSheets",
-  "impositionYield",
-  "scheduleWindow",
-  "recipe",
-  "physicalSpecs",
-  "sampleAndDrawing",
-  "trimDimensions",
-  "bleedMargin",
-  "cornerCut",
-  "holeEyelet",
-  "paperSubstrate",
-  "laminationSpec",
-  "surfaceCoating",
-  "embellishment",
-  "inksAndColors",
-  "frontSide",
-  "backSide",
-  "spotStations",
-  "kashirovkaTitle",
-  "kashirovkaMode",
-  "kashirovkaStrategy",
-  "kashirovkaTotalGsm",
-  "kashirovkaGlue",
-  "kashirovkaWastePause",
-  "flexoTitle",
-  "flexoTeeth",
-  "flexoWebWidth",
-  "flexoPlate",
-  "flexoGap",
-  "sizeBreakdown",
-  "colModel",
-  "colSize",
-  "colQty",
-  "colShare",
-  "totalTarget",
-  "bomMaterials",
-  "colMaterial",
-  "colReqQty",
-  "colWarehouseStock",
-  "stockOk",
-  "stockShortage",
-  "readinessChecklist",
-  "gate1Title",
-  "gate1Sub",
-  "gate2Title",
-  "gate2Sub",
-  "gate3Title",
-  "gate3Sub",
-  "gate4Title",
-  "gate4Sub",
-  "techRoute",
-  "colStep",
-  "colOperation",
-  "colMachine",
-  "colOperator",
-  "colDuration",
-  "colStatus",
-  "colSign",
-  "shiftNotesTitle",
-  "signOffTitle",
-  "signPrepress",
-  "signPrepressSub",
-  "signPress",
-  "signPressSub",
-  "signFinish",
-  "signFinishSub",
-  "signQc",
-  "signQcSub",
-  "signLabel",
-  "dateLabel",
-  "pass",
-  "footerSystem",
-  "printDate",
-] as const;
-
-export function JobTicketDialog({
-  isOpen,
-  onOpenChange,
-  workOrderId,
-  formData,
-  operations,
-  materials,
-}: JobTicketDialogProps) {
+/**
+ * Work order passport: the two-page PDF built on the server from the saved order —
+ * page 1 the order card, page 2 the production sheet. The Telegram orders group
+ * receives this same file.
+ */
+export function JobTicketDialog({ isOpen, onOpenChange, workOrderId }: JobTicketDialogProps) {
   const t = useTranslations("JobTicket");
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // Only the latest request may show its result; an older one (closed dialog, repeated refresh) is aborted.
   const abortRef = useRef<AbortController | null>(null);
+  const fileName = `Ish_pasporti_${workOrderId.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
 
-  // Only the order's own BOM; no recipe template is substituted when it is empty.
-  const bomMaterials = materials || [];
-  const routeSteps: JobTicketOperation[] = operations || [];
-  const shiftNotes: ShiftNote[] = formData.shiftNotes || [];
-
-  const generateReportLabPdf = useCallback(async () => {
-    const labelsMap: Record<string, string> = {};
-    for (const key of LABEL_KEYS) {
-      labelsMap[key] = t(key);
-    }
-
+  // State is set only after the request settles, so the mount effect can call it directly.
+  const fetchPdf = useCallback(async () => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-
     try {
-      setIsGeneratingPdf(true);
-      setErrorMsg(null);
-
-      const res = await fetch("/api/docs/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          type: "job-ticket-pdf",
-          payload: {
-            docNo: workOrderId,
-            orderData: {
-              ...formData,
-              appUrl:
-                typeof window !== "undefined"
-                  ? window.location.origin
-                  : process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-            },
-            operations: routeSteps,
-            materials: bomMaterials,
-            shiftNotes,
-            labels: labelsMap,
-            saveToS3: false,
-          },
-        }),
-      });
-
+      const res = await fetch(
+        `/api/v1/production/work-orders/${encodeURIComponent(workOrderId)}/order-card?format=pdf`,
+        { signal: controller.signal, cache: "no-store" }
+      );
       if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`ReportLab Server Error (${res.status}): ${errText}`);
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `HTTP ${res.status}`);
       }
-
       const blob = await res.blob();
-      const filename = `Order_Passport_${workOrderId || "PRINTGOO"}.pdf`;
-      const file = new File([blob], filename, { type: "application/pdf" });
-      const url = `${URL.createObjectURL(file)}#filename=${encodeURIComponent(filename)}`;
-      if (controller.signal.aborted) return;
-      setPdfBlobUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev.split("#")[0]);
-        return url;
-      });
+      const file = new File([blob], fileName, { type: "application/pdf" });
+      const url = `${URL.createObjectURL(file)}#filename=${encodeURIComponent(fileName)}`;
+      if (controller.signal.aborted) {
+        URL.revokeObjectURL(url.split("#")[0]);
+        return;
+      }
+      setErrorMsg(null);
+      setPdfUrl(url);
     } catch (err) {
       if (controller.signal.aborted) return;
-      console.error("Failed to generate Order Passport PDF:", err);
-      setErrorMsg(err instanceof Error ? err.message : "PDF generatsiyasida xatolik.");
+      console.error("Failed to load work order passport:", err);
+      setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
-      if (abortRef.current === controller) setIsGeneratingPdf(false);
+      if (abortRef.current === controller) setIsLoading(false);
     }
-  }, [workOrderId, formData, routeSteps, bomMaterials, shiftNotes, t]);
+  }, [workOrderId, fileName]);
 
-  // Generate once per opening; the cleanup aborts the request, so a re-run effect
-  // (React StrictMode in dev) does not produce a second PDF.
+  const loadPdf = () => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    void fetchPdf();
+  };
+
+  // The dialog is mounted only while open: load once. The deferred start and the
+  // abort on cleanup keep the StrictMode re-run in dev from rendering a second PDF.
   useEffect(() => {
-    if (!isOpen) {
-      setPdfBlobUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev.split("#")[0]);
-        return null;
-      });
-      return;
-    }
-    generateReportLabPdf();
-    return () => abortRef.current?.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+    const timer = window.setTimeout(() => void fetchPdf(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      abortRef.current?.abort();
+    };
+  }, [fetchPdf]);
+
+  // Free the blob when it is replaced or the dialog closes
+  useEffect(() => {
+    if (!pdfUrl) return;
+    return () => URL.revokeObjectURL(pdfUrl.split("#")[0]);
+  }, [pdfUrl]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="w-[96vw] max-w-[96vw]! sm:max-w-[96vw]! h-[94vh] max-h-[94vh]! flex flex-col overflow-hidden p-0 gap-0 border border-border bg-zinc-100 dark:bg-zinc-950"
+        className="w-[96vw] max-w-[96vw]! sm:max-w-[96vw]! h-[94vh] max-h-[94vh]! flex flex-col overflow-hidden p-0 gap-0 border border-border bg-muted"
       >
-        {/* Top Modal Controls Bar */}
-        <div className="shrink-0 flex items-center justify-between px-5 py-3 bg-card border-b border-border shadow-xs">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <FileText className="w-4 h-4 text-primary shrink-0" />
-            <DialogTitle className="text-sm font-semibold text-foreground truncate">
-              Order Passport
-            </DialogTitle>
+        <div className="shrink-0 flex items-center justify-between px-3 h-11 bg-card border-b border-border">
+          <div className="flex items-center gap-2 min-w-0">
+            <FileText className="size-4 text-muted-foreground shrink-0" />
+            <DialogTitle className="text-sm font-semibold text-foreground truncate">{t("title")}</DialogTitle>
             <Badge variant="outline" className="font-mono text-xs shrink-0">
               {workOrderId}
             </Badge>
-            <Badge
-              variant="secondary"
-              className="gap-1 text-[10px] font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 shrink-0"
-            >
-              <Sparkles className="w-3 h-3" />
-              <span>Vector PDF</span>
-            </Badge>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={generateReportLabPdf}
-              disabled={isGeneratingPdf}
-              className="h-8 gap-1.5 text-xs cursor-pointer"
-              title="Qayta generatsiya qilish"
+              onClick={loadPdf}
+              disabled={isLoading}
+              className="h-7 gap-1.5 text-xs cursor-pointer"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPdf ? "animate-spin" : ""}`} />
-              <span>Yangilash</span>
+              <RefreshCw className={`size-3.5 ${isLoading ? "animate-spin" : ""}`} />
+              <span>{t("refresh")}</span>
             </Button>
-
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => onOpenChange(false)}
-              className="h-8 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+              className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
             >
-              <X className="w-3.5 h-3.5 mr-1" />
+              <X className="size-3.5" />
               <span>{t("close")}</span>
             </Button>
           </div>
         </div>
 
-        {/* Live ReportLab PDF Viewport */}
-        <div className="flex-1 min-h-0 w-full bg-zinc-200/70 dark:bg-zinc-900 flex items-center justify-center relative">
-          {isGeneratingPdf ? (
-            <div className="flex flex-col items-center gap-3 text-center p-6">
-              <RefreshCw className="w-7 h-7 text-primary animate-spin" />
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-foreground">
-                  PDF hujjat generatsiya qilinmoqda...
-                </p>
-                <p className="text-[11px] text-muted-foreground font-mono">
-                  {`Order_Passport_${workOrderId || "PRINTGOO"}.pdf`} • 100% Native Vector PDF
-                </p>
-              </div>
+        <div className="flex-1 min-h-0 w-full flex items-center justify-center relative">
+          {isLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <RefreshCw className="size-4 animate-spin" />
+              <span>{t("generating")}</span>
             </div>
           ) : errorMsg ? (
-            <div className="max-w-md p-6 bg-card border border-destructive/40 rounded-lg text-center space-y-3 shadow-sm">
-              <p className="text-xs font-bold text-destructive">
-                PDF Xatoligi
-              </p>
-              <p className="text-[11px] text-muted-foreground font-mono break-all">
-                {errorMsg}
-              </p>
-              <Button size="sm" variant="outline" onClick={generateReportLabPdf} className="text-xs">
-                Qayta urinib ko&apos;rish
+            <div className="max-w-md p-4 bg-card border border-destructive/40 rounded-md text-center space-y-3">
+              <p className="text-xs font-semibold text-destructive">{t("failed")}</p>
+              <p className="text-[11px] text-muted-foreground font-mono break-all">{errorMsg}</p>
+              <Button size="sm" variant="outline" onClick={loadPdf} className="h-7 text-xs">
+                {t("retry")}
               </Button>
             </div>
-          ) : pdfBlobUrl ? (
+          ) : pdfUrl ? (
             <iframe
-              src={`${pdfBlobUrl}&toolbar=1&navpanes=0&view=FitH`}
-              title={`Order_Passport_${workOrderId || "PRINTGOO"}.pdf`}
+              src={`${pdfUrl}&toolbar=1&navpanes=0&view=FitH`}
+              title={fileName}
               className="w-full h-full border-0"
             />
           ) : null}
