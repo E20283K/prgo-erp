@@ -57,6 +57,8 @@ export interface FinancialCostParams {
   toolingItems?: WorkOrderToolingItem[];
   operations?: RouteStep[];
   shiftEvents?: ShiftEvent[];
+  /** The sample run of each step, kept when the mass run was released: its actual cost is the sample cost. */
+  sampleRuns?: RouteStep[];
   machines?: MachineRecord[];
   /** HR employees: assigned operators' wages drive hourly labor cost. */
   employees?: CostEmployee[];
@@ -194,6 +196,7 @@ export function calculateWorkOrderFinancials({
   toolingItems = [],
   operations = [],
   shiftEvents = [],
+  sampleRuns = [],
   machines = [],
   employees = [],
   productiveTimePercent,
@@ -444,6 +447,23 @@ export function calculateWorkOrderFinancials({
       type:
         (isPiecework ? "Sdelka" : cost.laborBasis === "employees" ? "Soatbay" : cost.laborBasis === "crew" ? "Ekipaj" : "Stavka yo'q") +
         factTag,
+    });
+  });
+
+  // C2. Namuna: tirajga chiqarishdan oldin shu bosqichlarda ketgan fakt soat va sdelka.
+  (sampleRuns || []).forEach((op, idx) => {
+    const actual = computeOperationActualCost(op, { machines, employees, exchangeRate: rate, productiveTimePercent });
+    if (!actual || actual.mode !== "auto" || !(actual.totalUsd > 0)) return;
+    rows.push({
+      id: `sample-run-${op.id || idx}`,
+      group: "sample",
+      category: GROUP_LABELS.sample,
+      name: `${op.name}${op.machine ? ` (${op.machine})` : ""}`,
+      quantity: `${Number(actual.hours.toFixed(2))} soat`,
+      unitRate: "—",
+      totalCost: fromUsd(actual.totalUsd),
+      share: 0,
+      type: "Fakt",
     });
   });
 

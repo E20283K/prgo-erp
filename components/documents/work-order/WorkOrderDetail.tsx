@@ -127,6 +127,7 @@ import {
 } from "./utils/stepTimeline";
 import { OperationDialog } from "./dialogs/OperationDialog";
 import { buildQuickStep, catalogPieceworkUsd, stepOperatorCount } from "./utils/quickStep";
+import { SAMPLE_OP_PREFIX, buildSampleRunSteps, isSampleEvent, moveSampleEvents } from "./utils/sampleRun";
 import type { WorkRateRecord } from "@/components/documents/work-rate/types";
 import { LogEventDialog } from "./dialogs/LogEventDialog";
 import { PalletReportDialog } from "./dialogs/PalletReportDialog";
@@ -1387,6 +1388,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     approvedBy: data.sampleApprovedBy || undefined,
     revisions: data.sampleRevisions || [],
     sampleTargetSize: data.sampleTargetSize || data.sampleSize || undefined,
+    releasedAt: data.sampleData?.releasedAt || undefined,
+    runSteps: Array.isArray(data.sampleData?.runSteps) ? data.sampleData.runSteps : undefined,
   });
 
   const handleSampleChange = (field: keyof WorkOrderSampleData, val: any) => {
@@ -1400,6 +1403,15 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const approver = currentUser?.name || "Bosh Texnolog";
     const massQty = formData.quantity || 5000;
 
+    // The same route runs the mass quantity; what the sample did leaves the steps:
+    // its journal entries move off them and its hours / output are kept as the sample cost.
+    const releasedAt = new Date().toISOString();
+    const runSteps = buildSampleRunSteps(operations, shiftEventsRef.current);
+    const sampleEvents = shiftEventsRef.current.map((ev) =>
+      ev.opId && !isSampleEvent(ev) ? { ...ev, opId: `${SAMPLE_OP_PREFIX}${ev.opId}` } : ev
+    );
+    setShiftEvents(sampleEvents);
+
     setSampleData((prev) => ({
       ...prev,
       approvalStatus: "approved",
@@ -1407,20 +1419,27 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       approvedBy: approver,
       qcPassed: true,
       isProduced: true,
+      releasedAt,
+      runSteps,
     }));
 
     handleFieldChange("orderType", "Production");
     handleFieldChange("status", "In Production");
     handleFieldChange("stage", "In Production");
 
-    // Scale operations target to full mass quantity
-    setOperations((prev) =>
-      prev.map((op, idx) => ({
-        ...op,
-        qtyCompleted: `0 / ${massQty.toLocaleString()}`,
-        status: idx === 0 ? "In Progress" : "Queued",
-      }))
-    );
+    const massOps: RouteStep[] = operations.map((op, idx) => ({
+      ...op,
+      qtyCompleted: `0 / ${massQty.toLocaleString()}`,
+      status: idx === 0 ? "In Progress" : "Queued",
+      phase: undefined,
+      startedAt: undefined,
+      completedAt: undefined,
+      pausedAt: undefined,
+      downtimeMinutes: undefined,
+      actualDurationMinutes: undefined,
+    }));
+    setOperations(massOps);
+    updateTabData(tab.id, { operations: massOps, events: sampleEvents });
 
     const docNo = data.docNo || tab.id;
     if (!docNo.startsWith("draft-") && !docNo.startsWith("temp-")) {
@@ -1568,7 +1587,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   // Shift Timeline & Log Events State
   const [selectedTimelineOpId, setSelectedTimelineOpId] = useState<string>("1");
   const [shiftEvents, setShiftEvents] = useState<ShiftEvent[]>(
-    data.events || data.shiftEvents || []
+    moveSampleEvents(data.events || data.shiftEvents || [], data.sampleData?.releasedAt)
   );
   const [shiftSchedule, setShiftSchedule] = useState<ShiftInterval[]>(DEFAULT_SHIFTS);
   const shiftEventsRef = React.useRef(shiftEvents);
@@ -1618,7 +1637,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     const res = await store.loadWorkOrderEventsAsync(orderNo);
     if (!res.success) return;
     if (res.schedule && res.schedule.length > 0) setShiftSchedule(res.schedule);
-    const serverEvents = res.events || [];
+    // Before the release is saved the server still has the sample entries on the steps.
+    const serverEvents = moveSampleEvents(res.events || [], sampleData.releasedAt);
     const known = new Set(serverEvents.map((ev) => ev.id));
     const localOnly = shiftEventsRef.current.filter((ev) => !known.has(ev.id));
     const migrated: ShiftEvent[] = [];
@@ -1731,6 +1751,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
         toolingItems: formData.toolingItems,
         operations,
         shiftEvents,
+        sampleRuns: sampleData.runSteps,
         machines: storeMachines,
         employees: useWorkspaceStore.getState().employees,
         productiveTimePercent: currentProductiveTimePercent(),
@@ -4460,6 +4481,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             {!isOperator && visitedTabs.has("financials") && (
               <FinancialsTab
                 shiftEvents={shiftEvents}
+                sampleRuns={sampleData.runSteps}
                 formData={{ ...formData, skuArtworks }}
                 printPlan={activePrintPlan}
                 operations={operations}

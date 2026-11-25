@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { branches, workOrderEvents, workOrderOperations, workOrders } from "@/db/schema";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, notLike, sql } from "drizzle-orm";
+import { SAMPLE_OP_PREFIX } from "@/components/documents/work-order/utils/sampleRun";
 import { getCompanyIdByCode } from "./crmService";
 import { resolveOperatorEmployeeId, syncPieceworkFromJournal } from "./pieceworkSyncService";
 import { verifyOperatorToken } from "./terminalIdentityService";
@@ -162,6 +163,24 @@ const int = (v: unknown) => {
   const n = Math.round(Number(v));
   return Number.isFinite(n) ? n : null;
 };
+
+/**
+ * Mass run released after a sample: entries logged on the route up to that moment belong to the
+ * sample run and leave the steps (their step id gets the sample prefix). Idempotent.
+ */
+export async function moveSampleEventsOffRoute(workOrderId: string, releasedAt: Date) {
+  await db
+    .update(workOrderEvents)
+    .set({ opId: sql`${SAMPLE_OP_PREFIX} || ${workOrderEvents.opId}` })
+    .where(
+      and(
+        eq(workOrderEvents.workOrderId, workOrderId),
+        isNotNull(workOrderEvents.opId),
+        notLike(workOrderEvents.opId, `${SAMPLE_OP_PREFIX}%`),
+        sql`coalesce(${workOrderEvents.occurredAt}, ${workOrderEvents.createdAt}) <= ${releasedAt.toISOString()}::timestamptz`
+      )
+    );
+}
 
 export async function listWorkOrderEvents(docNo: string, companyCode?: string | null) {
   const wo = await findWorkOrder(docNo, companyCode);

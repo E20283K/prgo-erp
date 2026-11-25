@@ -289,7 +289,11 @@ export interface WorkOrderSampleData {
   approvedBy?: string;
   revisions: SampleRevisionRecord[];
   sampleTargetSize?: string;
-  
+  /** Moment the mass run was released: journal entries up to it belong to the sample run. */
+  releasedAt?: string;
+  /** The sample run of each step (hours, good output), kept at release for the sample cost. */
+  runSteps?: RouteStep[];
+
   // Legacy compatibility fields if any older code references them
   dispatchDate?: string;
   deliveryMethod?: string;

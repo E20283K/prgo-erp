@@ -70,6 +70,8 @@ interface FinancialsTabProps {
   formData?: WorkOrderFormData;
   printPlan?: PrintPlanningResult;
   operations?: RouteStep[];
+  /** Sample run of each step, kept at the mass-run release (sample cost). */
+  sampleRuns?: RouteStep[];
   materials?: BomItem[];
   docNo?: string;
   onPriceChange?: (newPrice: number, financials?: Record<string, unknown>) => void;
@@ -84,6 +86,7 @@ export function FinancialsTab({
   formData,
   printPlan,
   operations = [],
+  sampleRuns,
   materials = [],
   docNo = "WOOF-26-0001",
   onPriceChange,
@@ -134,6 +137,7 @@ export function FinancialsTab({
         toolingItems: formData?.toolingItems,
         operations,
         shiftEvents,
+        sampleRuns,
         machines,
         employees,
         productiveTimePercent,
@@ -152,6 +156,7 @@ export function FinancialsTab({
       formData?.packagingData,
       operations,
       shiftEvents,
+      sampleRuns,
       machines,
       employees,
     ]

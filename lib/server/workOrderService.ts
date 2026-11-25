@@ -42,7 +42,12 @@ import { eq, desc, and, or, ilike, isNull, sql, inArray } from "drizzle-orm";
 import type { ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
-import { syncOrderStageFromSteps, syncStepFromJournal, toShiftEvent } from "./workOrderEventService";
+import {
+  moveSampleEventsOffRoute,
+  syncOrderStageFromSteps,
+  syncStepFromJournal,
+  toShiftEvent,
+} from "./workOrderEventService";
 import type { ShiftEvent } from "@/components/documents/work-order/types";
 import type { MachineRecord } from "@/components/documents/machine/types";
 import { freezeMachineRates, type FrozenCostRates } from "@/components/documents/work-order/utils/operationCost";
@@ -1131,6 +1136,13 @@ export async function upsertWorkOrder(
     } catch (auditErr) {
       console.error("[WorkOrder Audit] Boshlang'ich log yozishda xatolik:", auditErr);
     }
+  }
+
+  // 3a. Mass run released after a sample: the sample's journal entries leave the route steps first,
+  //     so the journal sync below does not put the sample's progress back on them.
+  const releasedAt = Date.parse(String((data.sampleData as { releasedAt?: string } | undefined)?.releasedAt || ""));
+  if (Number.isFinite(releasedAt)) {
+    await moveSampleEventsOffRoute(targetId, new Date(releasedAt));
   }
 
   // 3b. The journal wins over what the screen sent: an order tab opened before entries were logged
