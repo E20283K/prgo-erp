@@ -247,6 +247,8 @@ class JobTicketMaterialItem(BaseModel):
     name: str
     req: float = 0
     unit: str = "pcs"
+    # BOM availability: "In Stock" | "Reserved" | "Low Stock" | "On Order" | "Out of Stock"
+    availability: Optional[str] = None
 
 
 class JobTicketPdfRequest(BaseModel):

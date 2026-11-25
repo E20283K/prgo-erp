@@ -210,6 +210,9 @@ def draw_fitted_text(
 # Blank grid the operators fill in by hand on the shop floor: one row per route step,
 # the plate split, material usage and hand-over signatures. Row heights shrink to keep
 # it on one page.
+P_CARD_H = 60.0  # page-1 proof cards
+SIDE_INFO_MIN_W = 24.0  # free width beside the artwork that gets the side facts
+BELOW_INFO_MIN_H = 21.0  # free height under a wide artwork (two fact rows) that gets them instead
 REPORT_TOP_MM = 25.0
 REPORT_BOTTOM_MM = 284.0
 REPORT_GAP_MM = 3.0
@@ -522,7 +525,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     # ─── 3. PHYSICAL GEOMETRY (3 SIDE-BY-SIDE PROOFS: FRONT, BACK, DIELINE) ───
     sec3_top = kpi_top + kpi_h + 1.5
-    sec3_h = 61.5
+    sec3_h = 7.0 + P_CARD_H + 1.0 + 12.5 + 2.0
     draw_box(9, sec3_top, full_w_mm, sec3_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
     panel3_badge = f"{width:g}×{height:g} {dim_unit} (+{bleed:g}{dim_unit})"
     if od.get("shapeType"):
@@ -594,10 +597,73 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     # 3 Proof Cards Geometry
     p_card_top = sec3_top + 7.0
-    p_card_h = 39.0
+    p_card_h = P_CARD_H
     gap_p = 3.0
     p_card_w = (full_w_mm - 4.0 - 2 * gap_p) / 3.0  # ~60.6 mm each
     aspect = width / height if width > 0 and height > 0 else 1.0
+
+    # Artwork as large as the card allows. A tall, narrow product leaves room at the
+    # side: the artwork then sits left and the facts for that side fill the column.
+    slot_w = p_card_w - 4.0
+    slot_h = p_card_h - 10.0
+    if aspect >= slot_w / slot_h:
+        art_w = slot_w
+        art_h = max(8.0, art_w / aspect)
+    else:
+        art_h = slot_h
+        art_w = max(8.0, art_h * aspect)
+    side_info = slot_w - art_w >= SIDE_INFO_MIN_W
+    # A wide product leaves room under the artwork instead: the facts go there in two columns.
+    # When that room is just short, the artwork gives up to a quarter of its size to make it.
+    if not side_info and slot_h - art_h < BELOW_INFO_MIN_H and (slot_h - BELOW_INFO_MIN_H) >= art_h * 0.75:
+        art_h = slot_h - BELOW_INFO_MIN_H
+        art_w = art_h * aspect
+    below_info = not side_info and slot_h - art_h >= BELOW_INFO_MIN_H
+    art_top = p_card_top + 5.5 if below_info else p_card_top + 5.0 + (slot_h - art_h) / 2.0
+
+    def art_left(card_x: float) -> float:
+        return card_x + 3.0 if side_info else card_x + 2.0 + (slot_w - art_w) / 2.0
+
+    def draw_side_info(card_x: float, rows: List[Tuple[str, str]]):
+        """Label/value pairs in the free space beside (or under) the artwork."""
+        if side_info:
+            cols_xy = [(art_left(card_x) + art_w + 3.0, card_x + p_card_w - 2.0)]
+            iy0 = p_card_top + 6.5
+        elif below_info:
+            half = (p_card_w - 4.0) / 2.0
+            cols_xy = [(card_x + 2.0, card_x + 2.0 + half - 1.5), (card_x + 2.0 + half + 1.5, card_x + p_card_w - 2.0)]
+            iy0 = art_top + art_h + 2.5
+        else:
+            return
+        bottom = p_card_top + p_card_h - 4.0
+        per_col = max(1, int((bottom - iy0) // 8.4))
+        for idx, (label, value) in enumerate(rows):
+            col_i, row_i = divmod(idx, per_col)
+            if col_i >= len(cols_xy):
+                break
+            ix, ix_end = cols_xy[col_i]
+            iy = iy0 + row_i * 8.4
+            c.setFillColor(colors.HexColor("#64748b"))
+            c.setFont(FONT_BOLD, 5.6)
+            c.drawString(ix * mm, y_mm(iy + 2.4), label.upper())
+            draw_fitted_text(c, value or "—", ix, y_mm(iy + 6.2), ix_end - ix, font_name=FONT_BOLD,
+                             base_font_size=7.6, min_font_size=5.4, max_lines=1)
+
+    def process_letters(ch_map: Dict[str, Any]) -> str:
+        letters = [k.upper() for k in ("c", "m", "y", "k") if (ch_map or {}).get(k)]
+        return "CMYK" if len(letters) == 4 else " ".join(letters)
+
+    spot_list = od.get("spotColorItems") or [
+        {"name": s, "side": "front"} for s in (od.get("spotColors") or [])
+    ]
+
+    def spots_for(side: str) -> str:
+        return ", ".join(str(s.get("name")) for s in spot_list if (s.get("side") or "front") == side and s.get("name"))
+
+    hole_text = (f"Ø{hole_size:g} mm • {hole_pos}" + (f" • {hole_offset:g} mm" if hole_offset else "")
+                 if hole_size > 0 and hole_pos != "none" else "—")
+    lam_text = str(od.get("lamination") or "")
+    lam_text = "" if lam_text.lower() in ("", "none", "-", "yo'q") else lam_text
 
     # ── CARD 1: OLDI / FRONT PROOF ──
     c1_x = 11.0
@@ -610,17 +676,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFont(FONT_BOLD, 5.2)
     c.drawRightString((c1_x + p_card_w - 2.0) * mm, y_mm(p_card_top + 3.0), "1:1 PREPRESS")
 
-    slot_w = p_card_w - 4.0
-    slot_h = p_card_h - 10.0
-    if aspect >= slot_w / slot_h:
-        art_w = min(slot_w, 48.0)
-        art_h = max(8.0, art_w / aspect)
-    else:
-        art_h = min(slot_h, 28.0)
-        art_w = max(8.0, art_h * aspect)
-
-    art1_x = c1_x + 2.0 + (slot_w - art_w) / 2.0
-    art1_top = p_card_top + 5.0 + (slot_h - art_h) / 2.0
+    art1_x = art_left(c1_x)
+    art1_top = art_top
 
     if front_raw_p1 and front_raw_p1["kind"] == "pdf":
         vector_overlays.append({
@@ -650,6 +707,14 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFillColor(colors.HexColor("#475569"))
     c.setFont(FONT_BOLD, 4.8)
     c.drawCentredString((c1_x + p_card_w / 2) * mm, y_mm(p_card_top + p_card_h - 1.8), f"OLD YUZI • {width:g}×{height:g}{dim_unit}")
+    draw_side_info(c1_x, [
+        ("O'lcham", f"{width:g}×{height:g} {dim_unit}"),
+        ("Bleed", f"{bleed:g} {dim_unit}" if bleed else "yo'q"),
+        ("Bo'yoq", " • ".join(p for p in [str(od.get("colorsConfig") or ""), process_letters(od.get("frontColors") or {})] if p)),
+        ("Pantone", spots_for("front")),
+        ("Lak", str(od.get("coating") or "")),
+        ("Pardoz", "" if str(od.get("embellishment") or "").lower() in ("", "none") else str(od.get("embellishment"))),
+    ])
 
     # ── CARD 2: ORQA / BACK PROOF ──
     c2_x = c1_x + p_card_w + gap_p
@@ -663,7 +728,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFont(FONT_BOLD, 5.2)
     c.drawRightString((c2_x + p_card_w - 2.0) * mm, y_mm(p_card_top + 3.0), "2 TOMON" if back_printed else "1 TOMON")
 
-    art2_x = c2_x + 2.0 + (slot_w - art_w) / 2.0
+    art2_x = art_left(c2_x)
     art2_top = art1_top
 
     if back_raw_p1 and back_raw_p1["kind"] == "pdf":
@@ -695,6 +760,14 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFont(FONT_BOLD, 4.8)
     back_lbl = f"ORQA YUZI • {width:g}×{height:g}{dim_unit}" if back_printed else "ORQA BOSMA MAVJUD EMAS"
     c.drawCentredString((c2_x + p_card_w / 2) * mm, y_mm(p_card_top + p_card_h - 1.8), back_lbl)
+    draw_side_info(c2_x, [
+        ("Bosma", "2 tomon" if back_printed else "1 tomon"),
+        ("Bo'yoq", process_letters(od.get("backColors") or {}) or "—"),
+        ("Pantone", spots_for("back")),
+        ("Laminatsiya", " • ".join(p for p in [lam_text, {"1s": "1 tomon", "2s": "2 tomon"}.get(str(od.get("laminationSides") or ""), ""),
+                                                 f"{od.get('laminationMicron')} mkm" if od.get("laminationMicron") else ""] if p)),
+        ("Qog'oz", str(od.get("paperStock") or "")),
+    ])
 
     # ── CARD 3: DIELINE / SHTANS CAD KONTUR ──
     c3_x = c2_x + p_card_w + gap_p
@@ -707,7 +780,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFont(FONT_BOLD, 5.2)
     c.drawRightString((c3_x + p_card_w - 2.0) * mm, y_mm(p_card_top + 3.0), "CAD 1:1")
 
-    art3_x = c3_x + 2.0 + (slot_w - art_w) / 2.0
+    art3_x = art_left(c3_x)
     art3_top = art1_top
 
     if dieline_raw and dieline_raw["kind"] == "pdf":
@@ -769,9 +842,16 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setFont(FONT_BOLD, 4.8)
     tooling_lbl = f"SHTAMP: {trunc(od.get('selectedToolingName') or '—', 18)} (+{bleed:g}mm)"
     c.drawCentredString((c3_x + p_card_w / 2) * mm, y_mm(p_card_top + p_card_h - 1.8), tooling_lbl)
+    draw_side_info(c3_x, [
+        ("Shakl", str(od.get("shapeType") or "rectangle")),
+        ("Burchak", str(od.get("cornerType") or "")),
+        ("Teshik", hole_text),
+        ("Shtamp", str(od.get("selectedToolingName") or "")),
+        ("Bleed", f"{bleed:g} {dim_unit}" if bleed else "yo'q"),
+    ])
 
     # Bottom Specs Bar inside Section 3
-    s3_bar_top = sec3_top + 47.5
+    s3_bar_top = p_card_top + p_card_h + 1.0
     s3_bar_h = 12.5
     draw_box(11.0, s3_bar_top, full_w_mm - 4.0, s3_bar_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
     phys_cells = [
@@ -788,7 +868,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     # ─── 4. TECHNICAL COATINGS, LAK & KASHIROVKA SPECIFICATION ────────────────
     sec4_top = sec3_top + sec3_h + 2.0
-    sec4_h = 84.0
+    sec4_h = 79.0
     draw_box(9, sec4_top, full_w_mm, sec4_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
     draw_panel_header(9.8, sec4_top + 0.8, full_w_mm - 1.6, "TEXNOLOGIK QOPLAMALAR, LAK VA KASHIROVKA SPECIFIKATSIYASI")
 
@@ -799,7 +879,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     # LEFT COLUMN: LAMINATION, VARNISH/COATING, INKS
     # 1. Lamination Box
     lam_top = sec4_top + 7.0
-    lam_h = 21.0
+    lam_h = 19.0
     draw_box(11.0, lam_top, col_left_w, lam_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
     draw_box(11.0, lam_top, col_left_w, 4.6, fill_hex="#334155", stroke_hex=None)
     c.setFillColor(colors.white)
@@ -824,7 +904,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     # 2. Varnish & Surface Coatings Box
     coat_top = lam_top + lam_h + 2.5
-    coat_h = 21.0
+    coat_h = 19.0
     draw_box(11.0, coat_top, col_left_w, coat_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
     draw_box(11.0, coat_top, col_left_w, 4.6, fill_hex="#334155", stroke_hex=None)
     c.setFillColor(colors.white)
@@ -894,7 +974,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     # RIGHT COLUMN: KASHIROVKA SPECIFICATION & SUBSTRATE LAYERS
     kash_mode = str(od.get("kashirovkaMode") or "none")
     kash_box_top = sec4_top + 7.0
-    kash_box_h = 74.0
+    kash_box_h = 70.0
     draw_box(col_right_x, kash_box_top, col_right_w, kash_box_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0")
     draw_box(col_right_x, kash_box_top, col_right_w, 4.6, fill_hex="#334155", stroke_hex=None)
     c.setFillColor(colors.white)
@@ -990,7 +1070,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.drawString((col_right_x + 3.0) * mm, y_mm(tot_top + 8.5), "Qatlamlar yopishtirilmaydi. To'g'ridan-to'g'ri ofset bosmaga uzatiladi.")
 
 
-    # ─── 5. SIZE BREAKDOWN (fills the rest of page 1) ─────────────────────────
+    # Size breakdown (shown on page 2 with the SKU artworks)
     sizes_raw = od.get("sizes")
     if not sizes_raw and sku_artworks_raw:
         sizes_raw = []
@@ -1010,46 +1090,72 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     note_h = 13.0 if note_text else 0.0
     p1_bottom = 284.0 - (note_h + 2.0 if note_text else 0.0)
 
+    # ─── 5. READINESS: the order's own checks, plus the machines on the route ──
+    # Status comes from the order's checks (set on the order screen); a step without a
+    # check gets an empty cell for the shop floor to fill in.
     sec5_top = sec4_top + sec4_h + 2.0
-    size_cols = [("№", 10), ("MODEL", 0), ("RAZMER", 0), ("MIQDOR", 30), ("ULUSH", 20)]
-    n_sizes = len(sizes_raw)
-    halves = 2 if n_sizes > 8 else 1
-    block_w = (full_w_mm - 1.6 - (halves - 1) * 2.0) / halves
-    flex_w = (block_w - sum(w for _, w in size_cols)) / 2.0
-    size_cols = [(n, w or flex_w) for n, w in size_cols]
-    per_half = math.ceil(n_sizes / halves)
-    size_row_h = max(4.6, min(6.4, (p1_bottom - sec5_top - 7.0 - REPORT_HEAD_H - 1.0) / max(1, per_half)))
-    per_half = min(per_half, int((p1_bottom - sec5_top - 7.0 - REPORT_HEAD_H - 1.0) // size_row_h))
-    shown_sizes = sizes_raw[:per_half * halves]
-    sec5_h = 7.0 + REPORT_HEAD_H + per_half * size_row_h + 1.0
+    checks = od.get("checks") or {}
+    audit = checks.get("audit") or {}
+    sku_files = sum(
+        1 for a in sku_artworks_raw
+        if isinstance(a, dict) and (a.get("frontArtworkUrl") or a.get("backArtworkUrl"))
+    )
+    if sku_files:
+        design_detail = f"{sku_files} SKU maketi yuklangan"
+    elif front_raw_p1 or back_raw_p1:
+        design_detail = "Oldi" + (" va orqa" if back_raw_p1 else "") + " maket yuklangan"
+    else:
+        design_detail = "Maket yuklanmagan"
+    mats = req.materials or []
+    short = [m for m in mats if str(m.availability or "").lower() in ("low stock", "out of stock", "on order")]
+    paper_detail = " • ".join(p for p in [
+        str(od.get("paperStock") or ""),
+        f"{len(mats)} material" + (f", {len(short)} yetishmaydi" if short else "") if mats else "",
+    ] if p) or "—"
+    forms = int(imp_summary.get("forms") or 0)
+    plates = int(imp_summary.get("ctpPlates") or 0)
+    plates_detail = " • ".join(p for p in [
+        f"{forms} forma" if forms else "", f"{plates} plastina" if plates else "",
+        f"{gross_sheets:,} bosma list".replace(",", " ") if gross_sheets else "",
+    ] if p) or "Imposition qilinmagan"
+    tooling_names = [str(t.get("name") or t.get("toolingName") or "") for t in (od.get("toolingItems") or []) if isinstance(t, dict)]
+    tooling_detail = str(od.get("selectedToolingName") or "") or ", ".join(n for n in tooling_names if n) or "—"
+    machine_names: List[str] = []
+    for op in req.operations or []:
+        if op.machine and op.machine != "—" and op.machine not in machine_names:
+            machine_names.append(op.machine)
+    ready_rows = [
+        ("designReady", "Dizayn / maket", design_detail),
+        ("paperReady", "Qog'oz / material", paper_detail),
+        ("platesReady", "Bosma formalar", plates_detail),
+        ("toolingReady", "Shtamp / asbob", tooling_detail),
+        (None, "Uskunalar", ", ".join(machine_names) or "Mashrut kiritilmagan"),
+    ]
+    ready_cols = [("№", 8), ("TAYYORGARLIK", 38), ("TAFSILOT", 74.4), ("HOLAT", 24), ("TEKSHIRDI", 28), ("IMZO", 18)]
+    ready_row_h = max(5.0, min(7.0, (p1_bottom - sec5_top - 7.0 - REPORT_HEAD_H - 1.0) / len(ready_rows)))
+    sec5_h = 7.0 + REPORT_HEAD_H + len(ready_rows) * ready_row_h + 1.0
+    done = sum(1 for key, _, _ in ready_rows if key and checks.get(key))
     draw_box(9, sec5_top, full_w_mm, sec5_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-    hidden_sizes = n_sizes - len(shown_sizes)
-    draw_panel_header(9.8, sec5_top + 0.8, full_w_mm - 1.6, L["sizeBreakdown"],
-                      f"{n_sizes} SKU" + (f" • +{hidden_sizes}" if hidden_sizes > 0 else ""))
-    size_font = 8.0 if size_row_h >= 6.0 else 7.0
-    for h_idx in range(halves):
-        bx = 9.8 + h_idx * (block_w + 2.0)
-        part = shown_sizes[h_idx * per_half:(h_idx + 1) * per_half]
+    draw_panel_header(9.8, sec5_top + 0.8, full_w_mm - 1.6, "ISHLAB CHIQARISHGA TAYYORGARLIK", f"{done} / 4 TAYYOR")
 
-        def size_cell(ri: int, ci: int, part=part, base=h_idx * per_half):
-            if ri >= len(part):
-                return None
-            s_item = part[ri]
-            s_str = str(s_item.get("size") or s_item.get("sizeCode") or "ALL")
-            s_model = str(s_item.get("model") or (s_str.split(" - ")[0] if " - " in s_str else "STD"))
-            s_code = s_str.split(" - ")[1] if " - " in s_str else s_str
-            s_qty = int(s_item.get("quantity") or 0)
-            if ci == 0:
-                return (str(base + ri + 1), False, "#64748b")
-            if ci == 1:
-                return (s_model, False, "#334155")
-            if ci == 2:
-                return (s_code, True, "#0f172a")
-            if ci == 3:
-                return (f"{s_qty:,}".replace(",", " "), True, "#0f172a")
-            return (f"{round((s_qty / net_qty) * 100) if net_qty > 0 else 100}%", False, "#64748b")
+    def ready_cell(ri: int, ci: int):
+        key, title, detail = ready_rows[ri]
+        if ci == 0:
+            return (str(ri + 1), True, "#64748b")
+        if ci == 1:
+            return (title, True, "#0f172a")
+        if ci == 2:
+            return (detail, False, "#334155")
+        if ci == 3 and key:
+            return ("TAYYOR", True, "#15803d") if checks.get(key) else ("KUTILMOQDA", True, "#b45309")
+        if ci == 4 and key:
+            a = audit.get(key) or {}
+            who = " • ".join(str(v) for v in [a.get("verifiedBy"), a.get("verifiedAt")] if v)
+            return (who, False, "#475569") if who and checks.get(key) else None
+        return None
 
-        draw_grid(sec5_top + 7.0, size_cols, size_row_h, per_half, size_cell, x0=bx, font=size_font)
+    draw_grid(sec5_top + 7.0, ready_cols, ready_row_h, len(ready_rows), ready_cell, x0=9.8,
+              font=7.6 if ready_row_h >= 6.5 else 6.8)
 
     if note_text:
         note_top = p1_bottom + 2.0
@@ -1107,9 +1213,58 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
                 "diff": int(s_diff) if s_diff is not None else s_yield - s_target,
             })
 
+    # SKU artworks uploaded per model / size (each size's own file, else the order's own)
+    sku_art_map: Dict[str, Dict[str, Any]] = {}
+    for a in sku_artworks_raw:
+        if not isinstance(a, dict):
+            continue
+        for k in (a.get("skuId"), a.get("sizeCode"), a.get("size")):
+            if k:
+                sku_art_map[str(k).strip().upper()] = a
+        if a.get("model") and a.get("sizeCode"):
+            sku_art_map[f"{str(a['model']).strip()}___{str(a['sizeCode']).strip().upper()}"] = a
+
+    sku_cards: List[Dict[str, Any]] = []
+    for s_idx, s_item in enumerate(sizes_raw):
+        s_str = str(s_item.get("size") or s_item.get("sizeCode") or "ALL")
+        s_model = str(s_item.get("model") or (s_str.split(" - ")[0] if " - " in s_str else ""))
+        s_code = str(s_item.get("sizeCode") or (s_str.split(" - ")[1] if " - " in s_str else s_str)).strip().upper()
+        art = (
+            sku_art_map.get(str(s_item.get("id") or "").strip().upper())
+            or sku_art_map.get(f"{s_model}___{s_code}")
+            or sku_art_map.get(s_code)
+            or {}
+        )
+        f_raw = get_raw_artwork(art.get("frontArtworkUrl") or art.get("frontArtworkThumb")) if art else None
+        b_raw = get_raw_artwork(art.get("backArtworkUrl") or art.get("backArtworkThumb")) if art else None
+        if art and not b_raw and back_raw_p1:
+            b_raw = back_raw_p1  # one back shared by every size
+        sku_cards.append({
+            "model": "" if s_model.strip().upper() in ("", "STD", "—", "-") else s_model.strip(),
+            "code": s_code,
+            "qty": int(s_item.get("quantity") or 0),
+            "front": f_raw,
+            "back": b_raw,
+        })
+    art_cards = [card for card in sku_cards if card["front"] or card["back"]]
+    show_size_table = not art_cards and len(sizes_raw) > 1
+    art_cols = min(len(art_cards), 6) if art_cards else 0
+    art_rows = math.ceil(len(art_cards) / art_cols) if art_cards else 0
+    size_halves = 2 if len(sizes_raw) > 8 else 1
+    size_rows = math.ceil(len(sizes_raw) / size_halves)
+
+    def sku_block_h(s: float) -> float:
+        if art_cards:
+            card_h = max(30.0, (58.0 if art_rows == 1 else 44.0) * s)
+            return REPORT_PANEL_H + art_rows * card_h + (art_rows - 1) * 3.0 + REPORT_GAP_MM
+        if show_size_table:
+            return REPORT_PANEL_H + REPORT_HEAD_H + size_rows * max(4.6, 6.2 * s) + REPORT_GAP_MM
+        return 0.0
+
     def page2_height(op_h: float, mat_h: float, pl_h: float, blank: int, plates: List[Dict[str, Any]],
                      n_ops: int, n_mats: int) -> float:
-        h = REPORT_PANEL_H + REPORT_HEAD_H + (n_ops or EMPTY_ROUTE_ROWS) * op_h + REPORT_GAP_MM
+        h = sku_block_h(op_h / REPORT_OP_ROW_H)
+        h += REPORT_PANEL_H + REPORT_HEAD_H + (n_ops or EMPTY_ROUTE_ROWS) * op_h + REPORT_GAP_MM
         if plates:
             h += REPORT_PANEL_H + REPORT_HEAD_H + len(plates) * pl_h + REPORT_GAP_MM
         if n_mats or blank:
@@ -1135,6 +1290,82 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     row_font = 7.6 if op_h >= 8.0 else (6.8 if op_h >= 6.0 else 6.0)
 
     cur = REPORT_TOP_MM
+    s_used = op_h / REPORT_OP_ROW_H
+
+    # 0. SKU artworks (or, without files, the size breakdown) ahead of the route
+    if art_cards:
+        total_sku_qty = sum(card["qty"] for card in sku_cards)
+        draw_panel_header(9.0, cur, full_w_mm, "SKU MAKETLARI",
+                          f"{len(art_cards)} SKU • {total_sku_qty:,} {unit}".replace(",", " "))
+        card_h = max(30.0, (58.0 if art_rows == 1 else 44.0) * s_used)
+        gap_a = 3.0
+        card_w = (full_w_mm - (art_cols - 1) * gap_a) / art_cols
+        for a_idx, card in enumerate(art_cards):
+            col_i, row_i = a_idx % art_cols, a_idx // art_cols
+            acx = 9.0 + col_i * (card_w + gap_a)
+            acy = cur + REPORT_PANEL_H + row_i * (card_h + gap_a)
+            draw_box(acx, acy, card_w, card_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1", lw=0.5)
+            draw_box(acx, acy, card_w, 5.2, fill_hex="#0f172a", stroke_hex=None)
+            title = f"{card['model']} • {card['code']}" if card["model"] else card["code"]
+            qty_txt = f"{card['qty']:,}".replace(",", " ") if card["qty"] else ""
+            qty_w = c.stringWidth(qty_txt, FONT_BOLD, 6.8) / mm + 3.0 if qty_txt else 0.0
+            draw_fitted_text(c, title, acx + 2.0, y_mm(acy + 3.8), card_w - 4.0 - qty_w, font_name=FONT_BOLD,
+                             base_font_size=7.4, min_font_size=5.2, color="#ffffff", max_lines=1)
+            if qty_txt:
+                c.setFillColor(colors.HexColor("#93c5fd"))
+                c.setFont(FONT_BOLD, 6.8)
+                c.drawRightString((acx + card_w - 2.0) * mm, y_mm(acy + 3.8), qty_txt)
+
+            sides = [(raw, lbl) for raw, lbl in ((card["front"], "OLDI"), (card["back"], "ORQA")) if raw]
+            slot_top = acy + 6.4
+            slot_hh = card_h - 6.4 - 4.6
+            slot_ww = (card_w - 3.0 - (len(sides) - 1) * 2.0) / len(sides)
+            if aspect >= slot_ww / slot_hh:
+                aw, ah = slot_ww, max(6.0, slot_ww / aspect)
+            else:
+                ah, aw = slot_hh, max(6.0, slot_hh * aspect)
+            for si, (raw, lbl) in enumerate(sides):
+                sx = acx + 1.5 + si * (slot_ww + 2.0)
+                ax = sx + (slot_ww - aw) / 2.0
+                ay = slot_top + (slot_hh - ah) / 2.0
+                if raw["kind"] == "pdf":
+                    vector_overlays.append({
+                        "page_idx": 1, "x_mm": ax, "y_mm": ay, "w_mm": aw, "h_mm": ah,
+                        "pdf_bytes": raw["bytes"], "draw_contour": True,
+                    })
+                else:
+                    draw_raster_or_svg(c, raw, ax, ay, aw, ah, y_mm)
+                c.setFillColor(colors.HexColor("#64748b"))
+                c.setFont(FONT_BOLD, 5.4)
+                c.drawCentredString((sx + slot_ww / 2.0) * mm, y_mm(acy + card_h - 1.4), lbl)
+        cur += REPORT_PANEL_H + art_rows * card_h + (art_rows - 1) * gap_a + REPORT_GAP_MM
+    elif show_size_table:
+        draw_panel_header(9.0, cur, full_w_mm, L["sizeBreakdown"], f"{len(sizes_raw)} SKU")
+        size_row_h = max(4.6, 6.2 * s_used)
+        block_w = (full_w_mm - (size_halves - 1) * 2.0) / size_halves
+        size_cols = [("№", 10), ("MODEL", 0), ("RAZMER", 0), ("MIQDOR", 30), ("ULUSH", 20)]
+        flex_w = (block_w - sum(w for _, w in size_cols)) / 2.0
+        size_cols = [(n, w or flex_w) for n, w in size_cols]
+        for h_idx in range(size_halves):
+            part = sku_cards[h_idx * size_rows:(h_idx + 1) * size_rows]
+
+            def size_cell(ri: int, ci: int, part=part, base=h_idx * size_rows):
+                if ri >= len(part):
+                    return None
+                card = part[ri]
+                if ci == 0:
+                    return (str(base + ri + 1), False, "#64748b")
+                if ci == 1:
+                    return (card["model"] or "—", False, "#334155")
+                if ci == 2:
+                    return (card["code"], True, "#0f172a")
+                if ci == 3:
+                    return (f"{card['qty']:,}".replace(",", " "), True, "#0f172a")
+                return (f"{round((card['qty'] / net_qty) * 100) if net_qty > 0 else 100}%", False, "#64748b")
+
+            draw_grid(cur + REPORT_PANEL_H, size_cols, size_row_h, size_rows, size_cell,
+                      x0=9.0 + h_idx * (block_w + 2.0), font=7.4 if size_row_h >= 6.0 else 6.6)
+        cur += REPORT_PANEL_H + REPORT_HEAD_H + size_rows * size_row_h + REPORT_GAP_MM
 
     # 1. Route with blank actuals the operators fill in by hand
     hidden_ops = len(ops_all) - n_ops

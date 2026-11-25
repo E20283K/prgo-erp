@@ -117,6 +117,7 @@ function passportMaterials(order: any) {
         name: spec && !name.includes(spec) ? `${name} • ${spec}` : name,
         req: Number(m.planQty) || Number(m.qty) || Number(m.quantity) || 0,
         unit: str(m.unit) || "dona",
+        availability: str(m.availability),
       };
     });
 }
@@ -169,6 +170,8 @@ export function buildJobTicketPayload(
       spotColors: colors.spotColors || undefined,
       spotColorItems: colors.spotColorItems || undefined,
       notes: order.notes || undefined,
+      // Readiness checks ticked on the order screen, with who verified them
+      checks: order.checks || undefined,
       attachments,
       appUrl: erpBaseUrl(),
     },
