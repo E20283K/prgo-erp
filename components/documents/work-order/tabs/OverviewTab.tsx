@@ -747,22 +747,112 @@ export function OverviewTab({
     return out;
   }, [formData.skuArtworks, formData.artworkFront, formData.artworkBack]);
 
-  const [dismissedArtworkProofs, setDismissedArtworkProofs] = useState<Set<string>>(() => new Set());
+  // The artwork set is offered once as a single combined sheet. Its signature is
+  // remembered per order, so a new or replaced artwork brings the offer back.
+  const artworkProofSignature = React.useMemo(() => {
+    let h = 5381;
+    const s = artworkProofCandidates.join("|");
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return `${artworkProofCandidates.length}-${(h >>> 0).toString(36)}`;
+  }, [artworkProofCandidates]);
+  const artworkProofStorageKey = `wo-artwork-proof:${data?.docNo || tabId}`;
+  const [handledArtworkSignature, setHandledArtworkSignature] = useState<string | null>(() => {
+    try {
+      return typeof window !== "undefined" ? window.localStorage.getItem(artworkProofStorageKey) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isComposingArtworkProof, setIsComposingArtworkProof] = useState(false);
 
-  const pendingArtworkProofs = React.useMemo(
-    () => artworkProofCandidates.filter((src) => !photos.includes(src) && !dismissedArtworkProofs.has(src)),
-    [artworkProofCandidates, photos, dismissedArtworkProofs]
-  );
+  const showArtworkProofOffer =
+    artworkProofCandidates.length > 0 &&
+    handledArtworkSignature !== artworkProofSignature &&
+    !artworkProofCandidates.every((src) => photos.includes(src));
 
-  const handleAddArtworkProofs = () => {
-    if (pendingArtworkProofs.length === 0) return;
-    handleFieldChange("photoUrls", [...photos, ...pendingArtworkProofs]);
-    if (!formData.photoUrl) handleFieldChange("photoUrl", pendingArtworkProofs[0]);
-    onMarkUnsaved();
+  const markArtworkProofHandled = () => {
+    setHandledArtworkSignature(artworkProofSignature);
+    try {
+      window.localStorage.setItem(artworkProofStorageKey, artworkProofSignature);
+    } catch {
+      // storage unavailable: the offer just hides for this session
+    }
   };
 
-  const handleDismissArtworkProofs = () =>
-    setDismissedArtworkProofs((prev) => new Set([...prev, ...pendingArtworkProofs]));
+  const composeArtworkSheet = async (sources: string[]): Promise<File | null> => {
+    const loaded = await Promise.all(
+      sources.map(
+        (src) =>
+          new Promise<HTMLImageElement | null>((resolve) => {
+            const img = new Image();
+            const url = getDisplayImageUrl(src);
+            if (/^https?:/i.test(url)) img.crossOrigin = "anonymous";
+            img.onload = () => resolve(img.naturalWidth > 0 ? img : null);
+            img.onerror = () => resolve(null);
+            img.src = url;
+          })
+      )
+    );
+    const imgs = loaded.filter((i): i is HTMLImageElement => !!i);
+    if (imgs.length === 0) return null;
+
+    // Keep previews at their own resolution (no upscaling blur), capped for size
+    const cellH = Math.min(1200, Math.max(...imgs.map((i) => i.naturalHeight)));
+    const gap = Math.max(12, Math.round(cellH * 0.04));
+    const pad = gap;
+    const cols = imgs.length <= 4 ? imgs.length : Math.ceil(Math.sqrt(imgs.length));
+    const rows: { img: HTMLImageElement; w: number }[][] = [];
+    imgs.forEach((img, i) => {
+      if (i % cols === 0) rows.push([]);
+      rows[rows.length - 1].push({ img, w: Math.round((img.naturalWidth / img.naturalHeight) * cellH) });
+    });
+    const rowWidths = rows.map((r) => r.reduce((sum, c) => sum + c.w, 0) + gap * (r.length - 1));
+    const width = Math.max(...rowWidths) + pad * 2;
+    const height = rows.length * cellH + gap * (rows.length - 1) + pad * 2;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    rows.forEach((row, r) => {
+      let x = pad + (width - pad * 2 - rowWidths[r]) / 2;
+      const y = pad + r * (cellH + gap);
+      for (const c of row) {
+        ctx.drawImage(c.img, x, y, c.w, cellH);
+        ctx.strokeStyle = "#e5e7eb";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, c.w, cellH);
+        x += c.w + gap;
+      }
+    });
+
+    try {
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) return null;
+      return new File([blob], `artwork-proof-${data?.docNo || tabId}.png`, { type: "image/png" });
+    } catch {
+      // Canvas tainted by a cross-origin image
+      return null;
+    }
+  };
+
+  const handleAddArtworkProofs = async () => {
+    if (artworkProofCandidates.length === 0 || isComposingArtworkProof) return;
+    setIsComposingArtworkProof(true);
+    try {
+      const sheet = await composeArtworkSheet(artworkProofCandidates);
+      if (!sheet) return;
+      markArtworkProofHandled();
+      await uploadProofFiles([sheet]);
+    } finally {
+      setIsComposingArtworkProof(false);
+    }
+  };
+
+  const handleDismissArtworkProofs = () => markArtworkProofHandled();
 
   // Sync active photo index with carousel API selection
   React.useEffect(() => {
@@ -951,10 +1041,8 @@ export function OverviewTab({
     const updated = photos.filter((_, idx) => idx !== indexToRemove);
     handleFieldChange("photoUrls", updated);
     handleFieldChange("photoUrl", updated[0] || "");
-    if (removedUrl && artworkProofCandidates.includes(removedUrl)) {
-      // An artwork preview stays an artwork file; just stop offering it again
-      setDismissedArtworkProofs((prev) => new Set([...prev, removedUrl]));
-    } else if (removedUrl && setOrderAttachments) {
+    // An artwork preview stays an artwork file; keep its attachment
+    if (removedUrl && setOrderAttachments && !artworkProofCandidates.includes(removedUrl)) {
       setOrderAttachments((prev) => prev.filter((a) => a.url !== removedUrl));
     }
     onMarkUnsaved();
@@ -1177,33 +1265,33 @@ export function OverviewTab({
             )}
           </div>
 
-          {!isOperator && pendingArtworkProofs.length > 0 && (
+          {!isOperator && showArtworkProofOffer && (
             <div className="shrink-0 mt-2 flex items-center gap-2 rounded border border-border bg-muted/30 px-2 py-1">
-              <div className="flex items-center gap-1 shrink-0">
-                {pendingArtworkProofs.slice(0, 4).map((src, idx) => (
+              <div className="flex h-7 shrink-0 items-center gap-px overflow-hidden rounded-[3px] border border-border bg-white p-0.5">
+                {artworkProofCandidates.slice(0, 6).map((src, idx) => (
                   <img
                     key={`art-sug-${idx}`}
                     src={getDisplayImageUrl(src)}
                     alt=""
-                    className="size-6 rounded-[3px] border border-border object-cover bg-background"
+                    className="h-full w-auto max-w-5 object-contain"
                   />
                 ))}
-                {pendingArtworkProofs.length > 4 && (
-                  <span className="text-[10px] font-mono text-muted-foreground">+{pendingArtworkProofs.length - 4}</span>
-                )}
               </div>
               <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground">
                 {tEnhance("proofFromArtwork")}
-                <span className="ml-1 font-mono tabular-nums text-foreground">{pendingArtworkProofs.length}</span>
+                {artworkProofCandidates.length > 1 && (
+                  <span className="ml-1 font-mono tabular-nums">×{artworkProofCandidates.length}</span>
+                )}
               </span>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 className="h-6 px-2 text-xs shrink-0"
-                onClick={handleAddArtworkProofs}
+                disabled={isComposingArtworkProof}
+                onClick={() => void handleAddArtworkProofs()}
               >
-                <Plus className="w-3 h-3" />
+                {isComposingArtworkProof ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
                 {tEnhance("proofAddArtwork")}
               </Button>
               <Button
