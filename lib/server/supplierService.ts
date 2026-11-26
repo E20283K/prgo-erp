@@ -10,6 +10,8 @@ import {
 } from "@/db/schema";
 import { eq, desc, and, or, sql, ilike } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
+import { emitNotification } from "./notificationService";
+import { syncPurchaseOrderKeyboard } from "./telegramService";
 
 export type SupplierCategory =
   | "raw_materials"
@@ -548,6 +550,10 @@ export async function upsertSupplierOrder(
         telegramMessageId: data.telegramMessageId !== undefined ? data.telegramMessageId : existing.telegramMessageId,
         telegramSentAt: data.telegramSentAt ? new Date(data.telegramSentAt) : existing.telegramSentAt,
         telegramConfirmedBy: data.telegramConfirmedBy !== undefined ? data.telegramConfirmedBy : existing.telegramConfirmedBy,
+        // Yangi holat uchun guruh eslatmalari boshidan sanaladi
+        ...(data.status && data.status !== existing.status
+          ? { statusChangedAt: new Date(), reminderCount: 0, lastReminderAt: null }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(supplierOrders.id, existing.id))
@@ -590,7 +596,66 @@ export async function upsertSupplierOrder(
   // Ta'minotchi qarzini yangilash
   await syncSupplierBalance(companyId, savedOrder.supplierId);
 
+  if (existing && existing.status !== savedOrder.status) {
+    await notifyToolingStatusChange(savedOrder, companyCode);
+    await syncPurchaseOrderKeyboard(savedOrder, companyCode);
+  }
+
   return { success: true, order: savedOrder };
+}
+
+const TOOLING_ORDER_TYPES = new Set(["ctp_plates", "die_tooling", "cliche"]);
+
+const PO_STATUS_LABELS: Record<string, string> = {
+  Ordered: "Buyurtma berildi",
+  In_Production: "Jarayonda",
+  Ready: "Tayyor bo'ldi",
+  Delivered: "Yetkazildi",
+  Cancelled: "Bekor qilindi",
+};
+
+/**
+ * Tooling & CTP buyurtmasi holati ERP ichida qo'lda o'zgarganda bildirishnoma.
+ * dedupKey Telegram webhook bilan bir xil — bitta holat uchun bitta bildirishnoma.
+ */
+async function notifyToolingStatusChange(
+  order: typeof supplierOrders.$inferSelect,
+  companyCode: string
+) {
+  if (!TOOLING_ORDER_TYPES.has(order.orderType)) return;
+  const statusLabel = PO_STATUS_LABELS[order.status];
+  if (!statusLabel) return;
+
+  const severity =
+    order.status === "Cancelled"
+      ? "warning"
+      : order.status === "Ready" || order.status === "Delivered"
+        ? "success"
+        : "info";
+
+  try {
+    await emitNotification(
+      {
+        dedupKey: `po-status-${order.id}-${order.status}`,
+        severity,
+        category: "production",
+        eventType: "po_status_changed",
+        entityCode: order.orderNo,
+        title: `Tooling • ${statusLabel}`,
+        description: `${order.orderNo} (${order.title}) — "${statusLabel}" holatiga o'tkazildi.`,
+        link: { module: "production", subModule: "tooling-orders" },
+        targetTab: {
+          id: "tab-production-tooling-orders",
+          title: "Tooling & CTP Orders",
+          type: "registry",
+          module: "production",
+        },
+      },
+      companyCode
+    );
+  } catch (err) {
+    console.warn("[upsertSupplierOrder] emitNotification error:", err);
+  }
 }
 
 export async function deleteSupplierOrder(orderId: string, companyCode: string = "PRINTGOO") {

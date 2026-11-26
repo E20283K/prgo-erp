@@ -8,6 +8,7 @@ import {
 } from "../lib/server/queue";
 import { ensureStorageBuckets } from "../lib/server/storage";
 import { runRollCallReminders } from "../lib/server/rollCallGroupService";
+import { runSupplierOrderReminders } from "../lib/server/supplierOrderReminderService";
 
 console.log("🚀 [PrintGoo Worker] Fon xizmati (BullMQ) ishga tushmoqda...");
 
@@ -60,9 +61,24 @@ const rollCallTimer = setInterval(async () => {
   }
 }, 60_000);
 
+// 4. Ta'minotchi guruhlariga buyurtma holati eslatmasi: har 15 daqiqada vaqti kelganlarini tekshiradi
+let poReminderBusy = false;
+const poReminderTimer = setInterval(async () => {
+  if (poReminderBusy) return;
+  poReminderBusy = true;
+  try {
+    await runSupplierOrderReminders();
+  } catch (err) {
+    console.warn("[PoReminder] eslatma xatosi:", err);
+  } finally {
+    poReminderBusy = false;
+  }
+}, 15 * 60_000);
+
 const shutdown = async () => {
   console.log("🛑 [PrintGoo Worker] To'xtatilmoqda...");
   clearInterval(rollCallTimer);
+  clearInterval(poReminderTimer);
   await Promise.all([prepressWorker.close(), notificationsWorker.close()]);
   process.exit(0);
 };

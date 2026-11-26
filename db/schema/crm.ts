@@ -387,6 +387,11 @@ export const supplierOrders = pgTable(
     telegramMessageId: integer("telegram_message_id"),            // Guruhdagi xabar ID (inline button callback uchun)
     telegramSentAt: timestamp("telegram_sent_at", { withTimezone: true }),
     telegramConfirmedBy: varchar("telegram_confirmed_by", { length: 128 }), // Statusni tasdiqlagan ta'minotchi user
+    // Joriy holatga o'tgan payt — eslatma oraliqlari shundan hisoblanadi
+    statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).defaultNow().notNull(),
+    // Joriy holat uchun guruhga yuborilgan eslatmalar soni (holat o'zgarsa 0 ga qaytadi)
+    reminderCount: integer("reminder_count").default(0).notNull(),
+    lastReminderAt: timestamp("last_reminder_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

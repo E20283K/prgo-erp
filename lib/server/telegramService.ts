@@ -36,6 +36,12 @@ import { tryHandleRollCallCommand } from "./rollCallGroupService";
 import { findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
 import { readStoredFile } from "./storage";
 import type { WorkOrderToolingItem } from "@/components/documents/work-order/types";
+import {
+  canApplyPoStatus,
+  purchaseOrderKeyboard,
+  withoutOrderRows,
+  type InlineKeyboard,
+} from "@/lib/supplierOrderReminders";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
@@ -1979,43 +1985,7 @@ export async function sendPurchaseOrderToTelegram(params: {
   const fullText = textLines.join("\n");
 
   // Bosqichma-bosqich dinamik tugmalar
-  let initialButtons: Array<Array<{ text: string; callback_data: string }>> = [];
-
-  if (order.status === "In_Production") {
-    initialButtons = [
-      [
-        {
-          text: "✅ Tayyor bo'ldi",
-          callback_data: `po_status:${order.id}:Ready`,
-        },
-      ],
-    ];
-  } else if (order.status === "Ready") {
-    initialButtons = [
-      [
-        {
-          text: "🚚 Yo'lga chiqdi / Kuryerda",
-          callback_data: `po_status:${order.id}:Delivered`,
-        },
-      ],
-    ];
-  } else if (order.status === "Delivered" || order.status === "Cancelled") {
-    initialButtons = [];
-  } else {
-    // Dastlabki yuborilgan holat (Ordered / Draft): Qabul qilish yoki Rad etish
-    initialButtons = [
-      [
-        {
-          text: "🟢 Qabul qilish",
-          callback_data: `po_status:${order.id}:In_Production`,
-        },
-        {
-          text: "❌ Rad etish",
-          callback_data: `po_status:${order.id}:Cancelled`,
-        },
-      ],
-    ];
-  }
+  const initialButtons = purchaseOrderKeyboard(order.id, order.status);
 
   const replyMarkup = {
     inline_keyboard: initialButtons,
@@ -2045,12 +2015,54 @@ export async function sendPurchaseOrderToTelegram(params: {
         telegramChatId: linkedChat.chatId,
         telegramMessageId: sendResult.message.telegramMessageId,
         telegramSentAt: new Date(),
+        // Qayta yuborilgan xabar uchun eslatmalar boshidan sanaladi
+        reminderCount: 0,
+        lastReminderAt: null,
         updatedAt: new Date(),
       })
       .where(eq(supplierOrders.id, order.id));
   }
 
   return sendResult;
+}
+
+const PO_STATUS_TEXT: Record<string, string> = {
+  Draft: "Qabul kutilmoqda",
+  Ordered: "Qabul kutilmoqda",
+  In_Production: "Jarayonda",
+  Ready: "Tayyor",
+  Delivered: "Yetkazildi",
+  Cancelled: "Rad etilgan",
+};
+
+/**
+ * Buyurtma holati ERP'da qo'lda o'zgarganda ta'minotchi guruhidagi asl xabar tugmalarini moslash,
+ * aks holda guruhda eski bosqich tugmalari qolib ketadi.
+ */
+export async function syncPurchaseOrderKeyboard(
+  order: { id: string; status: string; telegramChatId: string | null; telegramMessageId: number | null },
+  companyCode: string = "PRINTGOO"
+): Promise<void> {
+  if (!order.telegramChatId || !order.telegramMessageId) return;
+  const token = await getEffectiveTelegramBotToken(companyCode);
+  if (!token || token.includes("mock") || token.includes("test")) return;
+  try {
+    const res = await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageReplyMarkup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: order.telegramChatId,
+        message_id: order.telegramMessageId,
+        reply_markup: { inline_keyboard: purchaseOrderKeyboard(order.id, order.status) },
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok && !String(data.description || "").includes("not modified")) {
+      console.warn("[syncPurchaseOrderKeyboard]", data.description);
+    }
+  } catch (err) {
+    console.warn("[syncPurchaseOrderKeyboard] error:", err);
+  }
 }
 
 /**
@@ -2098,102 +2110,116 @@ export async function processTelegramWebhookUpdate(
               "Ta'minotchi";
             const confirmedBy = fromUser?.username ? `${userName} (@${fromUser.username})` : userName;
 
+            const isLiveBot = Boolean(token && !token.includes("mock") && !token.includes("test"));
+            const tgCall = (method: string, body: Record<string, unknown>) =>
+              fetch(`${TELEGRAM_API_BASE}/bot${token}/${method}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              });
+            const pressedMsg = callbackQuery.message;
+            const pressedKeyboard = pressedMsg?.reply_markup?.inline_keyboard as InlineKeyboard | undefined;
+            // Tugma eslatma xabarida bosilgan (asl buyurtma xabarida emas)
+            const onReminder = Boolean(
+              pressedMsg && order.telegramMessageId && pressedMsg.message_id !== order.telegramMessageId
+            );
+
+            // Eskirgan tugma: holat ERP'da yoki boshqa xabarda allaqachon o'zgargan
+            if (!canApplyPoStatus(order.status, newStatus)) {
+              if (isLiveBot) {
+                try {
+                  await tgCall("answerCallbackQuery", {
+                    callback_query_id: callbackQuery.id,
+                    text: `Bu tugma eskirgan. Joriy holat: ${PO_STATUS_TEXT[order.status] || order.status}`,
+                    show_alert: true,
+                  });
+                  if (pressedMsg) {
+                    await tgCall("editMessageReplyMarkup", {
+                      chat_id: pressedMsg.chat.id,
+                      message_id: pressedMsg.message_id,
+                      reply_markup: {
+                        inline_keyboard: onReminder
+                          ? withoutOrderRows(pressedKeyboard, order.id)
+                          : purchaseOrderKeyboard(order.id, order.status),
+                      },
+                    });
+                  }
+                } catch (apiErr) {
+                  console.warn("[processTelegramWebhookUpdate] stale button reply error:", apiErr);
+                }
+              }
+              return { success: true, handled: true };
+            }
+
             let statusLabel = "";
             let emoji = "";
-            let nextKeyboard = { inline_keyboard: [] as any[] };
             let notifSeverity: "info" | "warning" | "success" = "info";
 
             if (newStatus === "In_Production") {
               statusLabel = "Qabul qilindi (Jarayonda)";
               emoji = "🟢";
-              nextKeyboard = {
-                inline_keyboard: [
-                  [
-                    {
-                      text: "✅ Tayyor bo'ldi",
-                      callback_data: `po_status:${order.id}:Ready`,
-                    },
-                  ],
-                ],
-              };
             } else if (newStatus === "Cancelled") {
               statusLabel = "Rad etildi / Qabul qilinmadi";
               emoji = "❌";
-              nextKeyboard = { inline_keyboard: [] };
               notifSeverity = "warning";
             } else if (newStatus === "Ready") {
               statusLabel = "Tayyor bo'ldi";
               emoji = "✅";
-              nextKeyboard = {
-                inline_keyboard: [
-                  [
-                    {
-                      text: "🚚 Yo'lga chiqdi / Kuryerda",
-                      callback_data: `po_status:${order.id}:Delivered`,
-                    },
-                  ],
-                ],
-              };
             } else if (newStatus === "Delivered") {
               statusLabel = "Yo'lga chiqdi (Yetkazildi)";
               emoji = "🚚";
-              nextKeyboard = { inline_keyboard: [] };
             }
+            const nextKeyboard = { inline_keyboard: purchaseOrderKeyboard(order.id, newStatus) };
 
-            // Baza statusini yangilash
+            // Baza statusini yangilash; yangi holat uchun eslatmalar boshidan sanaladi
             await db
               .update(supplierOrders)
               .set({
                 status: newStatus as any,
                 telegramConfirmedBy: confirmedBy,
                 ...(newStatus === "Delivered" && !order.receivedAt ? { receivedAt: new Date() } : {}),
+                statusChangedAt: new Date(),
+                reminderCount: 0,
+                lastReminderAt: null,
                 updatedAt: new Date(),
               })
               .where(eq(supplierOrders.id, order.id));
 
             // Telegram bot orqali javob (Toast) qaytarish
-            if (token && !token.includes("mock") && !token.includes("test")) {
+            if (isLiveBot) {
               try {
-                await fetch(`${TELEGRAM_API_BASE}/bot${token}/answerCallbackQuery`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    callback_query_id: callbackQuery.id,
-                    text: `Holat: ${statusLabel}`,
-                    show_alert: false,
-                  }),
+                await tgCall("answerCallbackQuery", {
+                  callback_query_id: callbackQuery.id,
+                  text: `Holat: ${statusLabel}`,
+                  show_alert: false,
                 });
 
-                // Xabarni tahrirlab yangi statusni belgilash
-                const originalMsg = callbackQuery.message;
-                if (originalMsg) {
+                if (pressedMsg) {
                   const nowStr = new Date().toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" });
-                  const baseText = originalMsg.text || originalMsg.caption || "";
-                  const updatedText = `${baseText}\n\n${emoji} <b>Holat:</b> ${statusLabel} (${nowStr})\n👤 <b>Mas'ul:</b> ${confirmedBy}`;
+                  const baseText = escapeTelegramHtml(pressedMsg.text || pressedMsg.caption || "");
+                  const statusLine = onReminder
+                    ? `${emoji} <b>${escapeTelegramHtml(order.orderNo)}:</b> ${statusLabel} (${nowStr}) — ${escapeTelegramHtml(confirmedBy)}`
+                    : `${emoji} <b>Holat:</b> ${statusLabel} (${nowStr})\n👤 <b>Mas'ul:</b> ${escapeTelegramHtml(confirmedBy)}`;
+                  const updatedText = `${baseText}\n\n${statusLine}`;
+                  // Eslatmada faqat shu buyurtma qatori olib tashlanadi; keyingi tugma asl xabarda chiqadi
+                  const pressedNext = onReminder
+                    ? { inline_keyboard: withoutOrderRows(pressedKeyboard, order.id) }
+                    : nextKeyboard;
+                  const isCaption = pressedMsg.caption !== undefined;
 
-                  if (originalMsg.caption !== undefined) {
-                    await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageCaption`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        chat_id: originalMsg.chat.id,
-                        message_id: originalMsg.message_id,
-                        caption: updatedText,
-                        parse_mode: "HTML",
-                        reply_markup: nextKeyboard,
-                      }),
-                    });
-                  } else {
-                    await fetch(`${TELEGRAM_API_BASE}/bot${token}/editMessageText`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        chat_id: originalMsg.chat.id,
-                        message_id: originalMsg.message_id,
-                        text: updatedText,
-                        parse_mode: "HTML",
-                        reply_markup: nextKeyboard,
-                      }),
+                  await tgCall(isCaption ? "editMessageCaption" : "editMessageText", {
+                    chat_id: pressedMsg.chat.id,
+                    message_id: pressedMsg.message_id,
+                    [isCaption ? "caption" : "text"]: updatedText,
+                    parse_mode: "HTML",
+                    reply_markup: pressedNext,
+                  });
+
+                  if (onReminder && order.telegramChatId && order.telegramMessageId) {
+                    await tgCall("editMessageReplyMarkup", {
+                      chat_id: order.telegramChatId,
+                      message_id: order.telegramMessageId,
+                      reply_markup: nextKeyboard,
                     });
                   }
                 }
