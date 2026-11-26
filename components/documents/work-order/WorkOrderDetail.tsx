@@ -32,6 +32,7 @@ import {
   Trash2,
   Truck,
   Send,
+  CopyPlus,
 } from "lucide-react";
 import {
   Dialog,
@@ -155,11 +156,14 @@ import { calculatePrintPlanning } from "./planningEngine";
 import { WarehouseStockRecord } from "@/store/workspaceStore";
 import { computeTariffEstimate, TariffRecord } from "@/components/documents/tariff/types";
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
+import { materialNotIssuedNote } from "@/lib/materialStatus";
 
 import { getInitialToolingItems, toolingItemTotalCost, mergeSupplierSourcedFields } from "./toolingItems";
 import { syncKashirovkaBomRows } from "./utils/kashirovkaBom";
 import { syncSampleBomRow } from "./utils/sampleBom";
 import { buildReorderDocument } from "./reorder";
+import { buildReprintDocument, type ReprintFaultParty } from "./reprint";
+import { ReprintDialog } from "./dialogs/ReprintDialog";
 export { getInitialToolingItems };
 
 export function syncBomWithSpecs(
@@ -1051,6 +1055,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     paperStock: data.paperStock || initialQueueItem?.paperStock || "",
     paperDensity: data.paperDensity ?? initialQueueItem?.paperDensity ?? undefined,
     targetGsm: data.targetGsm ?? initialQueueItem?.targetGsm ?? undefined,
+    targetPaperType: data.targetPaperType ?? initialQueueItem?.targetPaperType ?? undefined,
     coating: data.coating || initialQueueItem?.coating || "",
     coatingStockSku: data.coatingStockSku || (initialQueueItem as any)?.coatingStockSku || "",
     coatingStockName: data.coatingStockName || (initialQueueItem as any)?.coatingStockName || "",
@@ -1110,6 +1115,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     financials: data.financials || initialQueueItem?.financials,
     parentWorkOrderId: data.parentWorkOrderId || data.linkedWoId || undefined,
     isReorder: data.isReorder ?? Boolean(data.parentWorkOrderId),
+    // Saqlashda yo'qolmasligi uchun: aks holda server har safar "Production" va bo'sh izoh yozadi.
+    // Namuna (Sample) turi bu ekranda o'z oqimi bilan boshqariladi, shuning uchun faqat Reprint yuklanadi.
+    orderType: (data.orderType || (initialQueueItem as any)?.orderType) === "Reprint" ? "Reprint" : undefined,
+    notes: data.notes ?? (initialQueueItem as any)?.notes ?? "",
+    reprint: data.reprint || (initialQueueItem as any)?.reprint,
+    reprintDocNos: data.reprintDocNos || (initialQueueItem as any)?.reprintDocNos || [],
     toolingItems: getInitialToolingItems(
       {
         ...initialQueueItem,
@@ -1862,6 +1873,49 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     addNotification({
       title: tOrder("reorderOpenedTitle"),
       description: tOrder("reorderOpenedDesc", { docNo: currentDocNo }),
+      severity: "success",
+    });
+  };
+
+  // Kamomad: yetishmagan qism asl buyurtmaga bog'langan alohida "Reprint" qoralamasida ochiladi.
+  const [isReprintOpen, setIsReprintOpen] = useState(false);
+  const isReprintOrder = formData.orderType === "Reprint";
+  const handleCreateReprint = (input: { quantity: number; faultParty: ReprintFaultParty; reason: string }) => {
+    const currentDocNo = docNo || data.docNo || tab.id;
+    const draftId = `draft-wo-${Date.now()}`;
+
+    openTab({
+      id: draftId,
+      title: `${tOrder("reprint")}: ${formData.product}`,
+      type: "work-order",
+      module: "production",
+      isUnsaved: false,
+      activeLevel3Tab: "overview",
+      documentData: buildReprintDocument(
+        {
+          ...data,
+          ...formData,
+          operations,
+          materials: currentBomItems,
+          sampleData,
+          skuArtworks,
+          attachments: orderAttachments,
+        },
+        {
+          parentDocNo: currentDocNo,
+          draftId,
+          quantity: input.quantity,
+          producedQty: getProducedOutputQty(operations, shiftEvents),
+          faultParty: input.faultParty,
+          reason: input.reason,
+        }
+      ),
+    });
+
+    setIsReprintOpen(false);
+    addNotification({
+      title: tOrder("reprintOpenedTitle"),
+      description: tOrder("reprintOpenedDesc", { docNo: currentDocNo, qty: input.quantity.toLocaleString() }),
       severity: "success",
     });
   };
@@ -2725,110 +2779,21 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     });
   }, [openTab]);
 
-  const handleExecuteSpisanie = useCallback(async (customItems?: BomItem[]) => {
-    const { consumeMaterialsForWorkOrder, employees } = useWorkspaceStore.getState();
-
-    if (formData.materialsConsumed) {
-      addNotification({
-        title: "Xomashyo allaqachon hisobdan chiqarilgan",
-        description: `Chiqim hujjati: ${formData.materialIssueDocNo}`,
-        severity: "info",
-      });
-      return;
-    }
-
-    const itemsToConsume = customItems || currentBomItems;
-    if (!itemsToConsume || itemsToConsume.length === 0) {
-      addNotification({
-        title: "Xomashyo topilmadi",
-        description: "BOM jadvalida hisobdan chiqarish uchun material mavjud emas.",
-        severity: "warning",
-      });
-      return;
-    }
-
-    const currentDocNo = docNo || data.docNo || tab.id;
-
-    const preparedItems: BomItem[] = itemsToConsume.map((item, idx) => {
-      let actual = Number(item.actualQty);
-      const plan = Number(item.planQty) || Number(item.qty) || 0;
-      if (isNaN(actual) || actual <= 0) {
-        actual = plan;
-      }
-      // Press-shift waste belongs to the printed sheet, not to the kashirovka backing layers.
-      const isSubstrate =
-        !item.autoSource && (idx === 0 || item.category === "Paper & Board" || item.category === "Roll & Label");
-      let waste = Number(item.wasteQty) || 0;
-      if (isSubstrate && totalShiftWasteSheets > 0 && actual === plan) {
-        actual += totalShiftWasteSheets;
-        waste = totalShiftWasteSheets;
-      } else if (actual > plan && waste === 0) {
-        waste = actual - plan;
-      }
-
-      return {
-        ...item,
-        planQty: plan,
-        actualQty: actual,
-        wasteQty: waste,
+  // Yakunlangan sarf (RET / qo'shimcha ISS) dan keyin server BOM dagi haqiqiy sarfni qaytaradi
+  const handleMaterialsClosed = useCallback(
+    (materials: BomItem[], issueDocNo?: string) => {
+      const updates = {
+        materials,
+        materialsConsumed: true,
+        materialsConsumedAt: new Date().toISOString(),
+        materialIssueDocNo: issueDocNo,
       };
-    });
-
-    const movement = await consumeMaterialsForWorkOrder({
-      workOrderId: currentDocNo,
-      orderNumber: currentDocNo,
-      customer: formData.customer,
-      pressMachine: formData.pressMachine,
-      operator: employees[0]?.fullName || "",
-      reason: `Ishlab chiqarishga sarf (Spisanie) — ${currentDocNo} (${formData.product})`,
-      items: preparedItems,
-    });
-    // Ombor hujjati o'tmagan bo'lsa (qoldiq yetarli emas, material katalogda yo'q) — buyurtma o'zgarmaydi
-    if (!movement) return;
-
-    const now = new Date().toISOString();
-    const updates = {
-      materials: preparedItems,
-      materialsConsumed: true,
-      materialsConsumedAt: now,
-      materialIssueDocNo: movement.id,
-    };
-
-    setCurrentBomItems(preparedItems);
-    setFormData((prev) => ({ ...prev, ...updates }));
-    updateTabData(tab.id, updates);
-
-    // Auto-save Work Order immediately to database so that materials and issueDocNo are NEVER lost
-    try {
-      if (persistOrderDetailsRef.current) {
-        await persistOrderDetailsRef.current();
-      }
-    } catch (err) {
-      console.error("Failed to auto-save work order on spisanie:", err);
-    }
-
-    addNotification({
-      title: "Xomashyo hisobdan chiqarildi va saqlandi",
-      description: `${movement.id} hujjati yaratildi va ish hujjati avtomatik saqlandi.`,
-      severity: "success",
-    });
-
-    return movement;
-  }, [
-    formData.materialsConsumed,
-    formData.materialIssueDocNo,
-    formData.customer,
-    formData.pressMachine,
-    formData.product,
-    currentBomItems,
-    totalShiftWasteSheets,
-    docNo,
-    data.docNo,
-    tab.id,
-    addNotification,
-    setFormData,
-    updateTabData,
-  ]);
+      setCurrentBomItems(materials);
+      setFormData((prev) => ({ ...prev, ...updates }));
+      updateTabData(tab.id, updates);
+    },
+    [tab.id, setFormData, updateTabData]
+  );
 
   const orderDocNo = docNo || data.docNo || tab.id;
   const orderShipmentCount = useWorkspaceStore(
@@ -3274,10 +3239,18 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     return { ok: true, note: `Oldingi bosqichsiz boshlandi: ${reason}` };
   };
 
+  /** Xomashyo sexga berilmagan bo'lsa ogohlantiradi va jurnal izohiga qo'shadi (ishni to'xtatmaydi). */
+  const withMaterialWarning = async (note: string) => {
+    const warning = isDraft ? null : await materialNotIssuedNote(docNo);
+    if (!warning) return note;
+    addNotification({ title: warning, description: `${docNo}: omborchi "Sexga berish" qilishi kerak.`, severity: "warning" });
+    return `${note} · ${warning}`;
+  };
+
   const handleStartSetup = async (opId: string) => {
     const gate = await checkPreviousStep(opId);
     if (!gate.ok) return;
-    logStepTransition(opId, "SetupStart", gate.note || "Sozlash boshlandi");
+    logStepTransition(opId, "SetupStart", await withMaterialWarning(gate.note || "Sozlash boshlandi"));
   };
 
   const handleStartRun = async (opId: string) => {
@@ -3287,6 +3260,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
       const gate = await checkPreviousStep(opId);
       if (!gate.ok) return;
       if (gate.note) note = gate.note;
+      note = await withMaterialWarning(note);
     }
     logStepTransition(opId, "RunStart", note);
   };
@@ -3651,7 +3625,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
             formData.parentWorkOrderId
               ? {
                   docNo: formData.parentWorkOrderId,
-                  label: `${tOrder("baseOrder")}: ${formData.parentWorkOrderId} (${tOrder("reorder")})`,
+                  label: `${tOrder("baseOrder")}: ${formData.parentWorkOrderId} (${tOrder(isReprintOrder ? "reprint" : "reorder")})`,
                   onClick: () => handleOpenParentWorkOrder(formData.parentWorkOrderId!),
                 }
               : undefined
@@ -3696,6 +3670,13 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                     <span>{tOrder("reorderAction")}</span>
                   </DropdownMenuItem>
+
+                  {!isOperator && !isDraft && (
+                    <DropdownMenuItem onClick={() => setIsReprintOpen(true)} className="gap-2 cursor-pointer font-medium">
+                      <CopyPlus className="w-3.5 h-3.5" />
+                      <span>{tOrder("reprintAction")}</span>
+                    </DropdownMenuItem>
+                  )}
 
                   {!isOperator && (
                     <DropdownMenuItem
@@ -3815,9 +3796,34 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       <span className="truncate">{tOrder("baseOrder")}: {formData.parentWorkOrderId}</span>
                     </span>
                     <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 shrink-0">
-                      {tOrder("reorder")}
+                      {tOrder(isReprintOrder ? "reprint" : "reorder")}
                     </Badge>
                   </button>
+                )}
+
+                {(formData.reprintDocNos || []).length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 mb-1.5">
+                    <span className="text-[10px] text-muted-foreground">{tOrder("reprint")}:</span>
+                    {(formData.reprintDocNos || []).map((childNo) => (
+                      <button
+                        key={childNo}
+                        type="button"
+                        onClick={() =>
+                          openTab({
+                            id: childNo,
+                            title: `${childNo}: ${formData.product}`,
+                            type: "work-order",
+                            module: "production",
+                            activeLevel3Tab: "overview",
+                            documentData: { docNo: childNo, customer: formData.customer, product: formData.product },
+                          })
+                        }
+                        className="font-mono text-[10px] px-1 rounded border border-border bg-muted hover:bg-accent cursor-pointer"
+                      >
+                        {childNo}
+                      </button>
+                    ))}
+                  </div>
                 )}
 
                 {isOperator && (
@@ -4394,7 +4400,9 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                 exchangeRate={formData.exchangeRate || 12850}
                 materialsConsumed={formData.materialsConsumed}
                 materialIssueDocNo={formData.materialIssueDocNo}
-                onExecuteSpisanie={handleExecuteSpisanie}
+                workOrderNo={isDraft ? "" : docNo}
+                onMaterialsClosed={handleMaterialsClosed}
+                dirty={!!tab.isUnsaved}
                 onOpenIssueTab={handleOpenMaterialIssueTab}
                 shiftWasteSheets={totalShiftWasteSheets}
                 onRecipeChange={(code, dept) => {
@@ -4697,6 +4705,20 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
               updateTabData(tab.id, { telegramMeta: meta });
             }
           }}
+        />
+      )}
+
+      {isReprintOpen && (
+        <ReprintDialog
+          isOpen={isReprintOpen}
+          onOpenChange={setIsReprintOpen}
+          orderedQty={Number(formData.quantity) || 0}
+          producedQty={getProducedOutputQty(operations, shiftEvents)}
+          unit={formData.unit}
+          priceTotal={Number(formData.priceTotal) || 0}
+          currency={formData.currency || "UZS"}
+          existingReprints={formData.reprintDocNos || []}
+          onCreate={handleCreateReprint}
         />
       )}
 

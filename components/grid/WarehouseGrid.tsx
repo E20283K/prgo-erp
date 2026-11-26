@@ -46,6 +46,7 @@ import { useTranslations } from "next-intl";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/documents/MaterialImageModal";
 import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
+import { useGridImageHover } from "./GridImageHoverPreview";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
@@ -985,6 +986,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     updateGridStats(selectedRowsCount, filteredRows.length, coords);
   }, [selection, filteredRows.length, columns, updateGridStats]);
 
+
+  const imageHover = useGridImageHover(columns, filteredRows);
 
   // Double-click on row / cell opens document sheet or image preview
   const handleCellActivated = useCallback((cell: Item) => {
@@ -1934,7 +1937,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
           )}
 
           {/* Grid */}
-          <div className="flex-1 w-full h-full relative" id="warehouse-grid-root">
+          <div className="flex-1 w-full h-full relative" id="warehouse-grid-root" {...imageHover.containerProps}>
             {type === 'requirements' && filteredRows.length === 0 && (isProductionQueueLoading || isWarehouseStockLoading) && (
               <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/60 text-xs text-muted-foreground pointer-events-none">
                 <Loader2 className="size-3.5 animate-spin" />
@@ -1954,10 +1957,12 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               height="100%"
               gridSelection={selection}
               onGridSelectionChange={setSelection}
+              onItemHovered={imageHover.onItemHovered}
               headerHeight={28}
               rowHeight={32}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
             />
+            {imageHover.preview}
           </div>
         </div>
       </ContextMenuTrigger>

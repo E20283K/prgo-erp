@@ -278,7 +278,7 @@ flowchart TB
 | Bog'lanish | Joy |
 |---|---|
 | Qadoqlash yakunida FG `PendingReceipt` yaratish (`upsertFinishedGoodAsync`) | `components/documents/work-order/WorkOrderDetail.tsx:1468` |
-| Xomashyo sarfi → `ProductionIssue` movement (client-side qoldiq + async POST) | `store/workspaceStore.ts:3880-3955` |
+| Buyurtma xomashyosi: rezerv → sexga berish (ISS) → yakunlash (RET / qo'shimcha ISS); rezerv `dimensions.materialFlow` da | `lib/server/workOrderMaterialService.ts`, `POST /api/v1/production/work-orders/[id]/materials`, `MaterialFlowPanel.tsx` |
 | WO dan chiqim yaratish / partiyalar ↔ shipment | `components/documents/work-order/tabs/ShipmentsTab.tsx` |
 | Shipment jo'natilganda `workOrders.packagingData.boxes[].status = "dispatched"` | `warehouseService.ts:705-740` |
 | Barcode skaner WO qutilarini o'qiydi | `warehouseService.ts:1755` |

@@ -37,9 +37,10 @@ import {
   warehouseShipments,
   warehouseShipmentItems,
   warehouseFinishedGoods,
+  warehouseMovements,
 } from "@/db/schema";
 import { eq, desc, and, or, ilike, isNull, sql, inArray } from "drizzle-orm";
-import type { ProductionQueueItem } from "@/store/workspaceStore";
+import type { MaterialStatus, ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
 import {
@@ -58,6 +59,7 @@ import { getNextSpecNumber, lockNumbering } from "./numberingService";
 import { getClientCreditState } from "./financeService";
 import { canOverrideCreditHold } from "@/lib/userRole";
 import { emitNotification } from "./notificationService";
+import { releaseWorkOrderMaterials, reserveWorkOrderMaterials } from "./workOrderMaterialService";
 import {
   normalizeDepartment,
   WO_DEPT_PREFIXES,
@@ -234,7 +236,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
   });
 
   // What has left the warehouse for each order (posted shipments) and what has been invoiced.
-  const [shippedRows, invoicedRows] = await Promise.all([
+  const [shippedRows, invoicedRows, issuedRows] = await Promise.all([
     db
       .select({
         woNo: warehouseShipmentItems.sourceWorkOrderId,
@@ -258,7 +260,32 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       .innerJoin(deliveryActs, eq(deliveryActs.id, deliveryActItems.actId))
       .where(and(eq(deliveryActs.companyId, companyId), sql`${deliveryActs.status} not in ('cancelled', 'draft')`))
       .groupBy(deliveryActs.workOrderId),
+    // Sexga berilgan (ISS) buyurtmalar — xomashyo holati uchun
+    db
+      .selectDistinct({ woNo: warehouseMovements.workOrderId })
+      .from(warehouseMovements)
+      .where(
+        and(
+          eq(warehouseMovements.companyId, companyId),
+          eq(warehouseMovements.status, "Completed"),
+          or(
+            ilike(warehouseMovements.movementNumber, "ISS-%"),
+            sql`${warehouseMovements.reason} like '%"movementType":"ProductionIssue"%'`
+          )
+        )
+      ),
   ]);
+  const issuedNos = new Set(issuedRows.map((r) => r.woNo).filter(Boolean) as string[]);
+  const materialStatusOf = (docNo: string, dims: any): MaterialStatus => {
+    const flow = dims.materialFlow || {};
+    if (flow.closedAt || dims.materialsConsumed) return "closed";
+    if (issuedNos.has(docNo)) return "issued";
+    if (Array.isArray(flow.reservations) && flow.reservations.some((r: any) => Number(r?.qty) > 0)) return "reserved";
+    const hasPlan = (Array.isArray(dims.materials) ? dims.materials : []).some(
+      (m: any) => (Number(m?.planQty) || Number(m?.qty) || 0) > 0
+    );
+    return hasPlan ? "planned" : "none";
+  };
   const shippedByNo = new Map(shippedRows.filter((r) => r.woNo).map((r) => [r.woNo as string, Number(r.qty) || 0]));
 
   // Tooling & CTP orders are the source of truth for each tooling item's PO, supplier, progress and delivery cost.
@@ -290,6 +317,14 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
   }
   const invoicedById = new Map(invoicedRows.filter((r) => r.woId).map((r) => [r.woId as string, Number(r.qty) || 0]));
 
+  // Kamomad uchun ochilgan qo'shimcha buyurtmalar asl buyurtmada ko'rinadi (ikki marta ochilmasligi uchun).
+  const reprintsByParent = new Map<string, string[]>();
+  for (const wo of rawOrders) {
+    const parent = (wo.dimensions as any)?.parentWorkOrderId;
+    if (wo.orderType !== "Reprint" || !parent || wo.status === "Cancelled") continue;
+    reprintsByParent.set(parent, [...(reprintsByParent.get(parent) || []), wo.docNo]);
+  }
+
   return rawOrders.map((wo, index) => {
     const checks = (wo.checks as any) || {
       designReady: false,
@@ -307,6 +342,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       clientId: wo.clientId || undefined,
       parentWorkOrderId: dims.parentWorkOrderId || undefined,
       isReorder: Boolean(dims.parentWorkOrderId),
+      reprint: dims.reprint || undefined,
+      reprintDocNos: reprintsByParent.get(wo.docNo) || [],
       customer: wo.customerName,
       product: wo.productName,
       productType: wo.productType || "",
@@ -351,6 +388,7 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       // Asosiy spetsifikatsiya materiallari va pardozlash
       paperStock: wo.paperStock || dims.paperStock || "",
       targetGsm: dims.targetGsm ?? undefined,
+      targetPaperType: dims.targetPaperType ?? undefined,
       paperDensity: dims.paperDensity ?? undefined,
       coating: wo.coating || dims.coating || "",
       lamination: wo.lamination || dims.lamination || "",
@@ -416,6 +454,12 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
         ]
       ),
       materials: dims.materials || [],
+      // Xomashyo oqimi serverniki (rezerv / sexga berish / yakunlash) — faqat o'qiladi
+      materialFlow: dims.materialFlow,
+      materialStatus: materialStatusOf(wo.docNo, dims),
+      materialsConsumed: !!(dims.materialFlow?.closedAt || dims.materialsConsumed),
+      materialsConsumedAt: dims.materialsConsumedAt,
+      materialIssueDocNo: dims.materialIssueDocNo,
       selectedToolingId: dims.selectedToolingId || "",
       selectedToolingName: dims.selectedToolingName || "",
       toolingProcurementNeeded: !!dims.toolingProcurementNeeded,
@@ -767,6 +811,7 @@ export async function upsertWorkOrder(
       sizes: data.sizes ?? (data as any).dimensions?.sizes ?? (existingOrder?.dimensions as any)?.sizes ?? [],
       skuArtworks: resolvedSkuArtworks,
       targetGsm: data.targetGsm,
+      targetPaperType: data.targetPaperType,
       paperDensity: data.paperDensity,
       kashirovkaMode: data.kashirovkaMode,
       kashirovkaStrategy: data.kashirovkaStrategy,
@@ -780,6 +825,11 @@ export async function upsertWorkOrder(
       kashirovkaCuringHours: data.kashirovkaCuringHours,
       toolingItems: (data as any).toolingItems || (data as any).dimensions?.toolingItems || [],
       materials: (data as any).materials || (data as any).dimensions?.materials || [],
+      // Server tomonidan yuritiladi (workOrderMaterialService): mijoz yuborgani hisobga olinmaydi
+      materialFlow: (existingOrder?.dimensions as any)?.materialFlow,
+      materialsConsumed: (existingOrder?.dimensions as any)?.materialsConsumed,
+      materialsConsumedAt: (existingOrder?.dimensions as any)?.materialsConsumedAt,
+      materialIssueDocNo: (existingOrder?.dimensions as any)?.materialIssueDocNo,
       selectedToolingId: data.selectedToolingId,
       selectedToolingName: data.selectedToolingName,
       toolingProcurementNeeded: data.toolingProcurementNeeded,
@@ -829,6 +879,7 @@ export async function upsertWorkOrder(
       // Takroriy buyurtmaning asosi: alohida ustun yo'q, shuning uchun o'lchamlar JSON ida saqlanadi.
       parentWorkOrderId:
         data.parentWorkOrderId ?? (existingOrder?.dimensions as any)?.parentWorkOrderId ?? undefined,
+      reprint: (data as any).reprint ?? (existingOrder?.dimensions as any)?.reprint ?? undefined,
     },
     colorsConfig: {
       formula: data.colorsConfig,
@@ -1249,6 +1300,18 @@ export async function upsertWorkOrder(
     console.error("[WorkOrder] Supplier orders bog'lashda xatolik:", poErr);
   }
 
+  // Xomashyo rezervi: buyurtma sexga chiqqanda BOM band qilinadi, bekor qilinganda bo'shatiladi.
+  // Rezerv yetmasa ham buyurtma saqlanadi — yetishmovchilik Materiallar tabida ko'rinadi.
+  try {
+    if (statusVal === "Cancelled" && existingStatus !== "Cancelled") {
+      await releaseWorkOrderMaterials(targetId, companyCode);
+    } else if (releasedNow && statusVal !== "Cancelled" && !(existingOrder?.dimensions as any)?.materialFlow?.closedAt) {
+      await reserveWorkOrderMaterials(targetId, companyCode);
+    }
+  } catch (resErr) {
+    console.warn("[WorkOrder] Xomashyo rezervini yangilab bo'lmadi:", resErr);
+  }
+
   // Telegram guruhidagi statusni yangilash yoki avtomatik yangi buyurtmani yuborish
   try {
     const specsChanged = Boolean(
@@ -1423,6 +1486,9 @@ export async function deleteWorkOrder(
     }
 
     await db.transaction(async (tx) => {
+      // Band qilingan xomashyo omborga bo'shatiladi; sexga berilgani hujjatlar bilan qaytariladi.
+      await releaseWorkOrderMaterials(existingOrder.id, companyCode, tx);
+
       // Boxes handed to the warehouse but not yet received go back to the shop.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const pkg = existingOrder.packagingData as any;
@@ -1522,6 +1588,7 @@ export async function deleteWorkOrder(
     };
   } else {
     // Butunlay tozalash (Hard Delete — toza qoralama / dubl uchun)
+    await releaseWorkOrderMaterials(existingOrder.id, companyCode);
     await db.delete(workOrderOperations).where(eq(workOrderOperations.workOrderId, existingOrder.id));
     await db.delete(workOrderEvents).where(eq(workOrderEvents.workOrderId, existingOrder.id));
     await db.delete(workOrderAttachments).where(eq(workOrderAttachments.workOrderId, existingOrder.id));

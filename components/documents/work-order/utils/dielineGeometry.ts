@@ -66,9 +66,9 @@ export function dielineNeed(spec: DielineSpec): DielineNeed {
     return "supported";
   }
   if (shape === "circle" || shape === "oval") return "supported";
-  // rectangle
+  // rectangle: straight corners go to the guillotine unless a hole makes a die worthwhile
   const ct = (spec.cornerType || "").toLowerCase();
-  if (cornerRadiusMm(spec.cornerType) > 0 || ct.includes("die")) return "supported";
+  if (cornerRadiusMm(spec.cornerType) > 0 || ct.includes("die") || hasHole(spec)) return "supported";
   return "none";
 }
 
@@ -205,15 +205,22 @@ function holeCentres(spec: DielineSpec, x: number, y: number, w: number, h: numb
 }
 
 /** Product size from the spec; null when it is missing (a die cannot be generated without it). */
+/** True when the spec has a drill/punch hole (explicit or the hangtag default). */
+export function hasHole(spec: DielineSpec): boolean {
+  const h = effectiveHole(spec);
+  return h.size > 0 && h.position !== "none" && spec.shapeType !== "carton_box";
+}
+
 export function dielineSize(spec: DielineSpec): { w: number; h: number } | null {
   const w = Number(spec.width) || 0;
   const h = spec.shapeType === "circle" ? w : Number(spec.height) || 0;
   return w > 0 && h > 0 ? { w, h } : null;
 }
 
-/** Builds the production die SVG for a supported spec; null when not generatable. */
+/** Builds the production die SVG; null when the shape needs a file or the size is missing.
+ *  Straight rectangles (need "none") still build — the user may choose a die over the guillotine. */
 export function buildDielineSvg(spec: DielineSpec): BuiltDieline | null {
-  if (dielineNeed(spec) !== "supported") return null;
+  if (dielineNeed(spec) === "file_required") return null;
   const size = dielineSize(spec);
   if (!size) return null;
   const { w, h } = size;
@@ -322,8 +329,15 @@ export function resolveDieline(
 ): ResolvedDieline {
   const need = dielineNeed(spec);
   const built = () => buildDielineSvg(spec);
-  const unbuildable = (): "not_needed" | "file_required" | "missing_size" =>
-    need === "none" ? "not_needed" : need === "supported" && !dielineSize(spec) ? "missing_size" : "file_required";
+  // `explicit`: the user chose the generated die, so a straight rectangle without a size is a missing size
+  const unbuildable = (explicit = false): "not_needed" | "file_required" | "missing_size" =>
+    need === "file_required"
+      ? "file_required"
+      : dielineSize(spec)
+        ? "not_needed"
+        : need === "none" && !explicit
+          ? "not_needed"
+          : "missing_size";
 
   if (dieline?.source === "none") return { source: "none", reason: "not_needed" };
   if (dieline?.source === "file") {
@@ -333,7 +347,7 @@ export function resolveDieline(
   }
   if (dieline?.source === "spec") {
     const b = built();
-    return b ? { source: "spec", built: b } : { source: "none", reason: unbuildable() };
+    return b ? { source: "spec", built: b } : { source: "none", reason: unbuildable(true) };
   }
 
   // Implicit default

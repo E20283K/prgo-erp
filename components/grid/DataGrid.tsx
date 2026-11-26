@@ -18,6 +18,8 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFindShortcut } from "@/hooks/use-find-shortcut";
+import { MATERIAL_STATUS_COLOR, MATERIAL_STATUS_LABEL } from "@/lib/materialStatus";
+import type { MaterialStatus } from "@/store/workspaceStore";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -145,6 +147,8 @@ export interface OrderRow {
   unit: string;
   readyCount: number;
   readinessLabel: string;
+  materialStatus: MaterialStatus;
+  materialStatusLabel: string;
   priceTotal: number;
   status: "Draft" | "Active" | "In Production" | "Completed" | "Cancelled";
   priority: "Normal" | "Urgent" | "High";
@@ -163,6 +167,7 @@ const INITIAL_COLUMNS: GridColumn[] = [
   { id: "productType", title: "Mahsulot turi", width: 140, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "qty", title: "Quantity", width: 110, icon: GridColumnIcon.HeaderNumber, hasMenu: true },
   { id: "readiness", title: "Tayyorgarlik", width: 85, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
+  { id: "materialStatus", title: "Xomashyo", width: 95, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
   { id: "status", title: "1C Status", width: 110, icon: GridColumnIcon.HeaderSingleValue, hasMenu: true },
   { id: "sampleStatus", title: "Namuna holati", width: 160, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
   { id: "site", title: "Hudud", width: 120, icon: GridColumnIcon.HeaderLookup, hasMenu: true },
@@ -304,6 +309,8 @@ export function DataGrid() {
         unit: wo.unit || "pcs",
         readyCount,
         readinessLabel,
+        materialStatus: (wo.materialStatus || "none") as MaterialStatus,
+        materialStatusLabel: MATERIAL_STATUS_LABEL[(wo.materialStatus || "none") as MaterialStatus],
         priceTotal: wo.priceTotal || 0,
         status: wo.status || "Draft",
         priority: (wo.priority as any) || "Normal",
@@ -707,6 +714,17 @@ export function DataGrid() {
             textDark: isDark ? colorDark : colorLight,
             baseFontStyle: "700 12px monospace",
           },
+        };
+      }
+      case "materialStatus": {
+        const [dark, light] = MATERIAL_STATUS_COLOR[rowData.materialStatus];
+        return {
+          kind: GridCellKind.Text,
+          data: rowData.materialStatusLabel,
+          displayData: rowData.materialStatusLabel,
+          contentAlign: "center",
+          allowOverlay: false,
+          themeOverride: { textDark: isDark ? dark : light, baseFontStyle: "600 12px sans-serif" },
         };
       }
       case "priceTotal":

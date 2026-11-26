@@ -231,7 +231,16 @@ SAMPLE_PURPOSE_LABELS = {
     "full_finished": "To'liq namuna",
     "substrate_test": "Material sinovi",
 }
+DIE_TOOLING = {"die_cutting"}
+CLICHE_TOOLING = {"foil_cliche", "emboss_cliche"}
+PLATE_TOOLING = {"ctp_plates", "flexo_polymer", "varnish_plate"}
+TOOLING_STATUS = {
+    "Draft": "qoralama", "Ordered": "buyurtma qilingan", "In_Production": "tayyorlanmoqda",
+    "Ready": "tayyor", "Delivered": "yetkazildi", "Mounted": "o'rnatilgan",
+}
+ORDER_TYPE_LABELS = {"Production": "Ishlab chiqarish", "Sample": "Namuna", "Reprint": "Qayta bosma"}
 SAMPLE_STATUS = {
+    "none": ("BOSILMAGAN", True, "#b45309"),
     "pending_production": ("BOSILMAGAN", True, "#b45309"),
     "awaiting_approval": ("MIJOZ KO'RIGIDA", True, "#b45309"),
     "approved": ("TASDIQLANDI", True, "#15803d"),
@@ -385,6 +394,14 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     # The logo is placed as vector PDF in the PyMuPDF pass below; "none" leaves the header without one
     header_logo = logo_pdf(req.logo)
 
+    # Sample run ahead of the mass run: its own row in the readiness table, its own block on the route
+    sample = od.get("sampleData") or {}
+    sample_on = bool(sample.get("isRequired")) or str(od.get("orderType") or "") == "Sample"
+    sample_status = str(sample.get("approvalStatus") or "pending_production")
+    sample_qty = int(sample.get("sampleQty") or 0)
+    sample_sheets = int(sample.get("paperSheets") or 0)
+    sample_paper = str(sample.get("paperStock") or "").strip()
+
     # ─── UNIFIED HEADER (PAGES 1 & 2) WITH LOGO, BARCODE & QR ─────────────────
     def draw_unified_header(page_num: int):
         # 1. Top Left: text fallback only when a logo was asked for but cannot be loaded
@@ -434,6 +451,13 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.setFillColor(colors.HexColor("#64748b"))
         c.setFont(FONT_REGULAR, 6.5)
         c.drawRightString(184.0 * mm, y_mm(15.2), datetime.now().strftime("%Y-%m-%d"))
+        if sample_on and sample_status != "approved":
+            flag = f"NAMUNA {sample_qty} {unit} • KEYIN TIRAJ" if sample_qty else "NAMUNA • KEYIN TIRAJ"
+            fw = c.stringWidth(flag, FONT_BOLD, 6.6) / mm + 4.0
+            draw_box(184.0 - fw, 17.0, fw, 4.4, fill_hex="#fffbeb", stroke_hex="#f59e0b", lw=0.5)
+            c.setFillColor(colors.HexColor("#b45309"))
+            c.setFont(FONT_BOLD, 6.6)
+            c.drawCentredString((184.0 - fw / 2.0) * mm, y_mm(20.2), flag)
 
         # Header Bottom Divider Line
         c.setStrokeColor(colors.HexColor("#0f172a"))
@@ -477,7 +501,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         prio_text_col = "#1d4ed8"
 
     req_cols_data = [
-        (9, 38, L["customer"], customer, str(od.get("orderType") or "")),
+        (9, 38, L["customer"], customer, "Namuna + tiraj" if sample_on else ORDER_TYPE_LABELS.get(
+            str(od.get("orderType") or ""), str(od.get("orderType") or ""))),
         (47, 38, L["product"], product, str(od.get("itemCategory") or "")),
         (85, 30, L["departmentSite"], department, site),
         (115, 36, L["pressMachine"], press_machine, f"{L.get('recipe', 'Retsept')}: {recipe}"),
@@ -525,7 +550,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     kpi_h = 14.0
     draw_box(9, kpi_top, full_w_mm, kpi_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
     kpis = [
-        (L["netRun"], f"{net_qty:,} {unit}" if net_qty else "—", "#1d4ed8"),
+        (L["netRun"] + (f" • +{sample_qty} namuna" if sample_on and sample_qty else ""),
+         f"{net_qty:,} {unit}" if net_qty else "—", "#1d4ed8"),
         (L["grossSheets"], f"{gross_sheets:,} varaq" if gross_sheets else "—", "#0f172a"),
         (L["impositionYield"], f"{yield_per_sheet} dona / varaq" if yield_per_sheet else "—", "#047857"),
         (L["scheduleWindow"], f"{start_date} → {deadline}", "#0f172a"),
@@ -551,13 +577,6 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     kash_layers = [l for l in (od.get("kashirovkaLayers") or []) if isinstance(l, dict)]
     kash_on = kash_mode != "none"
     kash_h = 18.0 + REPORT_HEAD_H + max(1, len(kash_layers)) * KASH_ROW_H + 1.0
-    # Sample run ahead of the mass run: its own row in the readiness table, its own block on the route
-    sample = od.get("sampleData") or {}
-    sample_on = bool(sample.get("isRequired")) or str(od.get("orderType") or "") == "Sample"
-    sample_status = str(sample.get("approvalStatus") or "pending_production")
-    sample_qty = int(sample.get("sampleQty") or 0)
-    sample_sheets = int(sample.get("paperSheets") or 0)
-    sample_paper = str(sample.get("paperStock") or "").strip()
     ready_block_h = 7.0 + REPORT_HEAD_H + (6 if sample_on else 5) * 7.0 + 1.0
     sec3_top = kpi_top + kpi_h + 1.5
     geo_free = p1_bottom - sec3_top - 9.0 - (kash_h + 2.0 if kash_on else 0.0) - (ready_block_h + 2.0)
@@ -774,6 +793,27 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.drawCentredString(0, 0, f"{height:g}")
     c.restoreState()
 
+    # Tooling from the order's tooling list, by kind: the die, foil / emboss clichés, plates
+    tooling = [t for t in (od.get("toolingItems") or []) if isinstance(t, dict)]
+
+    def tool_text(categories) -> str:
+        return ", ".join(
+            " • ".join(x for x in [str(t.get("name") or "").strip(), TOOLING_STATUS.get(str(t.get("status") or ""), "")] if x)
+            for t in tooling if t.get("category") in categories and t.get("name")
+        )
+
+    # A straight rectangle without a hole is cut on the guillotine; anything else needs a die (or punch)
+    plain_cut = (str(od.get("shapeType") or "rectangle").lower() == "rectangle"
+                 and str(od.get("cornerType") or "Square").lower() in ("square", "", "none")
+                 and not hole_on)
+    die_text = tool_text(DIE_TOOLING) or str(od.get("selectedToolingName") or "").strip() or (
+        "kerak emas (gilotina)" if plain_cut and not dieline_raw else "biriktirilmagan")
+    emb_lower = str(od.get("embellishment") or "").lower()
+    cliche_needed = any(w in emb_lower for w in ("tisn", "emboss", "folg", "foil", "konger", "hot")) or bool(
+        tool_text(CLICHE_TOOLING))
+    cliche_text = tool_text(CLICHE_TOOLING) or ("biriktirilmagan" if cliche_needed else "kerak emas")
+    plate_tools_text = tool_text(PLATE_TOOLING)
+
     # Spec panel on the right
     # Paper the order asks for (type + density) is set before a stock item is picked
     # from the warehouse, so both are printed: the request and the chosen stock.
@@ -810,7 +850,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         ("Shakl", str(od.get("shapeType") or "rectangle")),
         (L["cornerCut"], str(od.get("cornerType") or "—")),
         (L["holeEyelet"], (f"Ø{hole_size:g} mm • {hole_pos}" + (f" • {hole_offset:g} mm" if hole_offset else "")) if hole_on else "—"),
-        ("Shtamp", str(od.get("selectedToolingName") or "—")),
+        ("Shtamp", die_text),
+        ("Klishe", cliche_text),
         ("Qog'oz turi / GSM", paper_spec or "—"),
         ("Ombordagi qog'oz", str(od.get("paperStock") or "tanlanmagan")),
         ("Oldi bo'yoq", " • ".join(p for p in [formula, letters(od.get("frontColors") or {})] if p) or "—"),
@@ -934,9 +975,12 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     plates_detail = " • ".join(p for p in [
         f"{forms} forma" if forms else "", f"{plates} plastina" if plates else "",
         f"{gross_sheets:,} bosma list".replace(",", " ") if gross_sheets else "",
+        plate_tools_text,
     ] if p) or "Imposition qilinmagan"
-    tooling_names = [str(t.get("name") or t.get("toolingName") or "") for t in (od.get("toolingItems") or []) if isinstance(t, dict)]
-    tooling_detail = str(od.get("selectedToolingName") or "") or ", ".join(n for n in tooling_names if n) or "—"
+    tooling_detail = " • ".join(p for p in [
+        f"Shtamp: {die_text}",
+        f"Klishe: {cliche_text}" if cliche_needed else "",
+    ] if p)
     machine_names: List[str] = []
     for op in req.operations or []:
         if op.machine and op.machine != "—" and op.machine not in machine_names:
@@ -1037,18 +1081,22 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         return f"{sample_qty} {op.planUnit or unit}" if sample_qty else ""
 
     # Until the sample is approved the route is printed twice: the sample run, then the mass run
-    sample_block = sample_on and sample_status != "approved" and bool(ops_all)
+    sample_block = sample_on and sample_status != "approved"
     route_rows: List[Dict[str, Any]] = []
+    # Without a route the blocks get blank rows to be written in by hand
+    blank_rows = [{"kind": "blank"}] * (EMPTY_ROUTE_ROWS // 2)
     if sample_block:
         route_rows.append({"kind": "banner", "color": "#b45309", "text": " • ".join(p for p in [
             "NAMUNA", f"{sample_qty} {unit}" if sample_qty else "",
             f"qog'oz: {sample_paper}" if sample_paper else "", f"{sample_sheets} list" if sample_sheets else "",
             SAMPLE_STATUS.get(sample_status, ("",))[0],
         ] if p)})
-        route_rows += [{"kind": "op", "op": op, "plan": sample_plan(op)} for op in ops_all]
+        route_rows += [{"kind": "op", "op": op, "plan": sample_plan(op)} for op in ops_all] or blank_rows
         route_rows.append({"kind": "banner", "color": "#1d4ed8",
                            "text": f"TIRAJ • {net_qty:,} {unit}".replace(",", " ") + " • namuna tasdiqlangandan keyin"})
-    route_rows += [{"kind": "op", "op": op, "plan": mass_plan(op)} for op in ops_all]
+        route_rows += [{"kind": "op", "op": op, "plan": mass_plan(op)} for op in ops_all] or blank_rows
+    else:
+        route_rows += [{"kind": "op", "op": op, "plan": mass_plan(op)} for op in ops_all]
 
     plate_rows: List[Dict[str, Any]] = []
     for p_idx, plate in enumerate(plates_data):
@@ -1236,6 +1284,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         if ri >= n_ops:
             return None
         row = route_rows[ri]
+        if row["kind"] == "blank":
+            return None
         if row["kind"] == "banner":
             return (row["text"], True, row["color"]) if ci == 1 else None
         op = row["op"]

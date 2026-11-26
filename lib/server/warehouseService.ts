@@ -1297,7 +1297,78 @@ function parseSheetArea(format?: string | null): number {
   return Number(m[1].replace(",", ".")) * Number(m[2].replace(",", "."));
 }
 
-export async function upsertWarehouseMovement(payload: any, companyCode: string = "PRINTGOO") {
+/**
+ * `opts.tx` berilsa, hujjat chaqiruvchining tranzaksiyasi ichida yoziladi (masalan, buyurtma
+ * rezervini yechish bilan birga) — aks holda o'z tranzaksiyasini ochadi.
+ */
+/**
+ * Buyurtma uchun sexga berilganda o'sha buyurtmaning shu ombordagi rezervini (band) yechadi:
+ * aks holda bo'sh qoldiq tekshiruvi buyurtmaning o'z bandiga uriladi va berilgan material ikki marta hisoblanadi.
+ */
+async function consumeWorkOrderReservation(
+  tx: DbExec,
+  companyId: string,
+  workOrderNo: string,
+  locationName: string,
+  qtyBySku: Map<string, number>
+) {
+  const [wo] = await tx
+    .select({ id: workOrders.id, dimensions: workOrders.dimensions })
+    .from(workOrders)
+    .where(and(eq(workOrders.companyId, companyId), or(eq(workOrders.docNo, workOrderNo), sql`${workOrders.id}::text = ${workOrderNo}`)))
+    .for("update")
+    .limit(1);
+  const dims = (wo?.dimensions as any) || {};
+  const reservations: any[] = Array.isArray(dims.materialFlow?.reservations) ? dims.materialFlow.reservations : [];
+  if (!wo || reservations.length === 0) return;
+
+  let changed = false;
+  for (const res of reservations) {
+    const need = qtyBySku.get(String(res?.sku || "")) || 0;
+    const resQty = Number(res?.qty) || 0;
+    if (!(need > 0) || !(resQty > 0) || res.locationName !== locationName) continue;
+    const take = Math.min(resQty, need);
+    const [row] = await tx
+      .select()
+      .from(warehouseStockBalances)
+      .where(
+        and(
+          eq(warehouseStockBalances.companyId, companyId),
+          eq(warehouseStockBalances.locationName, locationName),
+          eq(warehouseStockBalances.sku, res.sku)
+        )
+      )
+      .for("update")
+      .limit(1);
+    if (row) {
+      const nextReserved = Math.max(0, Math.round((Number(row.reserved) - take) * 1000) / 1000);
+      await tx
+        .update(warehouseStockBalances)
+        .set({
+          reserved: nextReserved.toString(),
+          available: Math.max(0, Number(row.stockLevel) - nextReserved).toString(),
+          updatedAt: new Date(),
+        })
+        .where(eq(warehouseStockBalances.id, row.id));
+    }
+    res.qty = Math.round((resQty - take) * 1000) / 1000;
+    qtyBySku.set(res.sku, need - take);
+    changed = true;
+  }
+  if (!changed) return;
+  dims.materialFlow = { ...dims.materialFlow, reservations: reservations.filter((r) => Number(r?.qty) > 1e-9) };
+  await tx.update(workOrders).set({ dimensions: dims, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
+}
+
+export async function upsertWarehouseMovement(
+  payload: any,
+  companyCode: string = "PRINTGOO",
+  opts: {
+    tx?: DbExec;
+    /** Chaqiruvchi buyurtma rezervini o'zi yechgan (xomashyo oqimi xizmati) */
+    reservationHandled?: boolean;
+  } = {}
+) {
   const companyId = await getCompanyIdByCode(companyCode);
   const rawCandidate = String(payload.movementNumber || payload.id || "").trim();
   const isDraft = isDraftDocNumber(rawCandidate);
@@ -1364,7 +1435,7 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
     throw new Error("Ko'chirishda jo'natuvchi va qabul qiluvchi ombor bir xil bo'lishi mumkin emas.");
   }
 
-  const movementRecord = await db.transaction(async (tx) => {
+  const run = async (tx: DbExec) => {
     // Raqam tranzaksiya ichida, seriya qulfi ostida beriladi: parallel saqlashlar bir xil raqam olmaydi
     let movementNumber = rawCandidate;
     if (isDraft) {
@@ -1446,6 +1517,11 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
         movementNumber,
         sumBySku(lines, (l) => l.rcvQty)
       );
+    }
+
+    // Buyurtma uchun sexga berish: avval o'sha buyurtmaning bandini yechamiz (ombor modulidan berilganda ham)
+    if (movementType === "ProductionIssue" && values.workOrderId && !opts.reservationHandled) {
+      await consumeWorkOrderReservation(tx, companyId, values.workOrderId, values.fromLocationName, sumBySku(lines, (l) => l.qty));
     }
 
     // Chiqim tomonida bo'sh qoldiq (stock - reserved) yetarliligini oldindan tekshirish
@@ -1568,7 +1644,8 @@ export async function upsertWarehouseMovement(payload: any, companyCode: string 
       }
     }
     return record;
-  });
+  };
+  const movementRecord = opts.tx ? await run(opts.tx) : await db.transaction((tx) => run(tx));
 
   return {
     ...movementRecord,

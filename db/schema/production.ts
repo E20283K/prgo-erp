@@ -487,7 +487,7 @@ export const finishingOptions = pgTable(
     companyId: uuid("company_id")
       .notNull()
       .references(() => companies.id, { onDelete: "cascade" }),
-    kind: varchar("kind", { length: 32 }).notNull(), // "lamination" | "coating" | "embellishment"
+    kind: varchar("kind", { length: 32 }).notNull(), // "lamination" | "coating" | "embellishment" | "paper_type"
     value: varchar("value", { length: 255 }).notNull(),
     label: varchar("label", { length: 255 }).notNull(),
     sortOrder: integer("sort_order").default(0).notNull(),

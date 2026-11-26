@@ -80,6 +80,7 @@ import {
   SkuArtwork,
 } from "../types";
 import { SizeMatrixCard } from "./SizeMatrixCard";
+import { PAPER_TYPE_OPTIONS } from "@/lib/paperSpec";
 
 interface SpecificationsTabProps {
   formData: WorkOrderFormData;
@@ -336,8 +337,19 @@ export function SpecificationsTab({
       });
     }
 
+    // Talab qilingan qog'oz turiga mos pozitsiyalar ro'yxat boshida turadi
+    const wantedType = formData.targetPaperType;
+    if (wantedType) {
+      const typeByName = new Map(
+        warehouseStock.map((w) => [w.name.toLowerCase().trim(), w.paperSpec?.paperType])
+      );
+      const rank = (o: ComboboxOption) =>
+        typeByName.get(String(o.value).toLowerCase().trim()) === wantedType ? 0 : 1;
+      options.sort((a, b) => rank(a) - rank(b));
+    }
+
     return options;
-  }, [warehouseStock, formData.paperStock, formData.department, formData.recipe]);
+  }, [warehouseStock, formData.paperStock, formData.department, formData.recipe, formData.targetPaperType]);
 
   const matchedStockItem = useMemo(() => {
     if (!formData.paperStock) return null;
@@ -348,6 +360,9 @@ export function SpecificationsTab({
       ) || null
     );
   }, [formData.paperStock, warehouseStock]);
+
+  const paperTypeLabel = (v?: string) =>
+    PAPER_TYPE_OPTIONS.find((o) => o.value === v)?.label || v || "";
 
   // Real Warehouse Stock Options for Lamination (Foil & Film)
   const laminationStockOptions = useMemo<ComboboxOption[]>(() => {
@@ -724,6 +739,7 @@ export function SpecificationsTab({
       code: selection.code,
       hex: selection.hex,
       side: selection.side,
+      ...(selection.note ? { note: selection.note } : {}),
     };
     const updated = [...spotColorItems, newItem];
     const newFrontSpots = updated.filter((s) => s.side === "front" || s.side === "both");
@@ -1901,9 +1917,6 @@ export function SpecificationsTab({
                   Size & shape
                 </span>
               </div>
-              <span className="font-mono text-[11px] text-muted-foreground">
-                Kesim chegarasi: +{formData.bleed ?? 2}mm
-              </span>
             </div>
 
             {/* Row 1: Primary Dimensions & Shape */}
@@ -2422,6 +2435,57 @@ export function SpecificationsTab({
                 </span>
               )}
             </div>
+
+            {/* Target Paper Type Row */}
+            {(isOffset || isFlexo) && (
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground shrink-0">
+                  Qog&apos;oz turi
+                </label>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {(() => {
+                    const wanted = formData.targetPaperType;
+                    const actual = matchedStockItem?.paperSpec?.paperType;
+                    if (!wanted || !actual) return null;
+                    const isMatched = actual === wanted;
+                    return (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "h-6 text-[10px] font-mono shrink-0",
+                          isMatched
+                            ? "text-emerald-600 dark:text-emerald-400 border-emerald-300"
+                            : "text-amber-600 dark:text-amber-400 border-amber-300"
+                        )}
+                      >
+                        Natija: {paperTypeLabel(actual)}
+                      </Badge>
+                    );
+                  })()}
+                  <div className="w-40">
+                    <FinishingOptionSelect
+                      kind="paper_type"
+                      baseOptions={PAPER_TYPE_OPTIONS}
+                      noneLabel="Tanlanmagan"
+                      value={formData.targetPaperType || ""}
+                      onChange={(val) => {
+                        // Ma'lumotnomaga tayyor tur nomi bilan qo'shilgan bo'lsa, kod qiymati saqlanadi
+                        const base = PAPER_TYPE_OPTIONS.find(
+                          (o) => o.label.toLowerCase() === val.toLowerCase()
+                        );
+                        const next = base ? base.value : val;
+                        handleFieldChange({
+                          targetPaperType: !next || next === "none" ? undefined : next,
+                        });
+                        onMarkUnsaved();
+                      }}
+                      disabled={isOperator}
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Target GSM Row (Offset) */}
             {isOffset && (
@@ -3549,6 +3613,11 @@ export function SpecificationsTab({
                           <span className="font-mono text-[11px] font-semibold text-foreground truncate max-w-[150px]">
                             {spot.name}
                           </span>
+                          {spot.note && (
+                            <span className="text-[11px] text-muted-foreground truncate max-w-[160px]" title={spot.note}>
+                              {spot.note}
+                            </span>
+                          )}
                           {!isOperator && (
                             <button
                               type="button"
@@ -3699,6 +3768,11 @@ export function SpecificationsTab({
                           <span className="font-mono text-[11px] font-semibold text-foreground truncate max-w-[150px]">
                             {spot.name}
                           </span>
+                          {spot.note && (
+                            <span className="text-[11px] text-muted-foreground truncate max-w-[160px]" title={spot.note}>
+                              {spot.note}
+                            </span>
+                          )}
                           {!isOperator && (
                             <button
                               type="button"

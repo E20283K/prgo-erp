@@ -5,7 +5,7 @@ import { getCountingProfile, planInUnit } from "@/components/documents/work-orde
 import { resolveMachine } from "@/components/documents/work-order/utils/operationCost";
 import { and, asc, eq, like, or } from "drizzle-orm";
 import { db } from "@/db";
-import { productionMachines, telegramMessages, workOrderOperations, workOrders } from "@/db/schema";
+import { branches, productionMachines, telegramMessages, workOrderOperations, workOrders } from "@/db/schema";
 import { PAPER_TYPE_OPTIONS } from "@/lib/paperSpec";
 import { isSampleBomRow } from "@/components/documents/work-order/utils/sampleBom";
 import { getCompanyIdByCode } from "./crmService";
@@ -208,6 +208,14 @@ export function buildJobTicketPayload(
   };
 }
 
+/** Orders keep the production site as a branch id; the passport prints its name. */
+async function resolveSiteName(site: unknown): Promise<string | undefined> {
+  const value = str(site);
+  if (!value || !UUID_REGEX.test(value)) return value;
+  const branch = await db.query.branches.findFirst({ where: eq(branches.id, value) });
+  return branch?.name || undefined;
+}
+
 type CardFormat = "png" | "pdf" | "both";
 
 /**
@@ -222,6 +230,7 @@ async function renderOrderCard(
 ): Promise<{ png?: Buffer; pdf?: Buffer }> {
   const operations = await loadPassportRoute(order);
   const payload = buildJobTicketPayload(order, customNote, logo, operations);
+  payload.orderData.site = await resolveSiteName(order.site);
   const res = await fetch(`${DOC_SERVICE_URL}/generate/pdf/job-ticket`, {
     method: "POST",
     signal: AbortSignal.timeout(CARD_TIMEOUT_MS),

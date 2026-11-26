@@ -91,7 +91,7 @@ export function TgSessionProvider({ children }: { children: React.ReactNode }) {
     const headers = new Headers(init?.headers);
     if (tokenRef.current) headers.set("Authorization", `Bearer ${tokenRef.current}`);
     if (init?.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    return fetch(path, { ...init, headers, credentials: "same-origin", cache: "no-store" });
+    return fetch(path, { ...init, headers, credentials: "same-origin", cache: init?.cache ?? "no-store" });
   }, []);
 
   React.useEffect(() => {

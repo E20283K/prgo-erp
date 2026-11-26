@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-export type FinishingKind = "lamination" | "coating" | "embellishment";
+export type FinishingKind = "lamination" | "coating" | "embellishment" | "paper_type";
 
 interface FinishingOption {
   id: string;
@@ -28,12 +28,14 @@ const DIALOG_TITLE: Record<FinishingKind, string> = {
   lamination: "Yangi plyonka turi",
   coating: "Yangi lak turi",
   embellishment: "Yangi pardoz turi",
+  paper_type: "Yangi qog'oz turi",
 };
 
 const NAME_PLACEHOLDER: Record<FinishingKind, string> = {
   lamination: "Masalan: Velvet Matte",
   coating: "Masalan: Glitter UF lak",
   embellishment: "Masalan: Mis issiq folga",
+  paper_type: "Masalan: Lyon",
 };
 
 // Ro'yxat bir marta yuklanadi va barcha ochiq buyurtma oynalari uchun umumiy.
@@ -87,6 +89,10 @@ interface FinishingOptionSelectProps {
   disabled?: boolean;
   placeholder?: string;
   className?: string;
+  /** Kodda qat'iy berilgan turlar; ma'lumotnomadagilar ulardan keyin keladi. */
+  baseOptions?: ComboboxOption[];
+  /** "none" qatorining yorlig'i. */
+  noneLabel?: string;
 }
 
 /** Laminatsiya / lak / pardoz turi — ma'lumotnomadan tanlanadi, yangisi oynada qo'shiladi. */
@@ -97,6 +103,8 @@ export function FinishingOptionSelect({
   disabled,
   placeholder,
   className,
+  baseOptions,
+  noneLabel = "Mavjud emas",
 }: FinishingOptionSelectProps) {
   const { list, error } = useFinishingOptions();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -105,14 +113,21 @@ export function FinishingOptionSelect({
   const [isSaving, setIsSaving] = useState(false);
 
   const items = useMemo<ComboboxOption[]>(() => {
-    const own = list.filter((o) => o.kind === kind).map((o) => ({ value: o.value, label: o.label }));
-    const result: ComboboxOption[] = [{ value: "none", label: "Mavjud emas" }, ...own];
+    const base = baseOptions ?? [];
+    const own = [
+      ...base,
+      ...list
+        .filter((o) => o.kind === kind)
+        .filter((o) => !base.some((b) => b.value === o.value || b.label.toLowerCase() === o.label.toLowerCase()))
+        .map((o) => ({ value: o.value, label: o.label })),
+    ];
+    const result: ComboboxOption[] = [{ value: "none", label: noneLabel }, ...own];
     // Ro'yxatdan olib tashlangan eski qiymat ham ko'rinib tursin.
     if (value && value !== "none" && !own.some((o) => o.value === value)) {
       result.splice(1, 0, { value, label: value });
     }
     return result;
-  }, [list, kind, value]);
+  }, [list, kind, value, baseOptions, noneLabel]);
 
   const openCreate = useCallback(
     (query?: string) => {

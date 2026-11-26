@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
-import { AlertTriangle, ExternalLink, FileUp, Loader2, Scissors } from "lucide-react";
+import { AlertTriangle, Download, ExternalLink, FileUp, Loader2, Scissors } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { PresignUnavailableError, uploadOrderFile } from "@/lib/client/uploadOrderFile";
@@ -9,6 +9,7 @@ import type { OrderAttachment, OrderDieline } from "../types";
 import {
   dielineFileCandidates,
   dielineNeed,
+  hasHole,
   resolveDieline,
   type DielineSpec,
 } from "../utils/dielineGeometry";
@@ -33,14 +34,14 @@ export interface DielineSourceCardProps {
 }
 
 const MODES: { value: OrderDieline["source"]; label: string }[] = [
-  { value: "spec", label: "Spetsifikatsiya" },
+  { value: "none", label: "Gilotin" },
+  { value: "spec", label: "Avto pichoq" },
   { value: "file", label: "Fayl" },
-  { value: "none", label: "Yo'q" },
 ];
 
 /**
- * One place to choose the order's die (noj): generated from the Specifications shape,
- * a PDF/SVG file on the order (uploaded here, in Files or on a die-cutting tool), or none.
+ * How the product is cut: guillotine (no die), a die generated from the Specifications shape
+ * (size, corners, holes), or a PDF/SVG die file on the order (uploaded here, in Files or on a tool).
  */
 export function DielineSourceCard({
   spec,
@@ -60,7 +61,19 @@ export function DielineSourceCard({
   const candidates = useMemo(() => dielineFileCandidates(attachments, toolingItems), [attachments, toolingItems]);
   const resolved = useMemo(() => resolveDieline(value, spec, candidates), [value, spec, candidates]);
   const need = dielineNeed(spec);
+  const holed = hasHole(spec);
   const mode: OrderDieline["source"] = value?.source ?? resolved.source;
+
+  const downloadSvg = () => {
+    if (resolved.source !== "spec") return;
+    const { svg, trimW, trimH } = resolved.built;
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${docNo ? `${docNo}_` : ""}pichoq_${trimW}x${trimH}mm.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const previewSrc = useMemo(
     () => (resolved.source === "spec" ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(resolved.built.svg)}` : null),
@@ -109,15 +122,19 @@ export function DielineSourceCard({
             ? "Fayl tanlanmagan"
             : resolved.reason === "missing_size"
               ? "O'lcham yo'q"
-              : "Gilotin";
-  const warn = resolved.source === "none" && resolved.reason !== undefined && resolved.reason !== "not_needed";
+              : holed
+                ? "Teshik alohida"
+                : "Pichoqsiz";
+  // Guillotine with a hole: the hole is not cut, it needs a separate drill/punch step
+  const warn =
+    resolved.source === "none" && (resolved.reason === "not_needed" || resolved.reason === undefined ? holed : true);
 
   return (
     <section className={cn("border border-border rounded-md bg-card", className)}>
       <header className="h-8 px-2.5 flex items-center justify-between gap-2 border-b border-border">
         <h3 className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
           <Scissors className="size-3.5 text-muted-foreground" />
-          Pichoq
+          Kesish
         </h3>
         <span
           className={cn(
@@ -137,7 +154,8 @@ export function DielineSourceCard({
             <button
               key={m.value}
               type="button"
-              disabled={readOnly}
+              disabled={readOnly || (m.value === "spec" && need === "file_required" && mode !== "spec")}
+              title={m.value === "spec" && need === "file_required" ? "Bu shakl uchun fayl kerak" : undefined}
               onClick={() => selectMode(m.value)}
               className={cn(
                 "flex-1 px-2 rounded text-xs transition-colors cursor-pointer disabled:cursor-not-allowed",
@@ -151,20 +169,23 @@ export function DielineSourceCard({
 
         {mode === "spec" &&
           (previewSrc ? (
-            <div className="h-28 rounded border border-border bg-white flex items-center justify-center p-2">
+            <div className="relative h-28 rounded border border-border bg-white flex items-center justify-center p-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={previewSrc} alt="Pichoq konturi" className="max-h-full max-w-full object-contain" />
+              <button
+                type="button"
+                onClick={downloadSvg}
+                title="SVG yuklab olish"
+                className="absolute top-1 right-1 h-6 px-1.5 inline-flex items-center gap-1 rounded border border-border bg-background text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <Download className="size-3" />
+                SVG
+              </button>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              {need === "file_required" || (resolved.source === "none" && resolved.reason === "missing_size") ? (
-                <>
-                  <AlertTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
-                  {need === "file_required" ? "Bu shakl uchun noj faylini yuklang" : "Mahsulot o'lchamini kiriting"}
-                </>
-              ) : (
-                "To'g'ri burchakli gilotin kesim — pichoq kerak emas"
-              )}
+              <AlertTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+              {need === "file_required" ? "Bu shakl uchun noj faylini yuklang" : "Mahsulot o'lchamini kiriting"}
             </div>
           ))}
 

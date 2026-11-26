@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
 import { DEFAULT_SHIFTS, plantClock, type ShiftInterval } from "@/lib/shiftSchedule";
+import { materialNotIssuedNote } from "@/lib/materialStatus";
 import type { RouteStep, ShiftEvent } from "../types";
 import { formatMinutes, type StepPhase } from "../utils/stepTimeline";
 import { stepUnit } from "../utils/stepKpis";
@@ -300,10 +301,18 @@ export function OperatorTerminal() {
     return { ok: true, note: `Oldingi bosqichsiz boshlandi: ${reason}` };
   };
 
+  /** Xomashyo sexga berilmagan bo'lsa ogohlantiradi va jurnal izohiga qo'shadi (ishni to'xtatmaydi). */
+  const withMaterialWarning = async (note: string) => {
+    const warning = job ? await materialNotIssuedNote(job.workOrderNo) : null;
+    if (!warning) return note;
+    addNotification({ title: warning, description: `${job!.workOrderNo}: omborchiga xabar bering.`, severity: "warning" });
+    return `${note} · ${warning}`;
+  };
+
   const startSetup = async () => {
     if (!(await requireOperator("Sozlash"))) return;
     const gate = await startGate();
-    if (gate.ok) await transition("SetupStart", gate.note || "Sozlash boshlandi");
+    if (gate.ok) await transition("SetupStart", await withMaterialWarning(gate.note || "Sozlash boshlandi"));
   };
 
   const startRun = async () => {
@@ -313,6 +322,7 @@ export function OperatorTerminal() {
       const gate = await startGate();
       if (!gate.ok) return;
       if (gate.note) note = gate.note;
+      note = await withMaterialWarning(note);
     }
     await transition("RunStart", note);
   };

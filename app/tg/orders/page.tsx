@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Flame, Loader2, Package, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTelegramBackButton, useTgSession } from "../TgSession";
+import { TgImage } from "../TgImage";
 import type { TgOrderRow, TgOrderScope } from "@/lib/server/tgOrdersService";
 import { ORDER_TYPE_LABEL, STAGE_LABEL, TONE_CLASS, formatQty, shortDate, stageTone, todayIso } from "./labels";
 
@@ -112,8 +113,7 @@ function OrdersScreen() {
                   <Link href={`/tg/orders/${o.id}`} className="flex items-center gap-2 px-3 py-2 active:bg-muted">
                     <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-muted">
                       {o.photo ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={o.photo} alt="" loading="lazy" className="size-full object-cover" />
+                        <TgImage src={o.photo} className="size-full object-cover" />
                       ) : (
                         <Package className="size-4 text-muted-foreground" />
                       )}

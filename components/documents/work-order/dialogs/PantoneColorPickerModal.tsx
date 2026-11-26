@@ -29,6 +29,7 @@ export interface SpotStationSelection {
   name: string;
   hex: string;
   side: "front" | "back" | "both";
+  note?: string;
 }
 
 interface PantoneColorPickerModalProps {
@@ -57,6 +58,10 @@ export function PantoneColorPickerModal({
   // Custom mix inputs
   const [customName, setCustomName] = useState("");
   const [customHex, setCustomHex] = useState("#2563eb");
+  const [customKind, setCustomKind] = useState<"pantone" | "special">("pantone");
+
+  // Free-text note attached to whichever station gets picked
+  const [note, setNote] = useState("");
 
   // Filter colors based on search and category
   const filteredColors = useMemo(() => {
@@ -74,34 +79,34 @@ export function PantoneColorPickerModal({
     return ALL_PANTONE_COLORS.slice(0, 80);
   }, [searchQuery, activeCategory]);
 
-  const handleSelect = (color: PantoneColor) => {
+  const finish = (spot: Omit<SpotStationSelection, "side" | "note">) => {
+    const cleanNote = note.trim();
     onSelectColor({
-      code: color.code,
-      name: color.name,
-      hex: color.hex,
+      ...spot,
       side: targetSide,
+      ...(cleanNote ? { note: cleanNote } : {}),
     });
     onOpenChange(false);
     setSearchQuery("");
+    setNote("");
   };
 
-  const handleAddCustomNamed = (name: string, hex = "#2563eb") => {
+  const handleSelect = (color: PantoneColor) => {
+    finish({ code: color.code, name: color.name, hex: color.hex });
+  };
+
+  // Foils, varnishes and other special stations keep their name as typed;
+  // only real Pantone inks get the "PANTONE" prefix.
+  const handleAddCustomNamed = (name: string, hex = "#2563eb", asPantone = activeCategory !== "specialty") => {
     const clean = name.trim();
     if (!clean) return;
-    const cleanName = clean.toUpperCase().startsWith("PANTONE") ? clean : `PANTONE ${clean}`;
-    onSelectColor({
-      code: clean,
-      name: cleanName,
-      hex,
-      side: targetSide,
-    });
-    onOpenChange(false);
-    setSearchQuery("");
+    const cleanName = !asPantone || clean.toUpperCase().startsWith("PANTONE") ? clean : `PANTONE ${clean}`;
+    finish({ code: clean, name: cleanName, hex });
   };
 
   const handleAddCustom = () => {
     if (!customName.trim()) return;
-    handleAddCustomNamed(customName, customHex);
+    handleAddCustomNamed(customName, customHex, customKind === "pantone");
     setCustomName("");
   };
 
@@ -246,6 +251,17 @@ export function PantoneColorPickerModal({
             )}
           </div>
 
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-muted-foreground shrink-0 w-10">Izoh</span>
+            <Input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Masalan: faqat logotip"
+              maxLength={120}
+              className="h-7 text-xs bg-background border-input"
+            />
+          </div>
+
           {/* Quick Custom Add Banner when searching */}
           {searchQuery.trim() && activeCategory !== "custom" && (
             <div className="flex items-center justify-between px-2.5 py-1.5 rounded bg-muted/40 border border-border text-xs">
@@ -258,7 +274,7 @@ export function PantoneColorPickerModal({
                 className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline cursor-pointer"
               >
                 <Plus className="size-3" />
-                <span>Maxsus rang sifatida qo&apos;shish</span>
+                <span>{activeCategory === "specialty" ? "Folga/lak sifatida qo'shish" : "Maxsus rang sifatida qo'shish"}</span>
               </button>
             </div>
           )}
@@ -266,6 +282,26 @@ export function PantoneColorPickerModal({
           {/* Content Area */}
           {activeCategory === "custom" ? (
             <div className="p-3 bg-muted/20 rounded border border-border space-y-3">
+              <div className="inline-flex items-center p-0.5 rounded bg-muted border border-border">
+                {([
+                  ["pantone", "Pantone"],
+                  ["special", "Folga / lak"],
+                ] as const).map(([kind, label]) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => setCustomKind(kind)}
+                    className={cn(
+                      "px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer",
+                      customKind === kind
+                        ? "bg-background text-foreground shadow-xs font-semibold"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-foreground">
                   Custom Spot Station / Ink Formulation Name
@@ -273,7 +309,7 @@ export function PantoneColorPickerModal({
                 <Input
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
-                  placeholder="e.g. Silk Screen White, Gold Foil Mirror, PMS 286 C"
+                  placeholder={customKind === "pantone" ? "286 C, Warm Red" : "Holographic Silver, Soft-touch"}
                   className="h-8 text-xs bg-background border-input"
                 />
               </div>
@@ -360,7 +396,7 @@ export function PantoneColorPickerModal({
                     className="h-7 text-xs gap-1.5"
                   >
                     <Plus className="size-3.5" />
-                    <span>&quot;{searchQuery}&quot; ni maxsus rang sifatida qo&apos;shish</span>
+                    <span>{activeCategory === "specialty" ? "Folga/lak sifatida qo'shish" : "Maxsus rang sifatida qo'shish"}</span>
                   </Button>
                 </div>
               )}

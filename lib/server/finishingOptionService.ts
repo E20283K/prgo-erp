@@ -3,7 +3,7 @@ import { finishingOptions } from "@/db/schema";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 
-export const FINISHING_KINDS = ["lamination", "coating", "embellishment"] as const;
+export const FINISHING_KINDS = ["lamination", "coating", "embellishment", "paper_type"] as const;
 export type FinishingKind = (typeof FINISHING_KINDS)[number];
 
 export function isFinishingKind(value: unknown): value is FinishingKind {

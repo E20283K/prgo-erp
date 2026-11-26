@@ -381,7 +381,8 @@ export interface MasterSpecificationRecord {
 
 /** Qog'oz / karton pasporti — bosmaxona tasnifi uchun texnik ko'rsatkichlar */
 export interface PaperSpec {
-  paperType?: "offset" | "coated" | "board" | "kraft" | "self_adhesive" | "designer" | "synthetic" | "newsprint";
+  /** Tayyor turlar yoki ma'lumotnomaga qo'shilgan tur nomi. */
+  paperType?: "offset" | "coated" | "board" | "kraft" | "self_adhesive" | "designer" | "synthetic" | "newsprint" | (string & {});
   boardGrade?: "GC1" | "GC2" | "GD2" | "GD3" | "GT" | "SBS";
   finish?: "gloss" | "matt" | "silk" | "uncoated" | "textured";
   coatedSides?: 0 | 1 | 2;
@@ -552,6 +553,8 @@ export interface ProductionReadinessChecks {
 
 export type ProductionQueueStage = "Queue" | "Ready to Print" | "In Production" | "Completed";
 
+export type MaterialStatus = "none" | "planned" | "reserved" | "issued" | "closed";
+
 export interface ProductionQueueItem {
   id: string; // e.g. "WOOF-26-0351"
   docNo?: string;
@@ -598,9 +601,12 @@ export interface ProductionQueueItem {
   dimensions?: any;
   toolingItems?: any[];
   materials?: any[];
+  /** Xomashyo oqimi: none — BOM bo'sh; planned → reserved → issued (sexga berilgan) → closed */
+  materialStatus?: MaterialStatus;
   colorsConfig?: any;
   paperStock?: string;
   targetGsm?: number;
+  targetPaperType?: string;
   coating?: string;
   lamination?: string;
   laminationSides?: "1s" | "2s";

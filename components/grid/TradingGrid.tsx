@@ -15,6 +15,7 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFindShortcut } from "@/hooks/use-find-shortcut";
+import { useGridImageHover } from "./GridImageHoverPreview";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -412,6 +413,8 @@ export function TradingGrid({ type }: TradingGridProps) {
     }
     updateGridStats(selectedRowsCount, rows.length, coords);
   }, [gridSelection, rows.length, columns, updateGridStats]);
+
+  const imageHover = useGridImageHover(columns, rows);
 
   // Glide Data Editor cell provider
   const getCellContent = useCallback(
@@ -1106,7 +1109,7 @@ export function TradingGrid({ type }: TradingGridProps) {
       <div className="flex-1 min-h-0 w-full relative">
         <ContextMenu>
           <ContextMenuTrigger asChild>
-            <div className="absolute inset-0">
+            <div className="absolute inset-0" {...imageHover.containerProps}>
               <DataEditor
                 columns={columns}
                 rows={rows.length}
@@ -1114,6 +1117,7 @@ export function TradingGrid({ type }: TradingGridProps) {
                 onCellActivated={handleCellActivated}
                 gridSelection={gridSelection}
                 onGridSelectionChange={setGridSelection}
+                onItemHovered={imageHover.onItemHovered}
                 rowMarkers="both"
                 freezeColumns={1}
                 smoothScrollX
@@ -1122,6 +1126,7 @@ export function TradingGrid({ type }: TradingGridProps) {
                 width="100%"
                 height="100%"
               />
+              {imageHover.preview}
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent className="text-xs">

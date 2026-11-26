@@ -61,7 +61,7 @@ import {
   Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useWorkspaceStore, type CrmCustomerRecord } from "@/store/workspaceStore";
+import { useWorkspaceStore, type CrmCustomerRecord, type MaterialStatus } from "@/store/workspaceStore";
 import { OrgUnitSelect } from "@/components/common/OrgUnitSelect";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
@@ -313,6 +313,17 @@ export function OverviewTab({
       companiesList: s.companiesList,
     }))
   );
+  // Xomashyo holati serverdan (ro'yxat yuklanganda hisoblanadi)
+  const queueMaterial = useWorkspaceStore(
+    useShallow((s) => {
+      const no = data?.docNo || tabId;
+      const q = s.productionQueue.find((x) => x.id === no || x.docNo === no) as any;
+      return { status: q?.materialStatus as MaterialStatus | undefined, issueDocNo: q?.materialIssueDocNo as string | undefined };
+    })
+  );
+  const materialStatus: MaterialStatus | undefined =
+    formData.materialsConsumed ? "closed" : queueMaterial.status;
+  const materialIssueDocNo = formData.materialIssueDocNo || queueMaterial.issueDocNo;
   const {
     loadCrmCustomers,
     upsertCustomerAsync,
@@ -711,6 +722,48 @@ export function OverviewTab({
     return formData.photoUrl ? [formData.photoUrl] : [];
   }, [formData.photoUrls, formData.photoUrl]);
 
+  // Front/back artwork previews already uploaded for the order (SKU table or the
+  // single artwork pair). Offered as proof photos so nobody re-uploads them.
+  const artworkProofCandidates = React.useMemo(() => {
+    const isImageUrl = (u?: string) =>
+      !!u && (u.startsWith("data:image/") || /\.(png|jpe?g|webp|gif|svg)(\?|$)/i.test(u));
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const push = (thumb?: string, url?: string, dedupeKey?: string) => {
+      const src = thumb || (isImageUrl(url) ? url : undefined);
+      if (!src) return;
+      const key = dedupeKey || src;
+      if (seen.has(key) || seen.has(src)) return;
+      seen.add(key);
+      seen.add(src);
+      out.push(src);
+    };
+    for (const a of formData.skuArtworks ?? []) {
+      push(a.frontArtworkThumb, a.frontArtworkUrl, a.frontArtworkName && `front:${a.frontArtworkName}`);
+      push(a.backArtworkThumb, a.backArtworkUrl, a.backArtworkName && `back:${a.backArtworkName}`);
+    }
+    push(undefined, formData.artworkFront);
+    push(undefined, formData.artworkBack);
+    return out;
+  }, [formData.skuArtworks, formData.artworkFront, formData.artworkBack]);
+
+  const [dismissedArtworkProofs, setDismissedArtworkProofs] = useState<Set<string>>(() => new Set());
+
+  const pendingArtworkProofs = React.useMemo(
+    () => artworkProofCandidates.filter((src) => !photos.includes(src) && !dismissedArtworkProofs.has(src)),
+    [artworkProofCandidates, photos, dismissedArtworkProofs]
+  );
+
+  const handleAddArtworkProofs = () => {
+    if (pendingArtworkProofs.length === 0) return;
+    handleFieldChange("photoUrls", [...photos, ...pendingArtworkProofs]);
+    if (!formData.photoUrl) handleFieldChange("photoUrl", pendingArtworkProofs[0]);
+    onMarkUnsaved();
+  };
+
+  const handleDismissArtworkProofs = () =>
+    setDismissedArtworkProofs((prev) => new Set([...prev, ...pendingArtworkProofs]));
+
   // Sync active photo index with carousel API selection
   React.useEffect(() => {
     if (!carouselApi) return;
@@ -898,69 +951,39 @@ export function OverviewTab({
     const updated = photos.filter((_, idx) => idx !== indexToRemove);
     handleFieldChange("photoUrls", updated);
     handleFieldChange("photoUrl", updated[0] || "");
-    if (removedUrl && setOrderAttachments) {
+    if (removedUrl && artworkProofCandidates.includes(removedUrl)) {
+      // An artwork preview stays an artwork file; just stop offering it again
+      setDismissedArtworkProofs((prev) => new Set([...prev, removedUrl]));
+    } else if (removedUrl && setOrderAttachments) {
       setOrderAttachments((prev) => prev.filter((a) => a.url !== removedUrl));
     }
     onMarkUnsaved();
   };
 
   // Auto-suggested product name calculations based on ERP order parameters
-  const suggestedProductName = useMemo(() => {
-    return generateSuggestedProductName(formData, "standard");
-  }, [
-    formData.customer,
-    formData.itemCategory,
-    formData.boxType,
-    formData.foldType,
-    formData.width,
-    formData.height,
-    formData.boxDepth,
-    formData.dimensionUnit,
-    formData.department,
-    formData.paperStock,
-    formData.colorsConfig,
-    formData.lamination,
-    formData.coating,
-  ]);
+  const suggestedNames = useMemo(
+    () =>
+      ({
+        standard: generateSuggestedProductName(formData, "standard"),
+        compact: generateSuggestedProductName(formData, "compact"),
+        client: generateSuggestedProductName(formData, "client"),
+        code: generateSuggestedProductName(formData, "code"),
+      }) satisfies Record<ProductNameNamingPreset, string>,
+    [formData]
+  );
+  const suggestedProductName = suggestedNames.standard;
 
-  const compactSuggestedName = useMemo(() => {
-    return generateSuggestedProductName(formData, "compact");
-  }, [
-    formData.customer,
-    formData.itemCategory,
-    formData.boxType,
-    formData.foldType,
-    formData.width,
-    formData.height,
-    formData.boxDepth,
-    formData.dimensionUnit,
-    formData.department,
-  ]);
-
-  const technicalSuggestedName = useMemo(() => {
-    return generateSuggestedProductName(formData, "technical");
-  }, [
-    formData.itemCategory,
-    formData.boxType,
-    formData.foldType,
-    formData.width,
-    formData.height,
-    formData.boxDepth,
-    formData.dimensionUnit,
-    formData.department,
-    formData.paperStock,
-    formData.colorsConfig,
-    formData.lamination,
-    formData.coating,
-  ]);
+  const namingPresetOptions: { preset: ProductNameNamingPreset; label: string; mono?: boolean }[] = [
+    { preset: "standard", label: tOrder("namingStandard") },
+    { preset: "compact", label: tOrder("namingCompact") },
+    { preset: "client", label: tOrder("namingClient") },
+    { preset: "code", label: tOrder("namingCode"), mono: true },
+  ];
 
   const [isNamingPopoverOpen, setIsNamingPopoverOpen] = useState(false);
 
   const handleApplySuggestedName = (preset: ProductNameNamingPreset = "standard") => {
-    let chosen = "";
-    if (preset === "compact") chosen = compactSuggestedName;
-    else if (preset === "technical") chosen = technicalSuggestedName;
-    else chosen = suggestedProductName;
+    let chosen = suggestedNames[preset];
 
     // Retain custom quote suffix if present, e.g. — "Brand / Notes"
     const currentName = formData.product || "";
@@ -1057,15 +1080,25 @@ export function OverviewTab({
           </div>
 
           {/* Material Spisanie & Reservation Status */}
-          {formData.materialsConsumed && formData.materialIssueDocNo ? (
+          {materialStatus === "closed" && materialIssueDocNo ? (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 gap-1 font-mono">
               <Boxes className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-              <span>Chiqim: {formData.materialIssueDocNo}</span>
+              <span>Chiqim: {materialIssueDocNo}</span>
             </Badge>
-          ) : formData.materialsReserved ? (
+          ) : materialStatus === "issued" ? (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 gap-1">
+              <Boxes className="w-3 h-3" />
+              <span>Xomashyo sexda</span>
+            </Badge>
+          ) : materialStatus === "reserved" ? (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30 gap-1">
-              <Boxes className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+              <Boxes className="w-3 h-3" />
               <span>Xomashyo band</span>
+            </Badge>
+          ) : materialStatus === "planned" ? (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/30 gap-1">
+              <Boxes className="w-3 h-3" />
+              <span>Xomashyo berilmagan</span>
             </Badge>
           ) : null}
         </div>
@@ -1143,6 +1176,48 @@ export function OverviewTab({
               </Popover>
             )}
           </div>
+
+          {!isOperator && pendingArtworkProofs.length > 0 && (
+            <div className="shrink-0 mt-2 flex items-center gap-2 rounded border border-border bg-muted/30 px-2 py-1">
+              <div className="flex items-center gap-1 shrink-0">
+                {pendingArtworkProofs.slice(0, 4).map((src, idx) => (
+                  <img
+                    key={`art-sug-${idx}`}
+                    src={getDisplayImageUrl(src)}
+                    alt=""
+                    className="size-6 rounded-[3px] border border-border object-cover bg-background"
+                  />
+                ))}
+                {pendingArtworkProofs.length > 4 && (
+                  <span className="text-[10px] font-mono text-muted-foreground">+{pendingArtworkProofs.length - 4}</span>
+                )}
+              </div>
+              <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground">
+                {tEnhance("proofFromArtwork")}
+                <span className="ml-1 font-mono tabular-nums text-foreground">{pendingArtworkProofs.length}</span>
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-xs shrink-0"
+                onClick={handleAddArtworkProofs}
+              >
+                <Plus className="w-3 h-3" />
+                {tEnhance("proofAddArtwork")}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                title={tEnhance("proofDismiss")}
+                onClick={handleDismissArtworkProofs}
+              >
+                <X className="w-3 h-3" />
+              </Button>
+            </div>
+          )}
 
           <div className="flex-1 min-h-0 flex flex-col pt-2">
             {photos.length > 0 ? (
@@ -1413,46 +1488,32 @@ export function OverviewTab({
                           <span>{tOrder("namingFormats")}</span>
                         </div>
                       </div>
-                      <div className="space-y-1">
-                        <button
-                          type="button"
-                          onClick={() => handleApplySuggestedName("standard")}
-                          className="w-full text-left p-2 rounded-md hover:bg-muted text-xs transition-colors cursor-pointer group border border-transparent hover:border-border"
-                        >
-                          <div className="font-semibold text-foreground group-hover:text-primary flex items-center justify-between">
-                            <span>{tOrder("namingStandard")}</span>
-                            <Badge variant="outline" className="h-4 px-1 text-[9px] font-mono text-primary border-primary/30">
-                              Tavsiya
-                            </Badge>
-                          </div>
-                          <div className="text-[11px] font-mono text-muted-foreground line-clamp-2 mt-1">
-                            {suggestedProductName}
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleApplySuggestedName("compact")}
-                          className="w-full text-left p-2 rounded-md hover:bg-muted text-xs transition-colors cursor-pointer group border border-transparent hover:border-border"
-                        >
-                          <div className="font-semibold text-foreground group-hover:text-primary">
-                            {tOrder("namingCompact")}
-                          </div>
-                          <div className="text-[11px] font-mono text-muted-foreground truncate mt-1">
-                            {compactSuggestedName}
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleApplySuggestedName("technical")}
-                          className="w-full text-left p-2 rounded-md hover:bg-muted text-xs transition-colors cursor-pointer group border border-transparent hover:border-border"
-                        >
-                          <div className="font-semibold text-foreground group-hover:text-primary">
-                            {tOrder("namingTechnical")}
-                          </div>
-                          <div className="text-[11px] font-mono text-muted-foreground line-clamp-2 mt-1">
-                            {technicalSuggestedName}
-                          </div>
-                        </button>
+                      <div className="space-y-0.5">
+                        {namingPresetOptions.map(({ preset, label, mono }) => {
+                          const value = suggestedNames[preset];
+                          const isCurrent = value === formData.product;
+                          return (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => handleApplySuggestedName(preset)}
+                              className="w-full text-left px-2 py-1.5 rounded-md hover:bg-muted text-xs transition-colors cursor-pointer group border border-transparent hover:border-border"
+                            >
+                              <div className="flex items-center justify-between gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                                <span>{label}</span>
+                                {isCurrent && <Check className="size-3 text-primary" />}
+                              </div>
+                              <div
+                                className={cn(
+                                  "text-xs text-foreground group-hover:text-primary line-clamp-2 mt-0.5",
+                                  mono && "font-mono"
+                                )}
+                              >
+                                {value}
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
                     </PopoverContent>
                   </Popover>

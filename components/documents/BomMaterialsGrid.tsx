@@ -101,6 +101,7 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid"
 import { toast } from "@/components/ui/toast";
 import { MASTER_SPECIFICATIONS, MasterSpecification } from "./work-order/types";
 import { MaterialImageModal, type MaterialImagePreviewData } from "@/components/documents/MaterialImageModal";
+import type { MaterialFlowLine } from "@/lib/server/workOrderMaterialService";
 
 export type MaterialIssueType = "standard" | "remake" | "client_change" | "press_waste";
 export type FaultParty = "none" | "prepress" | "production" | "client" | "supplier";
@@ -301,7 +302,12 @@ interface BomMaterialsGridProps {
   onExecuteSpisanie?: (customItems?: BomItem[]) => void;
   onOpenIssueTab?: (docNo: string) => void;
   shiftWasteSheets?: number;
+  /** Buyurtma xomashyo oqimi (saqlangan buyurtmada) — "Band" / "Berildi" ustunlari */
+  flowLines?: MaterialFlowLine[];
 }
+
+/** Xomashyo oqimi ustunlari — oqim bo'lmasa (qoralama, spetsifikatsiya) yashiriladi */
+const FLOW_COLUMN_IDS = ["reservedQty", "issuedQty"];
 
 export function BomMaterialsGrid({
   tabId,
@@ -322,8 +328,18 @@ export function BomMaterialsGrid({
   onExecuteSpisanie,
   onOpenIssueTab,
   shiftWasteSheets,
+  flowLines,
 }: BomMaterialsGridProps) {
   const t = useTranslations("BOM");
+
+  // Oqim qatorlari SKU (yoki nom) bo'yicha — server BOM ni ham shu tartibda moslaydi
+  const flowLineOf = useMemo(() => {
+    if (!flowLines) return null;
+    const bySku = new Map(flowLines.map((l) => [l.sku.toLowerCase(), l]));
+    const byName = new Map(flowLines.map((l) => [l.name.trim().toLowerCase(), l]));
+    return (item: BomItem) =>
+      bySku.get(String(item.id || "").trim().toLowerCase()) || byName.get(String(item.name || "").trim().toLowerCase());
+  }, [flowLines]);
   const {
     theme,
     setTabUnsaved,
@@ -543,6 +559,8 @@ export function BomMaterialsGrid({
     { id: "name", title: t("materialName"), width: 220, icon: GridColumnIcon.HeaderString },
     { id: "issueType", title: t("issueType"), width: 130, icon: GridColumnIcon.HeaderSingleValue },
     { id: "planQty", title: t("planQty"), width: 95, icon: GridColumnIcon.HeaderNumber },
+    { id: "reservedQty", title: "Band", width: 85, icon: GridColumnIcon.HeaderNumber },
+    { id: "issuedQty", title: "Berildi", width: 85, icon: GridColumnIcon.HeaderNumber },
     { id: "actualQty", title: t("actualQty"), width: 95, icon: GridColumnIcon.HeaderNumber },
     { id: "wasteQty", title: t("wasteQty"), width: 90, icon: GridColumnIcon.HeaderNumber },
     { id: "unit", title: t("unit"), width: 70, icon: GridColumnIcon.HeaderLookup },
@@ -583,9 +601,10 @@ export function BomMaterialsGrid({
 
   // Active columns filtered by RBAC (hide financial columns for floor operators)
   const visibleColumns = useMemo(() => {
-    if (!isOperator) return columns;
-    return columns.filter((c) => c.id !== "unitPrice" && c.id !== "totalPrice" && c.id !== "originalPrice" && c.id !== "originalCurrency");
-  }, [columns, isOperator]);
+    const base = flowLines ? columns : columns.filter((c) => !FLOW_COLUMN_IDS.includes(c.id as string));
+    if (!isOperator) return base;
+    return base.filter((c) => c.id !== "unitPrice" && c.id !== "totalPrice" && c.id !== "originalPrice" && c.id !== "originalCurrency");
+  }, [columns, isOperator, flowLines]);
 
   // Active items list
   const filteredItems = items;
@@ -922,6 +941,40 @@ export function BomMaterialsGrid({
             },
           };
         }
+        case "reservedQty":
+        case "issuedQty": {
+          const line = flowLineOf?.(item);
+          if (!line) {
+            return { kind: GridCellKind.Text, data: "", displayData: "—", allowOverlay: false, contentAlign: "right",
+              themeOverride: { textDark: isDark ? "#52525b" : "#a1a1aa" } };
+          }
+          if (column.id === "reservedQty") {
+            const r = line.reserved;
+            return {
+              kind: GridCellKind.Number, data: r, displayData: r > 0 ? r.toLocaleString("en-US") : "0",
+              allowOverlay: false, readonly: true, contentAlign: "right",
+              themeOverride: {
+                baseFontStyle: "12px monospace",
+                textDark: r > 0 ? (isDark ? "#60a5fa" : "#2563eb") : (isDark ? "#6b7280" : "#94a3b8"),
+              },
+            };
+          }
+          // Sexda turgan (berilgan − qaytarilgan). Reja to'liq berilsa yashil, qisman — sariq, umuman yo'q — qizil
+          const n = Math.max(0, line.net);
+          const covered = line.plan <= 0 || n + 1e-9 >= line.plan;
+          const color = covered && n > 0
+            ? (isDark ? "#4ade80" : "#16a34a")
+            : n > 0
+            ? (isDark ? "#fbbf24" : "#d97706")
+            : line.plan > 0
+            ? (isDark ? "#f87171" : "#dc2626")
+            : (isDark ? "#6b7280" : "#94a3b8");
+          return {
+            kind: GridCellKind.Number, data: n, displayData: n.toLocaleString("en-US"),
+            allowOverlay: false, readonly: true, contentAlign: "right",
+            themeOverride: { baseFontStyle: "600 12px monospace", textDark: color },
+          };
+        }
         case "actualQty": {
           const a = item.actualQty !== undefined ? item.actualQty : (item.qty || 0);
           const p = item.planQty !== undefined ? item.planQty : a;
@@ -1118,7 +1171,7 @@ export function BomMaterialsGrid({
           };
       }
     },
-    [visibleColumns, filteredItems, isDark, isOperator]
+    [visibleColumns, filteredItems, isDark, isOperator, flowLineOf]
   );
 
   // Support cell editing
@@ -1728,7 +1781,7 @@ export function BomMaterialsGrid({
                 <ExternalLink className="w-3 h-3" />
               </button>
             </div>
-          ) : !isOperator ? (
+          ) : !isOperator && onExecuteSpisanie ? (
             <Button
               type="button"
               variant="outline"

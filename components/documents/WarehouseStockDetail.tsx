@@ -66,6 +66,7 @@ import { WarehouseSelect } from "@/components/common/WarehouseSelect";
 import { MaterialImageModal } from "@/components/documents/MaterialImageModal";
 import { MaterialImageUploadDialog } from "@/components/documents/MaterialImageUploadDialog";
 import { SupplierSelect } from "@/components/common/SupplierSelect";
+import { FinishingOptionSelect } from "@/components/documents/work-order/FinishingOptionSelect";
 import {
   Boxes,
   FileText,
@@ -1353,11 +1354,17 @@ export function WarehouseStockDetail({ tab }: { tab: DocumentTab }) {
                     {isPaper && (
                       <div className="space-y-1">
                         <HintLabel hint={FIELD_HINTS.paperType}>Qog&apos;oz turi</HintLabel>
-                        <ComboboxSelect
-                          items={PAPER_TYPE_OPTIONS}
+                        <FinishingOptionSelect
+                          kind="paper_type"
+                          baseOptions={PAPER_TYPE_OPTIONS}
+                          noneLabel="Tanlanmagan"
                           value={spec.paperType || ""}
-                          onValueChange={(val) => handleSpecChange("paperType", (val || undefined) as PaperSpec["paperType"])}
-                          placeholder="Turini tanlang..."
+                          onChange={(val) => {
+                            // Tayyor tur nomi bilan qo'shilgan bo'lsa, kod qiymati saqlanadi
+                            const base = PAPER_TYPE_OPTIONS.find((o) => o.label.toLowerCase() === val.toLowerCase());
+                            const next = base ? base.value : val;
+                            handleSpecChange("paperType", !next || next === "none" ? undefined : next);
+                          }}
                           className="w-full h-7 text-xs bg-background"
                         />
                       </div>

@@ -823,6 +823,7 @@ export interface SpotColorItem {
   code: string;
   hex: string;
   side: "front" | "back" | "both";
+  note?: string;
 }
 
 export interface SideColorConfig {
@@ -887,6 +888,16 @@ export interface WorkOrderToolingItem {
   createdAt: string;
 }
 
+/** Qo'shimcha chop etish: asl buyurtma kamomadi, kimning aybi bilan va nima sababdan. */
+export interface WorkOrderReprintInfo {
+  faultParty: "production" | "prepress" | "supplier" | "client";
+  reason: string;
+  /** Asl buyurtma tiraji */
+  parentOrderedQty: number;
+  /** Asl buyurtmada chiqqan yaroqli mahsulot */
+  parentProducedQty: number;
+}
+
 export interface WorkOrderFormData {
   customer: string;
   product: string;
@@ -906,6 +917,11 @@ export interface WorkOrderFormData {
   linkedWoId?: string;
   parentWorkOrderId?: string;
   isReorder?: boolean;
+  /** Qo'shimcha chop etish (orderType "Reprint") tafsilotlari */
+  reprint?: WorkOrderReprintInfo;
+  /** Shu buyurtma kamomadi uchun ochilgan qo'shimcha buyurtmalar */
+  reprintDocNos?: string[];
+  notes?: string;
   linkedOrderId?: string;
   pressMachine: string;
   orderDate?: string;
@@ -915,6 +931,7 @@ export interface WorkOrderFormData {
   paperStock: string;
   paperDensity?: number;
   targetGsm?: number;
+  targetPaperType?: string;
   grammage?: number;
   coating: string;
   coatingZone?: string;
@@ -1412,125 +1429,219 @@ export const getInitialOperations = (
   return [];
 };
 
-export type ProductNameNamingPreset = "standard" | "compact" | "technical" | "clean";
+/**
+ * Product name presets:
+ * - standard: full nomenclature name, "Hangtag 50×90 mm, Mel 350 g, 4+4 +1 Pantone, mat lam., zarhal"
+ * - compact:  type and size only, "Hangtag 50×90 mm"
+ * - client:   customer in front, for lists without a customer column, "KGAWL — Hangtag 50×90 mm"
+ * - code:     SKU-like article, "HT-50x90-350G-4/4"
+ * The customer stays out of the standard name: the order already carries it.
+ */
+export type ProductNameNamingPreset = "standard" | "compact" | "client" | "code";
+
+const CATEGORY_NAMES: Record<string, string> = {
+  Hangtag: "Hangtag",
+  Label: "Etiketka",
+  Card: "Karta",
+  Carton: "Quti",
+  Flyer: "Buklet",
+};
+
+const CATEGORY_CODES: Record<string, string> = {
+  Hangtag: "HT",
+  Label: "ET",
+  Card: "KR",
+  Carton: "QT",
+  Flyer: "BK",
+};
+
+const DEPARTMENT_NAMES: Record<string, string> = {
+  Offset: "Ofset mahsulot",
+  Flexo: "Etiketka",
+  Jacquard: "To'qima yorliq",
+  Termo: "Termo etiketka",
+};
+
+const DEPARTMENT_CODES: Record<string, string> = {
+  Offset: "OF",
+  Flexo: "ET",
+  Jacquard: "TY",
+  Termo: "TE",
+};
+
+const BOX_TYPE_NAMES: Record<string, string> = {
+  auto_bottom: "avtotub",
+  snap_lock: "qulfli tub",
+  tuck_end: "tuck-end",
+  sleeve: "shuber",
+};
+
+const FOLD_NAMES: Record<string, string> = {
+  half_vertical: "1 buklama",
+  half_horizontal: "1 buklama",
+  tri_c: "C-buklama",
+  tri_z: "Z-buklama",
+  tri_fold: "Z-buklama",
+  gate: "darvoza",
+  gate_fold: "darvoza",
+};
+
+const WEAVE_NAMES: Record<string, string> = {
+  damask_50d: "damask 50D",
+  damask_100d: "damask 100D",
+  woven_satin: "satin",
+  taffeta: "taffeta",
+  hd_microfiber: "HD mikrofibra",
+};
+
+const LABEL_FOLD_NAMES: Record<string, string> = {
+  center_fold: "markaziy buklama",
+  end_fold: "uchlari buklangan",
+  mitre_fold: "burchakli buklama",
+  manhattan_fold: "manhattan buklama",
+  roll: "rulonda",
+};
+
+const LUREX_NAMES: Record<string, string> = {
+  gold: "oltin lyureks",
+  silver: "kumush lyureks",
+  copper: "mis lyureks",
+};
+
+const isSet = (v?: string | null) => {
+  const s = v?.trim();
+  return !!s && !/^(none|no|yo'q|-)$/i.test(s);
+};
+
+const num = (n: number) => String(Math.round(n * 100) / 100);
+
+/** "Hangtag" + its subtype: box type, fold, weave quality or textile fold */
+function buildTypeLabel(f: Partial<WorkOrderFormData>): string {
+  const cat = f.itemCategory || "";
+  const base = f.productType?.trim() || CATEGORY_NAMES[cat] || DEPARTMENT_NAMES[f.department || ""] || "Mahsulot";
+  const variant: string[] = [];
+  if (cat === "Carton" && f.boxType) variant.push(BOX_TYPE_NAMES[f.boxType] || "");
+  if (cat === "Flyer" && f.foldType) variant.push(FOLD_NAMES[f.foldType] || "");
+  if (f.department === "Jacquard" && f.weaveQuality) variant.push(WEAVE_NAMES[f.weaveQuality] || "");
+  if ((f.department === "Jacquard" || f.department === "Flexo") && f.labelFoldType) {
+    variant.push(LABEL_FOLD_NAMES[f.labelFoldType] || "");
+  }
+  const lowerBase = base.toLowerCase();
+  const extra = variant.filter((v) => v && !lowerBase.includes(v.toLowerCase()));
+  return [base, ...extra].join(" ");
+}
+
+function buildSize(f: Partial<WorkOrderFormData>, sep = "×", withUnit = true): string {
+  const w = Number(f.width) || 0;
+  const h = Number(f.height) || 0;
+  if (!w || !h) return "";
+  const dims = [w, h];
+  const d = Number(f.boxDepth) || 0;
+  if (f.itemCategory === "Carton" && d) dims.push(d);
+  const unit = f.dimensionUnit || "mm";
+  return dims.map(num).join(sep) + (withUnit ? ` ${unit}` : "");
+}
+
+function extractGsm(f: Partial<WorkOrderFormData>): number {
+  const fromStock = f.paperStock?.match(/(\d{2,4})\s*(?:gsm|gr|g\/m²|g\/m2|g|г)(?![a-z])/i);
+  if (fromStock) return Number(fromStock[1]);
+  return Number(f.grammage || f.targetGsm || f.paperDensity) || 0;
+}
+
+/** "SSS 200gsm" -> "SSS 200 g"; "BOPP oq yopishqoq etiketka materiali 100 mm" -> "BOPP oq" */
+function buildMaterial(f: Partial<WorkOrderFormData>): string {
+  const gsm = extractGsm(f);
+  let name = (f.paperStock || "")
+    .replace(/(\d{2,4})\s*(?:gsm|gr|g\/m²|g\/m2|g|г)(?![a-z])/gi, "")
+    .replace(/\d+([.,]\d+)?\s*(mm|sm|cm|m)\b/gi, "")
+    .replace(/\b(material[a-z]*|yopishqoq|etiketka|qog'ozi)\b/gi, "")
+    .replace(/[,;]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  name = name.split(" ").slice(0, 2).join(" ");
+  if (!name) name = f.labelMaterialType?.trim() || f.targetPaperType?.trim() || "";
+  return [name, gsm ? `${gsm} g` : ""].filter(Boolean).join(" ");
+}
+
+function colorFormula(f: Partial<WorkOrderFormData>): string {
+  const m = f.colorsConfig?.match(/\d\s*\+\s*\d/);
+  const formula = m ? m[0].replace(/\s/g, "") : "";
+  return formula === "0+0" ? "" : formula;
+}
+
+function buildPrint(f: Partial<WorkOrderFormData>): string {
+  const formula = colorFormula(f);
+  const spots = f.spotColorItems?.length || f.spotColors?.length || 0;
+  const spotLabel = spots ? `+${spots} Pantone` : "";
+  return [formula, spotLabel].filter(Boolean).join(" ");
+}
+
+function buildFinishing(f: Partial<WorkOrderFormData>): string[] {
+  const out: string[] = [];
+  if (isSet(f.lamination)) {
+    const raw = f.lamination!.trim();
+    const lower = raw.toLowerCase();
+    let lam = /lam|ламин/.test(lower) ? raw : `${raw} lam.`;
+    if (lower.includes("soft")) lam = "soft-touch lam.";
+    else if (/\bmat|матов/.test(lower)) lam = "mat lam.";
+    else if (/gloss|glossiy|yaltiroq|глянц/.test(lower)) lam = "glyanets lam.";
+    if (f.laminationSides === "2s") lam += " 2 tomon";
+    out.push(lam);
+  }
+  if (isSet(f.coating)) out.push(f.coating!.trim());
+  if (isSet(f.embellishment)) out.push(f.embellishment!.trim());
+  if (f.kashirovkaMode && f.kashirovkaMode !== "none") out.push("kashirovka");
+  if (f.department === "Jacquard" && f.hasLurexThread && f.lurexColor && f.lurexColor !== "none") {
+    out.push(LUREX_NAMES[f.lurexColor] || "lyureks");
+  }
+  return out;
+}
+
+function typeCode(f: Partial<WorkOrderFormData>): string {
+  const pt = f.productType?.trim();
+  if (pt) {
+    const words = pt.split(/\s+/).filter(Boolean);
+    const code = words.length > 1 ? words.map((w) => w[0]).join("").slice(0, 3) : pt.slice(0, 2);
+    return code.toUpperCase();
+  }
+  return CATEGORY_CODES[f.itemCategory || ""] || DEPARTMENT_CODES[f.department || ""] || "MH";
+}
 
 /**
- * Generates an industrial-standard product description string based on ERP order parameters.
- * Formula: [Customer], [Item Category (Subtype)], [Dimensions], [Stock & Finishes] - [Optional Brand/Note]
+ * Builds a product name from the order's specification fields.
+ * extraNote is a trailing brand/note kept from the current name: ` - "Note"`.
  */
 export function generateSuggestedProductName(
   formData: Partial<WorkOrderFormData>,
   preset: ProductNameNamingPreset = "standard",
   extraNote?: string
 ): string {
-  const parts: string[] = [];
+  const f = formData;
+  let name: string;
 
-  // 1. Customer (for standard, compact, clean)
-  const customer = formData.customer?.trim();
-  if (customer && preset !== "technical") {
-    parts.push(customer);
-  }
-
-  // 2. Product Category / Subtype
-  let categoryLabel = "";
-  const cat = formData.itemCategory;
-  if (cat === "Hangtag") {
-    categoryLabel = "Yorliq (Hangtag)";
-  } else if (cat === "Carton") {
-    const boxTypeNames: Record<string, string> = {
-      auto_bottom: "Avto-tag",
-      snap_lock: "Qulfli tub",
-      tuck_end: "Tuck-end",
-      sleeve: "Shuber",
-    };
-    const bType = formData.boxType && boxTypeNames[formData.boxType] ? ` (${boxTypeNames[formData.boxType]})` : "";
-    categoryLabel = `Quti${bType}`;
-  } else if (cat === "Label") {
-    categoryLabel = "Etiketka";
-  } else if (cat === "Card") {
-    categoryLabel = "Vizitka / Karta";
-  } else if (cat === "Flyer") {
-    const foldNames: Record<string, string> = {
-      half_vertical: "1 buklama",
-      half_horizontal: "Gorizontal",
-      tri_c: "C-buklama",
-      tri_z: "Z-buklama",
-      gate: "Darvoza",
-    };
-    const fType = formData.foldType && foldNames[formData.foldType] ? ` (${foldNames[formData.foldType]})` : "";
-    categoryLabel = `Buklet${fType}`;
-  } else if (cat === "Other") {
-    categoryLabel = "Maxsus mahsulot";
-  } else if (formData.department === "Jacquard") {
-    categoryLabel = "To'qilgan yorliq";
-  } else if (formData.department === "Flexo") {
-    categoryLabel = "Rulonli etiketka";
+  if (preset === "code") {
+    const gsm = extractGsm(f);
+    const formula = colorFormula(f);
+    name = [
+      typeCode(f),
+      buildSize(f, "x", false),
+      gsm ? `${gsm}G` : "",
+      formula ? formula.replace("+", "/") : "",
+    ]
+      .filter(Boolean)
+      .join("-");
   } else {
-    categoryLabel = "Mahsulot";
-  }
-
-  parts.push(categoryLabel);
-
-  // 3. Dimensions
-  if (formData.width && formData.height) {
-    const unit = formData.dimensionUnit || "mm";
-    if (cat === "Carton" && formData.boxDepth) {
-      parts.push(`${formData.width}×${formData.height}×${formData.boxDepth} ${unit}`);
+    const head = [buildTypeLabel(f), buildSize(f)].filter(Boolean).join(" ");
+    if (preset === "compact") {
+      name = head;
+    } else if (preset === "client") {
+      const customer = f.customer?.trim();
+      name = customer ? `${customer} — ${head}` : head;
     } else {
-      parts.push(`${formData.width}×${formData.height} ${unit}`);
+      name = [head, buildMaterial(f), buildPrint(f), ...buildFinishing(f)].filter(Boolean).join(", ");
     }
   }
 
-  // 4. Technical specifications (Materials, Colors, Finishing)
-  if (preset === "standard" || preset === "technical") {
-    const techDetails: string[] = [];
-
-    // Paper Stock / Substrate
-    if (formData.paperStock) {
-      const gsmMatch = formData.paperStock.match(/(\d{2,4}\s*g(?:[\/m²]*))/i);
-      if (gsmMatch) {
-        techDetails.push(gsmMatch[1].replace(/\/m²/i, ""));
-      } else {
-        const words = formData.paperStock.split(" ").slice(0, 2).join(" ");
-        techDetails.push(words);
-      }
-    }
-
-    // Color notation e.g. "4+0"
-    if (formData.colorsConfig) {
-      const colorMatch = formData.colorsConfig.match(/^\d\+\d/);
-      if (colorMatch) {
-        techDetails.push(colorMatch[0]);
-      }
-    }
-
-    // Coating / Lamination
-    if (formData.lamination && formData.lamination !== "None" && formData.lamination !== "none") {
-      const lamLower = formData.lamination.toLowerCase();
-      if (lamLower.includes("soft-touch")) {
-        techDetails.push("Soft-Touch");
-      } else if (lamLower.includes("matte") || lamLower.includes("mat")) {
-        techDetails.push("Mat lam");
-      } else if (lamLower.includes("gloss") || lamLower.includes("yaltiroq")) {
-        techDetails.push("Yaltiroq lam");
-      }
-    } else if (formData.coating && formData.coating !== "None" && formData.coating !== "none") {
-      const coatLower = formData.coating.toLowerCase();
-      if (coatLower.includes("uv")) {
-        techDetails.push("UV lak");
-      }
-    }
-
-    if (techDetails.length > 0) {
-      parts.push(techDetails.join(" "));
-    }
-  }
-
-  let finalName = parts.filter(Boolean).join(", ");
-
-  if (extraNote?.trim()) {
-    finalName += ` - "${extraNote.trim()}"`;
-  }
-
-  return finalName;
+  if (extraNote?.trim()) name += ` - "${extraNote.trim()}"`;
+  return name;
 }

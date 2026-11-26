@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Check, Circle, FileText, Flame, Loader2, Pause, Play, Truck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { telegramApp, useTelegramBackButton, useTgSession } from "../../TgSession";
+import { TgImage } from "../../TgImage";
 import type { TgOrderCard } from "@/lib/server/tgOrdersService";
 import {
   ATTACHMENT_LABEL,
@@ -156,8 +157,7 @@ export default function OrderCardPage() {
               onClick={() => openExternal(src)}
               className={cn("h-44 shrink-0 snap-start bg-muted", order.photos.length === 1 ? "w-full" : "w-[80%]")}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt="" loading="lazy" className="h-full w-full object-contain" />
+              <TgImage src={src} className="h-full w-full object-contain" />
             </button>
           ))}
         </div>

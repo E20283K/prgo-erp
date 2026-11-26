@@ -6,6 +6,8 @@ import dynamic from "next/dynamic";
 import type { DocumentTab } from "@/store/workspaceStore";
 import type { BomItem } from "../../BomMaterialsGrid";
 import type { MasterSpecification } from "../types";
+import { MaterialFlowPanel } from "../MaterialFlowPanel";
+import type { MaterialFlowView } from "@/lib/server/workOrderMaterialService";
 
 const BomMaterialsGrid = dynamic(
   () => import("../../BomMaterialsGrid").then((mod) => mod.BomMaterialsGrid),
@@ -37,6 +39,10 @@ interface MaterialsTabProps {
   onExecuteSpisanie?: (customItems?: BomItem[]) => void;
   onOpenIssueTab?: (docNo: string) => void;
   shiftWasteSheets?: number;
+  /** Saqlangan buyurtma raqami (qoralamada bo'sh) — xomashyo oqimi paneli uchun */
+  workOrderNo?: string;
+  dirty?: boolean;
+  onMaterialsClosed?: (materials: BomItem[], issueDocNo?: string) => void;
 }
 
 export function MaterialsTab({
@@ -57,9 +63,25 @@ export function MaterialsTab({
   onExecuteSpisanie,
   onOpenIssueTab,
   shiftWasteSheets,
+  workOrderNo,
+  dirty,
+  onMaterialsClosed,
 }: MaterialsTabProps) {
+  const [flow, setFlow] = React.useState<MaterialFlowView | null>(null);
   return (
     <TabsContent value="materials" className="flex-1 overflow-hidden p-0 m-0 h-full flex flex-col data-[state=inactive]:hidden">
+      {workOrderNo ? (
+        <MaterialFlowPanel
+          workOrderNo={workOrderNo}
+          isOperator={isOperator}
+          dirty={dirty}
+          shiftWasteSheets={shiftWasteSheets}
+          onOpenIssueTab={onOpenIssueTab}
+          onClosed={onMaterialsClosed}
+          onFlowChange={setFlow}
+        />
+      ) : null}
+      <div className="flex-1 min-h-0 flex flex-col">
       <BomMaterialsGrid
         tabId={tabId}
         department={department}
@@ -78,7 +100,9 @@ export function MaterialsTab({
         onExecuteSpisanie={onExecuteSpisanie}
         onOpenIssueTab={onOpenIssueTab}
         shiftWasteSheets={shiftWasteSheets}
+        flowLines={workOrderNo && flow ? flow.lines : undefined}
       />
+      </div>
     </TabsContent>
   );
 }
