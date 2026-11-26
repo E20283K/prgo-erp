@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Calendar, RefreshCw, Search } from "lucide-react";
+import { Calendar, RefreshCw, Save, Search, Undo2 } from "lucide-react";
 import type { AttendanceRecord, EmployeeRecord } from "../types";
 
 type Status = "present" | "late" | "absent" | "sick_leave" | "vacation" | "day_off";
@@ -14,6 +14,44 @@ type Status = "present" | "late" | "absent" | "sick_leave" | "vacation" | "day_o
 interface Mark {
   status: Status;
   manual: boolean;
+  /** Saved facts of the day; absent on unsaved edits. */
+  hours?: number;
+  overtime?: number;
+  /** Hours short of the shift norm; only known when in/out times were recorded. */
+  short?: number;
+  delay?: number;
+  checkIn?: string | null;
+  checkOut?: string | null;
+}
+
+interface ShiftWindow {
+  start: string;
+  end: string;
+}
+
+// Same fallback as the roll-call bot (lib/rollCallTime.ts).
+const DEFAULT_WINDOWS: Record<"day" | "night", ShiftWindow> = {
+  day: { start: "08:00", end: "20:00" },
+  night: { start: "20:00", end: "08:00" },
+};
+
+const isClock = (v: unknown): v is string => typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
+
+function windowHours(w: ShiftWindow): number {
+  const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  let len = toMin(w.end) - toMin(w.start);
+  if (len <= 0) len += 24 * 60;
+  return len / 60;
+}
+
+const fmtH = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+
+const WORKED: Status[] = ["present", "late"];
+
+interface Entry {
+  employeeId: string;
+  workDate: string;
+  status: Status | null;
 }
 
 const BRUSHES: { status: Status; code: string; label: string; cls: string }[] = [
@@ -42,6 +80,8 @@ export function TimesheetGrid() {
   const [period, setPeriod] = useState(() => todayIso().slice(0, 7));
   const [staff, setStaff] = useState<EmployeeRecord[]>([]);
   const [marks, setMarks] = useState<Map<string, Mark>>(new Map());
+  // Unsaved edits keyed like `marks`; null status = remove the manual mark.
+  const [pending, setPending] = useState<Map<string, Entry>>(new Map());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [brush, setBrush] = useState<Status>("present");
@@ -60,22 +100,53 @@ export function TimesheetGrid() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [empRes, attRes] = await Promise.all([
+      const [empRes, attRes, shiftRes] = await Promise.all([
         fetch("/api/v1/hr/employees").then((r) => r.json()),
         fetch(`/api/v1/hr/attendance?period=${period}`).then((r) => r.json()),
+        fetch("/api/v1/hr/shifts").then((r) => r.json()).catch(() => null),
       ]);
       if (empRes.success) {
         setStaff((empRes.data as EmployeeRecord[]).filter((e) => e.status !== "terminated"));
       }
+
+      // Shift norm per type: first active shift by start time, as the bot picks it.
+      const shiftRows = (shiftRes?.success ? shiftRes.data : []) as {
+        shiftType: string;
+        startTime: string;
+        endTime: string;
+        isActive: boolean;
+      }[];
+      const pick = (type: "day" | "night"): ShiftWindow => {
+        const row = shiftRows
+          .filter((r) => r.isActive && r.shiftType === type && isClock(r.startTime) && isClock(r.endTime))
+          .sort((a, b) => a.startTime.localeCompare(b.startTime))[0];
+        return row ? { start: row.startTime, end: row.endTime } : DEFAULT_WINDOWS[type];
+      };
+      const norm = { day: windowHours(pick("day")), night: windowHours(pick("night")) };
+
       const next = new Map<string, Mark>();
       if (attRes.success) {
         for (const a of attRes.data as AttendanceRecord[]) {
           const st = normalizeStatus(String(a.status));
           if (!st) continue;
-          next.set(`${a.employeeId}|${a.workDate}`, { status: st, manual: a.sourceDevice === "manual" });
+          const worked = WORKED.includes(st);
+          const hours = worked ? Number(a.workedHours) || 0 : 0;
+          const timed = Boolean(a.checkIn || a.checkOut);
+          const n = String(a.shiftType ?? "").toLowerCase().startsWith("night") ? norm.night : norm.day;
+          next.set(`${a.employeeId}|${a.workDate}`, {
+            status: st,
+            manual: a.sourceDevice === "manual",
+            hours,
+            overtime: worked ? Number(a.overtimeHours) || 0 : 0,
+            short: worked && timed ? Math.max(0, Math.round((n - hours) * 4) / 4) : 0,
+            delay: a.delayMinutes || 0,
+            checkIn: a.checkIn,
+            checkOut: a.checkOut,
+          });
         }
       }
       setMarks(next);
+      setPending(new Map());
     } catch {
       addNotification({ title: "Tabel yuklanmadi", description: "Server xatosi", severity: "error" });
     } finally {
@@ -94,68 +165,119 @@ export function TimesheetGrid() {
     );
   }, [staff, search]);
 
-  const save = useCallback(
-    async (entries: { employeeId: string; workDate: string; status: Status | null }[]) => {
-      if (entries.length === 0) return;
-      setSaving(true);
-      try {
-        const res = await fetch("/api/v1/hr/attendance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entries }),
-        });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error || "Saqlanmadi");
-        if (json.skipped?.length) {
-          addNotification({
-            title: `${json.saved} ta saqlandi, ${json.skipped.length} ta o'tkazib yuborildi`,
-            description: json.skipped[0].reason,
-            severity: "warning",
-          });
-        }
-        await load();
-      } catch (e) {
-        addNotification({ title: "Saqlanmadi", description: e instanceof Error ? e.message : "Xatolik", severity: "error" });
-      } finally {
-        setSaving(false);
+  const dirty = pending.size > 0;
+
+  useEffect(() => {
+    if (!dirty) return;
+    const onUnload = (ev: BeforeUnloadEvent) => ev.preventDefault();
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, [dirty]);
+
+  const confirmDiscard = () => !dirty || window.confirm("Saqlanmagan o'zgarishlar yo'qoladi. Davom etilsinmi?");
+
+  // Effective mark: an unsaved edit wins over the saved one.
+  const markOf = (key: string): Mark | undefined => {
+    const p = pending.get(key);
+    if (!p) return marks.get(key);
+    return p.status ? { status: p.status, manual: true } : undefined;
+  };
+
+  const stage = (entries: Entry[]) => {
+    if (entries.length === 0) return;
+    setPending((prev) => {
+      const next = new Map(prev);
+      for (const en of entries) {
+        const key = `${en.employeeId}|${en.workDate}`;
+        const orig = marks.get(key);
+        // Edit back to the saved value drops it from the draft.
+        const same = en.status === null ? !orig : orig?.manual && orig.status === en.status;
+        if (same) next.delete(key);
+        else next.set(key, en);
       }
-    },
-    [load, addNotification]
-  );
+      return next;
+    });
+  };
+
+  const save = async () => {
+    if (!dirty) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/v1/hr/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries: [...pending.values()] }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Saqlanmadi");
+      if (json.skipped?.length) {
+        addNotification({
+          title: `${json.saved} ta saqlandi, ${json.skipped.length} ta o'tkazib yuborildi`,
+          description: json.skipped[0].reason,
+          severity: "warning",
+        });
+      } else {
+        addNotification({ title: "Tabel saqlandi", description: `${json.saved ?? pending.size} ta yozuv`, severity: "success" });
+      }
+      await load();
+    } catch (e) {
+      addNotification({ title: "Saqlanmadi", description: e instanceof Error ? e.message : "Xatolik", severity: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const onCell = (e: EmployeeRecord, iso: string) => {
-    const cur = marks.get(`${e.id}|${iso}`);
+    const cur = markOf(`${e.id}|${iso}`);
     // Same brush on a manual mark removes it; otherwise paint.
     const status = cur?.manual && cur.status === brush ? null : brush;
-    save([{ employeeId: e.id, workDate: iso, status }]);
+    stage([{ employeeId: e.id, workDate: iso, status }]);
   };
 
   // Unmarked, employed, non-Sunday, not-future days of one employee.
   const emptyDaysOf = (e: EmployeeRecord) =>
-    days.filter(
-      (x) => x.dow !== 0 && x.iso <= todayIso() && x.iso >= e.hireDate && !marks.has(`${e.id}|${x.iso}`)
-    );
+    days.filter((x) => x.dow !== 0 && x.iso <= todayIso() && x.iso >= e.hireDate && !markOf(`${e.id}|${x.iso}`));
 
   const fillRow = (e: EmployeeRecord) =>
-    save(emptyDaysOf(e).map((x) => ({ employeeId: e.id, workDate: x.iso, status: "present" as Status })));
+    stage(emptyDaysOf(e).map((x) => ({ employeeId: e.id, workDate: x.iso, status: "present" as Status })));
 
   const fillDay = (iso: string) =>
-    save(
+    stage(
       rows
-        .filter((e) => iso >= e.hireDate && !marks.has(`${e.id}|${iso}`))
+        .filter((e) => iso >= e.hireDate && !markOf(`${e.id}|${iso}`))
         .map((e) => ({ employeeId: e.id, workDate: iso, status: "present" as Status }))
     );
 
   const fillAll = () =>
-    save(rows.flatMap((e) => emptyDaysOf(e).map((x) => ({ employeeId: e.id, workDate: x.iso, status: "present" as Status }))));
+    stage(rows.flatMap((e) => emptyDaysOf(e).map((x) => ({ employeeId: e.id, workDate: x.iso, status: "present" as Status }))));
 
-  const countOf = (e: EmployeeRecord) => {
-    let n = 0;
+  // Unsaved edits carry no hours, so only saved facts are summed.
+  const totalsOf = (e: EmployeeRecord) => {
+    const t = { days: 0, hours: 0, overtime: 0, short: 0 };
     for (const x of days) {
-      const m = marks.get(`${e.id}|${x.iso}`);
-      if (m && (m.status === "present" || m.status === "late" || m.status === "vacation" || m.status === "sick_leave")) n++;
+      const m = markOf(`${e.id}|${x.iso}`);
+      if (!m) continue;
+      if (m.status === "present" || m.status === "late" || m.status === "vacation" || m.status === "sick_leave") t.days++;
+      t.hours += m.hours ?? 0;
+      t.overtime += m.overtime ?? 0;
+      t.short += m.short ?? 0;
     }
-    return n;
+    return t;
+  };
+
+  const cellTitle = (m: Mark | undefined, label: string | undefined, edited: boolean) => {
+    if (edited) return `${label ?? "O'chiriladi"} (saqlanmagan)`;
+    if (!m) return undefined;
+    const lines = [`${label}${m.manual ? " (qo'lda)" : " (turniket)"}`];
+    if (m.checkIn || m.checkOut) lines.push(`Keldi ${m.checkIn ?? "—"} · Ketdi ${m.checkOut ?? "—"}`);
+    if (WORKED.includes(m.status)) {
+      const parts = [`Ishladi ${fmtH(m.hours ?? 0)} s`];
+      if (m.short) parts.push(`Kam ${fmtH(m.short)} s`);
+      if (m.overtime) parts.push(`Ortiqcha ${fmtH(m.overtime)} s`);
+      lines.push(parts.join(" · "));
+    }
+    if (m.delay) lines.push(`Kechikish ${m.delay} daq`);
+    return lines.join("\n");
   };
 
   return (
@@ -166,7 +288,7 @@ export function TimesheetGrid() {
           <input
             type="month"
             value={period}
-            onChange={(e) => e.target.value && setPeriod(e.target.value)}
+            onChange={(e) => e.target.value && confirmDiscard() && setPeriod(e.target.value)}
             className="bg-transparent font-mono text-xs focus:outline-none"
           />
         </div>
@@ -203,12 +325,39 @@ export function TimesheetGrid() {
               className="pl-7 h-7 text-xs"
             />
           </div>
-          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={load} disabled={loading} aria-label="Yangilash">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            onClick={() => confirmDiscard() && load()}
+            disabled={loading || saving}
+            aria-label="Yangilash"
+          >
             <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
           <Badge variant="outline" className="h-6 px-1.5 font-normal text-[11px]">
             {rows.length} xodim
           </Badge>
+          <Separator orientation="vertical" className="h-4" />
+          {dirty && (
+            <span className="text-[11px] text-amber-700 dark:text-amber-400 whitespace-nowrap">
+              {pending.size} ta o&apos;zgarish
+            </span>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs shadow-none"
+            disabled={!dirty || saving}
+            onClick={() => setPending(new Map())}
+          >
+            <Undo2 className="size-3.5 mr-1" />
+            Bekor
+          </Button>
+          <Button size="sm" className="h-7 px-2.5 text-xs shadow-none" disabled={!dirty || saving} onClick={save}>
+            <Save className="size-3.5 mr-1" />
+            {saving ? "Saqlanmoqda" : "Saqlash"}
+          </Button>
         </div>
       </div>
 
@@ -232,40 +381,66 @@ export function TimesheetGrid() {
                   <div className="leading-3 pb-0.5 text-muted-foreground">{WEEKDAYS[x.dow]}</div>
                 </th>
               ))}
-              <th className="border border-border px-2 font-medium min-w-[48px]">Kun</th>
+              <th className="border border-border px-2 font-medium min-w-[40px]">Kun</th>
+              <th className="border border-border px-2 font-medium min-w-[48px]">Soat</th>
+              <th className="border border-border px-2 font-medium min-w-[56px]">Ortiqcha</th>
+              <th className="border border-border px-2 font-medium min-w-[40px]">Kam</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((e) => (
-              <tr key={e.id}>
-                <td
-                  onClick={() => fillRow(e)}
-                  title="Belgilanmagan ish kunlarini kelgan qilish"
-                  className="sticky left-0 z-10 bg-card border border-border px-2 h-7 whitespace-nowrap cursor-pointer hover:bg-muted"
-                >
-                  <span className="font-mono text-muted-foreground mr-1.5">{e.badgeNumber || e.badgeNo}</span>
-                  {e.fullName}
-                </td>
-                {days.map((x) => {
-                  const m = marks.get(`${e.id}|${x.iso}`);
-                  const b = m ? BRUSH_BY_STATUS.get(m.status) : null;
-                  const before = x.iso < e.hireDate;
-                  return (
-                    <td
-                      key={x.iso}
-                      onClick={() => !before && !saving && onCell(e, x.iso)}
-                      className={`border border-border w-7 min-w-7 h-7 text-center ${
-                        before ? "bg-muted/40 cursor-not-allowed" : "cursor-pointer hover:outline hover:outline-1 hover:outline-foreground"
-                      } ${b ? b.cls : x.dow === 0 ? "bg-muted/30" : ""} ${m && !m.manual ? "font-normal" : "font-semibold"}`}
-                      title={m ? `${b?.label}${m.manual ? " (qo'lda)" : " (turniket)"}` : undefined}
-                    >
-                      {b?.code}
-                    </td>
-                  );
-                })}
-                <td className="border border-border px-2 text-center font-mono">{countOf(e)}</td>
-              </tr>
-            ))}
+            {rows.map((e) => {
+              const t = totalsOf(e);
+              return (
+                <tr key={e.id}>
+                  <td
+                    onClick={() => fillRow(e)}
+                    title="Belgilanmagan ish kunlarini kelgan qilish"
+                    className="sticky left-0 z-10 bg-card border border-border px-2 h-7 whitespace-nowrap cursor-pointer hover:bg-muted"
+                  >
+                    <span className="font-mono text-muted-foreground mr-1.5">{e.badgeNumber || e.badgeNo}</span>
+                    {e.fullName}
+                  </td>
+                  {days.map((x) => {
+                    const key = `${e.id}|${x.iso}`;
+                    const m = markOf(key);
+                    const edited = pending.has(key);
+                    const b = m ? BRUSH_BY_STATUS.get(m.status) : null;
+                    const before = x.iso < e.hireDate;
+                    const showHours = !edited && m && WORKED.includes(m.status) && m.hours !== undefined;
+                    return (
+                      <td
+                        key={x.iso}
+                        onClick={() => !before && !saving && onCell(e, x.iso)}
+                        className={`border border-border w-7 min-w-7 h-7 text-center ${
+                          before ? "bg-muted/40 cursor-not-allowed" : "cursor-pointer hover:outline hover:outline-1 hover:outline-foreground"
+                        } ${b ? b.cls : x.dow === 0 ? "bg-muted/30" : ""} ${m && !m.manual ? "font-normal" : "font-semibold"} ${
+                          edited ? "ring-1 ring-inset ring-amber-500" : ""
+                        }`}
+                        title={cellTitle(m, b?.label, edited)}
+                      >
+                        {showHours && m ? (
+                          <div className="flex flex-col items-center leading-[11px]">
+                            <span>{b?.code}</span>
+                            <span className={`text-[9px] font-normal font-mono ${m.short ? "text-red-600 dark:text-red-400" : ""}`}>
+                              {fmtH(m.hours ?? 0)}
+                              {m.overtime ? <span className="text-sky-700 dark:text-sky-400">+{fmtH(m.overtime)}</span> : null}
+                            </span>
+                          </div>
+                        ) : (
+                          b?.code
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td className="border border-border px-2 text-center font-mono">{t.days}</td>
+                  <td className="border border-border px-2 text-center font-mono">{fmtH(t.hours)}</td>
+                  <td className="border border-border px-2 text-center font-mono">{t.overtime ? fmtH(t.overtime) : ""}</td>
+                  <td className={`border border-border px-2 text-center font-mono ${t.short ? "text-red-600 dark:text-red-400" : ""}`}>
+                    {t.short ? fmtH(t.short) : ""}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
