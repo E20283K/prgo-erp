@@ -16,7 +16,9 @@ function isUsable(el: HTMLInputElement | null): el is HTMLInputElement {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (e.defaultPrevented || e.altKey || e.shiftKey) return;
+  // No defaultPrevented check: AppLayout's global handler preventDefaults every
+  // Ctrl+<letter> (to block browser shortcuts) before this listener may run.
+  if (e.altKey || e.shiftKey) return;
   if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "f") return;
   for (let i = stack.length - 1; i >= 0; i--) {
     const el = stack[i].current;
