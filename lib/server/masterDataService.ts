@@ -304,6 +304,13 @@ export async function createDieTooling(data: any, companyCode = "PRINTGOO") {
       ownership: data.ownership || (data.customerName ? "customer_owned" : "in_house"),
       isDedicated: data.isDedicated !== undefined ? Boolean(data.isDedicated) : Boolean(data.customerName),
 
+      imageUrl: data.imageUrl || null,
+      fileUrl: data.fileUrl || null,
+      fileName: data.fileName || null,
+      sourceOrderId: toUuidOrNull(data.sourceOrderId),
+      sourceOrderNo: data.sourceOrderNo || null,
+      workOrderNo: data.workOrderNo || null,
+
       isActive: true,
     })
     .returning();
@@ -361,6 +368,9 @@ export async function updateDieTooling(id: string, data: any, companyCode = "PRI
   if (data.customerName !== undefined) updatePayload.customerName = data.customerName || null;
   if (data.ownership !== undefined) updatePayload.ownership = data.ownership;
   if (data.isDedicated !== undefined) updatePayload.isDedicated = Boolean(data.isDedicated);
+  if (data.imageUrl !== undefined) updatePayload.imageUrl = data.imageUrl || null;
+  if (data.fileUrl !== undefined) updatePayload.fileUrl = data.fileUrl || null;
+  if (data.fileName !== undefined) updatePayload.fileName = data.fileName || null;
   if (data.isActive !== undefined) updatePayload.isActive = Boolean(data.isActive);
 
   const [updated] = await db

@@ -10,8 +10,21 @@ import {
   integer,
   index,
   uniqueIndex,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+
+/** Die/cliche parameters on a tooling purchase order; copied to dies_tooling when it is delivered. */
+export interface SupplierOrderToolingSpec {
+  dieType?: "rotary_magnetic" | "solid_rotary" | "flatbed" | "hot_stamp" | "embossing";
+  shape?: "rectangle" | "rounded_rect" | "circle" | "oval" | "custom";
+  widthMm?: number | null;
+  heightMm?: number | null;
+  cornerRadiusMm?: number | null;
+  acrossCount?: number | null;
+  aroundCount?: number | null;
+  cylinderTeeth?: number | null;
+}
 import { companies } from "./core";
 import { employees } from "./hr";
 import { workOrders } from "./production";
@@ -381,6 +394,7 @@ export const supplierOrders = pgTable(
     receivedAt: timestamp("received_at", { withTimezone: true }), // Yetkazildi holatiga o'tgan payt (arxiv davri)
     status: supplierOrderStatusEnum("status").default("Ordered").notNull(),
     specDetails: text("spec_details"), // "Format: 745x605mm, 4 rang (CMYK), 0.3mm metall"
+    toolingSpec: jsonb("tooling_spec").$type<SupplierOrderToolingSpec>(), // Shtamp/klishe turi va o'lchamlari
     notes: text("notes"),
     fileUrl: text("file_url"), // Biriktirilgan chizma/fayl URL (PDF, DXF, DWG, AI yoki rasm)
     fileName: varchar("file_name", { length: 255 }), // Fayl nomi (masalan: "die_cut_box_745x605.dxf")

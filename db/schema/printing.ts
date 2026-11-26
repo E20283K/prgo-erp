@@ -192,6 +192,15 @@ export const diesTooling = pgTable(
     ownership: varchar("ownership", { length: 32 }).default("in_house").notNull(), // "in_house" | "customer_owned"
     isDedicated: boolean("is_dedicated").default(false).notNull(), // true = faqat shu mijozga tegishli
 
+    // Ko'rinish va chizma (yetkazilgan buyurtmadan ko'chadi yoki qo'lda yuklanadi)
+    imageUrl: text("image_url"),
+    fileUrl: text("file_url"),
+    fileName: varchar("file_name", { length: 255 }),
+    // Manba: qaysi ta'minotchi buyurtmasi (supplier_orders) va ish buyrug'i uchun kelgan
+    sourceOrderId: uuid("source_order_id"),
+    sourceOrderNo: varchar("source_order_no", { length: 64 }),
+    workOrderNo: varchar("work_order_no", { length: 64 }),
+
     isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -201,6 +210,7 @@ export const diesTooling = pgTable(
     index("dies_tooling_company_shape_idx").on(table.companyId, table.shape),
     index("dies_tooling_status_idx").on(table.status),
     index("dies_tooling_customer_idx").on(table.customerId),
+    index("dies_tooling_source_order_idx").on(table.sourceOrderId),
   ]
 );
 

@@ -45,6 +45,9 @@ import {
   Building,
   ShieldCheck,
   X,
+  Upload,
+  FileText,
+  ImageIcon,
 } from "lucide-react";
 import {
   Dialog,
@@ -404,6 +407,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         realId: t.id,
         code: t.code,
         name: t.name,
+        image: t.imageUrl ? [t.imageUrl] : [],
+        imageUrl: t.imageUrl || "",
+        source: [t.sourceOrderNo, t.workOrderNo].filter(Boolean).join(" · ") || "—",
         customer: customerDisplay,
         customerName: t.customerName || "",
         customerId: t.customerId || null,
@@ -676,7 +682,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     } else {
       cols = [
         { id: "id", title: "Tool Code", width: 110, icon: GridColumnIcon.HeaderReference },
+        { id: "image", title: "Rasm", width: 60, icon: GridColumnIcon.HeaderImage },
         { id: "name", title: "Die / Cliché Description", width: 260, icon: GridColumnIcon.HeaderString },
+        { id: "source", title: "Manba", width: 150, icon: GridColumnIcon.HeaderReference },
         { id: "customer", title: "Mijoz (Client / Dedicated)", width: 190, icon: GridColumnIcon.HeaderLookup },
         { id: "ownership", title: "Egalik Turi", width: 130, icon: GridColumnIcon.HeaderSingleValue },
         { id: "toolType", title: "Tooling Type", width: 200, icon: GridColumnIcon.HeaderLookup },
@@ -1006,6 +1014,43 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     },
     [columns, filteredRows, getCursorCardPosition]
   );
+
+  // Image and drawing are kept as data URLs, the same way tooling orders store their files
+  const MAX_TOOL_FILE_BYTES = 8 * 1024 * 1024;
+  const handleToolFilePick = (kind: "image" | "file") => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_TOOL_FILE_BYTES) {
+      addNotification({ title: "Fayl katta", description: "8 MB dan oshmasin.", severity: "warning" });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      setToolFormData((prev: any) =>
+        kind === "image"
+          ? { ...prev, imageUrl: dataUrl }
+          : {
+              ...prev,
+              fileUrl: dataUrl,
+              fileName: file.name,
+              imageUrl: prev.imageUrl || (file.type.startsWith("image/") ? dataUrl : prev.imageUrl),
+            }
+      );
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const downloadToolFile = (url?: string | null, name?: string | null) => {
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name || "chizma";
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.click();
+  };
 
   const applyDieType = (dieType: string) => {
     setToolFormData((prev: any) => {
@@ -2572,6 +2617,59 @@ export function ProductionGrid({ type }: ProductionGridProps) {
               </>
                 );
               })()}
+
+              {/* Ko'rinish, chizma va manba */}
+              <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                <label
+                  className="relative size-16 shrink-0 rounded-md border border-border bg-card overflow-hidden cursor-pointer hover:border-foreground/40 flex items-center justify-center"
+                  title="Rasm yuklash"
+                >
+                  {toolFormData.imageUrl ? (
+                    <img src={toolFormData.imageUrl} alt={toolFormData.name || "Qolip"} className="size-full object-cover" />
+                  ) : (
+                    <ImageIcon className="size-5 text-muted-foreground" />
+                  )}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleToolFilePick("image")} />
+                </label>
+
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-medium text-muted-foreground w-14 shrink-0">Chizma</span>
+                    {toolFormData.fileName ? (
+                      <button
+                        type="button"
+                        onClick={() => downloadToolFile(toolFormData.fileUrl, toolFormData.fileName)}
+                        className="h-7 px-2 min-w-0 flex items-center gap-1.5 rounded border border-border bg-card hover:bg-muted text-xs font-mono"
+                        title="Yuklab olish"
+                      >
+                        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{toolFormData.fileName}</span>
+                        <Download className="size-3 shrink-0 text-muted-foreground" />
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                    <label
+                      className="size-7 shrink-0 flex items-center justify-center rounded border border-border bg-card hover:bg-muted cursor-pointer"
+                      title="Chizma yuklash"
+                    >
+                      <Upload className="size-3.5 text-muted-foreground" />
+                      <input
+                        type="file"
+                        accept=".dxf,.dwg,.pdf,.ai,.eps,.svg,.png,.jpg,.jpeg"
+                        className="hidden"
+                        onChange={handleToolFilePick("file")}
+                      />
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span className="text-[11px] font-medium text-muted-foreground w-14 shrink-0">Manba</span>
+                    <span className="font-mono truncate">
+                      {[toolFormData.sourceOrderNo, toolFormData.workOrderNo].filter(Boolean).join(" · ") || "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
 
               {/* Izohlar */}
               <div className="space-y-1">

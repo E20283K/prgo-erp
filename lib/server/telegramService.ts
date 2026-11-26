@@ -18,6 +18,7 @@ import {
   type TelegramCompanySettings,
   type TelegramChatSettings,
   type WorkOrderTelegramMeta,
+  type SupplierOrderToolingSpec,
 } from "@/db/schema";
 import { eq, desc, asc, and, sql, or, ilike, isNull, isNotNull } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
@@ -32,6 +33,7 @@ import {
 } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
 import { syncPickupDeliveryCash } from "./cashJournalService";
+import { registerDeliveredTooling } from "./toolingRegistrationService";
 import { setWebAppMenuButton, telegramWebAppUrl } from "./telegramWebApp";
 import { tryHandleRollCallCommand } from "./rollCallGroupService";
 import { findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
@@ -1811,6 +1813,27 @@ export async function updateTelegramOrderCardStatus(
   }
 }
 
+const DIE_TYPE_LABELS: Record<string, string> = {
+  rotary_magnetic: "Magnit val",
+  solid_rotary: "Yaxlit val",
+  flatbed: "Tekis shtamp",
+  hot_stamp: "Folga klishe",
+  embossing: "Kongrev klishe",
+};
+
+/** "Magnit val · 50×90 mm · 2×1 rux · Z=70" for the supplier's message. */
+function formatToolingSpec(spec: SupplierOrderToolingSpec | null | undefined): string | null {
+  if (!spec) return null;
+  const parts: string[] = [];
+  if (spec.dieType) parts.push(DIE_TYPE_LABELS[spec.dieType] || spec.dieType);
+  if (spec.widthMm && spec.heightMm) parts.push(`${spec.widthMm}×${spec.heightMm} mm`);
+  const across = Number(spec.acrossCount) || 1;
+  const around = Number(spec.aroundCount) || 1;
+  if (across * around > 1) parts.push(`${across}×${around} rux`);
+  if (spec.cylinderTeeth) parts.push(`Z=${spec.cylinderTeeth}`);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 export async function sendPurchaseOrderToTelegram(params: {
   supplierOrderId: string;
   customNote?: string;
@@ -1960,6 +1983,11 @@ export async function sendPurchaseOrderToTelegram(params: {
 
   if (order.workOrderNo) {
     textLines.push(`📋 <b>Asosiy buyurtma:</b> ${order.workOrderNo}`);
+  }
+
+  const toolingSpecLine = formatToolingSpec(order.toolingSpec);
+  if (toolingSpecLine) {
+    textLines.push(`📏 <b>Qolip:</b> ${toolingSpecLine}`);
   }
 
   textLines.push(`🔢 <b>Miqdori:</b> ${order.quantity} ${order.unit}`);
@@ -2188,6 +2216,12 @@ export async function processTelegramWebhookUpdate(
               .returning();
             // O'zimiz olib kelgan dostavka kassadan chiqim bo'lib yoziladi (yoki stornolanadi)
             if (updatedOrder) await syncPickupDeliveryCash(db, updatedOrder);
+            // Yetkazilgan shtamp/klishe qoliplar ro'yxatiga tushadi
+            if (updatedOrder) {
+              await registerDeliveredTooling(updatedOrder).catch((err) =>
+                console.error(`Tooling registration failed for ${updatedOrder.orderNo}:`, err)
+              );
+            }
 
             // Telegram bot orqali javob (Toast) qaytarish
             if (isLiveBot) {

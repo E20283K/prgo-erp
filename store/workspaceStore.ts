@@ -285,6 +285,12 @@ export interface DieToolingRecord {
   customerName?: string | null;
   ownership?: "in_house" | "customer_owned";
   isDedicated?: boolean;
+  imageUrl?: string | null;
+  fileUrl?: string | null;
+  fileName?: string | null;
+  sourceOrderId?: string | null;
+  sourceOrderNo?: string | null;
+  workOrderNo?: string | null;
   isActive?: boolean;
 }
 

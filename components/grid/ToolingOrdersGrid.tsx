@@ -113,6 +113,33 @@ function archivePeriodStart(period: ArchivePeriod): string | null {
   return d.toISOString().split("T")[0];
 }
 
+type ToolingSpec = NonNullable<ToolingOrderRecord["toolingSpec"]>;
+
+const DIE_KIND_OPTIONS: Record<"die_tooling" | "cliche", { value: NonNullable<ToolingSpec["dieType"]>; label: string }[]> = {
+  die_tooling: [
+    { value: "rotary_magnetic", label: "Magnit val" },
+    { value: "solid_rotary", label: "Yaxlit val" },
+    { value: "flatbed", label: "Tekis shtamp" },
+  ],
+  cliche: [
+    { value: "hot_stamp", label: "Folga klishe" },
+    { value: "embossing", label: "Kongrev klishe" },
+  ],
+};
+const ROTARY_KINDS = new Set(["rotary_magnetic", "solid_rotary"]);
+
+const isDieOrCliche = (t: ToolingOrderRecord["orderType"]): t is "die_tooling" | "cliche" =>
+  t === "die_tooling" || t === "cliche";
+
+/** What a die/cliche order still lacks before it can be placed; null when complete. */
+function toolingSpecError(orderType: ToolingOrderRecord["orderType"], spec: ToolingSpec): string | null {
+  if (!isDieOrCliche(orderType)) return null;
+  if (!spec.dieType || !DIE_KIND_OPTIONS[orderType].some((k) => k.value === spec.dieType)) return "Qolip turini tanlang";
+  if (!(Number(spec.widthMm) > 0) || !(Number(spec.heightMm) > 0)) return "Qolip enini va bo'yini kiriting";
+  if (ROTARY_KINDS.has(spec.dieType) && !(Number(spec.cylinderTeeth) > 0)) return "Val uchun silindr tishlari (Z) kiriting";
+  return null;
+}
+
 /** Archive date: when it was received, else (cancelled / legacy rows) the order date */
 function archiveDate(o: ToolingOrderRecord): string {
   return (o.receivedAt || o.orderDate || "").slice(0, 10);
@@ -284,6 +311,7 @@ export function ToolingOrdersGrid() {
     fileUrl: "" as string | undefined,
     fileName: "" as string | undefined,
     imageUrl: "" as string | undefined,
+    toolingSpec: {} as ToolingSpec,
   });
 
   // Load orders from API
@@ -947,6 +975,7 @@ export function ToolingOrdersGrid() {
       fileUrl: undefined,
       fileName: undefined,
       imageUrl: undefined,
+      toolingSpec: {},
       ...preset,
     });
     setIsModalOpen(true);
@@ -977,9 +1006,10 @@ export function ToolingOrdersGrid() {
       specDetails: order.specDetails || "",
       notes: order.notes || "",
       status: order.status,
-      fileUrl: matchingTool?.fileUrl || undefined,
-      fileName: matchingTool?.fileName || undefined,
+      fileUrl: matchingTool?.fileUrl || order.fileUrl || undefined,
+      fileName: matchingTool?.fileName || order.fileName || undefined,
       imageUrl: matchingTool?.imageUrl || undefined,
+      toolingSpec: order.toolingSpec || {},
     });
     setIsModalOpen(true);
   };
@@ -1005,6 +1035,12 @@ export function ToolingOrdersGrid() {
         description: "Buyurtma berish uchun jihoz chizma fayli (PDF/DXF/AI) yuklanishi shart",
         severity: "error",
       });
+      return;
+    }
+
+    const specError = isDraft ? null : toolingSpecError(formData.orderType, formData.toolingSpec);
+    if (specError) {
+      addNotification({ title: "Qolip ma'lumoti to'liq emas", description: specError, severity: "error" });
       return;
     }
 
@@ -1126,13 +1162,8 @@ export function ToolingOrdersGrid() {
           }
         }
 
-        if (formData.status === "Delivered") {
-          void registerDeliveredTooling({
-            orderNo: json.order?.orderNo || json.data?.orderNo || editingOrder?.orderNo,
-            title: formData.title,
-            orderType: formData.orderType,
-            workOrderNo: formData.workOrderNo,
-          });
+        if (formData.status === "Delivered" && editingOrder?.status !== "Delivered") {
+          announceRegisteredTooling(json.registeredTooling);
         }
 
         // A placed order (not a draft) goes to the supplier's Telegram group once, right away
@@ -1155,45 +1186,17 @@ export function ToolingOrdersGrid() {
   };
 
   /**
-   * A delivered die or cliche becomes a Tooling record (reusable, tracked by life and location).
-   * One-off CTP plates are not registered. The PO number is the record code, so a re-save never duplicates it.
+   * The server registers a delivered die/cliche in the tooling table (spec, file, photo, customer,
+   * source PO). Here the local list is refreshed and the user is told where it went.
    */
-  const registerDeliveredTooling = async (order: {
-    orderNo?: string;
-    title: string;
-    orderType: ToolingOrderRecord["orderType"];
-    workOrderNo?: string;
-  }) => {
-    if (!order.orderNo || (order.orderType !== "die_tooling" && order.orderType !== "cliche")) return;
-    const store = useWorkspaceStore.getState();
-    if (store.diesTooling.length === 0) await store.loadDiesToolingAsync();
-    const code = order.orderNo.trim().toUpperCase();
-    if (useWorkspaceStore.getState().diesTooling.some((d) => (d.code || "").toUpperCase() === code)) return;
-
-    const woKey = (order.workOrderNo || "").trim().toLowerCase();
-    const wo = woKey
-      ? store.productionQueue.find((q) => (q.id || q.docNo || "").trim().toLowerCase() === woKey)
-      : undefined;
-    const customerName = wo?.customer?.trim() || null;
-
-    const saved = await store.upsertDieToolingAsync({
-      code,
-      name: order.title,
-      dieType: order.orderType === "cliche" ? "hot_stamp" : "flatbed",
-      location: "",
-      status: "available",
-      customerName,
-      ownership: customerName ? "customer_owned" : "in_house",
-      isDedicated: Boolean(customerName),
-      notes: `Yetkazib berilgan buyurtma: ${order.orderNo}${order.workOrderNo ? ` · ${order.workOrderNo}` : ""}`,
+  const announceRegisteredTooling = (registered?: { code?: string; location?: string | null } | null) => {
+    if (!registered?.code) return;
+    void useWorkspaceStore.getState().loadDiesToolingAsync();
+    addNotification({
+      title: "Qoliplar ro'yxatiga qo'shildi",
+      description: registered.location ? registered.code : `${registered.code}: javon belgilanmagan`,
+      severity: "info",
     });
-    if (saved) {
-      addNotification({
-        title: "Tooling ro'yxatiga qo'shildi",
-        description: `${order.title}: javon belgilanmagan`,
-        severity: "info",
-      });
-    }
   };
 
   // Quick Status Change (Ready / Delivered / etc.)
@@ -1304,8 +1307,8 @@ export function ToolingOrdersGrid() {
           }
         }
 
-        if (newStatus === "Delivered") {
-          void registerDeliveredTooling(order);
+        if (newStatus === "Delivered" && order.status !== "Delivered") {
+          announceRegisteredTooling(json.registeredTooling);
         }
 
         if (!opts?.quiet) {
@@ -2189,7 +2192,13 @@ export function ToolingOrdersGrid() {
                     <label className="text-[10px] font-medium text-muted-foreground">Jihoz toifasi</label>
                     <Select
                       value={formData.orderType}
-                      onValueChange={(val: any) => setFormData({ ...formData, orderType: val || "ctp_plates" })}
+                      onValueChange={(val: any) =>
+                        setFormData({
+                          ...formData,
+                          orderType: val || "ctp_plates",
+                          toolingSpec: { ...formData.toolingSpec, dieType: undefined, cylinderTeeth: null },
+                        })
+                      }
                     >
                       <SelectTrigger className="h-6 text-xs w-full min-w-0">
                         <SelectValue placeholder="Toifa" />
@@ -2322,6 +2331,78 @@ export function ToolingOrdersGrid() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Qolip parametrlari: yetkazilganda qoliplar ro'yxatiga shu qiymatlar bilan tushadi */}
+              {isDieOrCliche(formData.orderType) && (() => {
+                const orderType = formData.orderType;
+                const spec = formData.toolingSpec;
+                const setSpec = (patch: Partial<ToolingSpec>) =>
+                  setFormData((prev) => ({ ...prev, toolingSpec: { ...prev.toolingSpec, ...patch } }));
+                const isRotary = ROTARY_KINDS.has(spec.dieType || "");
+                const isCliche = orderType === "cliche";
+                const numInput = (key: keyof ToolingSpec, label: string, placeholder?: string) => (
+                  <div className="space-y-0.5 min-w-0">
+                    <label className="text-[11px] font-medium text-foreground">{label}</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={(spec[key] as number | null | undefined) ?? ""}
+                      onChange={(e) => setSpec({ [key]: e.target.value === "" ? null : Number(e.target.value) })}
+                      placeholder={placeholder}
+                      className="h-7 text-xs font-mono w-full min-w-0"
+                    />
+                  </div>
+                );
+                return (
+                  <div className="space-y-1.5 w-full min-w-0 rounded border border-border p-2">
+                    <div className="space-y-0.5 min-w-0">
+                      <label className="text-[11px] font-medium text-foreground">
+                        Qolip turi <span className="text-destructive">*</span>
+                      </label>
+                      <div className={cn("grid gap-1", isCliche ? "grid-cols-2" : "grid-cols-3")}>
+                        {DIE_KIND_OPTIONS[orderType].map((kind) => (
+                          <button
+                            key={kind.value}
+                            type="button"
+                            aria-pressed={spec.dieType === kind.value}
+                            onClick={() =>
+                              setSpec({
+                                dieType: kind.value,
+                                ...(ROTARY_KINDS.has(kind.value) ? {} : { cylinderTeeth: null }),
+                              })
+                            }
+                            className={cn(
+                              "h-7 px-1.5 rounded border text-xs font-medium transition-colors",
+                              spec.dieType === kind.value
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border bg-card hover:bg-muted"
+                            )}
+                          >
+                            {kind.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className={cn("grid gap-1.5", isCliche ? "grid-cols-2" : "grid-cols-4")}>
+                      {numInput("widthMm", "Eni, mm *", "50")}
+                      {numInput("heightMm", "Bo'yi, mm *", "90")}
+                      {!isCliche && numInput("acrossCount", "Ko'ndalang", "1")}
+                      {!isCliche && numInput("aroundCount", "Bo'ylama", "1")}
+                    </div>
+                    {isRotary && (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {numInput("cylinderTeeth", "Silindr Z *", "70")}
+                        <div className="space-y-0.5 min-w-0">
+                          <label className="text-[11px] font-medium text-muted-foreground">Takrorlanish</label>
+                          <div className="h-7 px-2 flex items-center rounded border border-border bg-muted/40 text-xs font-mono text-muted-foreground">
+                            {Number(spec.cylinderTeeth) > 0 ? `${(Number(spec.cylinderTeeth) * 3.175).toFixed(3)} mm` : "—"}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Amount & Currency */}
               <div className="grid grid-cols-[1fr_95px] gap-2 w-full min-w-0">

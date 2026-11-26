@@ -6,7 +6,9 @@ import {
   supplierContracts,
   warehouseReceipts,
   workOrders,
+  type SupplierOrderToolingSpec,
 } from "@/db/schema";
+import { registerDeliveredTooling } from "./toolingRegistrationService";
 import { eq, desc, and, or, sql, ilike } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
@@ -105,6 +107,7 @@ export interface SupplierOrderRecord {
   receivedAt?: string;
   status: "Draft" | "Ordered" | "In_Production" | "Ready" | "Delivered" | "Cancelled";
   specDetails?: string;
+  toolingSpec?: SupplierOrderToolingSpec;
   notes?: string;
   fileUrl?: string;
   fileName?: string;
@@ -376,6 +379,7 @@ export async function getSupplierOrders(supplierIdOrCode: string, companyCode: s
     receivedAt: (o.receivedAt || (o.status === "Delivered" ? o.updatedAt : null))?.toISOString() || undefined,
     status: o.status as any,
     specDetails: o.specDetails || undefined,
+    toolingSpec: o.toolingSpec || undefined,
     notes: o.notes || undefined,
     fileUrl: o.fileUrl || undefined,
     fileName: o.fileName || undefined,
@@ -446,6 +450,7 @@ export async function getAllToolingOrders(
       receivedAt: (o.receivedAt || (o.status === "Delivered" ? o.updatedAt : null))?.toISOString() || undefined,
       status: o.status as any,
       specDetails: o.specDetails || undefined,
+      toolingSpec: o.toolingSpec || undefined,
       notes: o.notes || undefined,
       fileUrl: o.fileUrl || undefined,
       fileName: o.fileName || undefined,
@@ -549,6 +554,7 @@ export async function upsertSupplierOrder(
             ? existing.receivedAt || new Date()
             : null,
         specDetails: data.specDetails !== undefined ? data.specDetails : existing.specDetails,
+        toolingSpec: data.toolingSpec !== undefined ? data.toolingSpec || null : existing.toolingSpec,
         notes: data.notes !== undefined ? data.notes : existing.notes,
         fileUrl: data.fileUrl !== undefined ? data.fileUrl : existing.fileUrl,
         fileName: data.fileName !== undefined ? data.fileName : existing.fileName,
@@ -587,6 +593,7 @@ export async function upsertSupplierOrder(
         status: data.status || "Ordered",
         receivedAt: data.status === "Delivered" ? new Date() : null,
         specDetails: data.specDetails || null,
+        toolingSpec: data.toolingSpec || null,
         notes: data.notes || null,
         fileUrl: data.fileUrl || null,
         fileName: data.fileName || null,
@@ -602,13 +609,24 @@ export async function upsertSupplierOrder(
   // Ta'minotchi qarzini yangilash
   await syncSupplierBalance(companyId, savedOrder.supplierId);
   await syncPickupDeliveryCash(db, savedOrder);
+  const registeredTooling = await registerDeliveredToolingSafely(savedOrder);
 
   if (existing && existing.status !== savedOrder.status) {
     await notifyToolingStatusChange(savedOrder, companyCode);
     await syncPurchaseOrderKeyboard(savedOrder, companyCode);
   }
 
-  return { success: true, order: savedOrder };
+  return { success: true, order: savedOrder, registeredTooling };
+}
+
+/** The order is already saved; a failed die registration is logged rather than failing the save. */
+export async function registerDeliveredToolingSafely(order: typeof supplierOrders.$inferSelect) {
+  try {
+    return await registerDeliveredTooling(order);
+  } catch (err) {
+    console.error(`Tooling registration failed for ${order.orderNo}:`, err);
+    return null;
+  }
 }
 
 const TOOLING_ORDER_TYPES = new Set(["ctp_plates", "die_tooling", "cliche"]);
