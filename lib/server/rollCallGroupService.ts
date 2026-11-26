@@ -5,7 +5,7 @@ import { users } from "@/db/schema/users";
 import { attendanceLogs, attendanceRollCalls } from "@/db/schema/hr";
 import { plantClock } from "@/lib/shiftSchedule";
 import { LATE_THRESHOLD_MIN, formatMinutes, isClockTime, plantTime, shiftTimeFacts } from "@/lib/rollCallTime";
-import { getShiftWindows, type RollCallShift } from "./tgAttendanceService";
+import { getShiftWindows, shiftHasStaff, type RollCallShift } from "./tgAttendanceService";
 import { getEffectiveTelegramBotToken, saveTelegramSettings } from "./telegramService";
 
 /**
@@ -148,6 +148,8 @@ export async function runRollCallReminders(now: Date = new Date()): Promise<void
       const at = isClockTime(configured) ? configured : DEFAULT_REMINDER[shift];
       const late = nowMin - toMin(at);
       if (late < 0 || late > REMINDER_GRACE_MIN) continue;
+      // Nobody works this shift today: no roll call to ask for.
+      if (!(await shiftHasStaff(c.id, clock.day, shift))) continue;
 
       await db
         .insert(attendanceRollCalls)

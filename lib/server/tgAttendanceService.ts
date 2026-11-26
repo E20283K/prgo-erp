@@ -105,6 +105,26 @@ async function lockedEmployees(employeeIds: string[], period: string): Promise<S
   return new Set(rows.filter((r) => r.status === "approved" || r.status === "paid").map((r) => r.employeeId));
 }
 
+/**
+ * Whether anyone works this shift on this date: an active employee whose usual shift it is,
+ * or someone already moved into it for the day. Same staff filter as the roll call sheet.
+ */
+export async function shiftHasStaff(companyId: string, date: string, shift: RollCallShift): Promise<boolean> {
+  const staff = await db.query.employees.findMany({
+    where: and(eq(employees.companyId, companyId), ne(employees.status, "terminated"), lte(employees.hireDate, date)),
+    columns: { currentShift: true, terminationDate: true },
+  });
+  const usual = staff.some(
+    (e) => (!e.terminationDate || e.terminationDate >= date) && toShift(e.currentShift) === shift
+  );
+  if (usual) return true;
+  const logs = await db.query.attendanceLogs.findMany({
+    where: and(eq(attendanceLogs.companyId, companyId), eq(attendanceLogs.workDate, date)),
+    columns: { shiftType: true },
+  });
+  return logs.some((l) => toShift(l.shiftType) === shift);
+}
+
 export async function getRollCallSheet(userId: string, date: string): Promise<RollCallSheet> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Sana noto'g'ri");
   const company = await resolveUserCompany(userId);
