@@ -106,6 +106,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SmartCombobox, type ComboboxItem } from "@/components/ui/smart-combobox";
@@ -147,6 +148,18 @@ export interface PlanningSlotRecord {
 
 const INITIAL_MACHINES: any[] = [];
 const INITIAL_TOOLING: any[] = [];
+
+const DIE_KINDS = [
+  { value: "rotary_magnetic", label: "Magnit val" },
+  { value: "solid_rotary", label: "Yaxlit val" },
+  { value: "flatbed", label: "Tekis shtamp" },
+  { value: "hot_stamp", label: "Folga klishe" },
+  { value: "embossing", label: "Kongrev klishe" },
+] as const;
+const ROTARY_DIE_TYPES = new Set(["rotary_magnetic", "solid_rotary"]);
+const CLICHE_DIE_TYPES = new Set(["hot_stamp", "embossing"]);
+/** Rotary cylinder gear pitch: 1/8" per tooth. */
+const GEAR_PITCH_MM = 3.175;
 const INITIAL_PLANNING_SLOTS: PlanningSlotRecord[] = [];
 
 export function ProductionGrid({ type }: ProductionGridProps) {
@@ -483,7 +496,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
         isNew: true,
         code: nextCode,
         name: "",
-        dieType: "rotary_magnetic",
+        dieType: "",
         shape: "rectangle",
         widthMm: 50,
         heightMm: 90,
@@ -994,8 +1007,36 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     [columns, filteredRows, getCursorCardPosition]
   );
 
+  const applyDieType = (dieType: string) => {
+    setToolFormData((prev: any) => {
+      const next = { ...prev, dieType };
+      if (!ROTARY_DIE_TYPES.has(dieType)) {
+        next.cylinderTeeth = "";
+        next.repeatLengthMm = "";
+      }
+      if (CLICHE_DIE_TYPES.has(dieType)) {
+        next.shape = "rectangle";
+        next.cornerRadiusMm = 0;
+        next.acrossCount = 1;
+        next.aroundCount = 1;
+      }
+      return next;
+    });
+  };
+
   const handleSaveToolModal = async () => {
     if (!toolFormData) return;
+    const toolError = !toolFormData.dieType
+      ? "Shtamp turini tanlang."
+      : !(Number(toolFormData.widthMm) > 0) || !(Number(toolFormData.heightMm) > 0)
+        ? "Eni va bo'yini kiriting."
+        : ROTARY_DIE_TYPES.has(toolFormData.dieType) && !(Number(toolFormData.cylinderTeeth) > 0)
+          ? "Val uchun silindr tishlari (Z) majburiy."
+          : null;
+    if (toolError) {
+      addNotification({ title: "Xatolik", description: toolError, severity: "warning" });
+      return;
+    }
     if (!toolFormData.name?.trim()) {
       addNotification({
         title: "Xatolik",
@@ -2155,29 +2196,41 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                 </div>
               </div>
 
-              {/* Turi va Shakli */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-medium text-muted-foreground">
-                    Shtamp Turi (Technology)
-                  </Label>
-                  <Select
-                    value={toolFormData.dieType || "rotary_magnetic"}
-                    onValueChange={(val) => setToolFormData({ ...toolFormData, dieType: val })}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="rotary_magnetic">Rotary Magnetic (Магнитный)</SelectItem>
-                      <SelectItem value="solid_rotary">Solid Rotary (Цельный ротационный)</SelectItem>
-                      <SelectItem value="flatbed">Flatbed (Tekis shtansforma)</SelectItem>
-                      <SelectItem value="hot_stamp">Hot Foil Cliché (Zarb klishesi)</SelectItem>
-                      <SelectItem value="embossing">Embossing (Kongrev / Bo'rtma)</SelectItem>
-                    </SelectContent>
-                  </Select>
+              {/* Turi (majburiy) */}
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-muted-foreground">Turi *</Label>
+                <div role="radiogroup" className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                  {DIE_KINDS.map((kind) => {
+                    const selected = toolFormData.dieType === kind.value;
+                    return (
+                      <button
+                        key={kind.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => applyDieType(kind.value)}
+                        className={cn(
+                          "h-8 px-2 rounded-md border text-xs font-medium transition-colors",
+                          selected
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-950/40 dark:text-indigo-300"
+                            : "border-border bg-card text-foreground hover:bg-muted"
+                        )}
+                      >
+                        {kind.label}
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
 
+              {toolFormData.dieType && (() => {
+                const isRotary = ROTARY_DIE_TYPES.has(toolFormData.dieType);
+                const isCliche = CLICHE_DIE_TYPES.has(toolFormData.dieType);
+                return (
+              <>
+              {/* Shakli va Holati */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {!isCliche && (
                 <div className="space-y-1">
                   <Label className="text-[11px] font-medium text-muted-foreground">
                     Shakli (Die Shape)
@@ -2198,6 +2251,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     </SelectContent>
                   </Select>
                 </div>
+                )}
 
                 <div className="space-y-1">
                   <Label className="text-[11px] font-medium text-muted-foreground">
@@ -2364,6 +2418,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     className="h-8 text-xs font-mono"
                   />
                 </div>
+                {!isCliche && toolFormData.shape === "rounded_rect" && (
                 <div className="space-y-1">
                   <Label className="text-[11px] font-medium text-muted-foreground">
                     Radius (Corner R mm)
@@ -2378,6 +2433,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     className="h-8 text-xs font-mono"
                   />
                 </div>
+                )}
                 <div className="space-y-1">
                   <Label className="text-[11px] font-medium text-muted-foreground">
                     Stellaj / Quti (Rack)
@@ -2392,6 +2448,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
               </div>
 
               {/* Ruxlar va Oraliqlar (Imposition) */}
+              {!isCliche && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg border border-border bg-muted/20">
                 <div className="space-y-1">
                   <Label className="text-[11px] font-medium text-muted-foreground">
@@ -2444,19 +2501,27 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                   />
                 </div>
               </div>
+              )}
 
               {/* Silindr & Resurs */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className={cn("grid grid-cols-2 gap-3", isRotary ? "sm:grid-cols-4" : "sm:grid-cols-2")}>
+                {isRotary && (
+                <>
                 <div className="space-y-1">
                   <Label className="text-[11px] font-medium text-muted-foreground">
-                    Silindr Tishlari (Z)
+                    Silindr Tishlari (Z) *
                   </Label>
                   <Input
                     type="number"
                     value={toolFormData.cylinderTeeth ?? ""}
-                    onChange={(e) =>
-                      setToolFormData({ ...toolFormData, cylinderTeeth: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const z = Number(e.target.value);
+                      setToolFormData({
+                        ...toolFormData,
+                        cylinderTeeth: e.target.value,
+                        repeatLengthMm: z > 0 ? (z * GEAR_PITCH_MM).toFixed(3) : "",
+                      });
+                    }}
                     placeholder="Masalan: 70"
                     className="h-8 text-xs font-mono"
                   />
@@ -2470,10 +2535,12 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                     onChange={(e) =>
                       setToolFormData({ ...toolFormData, repeatLengthMm: e.target.value })
                     }
-                    placeholder="93.000"
+                    placeholder="222.250"
                     className="h-8 text-xs font-mono"
                   />
                 </div>
+                </>
+                )}
                 <div className="space-y-1">
                   <Label className="text-[11px] font-medium text-muted-foreground">
                     Zarblar Soni (Ishlagan)
@@ -2502,6 +2569,9 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                   />
                 </div>
               </div>
+              </>
+                );
+              })()}
 
               {/* Izohlar */}
               <div className="space-y-1">
@@ -2548,7 +2618,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
                 type="button"
                 size="sm"
                 onClick={handleSaveToolModal}
-                disabled={isToolSaving}
+                disabled={isToolSaving || !toolFormData?.dieType}
                 className="h-8 text-xs bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
               >
                 <Save className="w-3.5 h-3.5" />
