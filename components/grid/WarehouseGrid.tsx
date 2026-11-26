@@ -42,6 +42,7 @@ import { PendingFgReceiptsDialog } from "@/components/documents/warehouse/dialog
 import { DispatchManifestDialog } from "@/components/documents/warehouse/dialogs/DispatchManifestDialog";
 import { FgOpeningBalanceDialog } from "@/components/documents/warehouse/dialogs/FgOpeningBalanceDialog";
 import { StockImportDialog } from "@/components/documents/warehouse/dialogs/StockImportDialog";
+import { FgImportDialog } from "@/components/documents/warehouse/dialogs/FgImportDialog";
 import { PackageCheck } from "lucide-react";
 import { CarrierDialog, type CarrierProfile } from "@/components/documents/WarehouseShipmentDetail";
 import { useTranslations } from "next-intl";
@@ -188,6 +189,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const [isPendingFgDialogOpen, setIsPendingFgDialogOpen] = useState(false);
   const [isFgOpeningDialogOpen, setIsFgOpeningDialogOpen] = useState(false);
   const [isStockImportOpen, setIsStockImportOpen] = useState(false);
+  const [isFgImportOpen, setIsFgImportOpen] = useState(false);
   const [isDispatchManifestDialogOpen, setIsDispatchManifestDialogOpen] = useState(false);
   const [shipmentViewTab, setShipmentViewTab] = useState<"ALL" | "READY">("ALL");
   const [activeManifestRecord, setActiveManifestRecord] = useState<any | null>(null);
@@ -1496,6 +1498,18 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 <Button
                   size="sm"
                   variant="outline"
+                  onClick={() => setIsFgImportOpen(true)}
+                  className="h-7 px-2.5 text-xs font-medium gap-1.5 rounded shadow-none cursor-pointer"
+                >
+                  <Upload className="size-3.5" />
+                  <span>Import</span>
+                </Button>
+              )}
+
+              {type === 'finished-goods' && (
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => setIsPendingFgDialogOpen(true)}
                   className="h-7 px-2.5 text-xs font-medium gap-1.5 rounded border-blue-500/30 text-blue-600 bg-blue-50/40 hover:bg-blue-50 dark:bg-blue-950/30"
                 >
@@ -2350,6 +2364,10 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
 
       {type === 'stock-balance' && (
         <StockImportDialog open={isStockImportOpen} onOpenChange={setIsStockImportOpen} />
+      )}
+
+      {type === 'finished-goods' && (
+        <FgImportDialog open={isFgImportOpen} onOpenChange={setIsFgImportOpen} />
       )}
 
       <DispatchManifestDialog

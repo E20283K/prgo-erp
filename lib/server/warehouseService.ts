@@ -2048,6 +2048,112 @@ export async function upsertFinishedGood(payload: any, companyCode: string = "PR
   });
 }
 
+export interface FinishedGoodImportRow {
+  rowNo: number;
+  sku?: string;
+  customerName: string;
+  clientId?: string;
+  productName: string;
+  quantity: number;
+  unit?: string;
+  costPricePerUnit?: number;
+  locationName?: string;
+  locationShelf?: string;
+  batchNo?: string;
+  notes?: string;
+}
+
+/**
+ * Tayyor mahsulot boshlang'ich qoldig'ini fayldan ommaviy kiritish (FgOpeningBalanceDialog bilan bir xil yozuv:
+ * workOrderId = OB-<SKU>). Mos SKU bo'lsa miqdor almashtiriladi, faylda bo'sh maydonlar va kirim sanasi
+ * mavjud yozuvdan saqlanadi. Ishlab chiqarishdan kelgan SKU'ga tegilmaydi.
+ */
+export async function importFinishedGoodsOpening(
+  rows: FinishedGoodImportRow[],
+  companyCode: string = "PRINTGOO",
+  user?: { id?: string; name?: string }
+) {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const existingRows = await db.query.warehouseFinishedGoods.findMany({
+    where: eq(warehouseFinishedGoods.companyId, companyId),
+  });
+  const companyWarehouses = await db.query.warehouses.findMany({
+    where: eq(warehouses.companyId, companyId),
+  });
+
+  // Sikl ichida takrorlanmaydigan avto-SKU (bitta millisekundda bir nechta qator saqlanadi)
+  const stamp = Date.now().toString(36).toUpperCase();
+  let created = 0;
+  let updated = 0;
+  const failed: { rowNo: number; error: string }[] = [];
+
+  for (const row of rows) {
+    try {
+      const qty = Number(row.quantity);
+      if (!row.customerName?.trim()) throw new Error("Mijoz bo'sh");
+      if (!row.productName?.trim()) throw new Error("Mahsulot nomi bo'sh");
+      if (!(qty > 0)) throw new Error("Miqdor noldan katta bo'lishi kerak");
+
+      const sku = row.sku?.trim() || `FG-OB-${stamp}-${row.rowNo}`;
+      const workOrderId = `OB-${sku}`;
+      const sameSku = existingRows.filter((r) => r.sku === sku);
+      const existing = sameSku.find((r) => r.workOrderId === workOrderId);
+      if (!existing && sameSku.length > 0) throw new Error("SKU ishlab chiqarish zaxirasiga tegishli");
+
+      const locationName = row.locationName?.trim() || existing?.locationName || null;
+      const warehouse = locationName ? companyWarehouses.find((w) => w.name === locationName) : undefined;
+      const unitCost =
+        row.costPricePerUnit !== undefined && row.costPricePerUnit !== null
+          ? Number(row.costPricePerUnit) || 0
+          : Number(existing?.costPricePerUnit) || 0;
+
+      await upsertFinishedGood(
+        {
+          sku,
+          workOrderId,
+          productName: row.productName.trim(),
+          customerName: row.customerName.trim(),
+          clientId: row.clientId || existing?.clientId || null,
+          quantity: qty,
+          unit: row.unit || existing?.unit || "pcs",
+          batchNo: row.batchNo?.trim() || existing?.batchNo || null,
+          locationName,
+          warehouseId: warehouse?.id || (locationName === existing?.locationName ? existing?.warehouseId : null) || null,
+          locationShelf: row.locationShelf?.trim() || existing?.locationShelf || null,
+          notes: row.notes?.trim() || existing?.notes || "Boshlang'ich qoldiq",
+          // Kirim sanasi saqlanadi — "Muddat" (kunlar) qayta yuklashda nolga tushmasin
+          producedAt: existing?.producedAt || undefined,
+          receiptStatus: "Received",
+          allocationStatus: "Dedicated",
+          status: "In Stock",
+          costPricePerUnit: unitCost,
+          totalStockValue: unitCost * qty,
+        },
+        companyCode
+      );
+      if (existing) updated++;
+      else {
+        created++;
+        existingRows.push({ sku, workOrderId } as any);
+      }
+    } catch (err) {
+      failed.push({ rowNo: row.rowNo, error: err instanceof Error ? err.message : "Saqlashda xatolik" });
+    }
+  }
+
+  await writeAuditLog({
+    companyId,
+    userId: user?.id || "system",
+    userName: user?.name || "Warehouse Manager",
+    entityType: "warehouse_finished_good",
+    entityId: "import",
+    action: "update",
+    newData: { created, updated, failed: failed.length, total: rows.length },
+  }).catch(() => undefined);
+
+  return { created, updated, failed };
+}
+
 // ─── Helper: 1C Qoldiqlar Registri Deltasi (Accumulation Register Updater) ──────
 
 /** Vaqtinchalik UI identifikatorlari (tab-*, draft-*) SKU sifatida registrga tushmasligi kerak */

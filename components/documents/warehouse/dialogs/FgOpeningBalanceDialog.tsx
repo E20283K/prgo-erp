@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { FieldCombobox } from "@/components/ui/field-combobox";
 import { Loader2, Image as ImageIcon, Upload, X } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { pickFgWarehouses } from "@/components/documents/warehouse/utils/fgImport";
 
 interface FgOpeningBalanceDialogProps {
   open: boolean;
@@ -79,11 +80,10 @@ export function FgOpeningBalanceDialog({ open, onOpenChange }: FgOpeningBalanceD
     () => (crmCustomers || []).map((c: any) => ({ value: c.name, label: c.name })),
     [crmCustomers]
   );
-  const warehouseOptions = useMemo(() => {
-    const all = warehousesList || [];
-    const fg = all.filter((w: any) => /finished/i.test(String(w.type || "")) || /^WH-FG/i.test(String(w.code || "")));
-    return (fg.length > 0 ? fg : all).map((w: any) => ({ value: w.name, label: w.name }));
-  }, [warehousesList]);
+  const warehouseOptions = useMemo(
+    () => pickFgWarehouses<any>(warehousesList || []).map((w: any) => ({ value: w.name, label: w.name })),
+    [warehousesList]
+  );
 
   const totalValue = (Number(form.quantity) || 0) * (Number(form.costPricePerUnit) || 0);
   const skuTaken = useMemo(
