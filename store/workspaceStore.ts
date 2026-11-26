@@ -974,7 +974,11 @@ interface WorkspaceState {
   diesTooling: DieToolingRecord[];
   isDiesToolingLoading: boolean;
   loadDiesToolingAsync: (companyCode?: string) => Promise<void>;
-  upsertDieToolingAsync: (tool: Partial<DieToolingRecord>, companyCode?: string) => Promise<DieToolingRecord | null>;
+  upsertDieToolingAsync: (
+    tool: Partial<DieToolingRecord>,
+    companyCode?: string,
+    opts?: { throwOnError?: boolean }
+  ) => Promise<DieToolingRecord | null>;
   deleteDieToolingAsync: (id: string, companyCode?: string) => Promise<boolean>;
 
   // ── Enterprise Companies & Multi-tenant Settings ──────────────────────────
@@ -2328,7 +2332,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({ isDiesToolingLoading: false });
     }
   },
-  upsertDieToolingAsync: async (tool: Partial<DieToolingRecord>, companyCode = "PRINTGOO") => {
+  upsertDieToolingAsync: async (tool: Partial<DieToolingRecord>, companyCode = "PRINTGOO", opts) => {
     try {
       const isExisting = Boolean(tool.id && !tool.id.startsWith("new-") && !tool.id.startsWith("DIE-NEW-"));
       const method = isExisting ? "PUT" : "POST";
@@ -2354,8 +2358,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         });
         return savedTool;
       }
+      throw new Error(json?.error || `Server javobi: ${res.status}`);
     } catch (err) {
       console.error("upsertDieToolingAsync error:", err);
+      if (opts?.throwOnError) throw err;
     }
     return null;
   },

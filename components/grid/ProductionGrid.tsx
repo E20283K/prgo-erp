@@ -1007,7 +1007,7 @@ export function ProductionGrid({ type }: ProductionGridProps) {
     setIsToolSaving(true);
     try {
       if (upsertDieToolingAsync) {
-        const saved = await upsertDieToolingAsync(toolFormData);
+        const saved = await upsertDieToolingAsync(toolFormData, undefined, { throwOnError: true });
         if (saved) {
           addNotification({
             title: "Shtamp Saqlandi",

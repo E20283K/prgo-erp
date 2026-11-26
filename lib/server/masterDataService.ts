@@ -227,6 +227,25 @@ export async function getNextDieCode(companyCode = "PRINTGOO"): Promise<string> 
   return `DIE-${String(maxNum + 1).padStart(4, "0")}`;
 }
 
+// Form inputs arrive as "" when left empty; Postgres numeric/integer/uuid columns reject "".
+function toNumericOrNull(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const s = String(value).trim().replace(",", ".");
+  if (s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? String(n) : null;
+}
+
+function toIntOrNull(value: unknown): number | null {
+  const s = toNumericOrNull(value);
+  return s === null ? null : Math.round(Number(s));
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function toUuidOrNull(value: unknown): string | null {
+  return typeof value === "string" && UUID_RE.test(value) ? value : null;
+}
+
 /**
  * Yangi shtamp/pichoq (Dies & Tooling) yaratish
  */
@@ -241,7 +260,21 @@ export async function createDieTooling(data: any, companyCode = "PRINTGOO") {
     throw new Error(`Company with code ${companyCode} not found`);
   }
 
-  const code = (data.code && data.code.trim()) ? data.code.trim().toUpperCase() : await getNextDieCode(companyCode);
+  const requestedCode = typeof data.code === "string" ? data.code.trim().toUpperCase() : "";
+  let code = requestedCode || (await getNextDieCode(companyCode));
+
+  // The client suggests the next code from active dies only; a soft-deleted die may still hold it.
+  const [taken] = await db
+    .select({ id: diesTooling.id, isActive: diesTooling.isActive })
+    .from(diesTooling)
+    .where(and(eq(diesTooling.companyId, company.id), eq(diesTooling.code, code)))
+    .limit(1);
+  if (taken) {
+    if (taken.isActive) throw new Error(`"${code}" kodli shtamp allaqachon mavjud`);
+    code = await getNextDieCode(companyCode);
+  }
+
+  const customerId = toUuidOrNull(data.customerId);
 
   const [inserted] = await db
     .insert(diesTooling)
@@ -251,25 +284,25 @@ export async function createDieTooling(data: any, companyCode = "PRINTGOO") {
       name: data.name || "Yangi Shtamp",
       dieType: data.dieType || "rotary_magnetic",
       shape: data.shape || "rectangle",
-      widthMm: String(data.widthMm || 50),
-      heightMm: String(data.heightMm || 50),
-      cornerRadiusMm: String(data.cornerRadiusMm || 0),
-      acrossCount: Number(data.acrossCount) || 1,
-      aroundCount: Number(data.aroundCount) || 1,
-      gapXMm: String(data.gapXMm ?? 3.0),
-      gapYMm: String(data.gapYMm ?? 3.0),
-      repeatLengthMm: data.repeatLengthMm !== undefined && data.repeatLengthMm !== null ? String(data.repeatLengthMm) : null,
-      cylinderTeeth: data.cylinderTeeth ? Number(data.cylinderTeeth) : null,
+      widthMm: toNumericOrNull(data.widthMm) ?? "50",
+      heightMm: toNumericOrNull(data.heightMm) ?? "50",
+      cornerRadiusMm: toNumericOrNull(data.cornerRadiusMm) ?? "0",
+      acrossCount: toIntOrNull(data.acrossCount) || 1,
+      aroundCount: toIntOrNull(data.aroundCount) || 1,
+      gapXMm: toNumericOrNull(data.gapXMm) ?? "3",
+      gapYMm: toNumericOrNull(data.gapYMm) ?? "3",
+      repeatLengthMm: toNumericOrNull(data.repeatLengthMm),
+      cylinderTeeth: toIntOrNull(data.cylinderTeeth),
       location: data.location || null,
       status: data.status || "available",
-      totalImpressions: Number(data.totalImpressions) || 0,
-      maxImpressions: data.maxImpressions ? Number(data.maxImpressions) : null,
+      totalImpressions: toIntOrNull(data.totalImpressions) ?? 0,
+      maxImpressions: toIntOrNull(data.maxImpressions),
       notes: data.notes || null,
 
-      customerId: data.customerId || null,
+      customerId,
       customerName: data.customerName || null,
-      ownership: data.ownership || (data.customerId ? "customer_owned" : "in_house"),
-      isDedicated: data.isDedicated !== undefined ? Boolean(data.isDedicated) : Boolean(data.customerId),
+      ownership: data.ownership || (data.customerName ? "customer_owned" : "in_house"),
+      isDedicated: data.isDedicated !== undefined ? Boolean(data.isDedicated) : Boolean(data.customerName),
 
       isActive: true,
     })
@@ -301,21 +334,30 @@ export async function updateDieTooling(id: string, data: any, companyCode = "PRI
   if (data.name !== undefined) updatePayload.name = data.name;
   if (data.dieType !== undefined) updatePayload.dieType = data.dieType;
   if (data.shape !== undefined) updatePayload.shape = data.shape;
-  if (data.widthMm !== undefined) updatePayload.widthMm = String(data.widthMm);
-  if (data.heightMm !== undefined) updatePayload.heightMm = String(data.heightMm);
-  if (data.cornerRadiusMm !== undefined) updatePayload.cornerRadiusMm = String(data.cornerRadiusMm);
-  if (data.acrossCount !== undefined) updatePayload.acrossCount = Number(data.acrossCount);
-  if (data.aroundCount !== undefined) updatePayload.aroundCount = Number(data.aroundCount);
-  if (data.gapXMm !== undefined) updatePayload.gapXMm = String(data.gapXMm);
-  if (data.gapYMm !== undefined) updatePayload.gapYMm = String(data.gapYMm);
-  if (data.repeatLengthMm !== undefined) updatePayload.repeatLengthMm = data.repeatLengthMm ? String(data.repeatLengthMm) : null;
-  if (data.cylinderTeeth !== undefined) updatePayload.cylinderTeeth = data.cylinderTeeth ? Number(data.cylinderTeeth) : null;
+  // NOT NULL numeric columns: an empty input leaves the stored value untouched.
+  const widthMm = toNumericOrNull(data.widthMm);
+  const heightMm = toNumericOrNull(data.heightMm);
+  const cornerRadiusMm = toNumericOrNull(data.cornerRadiusMm);
+  const acrossCount = toIntOrNull(data.acrossCount);
+  const aroundCount = toIntOrNull(data.aroundCount);
+  const gapXMm = toNumericOrNull(data.gapXMm);
+  const gapYMm = toNumericOrNull(data.gapYMm);
+  const totalImpressions = toIntOrNull(data.totalImpressions);
+  if (widthMm !== null) updatePayload.widthMm = widthMm;
+  if (heightMm !== null) updatePayload.heightMm = heightMm;
+  if (cornerRadiusMm !== null) updatePayload.cornerRadiusMm = cornerRadiusMm;
+  if (acrossCount) updatePayload.acrossCount = acrossCount;
+  if (aroundCount) updatePayload.aroundCount = aroundCount;
+  if (gapXMm !== null) updatePayload.gapXMm = gapXMm;
+  if (gapYMm !== null) updatePayload.gapYMm = gapYMm;
+  if (totalImpressions !== null) updatePayload.totalImpressions = totalImpressions;
+  if (data.repeatLengthMm !== undefined) updatePayload.repeatLengthMm = toNumericOrNull(data.repeatLengthMm);
+  if (data.cylinderTeeth !== undefined) updatePayload.cylinderTeeth = toIntOrNull(data.cylinderTeeth);
   if (data.location !== undefined) updatePayload.location = data.location;
   if (data.status !== undefined) updatePayload.status = data.status;
-  if (data.totalImpressions !== undefined) updatePayload.totalImpressions = Number(data.totalImpressions);
-  if (data.maxImpressions !== undefined) updatePayload.maxImpressions = data.maxImpressions ? Number(data.maxImpressions) : null;
+  if (data.maxImpressions !== undefined) updatePayload.maxImpressions = toIntOrNull(data.maxImpressions);
   if (data.notes !== undefined) updatePayload.notes = data.notes;
-  if (data.customerId !== undefined) updatePayload.customerId = data.customerId || null;
+  if (data.customerId !== undefined) updatePayload.customerId = toUuidOrNull(data.customerId);
   if (data.customerName !== undefined) updatePayload.customerName = data.customerName || null;
   if (data.ownership !== undefined) updatePayload.ownership = data.ownership;
   if (data.isDedicated !== undefined) updatePayload.isDedicated = Boolean(data.isDedicated);
