@@ -2,6 +2,7 @@
 import React from "react";
 import dynamic from "next/dynamic";
 import { DocumentTab } from "@/store/workspaceStore";
+import { resolveRegistryView, type RegistryComponent } from "@/lib/workspace/viewRoutes";
 
 const DataGrid = dynamic(() => import("@/components/grid/DataGrid").then((mod) => mod.DataGrid), { ssr: false });
 const CrmGrid = dynamic(() => import("@/components/grid/CrmGrid").then((mod) => mod.CrmGrid), { ssr: false });
@@ -37,78 +38,19 @@ const NotificationSoundSettingsView = dynamic(() => import("@/components/documen
 const OperatorTerminal = dynamic(() => import("@/components/documents/work-order/terminal/OperatorTerminal").then((mod) => mod.OperatorTerminal), { ssr: false });
 const ToolingOrdersGrid = dynamic(() => import("@/components/grid/ToolingOrdersGrid").then((mod) => mod.ToolingOrdersGrid), { ssr: false });
 
-export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
-  if (tab.id.includes("tasks")) {
-    return <TaskGrid />;
-  }
+// Every component a registry route can name. The Record type makes a route
+// without a component here a compile error.
+const REGISTRY_COMPONENTS: Record<RegistryComponent, React.ComponentType<any>> = {
+  DataGrid, CrmGrid, ProductionGrid, WarehouseGrid, WarehouseWmsView, SalesGrid,
+  CashJournalGrid, MoneyAccountsGrid, CashCategoriesGrid, CashFlowReport, PnlReport, FinanceGrid,
+  TaskGrid, SettingsGrid, WorkRatesGrid, TradingGrid,
+  EmployeesGrid, DepartmentsGrid, PositionsGrid, TimesheetGrid, AttendanceGrid, ShiftsGrid,
+  PieceworkGrid, AdvancesGrid, PayrollGrid, DevicesGrid,
+  TelegramInbox, TelegramSettingsView, NotificationSoundSettingsView, OperatorTerminal, ToolingOrdersGrid,
+};
 
-  if (tab.module === "crm") {
-    if (tab.id.includes("telegram-inbox")) return <TelegramInbox />;
-    let crmType = "customers";
-    if (tab.id.includes("tasks")) return <TaskGrid />;
-    else if (tab.id.includes("customers")) crmType = "customers";
-    else if (tab.id.includes("suppliers")) crmType = "suppliers";
-    else if (tab.id.includes("leads")) crmType = "leads";
-    return <CrmGrid type={crmType as any} />;
-  } else if (tab.module === "production") {
-    if (tab.id.includes("operator-terminal")) return <OperatorTerminal />;
-    if (tab.id.includes("operation-catalog")) return <WorkRatesGrid />;
-    if (tab.id.includes("work-orders") || tab.id === "registry-work-orders") return <DataGrid />;
-    if (tab.id.includes("planning")) return <ProductionGrid type="planning" />;
-    if (tab.id.includes("machines")) return <ProductionGrid type="machines" />;
-    if (tab.id.includes("bom") || tab.id.includes("products")) return <ProductionGrid type="bom" />;
-    if (tab.id.includes("tooling-orders") || tab.id.includes("prepress-orders")) return <ToolingOrdersGrid />;
-    if (tab.id.includes("tooling")) return <ProductionGrid type="tooling" />;
-    return <DataGrid />;
-  } else if (tab.module === "warehouse") {
-    if (tab.id.includes("wms") || tab.id.includes("topology")) return <WarehouseWmsView tab={tab} />;
-    if (tab.id.includes("requirements") || tab.id.includes("deficits")) return <WarehouseGrid type="requirements" />;
-    if (tab.id.includes("finished-goods")) return <WarehouseGrid type="finished-goods" />;
-    if (tab.id.includes("trading-catalog") || tab.id.includes("accessories")) return <TradingGrid type="catalog" />;
-    if (tab.id.includes("trading-imports") || tab.id.includes("imports")) return <TradingGrid type="imports" />;
-    if (tab.id.includes("manifests")) return <WarehouseGrid type="manifests" />;
-    if (tab.id.includes("stock-balance")) return <WarehouseGrid type="stock-balance" />;
-    if (tab.id.includes("production-issue")) return <WarehouseGrid type="production-issue" />;
-    if (tab.id.includes("write-offs")) return <WarehouseGrid type="write-offs" />;
-    if (tab.id.includes("movements")) return <WarehouseGrid type="movements" />;
-    if (tab.id.includes("inventory")) return <WarehouseGrid type="inventory" />;
-    if (tab.id.includes("receipts")) return <WarehouseGrid type="receipts" />;
-    if (tab.id.includes("shipments")) return <WarehouseGrid type="shipments" />;
-    if (tab.id.includes("carriers")) return <WarehouseGrid type="carriers" />;
-    return <WarehouseGrid type="stock-balance" />;
-  } else if (tab.module === "finance") {
-    if (tab.id.includes("cash-journal")) return <CashJournalGrid />;
-    if (tab.id.includes("money-accounts")) return <MoneyAccountsGrid />;
-    if (tab.id.includes("cash-categories")) return <CashCategoriesGrid />;
-    if (tab.id.includes("cash-flow")) return <CashFlowReport />;
-    if (tab.id.includes("pnl")) return <PnlReport />;
-    if (tab.id.includes("delivery-acts")) return <SalesGrid type="delivery-acts" />;
-    if (tab.id.includes("settlements")) return <FinanceGrid type="settlements" />;
-    if (tab.id.includes("payments")) return <FinanceGrid type="payments" />;
-    if (tab.id.includes("cost-analysis")) return <FinanceGrid type="cost-analysis" />;
-    if (tab.id.includes("accounts")) return <FinanceGrid type="accounts" />;
-    return <FinanceGrid type="settlements" />;
-  } else if (tab.module === "settings") {
-    if (tab.id.includes("notifications-sound") || tab.id.includes("sound")) return <NotificationSoundSettingsView />;
-    if (tab.id.includes("telegram-settings")) return <TelegramSettingsView />;
-    if (tab.id.includes("companies")) return <SettingsGrid type="companies" />;
-    if (tab.id.includes("users")) return <SettingsGrid type="users" />;
-    if (tab.id.includes("tariffs")) return <SettingsGrid type="tariffs" />;
-    return <SettingsGrid type="companies" />;
-  } else if (tab.module === "hr") {
-    if (tab.id.includes("departments")) return <DepartmentsGrid />;
-    if (tab.id.includes("positions")) return <PositionsGrid />;
-    if (tab.id.includes("timesheet")) return <TimesheetGrid />;
-    if (tab.id.includes("attendance")) return <AttendanceGrid />;
-    if (tab.id.includes("shifts")) return <ShiftsGrid />;
-    if (tab.id.includes("devices") || tab.id.includes("biometric")) return <DevicesGrid />;
-    if (tab.id.includes("piecework")) return <PieceworkGrid />;
-    if (tab.id.includes("advances")) return <AdvancesGrid />;
-    if (tab.id.includes("payroll")) return <PayrollGrid />;
-    return <EmployeesGrid />;
-  } else if (tab.module === "trading") {
-    if (tab.id.includes("trading-imports") || tab.id.includes("imports")) return <TradingGrid type="imports" />;
-    return <TradingGrid type="catalog" />;
-  }
-  return <DataGrid />;
+export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
+  const { view } = resolveRegistryView(tab);
+  const Component = REGISTRY_COMPONENTS[view.component];
+  return <Component {...view.props} {...(view.passTab ? { tab } : {})} />;
 }

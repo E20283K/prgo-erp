@@ -65,11 +65,11 @@ export function ElementInspectorOverlay() {
     }
 
     ensureComponentIndexLoaded();
-    preloadSourceFile(activeResolution.relativePath);
-    if (activeResolution.activeSubTab?.relativePath) {
-      preloadSourceFile(activeResolution.activeSubTab.relativePath);
+    preloadSourceFile(activeResolution.view.relativePath);
+    if (activeResolution.subView) {
+      preloadSourceFile(activeResolution.subView.relativePath);
     }
-  }, [isInspectorActive, activeResolution.relativePath, activeResolution.activeSubTab?.relativePath]);
+  }, [isInspectorActive, activeResolution.view.relativePath, activeResolution.subView?.relativePath]);
 
   const recomputeInspection = useCallback(
     (targetEl: HTMLElement | null) => {
@@ -180,32 +180,45 @@ export function ElementInspectorOverlay() {
 
       if (!inspected) return;
 
-      // Copy structured AI context to clipboard
-      navigator.clipboard.writeText(inspected.aiPromptText);
+      const commit = (info: InspectedElementInfo) => {
+        // Copy structured AI context to clipboard
+        navigator.clipboard.writeText(info.aiPromptText).catch(() => {});
 
-      // Save in workspace store for Status Bar & Sidebar access
-      setLastInspectedElement({
-        elementLabel: inspected.elementLabel,
-        componentName: inspected.componentName,
-        moduleName: inspected.moduleName,
-        relativePath: inspected.relativePath,
-        fileName: inspected.fileName,
-        lineRangeLabel: inspected.lineRangeLabel,
-        startLine: inspected.startLine,
-        vscodeUrl: inspected.vscodeUrl,
-        aiPromptText: inspected.aiPromptText,
-      });
+        // Save in workspace store for Status Bar & Sidebar access
+        setLastInspectedElement({
+          elementLabel: info.elementLabel,
+          componentName: info.componentName,
+          moduleName: info.moduleName,
+          relativePath: info.relativePath,
+          fileName: info.fileName,
+          lineRangeLabel: info.lineRangeLabel,
+          startLine: info.startLine,
+          vscodeUrl: info.vscodeUrl,
+          aiPromptText: info.aiPromptText,
+        });
 
-      // Show floating copied confirmation toast
-      setCopiedBanner({
-        fileName: inspected.fileName,
-        lineRange: inspected.lineRangeLabel,
-        elementLabel: inspected.elementLabel,
-        aiPromptText: inspected.aiPromptText,
-      });
-      setTimeout(() => {
-        setCopiedBanner(null);
-      }, 3200);
+        // Show floating copied confirmation toast
+        setCopiedBanner({
+          fileName: info.fileName,
+          lineRange: info.lineRangeLabel,
+          elementLabel: info.elementLabel,
+          aiPromptText: info.aiPromptText,
+        });
+        setTimeout(() => {
+          setCopiedBanner(null);
+        }, 3200);
+      };
+
+      // Source not fetched yet (clicked right after activating): wait for it,
+      // otherwise the stored context points at line 1 with no snippet.
+      if (!inspected.codeSnippet) {
+        const el = inspected.element;
+        void preloadSourceFile(inspected.relativePath).then(() =>
+          commit(inspectDomElement(el, activeResolution))
+        );
+      } else {
+        commit(inspected);
+      }
 
       // If Ctrl/Cmd+Click, also open directly in VS Code at exact line
       if (e.ctrlKey || e.metaKey) {
@@ -245,7 +258,7 @@ export function ElementInspectorOverlay() {
       window.removeEventListener("click", handleClick, true);
       document.body.style.cursor = "";
     };
-  }, [isInspectorActive, inspected, recomputeInspection, setInspectorActive, setLastInspectedElement]);
+  }, [isInspectorActive, inspected, activeResolution, recomputeInspection, setInspectorActive, setLastInspectedElement]);
 
   if (!isInspectorActive && !copiedBanner) {
     return null;

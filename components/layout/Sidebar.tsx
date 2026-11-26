@@ -24,6 +24,7 @@ import { MODULE_NAV } from "@/lib/modules";
 import { isAdminRole } from "@/lib/userRole";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { resolveActiveComponent } from "@/lib/dev/componentRegistry";
+import { useSourceLineCount } from "@/lib/dev/useSourceLineCount";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -175,11 +176,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     activeModule,
     currentSubModule,
   );
+  const resolvedLines = useSourceLineCount(resolvedComponent.target.relativePath);
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [copiedInspected, setCopiedInspected] = React.useState(false);
 
   const handleCopyComponentPath = () => {
-    navigator.clipboard.writeText(resolvedComponent.relativePath);
+    navigator.clipboard.writeText(resolvedComponent.target.relativePath);
     setCopiedPath(true);
     setTimeout(() => setCopiedPath(false), 2000);
   };
@@ -693,12 +695,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             )}
             <div className="flex flex-col min-w-0 flex-1">
               <span className="truncate font-mono text-[11px] font-semibold text-foreground">
-                {resolvedComponent.fileName}
+                {resolvedComponent.target.fileName}
               </span>
               <span className="text-[10px] text-muted-foreground font-mono">
                 {copiedPath
                   ? "Copied to clipboard!"
-                  : `${resolvedComponent.linesOfCode.toLocaleString()} lines · Copy path`}
+                  : `${resolvedLines?.toLocaleString() ?? "–"} lines · Copy path`}
               </span>
             </div>
           </ContextMenuItem>

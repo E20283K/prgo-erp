@@ -1,541 +1,144 @@
 /**
- * Component & Module Registry for Developer Tools & Status Bar
- * 
- * Maps active workspace tabs, modules, and sub-views to their concrete
- * React Component Modules (.tsx files) and exact Lines of Code (LOC).
+ * Resolves the active workspace view to the source file that renders it.
+ *
+ * Reads the same route tables the workspace renders from
+ * (lib/workspace/viewRoutes.ts), so the dev tools always point at the
+ * component that is really on screen. Line counts are not stored here:
+ * they come live from /api/dev/source (see useSourceLineCount).
  */
 
-import { DocumentTab } from "@/store/workspaceStore";
+import type { DocumentTab } from "@/store/workspaceStore";
+import {
+  DOCUMENT_SUBVIEWS,
+  DOCUMENT_VIEWS,
+  REGISTRY_COMPONENT_FILES,
+  isDocumentViewType,
+  resolveRegistryView,
+} from "@/lib/workspace/viewRoutes";
 
-export interface SubComponentMeta {
-  id: string;
-  name: string;
-  fileName: string;
-  relativePath: string;
-  linesOfCode: number;
-  description: string;
-}
-
-export interface ComponentMeta {
+export interface ResolvedFile {
   componentName: string;
   fileName: string;
   relativePath: string;
-  linesOfCode: number;
-  featureModule: string;
-  category: "registry-grid" | "document-editor" | "dashboard" | "tool";
-  description: string;
-  subTabs?: Record<string, SubComponentMeta>;
 }
 
 export interface ActiveComponentResolution {
-  featureModule: string;
-  featureModuleLabel: string;
-  subModuleName: string;
-  componentName: string;
-  fileName: string;
-  relativePath: string;
-  linesOfCode: number;
-  category: string;
-  description: string;
-  activeSubTab?: SubComponentMeta;
-  totalLines: number;
-  vscodeUrl: string;
+  /** Module of the active tab, e.g. "warehouse". */
+  module: string;
+  /** Tab id for registries, tab type for documents. */
+  viewId: string;
   isDocument: boolean;
-  docTitle?: string;
-  docNo?: string;
-  status?: string;
+  /** Component the workspace mounts for this tab. */
+  view: ResolvedFile;
+  /** String props the workspace passes to it, e.g. { type: "receipts" }. */
+  props?: Record<string, string>;
+  /** Inner document tab (activeLevel3Tab) and the component rendering it. */
+  subView?: ResolvedFile & { id: string };
+  /** Innermost known file: subView if any, else view. */
+  target: ResolvedFile;
+  /** False when the tab did not match any route (fallback shown). */
+  matched: boolean;
+  record?: { docNo?: string; id?: string | number; status?: string };
+  vscodeUrl: string;
 }
 
 export const WORKSPACE_ROOT =
   process.env.NEXT_PUBLIC_WORKSPACE_ROOT ||
   "c:/Users/ThinkPad X1/Documents/PROJECTS/printgoo_ecosystem";
 
-// ── Master Component Registry with real line counts ──
-export const COMPONENT_REGISTRY: Record<string, ComponentMeta> = {
-  // Grids & Registries
-  "grid-production-work-orders": {
-    componentName: "DataGrid",
-    fileName: "DataGrid.tsx",
-    relativePath: "components/grid/DataGrid.tsx",
-    linesOfCode: 845,
-    featureModule: "production",
-    category: "registry-grid",
-    description: "High-performance Glide Data Grid for Work Orders registry.",
-  },
-  "grid-production-planning": {
-    componentName: "ProductionGrid",
-    fileName: "ProductionGrid.tsx",
-    relativePath: "components/grid/ProductionGrid.tsx",
-    linesOfCode: 1190,
-    featureModule: "production",
-    category: "registry-grid",
-    description: "Production planning scheduling grid and machine allocation.",
-  },
-  "grid-production-machines": {
-    componentName: "ProductionGrid",
-    fileName: "ProductionGrid.tsx",
-    relativePath: "components/grid/ProductionGrid.tsx",
-    linesOfCode: 1190,
-    featureModule: "production",
-    category: "registry-grid",
-    description: "Machine fleet management and maintenance registry.",
-  },
-  "grid-production-bom": {
-    componentName: "ProductionGrid",
-    fileName: "ProductionGrid.tsx",
-    relativePath: "components/grid/ProductionGrid.tsx",
-    linesOfCode: 1190,
-    featureModule: "production",
-    category: "registry-grid",
-    description: "Bill of Materials & specs master registry.",
-  },
-  "grid-production-tooling": {
-    componentName: "ProductionGrid",
-    fileName: "ProductionGrid.tsx",
-    relativePath: "components/grid/ProductionGrid.tsx",
-    linesOfCode: 1190,
-    featureModule: "production",
-    category: "registry-grid",
-    description: "Die-cuts, cylinders, and tooling registry.",
-  },
-  "grid-crm-customers": {
-    componentName: "CrmGrid",
-    fileName: "CrmGrid.tsx",
-    relativePath: "components/grid/CrmGrid.tsx",
-    linesOfCode: 939,
-    featureModule: "crm",
-    category: "registry-grid",
-    description: "CRM Client counterparty directory and VIP account ledger.",
-  },
-  "grid-crm-leads": {
-    componentName: "CrmGrid",
-    fileName: "CrmGrid.tsx",
-    relativePath: "components/grid/CrmGrid.tsx",
-    linesOfCode: 939,
-    featureModule: "crm",
-    category: "registry-grid",
-    description: "Sales pipeline opportunities and leads registry.",
-  },
-  "grid-tasks": {
-    componentName: "TaskGrid",
-    fileName: "TaskGrid.tsx",
-    relativePath: "components/grid/TaskGrid.tsx",
-    linesOfCode: 624,
-    featureModule: "crm",
-    category: "registry-grid",
-    description: "Operational task tracker and Kanban board integration.",
-  },
-  "grid-warehouse": {
-    componentName: "WarehouseGrid",
-    fileName: "WarehouseGrid.tsx",
-    relativePath: "components/grid/WarehouseGrid.tsx",
-    linesOfCode: 1039,
-    featureModule: "warehouse",
-    category: "registry-grid",
-    description: "Warehouse stock balance, raw materials, and barcode movements.",
-  },
-  "grid-warehouse-wms": {
-    componentName: "WarehouseWmsView",
-    fileName: "WarehouseWmsView.tsx",
-    relativePath: "components/documents/warehouse/wms/WarehouseWmsView.tsx",
-    linesOfCode: 650,
-    featureModule: "warehouse",
-    category: "registry-grid",
-    description: "Konva.js 2D interaktiv ombor xaritasi, stelaj va kataklar boshqaruvi (WMS).",
-  },
-  "grid-sales": {
-    componentName: "SalesGrid",
-    fileName: "SalesGrid.tsx",
-    relativePath: "components/grid/SalesGrid.tsx",
-    linesOfCode: 450,
-    featureModule: "sales",
-    category: "registry-grid",
-    description: "Commercial orders, quotations, and Schet-faktura acts.",
-  },
-  "grid-finance": {
-    componentName: "FinanceGrid",
-    fileName: "FinanceGrid.tsx",
-    relativePath: "components/grid/FinanceGrid.tsx",
-    linesOfCode: 690,
-    featureModule: "finance",
-    category: "registry-grid",
-    description: "Financial settlements, mutual payments, and bank transactions.",
-  },
-  "grid-settings": {
-    componentName: "SettingsGrid",
-    fileName: "SettingsGrid.tsx",
-    relativePath: "components/grid/SettingsGrid.tsx",
-    linesOfCode: 816,
-    featureModule: "settings",
-    category: "registry-grid",
-    description: "System parameters, plant configurations, and user RBAC security.",
-  },
-  "grid-hr": {
-    componentName: "EmployeeDetail",
-    fileName: "EmployeeDetail.tsx",
-    relativePath: "components/documents/hr/EmployeeDetail.tsx",
-    linesOfCode: 520,
-    featureModule: "hr",
-    category: "registry-grid",
-    description: "Staff & personnel registry, timesheets, and wage records.",
-  },
-  "grid-trading": {
-    componentName: "TradingGrid",
-    fileName: "TradingGrid.tsx",
-    relativePath: "components/grid/TradingGrid.tsx",
-    linesOfCode: 650,
-    featureModule: "sales",
-    category: "registry-grid",
-    description: "Wholesale trade, retail sales, and import registry.",
-  },
+export function vscodeFileUrl(relativePath: string, line?: number): string {
+  return `vscode://file/${WORKSPACE_ROOT}/${relativePath}${line ? `:${line}:1` : ""}`;
+}
 
-  // Document Detail Views
-  "doc-employee-detail": {
-    componentName: "EmployeeDetail",
-    fileName: "EmployeeDetail.tsx",
-    relativePath: "components/documents/hr/EmployeeDetail.tsx",
-    linesOfCode: 520,
-    featureModule: "hr",
-    category: "document-editor",
-    description: "Employee T-2 personal record, wage tariffs, piecework logs, and attendance history.",
-  },
-  "doc-work-order": {
-    componentName: "WorkOrderDetail",
-    fileName: "WorkOrderDetail.tsx",
-    relativePath: "components/documents/work-order/WorkOrderDetail.tsx",
-    linesOfCode: 589,
-    featureModule: "production",
-    category: "document-editor",
-    description: "Production Work Order 1C-style document container.",
-    subTabs: {
-      overview: {
-        id: "overview",
-        name: "OverviewTab",
-        fileName: "OverviewTab.tsx",
-        relativePath: "components/documents/work-order/tabs/OverviewTab.tsx",
-        linesOfCode: 2108,
-        description: "Primary work order specifications, paper stock, ink run, and approval gates.",
-      },
-      specs: {
-        id: "specs",
-        name: "SpecificationsTab",
-        fileName: "SpecificationsTab.tsx",
-        relativePath: "components/documents/work-order/tabs/SpecificationsTab.tsx",
-        linesOfCode: 520,
-        description: "Technical dimensions, 2D/3D die-cut folding model preview, and coating.",
-      },
-      layout: {
-        id: "layout",
-        name: "LayoutCalcTab",
-        fileName: "LayoutCalcTab.tsx",
-        relativePath: "components/documents/work-order/tabs/LayoutCalcTab.tsx",
-        linesOfCode: 32,
-        description: "Sheet-fed imposition via doc-service: parent-sheet cuts, ganged forms, preflight and vector montage PDF.",
-      },
-      flexo: {
-        id: "flexo",
-        name: "FlexoCalcTab",
-        fileName: "FlexoCalcTab.tsx",
-        relativePath: "components/documents/work-order/tabs/FlexoCalcTab.tsx",
-        linesOfCode: 1177,
-        description: "Flexographic cylinder gear, repeat length, and anilox calculator.",
-      },
-      sample: {
-        id: "sample",
-        name: "SampleTab",
-        fileName: "SampleTab.tsx",
-        relativePath: "components/documents/work-order/tabs/SampleTab.tsx",
-        linesOfCode: 327,
-        description: "Pre-production physical sample configuration and proofing gates.",
-      },
-      operations: {
-        id: "operations",
-        name: "OperationsTab",
-        fileName: "OperationsTab.tsx",
-        relativePath: "components/documents/work-order/tabs/OperationsTab.tsx",
-        linesOfCode: 302,
-        description: "Tech routing steps, machinery logs, and prepress stages.",
-      },
-      materials: {
-        id: "materials",
-        name: "MaterialsTab",
-        fileName: "MaterialsTab.tsx",
-        relativePath: "components/documents/work-order/tabs/MaterialsTab.tsx",
-        linesOfCode: 26,
-        description: "Raw material consumption and BOM reservation table.",
-      },
-      timeline: {
-        id: "timeline",
-        name: "ShiftTimelineTab",
-        fileName: "ShiftTimelineTab.tsx",
-        relativePath: "components/documents/work-order/tabs/ShiftTimelineTab.tsx",
-        linesOfCode: 641,
-        description: "Gantt timeline of production shifts and machine utilization.",
-      },
-      financials: {
-        id: "financials",
-        name: "FinancialsTab",
-        fileName: "FinancialsTab.tsx",
-        relativePath: "components/documents/work-order/tabs/FinancialsTab.tsx",
-        linesOfCode: 178,
-        description: "Cost calculation, direct expenses, labor, and profit margins.",
-      },
-      history: {
-        id: "history",
-        name: "HistoryTab",
-        fileName: "HistoryTab.tsx",
-        relativePath: "components/documents/work-order/tabs/HistoryTab.tsx",
-        linesOfCode: 15,
-        description: "Document audit log and state modification trail.",
-      },
-    },
-  },
+function fileOf(componentName: string, relativePath: string): ResolvedFile {
+  return { componentName, relativePath, fileName: relativePath.split("/").pop() || relativePath };
+}
 
-  "doc-client-order": {
-    componentName: "WorkOrderDetail",
-    fileName: "WorkOrderDetail.tsx",
-    relativePath: "components/documents/work-order/WorkOrderDetail.tsx",
-    linesOfCode: 968,
-    featureModule: "production",
-    category: "document-editor",
-    description: "Consolidated Work Order document (unified order model replacing Client Order).",
-  },
+const WORKSPACE_FILE = fileOf("Workspace", "components/layout/Workspace.tsx");
 
-  "doc-product-spec": {
-    componentName: "ProductSpecDetail",
-    fileName: "ProductSpecDetail.tsx",
-    relativePath: "components/documents/ProductSpecDetail.tsx",
-    linesOfCode: 681,
-    featureModule: "production",
-    category: "document-editor",
-    description: "Standard technical specification for repeat print packaging.",
-  },
-  "doc-delivery-act": {
-    componentName: "DeliveryActDetail",
-    fileName: "DeliveryActDetail.tsx",
-    relativePath: "components/documents/DeliveryActDetail.tsx",
-    linesOfCode: 1010,
-    featureModule: "sales",
-    category: "document-editor",
-    description: "Official Schet-faktura & delivery handover act document.",
-  },
-  "doc-customer": {
-    componentName: "CustomerDetail",
-    fileName: "CustomerDetail.tsx",
-    relativePath: "components/documents/CustomerDetail.tsx",
-    linesOfCode: 1161,
-    featureModule: "crm",
-    category: "document-editor",
-    description: "Customer 360 card, contracts, bank requisites, and contact persons.",
-  },
-  "doc-warehouse-receipt": {
-    componentName: "WarehouseReceiptDetail",
-    fileName: "WarehouseReceiptDetail.tsx",
-    relativePath: "components/documents/WarehouseReceiptDetail.tsx",
-    linesOfCode: 499,
-    featureModule: "warehouse",
-    category: "document-editor",
-    description: "Inbound raw materials receiving invoice (Prikhodniy order).",
-  },
-  "doc-warehouse-stock": {
-    componentName: "WarehouseStockDetail",
-    fileName: "WarehouseStockDetail.tsx",
-    relativePath: "components/documents/WarehouseStockDetail.tsx",
-    linesOfCode: 1350,
-    featureModule: "warehouse",
-    category: "document-editor",
-    description: "Xomashyo va ombor zaxirasi pasporti kartochkasi.",
-  },
-  "doc-warehouse-shipment": {
-    componentName: "WarehouseShipmentDetail",
-    fileName: "WarehouseShipmentDetail.tsx",
-    relativePath: "components/documents/WarehouseShipmentDetail.tsx",
-    linesOfCode: 1950,
-    featureModule: "warehouse",
-    category: "document-editor",
-    description: "Chiqim yuk xati (Rasxodnaya nakladnaya).",
-  },
-  "doc-warehouse-production-issue": {
-    componentName: "WarehouseProductionIssueDetail",
-    fileName: "WarehouseProductionIssueDetail.tsx",
-    relativePath: "components/documents/WarehouseProductionIssueDetail.tsx",
-    linesOfCode: 650,
-    featureModule: "warehouse",
-    category: "document-editor",
-    description: "Sexga xomashyo berish va sexdan qoldiqni qaytarish hujjati.",
-  },
-  "doc-warehouse-write-off": {
-    componentName: "WarehouseWriteOffDetail",
-    fileName: "WarehouseWriteOffDetail.tsx",
-    relativePath: "components/documents/WarehouseWriteOffDetail.tsx",
-    linesOfCode: 600,
-    featureModule: "warehouse",
-    category: "document-editor",
-    description: "Brak va chiqindini hisobdan chiqarish dalolatnomasi (Akt spisaniya).",
-  },
-  "doc-warehouse-inventory": {
-    componentName: "WarehouseInventoryDetail",
-    fileName: "WarehouseInventoryDetail.tsx",
-    relativePath: "components/documents/WarehouseInventoryDetail.tsx",
-    linesOfCode: 580,
-    featureModule: "warehouse",
-    category: "document-editor",
-    description: "1C uslubidagi to'liq ombor inventarizatsiyasi va qoldiqni tenglashtirish hujjati.",
-  },
-  "doc-warehouse-movement": {
-    componentName: "WarehouseMovementDetail",
-    fileName: "WarehouseMovementDetail.tsx",
-    relativePath: "components/documents/WarehouseMovementDetail.tsx",
-    linesOfCode: 500,
-    featureModule: "warehouse",
-    category: "document-editor",
-    description: "Omborlararo ko'chirish hujjati (Peremeshcheniye).",
-  },
-  "doc-planning-slot": {
-    componentName: "PlanningSlotDetail",
-    fileName: "PlanningSlotDetail.tsx",
-    relativePath: "components/documents/PlanningSlotDetail.tsx",
-    linesOfCode: 1120,
-    featureModule: "production",
-    category: "document-editor",
-    description: "Machine scheduling slot, setup time, and shift planning detail.",
-  },
-  "doc-bom": {
-    componentName: "BomMaterialsGrid",
-    fileName: "BomMaterialsGrid.tsx",
-    relativePath: "components/documents/BomMaterialsGrid.tsx",
-    linesOfCode: 739,
-    featureModule: "production",
-    category: "document-editor",
-    description: "Bill of materials formulation and raw component matrix.",
-  },
-  "doc-plant-detail": {
-    componentName: "PlantDetail",
-    fileName: "PlantDetail.tsx",
-    relativePath: "components/documents/PlantDetail.tsx",
-    linesOfCode: 320,
-    featureModule: "settings",
-    category: "document-editor",
-    description: "Enterprise factory, workshops, bank requisites, and warehouse configurations.",
-  },
-  "doc-tariff-detail": {
-    componentName: "TariffDetail",
-    fileName: "TariffDetail.tsx",
-    relativePath: "components/documents/TariffDetail.tsx",
-    linesOfCode: 480,
-    featureModule: "settings",
-    category: "document-editor",
-    description: "Normative operational tariffs, volume pricing tiers, piecework labor rates, and live cost simulation.",
-  },
-  "doc-user-detail": {
-    componentName: "UserDetail",
-    fileName: "UserDetail.tsx",
-    relativePath: "components/documents/UserDetail.tsx",
-    linesOfCode: 450,
-    featureModule: "settings",
-    category: "document-editor",
-    description: "Enterprise system user card, role-based access control, granular CRUD matrix, and security audit.",
-  },
-};
+export function resolveActiveComponent(
+  tab: DocumentTab | undefined,
+  activeModule: string,
+  currentSubModule: string
+): ActiveComponentResolution {
+  const module = tab?.module || activeModule;
+
+  if (tab && tab.type !== "registry") {
+    const docType = isDocumentViewType(tab.type) ? tab.type : null;
+    const known = docType !== null;
+    const view = docType
+      ? fileOf(DOCUMENT_VIEWS[docType].component, DOCUMENT_VIEWS[docType].file)
+      : WORKSPACE_FILE;
+
+    let subView: ActiveComponentResolution["subView"];
+    const subId = tab.activeLevel3Tab;
+    const sub = docType && subId ? DOCUMENT_SUBVIEWS[docType]?.[subId] : undefined;
+    if (sub && subId) subView = { id: subId, ...fileOf(sub.component, sub.file) };
+
+    const data = tab.documentData ?? {};
+    const record = {
+      docNo: data.docNo ?? data.number ?? undefined,
+      id: data.id ?? undefined,
+      status: data.status ?? undefined,
+    };
+    const target = subView ?? view;
+    return {
+      module,
+      viewId: tab.type,
+      isDocument: true,
+      view,
+      subView,
+      target,
+      matched: known,
+      record: record.docNo || record.id || record.status ? record : undefined,
+      vscodeUrl: vscodeFileUrl(target.relativePath),
+    };
+  }
+
+  const { view: route, matched } = resolveRegistryView({
+    id: tab?.id || currentSubModule,
+    module,
+  });
+  const view = fileOf(route.component, REGISTRY_COMPONENT_FILES[route.component]);
+  return {
+    module,
+    viewId: tab?.id || currentSubModule,
+    isDocument: false,
+    view,
+    props: route.props,
+    target: view,
+    matched,
+    vscodeUrl: vscodeFileUrl(view.relativePath),
+  };
+}
+
+/** `WarehouseGrid type="receipts"` */
+export function formatViewSignature(r: ActiveComponentResolution): string {
+  const props = Object.entries(r.props ?? {})
+    .map(([k, val]) => `${k}="${val}"`)
+    .join(" ");
+  return props ? `${r.view.componentName} ${props}` : r.view.componentName;
+}
 
 /**
- * Resolves the currently active view/tab to its concrete .tsx Component Module
+ * Compact view context for an AI prompt: where the user is, what is mounted,
+ * which record is open. No line totals or styling noise.
  */
-export function resolveActiveComponent(
-  tab?: DocumentTab,
-  activeModule = "production",
-  currentSubModule = "work-orders"
-): ActiveComponentResolution {
-  const isDocument = Boolean(tab && tab.type !== "registry");
-  let meta: ComponentMeta;
-
-  if (isDocument && tab) {
-    const docKey = `doc-${tab.type}`;
-    meta = COMPONENT_REGISTRY[docKey] || {
-      componentName: "DocumentDetail",
-      fileName: `${tab.type}.tsx`,
-      relativePath: `components/documents/${tab.type}.tsx`,
-      linesOfCode: 500,
-      featureModule: tab.module || activeModule,
-      category: "document-editor",
-      description: "Document editor module.",
-    };
-  } else {
-    // Registry / Grid
-    const tabId = tab?.id || currentSubModule;
-    const mod = tab?.module || activeModule;
-
-    if (tabId.includes("tasks")) {
-      meta = COMPONENT_REGISTRY["grid-tasks"];
-    } else if (mod === "crm") {
-      meta = COMPONENT_REGISTRY[tabId.includes("leads") ? "grid-crm-leads" : "grid-crm-customers"];
-    } else if (mod === "production") {
-      if (tabId.includes("planning")) meta = COMPONENT_REGISTRY["grid-production-planning"];
-      else if (tabId.includes("machines")) meta = COMPONENT_REGISTRY["grid-production-machines"];
-      else if (tabId.includes("bom")) meta = COMPONENT_REGISTRY["grid-production-bom"];
-      else if (tabId.includes("tooling")) meta = COMPONENT_REGISTRY["grid-production-tooling"];
-      else meta = COMPONENT_REGISTRY["grid-production-work-orders"];
-    } else if (mod === "warehouse") {
-      meta = COMPONENT_REGISTRY[tabId.includes("wms") ? "grid-warehouse-wms" : "grid-warehouse"];
-    } else if (mod === "sales") {
-      meta = COMPONENT_REGISTRY["grid-sales"];
-    } else if (mod === "finance") {
-      meta = COMPONENT_REGISTRY["grid-finance"];
-    } else if (mod === "hr") {
-      meta = COMPONENT_REGISTRY["grid-hr"];
-    } else if (mod === "trading") {
-      meta = COMPONENT_REGISTRY["grid-trading"];
-    } else if (mod === "settings") {
-      meta = COMPONENT_REGISTRY["grid-settings"];
-    } else {
-      meta = COMPONENT_REGISTRY["grid-production-work-orders"];
-    }
+export function buildViewContextLines(r: ActiveComponentResolution): string[] {
+  const lines = [
+    `View: ${r.module} › ${r.viewId}${r.subView ? ` › ${r.subView.id}` : ""}`,
+    `Mounted: ${formatViewSignature(r)} (${r.view.relativePath})`,
+  ];
+  if (r.subView) {
+    lines.push(`Inner tab: ${r.subView.componentName} (${r.subView.relativePath})`);
   }
-
-  if (!meta) {
-    meta = COMPONENT_REGISTRY["grid-production-work-orders"] || {
-      componentName: "AppModule",
-      fileName: "AppLayout.tsx",
-      relativePath: "components/layout/AppLayout.tsx",
-      linesOfCode: 500,
-      featureModule: (tab?.module || activeModule || "production") as any,
-      category: "registry-grid",
-      description: "Active system module view.",
-    };
+  if (r.record) {
+    const { docNo, id, status } = r.record;
+    const parts = [docNo, id !== undefined && String(id) !== String(docNo) ? `id ${id}` : null, status];
+    lines.push(`Record: ${parts.filter(Boolean).join(" · ")}`);
   }
-
-  // Handle active subTab inside complex documents
-  let activeSubTab: SubComponentMeta | undefined;
-  if (isDocument && tab?.activeLevel3Tab && meta?.subTabs) {
-    activeSubTab = meta.subTabs[tab.activeLevel3Tab];
+  if (!r.matched) {
+    lines.push("Note: tab matched no route in lib/workspace/viewRoutes.ts; a fallback view is shown.");
   }
-
-  const baseLoc = meta?.linesOfCode || 0;
-  const effectiveLoc = activeSubTab ? activeSubTab.linesOfCode : baseLoc;
-  const totalLoc = activeSubTab ? baseLoc + activeSubTab.linesOfCode : baseLoc;
-
-  const targetPath = activeSubTab ? activeSubTab.relativePath : (meta?.relativePath || "components/layout/AppLayout.tsx");
-  const vscodeUrl = `vscode://file/${WORKSPACE_ROOT}/${targetPath}`;
-
-  const docNo = tab?.documentData?.docNo || tab?.documentData?.id || (isDocument ? tab?.title : undefined);
-  const status = tab?.documentData?.status || undefined;
-
-  return {
-    featureModule: meta?.featureModule || "production",
-    featureModuleLabel: (meta?.featureModule || "production").toUpperCase(),
-    subModuleName: tab?.id || currentSubModule,
-    componentName: meta?.componentName || "Component",
-    fileName: meta?.fileName || "Component.tsx",
-    relativePath: targetPath,
-    linesOfCode: effectiveLoc,
-    category: meta?.category || "registry-grid",
-    description: meta?.description || "System view",
-    activeSubTab,
-    totalLines: totalLoc,
-    vscodeUrl,
-    isDocument,
-    docTitle: tab?.title,
-    docNo,
-    status,
-  };
+  return lines;
 }

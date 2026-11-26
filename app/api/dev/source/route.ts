@@ -10,6 +10,8 @@ interface IndexedComponentInfo {
 }
 
 let cachedComponentMap: Record<string, IndexedComponentInfo> | null = null;
+/** relativePath → line count, for every scanned file. */
+let cachedFileLines: Record<string, number> = {};
 let lastIndexTime = 0;
 
 const SCAN_DIRS = ["components", "app"];
@@ -45,6 +47,7 @@ async function getComponentIndex(): Promise<Record<string, IndexedComponentInfo>
   }
 
   const map: Record<string, IndexedComponentInfo> = {};
+  const fileLines: Record<string, number> = {};
 
   for (const fullPath of files) {
     try {
@@ -52,6 +55,7 @@ async function getComponentIndex(): Promise<Record<string, IndexedComponentInfo>
       const linesCount = content.split(/\r?\n/).length;
       const relPath = path.relative(rootDir, fullPath).replace(/\\/g, "/");
       const fileName = path.basename(fullPath);
+      fileLines[relPath] = linesCount;
       const baseNameNoExt = fileName.replace(/\.(tsx|ts)$/, "");
 
       // Register by file basename if PascalCase
@@ -86,6 +90,7 @@ async function getComponentIndex(): Promise<Record<string, IndexedComponentInfo>
   }
 
   cachedComponentMap = map;
+  cachedFileLines = fileLines;
   lastIndexTime = now;
   return map;
 }
@@ -105,7 +110,7 @@ export async function GET(req: NextRequest) {
     const componentMap = await getComponentIndex();
 
     if (indexOnly) {
-      return NextResponse.json({ componentMap });
+      return NextResponse.json({ componentMap, fileLines: cachedFileLines });
     }
 
     let targetRelPath = requestedFile || "";
@@ -114,7 +119,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (!targetRelPath) {
-      return NextResponse.json({ componentMap, lines: [], totalLines: 0 });
+      return NextResponse.json({ lines: [], totalLines: 0 });
     }
 
     // Security check: faqat components/ va app/ ichidagi tsx/ts fayllariga ruxsat beriladi
@@ -140,7 +145,6 @@ export async function GET(req: NextRequest) {
       fileName: path.basename(resolvedFull),
       totalLines: lines.length,
       lines,
-      componentMap,
     });
   } catch (err: any) {
     return NextResponse.json(

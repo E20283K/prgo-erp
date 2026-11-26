@@ -8,7 +8,7 @@
  * 4. Formatted AI-ready Markdown context for one-click copy to clipboard
  */
 
-import { ActiveComponentResolution, WORKSPACE_ROOT } from "./componentRegistry";
+import { ActiveComponentResolution, buildViewContextLines, vscodeFileUrl } from "./componentRegistry";
 
 export interface IndexedComponentMeta {
   componentName: string;
@@ -73,6 +73,20 @@ let clientComponentMap: Record<string, IndexedComponentMeta> = {};
 const fileLinesCache = new Map<string, string[]>();
 const pendingFileFetches = new Map<string, Promise<string[]>>();
 let indexLoaded = false;
+let indexPromise: Promise<void> | null = null;
+/** relativePath → line count from the dev source index. */
+let fileLineCounts: Record<string, number> = {};
+const indexListeners = new Set<() => void>();
+
+export function subscribeComponentIndex(listener: () => void): () => void {
+  indexListeners.add(listener);
+  return () => indexListeners.delete(listener);
+}
+
+/** Line count of a source file, or null until the index has loaded. */
+export function getIndexedLineCount(relativePath: string): number | null {
+  return fileLinesCache.get(relativePath)?.length ?? fileLineCounts[relativePath] ?? null;
+}
 
 // Ignored internal/wrapper component names when walking React Fiber
 const IGNORED_FIBER_NAMES = new Set([
@@ -258,20 +272,29 @@ const STATIC_COMPONENT_FILES: Record<string, string> = {
 /**
  * Preloads the component index from /api/dev/source?index=1
  */
-export async function ensureComponentIndexLoaded(): Promise<void> {
-  if (indexLoaded) return;
-  try {
-    const res = await fetch("/api/dev/source?index=1");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.componentMap) {
-        clientComponentMap = data.componentMap;
-        indexLoaded = true;
+export function ensureComponentIndexLoaded(): Promise<void> {
+  // The source endpoint only exists in development.
+  if (indexLoaded || process.env.NODE_ENV === "production") return Promise.resolve();
+  if (indexPromise) return indexPromise;
+  indexPromise = (async () => {
+    try {
+      const res = await fetch("/api/dev/source?index=1");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.componentMap) {
+          clientComponentMap = data.componentMap;
+          fileLineCounts = data.fileLines ?? {};
+          indexLoaded = true;
+          indexListeners.forEach((l) => l());
+        }
       }
+    } catch {
+      // ignore fetch error
+    } finally {
+      indexPromise = null;
     }
-  } catch {
-    // ignore fetch error
-  }
+  })();
+  return indexPromise;
 }
 
 /**
@@ -293,12 +316,9 @@ export async function preloadSourceFile(
       const res = await fetch(`/api/dev/source?file=${encodeURIComponent(relativePath)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.componentMap && !indexLoaded) {
-          clientComponentMap = data.componentMap;
-          indexLoaded = true;
-        }
         if (Array.isArray(data.lines) && data.lines.length > 0) {
           fileLinesCache.set(relativePath, data.lines);
+          indexListeners.forEach((l) => l());
           onLoaded?.();
           return data.lines as string[];
         }
@@ -751,18 +771,21 @@ export function inspectDomElement(
     } else if (targetEl.closest('[data-slot="sidebar"]')) {
       owningComponentName = "AppSidebar";
     } else {
-      owningComponentName =
-        activeResolution.activeSubTab?.name || activeResolution.componentName;
+      owningComponentName = activeResolution.target.componentName;
     }
   }
 
   // Determine source file path
+  // The route tables know the exact file of the mounted view and inner tab,
+  // which beats the name index (several files can share a basename).
+  const routedFile = [activeResolution.subView, activeResolution.view].find(
+    (f) => f?.componentName === owningComponentName
+  );
   let relativePath =
+    routedFile?.relativePath ||
     clientComponentMap[owningComponentName]?.relativePath ||
     STATIC_COMPONENT_FILES[owningComponentName] ||
-    (activeResolution.activeSubTab?.name === owningComponentName
-      ? activeResolution.activeSubTab.relativePath
-      : activeResolution.relativePath);
+    activeResolution.target.relativePath;
 
   // Special case: if inside Sidebar / StatusBar / Workspace header
   if (owningComponentName === "AppSidebar" || owningComponentName === "Sidebar") {
@@ -795,13 +818,14 @@ export function inspectDomElement(
 
   const totalLines =
     cachedLines.length ||
+    fileLineCounts[relativePath] ||
     clientComponentMap[owningComponentName]?.linesOfCode ||
-    activeResolution.linesOfCode;
+    0;
 
   const lineRangeLabel =
     endLine > startLine ? `L${startLine}-L${endLine}` : `L${startLine}`;
 
-  const vscodeUrl = `vscode://file/${WORKSPACE_ROOT}/${relativePath}:${startLine}:1`;
+  const vscodeUrl = vscodeFileUrl(relativePath, startLine);
 
   // Build readable hierarchy chain (feature components from top to leaf)
   const featureChain = rawChain
@@ -825,21 +849,29 @@ export function inspectDomElement(
     ? `${displayType} "${textPreview.slice(0, 36)}"`
     : `${displayType} (${kindTag})`;
 
-  const moduleName = activeResolution.featureModuleLabel || "PRODUCTION";
-  const subModuleOrDoc = activeResolution.isDocument
-    ? `${activeResolution.subModuleName} (${activeResolution.docNo || activeResolution.docTitle || "Doc"})`
-    : activeResolution.subModuleName;
+  const moduleName = activeResolution.module;
+  const subModuleOrDoc = activeResolution.subView
+    ? `${activeResolution.viewId} › ${activeResolution.subView.id}`
+    : activeResolution.viewId;
 
   const componentRootEl = findFirstHostDomInFiber(owningComponentFiber);
 
+  // Chain for the prompt: start at the mounted view (everything above it is
+  // app shell) and drop context/provider plumbing.
+  const viewIdx = featureChain.lastIndexOf(activeResolution.view.componentName);
+  const promptChain = (viewIdx >= 0 ? featureChain.slice(viewIdx) : featureChain).filter(
+    (name) => !/(Context|Provider|Group|Handler)$|^(Composite|Floating)|^Tabs(Root|Panel)$/.test(name)
+  );
+
+  // Compact, high-signal context: where it is, what renders it, the exact
+  // line. No Tailwind classes or LOC totals; they cost tokens and add nothing.
   const aiPromptText = [
-    `[UI Element Context]`,
-    `- Target: ${elementLabel} [${kindTag}]`,
-    `- Component: ${owningComponentName}${featureChain.length > 1 ? ` (${featureChain.join(" › ")})` : ""}`,
-    `- ERP Module: ${moduleName} › ${subModuleOrDoc}`,
-    `- File & Line: ${relativePath}:${lineRangeLabel} (${startLine}..${endLine} of ${totalLines} LOC)`,
-    `- DOM Selector: ${tagName}${dataSlot ? `[data-slot="${dataSlot}"]` : ""}${classPreview ? `.${classPreview}` : ""}`,
-    ...(snippet ? [`- Source Code:\n${snippet}`] : []),
+    `[UI context]`,
+    ...buildViewContextLines(activeResolution),
+    `Target: ${elementLabel}`,
+    ...(promptChain.length > 1 ? [`Chain: ${promptChain.join(" › ")}`] : []),
+    `Source: ${relativePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`,
+    ...(snippet ? ["```tsx", snippet, "```"] : []),
   ].join("\n");
 
   return {

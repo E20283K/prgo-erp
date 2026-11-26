@@ -70,8 +70,43 @@ import { TradingYttLimitDetail } from "@/components/documents/trading/TradingYtt
 
 import { TabContentWrapper } from "./TabContentWrapper";
 import { RegistryGridRenderer } from "./RegistryGridRenderer";
+import { isDocumentViewType, type DocumentViewType } from "@/lib/workspace/viewRoutes";
 import { NotificationPanel } from "./NotificationPanel";
 import { UserNav } from "./UserNav";
+
+// Document tab type → view. Keyed like DOCUMENT_VIEWS in lib/workspace/viewRoutes.ts;
+// the Record type makes a missing tab type a compile error.
+const DOCUMENT_COMPONENTS: Record<DocumentViewType, React.ComponentType<{ tab: DocumentTab }>> = {
+  "work-order": WorkOrderDetail,
+  "product-spec": ProductSpecDetail,
+  "delivery-act": DeliveryActDetail,
+  customer: CustomerDetail,
+  supplier: SupplierDetail,
+  "warehouse-receipt": WarehouseReceiptDetail,
+  "warehouse-shipment": WarehouseShipmentDetail,
+  "warehouse-movement": WarehouseMovementDetail,
+  "warehouse-production-issue": WarehouseProductionIssueDetail,
+  "warehouse-write-off": WarehouseWriteOffDetail,
+  "warehouse-inventory": WarehouseInventoryDetail,
+  "warehouse-stock": WarehouseStockDetail,
+  "planning-slot": PlanningSlotDetail,
+  "machine-detail": MachineDetail,
+  "company-detail": CompanyDetail,
+  "plant-detail": PlantDetail,
+  "tariff-detail": TariffDetail,
+  "user-detail": UserDetail,
+  "employee-detail": EmployeeDetail,
+  "department-detail": DepartmentDetail,
+  "position-detail": PositionDetail,
+  "shift-detail": ShiftDetail,
+  "payroll-detail": PayrollDetail,
+  "trading-sale": TradingSaleDetail,
+  "trading-order": TradingOrderDetail,
+  "trading-settlement": TradingSettlementDetail,
+  "trading-import": TradingImportDetail,
+  "trading-catalog": TradingCatalogDetail,
+  "trading-ytt-limit": TradingYttLimitDetail,
+};
 
 export function Workspace({ children }: { children: React.ReactNode }) {
   const t = useTranslations("Workspace");
@@ -192,37 +227,10 @@ export function Workspace({ children }: { children: React.ReactNode }) {
   };
 
   const renderTabType = (tab: DocumentTab) => {
-    if (tab.type === "work-order") return <WorkOrderDetail tab={tab} />;
-    if (tab.type === "product-spec") return <ProductSpecDetail tab={tab} />;
-    if (tab.type === "delivery-act") return <DeliveryActDetail tab={tab} />;
-    if (tab.type === "customer") return <CustomerDetail tab={tab} />;
-    if (tab.type === "supplier") return <SupplierDetail tab={tab} />;
-    if (tab.type === "warehouse-receipt") return <WarehouseReceiptDetail tab={tab} />;
-    if (tab.type === "warehouse-shipment") return <WarehouseShipmentDetail tab={tab} />;
-    if (tab.type === "warehouse-movement") return <WarehouseMovementDetail tab={tab} />;
-    if (tab.type === "warehouse-production-issue") return <WarehouseProductionIssueDetail tab={tab} />;
-    if (tab.type === "warehouse-write-off") return <WarehouseWriteOffDetail tab={tab} />;
-    if (tab.type === "warehouse-inventory") return <WarehouseInventoryDetail tab={tab} />;
-    if (tab.type === "warehouse-stock") return <WarehouseStockDetail tab={tab} />;
-    if (tab.type === "planning-slot") return <PlanningSlotDetail tab={tab} />;
-    if (tab.type === "machine-detail") return <MachineDetail tab={tab} />;
-    if (tab.type === "company-detail") return <CompanyDetail tab={tab} />;
-    if (tab.type === "plant-detail") return <PlantDetail tab={tab} />;
-    if (tab.type === "tariff-detail") return <TariffDetail tab={tab} />;
-    if (tab.type === "user-detail") return <UserDetail tab={tab} />;
-    if (tab.type === "employee-detail") return <EmployeeDetail tab={tab} />;
-    if (tab.type === "department-detail") return <DepartmentDetail tab={tab} />;
-    if (tab.type === "position-detail") return <PositionDetail tab={tab} />;
-    if (tab.type === "shift-detail") return <ShiftDetail tab={tab} />;
-    if (tab.type === "payroll-detail") return <PayrollDetail tab={tab} />;
-    if (tab.type === "trading-sale") return <TradingSaleDetail tab={tab} />;
-    if (tab.type === "trading-order") return <TradingOrderDetail tab={tab} />;
-    if (tab.type === "trading-settlement") return <TradingSettlementDetail tab={tab} />;
-    if (tab.type === "trading-import") return <TradingImportDetail tab={tab} />;
-    if (tab.type === "trading-catalog") return <TradingCatalogDetail tab={tab} />;
-    if (tab.type === "trading-ytt-limit") return <TradingYttLimitDetail tab={tab} />;
     if (tab.type === "registry") return <RegistryGridRenderer tab={tab} />;
-    return null;
+    if (!isDocumentViewType(tab.type)) return null;
+    const DocumentView = DOCUMENT_COMPONENTS[tab.type];
+    return <DocumentView tab={tab} />;
   };
 
   return (
