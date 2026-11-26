@@ -1715,7 +1715,31 @@ export async function upsertWarehouseMovement(
       return valued || record;
     }
 
+    // Sexga berish, qaytarish va hisobdan chiqarishda tannarx hujjatga yoziladi: keyin narx
+    // o'zgarsa ham P&L dagi xomashyo sarfi shu paytdagi narx bilan qoladi.
+    const recordsMaterialCost =
+      movementType === "ProductionIssue" || movementType === "ProductionReturn" || movementType === "WriteOff";
+    const pricedItems = recordsMaterialCost ? [...itemsList] : null;
+    const priceAt = async (sku: string, locationName: string) => {
+      const rows = await tx
+        .select({ p: warehouseStockBalances.unitPriceUsd, loc: warehouseStockBalances.locationName })
+        .from(warehouseStockBalances)
+        .where(and(eq(warehouseStockBalances.companyId, companyId), eq(warehouseStockBalances.sku, sku)));
+      const here = rows.find((r) => r.loc === locationName && Number(r.p) > 0);
+      return Number((here ?? rows.find((r) => Number(r.p) > 0))?.p) || 0;
+    };
+
     for (const line of lines) {
+      if (pricedItems) {
+        const qty = movementType === "ProductionReturn" ? line.rcvQty : line.qty;
+        const loc = movementType === "ProductionReturn" ? values.toLocationName : values.fromLocationName;
+        const unitPriceUsd = await priceAt(line.sku, loc);
+        pricedItems[line.sourceIndex] = {
+          ...pricedItems[line.sourceIndex],
+          unitPriceUsd: Number(unitPriceUsd.toFixed(4)),
+          costUsd: Number((unitPriceUsd * qty).toFixed(2)),
+        };
+      }
       if (isOutgoing && line.qty > 0) {
         await applyStockBalanceDelta({
           exec: tx,
@@ -1756,6 +1780,14 @@ export async function upsertWarehouseMovement(
           unitPriceUsd,
         });
       }
+    }
+    if (pricedItems) {
+      const [priced] = await tx
+        .update(warehouseMovements)
+        .set({ reason: JSON.stringify({ ...JSON.parse(values.reason), items: pricedItems }) })
+        .where(eq(warehouseMovements.id, record.id))
+        .returning();
+      return priced || record;
     }
     return record;
   };

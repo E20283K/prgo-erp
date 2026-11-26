@@ -7,6 +7,8 @@ import {
   deliveryActs,
   payrollRecords,
   supplierOrders,
+  warehouseMovements,
+  warehouseStockBalances,
 } from "@/db/schema";
 import { and, asc, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import type { CashDirection, CashCategoryGroup, PnlType } from "@/lib/finance/cashCategories";
@@ -437,6 +439,128 @@ export async function reverseManualCashEntry(
   });
 }
 
+// ─── Material consumption ─────────────────────────────────────────────────────
+
+export interface MaterialConsumption {
+  /** Issued to the shop floor (ISS-), USD. */
+  issuedUsd: number;
+  /** Returned unused from the shop floor (RET-), USD. */
+  returnedUsd: number;
+  /** Reusable offcuts taken back into stock (CUT-), USD. */
+  offcutUsd: number;
+  /** Written off as spoiled or lost (WOF-), USD. */
+  writeOffUsd: number;
+  /** Lines with no price on the document, valued at today's stock price. */
+  repricedLines: number;
+  /** Lines with no price anywhere: counted at 0. */
+  unpricedLines: number;
+}
+
+type MovementKind = "ProductionIssue" | "ProductionReturn" | "CuttingReturn" | "WriteOff";
+
+function movementKind(number: string, metaType: string | undefined): MovementKind | null {
+  const byPrefix = number.startsWith("ISS-")
+    ? "ProductionIssue"
+    : number.startsWith("RET-")
+      ? "ProductionReturn"
+      : number.startsWith("CUT-")
+        ? "CuttingReturn"
+        : number.startsWith("WOF-")
+          ? "WriteOff"
+          : "";
+  const t = metaType && metaType !== "Transfer" ? metaType : byPrefix;
+  return t === "ProductionIssue" || t === "ProductionReturn" || t === "CuttingReturn" || t === "WriteOff" ? t : null;
+}
+
+/**
+ * Raw materials consumed in a period (Tashkent dates), from completed warehouse documents.
+ * Each line uses the price stored on the document when it was completed; older documents
+ * without one fall back to the current stock price of the SKU.
+ */
+export async function getMaterialConsumption(
+  companyId: string,
+  fromDate: string,
+  toDate: string
+): Promise<MaterialConsumption> {
+  const rows = await db
+    .select({
+      number: warehouseMovements.movementNumber,
+      reason: warehouseMovements.reason,
+      sku: warehouseMovements.materialSku,
+      quantity: warehouseMovements.quantity,
+      receivedQty: warehouseMovements.receivedQty,
+      fromLoc: warehouseMovements.fromLocationName,
+      toLoc: warehouseMovements.toLocationName,
+    })
+    .from(warehouseMovements)
+    .where(
+      and(
+        eq(warehouseMovements.companyId, companyId),
+        eq(warehouseMovements.status, "Completed"),
+        sql`(${warehouseMovements.movementDate} at time zone 'Asia/Tashkent')::date between ${fromDate} and ${toDate}`
+      )
+    );
+
+  const stock = await db
+    .select({ sku: warehouseStockBalances.sku, loc: warehouseStockBalances.locationName, p: warehouseStockBalances.unitPriceUsd })
+    .from(warehouseStockBalances)
+    .where(eq(warehouseStockBalances.companyId, companyId));
+  const currentPrice = (sku: string, loc: string) => {
+    const here = stock.find((s) => s.sku === sku && s.loc === loc && num(s.p) > 0);
+    return num((here ?? stock.find((s) => s.sku === sku && num(s.p) > 0))?.p);
+  };
+
+  const out: MaterialConsumption = {
+    issuedUsd: 0,
+    returnedUsd: 0,
+    offcutUsd: 0,
+    writeOffUsd: 0,
+    repricedLines: 0,
+    unpricedLines: 0,
+  };
+  for (const r of rows) {
+    let meta: { movementType?: string; items?: Array<Record<string, unknown>> } | null = null;
+    try {
+      meta = r.reason && r.reason.startsWith("{") ? JSON.parse(r.reason) : null;
+    } catch {
+      meta = null;
+    }
+    const kind = movementKind(r.number, meta?.movementType);
+    if (!kind) continue;
+    const items: Array<Record<string, unknown>> =
+      meta?.items && meta.items.length ? meta.items : [{ sku: r.sku, quantity: r.quantity, receivedQty: r.receivedQty }];
+
+    for (const it of items) {
+      const sku = String(it.sku || "");
+      if (!sku) continue;
+      const hasRcv = it.receivedQty !== undefined && it.receivedQty !== null && it.receivedQty !== "";
+      const outgoing = kind === "ProductionIssue" || kind === "WriteOff";
+      const qty = num((outgoing || !hasRcv ? it.quantity : it.receivedQty) as string);
+      if (qty <= 0) continue;
+
+      let cost: number;
+      if (kind === "CuttingReturn" && it.creditUsd !== undefined) cost = num(it.creditUsd as number);
+      else if (it.costUsd !== undefined) cost = num(it.costUsd as number);
+      else {
+        const price = currentPrice(sku, outgoing ? r.fromLoc : r.toLoc);
+        if (price > 0) out.repricedLines++;
+        else out.unpricedLines++;
+        cost = price * qty;
+      }
+
+      if (kind === "ProductionIssue") out.issuedUsd += cost;
+      else if (kind === "ProductionReturn") out.returnedUsd += cost;
+      else if (kind === "CuttingReturn") out.offcutUsd += cost;
+      else out.writeOffUsd += cost;
+    }
+  }
+  out.issuedUsd = round2(out.issuedUsd);
+  out.returnedUsd = round2(out.returnedUsd);
+  out.offcutUsd = round2(out.offcutUsd);
+  out.writeOffUsd = round2(out.writeOffUsd);
+  return out;
+}
+
 // ─── Reports ──────────────────────────────────────────────────────────────────
 
 export interface CashFlowRow {
@@ -529,6 +653,8 @@ export interface PnlReport {
   opex: PnlLine[];
   capex: PnlLine[];
   totals: { revenue: number; cogs: number; grossProfit: number; opex: number; netProfit: number; capex: number };
+  /** Material lines valued at today's price (document had none) or at 0 (no price at all). */
+  materialPricing: { repriced: number; unpriced: number };
 }
 
 const SUPPLIER_COST_LABELS: Record<string, string> = {
@@ -540,10 +666,11 @@ const SUPPLIER_COST_LABELS: Record<string, string> = {
 };
 
 /**
- * Foyda va zarar (hisoblash asosida), UZS. Revenue: issued invoices without VAT. Costs: delivered
- * supplier orders (tooling, outsourcing, service), payroll accrued for the months, and journal
- * movements typed cogs/expense. Raw materials go to stock and are not a cost until consumed;
- * equipment is shown as capex, outside the profit line.
+ * Foyda va zarar (hisoblash asosida), UZS. Revenue: issued invoices without VAT. Costs: raw
+ * materials consumed (issued to the shop floor less returns and offcuts, plus write-offs),
+ * delivered supplier orders (tooling, outsourcing, service), payroll accrued for the months, and
+ * journal movements typed cogs/expense. Buying raw materials is not a cost: stock counts when it
+ * is consumed. Equipment is shown as capex, outside the profit line.
  */
 export async function getPnlReport(companyId: string, fromMonth: string, toMonth: string): Promise<PnlReport> {
   if (!MONTH_RE.test(fromMonth) || !MONTH_RE.test(toMonth)) throw new Error("Davr noto'g'ri");
@@ -635,12 +762,23 @@ export async function getPnlReport(companyId: string, fromMonth: string, toMonth
       )
     );
 
+  // 5. Xomashyo sarfi: sexga berilgan − qaytarilgan − delovoy otxod; hisobdan chiqarish alohida
+  const mat = await getMaterialConsumption(companyId, fromDate, toDate);
+
   const revenue: PnlLine[] = [{ key: "sales", label: "Sotuv (schet-faktura)", amount: round2(salesUzs) }];
-  const cogs: PnlLine[] = [...supplierCost.entries()].map(([k, v]) => ({
-    key: `po_${k}`,
-    label: SUPPLIER_COST_LABELS[k] ?? k,
-    amount: round2(v),
-  }));
+  const cogs: PnlLine[] = [
+    {
+      key: "materials",
+      label: "Xomashyo sarfi",
+      amount: round2((mat.issuedUsd - mat.returnedUsd - mat.offcutUsd) * rate),
+    },
+    ...(mat.writeOffUsd ? [{ key: "write_off", label: "Hisobdan chiqarish", amount: round2(mat.writeOffUsd * rate) }] : []),
+    ...[...supplierCost.entries()].map(([k, v]) => ({
+      key: `po_${k}`,
+      label: SUPPLIER_COST_LABELS[k] ?? k,
+      amount: round2(v),
+    })),
+  ];
   const opex: PnlLine[] = [{ key: "payroll", label: "Ish haqi fondi", amount: round2(num(payroll?.gross)) }];
   const capex: PnlLine[] = equipmentUzs ? [{ key: "po_equipment", label: "Jihoz (buyurtmalar)", amount: round2(equipmentUzs) }] : [];
 
@@ -665,5 +803,14 @@ export async function getPnlReport(companyId: string, fromMonth: string, toMonth
   };
   totals.grossProfit = round2(totals.revenue - totals.cogs);
   totals.netProfit = round2(totals.grossProfit - totals.opex);
-  return { from: fromMonth, to: toMonth, revenue, cogs, opex, capex, totals };
+  return {
+    from: fromMonth,
+    to: toMonth,
+    revenue,
+    cogs,
+    opex,
+    capex,
+    totals,
+    materialPricing: { repriced: mat.repricedLines, unpriced: mat.unpricedLines },
+  };
 }

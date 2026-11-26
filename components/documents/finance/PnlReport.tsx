@@ -32,6 +32,8 @@ export function PnlReport() {
   }, [from, to, requestKey]);
 
   const t = report?.totals;
+  const repriced = report?.materialPricing?.repriced ?? 0;
+  const unpriced = report?.materialPricing?.unpriced ?? 0;
   const margin = t && t.revenue ? Math.round((t.netProfit / t.revenue) * 1000) / 10 : null;
 
   return (
@@ -66,6 +68,16 @@ export function PnlReport() {
                 <td className="px-2 h-[26px] text-muted-foreground">Rentabellik</td>
                 <td className="px-2 text-right font-mono">{margin === null ? "—" : `${margin}%`}</td>
               </tr>
+              {(repriced > 0 || unpriced > 0) && (
+                <tr>
+                  <td colSpan={2} className="px-2 pt-2 text-[11px] text-muted-foreground">
+                    Xomashyo:
+                    {repriced > 0 && ` ${repriced} qator joriy narxda`}
+                    {repriced > 0 && unpriced > 0 && ","}
+                    {unpriced > 0 && <span className="text-amber-600 dark:text-amber-400"> {unpriced} qator narxsiz</span>}
+                  </td>
+                </tr>
+              )}
               {(report?.capex.length ?? 0) > 0 && (
                 <>
                   <Section title="Asosiy vositalar" lines={report?.capex} />
