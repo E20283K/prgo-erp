@@ -88,6 +88,27 @@ def probe_artwork_url(doc_no: str, s_code: str, side: str = "front", sku_id: str
     _EMPTY_ARTWORK_DOCS_CACHE[clean_doc] = now
     return None
 
+def _read_storage_key(src: str) -> Optional[bytes]:
+    """Bytes of an ERP storage URL (`/api/v1/storage/file?key=...`) read from MinIO, or None."""
+    from urllib.parse import urlparse, parse_qs
+    qs = parse_qs(urlparse(src).query)
+    key = (qs.get("key") or qs.get("path") or [""])[0].lstrip("/")
+    if not key or not urlparse(src).path.startswith("/api/v1/storage/file"):
+        return None
+    try:
+        from app.core.s3 import get_s3_client
+        s3 = get_s3_client()
+    except Exception as e:
+        print(f"S3 client unavailable for {key}: {e}", flush=True)
+        return None
+    for bucket in (os.getenv("S3_BUCKET_PREPRESS", "printgoo-prepress"), "printgoo-docs", "printgoo-thumbnails"):
+        try:
+            return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+        except Exception:
+            continue
+    return None
+
+
 def get_raw_artwork(src: Optional[str]) -> Optional[Dict[str, Any]]:
     if not src or not isinstance(src, str):
         return None
@@ -130,6 +151,16 @@ def get_raw_artwork(src: Optional[str]) -> Optional[Dict[str, Any]]:
                     except Exception as e:
                         print(f"Error reading local artwork file ({lp}): {e}", flush=True)
                         break
+
+            # Storage URLs (/api/v1/storage/file?key=...) need a session over HTTP, so the
+            # bytes are read straight from MinIO instead.
+            s3_data = _read_storage_key(src)
+            if s3_data:
+                if s3_data.startswith(b"%PDF") or src.lower().endswith(".pdf"):
+                    return {"kind": "pdf", "bytes": s3_data, "source": src}
+                if b"<svg" in s3_data[:2000]:
+                    return {"kind": "svg", "bytes": s3_data, "source": src}
+                return {"kind": "image", "bytes": s3_data, "source": src}
 
             # Fallback to single primary remote host via HTTP
             base_url = os.getenv("ERP_URL") or "http://host.docker.internal:3000"

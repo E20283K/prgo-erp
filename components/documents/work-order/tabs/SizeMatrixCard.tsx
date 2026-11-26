@@ -80,6 +80,7 @@ import {
   AttachmentAction,
 } from "@/components/ui/attachment";
 import { Progress } from "@/components/ui/progress";
+import { FilePreviewDialog } from "../dialogs/FilePreviewDialog";
 import {
   SizeDistribution,
   SIZE_SCALE_PRESETS,
@@ -3660,46 +3661,11 @@ export function SizeMatrixCard({
       )}
 
       {/* ── Artwork Preview Modal ── */}
-      <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>
-        <DialogContent className="max-w-4xl h-[85vh] p-0 flex flex-col overflow-hidden">
-          <DialogHeader className="p-3 px-4 border-b border-border flex flex-row items-center justify-between shrink-0">
-            <DialogTitle className="text-sm font-semibold truncate flex items-center gap-2">
-              <Eye className="w-4 h-4 text-primary" />
-              <span>Artwork Preview: {previewName}</span>
-            </DialogTitle>
-            <div className="flex items-center gap-2">
-              {previewUrl && (
-                <a
-                  href={previewUrl}
-                  download
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-border bg-background hover:bg-muted text-foreground transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Yuklab olish</span>
-                </a>
-              )}
-            </div>
-          </DialogHeader>
-          <div className="flex-1 bg-muted/20 overflow-auto flex items-center justify-center p-2">
-            {previewUrl && previewUrl.toLowerCase().endsWith(".svg") ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={previewUrl}
-                alt={previewName}
-                className="max-w-full max-h-full object-contain shadow-md rounded border border-border bg-white"
-              />
-            ) : previewUrl ? (
-              <iframe
-                src={`${previewUrl}#toolbar=1`}
-                title={previewName}
-                className="w-full h-full border-0 rounded"
-              />
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <FilePreviewDialog
+        url={previewUrl}
+        name={previewName}
+        onClose={() => setPreviewUrl(null)}
+      />
 
       {/* ── Hover Image Preview (Work Orders DataGrid style) ── */}
       {hoveredPreview && (

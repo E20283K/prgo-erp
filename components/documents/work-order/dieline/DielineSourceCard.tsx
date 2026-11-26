@@ -1,9 +1,19 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
-import { AlertTriangle, Download, ExternalLink, FileUp, Loader2, Scissors } from "lucide-react";
+import { AlertTriangle, Download, Eye, FileText, FileUp, Loader2, Scissors, X } from "lucide-react";
+import {
+  Attachment,
+  AttachmentMedia,
+  AttachmentContent,
+  AttachmentTitle,
+  AttachmentDescription,
+  AttachmentActions,
+  AttachmentAction,
+} from "@/components/ui/attachment";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { FilePreviewDialog } from "../dialogs/FilePreviewDialog";
 import { PresignUnavailableError, uploadOrderFile } from "@/lib/client/uploadOrderFile";
 import type { OrderAttachment, OrderDieline } from "../types";
 import {
@@ -57,6 +67,7 @@ export function DielineSourceCard({
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const candidates = useMemo(() => dielineFileCandidates(attachments, toolingItems), [attachments, toolingItems]);
   const resolved = useMemo(() => resolveDieline(value, spec, candidates), [value, spec, candidates]);
@@ -191,39 +202,68 @@ export function DielineSourceCard({
 
         {mode === "file" && (
           <div className="space-y-1.5">
-            <div className="flex items-center gap-1">
-              <Select
-                value={value?.fileUrl ?? ""}
-                disabled={readOnly || candidates.length === 0}
-                onValueChange={(url) => {
-                  const c = candidates.find((x) => x.url === url);
-                  if (c) onChange({ source: "file", fileUrl: c.url, fileName: c.name, origin: c.origin });
-                }}
-              >
-                <SelectTrigger className="h-7 flex-1 min-w-0 text-xs px-2 bg-background">
-                  <SelectValue placeholder={candidates.length ? "Faylni tanlang" : "Fayl yo'q"} />
-                </SelectTrigger>
-                <SelectContent className="text-xs">
-                  {candidates.map((c) => (
-                    <SelectItem key={c.url} value={c.url} className="text-xs">
-                      {c.name}
-                      {c.origin === "tooling" ? " · jihoz" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {value?.fileUrl && (
-                <a
-                  href={value.fileUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Ochish"
-                  className="size-7 shrink-0 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground"
+            {value?.fileUrl ? (
+              <Attachment size="xs" state="done" className="w-full max-w-[260px] bg-card border-border shadow-none">
+                <AttachmentMedia variant="icon" className="size-6 shrink-0 bg-primary/10 text-primary">
+                  <FileText className="size-3.5" />
+                </AttachmentMedia>
+                <AttachmentContent className="min-w-0 flex-1">
+                  <AttachmentTitle
+                    className="text-[11px] font-mono truncate cursor-pointer hover:text-primary transition-colors block"
+                    title={value.fileName || "noj.pdf"}
+                    onClick={() => setPreviewOpen(true)}
+                  >
+                    {value.fileName || "noj.pdf"}
+                  </AttachmentTitle>
+                  <AttachmentDescription className="text-[10px] text-muted-foreground">PDF / SVG</AttachmentDescription>
+                </AttachmentContent>
+                <AttachmentActions className="gap-0.5">
+                  <AttachmentAction
+                    type="button"
+                    size="icon-xs"
+                    onClick={() => setPreviewOpen(true)}
+                    title="Ko'rish"
+                    className="text-muted-foreground hover:text-foreground cursor-pointer size-5"
+                  >
+                    <Eye className="size-3" />
+                  </AttachmentAction>
+                  {!readOnly && (
+                    <AttachmentAction
+                      type="button"
+                      size="icon-xs"
+                      onClick={() => onChange({ source: "file" })}
+                      title="O'chirish"
+                      className="text-muted-foreground hover:text-destructive cursor-pointer size-5"
+                    >
+                      <X className="size-3" />
+                    </AttachmentAction>
+                  )}
+                </AttachmentActions>
+              </Attachment>
+            ) : (
+              candidates.length > 0 && (
+                <Select
+                  value=""
+                  disabled={readOnly}
+                  onValueChange={(url) => {
+                    const c = candidates.find((x) => x.url === url);
+                    if (c) onChange({ source: "file", fileUrl: c.url, fileName: c.name, origin: c.origin });
+                  }}
                 >
-                  <ExternalLink className="size-3.5" />
-                </a>
-              )}
-            </div>
+                  <SelectTrigger className="h-7 w-full text-xs px-2 bg-background">
+                    <SelectValue placeholder="Faylni tanlang" />
+                  </SelectTrigger>
+                  <SelectContent className="text-xs">
+                    {candidates.map((c) => (
+                      <SelectItem key={c.url} value={c.url} className="text-xs">
+                        {c.name}
+                        {c.origin === "tooling" ? " · jihoz" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )
+            )}
             <input
               ref={inputRef}
               type="file"
@@ -248,6 +288,13 @@ export function DielineSourceCard({
         )}
 
         {error && <div className="text-[11px] text-destructive">{error}</div>}
+
+        <FilePreviewDialog
+          url={previewOpen && value?.fileUrl ? value.fileUrl : null}
+          name={`Noj: ${value?.fileName || "noj.pdf"}`}
+          fileName={value?.fileName}
+          onClose={() => setPreviewOpen(false)}
+        />
       </div>
     </section>
   );

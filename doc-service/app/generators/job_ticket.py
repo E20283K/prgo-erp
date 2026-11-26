@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import math
 import base64
 from datetime import datetime
@@ -641,7 +642,18 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     back_raw_p1 = get_raw_artwork(back_src)
 
     # Dieline file probing from attachments or specific fields
-    dieline_src = od.get("dielineUrl") or od.get("customSvgPath")
+    # The order screen keeps the chosen die as `dieline` ({source: "file", fileUrl}); a die
+    # file attached to a die-cutting tooling item counts too.
+    dl = od.get("dieline") if isinstance(od.get("dieline"), dict) else {}
+    dieline_src = (dl.get("fileUrl") if dl.get("source") == "file" else None) or od.get("dielineUrl")
+    if not dieline_src and dl.get("source") != "none":
+        for t in od.get("toolingItems") or []:
+            if isinstance(t, dict) and t.get("category") == "die_cutting":
+                tu = str(t.get("fileUrl") or "")
+                if tu and not tu.startswith("data:") and re.search(r"\.(pdf|svg)(\?|&|$)", tu.lower()):
+                    dieline_src = tu
+                    break
+    dieline_src = dieline_src or od.get("customSvgPath")
     if not dieline_src:
         for att in od.get("attachments") or []:
             if isinstance(att, dict) and (att.get("category") == "dieline" or "dieline" in str(att.get("name", "")).lower() or "shtamp" in str(att.get("name", "")).lower()):
@@ -720,18 +732,19 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.drawCentredString(0, 0, text)
         c.restoreState()
 
-    def place(x0: float, y0: float, raw: Optional[Dict[str, Any]], bleed_box: bool):
+    def place(x0: float, y0: float, raw: Optional[Dict[str, Any]], bleed_box: bool, contour: bool = False):
         if raw and raw["kind"] == "pdf":
             vector_overlays.append({
                 "page_idx": 0, "x_mm": x0, "y_mm": y0, "w_mm": art_w, "h_mm": art_h,
-                "pdf_bytes": raw["bytes"], "draw_contour": True, "draw_bleed_box": bleed_box, "bleed_mm": bleed,
+                "pdf_bytes": raw["bytes"], "draw_contour": contour, "draw_bleed_box": bleed_box, "bleed_mm": bleed,
             })
             return True
         if raw:
             draw_raster_or_svg(c, raw, x0, y0, art_w, art_h, y_mm)
-            c.setStrokeColor(colors.HexColor("#10b981"))
-            c.setLineWidth(0.6)
-            c.rect(x0 * mm, y_mm(y0 + art_h), art_w * mm, art_h * mm, fill=0, stroke=1)
+            if contour:
+                c.setStrokeColor(colors.HexColor("#10b981"))
+                c.setLineWidth(0.6)
+                c.rect(x0 * mm, y_mm(y0 + art_h), art_w * mm, art_h * mm, fill=0, stroke=1)
             return True
         return False
 
