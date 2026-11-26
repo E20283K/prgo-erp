@@ -31,6 +31,7 @@ import {
   type OrderCardMedia,
 } from "./orderCardGenerator";
 import { tryHandlePayoutBotUpdate } from "./telegramPayoutBot";
+import { syncPickupDeliveryCash } from "./cashJournalService";
 import { setWebAppMenuButton, telegramWebAppUrl } from "./telegramWebApp";
 import { tryHandleRollCallCommand } from "./rollCallGroupService";
 import { findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
@@ -2172,7 +2173,7 @@ export async function processTelegramWebhookUpdate(
             const nextKeyboard = { inline_keyboard: purchaseOrderKeyboard(order.id, newStatus) };
 
             // Baza statusini yangilash; yangi holat uchun eslatmalar boshidan sanaladi
-            await db
+            const [updatedOrder] = await db
               .update(supplierOrders)
               .set({
                 status: newStatus as any,
@@ -2183,7 +2184,10 @@ export async function processTelegramWebhookUpdate(
                 lastReminderAt: null,
                 updatedAt: new Date(),
               })
-              .where(eq(supplierOrders.id, order.id));
+              .where(eq(supplierOrders.id, order.id))
+              .returning();
+            // O'zimiz olib kelgan dostavka kassadan chiqim bo'lib yoziladi (yoki stornolanadi)
+            if (updatedOrder) await syncPickupDeliveryCash(db, updatedOrder);
 
             // Telegram bot orqali javob (Toast) qaytarish
             if (isLiveBot) {

@@ -16,7 +16,7 @@ import {
 import { relations } from "drizzle-orm";
 import { companies, branches } from "./core";
 import { items } from "./master";
-import { clients } from "./crm";
+import { clients, suppliers, supplierOrders } from "./crm";
 
 // ─── Enums: 1C Uslubidagi Ombor Holatlari va Turlari ──────────────────────────
 
@@ -173,6 +173,11 @@ export const warehouseReceipts = pgTable(
     receiptNumber: varchar("receipt_number", { length: 64 }).notNull(), // Masalan: "RCV-3001"
     receiptDate: timestamp("receipt_date", { withTimezone: true }).defaultNow().notNull(),
     supplierName: varchar("supplier_name", { length: 255 }).notNull(),
+    // Ta'minotchi qarziga bog'lash nom bo'yicha emas, shu FK orqali bo'ladi.
+    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    supplierOrderId: uuid("supplier_order_id").references(() => supplierOrders.id, {
+      onDelete: "set null",
+    }),
     poNumber: varchar("po_number", { length: 64 }), // Shartnoma yoki buyurtma raqami
     locationName: varchar("location_name", { length: 255 }), // Ombor yoki sektor nomi
     status: warehouseReceiptStatusEnum("status").default("Draft").notNull(),
@@ -187,6 +192,7 @@ export const warehouseReceipts = pgTable(
     uniqueIndex("receipts_company_number_uq").on(table.companyId, table.receiptNumber),
     index("receipts_company_date_idx").on(table.companyId, table.receiptDate),
     index("receipts_warehouse_idx").on(table.warehouseId),
+    index("receipts_supplier_idx").on(table.supplierId),
   ]
 );
 
@@ -526,6 +532,14 @@ export const warehouseReceiptsRelations = relations(warehouseReceipts, ({ one, m
   warehouse: one(warehouses, {
     fields: [warehouseReceipts.warehouseId],
     references: [warehouses.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [warehouseReceipts.supplierId],
+    references: [suppliers.id],
+  }),
+  supplierOrder: one(supplierOrders, {
+    fields: [warehouseReceipts.supplierOrderId],
+    references: [supplierOrders.id],
   }),
   items: many(warehouseReceiptItems),
 }));

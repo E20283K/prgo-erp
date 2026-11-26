@@ -11,6 +11,7 @@ import {
   diesTooling,
 } from "./schema";
 import { ensureStorageBuckets } from "../lib/server/storage";
+import { ensureCashCategories, ensureDefaultCashDesk } from "../lib/server/cashJournalService";
 import { JR_1521_CYLINDERS, FLEXO_MACHINES, FLEXO_MATERIALS } from "../lib/flexo/masterData";
 import { ALL_PANTONE_COLORS } from "../lib/pantone-catalog";
 
@@ -71,6 +72,12 @@ async function seedDatabase() {
       },
     })
     .returning();
+
+  // Pul harakati moddalari va asosiy kassa
+  for (const c of [printgooCompany, textileCompany]) {
+    await ensureCashCategories(c.id);
+    await ensureDefaultCashDesk(c.id);
+  }
 
   // 2. Filiallar (Branches) - yangi tizimda toza boshlanadi
   const branchId = undefined;

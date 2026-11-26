@@ -45,6 +45,15 @@ import {
 } from "@/store/workspaceStore";
 import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "@/components/grid/DataGrid";
 import { AktSverkaPrintModal } from "../components/AktSverkaPrintModal";
+import { MoneyAccountSelect } from "@/components/finance/MoneyAccountSelect";
+
+type ClientPayMethod = "bank_transfer" | "corporate_card" | "cash" | "offset";
+const PAY_METHOD_LABELS: Record<ClientPayMethod, string> = {
+  bank_transfer: "Bank o'tkazmasi",
+  corporate_card: "Karta (Payme / Click)",
+  cash: "Naqd kassa",
+  offset: "O'zaro hisob",
+};
 
 const DataEditor = dynamic(
   () => import("@glideapps/glide-data-grid").then((mod) => mod.DataEditor),
@@ -95,22 +104,26 @@ export function CustomerSettlementsTab({
 
   // Payment Form state
   const [paymentAmount, setPaymentAmount] = useState("5000");
-  const [paymentMethod, setPaymentMethod] = useState("Bank o'tkazmasi");
+  const [paymentMethod, setPaymentMethod] = useState<ClientPayMethod>("bank_transfer");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
 
   const handleConfirmPayment = async () => {
     const amt = Number(paymentAmount);
     if (!amt || amt <= 0) return;
     const customerKey = settlement ? settlement.customer : customer.name;
+    const methodLabel = PAY_METHOD_LABELS[paymentMethod];
     const noteText = paymentNote.trim()
-      ? `${paymentNote.trim()} (${paymentMethod})`
-      : `Shartnoma ${customer.contractNo || ""} bo'yicha to'lov (${paymentMethod})`.trim();
+      ? `${paymentNote.trim()} (${methodLabel})`
+      : `Shartnoma ${customer.contractNo || ""} bo'yicha to'lov (${methodLabel})`.trim();
 
     if (recordPaymentAsync) {
       const saved = await recordPaymentAsync({
         customer: customerKey,
         amount: amt,
         currency: isUsd ? "USD" : "UZS",
+        method: paymentMethod,
+        bankAccountId: paymentMethod !== "offset" ? paymentAccountId || null : null,
         contractNo: customer.contractNo,
         note: noteText,
       });
@@ -121,7 +134,7 @@ export function CustomerSettlementsTab({
 
     addNotification({
       title: "Mijoz to'lovi qabul qilindi",
-      description: `${customer.name} hisobiga +${formatMoney(amt)} (${paymentMethod}) yozildi va Akt Sverka yangilandi.`,
+      description: `${customer.name} hisobiga +${formatMoney(amt)} (${methodLabel}) yozildi va Akt Sverka yangilandi.`,
       severity: "success",
       link: { module: "finance", subModule: "settlements" },
     });
@@ -446,18 +459,31 @@ export function CustomerSettlementsTab({
 
           <div className="space-y-1 w-52">
             <Label className="text-[11px] font-semibold">To&apos;lov usuli</Label>
-            <Select value={paymentMethod} onValueChange={(v) => v && setPaymentMethod(v)}>
+            <Select value={paymentMethod} onValueChange={(v) => v && setPaymentMethod(v as ClientPayMethod)}>
               <SelectTrigger className="h-7 text-xs bg-background">
-                <SelectValue />
+                <SelectValue>{PAY_METHOD_LABELS[paymentMethod]}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Bank o'tkazmasi">Bank o&apos;tkazmasi</SelectItem>
-                <SelectItem value="Korporativ karta (Payme / Click)">Korporativ karta</SelectItem>
-                <SelectItem value="Naqd kassa (ПКО)">Naqd kassa (ПКО)</SelectItem>
-                <SelectItem value="Akkreditiv / Faktoring">Akkreditiv / Faktoring</SelectItem>
+                {(Object.keys(PAY_METHOD_LABELS) as ClientPayMethod[]).map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {PAY_METHOD_LABELS[m]}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+
+          {paymentMethod !== "offset" && (
+            <div className="space-y-1 w-52">
+              <Label className="text-[11px] font-semibold">Hisob</Label>
+              <MoneyAccountSelect
+                method={paymentMethod}
+                value={paymentAccountId}
+                onChange={setPaymentAccountId}
+                className="bg-background"
+              />
+            </div>
+          )}
 
           <div className="space-y-1 flex-1 min-w-[200px]">
             <Label className="text-[11px] font-semibold">Izoh / To&apos;lov topshiriqnomasi №</Label>

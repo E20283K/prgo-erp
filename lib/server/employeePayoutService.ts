@@ -10,6 +10,8 @@ import type {
   PayoutSource,
 } from "@/components/documents/hr/types";
 import { getCompanyIdByCode } from "./crmService";
+import { postCashTransaction, resolveMoneyAccount, reverseCashTransaction } from "./cashJournalService";
+import { CASH_CATEGORY } from "@/lib/finance/cashCategories";
 
 const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -22,6 +24,8 @@ export interface CreatePayoutInput {
   advanceDate: string; // YYYY-MM-DD
   period?: string; // YYYY-MM, defaults to the month of advanceDate
   paymentMethod?: PayoutMethod;
+  /** Money account the payout leaves from; by default the cash desk (cash) or the card/bank account (card). */
+  accountId?: string | null;
   currency?: string;
   note?: string | null;
   source: PayoutSource;
@@ -139,6 +143,26 @@ export async function createPayoutTx(tx: Tx, input: CreatePayoutInput): Promise<
     })
     .returning({ id: employeeAdvances.id });
 
+  // The money leaves the cash desk or a card in the same transaction as the payout itself.
+  const isSettlement = input.kind === "settlement";
+  const method = (input.paymentMethod || "cash") === "card" ? "corporate_card" : "cash";
+  await postCashTransaction(tx, {
+    companyId: input.companyId,
+    date: input.advanceDate,
+    direction: "out",
+    categoryCode: isSettlement ? CASH_CATEGORY.PAYROLL_SETTLEMENT : CASH_CATEGORY.PAYROLL_ADVANCE,
+    amount,
+    currency: (input.currency || emp.currency || "UZS").toUpperCase(),
+    accountId: await resolveMoneyAccount(tx, input.companyId, method, input.accountId),
+    method,
+    counterparty: { type: "employee", employeeId: emp.id, name: emp.fullName },
+    sourceType: isSettlement ? "payroll_settlement" : "employee_advance",
+    sourceId: row.id,
+    sourceDocNo: period,
+    note: input.note?.trim() || null,
+    createdByUserId: input.createdByUserId ?? null,
+  });
+
   const result: CreatePayoutResult = { id: row.id };
 
   if (input.kind === "advance") {
@@ -208,6 +232,14 @@ export async function cancelPayout(
         cancelReason: reason?.trim() || null,
       })
       .where(eq(employeeAdvances.id, id));
+
+    await reverseCashTransaction(
+      tx,
+      companyId,
+      row.kind === "settlement" ? "payroll_settlement" : "employee_advance",
+      row.id,
+      { userId, reason: reason?.trim() || "Bekor qilindi" }
+    );
 
     // A cancelled raschot means the month is no longer fully paid out.
     if (row.kind === "settlement") {

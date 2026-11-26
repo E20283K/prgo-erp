@@ -79,6 +79,7 @@ const ORDER_TYPE_LABELS: Record<string, string> = {
   raw_materials: "Qog'oz / Karton / Bo'yoq",
   outsourcing: "Autsorsing xizmati",
   service: "Texnik servis",
+  equipment: "Jihoz / Uskuna",
 };
 
 const ORDER_STATUS_LABELS: Record<string, string> = {

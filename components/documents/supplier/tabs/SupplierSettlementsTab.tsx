@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { MoneyAccountSelect } from "@/components/finance/MoneyAccountSelect";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -67,14 +68,6 @@ interface SupplierSettlementsTabProps {
   setIsPaymentOpen?: (open: boolean) => void;
 }
 
-interface BankAccountOption {
-  id: string;
-  name: string;
-  accountNumber: string;
-  bankName: string;
-  currency: string;
-}
-
 export function SupplierSettlementsTab({
   supplier,
   ledger: propLedger,
@@ -104,7 +97,6 @@ export function SupplierSettlementsTab({
   const isPaymentOpen = externalPaymentOpen !== undefined ? externalPaymentOpen : internalPaymentOpen;
   const setIsPaymentOpen = setExternalPaymentOpen || setInternalPaymentOpen;
 
-  const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
   const [filterPeriod, setFilterPeriod] = useState<string>("all");
 
   const [paymentForm, setPaymentForm] = useState({
@@ -117,6 +109,10 @@ export function SupplierSettlementsTab({
   });
 
   const curr = supplier.currency || "UZS";
+  const setPaymentAccount = useCallback(
+    (id: string) => setPaymentForm((prev) => (prev.bankAccountId === id ? prev : { ...prev, bankAccountId: id })),
+    []
+  );
 
   // Use props if provided, otherwise internal state
   const ledger = propLedger !== undefined ? propLedger : internalLedger;
@@ -154,22 +150,6 @@ export function SupplierSettlementsTab({
     }
   }, [supplier.id, onRefreshLedger, onBalanceUpdated]);
 
-  // Fetch bank accounts
-  const fetchBankAccounts = useCallback(async () => {
-    try {
-      const res = await fetch("/api/v1/finance/bank-accounts");
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        setBankAccounts(json.data);
-        if (json.data.length > 0 && !paymentForm.bankAccountId) {
-          setPaymentForm((prev) => ({ ...prev, bankAccountId: json.data[0].id }));
-        }
-      }
-    } catch {
-      // non-fatal
-    }
-  }, [paymentForm.bankAccountId]);
-
   useEffect(() => {
     if (propLedger === undefined) {
       fetchLedger();
@@ -178,7 +158,6 @@ export function SupplierSettlementsTab({
 
   useEffect(() => {
     if (isPaymentOpen) {
-      fetchBankAccounts();
       if (!paymentForm.amount && closingBalance > 0) {
         setPaymentForm((prev) => ({
           ...prev,
@@ -187,7 +166,7 @@ export function SupplierSettlementsTab({
         }));
       }
     }
-  }, [isPaymentOpen, fetchBankAccounts, closingBalance, supplier.name, paymentForm.amount]);
+  }, [isPaymentOpen, closingBalance, supplier.name, paymentForm.amount]);
 
   const handleSavePayment = async () => {
     if (!supplier.id || supplier.id.startsWith("draft-") || supplier.id.startsWith("new-")) {
@@ -213,7 +192,7 @@ export function SupplierSettlementsTab({
           amount: numAmount,
           currency: paymentForm.currency,
           method: paymentForm.method,
-          bankAccountId: paymentForm.bankAccountId || undefined,
+          bankAccountId: paymentForm.method !== "offset" ? paymentForm.bankAccountId || undefined : undefined,
           date: paymentForm.date,
           note: paymentForm.note,
         }),
@@ -512,24 +491,15 @@ export function SupplierSettlementsTab({
             </Select>
           </div>
 
-          {bankAccounts.length > 0 && paymentForm.method === "bank_transfer" && (
+          {paymentForm.method !== "offset" && (
             <div className="space-y-1 w-52">
-              <Label className="text-[11px] font-semibold">Chiqim bank hisobi</Label>
-              <Select
+              <Label className="text-[11px] font-semibold">Hisob</Label>
+              <MoneyAccountSelect
+                method={paymentForm.method}
                 value={paymentForm.bankAccountId}
-                onValueChange={(val) => setPaymentForm((prev) => ({ ...prev, bankAccountId: val || "" }))}
-              >
-                <SelectTrigger className="h-7 text-xs bg-background">
-                  <SelectValue placeholder="Bank hisobini tanlang" />
-                </SelectTrigger>
-                <SelectContent>
-                  {bankAccounts.map((acc) => (
-                    <SelectItem key={acc.id} value={acc.id} className="text-xs">
-                      {acc.bankName} ({acc.accountNumber.slice(-4)})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={setPaymentAccount}
+                className="bg-background"
+              />
             </div>
           )}
 

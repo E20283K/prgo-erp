@@ -1,6 +1,10 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Factory,
+  Wallet,
+  Tags,
+  LineChart,
+
   Users,
   ShoppingCart,
   Package,
@@ -214,6 +218,19 @@ export const MODULE_NAV: ModuleDef[] = [
           { id: "settlements", label: "Settlements", icon: Scale },
           { id: "payments", label: "Payments", icon: CreditCard },
           { id: "cost-analysis", label: "Cost & Margin", icon: TrendingUp },
+        ],
+      },
+      {
+        id: "treasury",
+        label: "Treasury",
+        icon: Wallet,
+        defaultOpen: true,
+        items: [
+          { id: "cash-journal", label: "Cash journal", icon: ArrowLeftRight },
+          { id: "money-accounts", label: "Accounts", icon: Landmark },
+          { id: "cash-categories", label: "Categories", icon: Tags },
+          { id: "cash-flow", label: "Cash flow", icon: BarChart3 },
+          { id: "pnl", label: "P&L", icon: LineChart },
         ],
       },
     ],

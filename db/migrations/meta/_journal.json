@@ -218,6 +218,13 @@
       "when": 1795684890781,
       "tag": "0030_finished_goods_image",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795710300141,
+      "tag": "0031_cash_journal",
+      "breakpoints": true
     }
   ]
 }

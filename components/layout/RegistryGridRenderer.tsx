@@ -9,6 +9,11 @@ const ProductionGrid = dynamic(() => import("@/components/grid/ProductionGrid").
 const WarehouseGrid = dynamic(() => import("@/components/grid/WarehouseGrid").then((mod) => mod.WarehouseGrid), { ssr: false });
 const WarehouseWmsView = dynamic(() => import("@/components/documents/warehouse/wms/WarehouseWmsView").then((mod) => mod.WarehouseWmsView), { ssr: false });
 const SalesGrid = dynamic(() => import("@/components/grid/SalesGrid").then((mod) => mod.SalesGrid), { ssr: false });
+const CashJournalGrid = dynamic(() => import("@/components/documents/finance/CashJournalGrid").then((m) => m.CashJournalGrid), { ssr: false });
+const MoneyAccountsGrid = dynamic(() => import("@/components/documents/finance/MoneyAccountsGrid").then((m) => m.MoneyAccountsGrid), { ssr: false });
+const CashCategoriesGrid = dynamic(() => import("@/components/documents/finance/CashCategoriesGrid").then((m) => m.CashCategoriesGrid), { ssr: false });
+const CashFlowReport = dynamic(() => import("@/components/documents/finance/CashFlowReport").then((m) => m.CashFlowReport), { ssr: false });
+const PnlReport = dynamic(() => import("@/components/documents/finance/PnlReport").then((m) => m.PnlReport), { ssr: false });
 const FinanceGrid = dynamic(() => import("@/components/grid/FinanceGrid").then((mod) => mod.FinanceGrid), { ssr: false });
 const TaskGrid = dynamic(() => import("@/components/grid/TaskGrid").then((mod) => mod.TaskGrid), { ssr: false });
 const SettingsGrid = dynamic(() => import("@/components/grid/SettingsGrid").then((mod) => mod.SettingsGrid), { ssr: false });
@@ -72,6 +77,11 @@ export function RegistryGridRenderer({ tab }: { tab: DocumentTab }) {
     if (tab.id.includes("carriers")) return <WarehouseGrid type="carriers" />;
     return <WarehouseGrid type="stock-balance" />;
   } else if (tab.module === "finance") {
+    if (tab.id.includes("cash-journal")) return <CashJournalGrid />;
+    if (tab.id.includes("money-accounts")) return <MoneyAccountsGrid />;
+    if (tab.id.includes("cash-categories")) return <CashCategoriesGrid />;
+    if (tab.id.includes("cash-flow")) return <CashFlowReport />;
+    if (tab.id.includes("pnl")) return <PnlReport />;
     if (tab.id.includes("delivery-acts")) return <SalesGrid type="delivery-acts" />;
     if (tab.id.includes("settlements")) return <FinanceGrid type="settlements" />;
     if (tab.id.includes("payments")) return <FinanceGrid type="payments" />;

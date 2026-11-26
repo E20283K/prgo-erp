@@ -13,6 +13,8 @@ import { eq, desc, and, sql, ilike } from "drizzle-orm";
 import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
 import { getNextDeliveryActNumber, calculateNextNumber, getCurrentYearSuffix, lockNumbering } from "./numberingService";
 import { emitNotification } from "./notificationService";
+import { postCashTransaction, resolveMoneyAccount } from "./cashJournalService";
+import { CASH_CATEGORY } from "@/lib/finance/cashCategories";
 import type { DeliveryActRecord, ClientSettlementRecord } from "@/store/workspaceStore";
 
 const FALLBACK_USD_RATE = 12850;
@@ -801,6 +803,8 @@ export async function recordPayment(
     currency?: string;
     exchangeRate?: number;
     method?: "bank_transfer" | "cash" | "corporate_card" | "offset";
+    /** Money account the payment arrives on; by default the cash desk or the default bank account. */
+    bankAccountId?: string | null;
     note?: string;
     contractNo?: string;
     /** The act this payment settles: its UUID or number (SF-…). */
@@ -862,6 +866,8 @@ export async function recordPayment(
       docNo = calculateNextNumber("PAY", rows.map((r) => r.num), yearSuffix);
     }
     const date = data.date || new Date().toISOString().split("T")[0];
+    const method = data.method || "bank_transfer";
+    const accountId = await resolveMoneyAccount(tx, companyId, method, data.bankAccountId || null);
 
     const [payment] = await tx
       .insert(clientPayments)
@@ -876,12 +882,34 @@ export async function recordPayment(
         amountUzs: amountUzs.toString(),
         exchangeRate: rate.toString(),
         currency,
-        method: data.method || "bank_transfer",
+        method,
+        bankAccountId: accountId,
         deliveryActId: actId,
         note: data.note || null,
         status: "confirmed",
       })
       .returning();
+
+    // O'zaro hisob (offset) pul harakati emas: faqat qarzni yopadi.
+    if (method !== "offset") {
+      await postCashTransaction(tx, {
+        companyId,
+        date,
+        direction: "in",
+        categoryCode: CASH_CATEGORY.CLIENT_PAYMENT,
+        amount,
+        currency,
+        exchangeRate: currency === "UZS" ? null : rate,
+        amountUzs,
+        accountId,
+        method,
+        counterparty: { type: "client", clientId: targetClient.id, name: targetClient.name },
+        sourceType: "client_payment",
+        sourceId: payment.id,
+        sourceDocNo: docNo,
+        note: data.note || null,
+      });
+    }
 
     await syncClientSettlement(companyId, targetClient.id, targetClient.name, targetClient.tin || undefined, undefined, tx);
 

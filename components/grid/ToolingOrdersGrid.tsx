@@ -91,6 +91,7 @@ const ORDER_TYPE_LABELS: Record<string, string> = {
   outsourcing: "Autsorsing xizmati",
   raw_materials: "Material xaridi",
   service: "Texnik servis",
+  equipment: "Jihoz / Uskuna",
 };
 
 const CLOSED_STATUSES: ReadonlyArray<string> = ["Delivered", "Cancelled"];

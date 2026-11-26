@@ -4,7 +4,6 @@ import {
   supplierOrders,
   supplierPayments,
   supplierContracts,
-  bankAccounts,
   warehouseReceipts,
   workOrders,
 } from "@/db/schema";
@@ -12,6 +11,13 @@ import { eq, desc, and, or, sql, ilike } from "drizzle-orm";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
 import { syncPurchaseOrderKeyboard } from "./telegramService";
+import {
+  postCashTransaction,
+  resolveMoneyAccount,
+  reverseCashTransaction,
+  syncPickupDeliveryCash,
+} from "./cashJournalService";
+import { CASH_CATEGORY } from "@/lib/finance/cashCategories";
 
 export type SupplierCategory =
   | "raw_materials"
@@ -84,7 +90,7 @@ export interface SupplierOrderRecord {
   orderNo: string;
   orderDate: string;
   deliveryDeadline?: string;
-  orderType: "die_tooling" | "ctp_plates" | "cliche" | "raw_materials" | "outsourcing" | "service";
+  orderType: "die_tooling" | "ctp_plates" | "cliche" | "raw_materials" | "outsourcing" | "service" | "equipment";
   title: string;
   workOrderId?: string;
   workOrderNo?: string;
@@ -595,6 +601,7 @@ export async function upsertSupplierOrder(
 
   // Ta'minotchi qarzini yangilash
   await syncSupplierBalance(companyId, savedOrder.supplierId);
+  await syncPickupDeliveryCash(db, savedOrder);
 
   if (existing && existing.status !== savedOrder.status) {
     await notifyToolingStatusChange(savedOrder, companyCode);
@@ -666,8 +673,14 @@ export async function deleteSupplierOrder(orderId: string, companyCode: string =
   });
   if (!existing) throw new Error("Buyurtma topilmadi");
 
-  // Bog'langan to'lovlar FK orqali supplier_order_id = NULL bo'ladi
-  await db.delete(supplierOrders).where(eq(supplierOrders.id, existing.id));
+  await db.transaction(async (tx) => {
+    // O'zimiz to'lagan dostavka kassaga qaytadi (storno); jurnalda tarix qoladi.
+    await reverseCashTransaction(tx, companyId, "supplier_order_delivery", existing.id, {
+      reason: `${existing.orderNo} o'chirildi`,
+    });
+    // Bog'langan to'lovlar FK orqali supplier_order_id = NULL bo'ladi
+    await tx.delete(supplierOrders).where(eq(supplierOrders.id, existing.id));
+  });
 
   // Ta'minotchi qarzini qayta hisoblash
   await syncSupplierBalance(companyId, existing.supplierId);
@@ -744,35 +757,49 @@ export async function recordSupplierPayment(
 
   const docNo = `SPAY-${Date.now().toString().slice(-6)}`;
   const date = data.date || new Date().toISOString().split("T")[0];
+  const method = data.method || "bank_transfer";
+  const currency = data.currency || supp.currency || "UZS";
 
-  const [payment] = await db
-    .insert(supplierPayments)
-    .values({
-      companyId,
-      docNo,
-      date,
-      supplierId: supp.id,
-      supplierName: supp.name,
-      amount: data.amount.toString(),
-      currency: data.currency || supp.currency || "UZS",
-      method: data.method || "bank_transfer",
-      bankAccountId: data.bankAccountId || null,
-      supplierOrderId: data.supplierOrderId || null,
-      note: data.note || null,
-      status: "confirmed",
-    })
-    .returning();
-
-  // Agar bank hisobi tanlangan bo'lsa, uning balansidan yechamiz
-  if (data.bankAccountId) {
-    await db
-      .update(bankAccounts)
-      .set({
-        balance: sql`${bankAccounts.balance} - ${data.amount}`,
-        updatedAt: new Date(),
+  const payment = await db.transaction(async (tx) => {
+    const accountId = await resolveMoneyAccount(tx, companyId, method, data.bankAccountId || null);
+    const [row] = await tx
+      .insert(supplierPayments)
+      .values({
+        companyId,
+        docNo,
+        date,
+        supplierId: supp.id,
+        supplierName: supp.name,
+        amount: data.amount.toString(),
+        currency,
+        method,
+        bankAccountId: accountId,
+        supplierOrderId: data.supplierOrderId || null,
+        note: data.note || null,
+        status: "confirmed",
       })
-      .where(eq(bankAccounts.id, data.bankAccountId));
-  }
+      .returning();
+
+    // O'zaro hisob (offset) pul harakati emas: faqat qarzni yopadi.
+    if (method !== "offset") {
+      await postCashTransaction(tx, {
+        companyId,
+        date,
+        direction: "out",
+        categoryCode: CASH_CATEGORY.SUPPLIER_PAYMENT,
+        amount: data.amount,
+        currency,
+        accountId,
+        method,
+        counterparty: { type: "supplier", supplierId: supp.id, name: supp.name },
+        sourceType: "supplier_payment",
+        sourceId: row.id,
+        sourceDocNo: docNo,
+        note: data.note || null,
+      });
+    }
+    return row;
+  });
 
   // Ta'minotchi qarzini yangilash
   await syncSupplierBalance(companyId, supp.id);

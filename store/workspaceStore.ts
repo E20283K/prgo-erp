@@ -914,6 +914,7 @@ interface WorkspaceState {
     currency?: string;
     exchangeRate?: number;
     method?: "bank_transfer" | "cash" | "corporate_card" | "offset";
+    bankAccountId?: string | null;
     contractNo?: string;
   }, companyCode?: string) => Promise<boolean>;
   saveDeliveryActAsync: (act: DeliveryActRecord, companyCode?: string) => Promise<boolean>;

@@ -8,11 +8,14 @@ import {
   numeric,
   integer,
   timestamp,
+  date,
   index,
   uniqueIndex,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { companies } from "./core";
+import { employees } from "./hr";
 import { clients, suppliers, supplierOrders } from "./crm";
 import { workOrders } from "./production";
 import { warehouseShipments } from "./warehouse";
@@ -46,7 +49,30 @@ export const settlementStatusEnum = pgEnum("finance_settlement_status", [
   "advance",
 ]);
 
-// ─── 1. Bank Accounts (Korxona Bank Hisoblari) ─────────────────────────────────
+/** Where the money sits: a bank account, a cash desk (kassa) or a corporate card. */
+export const moneyAccountKindEnum = pgEnum("finance_money_account_kind", [
+  "bank",
+  "cash",
+  "card",
+]);
+
+/**
+ * How a cash-journal category lands in the reports. Paying money and recognising a cost
+ * are separate events, so a payment of an existing debt is a "settlement", not an expense.
+ */
+export const pnlTypeEnum = pgEnum("finance_pnl_type", [
+  "revenue",    // Daromad (P&L)
+  "cogs",       // Tannarx: xomashyo sarfi, dostavka, autsorsing
+  "expense",    // Davr xarajati: ijara, kommunal, ish haqi fondi
+  "capex",      // Asosiy vosita: jihoz (P&L ga birdaniga tushmaydi)
+  "prepayment", // Avans: xarajat emas, debitorlik
+  "settlement", // Qarzni yopish: ta'minotchiga to'lov, mijoz to'lovi, oylik raschet
+  "transfer",   // Hisoblar orasida o'tkazma
+]);
+
+export const cashDirectionEnum = pgEnum("finance_cash_direction", ["in", "out"]);
+
+// ─── 1. Money Accounts (Bank hisoblari, kassa, karta) ──────────────────────────
 
 export const bankAccounts = pgTable(
   "bank_accounts",
@@ -55,12 +81,16 @@ export const bankAccounts = pgTable(
     companyId: uuid("company_id")
       .notNull()
       .references(() => companies.id, { onDelete: "restrict" }),
-    name: varchar("name", { length: 128 }).notNull(), // Masalan: "Kapitalbank Asosiy UZS"
-    bankName: varchar("bank_name", { length: 255 }).notNull(),
-    accountNo: varchar("account_no", { length: 64 }).notNull(), // 20208000...
-    mfo: varchar("mfo", { length: 16 }).notNull(), // 00440...
+    kind: moneyAccountKindEnum("kind").default("bank").notNull(),
+    name: varchar("name", { length: 128 }).notNull(), // Masalan: "Kapitalbank Asosiy UZS" | "Asosiy kassa"
+    // Bank rekvizitlari faqat kind = "bank" uchun majburiy (kassa va kartada bo'sh).
+    bankName: varchar("bank_name", { length: 255 }),
+    accountNo: varchar("account_no", { length: 64 }), // 20208000...
+    mfo: varchar("mfo", { length: 16 }), // 00440...
     currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
     isDefault: boolean("is_default").default(false).notNull(),
+    // Qoldiq = boshlang'ich qoldiq + pul harakati jurnali. `balance` shu yig'indining keshi.
+    openingBalance: numeric("opening_balance", { precision: 18, scale: 2 }).default("0.00").notNull(),
     balance: numeric("balance", { precision: 18, scale: 2 }).default("0.00").notNull(),
     isActive: boolean("is_active").default(true).notNull(),
     notes: text("notes"),
@@ -357,5 +387,131 @@ export const supplierPaymentsRelations = relations(supplierPayments, ({ one }) =
   supplierOrder: one(supplierOrders, {
     fields: [supplierPayments.supplierOrderId],
     references: [supplierOrders.id],
+  }),
+}));
+
+// ─── 7. Expense Categories (Pul harakati moddalari) ───────────────────────────
+
+export const cashCategories = pgTable(
+  "cash_categories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    code: varchar("code", { length: 32 }).notNull(), // PAYROLL_ADVANCE, RENT, ...
+    name: varchar("name", { length: 128 }).notNull(),
+    // payroll | materials | logistics | equipment | tooling | outsourcing | overhead | tax | finance | sales | other
+    group: varchar("group", { length: 32 }).default("other").notNull(),
+    direction: cashDirectionEnum("direction").default("out").notNull(),
+    pnlType: pnlTypeEnum("pnl_type").default("expense").notNull(),
+    // System categories are written by integrations (avans, raschet, to'lovlar): not deletable or re-typed.
+    isSystem: boolean("is_system").default(false).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("cash_categories_company_code_uq").on(table.companyId, table.code),
+    index("cash_categories_company_idx").on(table.companyId),
+  ]
+);
+
+// ─── 8. Cash Journal (Pul harakati jurnali) ───────────────────────────────────
+// One row per movement of money in or out of a money account. Source modules post here in the
+// same transaction as their own document; a cancellation posts a reversal row, never a delete.
+
+export const cashTransactions = pgTable(
+  "cash_transactions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    date: date("date").notNull(),
+    direction: cashDirectionEnum("direction").notNull(),
+    // Null only for legacy rows whose account was never recorded.
+    accountId: uuid("account_id").references(() => bankAccounts.id, { onDelete: "restrict" }),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => cashCategories.id, { onDelete: "restrict" }),
+    amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // Always positive; direction gives the sign
+    currency: varchar("currency", { length: 8 }).default("UZS").notNull(),
+    exchangeRate: numeric("exchange_rate", { precision: 12, scale: 2 }),
+    amountUzs: numeric("amount_uzs", { precision: 18, scale: 2 }).notNull(), // Base-currency equivalent for reports
+    method: paymentMethodEnum("method").default("cash").notNull(),
+    // employee | supplier | client | other
+    counterpartyType: varchar("counterparty_type", { length: 16 }).default("other").notNull(),
+    employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "set null" }),
+    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    counterpartyName: varchar("counterparty_name", { length: 255 }),
+    workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+    // employee_advance | payroll_settlement | supplier_payment | client_payment | supplier_order_delivery | expense | manual
+    sourceType: varchar("source_type", { length: 32 }).default("manual").notNull(),
+    sourceId: uuid("source_id"),
+    sourceDocNo: varchar("source_doc_no", { length: 64 }),
+    status: varchar("status", { length: 16 }).default("posted").notNull(), // "posted" | "reversed"
+    reversalOfId: uuid("reversal_of_id").references((): AnyPgColumn => cashTransactions.id, {
+      onDelete: "restrict",
+    }),
+    note: text("note"),
+    createdByUserId: uuid("created_by_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // A source document has at most one live posting; reversed postings and their storno rows
+    // stay as history, so a corrected document can post again.
+    uniqueIndex("cash_tx_source_uq")
+      .on(table.companyId, table.sourceType, table.sourceId)
+      .where(
+        sql`${table.sourceId} IS NOT NULL AND ${table.reversalOfId} IS NULL AND ${table.status} = 'posted'`
+      ),
+    index("cash_tx_company_date_idx").on(table.companyId, table.date),
+    index("cash_tx_account_idx").on(table.accountId),
+    index("cash_tx_category_idx").on(table.categoryId),
+    index("cash_tx_employee_idx").on(table.employeeId),
+    index("cash_tx_supplier_idx").on(table.supplierId),
+    index("cash_tx_work_order_idx").on(table.workOrderId),
+  ]
+);
+
+export const cashCategoriesRelations = relations(cashCategories, ({ one, many }) => ({
+  company: one(companies, {
+    fields: [cashCategories.companyId],
+    references: [companies.id],
+  }),
+  transactions: many(cashTransactions),
+}));
+
+export const cashTransactionsRelations = relations(cashTransactions, ({ one }) => ({
+  company: one(companies, {
+    fields: [cashTransactions.companyId],
+    references: [companies.id],
+  }),
+  account: one(bankAccounts, {
+    fields: [cashTransactions.accountId],
+    references: [bankAccounts.id],
+  }),
+  category: one(cashCategories, {
+    fields: [cashTransactions.categoryId],
+    references: [cashCategories.id],
+  }),
+  employee: one(employees, {
+    fields: [cashTransactions.employeeId],
+    references: [employees.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [cashTransactions.supplierId],
+    references: [suppliers.id],
+  }),
+  client: one(clients, {
+    fields: [cashTransactions.clientId],
+    references: [clients.id],
+  }),
+  workOrder: one(workOrders, {
+    fields: [cashTransactions.workOrderId],
+    references: [workOrders.id],
   }),
 }));

@@ -9,6 +9,7 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { SmartCombobox, type ComboboxItem } from "@/components/ui/smart-combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { MoneyAccountSelect } from "@/components/finance/MoneyAccountSelect";
 import type { EmployeeLedger, EmployeeRecord, PayoutKind, PayoutMethod } from "../types";
 
 interface AdvanceFormDialogProps {
@@ -44,6 +45,7 @@ function AdvanceFormBody({ onOpenChange, employeeId, defaultKind = "advance", on
   const [amount, setAmount] = useState(0);
   const [kind, setKind] = useState<PayoutKind>(defaultKind);
   const [method, setMethod] = useState<PayoutMethod>("cash");
+  const [accountId, setAccountId] = useState("");
   const [date, setDate] = useState(todayLocal());
   const [period, setPeriod] = useState(todayLocal().slice(0, 7));
   const [note, setNote] = useState("");
@@ -91,7 +93,16 @@ function AdvanceFormBody({ onOpenChange, employeeId, defaultKind = "advance", on
       const res = await fetch("/api/v1/hr/advances", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId: empId, amount, kind, paymentMethod: method, advanceDate: date, period, note }),
+        body: JSON.stringify({
+          employeeId: empId,
+          amount,
+          kind,
+          paymentMethod: method,
+          accountId: accountId || null,
+          advanceDate: date,
+          period,
+          note,
+        }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Saqlanmadi");
@@ -154,6 +165,11 @@ function AdvanceFormBody({ onOpenChange, employeeId, defaultKind = "advance", on
                 <SelectItem value="card">Karta</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="col-span-2 space-y-1">
+            <Label className="text-xs">Hisob</Label>
+            <MoneyAccountSelect method={method} value={accountId} onChange={setAccountId} className="h-8" />
           </div>
 
           <div className="col-span-2 space-y-1">

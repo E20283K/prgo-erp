@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
       advanceDate?: string;
       period?: string;
       paymentMethod?: PayoutMethod;
+      accountId?: string | null;
       note?: string;
     };
     if (!body.employeeId) throw new Error("Hodim tanlanmagan");
@@ -56,6 +57,7 @@ export async function POST(request: NextRequest) {
       advanceDate: body.advanceDate || todayIso(),
       period: body.period || undefined,
       paymentMethod: body.paymentMethod === "card" ? "card" : "cash",
+      accountId: body.accountId || null,
       note: body.note ?? null,
       source: "ui",
       createdByUserId: auth.user.id,

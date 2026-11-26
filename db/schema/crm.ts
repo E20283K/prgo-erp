@@ -61,6 +61,7 @@ export const supplierOrderTypeEnum = pgEnum("supplier_order_type", [
   "raw_materials", // Qog'oz, bo'yoq, xomashyo
   "outsourcing",   // Autsorsing xizmati
   "service",       // Ta'mirlash / Servis
+  "equipment",     // Jihoz / Uskuna (asosiy vosita)
 ]);
 
 export const clientTypeEnum = pgEnum("client_type", [

@@ -23,6 +23,8 @@ import { Input } from "@/components/ui/input";
 import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { MoneyAccountSelect } from "@/components/finance/MoneyAccountSelect";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -44,6 +46,14 @@ import {
   CreditCard,
   Check,
 } from "lucide-react";
+
+type ClientPayMethod = "bank_transfer" | "corporate_card" | "cash" | "offset";
+const PAY_METHOD_LABELS: Record<ClientPayMethod, string> = {
+  bank_transfer: "Bank o'tkazmasi",
+  corporate_card: "Karta",
+  cash: "Naqd kassa",
+  offset: "O'zaro hisob",
+};
 
 interface FinanceGridProps {
   type: string; // "settlements" | "accounts" | "payments" | "bank" | "pnl" | "budget" | "cost-analysis"
@@ -74,6 +84,8 @@ export function FinanceGrid({ type }: FinanceGridProps) {
   const [isPaymentFormOpen, setIsPaymentFormOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState<string>("5000");
   const [paymentNote, setPaymentNote] = useState<string>("");
+  const [paymentMethod, setPaymentMethod] = useState<ClientPayMethod>("bank_transfer");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [realPayments, setRealPayments] = useState<any[]>([]);
 
   // Real DB dan Finance ma'lumotlarini yuklash
@@ -372,6 +384,8 @@ export function FinanceGrid({ type }: FinanceGridProps) {
       customer: selectedClient.customer,
       amount: amt,
       note: paymentNote.trim() || undefined,
+      method: paymentMethod,
+      bankAccountId: paymentMethod !== "offset" ? paymentAccountId || null : null,
       contractNo: selectedClient.contractNo,
     });
     if (!saved) return;
@@ -608,6 +622,32 @@ export function FinanceGrid({ type }: FinanceGridProps) {
                           className="h-7 text-xs bg-background"
                         />
                       </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Usul</Label>
+                        <Select value={paymentMethod} onValueChange={(v) => v && setPaymentMethod(v as ClientPayMethod)}>
+                          <SelectTrigger className="h-7 text-xs bg-background">
+                            <SelectValue>{PAY_METHOD_LABELS[paymentMethod]}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(PAY_METHOD_LABELS) as ClientPayMethod[]).map((m) => (
+                              <SelectItem key={m} value={m} className="text-xs">
+                                {PAY_METHOD_LABELS[m]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {paymentMethod !== "offset" && (
+                        <div className="space-y-1">
+                          <Label className="text-[11px]">Hisob</Label>
+                          <MoneyAccountSelect
+                            method={paymentMethod}
+                            value={paymentAccountId}
+                            onChange={setPaymentAccountId}
+                            className="bg-background"
+                          />
+                        </div>
+                      )}
                     </div>
                     <div className="flex justify-end gap-1.5">
                       <Button
