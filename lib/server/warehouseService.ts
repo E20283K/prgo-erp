@@ -355,6 +355,120 @@ export async function upsertStockBalance(payload: any, companyCode: string = "PR
   return record ? mapStockBalanceRow(record) : record;
 }
 
+export interface StockImportRow {
+  rowNo: number;
+  sku?: string;
+  name: string;
+  category: string;
+  location?: string;
+  locationShelf?: string;
+  stockLevel: number;
+  unit: string;
+  sheetFormat?: string;
+  grammage?: number;
+  price?: number;
+  currency?: "USD" | "UZS";
+  reorder?: number;
+  batchNo?: string;
+  supplier?: string;
+  rollWidthMm?: number;
+  rollLengthM?: number;
+  expiryDate?: string;
+}
+
+/**
+ * Fayldan (Excel/CSV) ommaviy qoldiq kiritish. Mos SKU + ombor bo'lsa miqdor almashtiriladi,
+ * faylda bo'sh qolgan maydonlar (rezerv, rasm, spetsifikatsiya va h.k.) mavjud yozuvdan saqlanadi.
+ * Qatorlar ketma-ket saqlanadi — bo'sh SKU uchun avtoraqam takrorlanmasligi uchun.
+ */
+export async function importStockBalances(
+  rows: StockImportRow[],
+  companyCode: string = "PRINTGOO",
+  user?: { id?: string; name?: string }
+) {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const existingRows = await db.query.warehouseStockBalances.findMany({
+    where: eq(warehouseStockBalances.companyId, companyId),
+  });
+  const defaultWarehouse = await db.query.warehouses.findFirst({
+    where: eq(warehouses.companyId, companyId),
+  });
+
+  let created = 0;
+  let updated = 0;
+  const failed: { rowNo: number; error: string }[] = [];
+
+  for (const row of rows) {
+    try {
+      const sku = row.sku?.trim() || "";
+      let location = row.location?.trim() || "";
+      // Ombor ko'rsatilmasa: shu SKU'ning mavjud joylashuvi, aks holda korxonaning ombori
+      if (!location && sku) {
+        location = existingRows.find((r) => r.sku === sku)?.locationName || "";
+      }
+      if (!location) location = defaultWarehouse?.name || "Asosiy ombor";
+
+      const existing = sku
+        ? existingRows.find((r) => r.sku === sku && r.locationName === location)
+        : undefined;
+
+      const fromFile: Record<string, unknown> = {
+        name: row.name,
+        category: row.category,
+        location,
+        locationName: location,
+        stockLevel: row.stockLevel,
+        unit: row.unit,
+        lastReceived: new Date().toISOString(),
+      };
+      if (sku) fromFile.sku = sku;
+      if (row.locationShelf) fromFile.locationShelf = row.locationShelf;
+      if (row.sheetFormat) fromFile.sheetFormat = row.sheetFormat;
+      if (row.grammage !== undefined) fromFile.grammage = row.grammage;
+      if (row.reorder !== undefined) fromFile.reorder = row.reorder;
+      if (row.batchNo) fromFile.batchNo = row.batchNo;
+      if (row.supplier) fromFile.supplier = row.supplier;
+      if (row.rollWidthMm !== undefined) fromFile.rollWidthMm = row.rollWidthMm;
+      if (row.rollLengthM !== undefined) fromFile.rollLengthM = row.rollLengthM;
+      if (row.expiryDate) fromFile.expiryDate = row.expiryDate;
+      if (row.price !== undefined) {
+        if (row.currency === "UZS") {
+          fromFile.currency = "UZS";
+          fromFile.unitPriceUzs = row.price;
+        } else {
+          fromFile.currency = "USD";
+          fromFile.unitPriceUsd = row.price;
+        }
+      }
+
+      const payload = existing
+        ? { ...mapStockBalanceRow(existing), warehouseId: existing.warehouseId, ...fromFile }
+        : fromFile;
+      // Yangi omborga ko'chsa eski warehouseId qolib ketmasin
+      if (existing && existing.locationName !== location) delete (payload as any).warehouseId;
+
+      const saved = await upsertStockBalance(payload, companyCode);
+      if (existing) updated++;
+      else created++;
+      if (saved && !existing) existingRows.push(saved as any);
+    } catch (err) {
+      failed.push({ rowNo: row.rowNo, error: err instanceof Error ? err.message : "Saqlashda xatolik" });
+    }
+  }
+
+  await writeAuditLog({
+    companyId,
+    userId: user?.id || "system",
+    userName: user?.name || "Warehouse Manager",
+    entityType: "warehouse_stock_balance",
+    entityId: "import",
+    action: "update",
+    newData: { created, updated, failed: failed.length, total: rows.length },
+  }).catch(() => undefined);
+
+  return { created, updated, failed };
+}
+
 // ─── 3. Warehouse Receipts (Kirim Orderlari) ───────────────────────────────────
 
 export async function getWarehouseReceipts(companyCode: string = "PRINTGOO") {
