@@ -168,7 +168,7 @@ export function WarehouseWriteOffDetail({ tab }: { tab: DocumentTab }) {
     if (warehousesList.length === 0 && loadWarehouses) {
       loadWarehouses("PRINTGOO");
     }
-    if (productionQueue.length === 0 && loadProductionQueue) {
+    if (!useWorkspaceStore.getState().productionQueueLoaded && loadProductionQueue) {
       loadProductionQueue("PRINTGOO");
     }
     if (machines.length === 0 && loadMachines) {

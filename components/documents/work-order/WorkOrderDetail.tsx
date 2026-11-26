@@ -865,8 +865,14 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
 
   useEffect(() => {
     const s = useWorkspaceStore.getState();
-    if (s.productionQueue.length === 0 && s.loadProductionQueue) {
-      s.loadProductionQueue();
+    // Only this order is needed here, not the whole registry.
+    const ownKey = (tab.documentData?.docNo || tab.id || "").trim();
+    const ownKeyLower = ownKey.toLowerCase();
+    const inQueue = s.productionQueue.some(
+      (q) => q.id?.toLowerCase() === ownKeyLower || q.docNo?.toLowerCase() === ownKeyLower
+    );
+    if (!inQueue) {
+      void s.loadWorkOrderAsync(ownKey);
     }
     if (s.crmCustomers.length === 0 && s.loadCrmCustomers) {
       s.loadCrmCustomers();
@@ -889,6 +895,8 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
     if (!s.tariffs || s.tariffs.length === 0) {
       if (s.fetchTariffs) s.fetchTariffs();
     }
+    // Runs once when the order tab opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const isDark = theme === "dark";
   const data = tab.documentData || {};

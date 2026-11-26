@@ -39,7 +39,7 @@ import {
   warehouseFinishedGoods,
   warehouseMovements,
 } from "@/db/schema";
-import { eq, desc, and, or, ilike, isNull, sql, inArray } from "drizzle-orm";
+import { eq, desc, and, or, ilike, isNull, sql, inArray, type SQL } from "drizzle-orm";
 import type { MaterialStatus, ProductionQueueItem } from "@/store/workspaceStore";
 import type { WorkOrderFormData, RouteStep } from "@/components/documents/work-order/types";
 import { getCompanyIdByCode, resolveClient, unknownClientMessage } from "./crmService";
@@ -213,14 +213,151 @@ function parseSafePlannedQty(op: any, defaultQty: number = 0): string {
   return String(defaultQty);
 }
 
+export type WorkOrderListFilters = {
+  /** Matches doc number, client order, customer, product or product type. */
+  search?: string;
+  /** Derived status as the registry shows it; "Active" also covers "In Production". */
+  status?: string;
+  /** Technology route (Offset, Flexo, ...), compared without spaces or punctuation. */
+  department?: string;
+  clientId?: string;
+  /** Customer name, for older orders saved without a client id. */
+  customer?: string;
+  /** Leave out orders whose stage is Completed (deficit counters only look at open orders). */
+  excludeCompleted?: boolean;
+};
+
+type WorkOrderQuery = WorkOrderListFilters & {
+  limit?: number;
+  cursor?: string | null;
+  /** One order by doc number or client order number (case-insensitive). */
+  key?: string;
+};
+
+export type WorkOrderPage = {
+  items: ProductionQueueItem[];
+  nextCursor: string | null;
+  /** Rows matching the filters; only counted for the first page. */
+  total?: number;
+};
+
+const IN_PRODUCTION_STAGE_LIST = ["In Production", "Post-press", "Packaging"] as const;
+
+function encodeWorkOrderCursor(createdAt: Date, id: string): string {
+  return Buffer.from(`${createdAt.toISOString()}|${id}`).toString("base64url");
+}
+
+function decodeWorkOrderCursor(cursor: string): { createdAt: Date; id: string } | null {
+  try {
+    const [iso, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
+    const createdAt = new Date(iso);
+    if (!id || Number.isNaN(createdAt.getTime())) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+}
+
+function workOrderFilterConditions(companyId: string, f: WorkOrderQuery): SQL[] {
+  const conds: SQL[] = [eq(workOrders.companyId, companyId)];
+
+  if (f.key) {
+    const k = f.key.trim().toLowerCase();
+    conds.push(or(sql`lower(${workOrders.docNo}) = ${k}`, sql`lower(${workOrders.clientOrderId}) = ${k}`)!);
+  }
+
+  const q = f.search?.trim();
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    conds.push(
+      or(
+        ilike(workOrders.docNo, like),
+        ilike(workOrders.clientOrderId, like),
+        ilike(workOrders.customerName, like),
+        ilike(workOrders.productName, like),
+        ilike(workOrders.productType, like)
+      )!
+    );
+  }
+
+  // Mirrors deriveWorkOrderStatus: Draft/Cancelled are stored, the rest follow the stage.
+  const live = sql`${workOrders.status} not in ('Draft', 'Cancelled')`;
+  switch (f.status) {
+    case "Draft":
+    case "Cancelled":
+      conds.push(eq(workOrders.status, f.status));
+      break;
+    case "Completed":
+      conds.push(and(live, eq(workOrders.stage, "Completed"))!);
+      break;
+    case "In Production":
+      conds.push(and(live, inArray(workOrders.stage, [...IN_PRODUCTION_STAGE_LIST]))!);
+      break;
+    case "Active":
+      conds.push(and(live, sql`${workOrders.stage} <> 'Completed'`)!);
+      break;
+  }
+
+  if (f.excludeCompleted) {
+    conds.push(sql`${workOrders.stage} <> 'Completed'`);
+  }
+
+  if (f.department) {
+    const dep = f.department.toLowerCase().replace(/[^a-z]/g, "");
+    conds.push(sql`regexp_replace(lower(${workOrders.department}), '[^a-z]', '', 'g') = ${dep}`);
+  }
+
+  // Orders with a client id match by id; older ones without it match by customer name.
+  if (f.clientId || f.customer) {
+    const byId = f.clientId ? sql`${workOrders.clientId}::text = ${f.clientId}` : undefined;
+    const byName = f.customer
+      ? and(isNull(workOrders.clientId), sql`lower(trim(${workOrders.customerName})) = ${f.customer.trim().toLowerCase()}`)
+      : undefined;
+    conds.push(or(byId, byName)!);
+  }
+
+  return conds;
+}
+
 /**
  * Bazadan barcha real ishlab chiqarish buyruqlarini (Work Orders) yuklash
  */
-export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<ProductionQueueItem[]> {
-  const companyId = await getCompanyIdByCode(companyCode);
+export async function getWorkOrders(
+  companyCode: string = "PRINTGOO",
+  filters: WorkOrderListFilters = {}
+): Promise<ProductionQueueItem[]> {
+  return (await queryWorkOrders(companyCode, filters)).items;
+}
 
-  const rawOrders = await db.query.workOrders.findMany({
-    where: eq(workOrders.companyId, companyId),
+/** One page of the registry, newest first; pass the returned cursor to get the next page. */
+export async function getWorkOrdersPage(
+  companyCode: string,
+  options: WorkOrderListFilters & { limit: number; cursor?: string | null }
+): Promise<WorkOrderPage> {
+  return queryWorkOrders(companyCode, options);
+}
+
+/** A single order by doc number or client order number, with everything the order screen needs. */
+export async function getWorkOrderByKey(companyCode: string, key: string): Promise<ProductionQueueItem | null> {
+  if (!key.trim()) return null;
+  const { items } = await queryWorkOrders(companyCode, { key, limit: 1 });
+  return items[0] ?? null;
+}
+
+async function queryWorkOrders(companyCode: string, opts: WorkOrderQuery): Promise<WorkOrderPage> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const limit = opts.limit && opts.limit > 0 ? Math.min(Math.floor(opts.limit), 500) : undefined;
+
+  const filterConds = workOrderFilterConditions(companyId, opts);
+  const conds = [...filterConds];
+  const cursor = opts.cursor ? decodeWorkOrderCursor(opts.cursor) : null;
+  if (cursor) {
+    conds.push(sql`(${workOrders.createdAt}, ${workOrders.id}) < (${cursor.createdAt.toISOString()}::timestamptz, ${cursor.id}::uuid)`);
+  }
+
+  const [fetched, total] = await Promise.all([
+    db.query.workOrders.findMany({
+    where: and(...conds),
     with: {
       operations: {
         orderBy: (ops, { asc }) => [asc(ops.sequence)],
@@ -232,11 +369,32 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
         orderBy: (att, { desc }) => [desc(att.createdAt)],
       },
     },
-    orderBy: [desc(workOrders.createdAt)],
-  });
+    orderBy: [desc(workOrders.createdAt), desc(workOrders.id)],
+    ...(limit ? { limit: limit + 1 } : {}),
+    }),
+    limit && !cursor && !opts.key
+      ? db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(workOrders)
+          .where(and(...filterConds))
+          .then((r) => r[0]?.n ?? 0)
+      : Promise.resolve(undefined),
+  ]);
+
+  const hasMore = !!limit && fetched.length > limit;
+  const rawOrders = hasMore ? fetched.slice(0, limit) : fetched;
+  const last = rawOrders[rawOrders.length - 1];
+  const nextCursor = hasMore && last ? encodeWorkOrderCursor(last.createdAt, last.id) : null;
+  if (rawOrders.length === 0) return { items: [], nextCursor: null, total };
+
+  // A page only needs the totals of its own orders; the full list reads them all at once.
+  const scoped = !!limit;
+  const pageIds = rawOrders.map((wo) => wo.id);
+  const pageDocNos = rawOrders.map((wo) => wo.docNo);
+  const pageDocNosLower = pageDocNos.map((d) => d.trim().toLowerCase());
 
   // What has left the warehouse for each order (posted shipments) and what has been invoiced.
-  const [shippedRows, invoicedRows, issuedRows] = await Promise.all([
+  const [shippedRows, invoicedRows, issuedRows, reprintRows] = await Promise.all([
     db
       .select({
         woNo: warehouseShipmentItems.sourceWorkOrderId,
@@ -247,7 +405,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       .where(
         and(
           eq(warehouseShipments.companyId, companyId),
-          inArray(warehouseShipments.status, ["Dispatched", "In Transit", "Delivered"])
+          inArray(warehouseShipments.status, ["Dispatched", "In Transit", "Delivered"]),
+          scoped ? inArray(warehouseShipmentItems.sourceWorkOrderId, pageDocNos) : undefined
         )
       )
       .groupBy(warehouseShipmentItems.sourceWorkOrderId),
@@ -258,7 +417,13 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       })
       .from(deliveryActItems)
       .innerJoin(deliveryActs, eq(deliveryActs.id, deliveryActItems.actId))
-      .where(and(eq(deliveryActs.companyId, companyId), sql`${deliveryActs.status} not in ('cancelled', 'draft')`))
+      .where(
+        and(
+          eq(deliveryActs.companyId, companyId),
+          sql`${deliveryActs.status} not in ('cancelled', 'draft')`,
+          scoped ? inArray(deliveryActs.workOrderId, pageIds) : undefined
+        )
+      )
       .groupBy(deliveryActs.workOrderId),
     // Sexga berilgan (ISS) buyurtmalar — xomashyo holati uchun
     db
@@ -271,9 +436,28 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
           or(
             ilike(warehouseMovements.movementNumber, "ISS-%"),
             sql`${warehouseMovements.reason} like '%"movementType":"ProductionIssue"%'`
-          )
+          ),
+          scoped ? inArray(warehouseMovements.workOrderId, pageDocNos) : undefined
         )
       ),
+    // Kamomad uchun ochilgan qo'shimcha buyurtmalar — ota buyurtma boshqa sahifada bo'lishi mumkin
+    db
+      .select({
+        docNo: workOrders.docNo,
+        parent: sql<string | null>`${workOrders.dimensions}->>'parentWorkOrderId'`,
+      })
+      .from(workOrders)
+      .where(
+        and(
+          eq(workOrders.companyId, companyId),
+          eq(workOrders.orderType, "Reprint"),
+          sql`${workOrders.status} <> 'Cancelled'`,
+          scoped
+            ? inArray(sql`${workOrders.dimensions}->>'parentWorkOrderId'`, pageDocNos)
+            : sql`${workOrders.dimensions}->>'parentWorkOrderId' is not null`
+        )
+      )
+      .orderBy(desc(workOrders.createdAt)),
   ]);
   const issuedNos = new Set(issuedRows.map((r) => r.woNo).filter(Boolean) as string[]);
   const materialStatusOf = (docNo: string, dims: any): MaterialStatus => {
@@ -293,7 +477,13 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
     where: and(
       eq(supplierOrders.companyId, companyId),
       inArray(supplierOrders.orderType, ["ctp_plates", "die_tooling", "cliche"]),
-      inArray(supplierOrders.status, ["Ordered", "In_Production", "Ready", "Delivered"])
+      inArray(supplierOrders.status, ["Ordered", "In_Production", "Ready", "Delivered"]),
+      scoped
+        ? or(
+            inArray(supplierOrders.workOrderId, pageIds),
+            inArray(sql`lower(trim(${supplierOrders.workOrderNo}))`, pageDocNosLower)
+          )
+        : undefined
     ),
     with: { supplier: { columns: { name: true } } },
     orderBy: [supplierOrders.orderNo],
@@ -319,13 +509,12 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
 
   // Kamomad uchun ochilgan qo'shimcha buyurtmalar asl buyurtmada ko'rinadi (ikki marta ochilmasligi uchun).
   const reprintsByParent = new Map<string, string[]>();
-  for (const wo of rawOrders) {
-    const parent = (wo.dimensions as any)?.parentWorkOrderId;
-    if (wo.orderType !== "Reprint" || !parent || wo.status === "Cancelled") continue;
-    reprintsByParent.set(parent, [...(reprintsByParent.get(parent) || []), wo.docNo]);
+  for (const r of reprintRows) {
+    if (!r.parent) continue;
+    reprintsByParent.set(r.parent, [...(reprintsByParent.get(r.parent) || []), r.docNo]);
   }
 
-  return rawOrders.map((wo, index) => {
+  const items = rawOrders.map((wo, index) => {
     const checks = (wo.checks as any) || {
       designReady: false,
       paperReady: false,
@@ -583,6 +772,8 @@ export async function getWorkOrders(companyCode: string = "PRINTGOO"): Promise<P
       }),
     } as any;
   });
+
+  return { items, nextCursor, total };
 }
 
 /**

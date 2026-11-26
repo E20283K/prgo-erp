@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getWorkOrders, upsertWorkOrder, WorkOrderValidationError } from "@/lib/server/workOrderService";
+import {
+  getWorkOrderByKey,
+  getWorkOrders,
+  getWorkOrdersPage,
+  upsertWorkOrder,
+  WorkOrderValidationError,
+} from "@/lib/server/workOrderService";
 import { validateSession } from "@/lib/server/authService";
 
 export const dynamic = "force-dynamic";
@@ -10,18 +16,38 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const companyCode = searchParams.get("company") ?? "PRINTGOO";
 
-    const clientId = searchParams.get("clientId");
-    const customer = searchParams.get("customer")?.trim().toLowerCase();
-
-    let orders = await getWorkOrders(companyCode);
     // Mijoz bo'yicha filtr: avval clientId, clientId siz eski buyurtmalar uchun nom bo'yicha
-    if (clientId || customer) {
-      orders = orders.filter((o) =>
-        o.clientId
-          ? o.clientId === clientId
-          : !!customer && o.customer?.trim().toLowerCase() === customer
-      );
+    const filters = {
+      clientId: searchParams.get("clientId") || undefined,
+      customer: searchParams.get("customer")?.trim() || undefined,
+      search: searchParams.get("q")?.trim() || undefined,
+      status: searchParams.get("status") || undefined,
+      department: searchParams.get("department") || undefined,
+    };
+
+    // Bitta buyurtma (buyurtma kartasi uchun)
+    const key = searchParams.get("docNo");
+    if (key) {
+      const order = await getWorkOrderByKey(companyCode, key);
+      if (!order) {
+        return NextResponse.json({ success: false, error: "Buyurtma topilmadi" }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, data: order });
     }
+
+    // Sahifalab: ?limit=100&cursor=... — reyestr ro'yxat oxiriga yetganda keyingisini so'raydi
+    const limit = Number(searchParams.get("limit"));
+    if (limit > 0) {
+      const page = await getWorkOrdersPage(companyCode, { ...filters, limit, cursor: searchParams.get("cursor") });
+      return NextResponse.json({
+        success: true,
+        data: page.items,
+        nextCursor: page.nextCursor,
+        total: page.total,
+      });
+    }
+
+    const orders = await getWorkOrders(companyCode, filters);
     return NextResponse.json({
       success: true,
       data: orders,

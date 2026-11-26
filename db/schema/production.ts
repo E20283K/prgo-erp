@@ -457,6 +457,8 @@ export const workOrders = pgTable(
     index("work_orders_status_idx").on(table.status),
     index("work_orders_priority_idx").on(table.priority),
     index("work_orders_order_date_idx").on(table.orderDate),
+    // Registry pages: newest first, keyset cursor on (created_at, id)
+    index("work_orders_company_created_idx").on(table.companyId, table.createdAt, table.id),
   ]
 );
 

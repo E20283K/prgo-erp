@@ -120,7 +120,7 @@ export function TariffDetail({ tab }: TariffDetailProps) {
     if ((!masterSpecifications || masterSpecifications.length === 0) && loadSpecificationsAsync) {
       loadSpecificationsAsync();
     }
-    if ((!productionQueue || productionQueue.length === 0) && loadProductionQueue) {
+    if (!useWorkspaceStore.getState().productionQueueLoaded && loadProductionQueue) {
       loadProductionQueue();
     }
   }, [

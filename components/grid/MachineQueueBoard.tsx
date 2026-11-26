@@ -144,7 +144,7 @@ export function MachineQueueBoard({
     if (machines.length === 0 && loadMachines) {
       loadMachines();
     }
-    if (productionQueue.length === 0 && loadProductionQueue) {
+    if (!useWorkspaceStore.getState().productionQueueLoaded && loadProductionQueue) {
       loadProductionQueue();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

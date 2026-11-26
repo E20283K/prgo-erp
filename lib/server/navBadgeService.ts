@@ -120,7 +120,7 @@ export async function getNavBadges(
   const needsQueue = allowed.production || allowed.warehouse;
   const [companyId, queue] = await Promise.all([
     getCompanyIdByCode(companyCode),
-    needsQueue ? getWorkOrders(companyCode) : Promise.resolve([] as Queue),
+    needsQueue ? getWorkOrders(companyCode, { excludeCompleted: true }) : Promise.resolve([] as Queue),
   ]);
 
   const [production, warehouse, crm, finance] = await Promise.all([

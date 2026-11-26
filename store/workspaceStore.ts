@@ -1089,7 +1089,18 @@ interface WorkspaceState {
   /** Moves an order in the planner's run order; `siblingIds` is the column it is moved within. */
   reorderQueueOrder: (idOrWoOrCo: string, direction: "up" | "down", siblingIds?: string[]) => void;
   isProductionQueueLoading?: boolean;
+  /** True once the full list has been read; a queue holding only orders opened one by one is not loaded. */
+  productionQueueLoaded: boolean;
+  /** Bumped whenever an order is saved, deleted or reloaded, so paged lists know to refetch. */
+  workOrdersRevision: number;
   loadProductionQueue: (companyCode?: string) => Promise<void>;
+  /** Reads one order from the server and puts it into the queue in place of any older copy. */
+  loadWorkOrderAsync: (docNo: string, companyCode?: string) => Promise<ProductionQueueItem | null>;
+  /**
+   * After a change: reloads the full queue if a screen already uses it, otherwise only the
+   * changed order, and tells paged lists to refetch.
+   */
+  refreshWorkOrders: (companyCode?: string, docNo?: string) => void;
   upsertWorkOrderAsync: (payload: any, companyCode?: string) => Promise<any>;
   /** Shift journal of an order (newest first) and the plant's shift schedule. */
   loadWorkOrderEventsAsync: (
@@ -1930,7 +1941,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
-          get().loadProductionQueue(companyCode);
+          get().refreshWorkOrders(companyCode, payload.originalWorkOrderId);
           return json.data;
         }
       }
@@ -2040,6 +2051,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   productionQueue: INITIAL_PRODUCTION_QUEUE,
   isProductionQueueLoading: false,
+  productionQueueLoaded: false,
+  workOrdersRevision: 0,
 
   loadProductionQueue: async (companyCode = "PRINTGOO") => {
     if (get().isProductionQueueLoading) return;
@@ -2049,17 +2062,51 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          set({
+          set(() => ({
             productionQueue: json.data.filter(
               (item: any) => !item.id?.startsWith("draft-") && !item.id?.startsWith("temp-")
             ),
-          });
+            productionQueueLoaded: true,
+          }));
         }
       }
     } catch (e) {
       console.error("Failed to load production queue from DB:", e);
     } finally {
       set({ isProductionQueueLoading: false });
+    }
+  },
+
+  loadWorkOrderAsync: async (docNo, companyCode = "PRINTGOO") => {
+    const key = (docNo || "").trim();
+    if (!key || key.startsWith("draft-") || key.startsWith("temp-")) return null;
+    try {
+      const params = new URLSearchParams({ company: companyCode, docNo: key });
+      const res = await fetch(`/api/v1/production/work-orders?${params.toString()}`);
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success || !json.data) return null;
+      const item = json.data as ProductionQueueItem;
+      set((state) => {
+        const idx = state.productionQueue.findIndex((q) => q.id === item.id);
+        const productionQueue =
+          idx === -1
+            ? [item, ...state.productionQueue]
+            : state.productionQueue.map((q, i) => (i === idx ? item : q));
+        return { productionQueue };
+      });
+      return item;
+    } catch (e) {
+      console.error("Failed to load work order:", e);
+      return null;
+    }
+  },
+
+  refreshWorkOrders: (companyCode = "PRINTGOO", docNo) => {
+    set((state) => ({ workOrdersRevision: state.workOrdersRevision + 1 }));
+    if (get().productionQueueLoaded) {
+      void get().loadProductionQueue(companyCode);
+    } else if (docNo) {
+      void get().loadWorkOrderAsync(docNo, companyCode);
     }
   },
 
@@ -2117,8 +2164,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       });
       const json = await res.json().catch(() => null);
       if (res.ok && json?.success) {
-        get().loadProductionQueue(companyCode);
         const wo = json.workOrder || json.data || {};
+        get().refreshWorkOrders(companyCode, wo.docNo || payload.docNo);
         return {
           success: true,
           workOrder: wo,
@@ -2236,7 +2283,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         };
       });
 
-      get().loadProductionQueue(companyCode);
+      get().refreshWorkOrders(companyCode, returnMode === "deleted" ? undefined : docNo);
 
       return {
         success: true,

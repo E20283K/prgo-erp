@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFindShortcut } from "@/hooks/use-find-shortcut";
 import { MATERIAL_STATUS_COLOR, MATERIAL_STATUS_LABEL } from "@/lib/materialStatus";
-import type { MaterialStatus } from "@/store/workspaceStore";
+import type { MaterialStatus, ProductionQueueItem } from "@/store/workspaceStore";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -178,6 +178,8 @@ const INITIAL_COLUMNS: GridColumn[] = [
   { id: "actualEndDate", title: "Faktik tugash", width: 110, icon: GridColumnIcon.HeaderDate, hasMenu: true },
 ];
 
+const ORDERS_PAGE_SIZE = 100;
+
 export function DataGrid() {
   const tGrid = useTranslations("DataGrid");
   const tCommon = useTranslations("Common");
@@ -189,8 +191,7 @@ export function DataGrid() {
     theme,
     setCreateWorkOrderOpen,
     productionQueue,
-    loadProductionQueue,
-    isProductionQueueLoading,
+    workOrdersRevision,
     warehouseStock,
     loadWarehouseStock,
     plants,
@@ -205,7 +206,6 @@ export function DataGrid() {
   const [columns, setColumns] = useState<GridColumn[]>(INITIAL_COLUMNS);
 
   useEffect(() => {
-    loadProductionQueue();
     if (!warehouseStock || warehouseStock.length === 0) {
       loadWarehouseStock();
     }
@@ -237,10 +237,99 @@ export function DataGrid() {
     }));
   }, [columns, tGrid]);
 
-  // Convert real productionQueue from workspaceStore/DB into OrderRow format
+  const [viewMode, setViewMode] = useState<"grid" | "calendar" | "timeline">("grid");
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
+  const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
+  const [searchFilter, setSearchFilter] = useState("");
+  const searchInputRef = useFindShortcut();
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [techFilter, setTechFilter] = useState<string>("ALL");
+
+  // ── Registry pages: the server filters and returns 100 orders at a time, newest first ──
+  const [pagedOrders, setPagedOrders] = useState<ProductionQueueItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const requestSeqRef = useRef(0);
+  const pageLoadingRef = useRef(false);
+  const loadedCountRef = useRef(0);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(searchFilter.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [searchFilter]);
+
+  // Calendar, timeline and the printed registry show every matching order, not just the loaded pages.
+  const needsAllOrders = viewMode !== "grid" || isPrintModalOpen;
+
+  const loadOrdersPage = useCallback(
+    async (cursor: string | null) => {
+      const seq = cursor ? requestSeqRef.current : ++requestSeqRef.current;
+      pageLoadingRef.current = true;
+      try {
+        const params = new URLSearchParams({ company: "PRINTGOO" });
+        if (!needsAllOrders) {
+          // A refresh keeps as many rows as were already scrolled through
+          const size = cursor ? ORDERS_PAGE_SIZE : Math.min(Math.max(ORDERS_PAGE_SIZE, loadedCountRef.current), 500);
+          params.set("limit", String(size));
+          if (cursor) params.set("cursor", cursor);
+        }
+        if (debouncedSearch) params.set("q", debouncedSearch);
+        if (statusFilter !== "ALL") params.set("status", statusFilter);
+        if (techFilter !== "ALL") params.set("department", techFilter);
+
+        const res = await fetch(`/api/v1/production/work-orders?${params.toString()}`);
+        const json = await res.json().catch(() => null);
+        if (seq !== requestSeqRef.current || !res.ok || !json?.success || !Array.isArray(json.data)) return;
+
+        const items = (json.data as ProductionQueueItem[]).filter(
+          (wo) => !wo.id?.startsWith("draft-") && !wo.id?.startsWith("temp-")
+        );
+        setPagedOrders((prev) => {
+          if (!cursor) return items;
+          const seen = new Set(prev.map((wo) => wo.id));
+          return [...prev, ...items.filter((wo) => !seen.has(wo.id))];
+        });
+        setNextCursor(json.nextCursor ?? null);
+        if (!cursor) setTotalCount(typeof json.total === "number" ? json.total : items.length);
+      } catch (e) {
+        console.error("Failed to load work orders page:", e);
+      } finally {
+        if (seq === requestSeqRef.current) {
+          pageLoadingRef.current = false;
+        }
+      }
+    },
+    [debouncedSearch, statusFilter, techFilter, needsAllOrders]
+  );
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- state is set when the response arrives
+    void loadOrdersPage(null);
+  }, [loadOrdersPage, workOrdersRevision]);
+
+  useEffect(() => {
+    loadedCountRef.current = pagedOrders.length;
+  }, [pagedOrders.length]);
+
+  // Bottom of the visible grid area; the next page loads once it comes within 20 rows of the end.
+  const visibleBottomRef = useRef(0);
+  const loadMoreIfNearEnd = useCallback(() => {
+    if (!nextCursor || pageLoadingRef.current) return;
+    if (visibleBottomRef.current >= pagedOrders.length - 20) void loadOrdersPage(nextCursor);
+  }, [nextCursor, pagedOrders.length, loadOrdersPage]);
+
+  // A page that does not fill the grid asks for the next one without waiting for a scroll.
+  useEffect(() => {
+    loadMoreIfNearEnd();
+  }, [loadMoreIfNearEnd]);
+
+  // Loaded pages as OrderRow; an order edited elsewhere in this session shows its store copy.
   const rows = React.useMemo<OrderRow[]>(() => {
-    return (productionQueue || [])
-      .filter((wo: any) => !wo.id?.startsWith("draft-") && !wo.id?.startsWith("temp-"))
+    const storeById = new Map((productionQueue || []).map((wo) => [wo.id, wo]));
+    return pagedOrders
+      .map((wo) => storeById.get(wo.id) ?? wo)
       .map((wo: any) => {
       // Collect ONLY real photographic proof photos from DB (no mock fallback!)
       const photos: string[] = [];
@@ -322,15 +411,7 @@ export function DataGrid() {
         rawOrder: wo,
       };
     });
-  }, [productionQueue, plants, companiesList]);
-  const [viewMode, setViewMode] = useState<"grid" | "calendar" | "timeline">("grid");
-  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
-  const [calendarDate, setCalendarDate] = useState<Date>(() => new Date(2026, 9, 6));
-  const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
-  const [searchFilter, setSearchFilter] = useState("");
-  const searchInputRef = useFindShortcut();
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [techFilter, setTechFilter] = useState<string>("ALL");
+  }, [pagedOrders, productionQueue, plants, companiesList]);
   const [sortConfig, setSortConfig] = useState<{ colId: string; asc: boolean } | null>(null);
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
@@ -360,29 +441,9 @@ export function DataGrid() {
     []
   );
 
+  // Search, status and technology are filtered by the server; sorting applies to the loaded rows.
   const filteredRows = React.useMemo(() => {
-    let result = rows.filter((r) => {
-      const matchesSearch = 
-        !searchFilter ||
-        r.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        r.customer.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        r.product.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        r.productType.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        r.readinessLabel.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        r.sampleStatusLabel.toLowerCase().includes(searchFilter.toLowerCase());
-
-      const matchesStatus =
-        statusFilter === "ALL" ||
-        r.status === statusFilter ||
-        (statusFilter === "Active" && r.status === "In Production");
-      const matchesTech =
-        techFilter === "ALL" ||
-        (r.department &&
-          r.department.toLowerCase().replace(/[^a-z]/g, "") ===
-            techFilter.toLowerCase().replace(/[^a-z]/g, ""));
-
-      return matchesSearch && matchesStatus && matchesTech;
-    });
+    let result = rows;
 
     if (sortConfig) {
       const { colId, asc } = sortConfig;
@@ -408,7 +469,7 @@ export function DataGrid() {
     }
 
     return result;
-  }, [rows, searchFilter, statusFilter, techFilter, sortConfig]);
+  }, [rows, sortConfig]);
 
   const handleHeaderClicked = useCallback((colIndex: number) => {
     const column = columns[colIndex];
@@ -579,8 +640,8 @@ export function DataGrid() {
       const colTitle = columns[col]?.title;
       coords = colTitle ? `R${row + 1}:C${col + 1} (${colTitle})` : `R${row + 1}:C${col + 1}`;
     }
-    updateGridStats(selectedRowsCount, filteredRows.length, coords);
-  }, [selection, filteredRows.length, columns, updateGridStats]);
+    updateGridStats(selectedRowsCount, totalCount ?? filteredRows.length, coords);
+  }, [selection, filteredRows.length, totalCount, columns, updateGridStats]);
 
   // Content Getter for Glide Data Grid
   const getContent = useCallback((cell: Item): GridCell => {
@@ -1189,6 +1250,10 @@ export function DataGrid() {
               onItemHovered={onItemHovered}
               onCellEdited={onCellEdited}
               onColumnResize={onColumnResize}
+              onVisibleRegionChanged={(range) => {
+                visibleBottomRef.current = range.y + range.height;
+                loadMoreIfNearEnd();
+              }}
               headerHeight={28}
               rowHeight={32}
               theme={isDark ? GLIDE_DARK_THEME : GLIDE_LIGHT_THEME}
