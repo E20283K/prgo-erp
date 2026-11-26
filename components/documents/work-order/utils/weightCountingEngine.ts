@@ -15,11 +15,12 @@ export interface TheoreticalWeightParams {
  * Formula: Maydon (m²) × Zichlik (g/m²) × Pardoz koeffitsienti
  */
 export function calculateTheoreticalUnitWeight(params: TheoreticalWeightParams): number {
-  const w = Number(params.widthMm) || 50;
-  const h = Number(params.heightMm) || 90;
+  // Buyurtmada o'lcham yoki qog'oz zichligi yo'q bo'lsa, taxminiy qiymat o'ylab topilmaydi: 0 qaytadi
+  const w = Number(params.widthMm) || 0;
+  const h = Number(params.heightMm) || 0;
   const areaM2 = (w * h) / 1000000;
 
-  let gsm = Number(params.paperDensity) || 300;
+  let gsm = Number(params.paperDensity) || 0;
 
   // Agar kashirovka (duplex/triplex) mavjud bo'lsa
   if (params.kashirovkaMode && params.kashirovkaMode !== "none" && params.kashirovkaLayers && params.kashirovkaLayers.length > 0) {
@@ -28,6 +29,8 @@ export function calculateTheoreticalUnitWeight(params: TheoreticalWeightParams):
       gsm = totals.totalMountedGsm;
     }
   }
+
+  if (areaM2 <= 0 || gsm <= 0) return 0;
 
   const baseWeightGrams = areaM2 * gsm;
 

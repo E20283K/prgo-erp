@@ -813,6 +813,9 @@ function placeRouteStep(others: RouteStep[], step: RouteStep, previousNumber?: n
   return [...production, ...packaging].map((op, idx) => ({ ...op, stepNumber: (idx + 1) * 10 }));
 }
 
+/** Barqaror bo'sh massiv: quti yo'q paytda yorliq oynasi har renderda qayta generatsiya qilmasligi uchun */
+const NO_BOXES: never[] = [];
+
 export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
   const tOrder = useTranslations("WorkOrderDetail");
   const tAct = useTranslations("DeliveryAct");
@@ -4734,6 +4737,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           targetQuantity={formData.quantity}
           unit={formData.unit}
           sizes={formData.sizes}
+          width={Number(formData.width) || undefined}
+          height={Number(formData.height) || undefined}
+          paperDensity={Number((formData as any).paperDensity) || undefined}
+          kashirovkaMode={formData.kashirovkaMode}
+          kashirovkaLayers={formData.kashirovkaLayers}
+          lamination={formData.lamination}
           existingPackaging={formData.packagingData}
           producedQty={getProducedOutputQty(operations, shiftEvents)}
           routeFinished={isProductionRouteFinished(operations)}
@@ -4755,7 +4764,12 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           clientOrderNo={formData.linkedOrderId}
           customer={formData.customer}
           product={formData.product}
-          boxes={formData.packagingData?.boxes || []}
+          productSize={
+            Number(formData.width) > 0 && Number(formData.height) > 0
+              ? `${Number(formData.width)}×${Number(formData.height)} mm`
+              : undefined
+          }
+          boxes={formData.packagingData?.boxes ?? NO_BOXES}
           totalBoxes={formData.packagingData?.totalBoxes || 0}
         />
       )}

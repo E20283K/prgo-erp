@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class PositionItem(BaseModel):
     x: float
@@ -133,12 +133,25 @@ class BoxLabelItemData(BaseModel):
     barcode: Optional[str] = None
     notes: Optional[str] = None
 
+    @field_validator("quantity", mode="before")
+    @classmethod
+    def _coerce_quantity(cls, v):
+        # Bo'sh yoki kasr miqdor (masalan, qo'lda yozilgan 12.5) 422 bermasligi uchun butunga keltiriladi
+        if v is None or v == "":
+            return 0
+        try:
+            return max(0, int(round(float(v))))
+        except (TypeError, ValueError):
+            return 0
+
 class BoxLabelsPdfRequest(BaseModel):
     workOrderNo: str = "WO-00351"
     clientOrderNo: Optional[str] = None
     customer: str = "—"
     product: str = "—"
     totalBoxes: int = 1
+    # Buyurtma mahsulotining formati (masalan "90×50 mm"): qutida o'lcham kodi bo'lmasa, yorliqda shu ko'rsatiladi
+    productSize: Optional[str] = None
     boxes: List[BoxLabelItemData] = Field(default_factory=list)
     saveToS3: bool = False
     s3Key: Optional[str] = None

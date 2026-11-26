@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   Printer,
   Download,
@@ -24,6 +24,30 @@ import {
 } from "@/components/ui/select";
 import { PackagingBoxItem } from "../types";
 
+/** doc-service xatosini (FastAPI "detail" JSON) o'qiladigan matnga aylantiradi */
+function readableError(status: number, raw: unknown): string {
+  if (status === 502) return "Hujjat xizmati (doc-service) javob bermayapti. Xizmat ishga tushganini tekshiring.";
+  const text = typeof raw === "string" ? raw : "";
+  try {
+    const parsed = JSON.parse(text);
+    const detail = parsed?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map((d: { loc?: unknown[]; msg?: string }) => {
+          const where = Array.isArray(d.loc) ? d.loc.filter((p) => p !== "body").join(" › ") : "";
+          return where ? `${where}: ${d.msg}` : String(d.msg);
+        })
+        .join("; ");
+    }
+  } catch {
+    /* matn JSON emas */
+  }
+  return text || `Xatolik (HTTP ${status})`;
+}
+
+type BoxFilter = number | "all" | "pending";
+
 interface BoxLabelPrintModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -31,6 +55,8 @@ interface BoxLabelPrintModalProps {
   clientOrderNo?: string;
   customer: string;
   product: string;
+  /** Buyurtma mahsuloti formati, masalan "90×50 mm": quti o'lcham kodiga ega bo'lmasa, yorliqda shu chiqadi */
+  productSize?: string;
   boxes: PackagingBoxItem[];
   totalBoxes: number;
 }
@@ -42,56 +68,76 @@ export function BoxLabelPrintModal({
   clientOrderNo,
   customer,
   product,
+  productSize,
   boxes,
   totalBoxes,
 }: BoxLabelPrintModalProps) {
-  const [selectedBoxIndex, setSelectedBoxIndex] = useState<number | "all">("all");
+  // Topshirilgan/jo'natilgan qutilarning yorlig'i allaqachon yopishtirilgan: standart tanlov faqat topshirilmaganlar
+  const [selectedBoxIndex, setSelectedBoxIndex] = useState<BoxFilter>(() =>
+    boxes.some((b) => b.status && b.status !== "ready") && boxes.some((b) => !b.status || b.status === "ready")
+      ? "pending"
+      : "all"
+  );
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const displayedBoxes = React.useMemo(() => {
     if (selectedBoxIndex === "all") return boxes;
+    if (selectedBoxIndex === "pending") return boxes.filter((b) => !b.status || b.status === "ready");
     const single = boxes[selectedBoxIndex];
     return single ? [single] : boxes;
   }, [boxes, selectedBoxIndex]);
+
+  // So'rov matni qiymat bo'yicha solishtiriladi: ota-komponent har renderda yangi massiv bersa ham, qayta generatsiya bo'lmaydi
+  const requestBody = React.useMemo(
+    () =>
+      JSON.stringify({
+        type: "box-labels-pdf",
+        payload: {
+          workOrderNo,
+          clientOrderNo,
+          customer: customer || "—",
+          product: product || "—",
+          productSize: productSize || undefined,
+          totalBoxes: totalBoxes || boxes.length || 1,
+          boxes: displayedBoxes.map((b) => ({
+            id: b.id,
+            boxNumber: b.boxNumber,
+            boxCode: b.boxCode,
+            model: b.model,
+            sizeCode: b.sizeCode,
+            quantity: Math.max(0, Math.round(Number(b.quantity) || 0)),
+            grossWeightKg: b.grossWeightKg,
+            packerName: b.packerName,
+            packedAt: b.packedAt,
+            barcode: b.barcode,
+            notes: b.notes,
+          })),
+        },
+      }),
+    [workOrderNo, clientOrderNo, customer, product, productSize, totalBoxes, boxes.length, displayedBoxes]
+  );
 
   const generateReportLabPdf = useCallback(async () => {
     try {
       setIsGeneratingPdf(true);
       setErrorMsg(null);
 
+      if (displayedBoxes.length === 0) {
+        throw new Error("Chop etish uchun quti tanlanmagan.");
+      }
+
       const res = await fetch("/api/docs/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "box-labels-pdf",
-          payload: {
-            workOrderNo,
-            clientOrderNo,
-            customer: customer || "—",
-            product: product || "—",
-            totalBoxes: totalBoxes || boxes.length || 1,
-            boxes: displayedBoxes.map((b) => ({
-              id: b.id,
-              boxNumber: b.boxNumber,
-              boxCode: b.boxCode,
-              model: b.model,
-              sizeCode: b.sizeCode,
-              quantity: b.quantity,
-              grossWeightKg: b.grossWeightKg,
-              packerName: b.packerName,
-              packedAt: b.packedAt,
-              barcode: b.barcode,
-              notes: b.notes,
-            })),
-          },
-        }),
+        body: requestBody,
       });
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.details || errJson.error || `HTTP ${res.status}`);
+        throw new Error(readableError(res.status, errJson.details ?? errJson.error ?? ""));
       }
 
       const blob = await res.blob();
@@ -106,7 +152,7 @@ export function BoxLabelPrintModal({
     } finally {
       setIsGeneratingPdf(false);
     }
-  }, [workOrderNo, clientOrderNo, customer, product, totalBoxes, boxes.length, displayedBoxes]);
+  }, [requestBody, displayedBoxes.length]);
 
   // Generate automatically when dialog opens or selection changes
   useEffect(() => {
@@ -121,16 +167,22 @@ export function BoxLabelPrintModal({
   }, [isOpen, generateReportLabPdf]);
 
   const handlePrint = () => {
-    if (pdfBlobUrl) {
-      const printWin = window.open(pdfBlobUrl, "_blank");
-      if (printWin) {
-        printWin.addEventListener("load", () => {
-          printWin.print();
-        });
+    if (!pdfBlobUrl) return;
+    // PDF ko'rsatgichi shu sahifadagi iframe ichida: yangi oyna va "load" hodisasiga tayanmasdan to'g'ridan-to'g'ri chop etiladi
+    try {
+      const frameWin = iframeRef.current?.contentWindow;
+      if (frameWin) {
+        frameWin.focus();
+        frameWin.print();
+        return;
       }
-      return;
+    } catch {
+      /* iframe chop etishga ruxsat bermadi: quyida yangi oynaga o'tiladi */
     }
-    window.print();
+    const win = window.open(pdfBlobUrl, "_blank");
+    if (!win) {
+      setErrorMsg("Brauzer yangi oynani blokladi. Popup'ga ruxsat bering yoki \"Yuklab olish\" ni bosing.");
+    }
   };
 
   const handleDownloadPdf = () => {
@@ -182,7 +234,7 @@ export function BoxLabelPrintModal({
               <Select
                 value={String(selectedBoxIndex)}
                 onValueChange={(val) =>
-                  setSelectedBoxIndex(!val || val === "all" ? "all" : Number(val))
+                  setSelectedBoxIndex(!val || val === "all" ? "all" : val === "pending" ? "pending" : Number(val))
                 }
               >
                 <SelectTrigger className="h-8 min-w-[170px] text-xs bg-muted font-medium">
@@ -192,6 +244,11 @@ export function BoxLabelPrintModal({
                   <SelectItem value="all" className="text-xs">
                     Barchasi ({boxes.length} ta)
                   </SelectItem>
+                  {boxes.some((b) => b.status && b.status !== "ready") && (
+                    <SelectItem value="pending" className="text-xs">
+                      Topshirilmaganlar ({boxes.filter((b) => !b.status || b.status === "ready").length} ta)
+                    </SelectItem>
+                  )}
                   {boxes.map((b, idx) => (
                     <SelectItem key={b.id || idx} value={String(idx)} className="text-xs font-mono">
                       Quti #{b.boxNumber} ({b.quantity} dona{b.sizeCode ? ` · ${b.sizeCode}` : ""})
@@ -247,17 +304,17 @@ export function BoxLabelPrintModal({
               <RefreshCw className="w-7 h-7 text-blue-600 animate-spin" />
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-foreground">
-                  ReportLab (Python) termoetiketkalarni generatsiya qilmoqda...
+                  Yorliqlar tayyorlanmoqda...
                 </p>
                 <p className="text-[11px] text-muted-foreground font-mono">
-                  POST /generate/pdf/box-labels • {displayedBoxes.length} ta 100×150 mm yorliq
+                  {displayedBoxes.length} ta 100×150 mm yorliq
                 </p>
               </div>
             </div>
           ) : errorMsg ? (
             <div className="max-w-md p-6 bg-card border border-destructive/40 rounded-lg text-center space-y-3 shadow-sm">
               <p className="text-xs font-bold text-destructive">
-                ReportLab PDF Xatoligi
+                Yorliqlarni tayyorlab bo&apos;lmadi
               </p>
               <p className="text-[11px] text-muted-foreground font-mono break-all">
                 {errorMsg}
@@ -268,6 +325,7 @@ export function BoxLabelPrintModal({
             </div>
           ) : pdfBlobUrl ? (
             <iframe
+              ref={iframeRef}
               src={`${pdfBlobUrl}#toolbar=1&navpanes=0&view=FitH`}
               title={`Box Labels ${workOrderNo}`}
               className="w-full h-full border-0"
@@ -298,7 +356,7 @@ export function BoxLabelPrintModal({
               type="button"
               size="sm"
               onClick={handlePrint}
-              disabled={isGeneratingPdf}
+              disabled={isGeneratingPdf || !pdfBlobUrl}
               className="h-8 gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5" />

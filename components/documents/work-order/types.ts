@@ -447,6 +447,10 @@ export interface WorkOrderPackagingSummary {
   calibrationMethod?: "theoretical" | "scale_sample";
   samplePcs?: number;
   sampleWeightGrams?: number;
+  /** Quti (tara) og'irligi, kg: tarozi ko'rsatkichidan ayiriladi */
+  tareKg?: number;
+  /** Mahsulot ishlab chiqarish jurnalisiz, oldindan tayyor bo'lgan (eski zaxira) */
+  preProduced?: boolean;
   boxes: PackagingBoxItem[];
 }
 
@@ -457,10 +461,10 @@ export function autoGeneratePackagingBoxes(params: {
   sizes?: SizeDistribution[];
   defaultPacker?: string;
 }): PackagingBoxItem[] {
-  const { workOrderNo, targetQuantity, standardCapacity, sizes, defaultPacker = "Qadoqlash bo'limi" } = params;
+  const { workOrderNo, targetQuantity, standardCapacity, sizes, defaultPacker = "" } = params;
   const capacity = Math.max(1, standardCapacity || 500);
   const now = new Date().toISOString();
-  const cleanWo = (workOrderNo || "WOOF-26-0001").replace(/[^a-zA-Z0-9_-]/g, "");
+  const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
 
   const validSizes = (sizes || []).filter((s) => Number(s.quantity) > 0);
 

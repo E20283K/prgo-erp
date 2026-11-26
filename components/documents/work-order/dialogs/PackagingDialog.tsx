@@ -50,13 +50,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 import { SmartCombobox, ComboboxItem } from "@/components/ui/smart-combobox";
 import {
   PackagingBoxItem,
   WorkOrderPackagingSummary,
   SizeDistribution,
   autoGeneratePackagingBoxes,
-  FLOOR_OPERATORS,
   KashirovkaMode,
   SubstrateLayer,
 } from "../types";
@@ -64,7 +64,6 @@ import {
   calculateTheoreticalUnitWeight,
   calibrateFromScaleSample,
   calculatePiecesFromWeight,
-  calculateWeightFromPieces,
 } from "../utils/weightCountingEngine";
 
 const BOX_TYPE_OPTIONS: ComboboxItem[] = [
@@ -75,12 +74,6 @@ const BOX_TYPE_OPTIONS: ComboboxItem[] = [
   { value: "Plastik quti / Konteyner", label: "Plastik quti / Konteyner", badge: "Konteyner" },
   { value: "Maxsus o'ram / Qop", label: "Maxsus o'ram / Qop", badge: "Qop" },
 ];
-
-const OPERATOR_OPTIONS: ComboboxItem[] = FLOOR_OPERATORS.map((op) => ({
-  value: op,
-  label: op,
-  icon: UserCheck,
-}));
 
 const CAPACITY_PRESETS = [100, 250, 500, 1000];
 const SAMPLE_PCS_PRESETS = [50, 100, 200];
@@ -112,6 +105,9 @@ interface PackagingDialogProps {
   /** Hands the packed ("ready") boxes over to the FG warehouse. */
   onHandOver?: (summary: WorkOrderPackagingSummary) => void;
 }
+
+/** Keyingi bo'sh quti raqami: mavjud eng katta raqamdan keyin (o'chirishdan keyin ham takrorlanmaydi) */
+const nextBoxNumber = (list: PackagingBoxItem[]) => list.reduce((m, b) => Math.max(m, b.boxNumber || 0), 0) + 1;
 
 /** Boxes past the shop (handed over, in the FG warehouse or shipped) are fixed: no edits, no deletes. */
 const isLockedBox = (b: PackagingBoxItem) => Boolean(b.status && b.status !== "ready");
@@ -161,11 +157,26 @@ export function PackagingDialog({
   routeFinished = false,
   onHandOver,
 }: PackagingDialogProps) {
-  // Without production data the plan is the ceiling (keeps legacy orders usable).
-  const packLimit = producedQty !== undefined ? Math.min(targetQuantity, Math.max(0, producedQty)) : targetQuantity;
   const [standardCapacity, setStandardCapacity] = useState<number>(500);
-  const [boxType, setBoxType] = useState<string>(BOX_TYPE_OPTIONS[0].value);
-  const [packerName, setPackerName] = useState<string>("N. Fedorov (Packaging)");
+  const [boxType, setBoxType] = useState<string>("");
+  const [packerName, setPackerName] = useState<string>("");
+  const [tareKg, setTareKg] = useState<number>(existingPackaging?.tareKg || 0);
+  const [preProduced, setPreProduced] = useState<boolean>(Boolean(existingPackaging?.preProduced));
+  // Without production data the plan is the ceiling (keeps legacy orders usable).
+  const effectiveProduced = preProduced ? targetQuantity : producedQty;
+  const packLimit =
+    effectiveProduced !== undefined ? Math.min(targetQuantity, Math.max(0, effectiveProduced)) : targetQuantity;
+  const employees = useWorkspaceStore((s) => s.employees);
+  const operatorOptions: ComboboxItem[] = useMemo(
+    () =>
+      Array.from(new Set((employees || []).map((e) => String(e.fullName || "").trim()).filter(Boolean))).map((n) => ({
+        value: n,
+        label: n,
+        icon: UserCheck,
+      })),
+    [employees]
+  );
+  const operatorNames = useMemo(() => operatorOptions.map((o) => o.value), [operatorOptions]);
   const [boxes, setBoxes] = useState<PackagingBoxItem[]>([]);
 
   // Theoretical 1 pc weight calculated from order specs
@@ -218,7 +229,9 @@ export function PackagingDialog({
         if (existingPackaging && existingPackaging.boxes && existingPackaging.boxes.length > 0) {
           setBoxes(existingPackaging.boxes);
           setStandardCapacity(existingPackaging.standardBoxCapacity || 500);
-          setBoxType(existingPackaging.boxType || BOX_TYPE_OPTIONS[0].value);
+          setBoxType(existingPackaging.boxType || "");
+          setTareKg(existingPackaging.tareKg || 0);
+          setPreProduced(Boolean(existingPackaging.preProduced));
           if (existingPackaging.calibrationMethod === "scale_sample" && existingPackaging.unitWeightGrams) {
             setCalibratedWeight(existingPackaging.unitWeightGrams);
             setSamplePcs(existingPackaging.samplePcs || 100);
@@ -239,11 +252,10 @@ export function PackagingDialog({
             defaultPacker: packerName,
           });
 
-          // Pre-fill gross weight from theoretical unit weight
+          // Tortilmagan qutiga taxminiy vazn yozilmaydi: "Tarozida" ustuni faqat haqiqiy tortishni ko'rsatadi
           const filled = generated.map((b) => ({
             ...b,
-            grossWeightKg: calculateWeightFromPieces(b.quantity, theoreticalUnitWeight),
-            unitWeightGrams: theoreticalUnitWeight,
+            unitWeightGrams: theoreticalUnitWeight > 0 ? theoreticalUnitWeight : undefined,
             countDeviation: 0,
           }));
           setBoxes(packLimit > 0 ? filled : []);
@@ -266,8 +278,8 @@ export function PackagingDialog({
       setBoxes((prev) =>
         prev.map((b) => {
           if (isLockedBox(b)) return b;
-          if (b.grossWeightKg && b.grossWeightKg > 0) {
-            const calculatedQty = calculatePiecesFromWeight(b.grossWeightKg, calibratedUnit);
+          if (b.isWeighed && b.grossWeightKg && b.grossWeightKg > 0) {
+            const calculatedQty = calculatePiecesFromWeight(Math.max(0, b.grossWeightKg - tareKg), calibratedUnit);
             return {
               ...b,
               quantity: calculatedQty,
@@ -305,8 +317,7 @@ export function PackagingDialog({
     }), kept.length + 1, workOrderNo);
     const filled = (rest > 0 ? generated : []).map((b) => ({
       ...b,
-      grossWeightKg: calculateWeightFromPieces(b.quantity, unitWeightGrams),
-      unitWeightGrams,
+      unitWeightGrams: unitWeightGrams > 0 ? unitWeightGrams : undefined,
       countDeviation: 0,
     }));
     setBoxes([...kept, ...filled]);
@@ -314,11 +325,10 @@ export function PackagingDialog({
 
   // Add manual box
   const handleAddManualBox = () => {
-    const nextNum = boxes.reduce((m, b) => Math.max(m, b.boxNumber || 0), 0) + 1;
+    const nextNum = nextBoxNumber(boxes);
     const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
     const defaultSize = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].size : undefined;
     const defaultModel = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].model : undefined;
-    const defaultWeight = calculateWeightFromPieces(standardCapacity, unitWeightGrams);
 
     const newBox: PackagingBoxItem = {
       id: `box-manual-${Date.now()}-${nextNum}`,
@@ -327,8 +337,7 @@ export function PackagingDialog({
       model: defaultModel,
       sizeCode: defaultSize,
       quantity: standardCapacity,
-      grossWeightKg: defaultWeight,
-      unitWeightGrams,
+      unitWeightGrams: unitWeightGrams > 0 ? unitWeightGrams : undefined,
       countDeviation: 0,
       packerName,
       packedAt: new Date().toISOString(),
@@ -339,10 +348,17 @@ export function PackagingDialog({
 
   // Duplicate box
   const handleDuplicateBox = (box: PackagingBoxItem) => {
-    const nextNum = boxes.length + 1;
+    const nextNum = nextBoxNumber(boxes);
     const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
     const newBox: PackagingBoxItem = {
       ...box,
+      // Nusxa yangi, tahrirlanadigan quti: topshirilgan qutining holati va sanalari ko'chirilmaydi
+      status: undefined,
+      handedOverAt: undefined,
+      receivedAt: undefined,
+      shipmentId: undefined,
+      batchId: undefined,
+      batchNo: undefined,
       id: `box-dup-${Date.now()}-${nextNum}`,
       boxNumber: nextNum,
       boxCode: `BX-${cleanWo}-${String(nextNum).padStart(2, "0")}`,
@@ -362,7 +378,7 @@ export function PackagingDialog({
           return { ...b, grossWeightKg: undefined, countDeviation: 0, isWeighed: false };
         }
         if (unitWeightGrams > 0) {
-          const calculatedQty = calculatePiecesFromWeight(val, unitWeightGrams);
+          const calculatedQty = calculatePiecesFromWeight(Math.max(0, val - tareKg), unitWeightGrams);
           return {
             ...b,
             grossWeightKg: val,
@@ -383,11 +399,11 @@ export function PackagingDialog({
     setBoxes((prev) =>
       prev.map((b) => {
         if (b.id !== boxId) return b;
-        const estWeight = unitWeightGrams > 0 ? calculateWeightFromPieces(nextQty, unitWeightGrams) : b.grossWeightKg;
         return {
           ...b,
           quantity: nextQty,
-          grossWeightKg: estWeight,
+          // Qo'lda o'zgartirilgan miqdor tortishga mos kelmaydi: eski tarozi ko'rsatkichi o'chiriladi
+          grossWeightKg: undefined,
           isWeighed: false,
           countDeviation: nextQty - standardCapacity,
         };
@@ -401,11 +417,12 @@ export function PackagingDialog({
     const weightKg = parseFloat(expressWeightInput);
     if (isNaN(weightKg) || weightKg <= 0) return;
 
-    const nextNum = boxes.length + 1;
+    if (unitWeightGrams <= 0) return;
+    const nextNum = nextBoxNumber(boxes);
     const cleanWo = (workOrderNo || "WO").replace(/[^a-zA-Z0-9_-]/g, "");
     const defaultSize = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].size : undefined;
     const defaultModel = hasValidSizeMatrix && sizes.length > 0 ? sizes[0].model : undefined;
-    const calculatedQty = calculatePiecesFromWeight(weightKg, unitWeightGrams);
+    const calculatedQty = calculatePiecesFromWeight(Math.max(0, weightKg - tareKg), unitWeightGrams);
 
     const newBox: PackagingBoxItem = {
       id: `box-weighed-${Date.now()}-${nextNum}`,
@@ -484,17 +501,38 @@ export function PackagingDialog({
     return boxes.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
   }, [boxes]);
 
+  // Faqat tarozida haqiqatan tortilgan qutilar (brutto) yig'iladi
   const totalGrossWeight = useMemo(() => {
-    return boxes.reduce((sum, b) => sum + (Number(b.grossWeightKg) || 0), 0);
+    return boxes.reduce((sum, b) => sum + (b.isWeighed ? Number(b.grossWeightKg) || 0 : 0), 0);
   }, [boxes]);
 
   const readyBoxes = useMemo(() => boxes.filter((b) => !isLockedBox(b)), [boxes]);
   const readyQty = readyBoxes.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
-  const overProducedQty = producedQty !== undefined ? Math.max(0, totalPackedQty - producedQty) : 0;
+  const overProducedQty = effectiveProduced !== undefined ? Math.max(0, totalPackedQty - effectiveProduced) : 0;
 
-  const diffQty = totalPackedQty - targetQuantity;
-  const isExactMatch = totalPackedQty === targetQuantity;
-  const completionPercent = targetQuantity > 0 ? Math.min(100, Math.round((totalPackedQty / targetQuantity) * 100)) : 0;
+  // Ishlab chiqarish jurnali bo'yicha qadoqlash chegarasi reja miqdoridan kichik bo'lsa, farq shu chegaraga nisbatan ko'rsatiladi
+  const compareTarget = effectiveProduced !== undefined ? packLimit : targetQuantity;
+  const noProduction = effectiveProduced !== undefined && packLimit === 0;
+  const diffQty = totalPackedQty - compareTarget;
+  const isExactMatch = totalPackedQty === compareTarget;
+  const completionPercent = compareTarget > 0 ? Math.min(100, Math.round((totalPackedQty / compareTarget) * 100)) : 0;
+
+  const handOverBlockReason =
+    readyBoxes.length === 0
+      ? "Topshirishga tayyor quti yo'q"
+      : overProducedQty > 0
+      ? `Ishlab chiqarilgandan ${overProducedQty.toLocaleString()} ${unit} ortiq. Jurnalsiz tayyor mahsulot bo'lsa, "Oldindan tayyor" ni belgilang`
+      : "";
+  const completeBlockReason =
+    boxes.length === 0
+      ? "Qutilar yo'q"
+      : preProduced && !routeFinished
+      ? "Oldindan tayyor buyurtmada operatsiyalar yakunlanmagan: qutilarni omborga topshiring"
+      : !routeFinished
+      ? "Barcha ishlab chiqarish operatsiyalari yakunlanmagan"
+      : overProducedQty > 0
+      ? "Ishlab chiqarilgandan ortiq qadoqlangan"
+      : "";
 
   const currentSummary: WorkOrderPackagingSummary = useMemo(() => {
     return {
@@ -509,9 +547,11 @@ export function PackagingDialog({
       calibrationMethod,
       samplePcs,
       sampleWeightGrams: sampleWeightInput ? parseFloat(sampleWeightInput) : undefined,
+      tareKg: tareKg > 0 ? tareKg : undefined,
+      preProduced: preProduced || undefined,
       boxes,
     };
-  }, [standardCapacity, boxType, boxes, totalPackedQty, targetQuantity, existingPackaging, unitWeightGrams, calibrationMethod, samplePcs, sampleWeightInput]);
+  }, [standardCapacity, boxType, boxes, totalPackedQty, targetQuantity, existingPackaging, unitWeightGrams, calibrationMethod, samplePcs, sampleWeightInput, tareKg, preProduced]);
 
   const handleSaveDraft = () => {
     onSavePackaging(currentSummary, false);
@@ -570,7 +610,7 @@ export function PackagingDialog({
                 className="h-7 text-xs font-medium gap-1.5 shrink-0 cursor-pointer mr-1"
               >
                 <Printer className="size-3.5" />
-                <span>Yorliqlar (100×150)</span>
+                <span>Yorliqlar</span>
               </Button>
             )}
           </div>
@@ -645,7 +685,7 @@ export function PackagingDialog({
                   1 dona birlik og&apos;irligi:
                 </span>
                 <span className="font-mono font-bold text-xs text-primary">
-                  {unitWeightGrams > 0 ? `${unitWeightGrams} g` : "0 g"}
+                  {unitWeightGrams > 0 ? `${unitWeightGrams} g` : "Noma'lum"}
                 </span>
                 <Badge
                   variant="outline"
@@ -655,12 +695,17 @@ export function PackagingDialog({
                       : "text-[9px] px-1 py-0 text-muted-foreground font-mono"
                   }
                 >
-                  {calibrationMethod === "scale_sample" ? "Etalon kalibrovka" : "Nazariy hisob"}
+                  {calibrationMethod === "scale_sample"
+                    ? "Etalon kalibrovka"
+                    : unitWeightGrams > 0
+                    ? "Nazariy hisob"
+                    : "Kiritilmagan"}
                 </Badge>
               </div>
               <div className="text-[10px] text-muted-foreground">
-                {width && height ? `${width}×${height} mm` : "Standart format"} •{" "}
-                {paperDensity ? `${paperDensity} g/m²` : "Qog'oz"}
+                {unitWeightGrams > 0 || (width && height)
+                  ? `${width && height ? `${width}×${height} mm` : "O'lcham yo'q"} • ${paperDensity ? `${paperDensity} g/m²` : "zichlik yo'q"}`
+                  : "Buyurtmada o'lcham va zichlik yo'q: etalon bilan kalibrovka qiling"}
                 {calibrationMethod === "scale_sample" && sampleWeightInput
                   ? ` (Etalon: ${samplePcs} dona = ${sampleWeightInput} g)`
                   : ""}
@@ -670,6 +715,18 @@ export function PackagingDialog({
 
           {/* Scale Actions */}
           <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 mr-1" title="Bo'sh quti og'irligi: tarozi ko'rsatkichidan ayiriladi">
+              <label className="text-[11px] text-muted-foreground whitespace-nowrap">Tara (kg):</label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={tareKg || ""}
+                placeholder="0"
+                onChange={(e) => setTareKg(Math.max(0, Number(e.target.value) || 0))}
+                className="h-7 w-16 text-xs font-mono text-right"
+              />
+            </div>
             {/* Popover: Calibrate with scale sample */}
             <Popover open={isCalibratePopoverOpen} onOpenChange={setIsCalibratePopoverOpen}>
               <PopoverTrigger
@@ -796,7 +853,7 @@ export function PackagingDialog({
           >
             <div className="flex items-center gap-1.5 text-xs font-medium text-foreground shrink-0">
               <Scale className="size-4 text-primary" />
-              <span>Quti sof vazni (kg):</span>
+              <span>Tarozi ko&apos;rsatkichi (kg):</span>
             </div>
 
             <div className="flex items-center gap-2 flex-1 max-w-xs">
@@ -814,18 +871,23 @@ export function PackagingDialog({
               <span className="text-xs text-muted-foreground font-mono">kg</span>
             </div>
 
+            {unitWeightGrams <= 0 && (
+              <span className="text-[11px] text-amber-600 dark:text-amber-400">
+                Avval &quot;Etalondan kalibrovka&quot; orqali 1 dona og&apos;irligini kiriting
+              </span>
+            )}
             {expressWeightInput && parseFloat(expressWeightInput) > 0 && unitWeightGrams > 0 && (
               <div className="flex items-center gap-2 text-xs font-mono">
                 <ArrowRight className="size-3.5 text-muted-foreground" />
                 <span className="text-muted-foreground">Hisoblandi:</span>
                 <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
-                  {calculatePiecesFromWeight(parseFloat(expressWeightInput), unitWeightGrams).toLocaleString()} {unit}
+                  {calculatePiecesFromWeight(Math.max(0, parseFloat(expressWeightInput) - tareKg), unitWeightGrams).toLocaleString()} {unit}
                 </strong>
                 <span className="text-[10px] text-muted-foreground">
                   (Og&apos;ish:{" "}
-                  {calculatePiecesFromWeight(parseFloat(expressWeightInput), unitWeightGrams) - standardCapacity >= 0
-                    ? `+${calculatePiecesFromWeight(parseFloat(expressWeightInput), unitWeightGrams) - standardCapacity}`
-                    : calculatePiecesFromWeight(parseFloat(expressWeightInput), unitWeightGrams) - standardCapacity})
+                  {calculatePiecesFromWeight(Math.max(0, parseFloat(expressWeightInput) - tareKg), unitWeightGrams) - standardCapacity >= 0
+                    ? `+${calculatePiecesFromWeight(Math.max(0, parseFloat(expressWeightInput) - tareKg), unitWeightGrams) - standardCapacity}`
+                    : calculatePiecesFromWeight(Math.max(0, parseFloat(expressWeightInput) - tareKg), unitWeightGrams) - standardCapacity})
                 </span>
               </div>
             )}
@@ -833,7 +895,7 @@ export function PackagingDialog({
             <Button
               type="submit"
               size="sm"
-              disabled={!expressWeightInput || parseFloat(expressWeightInput) <= 0}
+              disabled={!expressWeightInput || parseFloat(expressWeightInput) <= 0 || unitWeightGrams <= 0}
               className="h-7.5 text-xs px-3 ml-auto gap-1"
             >
               <Plus className="size-3.5" />
@@ -886,7 +948,7 @@ export function PackagingDialog({
               value={boxType}
               onChange={setBoxType}
               options={BOX_TYPE_OPTIONS}
-              placeholder="Tara turini tanlang..."
+              placeholder="Tara turi (ixtiyoriy)"
               searchPlaceholder="Tara turi bo'yicha qidirish..."
               allowCustom={true}
               className="h-7.5 text-xs bg-background"
@@ -914,7 +976,7 @@ export function PackagingDialog({
             <SmartCombobox
               value={packerName}
               onChange={setPackerName}
-              options={OPERATOR_OPTIONS}
+              options={operatorOptions}
               placeholder="Xodimni tanlang..."
               searchPlaceholder="Xodim qidirish..."
               allowCustom={true}
@@ -979,6 +1041,20 @@ export function PackagingDialog({
                 </strong>
                 <span className="text-[10px] text-muted-foreground">{unit}</span>
               </div>
+              {producedQty !== undefined && producedQty < targetQuantity && (
+                <label
+                  className="flex items-center gap-1.5 text-[11px] text-foreground cursor-pointer select-none"
+                  title="Mahsulot ishlab chiqarish jurnalisiz, oldindan tayyor (eski zaxira): qadoqlash chegarasi reja miqdoriga teng bo'ladi"
+                >
+                  <input
+                    type="checkbox"
+                    checked={preProduced}
+                    onChange={(e) => setPreProduced(e.target.checked)}
+                    className="size-3.5 accent-primary"
+                  />
+                  <span>Oldindan tayyor</span>
+                </label>
+              )}
               {overProducedQty > 0 && (
                 <span className="text-[11px] font-medium text-destructive">
                   Ishlab chiqarilgandan ortiq: {overProducedQty.toLocaleString()} {unit}
@@ -992,7 +1068,7 @@ export function PackagingDialog({
               </div>
               {totalGrossWeight > 0 && (
                 <div className="flex items-baseline gap-1">
-                  <span className="text-muted-foreground text-[11px]">Jami sof vazn:</span>
+                  <span className="text-muted-foreground text-[11px]">Tortilgan (brutto):</span>
                   <strong className="font-mono text-xs">{totalGrossWeight.toFixed(2)}</strong>
                   <span className="text-[10px] text-muted-foreground">kg</span>
                 </div>
@@ -1000,7 +1076,11 @@ export function PackagingDialog({
             </div>
 
             <div className="shrink-0">
-              {isExactMatch ? (
+              {noProduction && totalPackedQty === 0 ? (
+                <Badge variant="outline" className="text-muted-foreground text-[11px] font-medium py-0.5">
+                  Ishlab chiqarilgan miqdor yo&apos;q
+                </Badge>
+              ) : isExactMatch ? (
                 <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 gap-1 text-[11px] font-medium py-0.5">
                   <CheckCircle2 className="size-3.5" />
                   <span>Mos keldi</span>
@@ -1039,6 +1119,12 @@ export function PackagingDialog({
             <div className="p-8 text-center text-muted-foreground">
               <Package className="size-8 mx-auto mb-2 opacity-40" />
               <p className="font-medium text-xs">Hozircha birorta ham quti shakllantirilmadi.</p>
+              {noProduction && (
+                <p className="mt-1 text-[11px]">
+                  Ishlab chiqarilgan miqdor 0, avto-taqsimlash quti yaratmaydi. Mahsulot oldindan tayyor bo&apos;lsa,
+                  yuqoridagi &quot;Oldindan tayyor&quot; ni belgilang.
+                </p>
+              )}
               <div className="mt-3 flex items-center justify-center gap-2">
                 <Button
                   size="sm"
@@ -1068,7 +1154,7 @@ export function PackagingDialog({
                   <TableHead className="w-28">Quti kodi</TableHead>
                   {hasValidSizeMatrix && <TableHead className="w-28">Model</TableHead>}
                   {hasValidSizeMatrix && <TableHead className="w-28">O&apos;lcham</TableHead>}
-                  <TableHead className="w-28 text-right">Tarozida (kg)</TableHead>
+                  <TableHead className="w-28 text-right" title="Tarozi ko'rsatkichi (brutto), tara ayiriladi">Tarozida (kg)</TableHead>
                   <TableHead className="w-32 text-right">Miqdor (dona)</TableHead>
                   <TableHead className="w-36">Mas&apos;ul xodim</TableHead>
                   <TableHead className="w-24">Izoh</TableHead>
@@ -1153,7 +1239,7 @@ export function PackagingDialog({
                               )
                             }
                             className="h-6 w-20 text-right font-mono text-xs ml-auto"
-                            title="Tarozidagi sof og'irlik (kg)"
+                            title="Tarozidagi brutto og'irlik (kg); tara ayirilib dona hisoblanadi"
                           />
                         </div>
                       </TableCell>
@@ -1187,15 +1273,15 @@ export function PackagingDialog({
                       {/* Packer Name */}
                       <TableCell>
                         <Select
-                          value={box.packerName || packerName}
+                          value={box.packerName || packerName || undefined}
                           disabled={locked}
                           onValueChange={(val) => handleBoxPackerChange(box.id, val || packerName)}
                         >
                           <SelectTrigger className="h-6 w-34 text-[11px] bg-background px-2 truncate">
-                            <SelectValue />
+                            <SelectValue placeholder="Tanlanmagan" />
                           </SelectTrigger>
                           <SelectContent>
-                            {FLOOR_OPERATORS.map((op) => (
+                            {Array.from(new Set([...(box.packerName ? [box.packerName] : []), ...operatorNames])).map((op) => (
                               <SelectItem key={op} value={op} className="text-xs">
                                 {op}
                               </SelectItem>
@@ -1296,6 +1382,9 @@ export function PackagingDialog({
           </div>
 
           <div className="flex items-center gap-2">
+            {onHandOver && handOverBlockReason && (
+              <span className="max-w-[260px] text-[11px] leading-tight text-destructive text-right">{handOverBlockReason}</span>
+            )}
             {onHandOver && (
               <Button
                 size="sm"
@@ -1303,7 +1392,7 @@ export function PackagingDialog({
                 onClick={handleHandOver}
                 disabled={readyBoxes.length === 0 || overProducedQty > 0}
                 className="h-8 text-xs font-medium gap-1.5 cursor-pointer"
-                title="Qadoqlangan qutilarni tayyor mahsulot omboriga qabulga berish"
+                title={handOverBlockReason || "Qadoqlangan qutilarni tayyor mahsulot omboriga qabulga berish"}
               >
                 <Truck className="size-3.5" />
                 <span>
@@ -1315,7 +1404,7 @@ export function PackagingDialog({
               size="sm"
               onClick={handleCompletePackaging}
               disabled={boxes.length === 0 || !routeFinished || overProducedQty > 0}
-              title={routeFinished ? undefined : "Barcha ishlab chiqarish operatsiyalari yakunlanmagan"}
+              title={completeBlockReason || undefined}
               className="h-8 text-xs font-medium gap-1.5 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
             >
               <CheckCircle2 className="size-3.5" />
