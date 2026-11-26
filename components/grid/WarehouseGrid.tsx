@@ -40,6 +40,7 @@ import { useWorkspaceStore, generateNextMaterialSku } from "@/store/workspaceSto
 import { ReturnOffcutDialog } from "./ReturnOffcutDialog";
 import { PendingFgReceiptsDialog } from "@/components/documents/warehouse/dialogs/PendingFgReceiptsDialog";
 import { DispatchManifestDialog } from "@/components/documents/warehouse/dialogs/DispatchManifestDialog";
+import { FgOpeningBalanceDialog } from "@/components/documents/warehouse/dialogs/FgOpeningBalanceDialog";
 import { PackageCheck } from "lucide-react";
 import { CarrierDialog, type CarrierProfile } from "@/components/documents/WarehouseShipmentDetail";
 import { useTranslations } from "next-intl";
@@ -184,6 +185,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
   const [uploadTargetRecord, setUploadTargetRecord] = useState<any | null>(null);
   const [isCarrierDialogOpen, setIsCarrierDialogOpen] = useState(false);
   const [isPendingFgDialogOpen, setIsPendingFgDialogOpen] = useState(false);
+  const [isFgOpeningDialogOpen, setIsFgOpeningDialogOpen] = useState(false);
   const [isDispatchManifestDialogOpen, setIsDispatchManifestDialogOpen] = useState(false);
   const [shipmentViewTab, setShipmentViewTab] = useState<"ALL" | "READY">("ALL");
   const [activeManifestRecord, setActiveManifestRecord] = useState<any | null>(null);
@@ -1467,6 +1469,17 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
               {type === 'finished-goods' && (
                 <Button
                   size="sm"
+                  onClick={() => setIsFgOpeningDialogOpen(true)}
+                  className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs gap-1 shadow-none rounded cursor-pointer"
+                >
+                  <Plus className="size-3.5" />
+                  <span>Boshlang&apos;ich qoldiq</span>
+                </Button>
+              )}
+
+              {type === 'finished-goods' && (
+                <Button
+                  size="sm"
                   variant="outline"
                   onClick={() => setIsPendingFgDialogOpen(true)}
                   className="h-7 px-2.5 text-xs font-medium gap-1.5 rounded border-blue-500/30 text-blue-600 bg-blue-50/40 hover:bg-blue-50 dark:bg-blue-950/30"
@@ -2311,6 +2324,11 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
       <PendingFgReceiptsDialog
         open={isPendingFgDialogOpen}
         onOpenChange={setIsPendingFgDialogOpen}
+      />
+
+      <FgOpeningBalanceDialog
+        open={isFgOpeningDialogOpen}
+        onOpenChange={setIsFgOpeningDialogOpen}
       />
 
       <DispatchManifestDialog
