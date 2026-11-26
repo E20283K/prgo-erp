@@ -167,9 +167,13 @@ export function MaterialFlowPanel({
     if (!json) return;
     setMode(null);
     onClosed?.(json.materials || [], json.materialIssueDocNo);
+    const docs: string[] = json.documents || [];
+    const hasReturn = docs.some((n) => n.startsWith("RET-"));
     toast.add({
       title: "Sarf yakunlandi",
-      description: json.documents?.length ? json.documents.join(", ") : undefined,
+      description: docs.length
+        ? `${docs.join(", ")}${hasReturn ? " · qaytarishni omborchi qabul qiladi" : ""}`
+        : undefined,
       type: "success",
     });
   };
@@ -221,12 +225,17 @@ export function MaterialFlowPanel({
               type="button"
               onClick={() => onOpenIssueTab?.(d.number)}
               className={cn(
-                "font-mono text-[11px] px-1.5 h-5 rounded border cursor-pointer hover:bg-muted shrink-0",
-                d.type === "ProductionReturn" ? "border-border text-muted-foreground" : "border-border text-foreground"
+                "inline-flex items-center gap-1 font-mono text-[11px] px-1.5 h-5 rounded border cursor-pointer hover:bg-muted shrink-0",
+                d.pending
+                  ? "border-amber-500/40 text-amber-700 dark:text-amber-300"
+                  : d.type === "ProductionReturn"
+                  ? "border-border text-muted-foreground"
+                  : "border-border text-foreground"
               )}
-              title={`${fmt(d.quantity)} ${d.unit}`}
+              title={`${fmt(d.quantity)} ${d.unit}${d.pending ? " · omborchi tasdiqlamagan" : ""}`}
             >
               {d.number}
+              {d.pending && <span className="font-sans">Kutilmoqda</span>}
             </button>
           ))}
         </div>

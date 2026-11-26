@@ -12,8 +12,9 @@
  */
 import { db, type DbExec } from "@/db";
 import { warehouseMovements, warehouseStockBalances, workOrders } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getCompanyIdByCode, upsertWarehouseMovement } from "./warehouseService";
+import { emitNotification } from "./notificationService";
 
 const EPS = 1e-9;
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -56,6 +57,8 @@ export interface MaterialFlowDoc {
   date: string;
   quantity: number;
   unit: string;
+  /** Omborchi hali tasdiqlamagan (qoldiqqa ta'sir qilmagan) */
+  pending?: boolean;
 }
 
 export interface MaterialFlowView {
@@ -200,7 +203,8 @@ async function loadIssued(exec: DbExec, companyId: string, docNo: string): Promi
       and(
         eq(warehouseMovements.companyId, companyId),
         eq(warehouseMovements.workOrderId, docNo),
-        eq(warehouseMovements.status, "Completed")
+        // Qoralamalar faqat hujjat sifatida ko'rinadi — miqdorlar yakunlanganlardan hisoblanadi
+        inArray(warehouseMovements.status, ["Completed", "Pending", "In Transit"])
       )
     );
   const netByLoc = new Map<string, Map<string, number>>();
@@ -227,10 +231,15 @@ async function loadIssued(exec: DbExec, companyId: string, docNo: string): Promi
     if (items.length === 0 && r.materialSku) {
       items = [{ sku: r.materialSku, quantity: r.quantity, receivedQty: r.receivedQty }];
     }
+    const pending = r.status !== "Completed";
     let docQty = 0;
     for (const it of items) {
       const sku = String(it?.sku || "");
       if (!sku) continue;
+      if (pending) {
+        docQty += Number(it.quantity) || 0;
+        continue;
+      }
       if (type === "ProductionIssue") {
         const q = Number(it.quantity) || 0;
         issued.set(sku, (issued.get(sku) || 0) + q);
@@ -249,6 +258,7 @@ async function loadIssued(exec: DbExec, companyId: string, docNo: string): Promi
       date: (r.movementDate instanceof Date ? r.movementDate : new Date(r.movementDate as any)).toISOString(),
       quantity: round3(docQty),
       unit: r.unit,
+      ...(pending ? { pending: true } : {}),
     });
   }
   docs.sort((a, b) => a.date.localeCompare(b.date) || a.number.localeCompare(b.number));
@@ -639,6 +649,9 @@ export async function closeWorkOrderMaterials(
         }))
       );
     }
+    // Ortgan material omborga qoralama (Pending) RET bilan qaytadi: omborchi jismonan qabul qilib tasdiqlaganda
+    // qoldiq oshadi. Qabul qilingan miqdor oldindan to'ldiriladi — omborchi sanab tuzatadi.
+    const pendingReturns: Array<{ number: string; location: string; total: number; unit: string }> = [];
     for (const [loc, group] of returns) {
       const total = group.reduce((s, l) => s + l.qty, 0);
       const press = input.pressMachine || wo.pressMachine || "Sex";
@@ -646,7 +659,7 @@ export async function closeWorkOrderMaterials(
         {
           movementNumber: "",
           movementType: "ProductionReturn",
-          status: "Completed",
+          status: "Pending",
           date: new Date().toISOString().slice(0, 10),
           from: press,
           to: loc,
@@ -671,6 +684,7 @@ export async function closeWorkOrderMaterials(
         { tx }
       );
       numbers.push(rec.movementNumber);
+      pendingReturns.push({ number: rec.movementNumber, location: loc, total: round3(total), unit: group[0].unit });
     }
 
     await releaseAll(tx, companyId, flow.reservations);
@@ -702,7 +716,7 @@ export async function closeWorkOrderMaterials(
       });
     }
 
-    const firstIssue = issuedState.docs.find((d) => d.type === "ProductionIssue")?.number || numbers.find((n) => n.startsWith("ISS-"));
+    const firstIssue = issuedState.docs.find((d) => d.type === "ProductionIssue" && !d.pending)?.number || numbers.find((n) => n.startsWith("ISS-"));
     dims.materials = nextMaterials;
     dims.materialsConsumed = true;
     dims.materialsConsumedAt = new Date().toISOString();
@@ -714,8 +728,29 @@ export async function closeWorkOrderMaterials(
       closedBy: actor?.name || input.operator || undefined,
     };
     await writeDimensions(tx, wo.id, dims);
-    return { docNo: wo.docNo, numbers, materials: nextMaterials, materialIssueDocNo: firstIssue };
+    return { docNo: wo.docNo, numbers, materials: nextMaterials, materialIssueDocNo: firstIssue, pendingReturns };
   });
+
+  for (const r of result.pendingReturns) {
+    try {
+      await emitNotification(
+        {
+          dedupKey: `production-return-pending:${r.number}`,
+          severity: "warning",
+          category: "warehouse",
+          eventType: "production_return:pending",
+          entityCode: r.number,
+          title: `Qaytarishni qabul qiling: ${r.number}`,
+          description: `${result.docNo}: sexdan ${fmtQty(r.total)} ${r.unit} ortgan material "${r.location}" omboriga qaytariladi.`,
+          link: { module: "warehouse", subModule: "production-issue" },
+        },
+        companyCode
+      );
+    } catch {
+      /* bildirishnoma yetmasa ham hujjat ro'yxatda va menyu hisoblagichida ko'rinadi */
+    }
+  }
+
   return {
     flow: await viewOf(db, companyId, result.docNo),
     documents: result.numbers,
