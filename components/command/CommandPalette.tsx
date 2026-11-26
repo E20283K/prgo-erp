@@ -37,6 +37,26 @@ import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "@/i18n/routing";
 import { LANGUAGES } from "@/components/layout/LanguageSwitcher";
 
+/**
+ * cmdk's default scorer is a loose subsequence match: "orders" matches
+ * "Toggle Inspect Element … DisabledCtrl+Shift+C" because o-r-d-e-r-s appear
+ * in that order somewhere in the text. Require every typed word to appear as
+ * a real substring instead, ranking word-start hits above mid-word ones.
+ */
+function paletteFilter(value: string, search: string, keywords?: string[]): number {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return 1;
+  const haystack = `${value} ${(keywords ?? []).join(" ")}`.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    const idx = haystack.indexOf(term);
+    if (idx === -1) return 0;
+    const atWordStart = idx === 0 || /[^\p{L}\p{N}]/u.test(haystack[idx - 1]);
+    score += atWordStart ? 1 : 0.5;
+  }
+  return score / terms.length;
+}
+
 export function CommandPalette() {
   const [isMac, setIsMac] = React.useState(false);
 
@@ -157,6 +177,7 @@ export function CommandPalette() {
     <CommandDialog
       open={isCommandOpen}
       onOpenChange={setCommandOpen}
+      filter={paletteFilter}
       title="PrintGoo ERP Command Palette"
       description="Fast travel across modules, menus, documents, and system actions"
     >
