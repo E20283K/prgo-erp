@@ -1,0 +1,1 @@
+ALTER TABLE "warehouse_finished_goods" ADD COLUMN "image_url" text;

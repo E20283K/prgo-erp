@@ -1882,6 +1882,7 @@ export async function upsertFinishedGood(payload: any, companyCode: string = "PR
     locationShelf: payload.locationShelf || null,
     notes: payload.notes || null,
     // Ixtiyoriy maydonlar: payload'da berilgan bo'lsagina yoziladi (mavjud qiymat default bilan ustidan yozilmasin)
+    ...(payload.imageUrl !== undefined ? { imageUrl: payload.imageUrl ? String(payload.imageUrl) : null } : {}),
     ...(payload.receiptStatus ? { receiptStatus: String(payload.receiptStatus) } : {}),
     ...(payload.allocationStatus ? { allocationStatus: String(payload.allocationStatus) } : {}),
     ...(payload.costPricePerUnit !== undefined && payload.costPricePerUnit !== null

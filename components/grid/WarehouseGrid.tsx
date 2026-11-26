@@ -699,6 +699,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
     }
     if (type === 'finished-goods') {
       cols = [
+        { id: 'image', title: tCommon('image'), width: 56, icon: GridColumnIcon.HeaderImage },
         { id: 'id', title: 'Partiya / WO №', width: 125, icon: GridColumnIcon.HeaderReference },
         { id: 'customerName', title: 'Buyurtmachi (Mijoz)', width: 220, icon: GridColumnIcon.HeaderString },
         { id: 'productName', title: 'Tayyor Mahsulot Nomi', width: 280, icon: GridColumnIcon.HeaderString },
@@ -1001,7 +1002,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
         if (rowData.imageUrl) {
           setPreviewMaterial({
             imageUrl: rowData.imageUrl,
-            title: rowData.name || rowData.sku,
+            title: rowData.name || rowData.productName || rowData.sku,
             sku: rowData.sku,
             category: rowData.category,
             spec: rowData.sheetFormat ? `${rowData.sheetFormat} mm` : rowData.cutDimensions,
@@ -2271,7 +2272,7 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
           setIsUploadDialogOpen(false);
           setUploadTargetRecord(null);
         }}
-        materialName={uploadTargetRecord?.name || formData?.name || "Yangi material"}
+        materialName={uploadTargetRecord?.name || uploadTargetRecord?.productName || formData?.name || "Yangi material"}
         materialSku={uploadTargetRecord?.sku || formData?.sku}
         currentImageUrl={
           uploadTargetRecord?.imageUrl ||
@@ -2285,6 +2286,8 @@ export function WarehouseGrid({ type }: WarehouseGridProps) {
                 ...uploadTargetRecord,
                 imageUrl: newUrl,
               });
+            } else if (type === "finished-goods") {
+              void upsertFinishedGoodAsync({ ...uploadTargetRecord, imageUrl: newUrl });
             }
             setSelectedRecord((prev: any) => (prev ? { ...prev, imageUrl: newUrl } : null));
             setRowsData((prev) =>

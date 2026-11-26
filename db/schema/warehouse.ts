@@ -455,6 +455,7 @@ export const warehouseFinishedGoods = pgTable(
     totalStockValue: numeric("total_stock_value", { precision: 15, scale: 2 }).default("0").notNull(),
     locationShelf: varchar("location_shelf", { length: 128 }),
     notes: text("notes"),
+    imageUrl: text("image_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
