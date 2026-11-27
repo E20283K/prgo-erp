@@ -126,7 +126,7 @@ export function Segmented<T extends string | number>({
 }: {
   value: T;
   onChange: (v: T) => void;
-  options: { value: T; label: string; title?: string }[];
+  options: { value: T; label: string; title?: string; disabled?: boolean }[];
   disabled?: boolean;
   className?: string;
 }) {
@@ -137,7 +137,7 @@ export function Segmented<T extends string | number>({
           key={String(o.value)}
           type="button"
           title={o.title}
-          disabled={disabled}
+          disabled={disabled || o.disabled}
           onClick={() => onChange(o.value)}
           className={cn(
             "px-2 rounded text-xs transition-colors cursor-pointer disabled:cursor-not-allowed",

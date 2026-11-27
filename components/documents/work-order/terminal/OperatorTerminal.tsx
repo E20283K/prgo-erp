@@ -22,6 +22,7 @@ import {
   LogOut,
   Lock,
   Factory,
+  Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,8 @@ import { stepUnit } from "../utils/stepKpis";
 import { PalletReportDialog } from "../dialogs/PalletReportDialog";
 import { DowntimeLogDialog } from "../dialogs/DowntimeLogDialog";
 import { useAskDialog } from "../dialogs/AskDialog";
+import { printCutPlans, renderCutPlanSvg, svgDataUrl } from "../tabs/layout-calc/cutPlanSvg";
+import type { CutPlanSnapshot } from "../tabs/layout-calc/cutPlan";
 import type {
   FloorMachine,
   TerminalJob,
@@ -927,6 +930,15 @@ export function OperatorTerminal() {
                   />
                 </div>
 
+                {job.cutPlans && (
+                  <CutPlanCard
+                    key={`${job.workOrderNo}-${job.opId}`}
+                    plans={job.cutPlans}
+                    docNo={job.workOrderNo}
+                    jobName={job.productName}
+                  />
+                )}
+
                 {/* Recent entries */}
                 <div className="border border-border rounded-lg bg-card">
                   <div className="h-8 px-3 flex items-center text-[11px] text-muted-foreground border-b border-border">
@@ -1192,6 +1204,58 @@ function MachinePhoto({
         <Factory className="size-1/2 max-w-8 max-h-8 text-muted-foreground/50" />
       )}
     </span>
+  );
+}
+
+/** Guillotine cutting plan of the job's sheet layout, the same card the layout tab prints. */
+function CutPlanCard({
+  plans,
+  docNo,
+  jobName,
+}: {
+  plans: CutPlanSnapshot[];
+  docNo: string;
+  jobName: string;
+}) {
+  const [idx, setIdx] = useState(0);
+  const plan = plans[Math.min(idx, plans.length - 1)];
+  const src = useMemo(
+    () => svgDataUrl(renderCutPlanSvg(plan, { docNo, jobName, totalForms: plans.length })),
+    [plan, docNo, jobName, plans.length]
+  );
+  return (
+    <div className="border border-border rounded-lg bg-card">
+      <div className="h-8 px-3 flex items-center gap-2 text-[11px] text-muted-foreground border-b border-border">
+        <span>Kesish rejasi</span>
+        {plans.length > 1 && (
+          <div className="flex items-center gap-1">
+            {plans.map((p, i) => (
+              <button
+                key={p.formIndex}
+                type="button"
+                onClick={() => setIdx(i)}
+                className={cn(
+                  "h-6 px-2 rounded border text-xs",
+                  i === idx ? "border-foreground text-foreground font-semibold" : "border-border text-muted-foreground"
+                )}
+              >
+                F{p.formIndex}
+              </button>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => printCutPlans(plans, { docNo, jobName })}
+          className="ml-auto h-6 px-2 inline-flex items-center gap-1.5 rounded border border-border text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Printer className="size-3.5" />
+          Chop etish
+        </button>
+      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt="Kesish rejasi" className="block w-full h-auto bg-white rounded-b-lg" />
+    </div>
   );
 }
 

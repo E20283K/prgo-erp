@@ -27,6 +27,8 @@ import {
   pickOptimalCutOption,
   resolveMachineConstraints,
 } from "./parentSheet";
+import { snapshotCutPlans, type CutPlanSnapshot } from "./cutPlan";
+import { renderCutPlanSvg } from "./cutPlanSvg";
 import type { ApplyImpositionPayload, ImpositionVariant, LayoutCalcTabProps, SheetCutOption } from "./types";
 import {
   dielineFileCandidates,
@@ -543,6 +545,17 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calcKey]);
 
+  // ---------------------------------------------------------------- guillotine cutting plan
+  // Only from a result that matches the current settings; a stale one has other cell positions
+  const freshCalc = calcState.key === calcKey ? calc : null;
+  const cutPlans = useMemo<CutPlanSnapshot[] | undefined>(
+    () =>
+      settings.category === "guillotine" && freshCalc
+        ? snapshotCutPlans(freshCalc.forms, settings.sheetW, settings.sheetH)
+        : undefined,
+    [settings.category, settings.sheetW, settings.sheetH, freshCalc]
+  );
+
   // ---------------------------------------------------------------- production summary
   const summary = useMemo(() => {
     if (!calc) return null;
@@ -583,7 +596,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [analysisKey, setAnalysisKey] = useState<string | null>(null);
   const [generated, setGenerated] = useState<GenerateResponse | null>(null);
-  const [busy, setBusy] = useState<"analyze" | "generate" | "apply" | "applyPaper" | null>(null);
+  const [busy, setBusy] = useState<"analyze" | "generate" | "apply" | "applyPaper" | "attachCut" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const sourceKey = useMemo(
@@ -720,6 +733,8 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
             ctpPlates: summary.ctpPlates,
           }
         : saved?.summary,
+      // Kept on the order for the guillotine operator's terminal
+      cutPlans: settings.category === "guillotine" ? (cutPlans ?? saved?.cutPlans) : undefined,
     };
     const json = JSON.stringify(state);
     if (!persistReady.current) {
@@ -732,10 +747,36 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     const t = setTimeout(flushPersist, PERSIST_DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, pdfMeta, summary]);
+  }, [settings, pdfMeta, summary, cutPlans]);
 
   // Leaving the tab unmounts it: write any debounced change before it is lost
   useEffect(() => () => flushPersist(), [flushPersist]);
+
+  /** Saves the printable cutting plan card (one SVG per form) to the order's files. */
+  const attachCutPlans = useCallback(async () => {
+    if (!cutPlans?.length || !docNo) return;
+    setBusy("attachCut");
+    setActionError(null);
+    const safeDoc = docNo.replace(/[^a-zA-Z0-9_-]/g, "_");
+    try {
+      for (const plan of cutPlans) {
+        const suffix = cutPlans.length > 1 ? `_F${plan.formIndex}` : "";
+        const name = `Kesish_${safeDoc}${suffix}.svg`;
+        const svg = renderCutPlanSvg(plan, { docNo, jobName: orderName, totalForms: cutPlans.length });
+        const file = new File([svg], name, { type: "image/svg+xml" });
+        const att = await uploadOrderFile(docNo, file, { category: "docs", skipOrderPhoto: true });
+        onAddAttachment?.({ ...att, id: `ATT-KESISH-${safeDoc}${suffix}` });
+      }
+    } catch (err: unknown) {
+      setActionError(
+        err instanceof PresignUnavailableError
+          ? "Fayl ombori sozlanmagan"
+          : errorMessage(err, "Kesish rejasini saqlab bo'lmadi")
+      );
+    } finally {
+      setBusy(null);
+    }
+  }, [cutPlans, docNo, orderName, onAddAttachment]);
 
   // ---------------------------------------------------------------- apply to order
   /**
@@ -878,6 +919,10 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     },
     hasAllArtwork,
     calc,
+    cutPlans,
+    attachCutPlans,
+    docNo,
+    orderName,
     calcError,
     calcLoading,
     summary,

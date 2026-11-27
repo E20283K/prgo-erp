@@ -10,6 +10,7 @@ export {
   migrateLegacyWorkOrderNo,
 } from "./utils/workOrderNumbering";
 import type { WorkOrderDepartment } from "./utils/workOrderNumbering";
+import type { CutPlanSnapshot } from "./tabs/layout-calc/cutPlan";
 import type { FrozenCostRates } from "./utils/operationCost";
 import type { ProductionQueueStage, ProductionReadinessChecks } from "@/store/workspaceStore";
 
@@ -1168,6 +1169,8 @@ export interface PersistedImpositionState {
     parentSheets: number;
     ctpPlates: number;
   };
+  /** Guillotine cutting plan per form, for the cutting operator (guillotine jobs only) */
+  cutPlans?: CutPlanSnapshot[];
 }
 
 /**

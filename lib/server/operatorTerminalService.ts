@@ -9,6 +9,7 @@ import {
   planInUnit,
   type CountingProfile,
 } from "@/components/documents/work-order/utils/countingProfile";
+import type { CutPlanSnapshot } from "@/components/documents/work-order/tabs/layout-calc/cutPlan";
 
 /**
  * Operator terminal: the work waiting on one machine, across all active work orders.
@@ -55,6 +56,8 @@ export interface TerminalJob {
   recentEvents: ShiftEvent[];
   /** All output reports of the step (input already taken in, pallet numbering). */
   reports: ShiftEvent[];
+  /** Cutting plan per form, on a guillotine with a saved sheet layout. */
+  cutPlans: CutPlanSnapshot[] | null;
 }
 
 export interface TerminalMachine {
@@ -243,6 +246,10 @@ function buildMachineJobs(machine: MachineRow, orders: FloorOrder[]): TerminalJo
           .sort((a, b) => (b.occurredAt || "").localeCompare(a.occurredAt || ""))
           .slice(0, 8),
         reports,
+        cutPlans:
+          machine.category === "guillotine" && Array.isArray(dims.impositionState?.cutPlans) && dims.impositionState.cutPlans.length
+            ? (dims.impositionState.cutPlans as CutPlanSnapshot[])
+            : null,
       });
     });
   }
