@@ -5,12 +5,14 @@ import { AlertTriangle, LayoutTemplate } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { NumField, Section, Segmented } from "../components/fields";
+import { MarginSketch, WithSketch, useFocusKey } from "../components/sketches";
 import type { SheetImpositionController } from "../useSheetImposition";
 
 export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; readOnly?: boolean }) {
   const s = c.settings;
   const n = (v: number | undefined, fallback = 0) => v ?? fallback;
   const gripperOn = s.gripper !== false;
+  const marginFocus = useFocusKey();
   // Off: the bottom edge becomes a plain margin like the top; on: back to the machine gripper
   const setGripper = (on: boolean) =>
     c.update(
@@ -115,12 +117,39 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
         />
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
-        <NumField label={gripperOn ? "Klapan" : "Pastki"} suffix="mm" value={s.marginBottom} disabled={readOnly} onChange={(v) => c.update({ marginBottom: n(v) })} />
-        <NumField label="Yuqori" suffix="mm" value={s.marginTop} disabled={readOnly} onChange={(v) => c.update({ marginTop: n(v) })} />
-        <NumField label="Chap" suffix="mm" value={s.marginLeft} disabled={readOnly} onChange={(v) => c.update({ marginLeft: n(v) })} />
-        <NumField label="O'ng" suffix="mm" value={s.marginRight} disabled={readOnly} onChange={(v) => c.update({ marginRight: n(v) })} />
-      </div>
+      <WithSketch
+        {...marginFocus.handlers}
+        sketch={
+          <MarginSketch
+            sheetW={s.sheetW}
+            sheetH={s.sheetH}
+            top={s.marginTop}
+            bottom={s.marginBottom}
+            left={s.marginLeft}
+            right={s.marginRight}
+            gripper={gripperOn}
+            alignment={s.alignment}
+            blockW={c.calc?.block_w_mm}
+            blockH={c.calc?.block_h_mm}
+            focus={marginFocus.focus}
+          />
+        }
+      >
+        <div className="grid grid-cols-2 gap-2">
+          <div data-k="marginBottom">
+            <NumField label={gripperOn ? "Klapan" : "Pastki"} suffix="mm" value={s.marginBottom} disabled={readOnly} onChange={(v) => c.update({ marginBottom: n(v) })} />
+          </div>
+          <div data-k="marginTop">
+            <NumField label="Yuqori" suffix="mm" value={s.marginTop} disabled={readOnly} onChange={(v) => c.update({ marginTop: n(v) })} />
+          </div>
+          <div data-k="marginLeft">
+            <NumField label="Chap" suffix="mm" value={s.marginLeft} disabled={readOnly} onChange={(v) => c.update({ marginLeft: n(v) })} />
+          </div>
+          <div data-k="marginRight">
+            <NumField label="O'ng" suffix="mm" value={s.marginRight} disabled={readOnly} onChange={(v) => c.update({ marginRight: n(v) })} />
+          </div>
+        </div>
+      </WithSketch>
       {narrowSides.length > 0 && (
         <div className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-500">
           <AlertTriangle className="size-3.5 shrink-0 mt-px" />
