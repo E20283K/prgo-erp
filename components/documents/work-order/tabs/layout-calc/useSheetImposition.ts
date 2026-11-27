@@ -27,7 +27,13 @@ import {
   pickOptimalCutOption,
   resolveMachineConstraints,
 } from "./parentSheet";
-import { snapshotCutPlans, type CutPlanSnapshot } from "./cutPlan";
+import {
+  buildParentCut,
+  parentSheetFit,
+  snapshotCutPlans,
+  type CutPlanSnapshot,
+  type ParentCutSnapshot,
+} from "./cutPlan";
 import { renderCutPlanSvg } from "./cutPlanSvg";
 import type { ApplyImpositionPayload, ImpositionVariant, LayoutCalcTabProps, SheetCutOption } from "./types";
 import {
@@ -557,11 +563,17 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
   );
 
   // ---------------------------------------------------------------- production summary
+  /** Press sheets that fit the parent sheet by geometry, to check the divisor against */
+  const parentFit = useMemo(
+    () => parentSheetFit(settings.parentSheetW, settings.parentSheetH, settings.sheetW, settings.sheetH).fit,
+    [settings.parentSheetW, settings.parentSheetH, settings.sheetW, settings.sheetH]
+  );
   const summary = useMemo(() => {
     if (!calc) return null;
     const forms = calc.forms.length;
     const pressSheets = calc.total_sheets;
-    const divisor = Math.max(1, settings.cutDivisor);
+    // A divisor above what fits would under-issue paper: never plan more press sheets per parent than fit
+    const divisor = parentFit > 0 ? Math.min(Math.max(1, settings.cutDivisor), parentFit) : Math.max(1, settings.cutDivisor);
     const parentSheets = Math.ceil(pressSheets / divisor);
     const platesPerForm =
       typeof kashirovkaPlates === "number"
@@ -590,7 +602,23 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       overprintPct,
       extraPct,
     };
-  }, [calc, variants, settings.cutDivisor, settings.mode, frontColorCount, backColorCount, kashirovkaPlates]);
+  }, [calc, variants, settings.cutDivisor, parentFit, settings.mode, frontColorCount, backColorCount, kashirovkaPlates]);
+
+  // ---------------------------------------------------------------- parent sheet cut
+  const parentCut = useMemo<ParentCutSnapshot | undefined>(() => {
+    if (!freshCalc || !summary) return undefined;
+    return buildParentCut({
+      parentW: settings.parentSheetW,
+      parentH: settings.parentSheetH,
+      pressW: settings.sheetW,
+      pressH: settings.sheetH,
+      divisor: Math.max(1, settings.cutDivisor),
+      pressSheets: summary.pressSheets,
+      runSheets: freshCalc.forms.reduce((s, f) => s + f.sheet_run, 0),
+      parentSheets: summary.parentSheets,
+      paperName: settings.paperName,
+    });
+  }, [freshCalc, summary, settings.parentSheetW, settings.parentSheetH, settings.sheetW, settings.sheetH, settings.cutDivisor, settings.paperName]);
 
   // ---------------------------------------------------------------- analyze / generate
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
@@ -735,6 +763,8 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
         : saved?.summary,
       // Kept on the order for the guillotine operator's terminal
       cutPlans: settings.category === "guillotine" ? (cutPlans ?? saved?.cutPlans) : undefined,
+      // Cutting the stock sheet down to the press sheet, for the passport
+      parentCut: parentCut ?? saved?.parentCut,
     };
     const json = JSON.stringify(state);
     if (!persistReady.current) {
@@ -747,7 +777,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     const t = setTimeout(flushPersist, PERSIST_DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, pdfMeta, summary, cutPlans]);
+  }, [settings, pdfMeta, summary, cutPlans, parentCut]);
 
   // Leaving the tab unmounts it: write any debounced change before it is lost
   useEffect(() => () => flushPersist(), [flushPersist]);
@@ -921,6 +951,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     calc,
     cutPlans,
     attachCutPlans,
+    parentFit,
     docNo,
     orderName,
     calcError,

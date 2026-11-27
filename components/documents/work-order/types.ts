@@ -10,7 +10,7 @@ export {
   migrateLegacyWorkOrderNo,
 } from "./utils/workOrderNumbering";
 import type { WorkOrderDepartment } from "./utils/workOrderNumbering";
-import type { CutPlanSnapshot } from "./tabs/layout-calc/cutPlan";
+import type { CutPlanSnapshot, ParentCutSnapshot } from "./tabs/layout-calc/cutPlan";
 import type { FrozenCostRates } from "./utils/operationCost";
 import type { ProductionQueueStage, ProductionReadinessChecks } from "@/store/workspaceStore";
 
@@ -1171,6 +1171,8 @@ export interface PersistedImpositionState {
   };
   /** Guillotine cutting plan per form, for the cutting operator (guillotine jobs only) */
   cutPlans?: CutPlanSnapshot[];
+  /** Stock (parent) sheet cut down to the press sheet, with offcuts and sheet counts */
+  parentCut?: ParentCutSnapshot;
 }
 
 /**

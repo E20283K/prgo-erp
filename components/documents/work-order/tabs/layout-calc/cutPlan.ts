@@ -290,3 +290,135 @@ export function cutPlanEdges(firstAxis: CutAxis) {
     left: `YON TIRGAK · TIRGAK ${xStage}`,
   };
 }
+
+// ------------------------------------------------------------------------------ parent sheet
+
+/** Smaller side below this the strip is waste; at or above it goes back to stock as an offcut. */
+export const OFFCUT_MIN_MM = 50;
+
+export interface ParentCutOffcut {
+  w: number;
+  h: number;
+  /** Pieces per parent sheet */
+  perSheet: number;
+  kind: "offcut" | "waste";
+}
+
+/** How the parent sheet is cut into press sheets before printing (impositionState.parentCut). */
+export interface ParentCutSnapshot {
+  parentW: number;
+  parentH: number;
+  pressW: number;
+  pressH: number;
+  /** Press sheets laid across the parent sheet's other way */
+  rotated: boolean;
+  cols: number;
+  rows: number;
+  /** Press sheets that fit one parent sheet */
+  fit: number;
+  /** Press sheets per parent sheet the run is planned with (the layout's divisor) */
+  divisor: number;
+  usedPct: number;
+  /** Knife order with the press sheets as pieces; null when nothing fits */
+  plan: CutPlanSnapshot | null;
+  offcuts: ParentCutOffcut[];
+  pressSheets: number;
+  runSheets: number;
+  wasteSheets: number;
+  parentSheets: number;
+  paperName?: string;
+}
+
+/** Press sheets per parent sheet by geometry: the better of the two orientations. */
+export function parentSheetFit(parentW: number, parentH: number, pressW: number, pressH: number) {
+  if (!(parentW > 0 && parentH > 0 && pressW > 0 && pressH > 0)) return { cols: 0, rows: 0, rotated: false, fit: 0 };
+  const straight = { cols: Math.floor(parentW / pressW + 1e-6), rows: Math.floor(parentH / pressH + 1e-6), rotated: false };
+  const turned = { cols: Math.floor(parentW / pressH + 1e-6), rows: Math.floor(parentH / pressW + 1e-6), rotated: true };
+  const best = turned.cols * turned.rows > straight.cols * straight.rows ? turned : straight;
+  return { ...best, fit: best.cols * best.rows };
+}
+
+/**
+ * Lays the press sheets against the two reference edges (bottom and left) so the leftover
+ * strips fall off first, then plans the knife order the same way as the printed sheet.
+ */
+export function buildParentCut(input: {
+  parentW: number;
+  parentH: number;
+  pressW: number;
+  pressH: number;
+  divisor: number;
+  pressSheets: number;
+  runSheets: number;
+  parentSheets: number;
+  paperName?: string;
+}): ParentCutSnapshot {
+  const { parentW: W, parentH: H, pressW, pressH } = input;
+  const g = parentSheetFit(W, H, pressW, pressH);
+  const cw = g.rotated ? pressH : pressW;
+  const ch = g.rotated ? pressW : pressH;
+
+  const cells: PlacedCell[] = [];
+  for (let r = 0; r < g.rows; r++) {
+    for (let c = 0; c < g.cols; c++) {
+      cells.push({
+        col: c,
+        row: r,
+        x_mm: c * cw,
+        y_mm: H - (r + 1) * ch,
+        w_mm: cw,
+        h_mm: ch,
+        rotation: g.rotated ? 90 : 0,
+        variant_index: 0,
+        variant_name: "",
+      });
+    }
+  }
+  const plan = buildCutPlan(cells, W, H);
+
+  const rightW = r1(W - g.cols * cw);
+  const topH = r1(H - g.rows * ch);
+  const raw =
+    !plan || plan.firstAxis === "y"
+      ? [
+          { w: W, h: topH, perSheet: 1 },
+          { w: rightW, h: ch, perSheet: g.rows },
+        ]
+      : [
+          { w: rightW, h: H, perSheet: 1 },
+          { w: cw, h: topH, perSheet: g.cols },
+        ];
+  const offcuts: ParentCutOffcut[] = g.fit
+    ? raw
+        .filter((o) => o.w > 0.5 && o.h > 0.5 && o.perSheet > 0)
+        .map((o) => ({ ...o, w: r1(o.w), h: r1(o.h), kind: Math.min(o.w, o.h) >= OFFCUT_MIN_MM ? "offcut" : "waste" }))
+    : [];
+
+  return {
+    parentW: W,
+    parentH: H,
+    pressW,
+    pressH,
+    rotated: g.rotated,
+    cols: g.cols,
+    rows: g.rows,
+    fit: g.fit,
+    divisor: input.divisor,
+    usedPct: W * H > 0 ? Math.round(((g.fit * pressW * pressH) / (W * H)) * 1000) / 10 : 0,
+    plan: plan
+      ? {
+          ...plan,
+          formIndex: 0,
+          sheetW: W,
+          sheetH: H,
+          cells: cells.map((c) => ({ x: r1(c.x_mm), y: r1(c.y_mm), w: r1(c.w_mm), h: r1(c.h_mm), v: 0 })),
+        }
+      : null,
+    offcuts,
+    pressSheets: input.pressSheets,
+    runSheets: input.runSheets,
+    wasteSheets: Math.max(0, input.pressSheets - input.runSheets),
+    parentSheets: input.parentSheets,
+    paperName: input.paperName,
+  };
+}

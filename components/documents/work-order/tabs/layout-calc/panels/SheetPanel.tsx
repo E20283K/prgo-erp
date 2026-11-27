@@ -97,6 +97,15 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
         <NumField label="Press-list bo'yi" suffix="mm" value={s.sheetH} disabled={readOnly} onChange={(v) => c.update({ sheetH: n(v, 1) })} />
         <NumField label="Bo'luvchi" value={s.cutDivisor} min={1} disabled={readOnly} onChange={(v) => c.update({ cutDivisor: Math.max(1, Math.round(n(v, 1))) })} />
       </div>
+      {/* The divisor sets how many parent sheets are planned; it must match what really fits */}
+      {s.parentSheetW > 0 && s.parentSheetH > 0 && (c.parentFit === 0 || c.parentFit !== s.cutDivisor) && (
+        <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-500">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          {c.parentFit === 0
+            ? "Press-list ota-listga sig'maydi"
+            : `Bo'luvchi ${s.cutDivisor}, ota-listga ${c.parentFit} ta sig'adi`}
+        </div>
+      )}
       {!c.sheetFitsMachine && (
         <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-500">
           <AlertTriangle className="size-3.5 shrink-0" />

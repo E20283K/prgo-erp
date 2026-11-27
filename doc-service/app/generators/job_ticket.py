@@ -27,7 +27,10 @@ from app.schemas.documents import JobTicketPdfRequest
 from app.core.constants import DEFAULT_JOB_TICKET_LABELS, trunc
 from app.generators.artwork_utils import get_raw_artwork, probe_artwork_url
 from app.generators import job_ticket_profiles as profiles
-from app.generators.cut_plan_block import cut_block_body_h, cut_plan_badge, draw_cut_plan_block, pick_cut_plans
+from app.generators.cut_plan_block import (
+    cut_block_body_h, cut_plan_badge, draw_cut_plan_block, draw_paper_cut_block, paper_block_body_h, paper_cut_badge,
+    pick_cut_plans, pick_parent_cut,
+)
 
 _CORE_DIR = os.path.join(os.path.dirname(__file__), "..", "core")
 # Header logos the Telegram send dialog offers; "none" leaves the header without one
@@ -1208,6 +1211,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     eff_pieces = int(imp_state.get("effectivePieces") or yield_per_sheet or 1)
     # Guillotine jobs carry the layout tab's cutting plan; the first form is printed
     cut_plans = pick_cut_plans(od)
+    # Stock sheet cut down to the press sheet before printing
+    parent_cut = pick_parent_cut(od)
 
     def mass_plan(op) -> str:
         return f"{op.plannedQty:,.0f} {op.planUnit or ''}".replace(",", " ").strip() if op.plannedQty else ""
@@ -1312,6 +1317,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
                      n_ops: int, n_mats: int) -> float:
         h = sku_block_h(op_h / REPORT_OP_ROW_H)
         h += REPORT_PANEL_H + REPORT_HEAD_H + (n_ops or EMPTY_ROUTE_ROWS) * op_h + REPORT_GAP_MM
+        if parent_cut:
+            h += REPORT_PANEL_H + paper_block_body_h(op_h / REPORT_OP_ROW_H) + REPORT_GAP_MM
         if cut_plans:
             h += REPORT_PANEL_H + cut_block_body_h(op_h / REPORT_OP_ROW_H) + REPORT_GAP_MM
         if plates:
@@ -1448,6 +1455,17 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     draw_grid(cur + REPORT_PANEL_H, REPORT_OP_COLS, op_h, n_ops or EMPTY_ROUTE_ROWS, op_cell, font=row_font,
               shaded_rows=banner_rows, merge=(1, len(REPORT_OP_COLS) - 1))
     cur += REPORT_PANEL_H + REPORT_HEAD_H + (n_ops or EMPTY_ROUTE_ROWS) * op_h + REPORT_GAP_MM
+
+    # 1a. Stock sheet cut to the press sheet: knife order, sheet counts and offcuts for the store
+    if parent_cut:
+        paper_body = paper_block_body_h(s_used)
+        draw_panel_header(9.0, cur, full_w_mm, "QOG'OZ KESISH", paper_cut_badge(parent_cut))
+        try:
+            order_sheets = int(float(od.get("plannedSheets") or 0)) or None
+        except (TypeError, ValueError):
+            order_sheets = None
+        draw_paper_cut_block(c, cur + REPORT_PANEL_H, 9.0, full_w_mm, paper_body, parent_cut, y_mm, order_sheets)
+        cur += REPORT_PANEL_H + paper_body + REPORT_GAP_MM
 
     # 1b. Guillotine cutting plan: knife order and back gauge settings for the cutter
     if cut_plans:
