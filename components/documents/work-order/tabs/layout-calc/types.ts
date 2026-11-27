@@ -60,6 +60,8 @@ export interface ApplyImpositionPayload {
   printMethod?: PrintMethod;
   /** Generated montaj stored in the order files; attached to the CTP tooling item */
   montaj?: { fileUrl: string; fileName: string; imageUrl?: string };
+  /** Write only the paper fields; the order's CTP tooling items are left as they are */
+  paperOnly?: boolean;
 }
 
 export interface LayoutCalcTabProps {

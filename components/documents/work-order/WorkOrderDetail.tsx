@@ -4132,6 +4132,23 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                       updateTabData(tab.id, { impositionState: impState });
                     }}
                     onApplyToOrder={(payload) => {
+                      if (payload.paperOnly) {
+                        handleFieldChange({
+                          ...(payload.paperStock ? { paperStock: payload.paperStock } : {}),
+                          parentSheetW: payload.parentSheetW,
+                          parentSheetH: payload.parentSheetH,
+                          pressSheetW: payload.pressSheetW,
+                          pressSheetH: payload.pressSheetH,
+                          plannedSheets: payload.plannedParentSheets,
+                        });
+                        setTabUnsaved(tab.id, true);
+                        addNotification({
+                          title: "Qog'oz sarfi qo'llandi",
+                          description: `Xom qog'oz: ${payload.plannedParentSheets.toLocaleString()} list (${payload.plannedPressSheets.toLocaleString()} bosma list).`,
+                          severity: "success",
+                        });
+                        return;
+                      }
                       const currentTools = formData.toolingItems || [];
                       const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
                       const unitCtpCost = isUsd ? 6 : 75000;

@@ -583,7 +583,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [analysisKey, setAnalysisKey] = useState<string | null>(null);
   const [generated, setGenerated] = useState<GenerateResponse | null>(null);
-  const [busy, setBusy] = useState<"analyze" | "generate" | "apply" | null>(null);
+  const [busy, setBusy] = useState<"analyze" | "generate" | "apply" | "applyPaper" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const sourceKey = useMemo(
@@ -819,6 +819,31 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     onApplyToOrder(payload);
   }, [onApplyToOrder, summary, settings, frontColorCount, backColorCount, machine, storeMontaj, kashirovkaPlates]);
 
+  /** Paper consumption only: sheet sizes and counts go to the order, CTP tooling stays untouched. */
+  const applyPaperToOrder = useCallback(() => {
+    if (!onApplyToOrder || !summary) return;
+    setActionError(null);
+    onApplyToOrder({
+      paperStock: settings.paperName,
+      parentSheetW: settings.parentSheetW,
+      parentSheetH: settings.parentSheetH,
+      pressSheetW: settings.sheetW,
+      pressSheetH: settings.sheetH,
+      plannedParentSheets: summary.parentSheets,
+      plannedPressSheets: summary.pressSheets,
+      totalCtpPlates: 0,
+      ctpSides: [],
+      ctpSpecDetails: "",
+      paperOnly: true,
+    });
+  }, [onApplyToOrder, summary, settings]);
+
+  const isPaperApplied =
+    !!summary &&
+    plannedSheets === summary.parentSheets &&
+    propPressW === settings.sheetW &&
+    propPressH === settings.sheetH;
+
   const isApplied =
     !!summary &&
     plannedSheets === summary.parentSheets &&
@@ -865,8 +890,10 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     runGenerate,
     savedPdfUrl: pdfMeta.pdfUrl,
     applyToOrder,
+    applyPaperToOrder,
     canApply: !!onApplyToOrder && !!summary,
     isApplied,
+    isPaperApplied,
   };
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Check, CheckCircle2, Download, FileOutput, Loader2, Play, ScanSearch } from "lucide-react";
+import { Check, CheckCircle2, Download, FileOutput, Layers, Loader2, Play, ScanSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Section, SelectField } from "../components/fields";
@@ -84,24 +84,38 @@ export function OutputPanel({ c, readOnly }: { c: SheetImpositionController; rea
       )}
 
       {c.canApply && !readOnly && (
-        <Button
-          type="button"
-          size="sm"
-          variant={c.isApplied ? "secondary" : "default"}
-          className="h-7 w-full text-xs"
-          disabled={!!c.busy}
-          onClick={() => void c.applyToOrder()}
-          title="Listlar soni va CTP plastinalarni buyurtmaga yozish"
-        >
-          {c.busy === "apply" ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : c.isApplied ? (
-            <Check className="size-3.5" />
-          ) : (
-            <CheckCircle2 className="size-3.5" />
-          )}
-          {c.isApplied ? "Qo'llangan" : "Buyurtmaga qo'llash"}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={!!c.busy}
+            onClick={() => c.applyPaperToOrder()}
+            title="Faqat qog'oz va listlar sonini buyurtmaga yozish"
+          >
+            {c.isPaperApplied ? <Check className="size-3.5" /> : <Layers className="size-3.5" />}
+            Faqat qog'oz
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={c.isApplied ? "secondary" : "default"}
+            className="h-7 flex-1 text-xs"
+            disabled={!!c.busy}
+            onClick={() => void c.applyToOrder()}
+            title="Listlar soni va CTP plastinalarni buyurtmaga yozish"
+          >
+            {c.busy === "apply" ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : c.isApplied ? (
+              <Check className="size-3.5" />
+            ) : (
+              <CheckCircle2 className="size-3.5" />
+            )}
+            {c.isApplied ? "Qo'llangan" : "Buyurtmaga qo'llash"}
+          </Button>
+        </div>
       )}
     </Section>
   );
