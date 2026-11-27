@@ -11,6 +11,7 @@ import {
   workOrders,
   workOrderAttachments,
   companies,
+  branches,
   users,
   type TelegramChat,
   type TelegramMessage,
@@ -101,6 +102,81 @@ function chatMatchWhere(idOrChatId: string) {
   return UUID_REGEX.test(idOrChatId)
     ? or(eq(telegramChats.id, idOrChatId), eq(telegramChats.chatId, idOrChatId))
     : eq(telegramChats.chatId, idOrChatId);
+}
+
+/** Where the orders group of a work order came from. */
+export type OrdersChatSource = "manual" | "branch" | "company" | "default" | "client";
+
+export interface ResolvedOrdersChat {
+  chat: TelegramChat;
+  source: OrdersChatSource;
+  /** Name of the organization whose setting picked the group. */
+  sourceName?: string;
+}
+
+function integrationOrdersChatId(integration: unknown): string | undefined {
+  if (!integration || typeof integration !== "object") return undefined;
+  const id = (integration as { telegramOrdersChatId?: unknown }).telegramOrdersChatId;
+  return typeof id === "string" && id.trim() ? id.trim() : undefined;
+}
+
+/**
+ * Picks the orders group for a work order: a chosen chat first, then the group set on
+ * the work order's production site (branch, then its company), then the holding-wide
+ * orders group, and last the customer's own group.
+ */
+export async function resolveOrdersChat(params: {
+  companyId: string;
+  site?: string | null;
+  clientId?: string | null;
+  chatId?: string;
+}): Promise<ResolvedOrdersChat | null> {
+  const { companyId } = params;
+
+  const findChat = async (idOrChatId: string | undefined) => {
+    if (!idOrChatId) return null;
+    const found = await db.query.telegramChats.findFirst({
+      where: and(eq(telegramChats.companyId, companyId), chatMatchWhere(idOrChatId)),
+    });
+    return found ?? null;
+  };
+
+  const manual = await findChat(params.chatId);
+  if (manual) return { chat: manual, source: "manual" };
+
+  const site = params.site?.trim();
+  if (site && UUID_REGEX.test(site)) {
+    const branch = await db.query.branches.findFirst({ where: eq(branches.id, site) });
+    if (branch) {
+      const chat = await findChat(integrationOrdersChatId(branch.integration));
+      if (chat) return { chat, source: "branch", sourceName: branch.name };
+    }
+
+    const siteCompanyId = branch?.companyId ?? site;
+    const siteCompany = await db.query.companies.findFirst({ where: eq(companies.id, siteCompanyId) });
+    if (siteCompany) {
+      const settings = siteCompany.settings as { integration?: unknown } | null;
+      const chat = await findChat(integrationOrdersChatId(settings?.integration));
+      if (chat) return { chat, source: "company", sourceName: siteCompany.name };
+    }
+  }
+
+  const comp = await db.query.companies.findFirst({ where: eq(companies.id, companyId) });
+  const fallback = await findChat(comp?.settings?.telegram?.ordersChatId);
+  if (fallback) return { chat: fallback, source: "default" };
+
+  if (params.clientId) {
+    const clientChat = await db.query.telegramChats.findFirst({
+      where: and(
+        eq(telegramChats.companyId, companyId),
+        eq(telegramChats.clientId, params.clientId),
+        eq(telegramChats.status, "active")
+      ),
+    });
+    if (clientChat) return { chat: clientChat, source: "client" };
+  }
+
+  return null;
 }
 
 function ensureCacheDir() {
@@ -1405,6 +1481,32 @@ export function formatWorkOrderTelegramCaption(order: any, customNote?: string):
   return lines.join("\n");
 }
 
+/** The orders group a work order would be sent to; `site` overrides the saved one. */
+export async function previewOrdersChat(params: {
+  workOrderId: string;
+  companyCode?: string;
+  site?: string | null;
+}): Promise<{ id: string; chatId: string; title: string; source: OrdersChatSource; sourceName?: string } | null> {
+  const companyId = await getCompanyIdByCode(params.companyCode || "PRINTGOO");
+  const order = await db.query.workOrders.findFirst({
+    where: and(eq(workOrders.companyId, companyId), workOrderMatchWhere(params.workOrderId)),
+    columns: { site: true, clientId: true },
+  });
+  const resolved = await resolveOrdersChat({
+    companyId,
+    site: params.site !== undefined ? params.site : order?.site,
+    clientId: order?.clientId,
+  });
+  if (!resolved) return null;
+  return {
+    id: resolved.chat.id,
+    chatId: resolved.chat.chatId,
+    title: resolved.chat.title,
+    source: resolved.source,
+    sourceName: resolved.sourceName,
+  };
+}
+
 /**
  * Buyurtmani markaziy 'Buyurtmalar guruhi'ga (yoki tanlangan guruhga)
  * yuqori sifatli kompozit rasm va Stepper-status bilan jo'natish
@@ -1441,30 +1543,13 @@ export async function sendWorkOrderToOrdersGroup(params: {
     return { success: false, error: "Ish buyurtmasi topilmadi" };
   }
 
-  const comp = await db.query.companies.findFirst({
-    where: eq(companies.id, companyId),
+  const resolved = await resolveOrdersChat({
+    companyId,
+    site: order.site,
+    clientId: order.clientId,
+    chatId: params.chatId,
   });
-
-  let targetChatRecord: TelegramChat | null = null;
-  const requestedChatId = params.chatId || comp?.settings?.telegram?.ordersChatId;
-
-  if (requestedChatId) {
-    const found = await db.query.telegramChats.findFirst({
-      where: and(eq(telegramChats.companyId, companyId), chatMatchWhere(requestedChatId)),
-    });
-    if (found) targetChatRecord = found;
-  }
-
-  if (!targetChatRecord && order.clientId) {
-    const clientChat = await db.query.telegramChats.findFirst({
-      where: and(
-        eq(telegramChats.companyId, companyId),
-        eq(telegramChats.clientId, order.clientId),
-        eq(telegramChats.status, "active")
-      ),
-    });
-    if (clientChat) targetChatRecord = clientChat;
-  }
+  const targetChatRecord = resolved?.chat ?? null;
 
   if (!targetChatRecord) {
     return {

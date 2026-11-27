@@ -50,6 +50,8 @@ interface TelegramOrdersGroupModalProps {
   status?: string;
   stage?: string;
   deadline?: string;
+  /** Production site (branch or company id); picks the orders group. */
+  site?: string;
   telegramMeta?: WorkOrderTelegramMeta | null;
   onSuccess?: (meta?: WorkOrderTelegramMeta) => void;
 }
@@ -60,6 +62,22 @@ interface ChatOption {
   title: string;
   clientName?: string | null;
 }
+
+interface ResolvedOrdersChat {
+  id: string;
+  chatId: string;
+  title: string;
+  source: "manual" | "branch" | "company" | "default" | "client";
+  sourceName?: string;
+}
+
+const CHAT_SOURCE_LABEL: Record<ResolvedOrdersChat["source"], string> = {
+  manual: "Tanlangan",
+  branch: "Filial",
+  company: "Tashkilot",
+  default: "Asosiy",
+  client: "Mijoz",
+};
 
 type UpdateMode = "caption_only" | "replace_pdf" | "resend_new";
 
@@ -89,6 +107,7 @@ export function TelegramOrdersGroupModal({
   status = "Active",
   stage = "Queue",
   deadline = "Kelishilmoqda",
+  site,
   telegramMeta,
   onSuccess,
 }: TelegramOrdersGroupModalProps) {
@@ -97,7 +116,7 @@ export function TelegramOrdersGroupModal({
   const [chats, setChats] = useState<ChatOption[]>([]);
   const [loadingChats, setLoadingChats] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string>("");
-  const [defaultOrdersChatId, setDefaultOrdersChatId] = useState<string>("");
+  const [resolvedChat, setResolvedChat] = useState<ResolvedOrdersChat | null>(null);
   const [customNote, setCustomNote] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -174,22 +193,31 @@ export function TelegramOrdersGroupModal({
 
     Promise.all([
       fetch("/api/v1/crm/telegram/chats").then((r) => r.json()).catch(() => ({})),
-      fetch("/api/v1/settings/telegram").then((r) => r.json()).catch(() => ({})),
+      fetch(
+        `/api/v1/production/work-orders/${encodeURIComponent(workOrderId)}/send-orders-group?${new URLSearchParams({ site: site || "" }).toString()}`,
+        { cache: "no-store" }
+      )
+        .then((r) => r.json())
+        .catch(() => ({})),
     ])
-      .then(([chatsRes, settingsRes]) => {
+      .then(([chatsRes, resolvedRes]) => {
         if (!isMounted) return;
 
         if (chatsRes?.success && Array.isArray(chatsRes.data)) {
           setChats(chatsRes.data);
         }
 
-        const configuredOrdersChat = settingsRes?.data?.ordersChatId || "";
-        setDefaultOrdersChatId(configuredOrdersChat);
+        const resolved: ResolvedOrdersChat | null = resolvedRes?.success ? resolvedRes.data ?? null : null;
+        setResolvedChat(resolved);
 
         if (telegramMeta?.chatId) {
-          setSelectedChatId(telegramMeta.chatId);
-        } else if (configuredOrdersChat) {
-          setSelectedChatId(configuredOrdersChat);
+          // The meta keeps the chat row id; the select is keyed by the Telegram chat id
+          const sentChat = (chatsRes?.data as ChatOption[] | undefined)?.find(
+            (c) => c.id === telegramMeta.chatId || c.chatId === telegramMeta.chatId
+          );
+          setSelectedChatId(sentChat?.chatId ?? telegramMeta.chatId);
+        } else if (resolved?.chatId) {
+          setSelectedChatId(resolved.chatId);
         } else if (chatsRes?.data?.length > 0) {
           setSelectedChatId(chatsRes.data[0].chatId);
         }
@@ -201,7 +229,7 @@ export function TelegramOrdersGroupModal({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, telegramMeta]);
+  }, [isOpen, telegramMeta, workOrderId, site]);
 
   // Stepper matnini vizual ko'rish
   const previewStepper = useMemo(() => {
@@ -487,14 +515,38 @@ export function TelegramOrdersGroupModal({
             </div>
           )}
 
+          {/* Maydon o'zgargan: xabar eski guruhda qolgan */}
+          {isAlreadySent && resolvedChat && telegramMeta?.chatId && resolvedChat.id !== telegramMeta.chatId &&
+            resolvedChat.chatId !== telegramMeta.chatId && (
+            <div className="flex items-center gap-1.5 rounded border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-2 py-1.5 text-[11px] text-amber-800 dark:text-amber-300">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              <span className="truncate">Maydon guruhi boshqa: {resolvedChat.title}</span>
+              {updateMode !== "resend_new" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto h-6 px-2 text-[11px]"
+                  onClick={() => {
+                    setUpdateMode("resend_new");
+                    setSelectedChatId(resolvedChat.chatId);
+                  }}
+                >
+                  Qayta yuborish
+                </Button>
+              )}
+            </div>
+          )}
+
           {/* Qabul qiluvchi guruh (agar yangi bo'lsa yoki qayta yuborilayotgan bo'lsa) */}
           {(!isAlreadySent || updateMode === "resend_new") && (
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <Label className="text-[11px] font-medium">Qabul qiluvchi guruh</Label>
-                {defaultOrdersChatId && (
-                  <span className="text-[10px] text-muted-foreground">
-                    Asosiy: {chats.find((c) => c.chatId === defaultOrdersChatId)?.title || "Sozlamalardagi"}
+                {resolvedChat && (
+                  <span className="text-[10px] text-muted-foreground truncate max-w-[60%]">
+                    {CHAT_SOURCE_LABEL[resolvedChat.source]}
+                    {resolvedChat.sourceName ? `: ${resolvedChat.sourceName}` : ""}
                   </span>
                 )}
               </div>

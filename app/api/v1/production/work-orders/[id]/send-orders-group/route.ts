@@ -1,11 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  previewOrdersChat,
   sendWorkOrderToOrdersGroup,
   updateTelegramOrderCardStatus,
 } from "@/lib/server/telegramService";
 import { parseOrderCardLogo } from "@/lib/server/orderCardGenerator";
 
 export const dynamic = "force-dynamic";
+
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await context.params;
+    const { searchParams } = new URL(request.url);
+    const site = searchParams.has("site") ? searchParams.get("site") : undefined;
+    const data = await previewOrdersChat({ workOrderId: id, site });
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
+    console.error("[GET /api/v1/production/work-orders/[id]/send-orders-group] Error:", error);
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : "Guruhni aniqlab bo'lmadi" },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(
   request: NextRequest,

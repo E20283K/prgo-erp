@@ -41,6 +41,9 @@ export interface PlantIntegrationSettings {
   oneCSyncEnabled: boolean;
   oneCEndpoint?: string;
   lastSyncAt?: string;
+  /** Telegram group that receives this organization's work orders. */
+  telegramOrdersChatId?: string;
+  telegramOrdersChatTitle?: string;
 }
 
 export interface PlantRecord {
@@ -200,6 +203,8 @@ export function branchToPlantRecord(b: any): PlantRecord {
       oneCSyncEnabled: Boolean(rawIntegration.oneCSyncEnabled),
       oneCEndpoint: rawIntegration.oneCEndpoint || "",
       lastSyncAt: rawIntegration.lastSyncAt || "",
+      telegramOrdersChatId: rawIntegration.telegramOrdersChatId || undefined,
+      telegramOrdersChatTitle: rawIntegration.telegramOrdersChatTitle || undefined,
     },
     notes: b.notes || "",
   };

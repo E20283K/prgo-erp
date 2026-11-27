@@ -4710,6 +4710,7 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
           status={formData.status}
           stage={formData.stage}
           deadline={formData.deadline}
+          site={formData.site}
           telegramMeta={(data as any).telegramMeta}
           onSuccess={(meta) => {
             if (meta) {

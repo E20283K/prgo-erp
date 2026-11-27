@@ -75,6 +75,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import {
   updateTelegramOrderCardStatus,
   sendWorkOrderToOrdersGroup,
+  resolveOrdersChat,
 } from "./telegramService";
 
 const SHEET_IMPOSITION_PREFIX = "/api/sheet-imposition/";
@@ -1551,14 +1552,18 @@ export async function upsertWorkOrder(
     });
     if (
       comp?.settings?.telegram?.autoSendNewOrders &&
-      comp?.settings?.telegram?.ordersChatId &&
       !existingOrder?.telegramMeta &&
       (statusVal === "Active" || statusVal === "In Production")
     ) {
-      sendWorkOrderToOrdersGroup({
-        workOrderId: targetId,
-        companyCode,
-      }).catch((e) => console.warn("[WorkOrder] Auto send to telegram failed:", e));
+      // No client id: an automatic send never falls back to the customer's own group.
+      const ordersChat = await resolveOrdersChat({ companyId, site: payload.site });
+      if (ordersChat) {
+        sendWorkOrderToOrdersGroup({
+          workOrderId: targetId,
+          companyCode,
+          chatId: ordersChat.chat.id,
+        }).catch((e) => console.warn("[WorkOrder] Auto send to telegram failed:", e));
+      }
     }
   } catch (_) {
   }

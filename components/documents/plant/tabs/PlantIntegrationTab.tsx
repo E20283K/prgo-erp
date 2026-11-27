@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { PlantRecord } from "../types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,15 @@ import {
   Server,
   Key,
   ShieldCheck,
+  Send,
 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface PlantIntegrationTabProps {
   plant: PlantRecord;
@@ -199,13 +207,91 @@ export function PlantIntegrationTab({ plant, onUpdate }: PlantIntegrationTabProp
         )}
       </div>
 
-      {/* 3. Audit & Security info */}
+      {/* 3. Telegram buyurtmalar guruhi */}
+      <TelegramOrdersGroupSection plant={plant} onUpdate={onUpdate} />
+
+      {/* 4. Audit & Security info */}
       <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
           <span>Barcha integratsiya so&apos;rovlari SSL/TLS shifrlangan kanal orqali uzatiladi.</span>
         </div>
         <span className="font-mono text-[11px]">Audit ID: SEC-PLT-{plant.id}</span>
+      </div>
+    </div>
+  );
+}
+
+interface ChatOption {
+  id: string;
+  chatId: string;
+  title: string;
+}
+
+const NO_GROUP = "none";
+
+function TelegramOrdersGroupSection({ plant, onUpdate }: PlantIntegrationTabProps) {
+  const [chats, setChats] = useState<ChatOption[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/v1/crm/telegram/chats")
+      .then((r) => r.json())
+      .then((res) => {
+        if (alive && res?.success && Array.isArray(res.data)) setChats(res.data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setLoaded(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const value = plant.integration.telegramOrdersChatId || NO_GROUP;
+  const savedMissing = value !== NO_GROUP && loaded && !chats.some((c) => c.chatId === value);
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3 shadow-xs">
+      <div className="flex items-center gap-2 border-b border-border pb-2 text-xs font-semibold text-foreground">
+        <Send className="w-4 h-4 text-primary" />
+        <span>Telegram</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+        <div className="space-y-1">
+          <Label className="text-[11px] font-medium text-muted-foreground">Buyurtmalar guruhi</Label>
+          <Select
+            value={value}
+            onValueChange={(val) => {
+              const chatId = !val || val === NO_GROUP ? undefined : val;
+              onUpdate({
+                integration: {
+                  ...plant.integration,
+                  telegramOrdersChatId: chatId,
+                  telegramOrdersChatTitle: chatId ? chats.find((c) => c.chatId === chatId)?.title : undefined,
+                },
+              });
+            }}
+          >
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Guruhni tanlang" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_GROUP}>Asosiy guruh</SelectItem>
+              {savedMissing && (
+                <SelectItem value={value}>{plant.integration.telegramOrdersChatTitle || value}</SelectItem>
+              )}
+              {chats.map((c) => (
+                <SelectItem key={c.id} value={c.chatId}>
+                  {c.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     </div>
   );
