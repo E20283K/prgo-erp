@@ -334,7 +334,28 @@ export async function getWorkOrdersPage(
   companyCode: string,
   options: WorkOrderListFilters & { limit: number; cursor?: string | null }
 ): Promise<WorkOrderPage> {
-  return queryWorkOrders(companyCode, options);
+  const page = await queryWorkOrders(companyCode, options);
+  return { ...page, items: page.items.map(toListItem) };
+}
+
+/**
+ * Registry rows without embedded files: SKU artwork previews, tooling images and attachments saved
+ * as data: URLs make up most of an order's size and the registry never shows them. Only the proof
+ * photo it displays stays. The order card loads the full order before it opens.
+ */
+function toListItem(item: ProductionQueueItem): ProductionQueueItem {
+  const strip = (value: unknown): unknown => {
+    if (typeof value === "string") return value.startsWith("data:") ? undefined : value;
+    if (Array.isArray(value)) return value.map(strip);
+    if (value && typeof value === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value)) out[k] = strip(v);
+      return out;
+    }
+    return value;
+  };
+  const { photoUrl, photoUrls, ...rest } = item as ProductionQueueItem & Record<string, unknown>;
+  return { ...(strip(rest) as ProductionQueueItem), photoUrl, photoUrls, listPartial: true } as ProductionQueueItem;
 }
 
 /** A single order by doc number or client order number, with everything the order screen needs. */
@@ -492,6 +513,7 @@ async function queryWorkOrders(companyCode: string, opts: WorkOrderQuery): Promi
   for (const o of toolingOrders) {
     if (!o.workOrderId && !o.workOrderNo) continue;
     const link: ToolingOrderLink = {
+      toolingItemId: o.toolingItemId,
       orderNo: o.orderNo,
       orderType: o.orderType,
       title: o.title,
@@ -837,6 +859,10 @@ export async function upsertWorkOrder(
   },
   companyCode: string = "PRINTGOO"
 ): Promise<{ success: boolean; workOrder: any }> {
+  // A registry row has its files stripped; saving it would erase them from the order.
+  if ((data as { listPartial?: boolean }).listPartial) {
+    throw new WorkOrderValidationError("Buyurtma to'liq yuklanmagan — kartani qayta oching");
+  }
   const companyId = await getCompanyIdByCode(companyCode);
 
   let docNo = (data.docNo || "").trim();

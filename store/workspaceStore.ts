@@ -596,6 +596,8 @@ export interface ProductionQueueItem {
   sampleData?: any;
   photoUrl?: string;
   photoUrls?: string[];
+  /** Registry row without embedded files; load the full order before editing it. */
+  listPartial?: boolean;
   attachments?: any[];
   site?: string;
   priceTotal?: number;

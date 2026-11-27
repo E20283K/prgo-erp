@@ -180,6 +180,11 @@ const INITIAL_COLUMNS: GridColumn[] = [
 
 const ORDERS_PAGE_SIZE = 100;
 
+/** Stored photos come downscaled by the storage route; the registry never needs the original file. */
+function previewSized(url: string, width: number): string {
+  return url.startsWith("/api/v1/storage/file?") ? `${url}&w=${width}` : url;
+}
+
 export function DataGrid() {
   const tGrid = useTranslations("DataGrid");
   const tCommon = useTranslations("Common");
@@ -620,7 +625,7 @@ export function DataGrid() {
           const { x, y } = getCursorCardPosition(clientX, clientY);
 
           setHoveredPreview({
-            url: rowData.preview[0],
+            url: previewSized(rowData.preview[0], 640),
             x,
             y,
           });
@@ -667,7 +672,7 @@ export function DataGrid() {
         return {
           kind: GridCellKind.Image,
           data: rowData.preview.length > 0 ? [rowData.preview[0]] : [],
-          displayData: rowData.preview.length > 0 ? [rowData.preview[0]] : [],
+          displayData: rowData.preview.length > 0 ? [previewSized(rowData.preview[0], 96)] : [],
           allowOverlay: false,
           rounding: 4,
           contentAlign: "center",
@@ -883,11 +888,20 @@ export function DataGrid() {
   }, [filteredRows, columns]);
 
   // Double click on row / cell opens document in new Workspace tab
-  const handleCellActivated = useCallback((cell: Item) => {
+  const handleCellActivated = useCallback(async (cell: Item) => {
     const [, row] = cell;
     const rowData = filteredRows[row];
     if (rowData) {
-      const raw = rowData.rawOrder || {};
+      // Registry rows come without embedded files; the card gets the full order.
+      let raw = rowData.rawOrder || {};
+      if (raw.listPartial) {
+        const full = await useWorkspaceStore.getState().loadWorkOrderAsync(rowData.id);
+        if (!full) {
+          addNotification({ title: rowData.id, description: "Buyurtma yuklanmadi", severity: "error" });
+          return;
+        }
+        raw = full;
+      }
       const photos = rowData.allPhotos && rowData.allPhotos.length > 0
         ? rowData.allPhotos
         : (rowData.preview && rowData.preview.length > 0 ? rowData.preview : (raw.photoUrls || []));
@@ -925,7 +939,7 @@ export function DataGrid() {
         },
       });
     }
-  }, [filteredRows, openTab]);
+  }, [filteredRows, openTab, addNotification]);
 
   // Support cell editing
   const onCellEdited = useCallback((cell: Item, newValue: EditableGridCell) => {
