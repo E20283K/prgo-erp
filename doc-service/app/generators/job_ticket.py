@@ -4,6 +4,7 @@ import re
 import math
 import base64
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi.responses import StreamingResponse
@@ -25,6 +26,7 @@ from app.core.s3 import upload_buffer_to_s3
 from app.schemas.documents import JobTicketPdfRequest
 from app.core.constants import DEFAULT_JOB_TICKET_LABELS, trunc
 from app.generators.artwork_utils import get_raw_artwork, probe_artwork_url
+from app.generators import job_ticket_profiles as profiles
 
 _CORE_DIR = os.path.join(os.path.dirname(__file__), "..", "core")
 # Header logos the Telegram send dialog offers; "none" leaves the header without one
@@ -273,6 +275,9 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     L = {**DEFAULT_JOB_TICKET_LABELS, **(req.labels or {})}
     od = req.orderData or {}
     doc_no = req.docNo or "WO-00772"
+    # Technology profile: which KPIs, spec rows and readiness rows page 1 prints
+    tech = profiles.technology(od)
+    is_roll = tech in profiles.ROLL_TECHS
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
@@ -550,14 +555,14 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     kpi_top = req_top + req_h + 1.5
     kpi_h = 14.0
     draw_box(9, kpi_top, full_w_mm, kpi_h, fill_hex="#f8fafc", stroke_hex="#cbd5e1")
-    kpis = [
-        (L["netRun"] + (f" • +{sample_qty} namuna" if sample_on and sample_qty else ""),
-         f"{net_qty:,} {unit}" if net_qty else "—", "#1d4ed8"),
-        (L["grossSheets"], f"{gross_sheets:,} varaq" if gross_sheets else "—", "#0f172a"),
-        (L["impositionYield"], f"{yield_per_sheet} dona / varaq" if yield_per_sheet else "—", "#047857"),
-        (L["scheduleWindow"], f"{start_date} → {deadline}", "#0f172a"),
-    ]
-    for i, (lbl, val, col_hex) in enumerate(kpis):
+    # Everything the technology profile reads; spec and readiness values are added below
+    px = SimpleNamespace(
+        od=od, L=L, net_qty=net_qty, unit=unit, sample_on=sample_on, sample_qty=sample_qty,
+        gross_sheets=gross_sheets, yield_per_sheet=yield_per_sheet, start_date=start_date, deadline=deadline,
+        width=width, height=height, dim_unit=dim_unit, bleed=bleed,
+        roll=profiles.roll_metrics(od, net_qty, height),
+    )
+    for i, (lbl, val, col_hex) in enumerate(profiles.kpis(tech, px)):
         cx = 11 + i * 47.5
         c.setFillColor(colors.HexColor("#64748b"))
         c.setFont(FONT_BOLD, 6.2)
@@ -748,13 +753,73 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
             return True
         return False
 
+    def winding_diagram(x0: float, y0: float, code: str):
+        """Roll with the web coming off the top: labels on the outer face sit above the
+        web, on the inner face below it (dashed); the letter's top shows which end of
+        the label leaves the roll first."""
+        s = min(art_w, art_h)
+        ax, ay = x0 + (art_w - s) / 2.0, y0 + (art_h - s) / 2.0
+        draw_box(x0, y0, art_w, art_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0", lw=0.4)
+        R = s * 0.22
+        cx, cy = ax + s * 0.28, ay + s * 0.48
+        c.setStrokeColor(colors.HexColor("#334155"))
+        c.setFillColor(colors.white)
+        c.setLineWidth(0.6)
+        c.circle(cx * mm, y_mm(cy), R * mm, fill=1, stroke=1)
+        c.setFillColor(colors.HexColor("#cbd5e1"))
+        c.circle(cx * mm, y_mm(cy), R * 0.38 * mm, fill=1, stroke=1)
+        web_y = cy - R
+        web_x1 = ax + s * 0.96
+        c.setLineWidth(0.9)
+        c.line(cx * mm, y_mm(web_y), web_x1 * mm, y_mm(web_y))
+        # Unwind direction
+        c.setFillColor(colors.HexColor("#334155"))
+        tip = web_x1 + 0.2
+        p = c.beginPath()
+        p.moveTo(tip * mm, y_mm(web_y))
+        p.lineTo((tip - 1.6) * mm, y_mm(web_y - 0.9))
+        p.lineTo((tip - 1.6) * mm, y_mm(web_y + 0.9))
+        p.close()
+        c.drawPath(p, fill=1, stroke=0)
+        inside = code.startswith("in")
+        head_first = code.endswith("top")
+        lw_, lh_ = s * 0.2, s * 0.16
+        for i in range(2):
+            lx = cx + R * 0.35 + i * (lw_ + s * 0.05)
+            ly = web_y + 0.4 if inside else web_y - 0.4 - lh_
+            c.setStrokeColor(colors.HexColor("#1d4ed8"))
+            c.setFillColor(colors.white if inside else colors.HexColor("#dbeafe"))
+            c.setLineWidth(0.5)
+            if inside:
+                c.setDash(1.2, 0.9)
+            c.rect(lx * mm, y_mm(ly + lh_), lw_ * mm, lh_ * mm, fill=1, stroke=1)
+            c.setDash()
+            c.saveState()
+            c.translate((lx + lw_ / 2.0) * mm, y_mm(ly + lh_ / 2.0))
+            c.rotate(-90 if head_first else 90)
+            fs = max(4.0, min(lh_, lw_) * 2.0)
+            c.setFillColor(colors.HexColor("#1d4ed8"))
+            c.setFont(FONT_BOLD, fs)
+            c.drawCentredString(0, -fs * 0.35, "A")
+            c.restoreState()
+        draw_fitted_text(c, profiles.WINDING_LABELS[code], x0 + art_w / 2.0, y_mm(ay + s * 0.9), art_w - 2.0,
+                         font_name=FONT_BOLD, base_font_size=6.0, min_font_size=4.4, color="#334155",
+                         max_lines=2, line_spacing_pt=6.2, align="center")
+
     (fx, fy), (bx, by), (dx3, dy3) = spots_xy
     # Front
     if not place(fx, fy, front_raw_p1, bleed > 0):
         placeholder(fx, fy, "MAKET YO'Q")
     hole_mark(fx, fy)
-    # Back
-    if not place(bx, by, back_raw_p1, bleed > 0):
+    # Back; a roll job printed on one side shows how it is wound instead
+    show_winding = is_roll and not back_raw_p1 and not back_printed
+    if show_winding:
+        w_code = profiles.winding_code(od)
+        if w_code:
+            winding_diagram(bx, by, w_code)
+        else:
+            placeholder(bx, by, "O'RASH KIRITILMAGAN")
+    elif not place(bx, by, back_raw_p1, bleed > 0):
         placeholder(bx, by, "ORQA MAKET YO'Q" if back_printed else "BOSILMAYDI")
     if back_raw_p1 or back_printed:
         hole_mark(bx, by)
@@ -781,7 +846,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
 
     # Captions under each drawing
     cap_pad = 1.2 + (max(0.8, bleed * (art_h / height)) if bleed and height else 0.0)
-    for (x0, y0), cap in zip(spots_xy, ["OLDI", "ORQA", "SHTANS" if dieline_raw else "KESIM KONTURI"]):
+    for (x0, y0), cap in zip(spots_xy, profiles.captions(show_winding, bool(dieline_raw))):
         c.setFillColor(colors.HexColor("#334155"))
         c.setFont(FONT_BOLD, 6.2)
         c.drawCentredString((x0 + art_w / 2.0) * mm, y_mm(y0 + art_h + cap_pad + 2.8), cap)
@@ -816,7 +881,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         )
 
     # A straight rectangle without a hole is cut on the guillotine; anything else needs a die (or punch)
-    plain_cut = (str(od.get("shapeType") or "rectangle").lower() == "rectangle"
+    # (sheet jobs only: a roll is always cut on the press by a rotary die)
+    plain_cut = not is_roll and (str(od.get("shapeType") or "rectangle").lower() == "rectangle"
                  and str(od.get("cornerType") or "Square").lower() in ("square", "", "none")
                  and not hole_on)
     die_text = tool_text(DIE_TOOLING) or str(od.get("selectedToolingName") or "").strip() or (
@@ -857,24 +923,18 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     ] if p)
     emb = str(od.get("embellishment") or "")
     formula = str(od.get("colorsConfig") or "")
-    info_rows = [
-        (L["trimDimensions"], f"{width:g} × {height:g} {dim_unit}"),
-        ("Bleed", f"{bleed:g} {dim_unit}" if bleed else "yo'q"),
-        ("Shakl", str(od.get("shapeType") or "rectangle")),
-        (L["cornerCut"], str(od.get("cornerType") or "—")),
-        (L["holeEyelet"], (f"Ø{hole_size:g} mm • {hole_pos}" + (f" • {hole_offset:g} mm" if hole_offset else "")) if hole_on else "—"),
-        ("Shtamp", die_text),
-        ("Klishe", cliche_text),
-        ("Qog'oz turi / GSM", paper_spec or "—"),
-        ("Ombordagi qog'oz", str(od.get("paperStock") or "tanlanmagan")),
-        ("Oldi bo'yoq", " • ".join(p for p in [formula, letters(od.get("frontColors") or {})] if p) or "—"),
-        ("Orqa bo'yoq", letters(od.get("backColors") or {}) or ("—" if back_printed else "bosilmaydi")),
-        ("Pantone", spots or "—"),
-        ("Laminatsiya", lam_full or "—"),
-        ("Lak / pardoz", " • ".join(p for p in [str(od.get("coating") or ""), "" if emb.lower() in ("", "none") else emb] if p) or "—"),
-        ("Kashirovka", kash_mode.capitalize() + f" • {len(kash_layers)} qatlam" if kash_on else "yo'q"),
-        ("Bosma varaq", f"{press_sheet_w:g} × {press_sheet_h:g} mm" if press_sheet_w and press_sheet_h else "—"),
-    ]
+    px.__dict__.update(
+        hole_on=hole_on, hole_size=hole_size, hole_pos=hole_pos, hole_offset=hole_offset,
+        die_text=die_text, cliche_text=cliche_text, plate_tools_text=plate_tools_text, paper_spec=paper_spec,
+        formula=formula, front_letters=letters(od.get("frontColors") or {}),
+        back_letters=letters(od.get("backColors") or {}), back_printed=back_printed,
+        spots=spots, spot_count_front=sum(
+            1 for s in spot_list if s.get("name") and (s.get("side") or "front") != "back"),
+        lam_full=lam_full, coating=str(od.get("coating") or ""), emb=emb,
+        kash_on=kash_on, kash_mode=kash_mode, kash_layers=kash_layers,
+        press_sheet_w=press_sheet_w, press_sheet_h=press_sheet_h,
+    )
+    info_rows = profiles.spec_rows(tech, px)
     info_x = geo_x0 + zone_w + 4.0
     info_w = geo_x1 - info_x
     draw_box(info_x, geo_top, info_w, geo_body_h, fill_hex="#f8fafc", stroke_hex="#e2e8f0", lw=0.5)
@@ -1005,19 +1065,20 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         sample_paper or ("asosiy qog'oz" if od.get("paperStock") else "qog'oz tanlanmagan"),
         f"{sample_sheets} list" if sample_sheets else "",
     ] if p)
-    ready_rows = ([("__sample__", "Namuna", sample_detail)] if sample_on else []) + [
-        ("designReady", "Dizayn / maket", design_detail),
-        ("paperReady", "Qog'oz / material", paper_detail),
-        ("platesReady", "Bosma formalar", plates_detail),
-        ("toolingReady", "Shtamp / asbob", tooling_detail),
-        (None, "Uskunalar", ", ".join(machine_names) or "Mashrut kiritilmagan"),
-    ]
+    px.__dict__.update(
+        design_detail=design_detail, paper_detail=paper_detail, plates_detail=plates_detail,
+        tooling_detail=tooling_detail, machine_names=machine_names, sample_detail=sample_detail,
+        mats_count_detail=f"{len(mats)} material" + (f", {len(short)} yetishmaydi" if short else "") if mats else "",
+    )
+    ready_rows = profiles.ready_rows(tech, px)
+    ready_checks = [key for key, _, _ in ready_rows if key and key != "__sample__"]
     ready_cols = [("№", 8), ("TAYYORGARLIK", 38), ("TAFSILOT", 74.4), ("HOLAT", 24), ("TEKSHIRDI", 28), ("IMZO", 18)]
     ready_row_h = max(5.0, min(7.0, (p1_bottom - sec5_top - 7.0 - REPORT_HEAD_H - 1.0) / len(ready_rows)))
     sec5_h = 7.0 + REPORT_HEAD_H + len(ready_rows) * ready_row_h + 1.0
-    done = sum(1 for key, _, _ in ready_rows if key and checks.get(key))
+    done = sum(1 for key in ready_checks if checks.get(key))
     draw_box(9, sec5_top, full_w_mm, sec5_h, fill_hex="#ffffff", stroke_hex="#cbd5e1")
-    draw_panel_header(9.8, sec5_top + 0.8, full_w_mm - 1.6, "ISHLAB CHIQARISHGA TAYYORGARLIK", f"{done} / 4 TAYYOR")
+    draw_panel_header(9.8, sec5_top + 0.8, full_w_mm - 1.6, "ISHLAB CHIQARISHGA TAYYORGARLIK",
+                      f"{done} / {len(ready_checks)} TAYYOR")
 
     def ready_cell(ri: int, ci: int):
         key, title, detail = ready_rows[ri]
@@ -1067,7 +1128,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         c.drawRightString(page_w - margin_x, y_mm(291.0),
                           f"{L['printDate']}: {datetime.now().strftime('%Y-%m-%d %H:%M')} • Sahifa {page_num} / 2")
 
-    draw_footer(1, "MAHSULOT PASPORTI VA SPETSIFIKATSIYASI")
+    draw_footer(1, profiles.FOOTER_TITLES[tech])
     c.showPage()
 
     # ══════════════════════════════════════════════════════════════════════════

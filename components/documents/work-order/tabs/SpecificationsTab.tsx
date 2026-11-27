@@ -58,6 +58,7 @@ import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
 import { findPantoneByName, searchPantoneColors, UNKNOWN_SPOT_HEX } from "@/lib/pantone-catalog";
 import { extractSvgDimensions } from "../utils/svgContour";
+import { getOrderTechnology } from "../utils/orderTechnology";
 import { TermoSpecSection } from "./TermoSpecSection";
 import { useLookupStore } from "@/store/lookupStore";
 import { useWorkspaceStore, generateNextMaterialSku } from "@/store/workspaceStore";
@@ -635,18 +636,13 @@ export function SpecificationsTab({
   };
 
   // Department technology flags
-  const isTermo = formData.department === "Termo";
-  const isFlexo = !isTermo && (formData.department === "Flexo" || (formData.recipe ? formData.recipe.startsWith("FLEXO_") : false));
-  const isJacquard = !isTermo && (formData.department === "Jacquard" || (formData.recipe ? formData.recipe.startsWith("JACQ_") : false));
-  const isOffset = !isFlexo && !isJacquard && !isTermo;
-  const isTextileRibbon = isFlexo && (
-    formData.labelMaterialType === "polyester_satin_white" ||
-    formData.labelMaterialType === "polyester_satin_black" ||
-    formData.labelMaterialType === "nylon_taffeta" ||
-    formData.labelMaterialType === "cotton_tape" ||
-    Boolean(formData.paperStock && (formData.paperStock.toLowerCase().includes("satin") || formData.paperStock.toLowerCase().includes("nylon")))
-  );
-  const isSticker = isFlexo && !isTextileRibbon;
+  const technology = getOrderTechnology(formData);
+  const isTermo = technology === "termo";
+  const isTextileRibbon = technology === "flexo_ribbon";
+  const isSticker = technology === "flexo_sticker";
+  const isFlexo = isSticker || isTextileRibbon;
+  const isJacquard = technology === "jacquard";
+  const isOffset = technology === "offset";
 
   // Hole calculation
   const effectiveHoleSize = formData.holeSize !== undefined
@@ -1447,6 +1443,75 @@ export function SpecificationsTab({
                       onMarkUnsaved();
                     }}
                     className="h-7 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">Ruchey</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    disabled={isOperator}
+                    value={formData.flexoLanes ?? 1}
+                    onChange={(e) => {
+                      handleFieldChange("flexoLanes", Math.max(1, Math.floor(Number(e.target.value)) || 1));
+                      onMarkUnsaved();
+                    }}
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">Rulonlar</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    disabled={isOperator}
+                    value={formData.flexoRollsCount ?? ""}
+                    onChange={(e) => {
+                      const rolls = Math.max(0, Math.floor(Number(e.target.value)) || 0);
+                      const total = rolls * (formData.flexoLabelsPerRoll || 0);
+                      handleFieldChange({ flexoRollsCount: rolls, ...(total > 0 ? { quantity: total } : {}) });
+                      onMarkUnsaved();
+                    }}
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">Dona / rulon</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={100}
+                    disabled={isOperator}
+                    value={formData.flexoLabelsPerRoll ?? ""}
+                    onChange={(e) => {
+                      const perRoll = Math.max(0, Math.floor(Number(e.target.value)) || 0);
+                      const total = (formData.flexoRollsCount || 0) * perRoll;
+                      handleFieldChange({ flexoLabelsPerRoll: perRoll, ...(total > 0 ? { quantity: total } : {}) });
+                      onMarkUnsaved();
+                    }}
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">Gilza</label>
+                  <ComboboxSelect
+                    items={[
+                      { value: "25", label: "25 mm" },
+                      { value: "40", label: "40 mm" },
+                      { value: "76", label: "76 mm" },
+                    ]}
+                    value={formData.flexoCoreDiameter ? String(parseFloat(String(formData.flexoCoreDiameter))) : ""}
+                    disabled={isOperator}
+                    onValueChange={(val) => {
+                      handleFieldChange("flexoCoreDiameter", Number(val) || 76);
+                      onMarkUnsaved();
+                    }}
+                    placeholder="Gilza"
                   />
                 </div>
               </div>

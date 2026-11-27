@@ -3,6 +3,7 @@ import path from "path";
 import { createHash } from "crypto";
 import { getCountingProfile, planInUnit } from "@/components/documents/work-order/utils/countingProfile";
 import { resolveMachine } from "@/components/documents/work-order/utils/operationCost";
+import { getOrderTechnology } from "@/components/documents/work-order/utils/orderTechnology";
 import { and, asc, eq, like, or } from "drizzle-orm";
 import { db } from "@/db";
 import { branches, productionMachines, telegramMessages, workOrderOperations, workOrders } from "@/db/schema";
@@ -166,6 +167,13 @@ export function buildJobTicketPayload(
       quantity: Number(order.quantity) || 0,
       unit: order.unit || "dona",
       department: order.department || undefined,
+      // Passport profile (offset sheet, flexo sticker / ribbon, termo roll)
+      technology: getOrderTechnology({
+        department: order.department,
+        recipe: order.recipeCode,
+        labelMaterialType: dims.labelMaterialType,
+        paperStock: order.paperStock || dims.paperStock,
+      }),
       site: order.site || undefined,
       pressMachine: order.pressMachine || undefined,
       priority: order.priority || undefined,
