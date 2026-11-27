@@ -384,6 +384,10 @@ export const supplierOrders = pgTable(
       onDelete: "set null",
     }),
     workOrderNo: varchar("work_order_no", { length: 64 }),
+    // Ish buyurtmasidagi jihoz (dimensions.toolingItems[].id) — bitta PO bitta jihozni yopadi; null = erkin buyurtma
+    toolingItemId: varchar("tooling_item_id", { length: 64 }),
+    // Shu jihozga qayta buyurtma bo'lsa: nima uchun (singan, yaroqsiz va h.k.)
+    remakeReason: text("remake_reason"),
     quantity: numeric("quantity", { precision: 12, scale: 2 }).default("1.00").notNull(),
     unit: varchar("unit", { length: 32 }).default("dona").notNull(),
     amount: numeric("amount", { precision: 18, scale: 2 }).default("0.00").notNull(),
@@ -414,6 +418,7 @@ export const supplierOrders = pgTable(
     uniqueIndex("supplier_orders_company_no_uq").on(table.companyId, table.orderNo),
     index("supplier_orders_supplier_idx").on(table.supplierId),
     index("supplier_orders_work_order_idx").on(table.workOrderId),
+    index("supplier_orders_tooling_item_idx").on(table.companyId, table.workOrderNo, table.toolingItemId),
     index("supplier_orders_status_idx").on(table.status),
     index("supplier_orders_date_idx").on(table.orderDate),
   ]

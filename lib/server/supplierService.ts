@@ -20,6 +20,8 @@ import {
   syncPickupDeliveryCash,
 } from "./cashJournalService";
 import { CASH_CATEGORY } from "@/lib/finance/cashCategories";
+import { getInitialToolingItems } from "@/components/documents/work-order/toolingItems";
+import type { WorkOrderFormData, WorkOrderToolingItem } from "@/components/documents/work-order/types";
 
 export type SupplierCategory =
   | "raw_materials"
@@ -96,6 +98,10 @@ export interface SupplierOrderRecord {
   title: string;
   workOrderId?: string;
   workOrderNo?: string;
+  /** The work order's tooling item this order procures; empty for a free order. */
+  toolingItemId?: string;
+  /** Why this item is ordered again (broken, spoiled, ...). */
+  remakeReason?: string;
   quantity: number;
   unit: string;
   amount: number;
@@ -439,6 +445,8 @@ export async function getAllToolingOrders(
       title: o.title,
       workOrderId: o.workOrderId || wo?.id || undefined,
       workOrderNo: o.workOrderNo || wo?.docNo || undefined,
+      toolingItemId: o.toolingItemId || undefined,
+      remakeReason: o.remakeReason || undefined,
       imageUrl: woPhoto || undefined,
       workOrderProduct: (wo as any)?.productName || (wo as any)?.product || undefined,
       quantity: Number(o.quantity) || 1,
@@ -491,7 +499,10 @@ export async function getNextSupplierOrderNo(companyId: string): Promise<string>
 }
 
 export async function upsertSupplierOrder(
-  data: Partial<SupplierOrderRecord>,
+  data: Partial<SupplierOrderRecord> & {
+    /** The item as the order dialog shows it; its file is written back to the work order. */
+    toolingItem?: WorkOrderToolingItem;
+  },
   companyCode: string = "PRINTGOO"
 ) {
   const companyId = await getCompanyIdByCode(companyCode);
@@ -541,6 +552,8 @@ export async function upsertSupplierOrder(
             ? validWorkOrderId || existing.workOrderId
             : existing.workOrderId,
         workOrderNo: data.workOrderNo !== undefined ? data.workOrderNo : existing.workOrderNo,
+        toolingItemId: data.toolingItemId !== undefined ? data.toolingItemId || null : existing.toolingItemId,
+        remakeReason: data.remakeReason !== undefined ? data.remakeReason || null : existing.remakeReason,
         quantity: (data.quantity || 1).toString(),
         unit: data.unit || existing.unit,
         amount: (data.amount || 0).toString(),
@@ -584,6 +597,8 @@ export async function upsertSupplierOrder(
         title: data.title || "Buyurtma",
         workOrderId: validWorkOrderId,
         workOrderNo: data.workOrderNo || null,
+        toolingItemId: data.toolingItemId || null,
+        remakeReason: data.remakeReason || null,
         quantity: (data.quantity || 1).toString(),
         unit: data.unit || "dona",
         amount: (data.amount || 0).toString(),
@@ -606,6 +621,10 @@ export async function upsertSupplierOrder(
     savedOrder = created;
   }
 
+  if (data.toolingItem && savedOrder.toolingItemId === data.toolingItem.id && savedOrder.workOrderId) {
+    await syncWorkOrderToolingItem(companyId, savedOrder.workOrderId, data.toolingItem);
+  }
+
   // Ta'minotchi qarzini yangilash
   await syncSupplierBalance(companyId, savedOrder.supplierId);
   await syncPickupDeliveryCash(db, savedOrder);
@@ -617,6 +636,51 @@ export async function upsertSupplierOrder(
   }
 
   return { success: true, order: savedOrder, registeredTooling };
+}
+
+/**
+ * The file belongs to the tooling item: an order placed for an item keeps the work order's copy of that
+ * item in step (its file, and the item itself when the order's list was still the generated default).
+ */
+async function syncWorkOrderToolingItem(companyId: string, workOrderId: string, item: WorkOrderToolingItem) {
+  const wo = await db.query.workOrders.findFirst({
+    where: and(eq(workOrders.companyId, companyId), eq(workOrders.id, workOrderId)),
+    columns: { id: true, docNo: true, productName: true, department: true, currency: true, coating: true, embellishment: true, dimensions: true },
+  });
+  if (!wo) return;
+  const dims = (wo.dimensions as Record<string, unknown> | null) || {};
+  const stored = Array.isArray(dims.toolingItems) ? (dims.toolingItems as WorkOrderToolingItem[]) : [];
+  const base =
+    stored.length > 0
+      ? stored
+      : getInitialToolingItems(
+          {
+            ...(dims as object),
+            product: wo.productName,
+            department: (wo.department || undefined) as WorkOrderFormData["department"],
+            currency: wo.currency || undefined,
+            coating: wo.coating || (dims.coating as string | undefined),
+            embellishment: wo.embellishment || (dims.embellishment as string | undefined),
+          },
+          wo.docNo
+        );
+
+  let next: WorkOrderToolingItem[];
+  const existing = base.find((t) => t.id === item.id);
+  if (existing) {
+    if (existing.fileUrl === item.fileUrl && existing.fileName === item.fileName) return;
+    next = base.map((t) => (t.id === item.id ? { ...t, fileUrl: item.fileUrl, fileName: item.fileName } : t));
+  } else {
+    // A generated default item gets a new id on every build: replace it by kind and name.
+    next = [
+      ...base.filter((t) => !(stored.length === 0 && t.category === item.category && t.name === item.name)),
+      item,
+    ];
+  }
+  await db
+    .update(workOrders)
+    .set({ dimensions: { ...dims, toolingItems: next } as typeof wo.dimensions, updatedAt: new Date() })
+    .where(eq(workOrders.id, wo.id));
 }
 
 /** The order is already saved; a failed die registration is logged rather than failing the save. */

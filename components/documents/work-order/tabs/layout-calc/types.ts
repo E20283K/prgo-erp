@@ -54,6 +54,8 @@ export interface ApplyImpositionPayload {
   plannedParentSheets: number;
   plannedPressSheets: number;
   totalCtpPlates: number;
+  /** Plate sets by print side (Oldi / Orqa, or one Komplekt for work-and-turn) */
+  ctpSides: { side: "front" | "back" | "set"; plates: number }[];
   ctpSpecDetails: string;
   printMethod?: PrintMethod;
   /** Generated montaj stored in the order files; attached to the CTP tooling item */

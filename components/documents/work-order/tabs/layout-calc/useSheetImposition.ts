@@ -799,12 +799,21 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
       plannedParentSheets: summary.parentSheets,
       plannedPressSheets: summary.pressSheets,
       totalCtpPlates: summary.ctpPlates,
+      ctpSides:
+        typeof kashirovkaPlates === "number" || settings.mode === "work_and_turn"
+          ? [{ side: "set", plates: summary.ctpPlates }]
+          : settings.mode === "single_sided"
+          ? [{ side: "front", plates: summary.forms * frontColorCount }]
+          : [
+              { side: "front", plates: summary.forms * frontColorCount },
+              { side: "back", plates: summary.forms * backColorCount },
+            ],
       ctpSpecDetails: `${summary.forms} forma × ${summary.platesPerForm} plastina (${modeLabel}) · ${machine.plateW}×${machine.plateH} mm · ${machine.machineName}`,
       printMethod: settings.mode,
       montaj,
     };
     onApplyToOrder(payload);
-  }, [onApplyToOrder, summary, settings, frontColorCount, backColorCount, machine, storeMontaj]);
+  }, [onApplyToOrder, summary, settings, frontColorCount, backColorCount, machine, storeMontaj, kashirovkaPlates]);
 
   const isApplied =
     !!summary &&

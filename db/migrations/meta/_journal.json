@@ -239,6 +239,13 @@
       "when": 1795723293909,
       "tag": "0033_tooling_source_and_spec",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795781704908,
+      "tag": "0034_supplier_order_tooling_item",
+      "breakpoints": true
     }
   ]
 }

@@ -1895,7 +1895,7 @@ export async function sendPurchaseOrderToTelegram(params: {
     const tools = (((linkedWo.dimensions as { toolingItems?: WorkOrderToolingItem[] } | null)?.toolingItems) || []).filter(
       (t) => t.fileUrl
     );
-    const tool = findDeliveryTarget(tools, { orderNo: order.orderNo, orderType: order.orderType, title: order.title });
+    const tool = findDeliveryTarget(tools, { toolingItemId: order.toolingItemId, orderNo: order.orderNo, orderType: order.orderType, title: order.title });
     if (tool?.fileUrl) {
       fileUrl = tool.fileUrl;
       fileName = tool.fileName || fileName;

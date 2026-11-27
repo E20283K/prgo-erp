@@ -2,11 +2,14 @@
 // Server va brauzerda ishlaydi — faqat sof funksiyalar.
 import type { ProductionQueueItem, WarehouseStockRecord } from "@/store/workspaceStore";
 import type { ToolingOrderRecord } from "@/lib/server/supplierService";
-import type { WorkOrderToolingItem } from "@/components/documents/work-order/types";
-import { getInitialToolingItems } from "@/components/documents/work-order/toolingItems";
+import type { ToolingSide, WorkOrderToolingItem } from "@/components/documents/work-order/types";
+import { getInitialToolingItems, toolingItemMatchesOrder } from "@/components/documents/work-order/toolingItems";
 
 type ToolingOrderLike = {
   workOrderNo?: string | null;
+  toolingItemId?: string | null;
+  orderNo?: string | null;
+  title?: string | null;
   orderType: ToolingOrderRecord["orderType"];
   status: string;
 };
@@ -125,6 +128,11 @@ export function computeMaterialDeficits(
 export interface ToolingDeficitRow {
   id: string;
   workOrderId: string;
+  /** The work order's tooling item; an order placed from this row is linked to it. */
+  toolingItemId: string;
+  item: WorkOrderToolingItem;
+  side?: ToolingSide;
+  phase?: WorkOrderToolingItem["phase"];
   customer: string;
   product: string;
   neededTooling: string;
@@ -139,6 +147,14 @@ export interface ToolingDeficitRow {
   fileUrl?: string;
   fileName?: string;
   imageUrl?: string;
+}
+
+/** Supplier order kind that procures a tooling item. */
+export function toolingOrderTypeOf(item: WorkOrderToolingItem): ToolingOrderRecord["orderType"] {
+  if (item.category === "die_cutting") return "die_tooling";
+  if (item.category === "foil_cliche" || item.category === "emboss_cliche") return "cliche";
+  if (item.category === "varnish_plate") return "outsourcing";
+  return "ctp_plates";
 }
 
 /** Buyurtmalarda kerak, lekin ta'minotchiga hali buyurtma berilmagan qolip/CTP/klishelar. */
@@ -157,26 +173,38 @@ export function computeToolingDeficits(
         ? q.toolingItems
         : getInitialToolingItems(q as any, woNo);
 
+    // Each supplier order covers one item: the item it was placed for, or for older orders its PO
+    // number, else same name, else the first unclaimed item of its kind.
+    const woOrders = orders.filter(
+      (o) => !!o.workOrderNo && o.workOrderNo.trim().toLowerCase() === woNo.toLowerCase() && o.status !== "Cancelled"
+    );
+    const orderedIds = new Set<string>(woOrders.map((o) => o.toolingItemId).filter((id): id is string => !!id));
+    woOrders
+      .filter((o) => !o.toolingItemId)
+      .forEach((o) => {
+        const link = { orderNo: o.orderNo || undefined, title: o.title || undefined, orderType: o.orderType };
+        const open = items.filter((t) => !orderedIds.has(t.id));
+        const target =
+          (link.orderNo ? open.find((t) => t.purchaseOrderNo === link.orderNo) : undefined) ||
+          (link.title ? open.find((t) => norm(t.name) === norm(link.title)) : undefined) ||
+          open.find((t) => toolingItemMatchesOrder(t, link)) ||
+          open.find((t) => toolingOrderTypeOf(t) === o.orderType);
+        if (target) orderedIds.add(target.id);
+      });
+
     items.forEach((item) => {
       if (item.status === "Ready" || item.status === "Delivered" || item.status === "Mounted") return;
 
-      let orderType: ToolingOrderRecord["orderType"] = "ctp_plates";
-      if (item.category === "die_cutting") orderType = "die_tooling";
-      else if (item.category === "foil_cliche" || item.category === "emboss_cliche") orderType = "cliche";
-      else if (item.category === "varnish_plate") orderType = "outsourcing";
-
-      const isAlreadyOrdered = orders.some(
-        (o) =>
-          !!o.workOrderNo &&
-          o.workOrderNo.trim().toLowerCase() === woNo.toLowerCase() &&
-          o.orderType === orderType &&
-          o.status !== "Cancelled"
-      );
-      if (isAlreadyOrdered) return;
+      if (orderedIds.has(item.id)) return;
+      const orderType = toolingOrderTypeOf(item);
 
       list.push({
         id: `DEF-${q.id}-${item.id || item.category}`,
         workOrderId: woNo,
+        toolingItemId: item.id,
+        item,
+        side: item.side,
+        phase: item.phase,
         customer: q.customer || "—",
         product: q.product || "Mahsulot",
         neededTooling: item.name,

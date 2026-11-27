@@ -17,8 +17,8 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { useWorkspaceStore, ProductionQueueItem } from "@/store/workspaceStore";
 import { ToolingOrderRecord } from "@/lib/server/supplierService";
 import { getInitialToolingItems, findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
-import { computeToolingDeficits } from "@/lib/deficits";
-import { WorkOrderToolingItem } from "@/components/documents/work-order/types";
+import { computeToolingDeficits, toolingOrderTypeOf, type ToolingDeficitRow } from "@/lib/deficits";
+import type { ToolingSide, WorkOrderToolingItem } from "@/components/documents/work-order/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFindShortcut } from "@/hooks/use-find-shortcut";
@@ -73,6 +73,7 @@ import {
   Lock,
   Upload,
   Send,
+  RotateCcw,
   MessageSquare,
   Trash2,
   Archive,
@@ -154,6 +155,8 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
   Cancelled: "Bekor qilindi",
 };
 
+const SIDE_LABELS: Record<ToolingSide, string> = { front: "Oldi", back: "Orqa", set: "Komplekt" };
+
 export function ToolingOrdersGrid() {
   const { ask, dialog: askDialog } = useAskDialog();
   const {
@@ -161,6 +164,7 @@ export function ToolingOrdersGrid() {
     suppliers,
     loadSuppliers,
     productionQueue,
+    productionQueueLoaded,
     loadProductionQueue,
     openTab,
     toggleReadinessCheck,
@@ -173,6 +177,7 @@ export function ToolingOrdersGrid() {
 
   const [orders, setOrders] = useState<ToolingOrderRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useFindShortcut();
   const [selectedType, setSelectedType] = useState<string>("all");
@@ -312,6 +317,11 @@ export function ToolingOrdersGrid() {
     fileName: "" as string | undefined,
     imageUrl: "" as string | undefined,
     toolingSpec: {} as ToolingSpec,
+    // The work order's tooling item this order is for; empty for a free order
+    toolingItemId: "",
+    toolingItem: undefined as WorkOrderToolingItem | undefined,
+    isRemake: false,
+    remakeReason: "",
   });
 
   // Load orders from API
@@ -327,6 +337,7 @@ export function ToolingOrdersGrid() {
       console.error("Failed to load tooling orders:", err);
     } finally {
       setIsLoading(false);
+      setOrdersLoaded(true);
     }
   }, []);
 
@@ -337,7 +348,11 @@ export function ToolingOrdersGrid() {
   }, [fetchOrders, loadSuppliers, loadProductionQueue]);
 
   // Buyurtmalarda kerak, lekin hali buyurtma berilmagan jihozlar (sidebar badge bilan bir xil hisob)
-  const deficitRows = useMemo(() => computeToolingDeficits(productionQueue, orders), [productionQueue, orders]);
+  // Only once both lists are in: before the supplier orders arrive every item would look unordered.
+  const deficitRows = useMemo(
+    () => (ordersLoaded && productionQueueLoaded ? computeToolingDeficits(productionQueue, orders) : []),
+    [ordersLoaded, productionQueueLoaded, productionQueue, orders]
+  );
 
   // Filtered orders
   const activeOrders = useMemo(() => orders.filter((o) => !CLOSED_STATUSES.includes(o.status)), [orders]);
@@ -469,7 +484,7 @@ export function ToolingOrdersGrid() {
         return {
           kind: GridCellKind.Text,
           data: order.title || "",
-          displayData: order.title || "",
+          displayData: order.remakeReason ? `Qayta · ${order.title || ""}` : order.title || "",
           allowOverlay: false,
           themeOverride: {
             baseFontStyle: "500 12px sans-serif",
@@ -976,10 +991,71 @@ export function ToolingOrdersGrid() {
       fileName: undefined,
       imageUrl: undefined,
       toolingSpec: {},
+      toolingItemId: "",
+      toolingItem: undefined,
+      isRemake: false,
+      remakeReason: "",
       ...preset,
     });
     setIsModalOpen(true);
   };
+
+  /** An order for one work-order item: the item fixes what is ordered and its file. */
+  const openForItem = (
+    workOrderNo: string,
+    item: WorkOrderToolingItem,
+    opts: { deadline?: string; currency?: string; remake?: boolean } = {}
+  ) =>
+    handleOpenCreateModal({
+      workOrderNo,
+      toolingItemId: item.id,
+      toolingItem: item,
+      title: item.name,
+      orderType: toolingOrderTypeOf(item),
+      quantity: item.quantity || 1,
+      unit: item.unit || "dona",
+      amount: item.estimatedCost || 0,
+      currency: item.currency || opts.currency || "UZS",
+      specDetails: item.specDetails || "",
+      deliveryDeadline: opts.deadline || new Date().toISOString().split("T")[0],
+      fileUrl: item.fileUrl,
+      fileName: item.fileName,
+      imageUrl: item.imageUrl,
+      isRemake: !!opts.remake,
+    });
+
+  const openForDeficit = (def: ToolingDeficitRow) =>
+    openForItem(def.workOrderId, def.item, { deadline: def.deadline, currency: def.currency });
+
+  /** The work order's current copy of a tooling item, for ordering it again. */
+  const findWorkOrderItem = (workOrderNo?: string, itemId?: string) => {
+    if (!workOrderNo || !itemId) return undefined;
+    const key = workOrderNo.trim().toLowerCase();
+    const q = productionQueue.find((w) => (w.id || w.docNo || "").trim().toLowerCase() === key);
+    return (q?.toolingItems || []).find((t) => t.id === itemId);
+  };
+
+  const openRemake = (order: ToolingOrderRecord) => {
+    const item = findWorkOrderItem(order.workOrderNo, order.toolingItemId);
+    if (!item || !order.workOrderNo) {
+      addNotification({ title: "Jihoz topilmadi", description: order.orderNo, severity: "error" });
+      return;
+    }
+    openForItem(order.workOrderNo, item, { currency: order.currency, remake: true });
+  };
+
+  // The work order card asks to order one of its items (or to order it again); each request opens once.
+  const handledOrderRequestRef = useRef<string | null>(null);
+  const orderRequest = activeTab?.documentData?.orderItem as
+    | { nonce: string; workOrderNo: string; item: WorkOrderToolingItem; remake?: boolean }
+    | undefined;
+  useEffect(() => {
+    if (!orderRequest || handledOrderRequestRef.current === orderRequest.nonce) return;
+    handledOrderRequestRef.current = orderRequest.nonce;
+    openForItem(orderRequest.workOrderNo, orderRequest.item, { remake: orderRequest.remake });
+    // Only a new request opens the dialog.
+    // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
+  }, [orderRequest?.nonce]);
 
   const handleOpenEditModal = (order: ToolingOrderRecord) => {
     setFileError(false);
@@ -987,11 +1063,8 @@ export function ToolingOrdersGrid() {
     const matchingQueueItem = productionQueue.find(
       (q) => (q.id || q.docNo || "").trim().toLowerCase() === (order.workOrderNo || "").trim().toLowerCase()
     );
-    const matchingTool = matchingQueueItem?.toolingItems?.find(
-      (t: any) =>
-        (t.name && order.title && t.name.toLowerCase() === order.title.toLowerCase()) ||
-        t.category === order.orderType
-    );
+    const matchingTool = findDeliveryTarget(matchingQueueItem?.toolingItems || [], order);
+    const linkedTool = order.toolingItemId ? matchingTool : undefined;
 
     setFormData({
       supplierId: order.supplierId,
@@ -1010,6 +1083,10 @@ export function ToolingOrdersGrid() {
       fileName: matchingTool?.fileName || order.fileName || undefined,
       imageUrl: matchingTool?.imageUrl || undefined,
       toolingSpec: order.toolingSpec || {},
+      toolingItemId: linkedTool ? order.toolingItemId || "" : "",
+      toolingItem: linkedTool,
+      isRemake: !!order.remakeReason,
+      remakeReason: order.remakeReason || "",
     });
     setIsModalOpen(true);
   };
@@ -1038,6 +1115,11 @@ export function ToolingOrdersGrid() {
       return;
     }
 
+    if (formData.isRemake && !formData.remakeReason.trim()) {
+      addNotification({ title: "Sabab kiritilmagan", description: "Qayta buyurtma sababini yozing", severity: "error" });
+      return;
+    }
+
     const specError = isDraft ? null : toolingSpecError(formData.orderType, formData.toolingSpec);
     if (specError) {
       addNotification({ title: "Qolip ma'lumoti to'liq emas", description: specError, severity: "error" });
@@ -1059,9 +1141,17 @@ export function ToolingOrdersGrid() {
     }
 
     try {
+      const { toolingItem, isRemake, ...orderFields } = formData;
+      const itemWithFile =
+        orderFields.toolingItemId && toolingItem
+          ? { ...toolingItem, fileUrl: orderFields.fileUrl, fileName: orderFields.fileName }
+          : undefined;
       const payload = {
         ...(editingOrder ? { id: editingOrder.id, orderNo: editingOrder.orderNo } : {}),
-        ...formData,
+        ...orderFields,
+        toolingItemId: orderFields.toolingItemId || undefined,
+        remakeReason: isRemake ? orderFields.remakeReason.trim() : undefined,
+        toolingItem: itemWithFile,
         ...(delivery || {}),
       };
 
@@ -1079,8 +1169,8 @@ export function ToolingOrdersGrid() {
           severity: "success",
         });
 
-        // Bidirectional sync with Work Order toolingItems in workspace store
-        if (formData.workOrderNo) {
+        // The order's own item in the workspace store (a free order touches no item)
+        if (formData.workOrderNo && itemWithFile) {
           const queue = useWorkspaceStore.getState().productionQueue;
           const woKey = formData.workOrderNo.trim().toLowerCase();
           const targetQ = queue.find(
@@ -1096,42 +1186,30 @@ export function ToolingOrdersGrid() {
             const chosenSupplier = suppliers.find((s) => s.id === formData.supplierId);
             const poNo = json.order?.orderNo || json.data?.orderNo || editingOrder?.orderNo;
 
-            const isMatchTool = (t: WorkOrderToolingItem) =>
-                (t.name && formData.title && t.name.toLowerCase() === formData.title.toLowerCase()) ||
-                (t.category && formData.orderType && (
-                  (formData.orderType === "ctp_plates" && (t.category === "ctp_plates" || t.category === "flexo_polymer")) ||
-                  (formData.orderType === "die_tooling" && t.category === "die_cutting") ||
-                  (formData.orderType === "cliche" && (t.category === "foil_cliche" || t.category === "emboss_cliche"))
-                ));
-
-            // Delivery cost lands on one item only (the PO's own item, else the first match)
-            const deliveryTargetId = delivery
-              ? findDeliveryTarget(currentTools, { orderNo: poNo, orderType: formData.orderType, title: formData.title })?.id
-              : undefined;
-
-            const updatedTools = currentTools.map((t) => {
-              const isMatch = isMatchTool(t);
-
-              if (isMatch) {
-                return {
-                  ...t,
-                  supplierName: chosenSupplier?.name || t.supplierName,
-                  purchaseOrderNo: poNo || t.purchaseOrderNo,
-                  status: (formData.status === "Ready" || formData.status === "Delivered")
-                    ? "Ready"
-                    : formData.status === "Draft"
-                    ? "Draft"
-                    : "Ordered",
-                  fileUrl: formData.fileUrl || t.fileUrl,
-                  fileName: formData.fileName || t.fileName,
-                  imageUrl: formData.imageUrl || t.imageUrl,
-                  ...(delivery && t.id === deliveryTargetId
-                    ? { deliveryMethod: delivery.deliveryMethod, deliveryCost: delivery.deliveryCost }
-                    : {}),
-                } as WorkOrderToolingItem;
-              }
-              return t;
+            const patchItem = (t: WorkOrderToolingItem): WorkOrderToolingItem => ({
+              ...t,
+              supplierName: chosenSupplier?.name || t.supplierName,
+              purchaseOrderNo: poNo || t.purchaseOrderNo,
+              status:
+                formData.status === "Ready" || formData.status === "Delivered"
+                  ? "Ready"
+                  : formData.status === "Draft"
+                  ? "Draft"
+                  : "Ordered",
+              fileUrl: itemWithFile.fileUrl,
+              fileName: itemWithFile.fileName,
+              ...(delivery ? { deliveryMethod: delivery.deliveryMethod, deliveryCost: delivery.deliveryCost } : {}),
             });
+            const hasStoredTools = Array.isArray(targetQ.toolingItems) && targetQ.toolingItems.length > 0;
+            const updatedTools = currentTools.some((t) => t.id === itemWithFile.id)
+              ? currentTools.map((t) => (t.id === itemWithFile.id ? patchItem(t) : t))
+              : [
+                  // A generated default item gets a new id each build: replace it by kind and name
+                  ...currentTools.filter(
+                    (t) => hasStoredTools || !(t.category === itemWithFile.category && t.name === itemWithFile.name)
+                  ),
+                  patchItem(itemWithFile),
+                ];
 
             useWorkspaceStore.getState().upsertProductionQueueItem({
               id: targetQ.id,
@@ -1256,26 +1334,15 @@ export function ToolingOrdersGrid() {
                 ? "Draft"
                 : "Ordered";
 
-            const matchesOrder = (t: WorkOrderToolingItem) =>
-                (t.purchaseOrderNo && order.orderNo && t.purchaseOrderNo === order.orderNo) ||
-                (t.name && order.title && t.name.toLowerCase() === order.title.toLowerCase()) ||
-                (t.category && order.orderType && (
-                  (order.orderType === "ctp_plates" && (t.category === "ctp_plates" || t.category === "flexo_polymer")) ||
-                  (order.orderType === "die_tooling" && t.category === "die_cutting") ||
-                  (order.orderType === "cliche" && (t.category === "foil_cliche" || t.category === "emboss_cliche"))
-                ));
-
-            // Delivery cost lands on exactly one item (the PO's own item, else the first match) so it is never counted twice
-            const deliveryTargetId = delivery ? findDeliveryTarget(currentTools, order)?.id : undefined;
+            // The order covers exactly one item: the one it was placed for (older orders: PO number, name, kind)
+            const targetId = findDeliveryTarget(currentTools, order)?.id;
 
             const updatedTools = currentTools.map((t) => {
-              if (!matchesOrder(t)) return t;
+              if (t.id !== targetId) return t;
               return {
                 ...t,
                 status: nextToolStatus,
-                ...(delivery && t.id === deliveryTargetId
-                  ? { deliveryMethod: delivery.deliveryMethod, deliveryCost: delivery.deliveryCost }
-                  : {}),
+                ...(delivery ? { deliveryMethod: delivery.deliveryMethod, deliveryCost: delivery.deliveryCost } : {}),
               } as WorkOrderToolingItem;
             });
 
@@ -1511,36 +1578,7 @@ export function ToolingOrdersGrid() {
             className="h-7 text-xs gap-1.5 bg-primary text-primary-foreground font-medium"
             onClick={() => {
               if (viewMode === "deficits" && selectedDeficit) {
-                handleOpenCreateModal({
-                  workOrderNo: selectedDeficit.workOrderId,
-                  title: selectedDeficit.neededTooling,
-                  orderType: selectedDeficit.toolingCategory,
-                  quantity: selectedDeficit.quantity,
-                  unit: selectedDeficit.unit,
-                  amount: selectedDeficit.estimatedCost || 0,
-                  currency: selectedDeficit.currency || "UZS",
-                  specDetails: selectedDeficit.specDetails || "",
-                  deliveryDeadline: selectedDeficit.deadline || new Date().toISOString().split("T")[0],
-                  fileUrl: selectedDeficit.fileUrl,
-                  fileName: selectedDeficit.fileName,
-                  imageUrl: selectedDeficit.imageUrl,
-                });
-              } else if (deficitRows.length > 0) {
-                const def = deficitRows[0];
-                handleOpenCreateModal({
-                  workOrderNo: def.workOrderId,
-                  title: def.neededTooling,
-                  orderType: def.toolingCategory,
-                  quantity: def.quantity,
-                  unit: def.unit,
-                  amount: def.estimatedCost || 0,
-                  currency: def.currency || "UZS",
-                  specDetails: def.specDetails || "",
-                  deliveryDeadline: def.deadline || new Date().toISOString().split("T")[0],
-                  fileUrl: def.fileUrl,
-                  fileName: def.fileName,
-                  imageUrl: def.imageUrl,
-                });
+                openForDeficit(selectedDeficit);
               } else {
                 handleOpenCreateModal();
               }
@@ -1781,6 +1819,13 @@ export function ToolingOrdersGrid() {
                 <span>Buyurtmani ko&apos;rish (F12)</span>
               </ContextMenuItem>
 
+              {selectedOrder?.toolingItemId && selectedOrder.status !== "Cancelled" && (
+                <ContextMenuItem onClick={() => openRemake(selectedOrder)}>
+                  <RotateCcw className="size-3.5 mr-2" />
+                  <span>Qayta buyurtma</span>
+                </ContextMenuItem>
+              )}
+
               {selectedOrder?.workOrderNo && (
                 <ContextMenuItem onClick={() => handleOpenWorkOrder(selectedOrder.workOrderNo)}>
                   <ExternalLink className="size-3.5 mr-2" />
@@ -1900,20 +1945,7 @@ export function ToolingOrdersGrid() {
                       return;
                     }
                   }
-                  handleOpenCreateModal({
-                    workOrderNo: def.workOrderId,
-                    title: def.neededTooling,
-                    orderType: def.toolingCategory,
-                    quantity: def.quantity,
-                    unit: def.unit,
-                    amount: def.estimatedCost || 0,
-                    currency: def.currency || "UZS",
-                    specDetails: def.specDetails || "",
-                    deliveryDeadline: def.deadline || new Date().toISOString().split("T")[0],
-                    fileUrl: def.fileUrl,
-                    fileName: def.fileName,
-                    imageUrl: def.imageUrl,
-                  });
+                  openForDeficit(def);
                 }}
               />
             </ContextMenuTrigger>
@@ -1922,20 +1954,7 @@ export function ToolingOrdersGrid() {
               <ContextMenuItem
                 onClick={() => {
                   if (selectedDeficit) {
-                    handleOpenCreateModal({
-                      workOrderNo: selectedDeficit.workOrderId,
-                      title: selectedDeficit.neededTooling,
-                      orderType: selectedDeficit.toolingCategory,
-                      quantity: selectedDeficit.quantity,
-                      unit: selectedDeficit.unit,
-                      amount: selectedDeficit.estimatedCost || 0,
-                      currency: selectedDeficit.currency || "UZS",
-                      specDetails: selectedDeficit.specDetails || "",
-                      deliveryDeadline: selectedDeficit.deadline || new Date().toISOString().split("T")[0],
-                      fileUrl: selectedDeficit.fileUrl,
-                      fileName: selectedDeficit.fileName,
-                      imageUrl: selectedDeficit.imageUrl,
-                    });
+                    openForDeficit(selectedDeficit);
                   }
                 }}
                 disabled={!selectedDeficit}
@@ -1992,7 +2011,7 @@ export function ToolingOrdersGrid() {
             <div className="flex items-center justify-between pr-8">
               <DialogTitle className="text-xs font-semibold flex items-center gap-2">
                 <Stamp className="size-3.5 text-primary" />
-                <span>{editingOrder ? "Buyurtmani tahrirlash" : "Jihoz / CTP buyurtmasi"}</span>
+                <span>{editingOrder ? "Buyurtmani tahrirlash" : formData.isRemake ? "Qayta buyurtma" : "Jihoz / CTP buyurtmasi"}</span>
                 {formData.workOrderNo && (
                   <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
                     {formData.workOrderNo}
@@ -2026,56 +2045,8 @@ export function ToolingOrdersGrid() {
           </DialogHeader>
 
           <div className="space-y-2 text-xs w-full min-w-0 flex-1 overflow-y-auto pr-1">
-            {/* Deficit Switcher when creating new order and multiple deficits exist */}
-            {!editingOrder && deficitRows.length > 1 && (
-              <div className="space-y-0.5 w-full min-w-0">
-                <Select
-                  value={
-                    deficitRows.find(
-                      (d) => d.workOrderId === formData.workOrderNo && d.neededTooling === formData.title
-                    )?.id || ""
-                  }
-                  onValueChange={(val) => {
-                    const def = deficitRows.find((d) => d.id === val);
-                    if (def) {
-                      setFormData((prev) => ({
-                        ...prev,
-                        workOrderNo: def.workOrderId,
-                        title: def.neededTooling,
-                        orderType: def.toolingCategory,
-                        quantity: def.quantity,
-                        unit: def.unit,
-                        amount: def.estimatedCost || prev.amount || 0,
-                        currency: def.currency || prev.currency || "UZS",
-                        specDetails: def.specDetails || "",
-                        deliveryDeadline: def.deadline || prev.deliveryDeadline,
-                        fileUrl: def.fileUrl,
-                        fileName: def.fileName,
-                        imageUrl: def.imageUrl,
-                      }));
-                      setFileError(false);
-                    }
-                  }}
-                >
-                  <SelectTrigger className="h-6 text-[11px] bg-muted/40 w-full min-w-0 overflow-hidden">
-                    <SelectValue placeholder="Ehtiyojni tanlang..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {deficitRows.map((d) => (
-                      <SelectItem key={d.id} value={d.id} className="text-xs max-w-[460px]">
-                        <span className="font-mono font-bold mr-1 shrink-0">{d.workOrderId}</span>
-                        <span className="text-muted-foreground mr-1 shrink-0">—</span>
-                        <span className="truncate flex-1 min-w-0">{d.neededTooling}</span>
-                        <span className="font-mono text-muted-foreground ml-1 shrink-0">({d.quantity} {d.unit})</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {/* Work Order Details & Attached File (Super Compact High-Density Card) */}
-            {formData.workOrderNo ? (
+            {/* The item being ordered (locked) and its file; a free order fills the form below instead */}
+            {formData.toolingItemId ? (
               <div className="rounded border border-border/80 bg-muted/30 p-2 space-y-1.5 w-full min-w-0 overflow-hidden">
                 {/* Line 1: Type badge, Title, Quantity */}
                 <div className="flex items-center justify-between gap-2 w-full min-w-0">
@@ -2085,6 +2056,16 @@ export function ToolingOrdersGrid() {
                         ? "Flexo Polimer Forma"
                         : ORDER_TYPE_LABELS[formData.orderType] || formData.orderType}
                     </Badge>
+                    {formData.toolingItem?.side && (
+                      <Badge variant="outline" className="text-[10px] h-4 px-1 font-medium shrink-0">
+                        {SIDE_LABELS[formData.toolingItem.side]}
+                      </Badge>
+                    )}
+                    {formData.toolingItem?.phase === "sample" && (
+                      <Badge variant="outline" className="text-[10px] h-4 px-1 font-medium shrink-0">
+                        Namuna
+                      </Badge>
+                    )}
                     <span className="font-medium text-foreground truncate min-w-0 flex-1">{formData.title}</span>
                   </div>
                   <span className="font-mono font-bold text-foreground shrink-0 text-xs whitespace-nowrap">
@@ -2305,6 +2286,20 @@ export function ToolingOrdersGrid() {
                     <span>Buyurtma berish uchun jihoz chizma fayli (PDF/DXF/AI) biriktirilishi shart</span>
                   </div>
                 )}
+              </div>
+            )}
+
+            {formData.isRemake && (
+              <div className="space-y-0.5 w-full min-w-0">
+                <label className="text-[11px] font-medium text-foreground">
+                  Qayta buyurtma sababi <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={formData.remakeReason}
+                  onChange={(e) => setFormData({ ...formData, remakeReason: e.target.value })}
+                  placeholder="Singan, yaroqsiz, maket o'zgardi..."
+                  className="h-7 text-xs w-full min-w-0"
+                />
               </div>
             )}
 

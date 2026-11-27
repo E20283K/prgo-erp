@@ -36,6 +36,9 @@ async function productionBadges(queue: Queue, companyId: string) {
   const orders = await db
     .select({
       workOrderNo: supplierOrders.workOrderNo,
+      orderNo: supplierOrders.orderNo,
+      toolingItemId: supplierOrders.toolingItemId,
+      title: supplierOrders.title,
       orderType: supplierOrders.orderType,
       status: supplierOrders.status,
     })

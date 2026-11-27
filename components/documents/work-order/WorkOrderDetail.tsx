@@ -158,7 +158,7 @@ import { computeTariffEstimate, TariffRecord } from "@/components/documents/tari
 import { deriveWorkOrderStatus } from "@/lib/workOrderStatus";
 import { materialNotIssuedNote } from "@/lib/materialStatus";
 
-import { getInitialToolingItems, toolingItemTotalCost, mergeSupplierSourcedFields } from "./toolingItems";
+import { applyMontajCtpItems, getInitialToolingItems, toolingItemTotalCost, mergeSupplierSourcedFields } from "./toolingItems";
 import { syncKashirovkaBomRows } from "./utils/kashirovkaBom";
 import { syncSampleBomRow } from "./utils/sampleBom";
 import { buildReorderDocument } from "./reorder";
@@ -4115,7 +4115,11 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     pressSheetW={formData.pressSheetW}
                     pressSheetH={formData.pressSheetH}
                     plannedSheets={formData.plannedSheets}
-                    appliedCtpPlates={(formData.toolingItems || []).find((t) => t.category === "ctp_plates")?.quantity}
+                    appliedCtpPlates={(() => {
+                      const ctp = (formData.toolingItems || []).filter((t) => t.category === "ctp_plates" && t.phase !== "sample");
+                      const sided = ctp.filter((t) => t.side);
+                      return sided.length > 0 ? sided.reduce((n, t) => n + (t.quantity || 0), 0) : ctp[0]?.quantity;
+                    })()}
                     isOperator={isOperator}
                     onSwitchTab={(target) => setLevel3Tab(tab.id, target)}
                     onAddAttachment={(att) => {
@@ -4129,52 +4133,31 @@ export function WorkOrderDetail({ tab }: { tab: DocumentTab }) {
                     }}
                     onApplyToOrder={(payload) => {
                       const currentTools = formData.toolingItems || [];
-                      const ctpIdx = currentTools.findIndex((t) => t.category === "ctp_plates");
-                      let nextTooling = [...currentTools];
                       const isUsd = (formData.currency || "UZS").toUpperCase() === "USD";
                       const unitCtpCost = isUsd ? 6 : 75000;
                       const rawOrderNo = docNo || data.docNo || tab.id;
                       const isDraftOrder = !rawOrderNo || rawOrderNo.startsWith("draft-") || rawOrderNo.startsWith("temp-");
                       const displayOrderNo = !isDraftOrder ? rawOrderNo : (formData.product ? formData.product : "");
-                      const ctpItemName = displayOrderNo ? `${displayOrderNo} CTP Metall Formalar Komplekti` : "CTP Metall Formalar Komplekti";
-                      const montajFiles = payload.montaj
-                        ? {
-                            fileUrl: payload.montaj.fileUrl,
-                            fileName: payload.montaj.fileName,
-                            ...(payload.montaj.imageUrl ? { imageUrl: payload.montaj.imageUrl } : {}),
-                          }
-                        : {};
-
-                      if (ctpIdx >= 0) {
-                        if (payload.totalCtpPlates > 0) {
-                          nextTooling[ctpIdx] = {
-                            ...nextTooling[ctpIdx],
-                            ...montajFiles,
-                            name: ctpItemName,
-                            quantity: payload.totalCtpPlates,
-                            specDetails: payload.ctpSpecDetails,
-                            estimatedCost: unitCtpCost * payload.totalCtpPlates,
-                          };
-                        } else {
-                          nextTooling.splice(ctpIdx, 1);
-                        }
-                      } else if (payload.totalCtpPlates > 0) {
-                        nextTooling = [
-                          {
-                            id: `TL-CTP-${Date.now()}`,
-                            category: "ctp_plates",
-                            name: ctpItemName,
-                            specDetails: payload.ctpSpecDetails,
-                            quantity: payload.totalCtpPlates,
-                            unit: "dona",
-                            estimatedCost: unitCtpCost * payload.totalCtpPlates,
-                            currency: formData.currency || "UZS",
-                            status: "Draft",
-                            createdAt: new Date().toISOString(),
-                            ...montajFiles,
-                          },
-                          ...nextTooling,
-                        ];
+                      // One CTP item per printed side (or one Komplekt), each with the montaj file
+                      const { items: nextTooling, locked } = applyMontajCtpItems(currentTools, payload.ctpSides, {
+                        orderLabel: displayOrderNo,
+                        specDetails: payload.ctpSpecDetails,
+                        unitCost: unitCtpCost,
+                        currency: formData.currency || "UZS",
+                        files: payload.montaj
+                          ? {
+                              fileUrl: payload.montaj.fileUrl,
+                              fileName: payload.montaj.fileName,
+                              ...(payload.montaj.imageUrl ? { imageUrl: payload.montaj.imageUrl } : {}),
+                            }
+                          : {},
+                      });
+                      if (locked.length > 0) {
+                        addNotification({
+                          title: "Buyurtma qilingan jihoz o'zgarmadi",
+                          description: locked.map((t) => `${t.name} (${t.purchaseOrderNo})`).join(", "),
+                          severity: "warning",
+                        });
                       }
 
                       const totalCost = nextTooling.reduce(

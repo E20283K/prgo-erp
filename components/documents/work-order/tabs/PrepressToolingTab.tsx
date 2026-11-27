@@ -223,6 +223,28 @@ export function PrepressToolingTab({
     });
   }, [openTab, docNo]);
 
+  /** Opens the Tooling & CTP order dialog for this one item (or to order it again). */
+  const handleOrderItem = useCallback(
+    (item: WorkOrderToolingItem, remake = false) => {
+      if (!docNo || docNo.startsWith("draft-") || docNo.startsWith("temp-")) {
+        addNotification({ title: "Buyurtma saqlanmagan", description: "Avval ish buyurtmasini saqlang", severity: "warning" });
+        return;
+      }
+      openTab({
+        id: "tooling-orders",
+        title: "Qolip va CTP buyurtmalari",
+        type: "registry",
+        module: "production",
+        documentData: {
+          workOrderNo: docNo,
+          viewMode: remake ? "orders" : "deficits",
+          orderItem: { nonce: `${item.id}-${Date.now()}`, workOrderNo: docNo, item, remake },
+        },
+      });
+    },
+    [openTab, docNo, addNotification]
+  );
+
   useEffect(() => {
     const s = useWorkspaceStore.getState();
     if (s.suppliers.length === 0 && s.loadSuppliers) s.loadSuppliers();
@@ -236,6 +258,35 @@ export function PrepressToolingTab({
   const [isAddEditOpen, setIsAddEditOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Partial<WorkOrderToolingItem> | null>(null);
   const [fileError, setFileError] = useState(false);
+
+  // Supplier orders placed for the item being edited (a remake adds a newer one)
+  const [itemOrders, setItemOrders] = useState<
+    { orderNo: string; status: string; orderDate: string; supplierName?: string; remakeReason?: string }[]
+  >([]);
+  const editingItemId = isAddEditOpen ? editingItem?.id : undefined;
+  const editingItemPo = isAddEditOpen ? editingItem?.purchaseOrderNo : undefined;
+  useEffect(() => {
+    if (!editingItemId || !docNo) return;
+    let cancelled = false;
+    fetch("/api/v1/production/tooling-orders")
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled || !json?.success || !Array.isArray(json.data)) return;
+        const woKey = docNo.trim().toLowerCase();
+        setItemOrders(
+          json.data.filter(
+            (o: { workOrderNo?: string; toolingItemId?: string; orderNo: string }) =>
+              (o.workOrderNo || "").trim().toLowerCase() === woKey &&
+              (o.toolingItemId ? o.toolingItemId === editingItemId : !!editingItemPo && o.orderNo === editingItemPo)
+          )
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      setItemOrders([]);
+    };
+  }, [editingItemId, editingItemPo, docNo]);
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
   const imageFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const cadFileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -701,6 +752,7 @@ export function PrepressToolingTab({
     const targetItem: WorkOrderToolingItem = {
       id: targetId,
       category: editingItem.category || "ctp_plates",
+      side: editingItem.side,
       name: editingItem.name,
       specDetails: editingItem.specDetails || "",
       quantity: Number(editingItem.quantity) || 1,
@@ -858,14 +910,14 @@ export function PrepressToolingTab({
       }
 
       if (column?.id === "purchaseOrderNo" && !target.purchaseOrderNo) {
-        handleOpenToolingRegistry();
+        handleOrderItem(target);
         return;
       }
 
       setEditingItem(target);
       setIsAddEditOpen(true);
     },
-    [filteredItems, columns, handleOpenSupplierOrders, handleOpenToolingRegistry]
+    [filteredItems, columns, handleOpenSupplierOrders, handleOrderItem]
   );
 
   return (
@@ -1072,25 +1124,22 @@ export function PrepressToolingTab({
               </Tooltip>
 
               {/* Order in Central Registry Shortcut */}
-              {!selectedItem.purchaseOrderNo && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        onClick={handleOpenToolingRegistry}
-                        variant="outline"
-                        size="sm"
-                        className="h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer shrink-0 text-primary border-primary/30 hover:bg-primary/5"
-                      >
-                        <Stamp className="w-3 h-3 text-primary" />
-                        <span className="hidden sm:inline">Reestrda buyurtma berish</span>
-                      </Button>
-                    }
-                  />
-                  <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                    Qoliplar va CTP buyurtmalari modulida rasmiy PO ochish
-                  </TooltipContent>
-                </Tooltip>
+              {selectedItem.status !== "Mounted" && (
+                <Button
+                  onClick={() => handleOrderItem(selectedItem, !!selectedItem.purchaseOrderNo)}
+                  variant="outline"
+                  size="sm"
+                  className="h-6.5 px-2 text-xs font-medium gap-1 rounded cursor-pointer shrink-0 text-primary border-primary/30 hover:bg-primary/5"
+                >
+                  {selectedItem.purchaseOrderNo ? (
+                    <RotateCcw className="w-3 h-3 text-primary" />
+                  ) : (
+                    <Stamp className="w-3 h-3 text-primary" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {selectedItem.purchaseOrderNo ? "Qayta buyurtma" : "Buyurtma berish"}
+                  </span>
+                </Button>
               )}
 
               {/* Supplier / PO Navigation Button */}
@@ -1430,16 +1479,13 @@ export function PrepressToolingTab({
                 </ContextMenuItem>
               )}
 
-              {!selectedItem.purchaseOrderNo && (
-                <ContextMenuItem
-                  onClick={handleOpenToolingRegistry}
-                  className="gap-2 cursor-pointer font-medium text-primary"
-                >
-                  <Stamp className="w-3.5 h-3.5" />
-                  <span>Qoliplar va CTP modulida ochish</span>
-                  <ExternalLink className="w-3 h-3 ml-auto opacity-70" />
-                </ContextMenuItem>
-              )}
+              <ContextMenuItem
+                onClick={() => handleOrderItem(selectedItem, !!selectedItem.purchaseOrderNo)}
+                className="gap-2 cursor-pointer font-medium text-primary"
+              >
+                {selectedItem.purchaseOrderNo ? <RotateCcw className="w-3.5 h-3.5" /> : <Stamp className="w-3.5 h-3.5" />}
+                <span>{selectedItem.purchaseOrderNo ? "Qayta buyurtma" : "Buyurtma berish"}</span>
+              </ContextMenuItem>
 
               {/* Production Floor: Mark as Mounted when tool is on press */}
               {selectedItem.status === "Ready" && (
@@ -1571,6 +1617,37 @@ export function PrepressToolingTab({
                   </Select>
                 </div>
               </div>
+
+              {/* Plate sets: which print side this file is for */}
+              {(editingItem.category === "ctp_plates" || editingItem.category === "flexo_polymer") && (
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground font-medium">Tomon</Label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(
+                      [
+                        ["front", "Oldi"],
+                        ["back", "Orqa"],
+                        ["set", "Komplekt"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={editingItem.side === value}
+                        onClick={() => setEditingItem((prev) => ({ ...prev, side: value }))}
+                        className={cn(
+                          "h-7 px-1.5 rounded border text-xs font-medium transition-colors",
+                          editingItem.side === value
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-card hover:bg-muted"
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Row 2: Name */}
               <div className="space-y-1.5">
@@ -1936,6 +2013,24 @@ export function PrepressToolingTab({
                   className="h-14 text-xs bg-background resize-none"
                 />
               </div>
+
+              {itemOrders.length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground font-medium">Buyurtmalar</Label>
+                  <div className="rounded border border-border divide-y divide-border">
+                    {itemOrders.map((o) => (
+                      <div key={o.orderNo} className="h-7 px-2 flex items-center gap-2 text-xs">
+                        <span className="font-mono font-medium shrink-0">{o.orderNo}</span>
+                        <span className="text-muted-foreground shrink-0">{o.orderDate}</span>
+                        <span className="truncate min-w-0 flex-1 text-muted-foreground">
+                          {o.remakeReason ? `Qayta: ${o.remakeReason}` : o.supplierName || ""}
+                        </span>
+                        <span className="shrink-0">{STATUS_CONFIG[o.status as ToolingStatus]?.label || o.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Cost phase: sample vs production run */}
               <div className="space-y-1.5">

@@ -860,9 +860,13 @@ export type ToolingStatus =
   | "Delivered"
   | "Mounted";
 
+/** Which print side a plate set is for; "set" is one set for both sides (work-and-turn) or a single kit. */
+export type ToolingSide = "front" | "back" | "set";
+
 export interface WorkOrderToolingItem {
   id: string;
   category: ToolingCategory;
+  side?: ToolingSide;
   name: string;
   specDetails: string;
   quantity: number;
