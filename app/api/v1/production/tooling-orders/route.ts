@@ -3,6 +3,7 @@ import {
   getAllToolingOrders,
   upsertSupplierOrder,
 } from "@/lib/server/supplierService";
+import { getToolingDeficits } from "@/lib/server/toolingDeficitService";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,17 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const companyCode = searchParams.get("company") || "PRINTGOO";
 
-    const orders = await getAllToolingOrders(companyCode);
+    // ?view=deficits: items open work orders need that no order covers yet
+    if (searchParams.get("view") === "deficits") {
+      const rows = await getToolingDeficits(companyCode);
+      return NextResponse.json({ success: true, data: rows, total: rows.length });
+    }
+
+    // ?id= returns one order with its embedded drawing; ?workOrderNo= the orders of one work order
+    const orders = await getAllToolingOrders(companyCode, {
+      id: searchParams.get("id") || undefined,
+      workOrderNo: searchParams.get("workOrderNo") || undefined,
+    });
 
     return NextResponse.json({
       success: true,

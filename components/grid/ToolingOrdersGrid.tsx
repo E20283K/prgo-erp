@@ -17,7 +17,7 @@ import { GLIDE_LIGHT_THEME, GLIDE_DARK_THEME } from "./DataGrid";
 import { useWorkspaceStore, ProductionQueueItem } from "@/store/workspaceStore";
 import { ToolingOrderRecord } from "@/lib/server/supplierService";
 import { getInitialToolingItems, findDeliveryTarget } from "@/components/documents/work-order/toolingItems";
-import { computeToolingDeficits, toolingOrderTypeOf, type ToolingDeficitRow } from "@/lib/deficits";
+import { toolingOrderTypeOf, type ToolingDeficitRow } from "@/lib/deficits";
 import type { ToolingSide, WorkOrderToolingItem } from "@/components/documents/work-order/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -95,6 +95,11 @@ const ORDER_TYPE_LABELS: Record<string, string> = {
   equipment: "Jihoz / Uskuna",
 };
 
+/** Stored photos come downscaled by the storage route; grid thumbnails never need the original. */
+function previewSized(url: string, width: number): string {
+  return url.startsWith("/api/v1/storage/file?") ? `${url}&w=${width}` : url;
+}
+
 const CLOSED_STATUSES: ReadonlyArray<string> = ["Delivered", "Cancelled"];
 
 type ArchivePeriod = "30d" | "90d" | "year" | "all";
@@ -164,7 +169,6 @@ export function ToolingOrdersGrid() {
     suppliers,
     loadSuppliers,
     productionQueue,
-    productionQueueLoaded,
     loadProductionQueue,
     openTab,
     toggleReadinessCheck,
@@ -341,18 +345,31 @@ export function ToolingOrdersGrid() {
     }
   }, []);
 
+  // Buyurtmalarda kerak, lekin hali buyurtma berilmagan jihozlar (sidebar badge bilan bir xil hisob).
+  // Computed on the server, so this screen never downloads every work order with its files.
+  const [deficitRows, setDeficitRows] = useState<ToolingDeficitRow[]>([]);
+  const fetchDeficits = useCallback(async () => {
+    try {
+      const res = await fetch("/api/v1/production/tooling-orders?view=deficits");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) setDeficitRows(json.data);
+    } catch (err) {
+      console.error("Failed to load tooling deficits:", err);
+    }
+  }, []);
+
+  /** After a change: deficits again, and the work order list only if another screen keeps it. */
+  const refreshAfterChange = useCallback(() => {
+    void fetchOrders();
+    void fetchDeficits();
+    if (useWorkspaceStore.getState().productionQueueLoaded) void loadProductionQueue();
+  }, [fetchOrders, fetchDeficits, loadProductionQueue]);
+
   useEffect(() => {
     fetchOrders();
+    fetchDeficits();
     if (loadSuppliers) loadSuppliers();
-    if (loadProductionQueue) loadProductionQueue();
-  }, [fetchOrders, loadSuppliers, loadProductionQueue]);
-
-  // Buyurtmalarda kerak, lekin hali buyurtma berilmagan jihozlar (sidebar badge bilan bir xil hisob)
-  // Only once both lists are in: before the supplier orders arrive every item would look unordered.
-  const deficitRows = useMemo(
-    () => (ordersLoaded && productionQueueLoaded ? computeToolingDeficits(productionQueue, orders) : []),
-    [ordersLoaded, productionQueueLoaded, productionQueue, orders]
-  );
+  }, [fetchOrders, fetchDeficits, loadSuppliers]);
 
   // Filtered orders
   const activeOrders = useMemo(() => orders.filter((o) => !CLOSED_STATUSES.includes(o.status)), [orders]);
@@ -463,7 +480,7 @@ export function ToolingOrdersGrid() {
         return {
           kind: GridCellKind.Image,
           data,
-          displayData: data,
+          displayData: img ? [previewSized(img, 96)] : [],
           allowOverlay: false,
           rounding: 4,
           contentAlign: "center",
@@ -722,7 +739,7 @@ export function ToolingOrdersGrid() {
         return {
           kind: GridCellKind.Image,
           data,
-          displayData: data,
+          displayData: img ? [previewSized(img, 96)] : [],
           allowOverlay: false,
           rounding: 4,
           contentAlign: "center",
@@ -878,7 +895,7 @@ export function ToolingOrdersGrid() {
                 mouseCoordsRef.current.y
               );
               setHoveredPreview({
-                url: img,
+                url: previewSized(img, 640),
                 x,
                 y,
                 title: order.title,
@@ -909,7 +926,7 @@ export function ToolingOrdersGrid() {
                 mouseCoordsRef.current.y
               );
               setHoveredPreview({
-                url: img,
+                url: previewSized(img, 640),
                 x,
                 y,
                 title: def.neededTooling,
@@ -1024,19 +1041,36 @@ export function ToolingOrdersGrid() {
       isRemake: !!opts.remake,
     });
 
-  const openForDeficit = (def: ToolingDeficitRow) =>
-    openForItem(def.workOrderId, def.item, { deadline: def.deadline, currency: def.currency });
-
-  /** The work order's current copy of a tooling item, for ordering it again. */
-  const findWorkOrderItem = (workOrderNo?: string, itemId?: string) => {
-    if (!workOrderNo || !itemId) return undefined;
+  /** The work order with its tooling items and files, fetched on demand (the list does not carry it). */
+  const loadWorkOrder = async (workOrderNo?: string) => {
+    if (!workOrderNo?.trim()) return undefined;
     const key = workOrderNo.trim().toLowerCase();
-    const q = productionQueue.find((w) => (w.id || w.docNo || "").trim().toLowerCase() === key);
-    return (q?.toolingItems || []).find((t) => t.id === itemId);
+    const cached = useWorkspaceStore
+      .getState()
+      .productionQueue.find((w) => (w.id || w.docNo || "").trim().toLowerCase() === key);
+    if (cached && !cached.listPartial) return cached;
+    return (await useWorkspaceStore.getState().loadWorkOrderAsync(workOrderNo.trim())) || undefined;
   };
 
-  const openRemake = (order: ToolingOrderRecord) => {
-    const item = findWorkOrderItem(order.workOrderNo, order.toolingItemId);
+  const openForDeficit = async (def: ToolingDeficitRow) => {
+    let item = def.item;
+    if (def.listPartial) {
+      const wo = await loadWorkOrder(def.workOrderId);
+      const full = (wo?.toolingItems || []).find((t) => t.id === def.toolingItemId);
+      if (full) item = full;
+    }
+    openForItem(def.workOrderId, item, { deadline: def.deadline, currency: def.currency });
+  };
+
+  /** The work order's current copy of a tooling item, for ordering it again. */
+  const findWorkOrderItem = async (workOrderNo?: string, itemId?: string) => {
+    if (!workOrderNo || !itemId) return undefined;
+    const wo = await loadWorkOrder(workOrderNo);
+    return (wo?.toolingItems || []).find((t) => t.id === itemId);
+  };
+
+  const openRemake = async (order: ToolingOrderRecord) => {
+    const item = await findWorkOrderItem(order.workOrderNo, order.toolingItemId);
     if (!item || !order.workOrderNo) {
       addNotification({ title: "Jihoz topilmadi", description: order.orderNo, severity: "error" });
       return;
@@ -1057,12 +1091,20 @@ export function ToolingOrdersGrid() {
     // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   }, [orderRequest?.nonce]);
 
-  const handleOpenEditModal = (order: ToolingOrderRecord) => {
+  const handleOpenEditModal = async (listed: ToolingOrderRecord) => {
     setFileError(false);
+    let order = listed;
+    if (listed.listPartial) {
+      try {
+        const res = await fetch(`/api/v1/production/tooling-orders?id=${encodeURIComponent(listed.id)}`);
+        const json = await res.json();
+        if (json.success && json.data?.[0]) order = json.data[0];
+      } catch (err) {
+        console.error("Failed to load tooling order:", err);
+      }
+    }
+    const matchingQueueItem = await loadWorkOrder(order.workOrderNo);
     setEditingOrder(order);
-    const matchingQueueItem = productionQueue.find(
-      (q) => (q.id || q.docNo || "").trim().toLowerCase() === (order.workOrderNo || "").trim().toLowerCase()
-    );
     const matchingTool = findDeliveryTarget(matchingQueueItem?.toolingItems || [], order);
     const linkedTool = order.toolingItemId ? matchingTool : undefined;
 
@@ -1252,8 +1294,7 @@ export function ToolingOrdersGrid() {
         }
 
         setIsModalOpen(false);
-        fetchOrders();
-        void loadProductionQueue();
+        refreshAfterChange();
       } else {
         alert(json.error || "Xatolik yuz berdi");
       }
@@ -1390,10 +1431,7 @@ export function ToolingOrdersGrid() {
           announceRegisteredTooling(json.registeredTooling);
         }
 
-        if (!opts?.quiet) {
-          fetchOrders();
-          void loadProductionQueue();
-        }
+        if (!opts?.quiet) refreshAfterChange();
       }
       return true;
     } catch (err) {
@@ -1417,8 +1455,7 @@ export function ToolingOrdersGrid() {
       severity: ok === receipts.length ? "success" : "warning",
     });
     setGridSelection({ columns: CompactSelection.empty(), rows: CompactSelection.empty() });
-    fetchOrders();
-    void loadProductionQueue();
+    refreshAfterChange();
   };
 
   // Buyurtmani bazadan butunlay o'chirish

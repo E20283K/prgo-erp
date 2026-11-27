@@ -270,7 +270,7 @@ export function PrepressToolingTab({
   useEffect(() => {
     if (!editingItemId || !docNo) return;
     let cancelled = false;
-    fetch("/api/v1/production/tooling-orders")
+    fetch(`/api/v1/production/tooling-orders?workOrderNo=${encodeURIComponent(docNo.trim())}`)
       .then((r) => r.json())
       .then((json) => {
         if (cancelled || !json?.success || !Array.isArray(json.data)) return;

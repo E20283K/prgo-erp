@@ -9,7 +9,7 @@ import {
   type SupplierOrderToolingSpec,
 } from "@/db/schema";
 import { registerDeliveredTooling } from "./toolingRegistrationService";
-import { eq, desc, and, or, sql, ilike, notInArray } from "drizzle-orm";
+import { eq, desc, and, or, sql, ilike, inArray, notInArray } from "drizzle-orm";
 import { toolingOrderTypeOf } from "@/lib/deficits";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
@@ -124,6 +124,8 @@ export interface SupplierOrderRecord {
   telegramSentAt?: string | null;
   telegramConfirmedBy?: string | null;
   createdAt?: string;
+  /** List row whose embedded drawing (data: URL) was left out; saving it keeps the stored file. */
+  listPartial?: boolean;
 }
 
 export interface ToolingOrderRecord extends SupplierOrderRecord {
@@ -398,47 +400,117 @@ export async function getSupplierOrders(supplierIdOrCode: string, companyCode: s
   }));
 }
 
+export interface ToolingOrderListOptions {
+  /** One order with its embedded file (the edit dialog). */
+  id?: string;
+  /** Only the orders of one work order. */
+  workOrderNo?: string;
+}
+
+/**
+ * Supplier orders for the tooling screen. A drawing saved as a data: URL can weigh megabytes, so
+ * list rows leave it out (fileName stays, `listPartial` marks the row); saving such a row keeps the
+ * stored file, and the edit dialog asks for the single order with its file. Only the columns the
+ * screen shows are read from the linked work orders, never their full payload.
+ */
 export async function getAllToolingOrders(
-  companyCode: string = "PRINTGOO"
+  companyCode: string = "PRINTGOO",
+  opts: ToolingOrderListOptions = {}
 ): Promise<ToolingOrderRecord[]> {
   const companyId = await getCompanyIdByCode(companyCode);
+  const withFile = !!opts.id;
 
-  const rawSuppliers = await getSuppliers(companyCode);
-  const suppMap = new Map(rawSuppliers.map((s) => [s.id, s]));
+  const conds = [eq(supplierOrders.companyId, companyId)];
+  if (opts.id) conds.push(eq(supplierOrders.id, opts.id));
+  if (opts.workOrderNo?.trim()) {
+    conds.push(sql`lower(trim(${supplierOrders.workOrderNo})) = ${opts.workOrderNo.trim().toLowerCase()}`);
+  }
 
-  const raw = await db.query.supplierOrders.findMany({
-    where: eq(supplierOrders.companyId, companyId),
-    with: {
-      supplier: true,
-      workOrder: true,
-    },
-    orderBy: [desc(supplierOrders.orderDate), desc(supplierOrders.createdAt)],
-  });
+  const raw = await db
+    .select({
+      id: supplierOrders.id,
+      supplierId: supplierOrders.supplierId,
+      supplierName: suppliers.name,
+      supplierCode: suppliers.code,
+      supplierPhone: suppliers.phone,
+      orderNo: supplierOrders.orderNo,
+      orderDate: supplierOrders.orderDate,
+      deliveryDeadline: supplierOrders.deliveryDeadline,
+      orderType: supplierOrders.orderType,
+      title: supplierOrders.title,
+      workOrderId: supplierOrders.workOrderId,
+      workOrderNo: supplierOrders.workOrderNo,
+      toolingItemId: supplierOrders.toolingItemId,
+      remakeReason: supplierOrders.remakeReason,
+      quantity: supplierOrders.quantity,
+      unit: supplierOrders.unit,
+      amount: supplierOrders.amount,
+      currency: supplierOrders.currency,
+      deliveryMethod: supplierOrders.deliveryMethod,
+      deliveryCost: supplierOrders.deliveryCost,
+      receivedAt: supplierOrders.receivedAt,
+      updatedAt: supplierOrders.updatedAt,
+      status: supplierOrders.status,
+      specDetails: supplierOrders.specDetails,
+      toolingSpec: supplierOrders.toolingSpec,
+      notes: supplierOrders.notes,
+      fileUrl: withFile
+        ? supplierOrders.fileUrl
+        : sql<string | null>`case when ${supplierOrders.fileUrl} like 'data:%' then null else ${supplierOrders.fileUrl} end`,
+      fileEmbedded: sql<boolean>`coalesce(${supplierOrders.fileUrl} like 'data:%', false)`,
+      fileName: supplierOrders.fileName,
+      telegramChatId: supplierOrders.telegramChatId,
+      telegramMessageId: supplierOrders.telegramMessageId,
+      telegramSentAt: supplierOrders.telegramSentAt,
+      telegramConfirmedBy: supplierOrders.telegramConfirmedBy,
+      createdAt: supplierOrders.createdAt,
+    })
+    .from(supplierOrders)
+    .leftJoin(suppliers, eq(suppliers.id, supplierOrders.supplierId))
+    .where(and(...conds))
+    .orderBy(desc(supplierOrders.orderDate), desc(supplierOrders.createdAt));
 
-  // Map any work orders by docNo for orders that only have workOrderNo string
-  const allWos = await db.query.workOrders.findMany({
-    where: eq(workOrders.companyId, companyId),
-    columns: { id: true, docNo: true, photoUrl: true, photoUrls: true, productName: true },
-  });
-  const woByDocNo = new Map(allWos.map((w) => [w.docNo?.toLowerCase() || "", w]));
-  const woById = new Map(allWos.map((w) => [w.id, w]));
+  // Linked work orders: only their number, product and first proof photo
+  const woIds = [...new Set(raw.map((o) => o.workOrderId).filter((v): v is string => !!v))];
+  const woNos = [
+    ...new Set(
+      raw.filter((o) => !o.workOrderId && o.workOrderNo).map((o) => o.workOrderNo!.trim().toLowerCase())
+    ),
+  ];
+  const wos =
+    woIds.length > 0 || woNos.length > 0
+      ? await db
+          .select({
+            id: workOrders.id,
+            docNo: workOrders.docNo,
+            productName: workOrders.productName,
+            photo: sql<string | null>`coalesce(nullif(${workOrders.photoUrl}, ''), ${workOrders.photoUrls}->>0)`,
+          })
+          .from(workOrders)
+          .where(
+            and(
+              eq(workOrders.companyId, companyId),
+              or(
+                woIds.length > 0 ? inArray(workOrders.id, woIds) : undefined,
+                woNos.length > 0 ? inArray(sql`lower(${workOrders.docNo})`, woNos) : undefined
+              )
+            )
+          )
+      : [];
+  const woById = new Map(wos.map((w) => [w.id, w]));
+  const woByDocNo = new Map(wos.map((w) => [w.docNo.toLowerCase(), w]));
 
   return raw.map((o) => {
-    const supp = o.supplier || suppMap.get(o.supplierId);
     const wo =
-      (o as any).workOrder ||
-      (o.workOrderId ? woById.get(o.workOrderId) : null) ||
-      (o.workOrderNo ? woByDocNo.get(o.workOrderNo.toLowerCase().trim()) : null);
-    const woPhoto =
-      wo?.photoUrl ||
-      (Array.isArray(wo?.photoUrls) && wo.photoUrls.length > 0 ? wo.photoUrls[0] : undefined);
+      (o.workOrderId ? woById.get(o.workOrderId) : undefined) ||
+      (o.workOrderNo ? woByDocNo.get(o.workOrderNo.toLowerCase().trim()) : undefined);
 
     return {
       id: o.id,
       supplierId: o.supplierId,
-      supplierName: supp?.name || "Yetkazib beruvchi",
-      supplierCode: supp?.code || "",
-      supplierPhone: supp?.phone || "",
+      supplierName: o.supplierName || "Yetkazib beruvchi",
+      supplierCode: o.supplierCode || "",
+      supplierPhone: o.supplierPhone || "",
       orderNo: o.orderNo,
       orderDate: o.orderDate,
       deliveryDeadline: o.deliveryDeadline || undefined,
@@ -448,8 +520,8 @@ export async function getAllToolingOrders(
       workOrderNo: o.workOrderNo || wo?.docNo || undefined,
       toolingItemId: o.toolingItemId || undefined,
       remakeReason: o.remakeReason || undefined,
-      imageUrl: woPhoto || undefined,
-      workOrderProduct: (wo as any)?.productName || (wo as any)?.product || undefined,
+      imageUrl: wo?.photo || undefined,
+      workOrderProduct: wo?.productName || undefined,
       quantity: Number(o.quantity) || 1,
       unit: o.unit || "dona",
       amount: Number(o.amount) || 0,
@@ -463,6 +535,7 @@ export async function getAllToolingOrders(
       notes: o.notes || undefined,
       fileUrl: o.fileUrl || undefined,
       fileName: o.fileName || undefined,
+      ...(!withFile && o.fileEmbedded ? { listPartial: true } : {}),
       telegramChatId: o.telegramChatId || undefined,
       telegramMessageId: o.telegramMessageId || undefined,
       telegramSentAt: o.telegramSentAt?.toISOString() || undefined,
@@ -749,8 +822,11 @@ async function syncWorkOrderToolingItem(companyId: string, workOrderId: string, 
   let next: WorkOrderToolingItem[];
   const existing = base.find((t) => t.id === item.id);
   if (existing) {
-    if (existing.fileUrl === item.fileUrl && existing.fileName === item.fileName) return;
-    next = base.map((t) => (t.id === item.id ? { ...t, fileUrl: item.fileUrl, fileName: item.fileName } : t));
+    // A list copy of the item comes without its embedded file: same file name keeps the stored file
+    const fileUrl =
+      item.fileUrl || (item.fileName && item.fileName === existing.fileName ? existing.fileUrl : undefined);
+    if (existing.fileUrl === fileUrl && existing.fileName === item.fileName) return;
+    next = base.map((t) => (t.id === item.id ? { ...t, fileUrl, fileName: item.fileName } : t));
   } else {
     // A generated default item gets a new id on every build: replace it by kind and name.
     next = [

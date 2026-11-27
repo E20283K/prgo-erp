@@ -147,6 +147,8 @@ export interface ToolingDeficitRow {
   fileUrl?: string;
   fileName?: string;
   imageUrl?: string;
+  /** Row sent without the item's embedded files; load the work order's item before ordering it. */
+  listPartial?: boolean;
 }
 
 /** Supplier order kind that procures a tooling item. */
