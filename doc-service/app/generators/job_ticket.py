@@ -904,17 +904,6 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     _imp = od.get("impositionState") or {}
     press_sheet_w = _imp.get("sheetW") or od.get("pressSheetW")
     press_sheet_h = _imp.get("sheetH") or od.get("pressSheetH")
-    def letters(ch_map: Dict[str, Any]) -> str:
-        got = [k.upper() for k in ("c", "m", "y", "k") if (ch_map or {}).get(k)]
-        return "CMYK" if len(got) == 4 else " ".join(got)
-
-    spot_list = od.get("spotColorItems") or [{"name": s, "side": "front"} for s in (od.get("spotColors") or [])]
-    spots = ", ".join(
-        f"{s.get('name')}"
-        + (" (orqa)" if (s.get("side") or "front") == "back" else "")
-        + (f" — {str(s.get('note')).strip()}" if str(s.get("note") or "").strip() else "")
-        for s in spot_list if s.get("name")
-    )
     lam = str(od.get("lamination") or "")
     lam = "" if lam.lower() in ("", "none", "-", "yo'q") else lam
     lam_full = " • ".join(p for p in [
@@ -922,15 +911,11 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
         f"{od.get('laminationMicron')} mkm" if lam and od.get("laminationMicron") else "",
     ] if p)
     emb = str(od.get("embellishment") or "")
-    formula = str(od.get("colorsConfig") or "")
+    ink_sides = profiles.ink_sides(tech, od, back_printed)
     px.__dict__.update(
         hole_on=hole_on, hole_size=hole_size, hole_pos=hole_pos, hole_offset=hole_offset,
         die_text=die_text, cliche_text=cliche_text, plate_tools_text=plate_tools_text, paper_spec=paper_spec,
-        formula=formula, front_letters=letters(od.get("frontColors") or {}),
-        back_letters=letters(od.get("backColors") or {}), back_printed=back_printed,
-        spots=spots, spot_count_front=sum(
-            1 for s in spot_list if s.get("name") and (s.get("side") or "front") != "back"),
-        lam_full=lam_full, coating=str(od.get("coating") or ""), emb=emb,
+        ink_sides=ink_sides, lam_full=lam_full, coating=str(od.get("coating") or ""), emb=emb,
         kash_on=kash_on, kash_mode=kash_mode, kash_layers=kash_layers,
         press_sheet_w=press_sheet_w, press_sheet_h=press_sheet_h,
     )
@@ -941,15 +926,93 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     c.setStrokeColor(colors.HexColor("#e2e8f0"))
     c.setLineWidth(0.5)
     c.line((info_x - 2.0) * mm, y_mm(geo_top), (info_x - 2.0) * mm, y_mm(geo_top + geo_body_h))
+
+    # Inks: one line per side, process channels as one chip and every spot ink as its own
+    # chip in press-unit order. Chips flow onto another line instead of being cut.
+    INK_FS, INK_CHIP_H, INK_LINE_H, INK_SIDE_W, INK_SQ = 6.4, 4.4, 5.4, 15.0, 2.6
+    ink_x0 = info_x + 2.0
+    ink_w = info_w - 4.0
+    chips_w = ink_w - INK_SIDE_W
+
+    def side_chips(side) -> List[Dict[str, Any]]:
+        chips = []
+        if side["process"]:
+            text = "CMYK" if len(side["process"]) == 4 else " ".join(l for l, _ in side["process"])
+            chips.append({"squares": [hx for _, hx in side["process"]], "text": text})
+        chips += [{"squares": [sp["hex"]], "text": sp["name"]} for sp in side["spots"]]
+        for ch in chips:
+            ch["w"] = 1.0 + len(ch["squares"]) * INK_SQ + 1.0 + c.stringWidth(ch["text"], FONT_BOLD, INK_FS) / mm + 1.4
+        return chips
+
+    def flow(chips) -> List[List[Dict[str, Any]]]:
+        lines: List[List[Dict[str, Any]]] = [[]]
+        used = 0.0
+        for ch in chips:
+            ch["w"] = min(ch["w"], chips_w)
+            if lines[-1] and used + ch["w"] > chips_w:
+                lines.append([])
+                used = 0.0
+            lines[-1].append(ch)
+            used += ch["w"] + 1.2
+        return lines
+
+    ink_layout = [(side, flow(side_chips(side))) for side in ink_sides]
+    ink_notes = [f"{sp['name']} — {sp['note']}" for side in ink_sides for sp in side["spots"] if sp["note"]]
+    ink_notes = list(dict.fromkeys(ink_notes))  # a "both" spot is listed once
+    ink_h = (4.2 + sum(len(lines) * INK_LINE_H for _, lines in ink_layout) + len(ink_notes) * 3.4 + 1.6
+             if ink_sides else 0.0)
+
+    if ink_sides:
+        iy = geo_top + 1.5
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont(FONT_BOLD, 5.6)
+        c.drawString(ink_x0 * mm, y_mm(iy + 2.6), f"BO'YOQLAR • {profiles.ink_formula(ink_sides)}")
+        ly = iy + 4.2
+        for side, lines in ink_layout:
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(FONT_BOLD, 6.6)
+            c.drawString(ink_x0 * mm, y_mm(ly + INK_CHIP_H / 2.0 + 0.9), side["label"])
+            c.setFillColor(colors.HexColor("#64748b"))
+            c.setFont(FONT_BOLD, 6.0)
+            if side["count"]:
+                c.drawRightString((ink_x0 + INK_SIDE_W - 2.0) * mm, y_mm(ly + INK_CHIP_H / 2.0 + 0.9),
+                                  str(side["count"]))
+            if not side["printed"] or not lines[0]:
+                draw_fitted_text(c, "bosilmaydi" if not side["printed"] else "—", ink_x0 + INK_SIDE_W,
+                                 y_mm(ly + INK_CHIP_H / 2.0 + 1.0), chips_w, font_name=FONT_BOLD,
+                                 base_font_size=7.4, color="#64748b", max_lines=1)
+            for line in lines:
+                cx = ink_x0 + INK_SIDE_W
+                for ch in line:
+                    draw_box(cx, ly, ch["w"], INK_CHIP_H, fill_hex="#ffffff", stroke_hex="#cbd5e1", lw=0.4)
+                    sx = cx + 1.0
+                    for hx in ch["squares"]:
+                        draw_box(sx, ly + (INK_CHIP_H - INK_SQ) / 2.0, INK_SQ, INK_SQ, fill_hex=hx,
+                                 stroke_hex="#94a3b8", lw=0.3)
+                        sx += INK_SQ
+                    draw_fitted_text(c, ch["text"], sx + 1.0, y_mm(ly + INK_CHIP_H / 2.0 + 0.8),
+                                     ch["w"] - (sx - cx) - 1.4, font_name=FONT_BOLD, base_font_size=INK_FS,
+                                     min_font_size=5.0, max_lines=1)
+                    cx += ch["w"] + 1.2
+                ly += INK_LINE_H
+        for note in ink_notes:
+            draw_fitted_text(c, note, ink_x0, y_mm(ly + 2.4), ink_w, font_name=FONT_REGULAR,
+                             base_font_size=6.2, min_font_size=5.0, color="#475569", max_lines=1)
+            ly += 3.4
+        c.setStrokeColor(colors.HexColor("#e2e8f0"))
+        c.setLineWidth(0.3)
+        c.line(ink_x0 * mm, y_mm(geo_top + ink_h), (ink_x0 + ink_w) * mm, y_mm(geo_top + ink_h))
+
+    rows_top = geo_top + ink_h
     info_cols = 2 if info_w >= 80.0 else 1
     per_col = math.ceil(len(info_rows) / info_cols)
-    row_h = min(9.4, (geo_body_h - 3.0) / per_col)
+    row_h = min(9.4, (geo_body_h - ink_h - 3.0) / per_col)
     col_w = (info_w - 4.0) / info_cols
     val_size = 8.4 if row_h >= 8.0 else 7.4
     for idx, (label, value) in enumerate(info_rows):
         ci, ri = divmod(idx, per_col)
         ix = info_x + 2.0 + ci * col_w
-        iy = geo_top + 1.5 + ri * row_h
+        iy = rows_top + 1.5 + ri * row_h
         c.setFillColor(colors.HexColor("#64748b"))
         c.setFont(FONT_BOLD, 5.6)
         c.drawString(ix * mm, y_mm(iy + 2.6), str(label).upper())

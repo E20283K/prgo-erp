@@ -143,16 +143,43 @@ def _material(od: Dict[str, Any]) -> str:
     return MATERIAL_LABELS.get(code, code)
 
 
-def _ink_count(x: SimpleNamespace) -> int:
-    """Front process inks plus front spot inks: the print stations the job takes."""
-    letters = x.front_letters
-    process = 4 if letters == "CMYK" else len(letters.split()) if letters else 0
-    return process + x.spot_count_front
+PROCESS_INKS = [("c", "C", "#00aeef"), ("m", "M", "#ec008c"), ("y", "Y", "#fff200"), ("k", "K", "#231f20")]
+UNKNOWN_SPOT_HEX = "#9ca3af"
 
 
-def _colors_text(x: SimpleNamespace) -> str:
-    n = _ink_count(x)
-    return _join(x.formula, x.front_letters, f"{n} rang" if n else "")
+def _short_spot(name: str) -> str:
+    """"PANTONE 286 C" → "P 286 C": the chip keeps the part the ink can be told apart by."""
+    n = " ".join(str(name).split())
+    for prefix in ("PANTONE ", "Pantone ", "PMS "):
+        if n.startswith(prefix):
+            return "P " + n[len(prefix):]
+    return n
+
+
+def ink_sides(tech: str, od: Dict[str, Any], back_printed: bool) -> List[Dict[str, Any]]:
+    """Inks per side for the passport's ink block: process channels as one chip, each
+    spot ink as its own chip (a "both" spot on both sides). Empty for unprinted jobs."""
+    if tech == TERMO:
+        return []
+    spot_list = od.get("spotColorItems") or [{"name": n, "side": "front"} for n in (od.get("spotColors") or [])]
+    sides = []
+    for key, label, colors_key in (("front", "OLDI", "frontColors"), ("back", "ORQA", "backColors")):
+        ch = od.get(colors_key) or {}
+        process = [(letter, hx) for k, letter, hx in PROCESS_INKS if ch.get(k)]
+        spots = [
+            {"name": _short_spot(s.get("name")), "hex": str(s.get("hex") or "") or UNKNOWN_SPOT_HEX,
+             "note": str(s.get("note") or "").strip()}
+            for s in spot_list
+            if isinstance(s, dict) and s.get("name") and (s.get("side") or "front") in (key, "both")
+        ]
+        sides.append({"label": label, "process": process, "spots": spots, "count": len(process) + len(spots),
+                      "printed": bool(process or spots) or (key == "back" and back_printed)})
+    return sides
+
+
+def ink_formula(sides: List[Dict[str, Any]]) -> str:
+    """"4+1" from the inks themselves, so it always matches the press units the job takes."""
+    return "+".join(str(s["count"]) for s in sides) if sides else ""
 
 
 # ─── KPIs ────────────────────────────────────────────────────────────────────
@@ -198,9 +225,6 @@ def spec_rows(tech: str, x: SimpleNamespace) -> List[Tuple[str, str]]:
             ("Klishe", x.cliche_text),
             ("Qog'oz turi / GSM", x.paper_spec or "—"),
             ("Ombordagi qog'oz", str(od.get("paperStock") or "tanlanmagan")),
-            ("Oldi bo'yoq", _join(x.formula, x.front_letters) or "—"),
-            ("Orqa bo'yoq", x.back_letters or ("—" if x.back_printed else "bosilmaydi")),
-            ("Pantone", x.spots or "—"),
             ("Laminatsiya", x.lam_full or "—"),
             ("Lak / pardoz", finish or "—"),
             ("Kashirovka", x.kash_mode.capitalize() + f" • {len(x.kash_layers)} qatlam" if x.kash_on else "yo'q"),
@@ -230,9 +254,6 @@ def spec_rows(tech: str, x: SimpleNamespace) -> List[Tuple[str, str]]:
             ("Tikuv zapasi", f"{_num(margin):g} mm" if margin is not None else "—"),
             ("Yuvish", WASH_LABELS.get(str(od.get("labelWashResistance") or ""), "—")),
             ("Bosma tomon", sides or "—"),
-            ("Oldi bo'yoq", _colors_text(x) or "—"),
-            ("Orqa bo'yoq", x.back_letters or ("—" if x.back_printed else "bosilmaydi")),
-            ("Pantone", x.spots or "—"),
             ("Silindr", cylinder),
             ("Klishe", plates),
         ]
@@ -257,8 +278,6 @@ def spec_rows(tech: str, x: SimpleNamespace) -> List[Tuple[str, str]]:
     return rows + [
         ("Silindr", cylinder),
         ("Klishe", plates),
-        ("Bo'yoqlar", _colors_text(x) or "—"),
-        ("Pantone", x.spots or "—"),
         ("Laminatsiya / lak", _join(x.lam_full, finish) or "—"),
     ]
 
@@ -291,7 +310,7 @@ def ready_rows(tech: str, x: SimpleNamespace) -> List[Tuple[Optional[str], str, 
         ("paperReady", "Rulon material", roll_material),
     ]
     if tech in CYLINDER_TECHS:
-        n_colors = _ink_count(x)
+        n_colors = x.ink_sides[0]["count"] if x.ink_sides else 0
         rows.append(("platesReady", "Fotopolimer klishe", _join(
             f"{n_colors} rang" if n_colors else "",
             f"silindr {r.teeth}T" if r.teeth else "",

@@ -8,6 +8,7 @@ import { and, asc, eq, like, or } from "drizzle-orm";
 import { db } from "@/db";
 import { branches, productionMachines, telegramMessages, workOrderOperations, workOrders } from "@/db/schema";
 import { PAPER_TYPE_OPTIONS } from "@/lib/paperSpec";
+import { findPantoneByName, UNKNOWN_SPOT_HEX } from "@/lib/pantone-catalog";
 import { isSampleBomRow } from "@/components/documents/work-order/utils/sampleBom";
 import { getCompanyIdByCode } from "./crmService";
 
@@ -137,6 +138,25 @@ function passportMaterials(order: any) {
 }
 
 /**
+ * Spot inks with the swatch the passport draws: items saved with the placeholder
+ * (or none) are matched to the Pantone catalog by name; an unmatched one keeps no
+ * hex and prints grey.
+ */
+function passportSpots(items: unknown) {
+  if (!Array.isArray(items) || !items.length) return undefined;
+  return items
+    .filter((s: any) => str(s?.name))
+    .map((s: any) => {
+      const saved = str(s.hex)?.toLowerCase();
+      const hex =
+        saved && saved !== UNKNOWN_SPOT_HEX
+          ? saved
+          : findPantoneByName(s.name)?.hex ?? findPantoneByName(s.code || "")?.hex ?? undefined;
+      return { name: String(s.name).trim(), side: s.side || "front", note: str(s.note), hex };
+    });
+}
+
+/**
  * Maps a saved work order row to the doc-service job ticket request. `orderData`
  * has the same keys as the order screen's form: `dimensions` holds most of them,
  * the rest are columns of their own.
@@ -193,7 +213,7 @@ export function buildJobTicketPayload(
       frontColors: colors.frontColors || undefined,
       backColors: colors.backColors || undefined,
       spotColors: colors.spotColors || undefined,
-      spotColorItems: colors.spotColorItems || undefined,
+      spotColorItems: passportSpots(colors.spotColorItems),
       notes: order.notes || undefined,
       // Readiness checks ticked on the order screen, with who verified them
       checks: order.checks || undefined,
