@@ -1990,7 +1990,9 @@ export async function sendPurchaseOrderToTelegram(params: {
     textLines.push(`📏 <b>Qolip:</b> ${toolingSpecLine}`);
   }
 
-  textLines.push(`🔢 <b>Miqdori:</b> ${order.quantity} ${order.unit}`);
+  const quantityNum = Number(order.quantity);
+  const quantityText = Number.isFinite(quantityNum) ? String(quantityNum) : String(order.quantity);
+  textLines.push(`🔢 <b>Miqdori:</b> ${quantityText} ${order.unit}`);
   textLines.push(`⏳ <b>Muddati:</b> ${deadline}`);
 
   if (order.specDetails?.trim()) {
