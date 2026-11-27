@@ -56,7 +56,7 @@ import { DieLinePreview } from "../DieLinePreview";
 import { DielineSourceCard } from "../dieline/DielineSourceCard";
 import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
-import { searchPantoneColors } from "@/lib/pantone-catalog";
+import { findPantoneByName, searchPantoneColors, UNKNOWN_SPOT_HEX } from "@/lib/pantone-catalog";
 import { extractSvgDimensions } from "../utils/svgContour";
 import { TermoSpecSection } from "./TermoSpecSection";
 import { useLookupStore } from "@/store/lookupStore";
@@ -689,14 +689,19 @@ export function SpecificationsTab({
   // Color config helpers
   const frontColors = formData.frontColors || { c: false, m: false, y: false, k: false };
   const backColors = formData.backColors || { c: false, m: false, y: false, k: false };
+  // Items saved before name→hex lookup existed carry the placeholder blue; resolve them on read.
   const spotColorItems: SpotColorItem[] = (formData.spotColorItems && formData.spotColorItems.length > 0)
-    ? formData.spotColorItems
+    ? formData.spotColorItems.map((s) =>
+        s.hex?.toLowerCase() === UNKNOWN_SPOT_HEX
+          ? { ...s, hex: findPantoneByName(s.name)?.hex ?? findPantoneByName(s.code)?.hex ?? s.hex }
+          : s,
+      )
     : (formData.spotColors && formData.spotColors.length > 0
         ? formData.spotColors.map((name, i) => ({
             id: `spot-${i}`,
             name,
             code: name.replace(/^PANTONE\s+/i, ""),
-            hex: name.includes("021") ? "#fe5000" : name.includes("871") ? "#84754e" : "#2563eb",
+            hex: findPantoneByName(name)?.hex ?? UNKNOWN_SPOT_HEX,
             side: "front" as const,
           }))
         : []);
@@ -831,7 +836,7 @@ export function SpecificationsTab({
             id: `spot-auto-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             name: sName,
             code: sName,
-            hex: "#2563eb",
+            hex: findPantoneByName(sName)?.hex ?? UNKNOWN_SPOT_HEX,
             side: db && db.hasContent ? "both" : "front",
           });
         }
@@ -901,14 +906,13 @@ export function SpecificationsTab({
     const raw = (side === "front" ? frontQuickInput : backQuickInput).trim();
     if (!raw) return;
 
-    const matches = searchPantoneColors(raw, 5);
-    const matched = matches[0];
+    const matched = findPantoneByName(raw) ?? searchPantoneColors(raw, 5)[0];
 
     const newItem: SpotColorItem = {
       id: `spot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: matched ? matched.name : (raw.toUpperCase().startsWith("PANTONE") ? raw : `PANTONE ${raw}`),
       code: matched ? matched.code : raw,
-      hex: matched ? matched.hex : "#2563eb",
+      hex: matched ? matched.hex : UNKNOWN_SPOT_HEX,
       side,
     };
 

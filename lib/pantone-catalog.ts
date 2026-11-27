@@ -78,6 +78,41 @@ export const ALL_PANTONE_COLORS: PantoneColor[] = [
   ...extractNpmPantoneColors(),
 ];
 
+/** Placeholder swatch used when a spot name could not be matched to the catalog. */
+export const UNKNOWN_SPOT_HEX = "#2563eb";
+
+// "PANTONE 485 C", "PANTONE#20485#20C", "PMS 485 CVC", "Warm Red C" → "485" / "warm red"
+const normalizePantoneKey = (raw: string): string =>
+  raw
+    .replace(/#([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\(.*?\)/g, " ")
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/^\s*(pantone|pms)\s*/, "")
+    .replace(/\s+(c|u|m|cp|up|cv|cvc|cvu|tcx|tpx|tpg)\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+let pantoneKeyIndex: Map<string, PantoneColor> | null = null;
+const getPantoneKeyIndex = () => {
+  if (pantoneKeyIndex) return pantoneKeyIndex;
+  const index = new Map<string, PantoneColor>();
+  for (const p of ALL_PANTONE_COLORS) {
+    for (const key of [normalizePantoneKey(p.code), normalizePantoneKey(p.name)]) {
+      if (key && !index.has(key)) index.set(key, p);
+    }
+  }
+  pantoneKeyIndex = index;
+  return index;
+};
+
+/** Exact catalog lookup for a spot colour name as it appears in a PDF separation. */
+export function findPantoneByName(name: string): PantoneColor | null {
+  const key = normalizePantoneKey(name || "");
+  if (!key) return null;
+  return getPantoneKeyIndex().get(key) ?? null;
+}
+
 /**
  * Search Pantone catalog by query string (matching code, name, or number)
  */
