@@ -3150,259 +3150,6 @@ export function SpecificationsTab({
               </div>
             </div>
           )}
-
-          {/* Card 4: Kashirovka (Duplex / Triplex, offset only) */}
-          {isOffset && (() => {
-            const isKashirovkaOn = kashirovkaMode !== "none";
-            const printedLinersCount = kashirovkaLayers.filter(
-              (l) => l.role !== "core_board" && l.colors !== "0+0"
-            ).length;
-            const strategy = formData.kashirovkaStrategy || "split_half_sheet";
-            const kashirovkaPlates = kashirovkaPlatesPerForm(kashirovkaMode, kashirovkaLayers, strategy) ?? 0;
-            const segmentClass = (active: boolean) =>
-              cn(
-                "h-6 px-2 rounded text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
-                active
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              );
-            const modeOptions: { value: KashirovkaMode; label: string }[] = [
-              { value: "none", label: "Yo'q" },
-              { value: "duplex", label: "2 qavat" },
-              { value: "triplex", label: "3 qavat" },
-            ];
-            const strategyOptions = [
-              { value: "split_half_sheet", label: "1-CTP" },
-              { value: "separate_sheets", label: "2-CTP" },
-            ] as const;
-            const numberField = (
-              key: "kashirovkaGlueGsm" | "kashirovkaMakeReadySheets" | "kashirovkaCuringHours",
-              label: string,
-              unit: string,
-              step: number,
-              placeholder?: string
-            ) => (
-              <label className="flex flex-col gap-1 min-w-0">
-                <span className="text-[10px] uppercase font-semibold text-muted-foreground">{label}</span>
-                <div className="flex items-center gap-1">
-                  <Input
-                    type="number"
-                    min={0}
-                    step={step}
-                    disabled={isOperator}
-                    value={formData[key] || ""}
-                    placeholder={placeholder}
-                    onChange={(e) => {
-                      handleFieldChange(key, e.target.value === "" ? undefined : Number(e.target.value));
-                      onMarkUnsaved();
-                    }}
-                    className="h-7 text-xs font-mono text-right"
-                  />
-                  <span className="text-[10px] font-mono text-muted-foreground shrink-0">{unit}</span>
-                </div>
-              </label>
-            );
-
-            return (
-              <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
-                <div
-                  className={cn(
-                    "flex items-center justify-between gap-2",
-                    isKashirovkaOn && "pb-1.5 border-b border-border"
-                  )}
-                >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <Layers className="size-3.5 text-primary shrink-0" />
-                    <span className="font-semibold text-xs text-foreground">Kashirovka</span>
-                    {isKashirovkaOn && (
-                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-mono">
-                        {kashirovkaTotals.netPaperGsm} g/m²
-                      </Badge>
-                    )}
-                  </div>
-                  <div
-                    role="group"
-                    aria-label="Kashirovka turi"
-                    className="inline-flex items-center gap-0.5 bg-muted p-0.5 rounded-md border border-border"
-                  >
-                    {modeOptions.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        disabled={isOperator}
-                        aria-pressed={kashirovkaMode === opt.value}
-                        onClick={() => handleKashirovkaModeChange(opt.value)}
-                        className={segmentClass(kashirovkaMode === opt.value)}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {isKashirovkaOn && (
-                  <>
-                    <div className="grid grid-cols-4 gap-2 text-[11px]">
-                      {[
-                        { label: "Qog'oz", value: `${kashirovkaTotals.netPaperGsm} g/m²` },
-                        { label: "Yelim", value: `+${kashirovkaTotals.totalGlueGsm} g/m²` },
-                        { label: "Jami", value: `${kashirovkaTotals.totalMountedGsm} g/m²` },
-                        { label: "Qalinlik", value: `~${kashirovkaTotals.estimatedCaliperMm} mm` },
-                      ].map((stat) => (
-                        <div key={stat.label} className="min-w-0">
-                          <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
-                            {stat.label}
-                          </span>
-                          <span className="font-mono font-semibold text-foreground">{stat.value}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="space-y-1 pt-2 border-t border-border">
-                      {kashirovkaLayers.map((layer, idx) => {
-                        const roleLabel = KASHIROVKA_LAYER_LABELS[layer.role] || `Qatlam ${idx + 1}`;
-                        return (
-                          <div
-                            key={layer.id || idx}
-                            className="grid grid-cols-[5.5rem_minmax(0,1fr)_4rem_4.25rem] items-center gap-1.5"
-                          >
-                            <span className="text-[11px] font-medium text-foreground truncate">{roleLabel}</span>
-                            <ComboboxSelect
-                              items={paperStockOptions}
-                              value={layer.paperStock}
-                              onValueChange={(val) => {
-                                const matched = warehouseStock.find(
-                                  (w) =>
-                                    w.name.toLowerCase() === val.toLowerCase() ||
-                                    w.sku.toLowerCase() === val.toLowerCase()
-                                );
-                                const gsm = matched?.grammage || parseGrammageFromStock(val, 0);
-                                updateKashirovkaLayer(idx, {
-                                  paperStock: val,
-                                  ...(gsm > 0 ? { grammage: gsm } : {}),
-                                });
-                              }}
-                              placeholder="Qog'oz"
-                              disabled={isOperator}
-                              allowCustom={!isOperator}
-                              className="h-7 text-xs font-mono"
-                            />
-                            <Input
-                              type="number"
-                              min={0}
-                              step={10}
-                              aria-label={`${roleLabel} zichligi`}
-                              disabled={isOperator}
-                              value={layer.grammage || ""}
-                              onChange={(e) =>
-                                updateKashirovkaLayer(idx, { grammage: Number(e.target.value) || 0 })
-                              }
-                              className="h-7 text-xs font-mono text-right"
-                            />
-                            <span
-                              aria-label={`${roleLabel} bosmasi`}
-                              title={
-                                layer.role === "top_liner"
-                                  ? "Old tomon ranglaridan"
-                                  : layer.role === "bottom_liner"
-                                    ? "Orqa tomon ranglaridan"
-                                    : "O'rta qatlam bosilmaydi"
-                              }
-                              className={cn(
-                                "h-7 flex items-center justify-center rounded-md border border-border bg-muted text-xs font-mono",
-                                layer.colors === "0+0" ? "text-muted-foreground" : "text-foreground"
-                              )}
-                            >
-                              {layer.colors}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_4rem_4.25rem] items-center gap-1.5 pt-2 border-t border-border">
-                      <span className="text-[11px] font-medium text-foreground truncate">Yelim</span>
-                      <ComboboxSelect
-                        items={glueStockOptions}
-                        value={formData.kashirovkaGlueStockSku || ""}
-                        onValueChange={(val) => {
-                          const matched = warehouseStock.find((w) => w.sku === val || w.name === val);
-                          handleFieldChange({
-                            kashirovkaGlueStockSku: matched ? matched.sku : val,
-                            kashirovkaGlueStockName: matched ? matched.name : val,
-                          });
-                          onMarkUnsaved();
-                        }}
-                        placeholder="Ombordan yelim"
-                        disabled={isOperator}
-                        className="h-7 text-xs font-mono"
-                      />
-                      <Input
-                        type="number"
-                        min={0}
-                        step={1}
-                        aria-label="Yelim normasi"
-                        disabled={isOperator}
-                        value={formData.kashirovkaGlueGsm || ""}
-                        placeholder={String(resolveKashirovkaGlueGsm())}
-                        onChange={(e) => {
-                          handleFieldChange(
-                            "kashirovkaGlueGsm",
-                            e.target.value === "" ? undefined : Number(e.target.value)
-                          );
-                          onMarkUnsaved();
-                        }}
-                        className="h-7 text-xs font-mono text-right"
-                      />
-                      <span className="h-7 flex items-center justify-center rounded-md border border-border bg-muted text-[10px] font-mono text-muted-foreground">
-                        g/m²
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
-                      {numberField("kashirovkaMakeReadySheets", "Priladka", "list", 5)}
-                      {numberField("kashirovkaCuringHours", "Quritish", "soat", 1)}
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-xs text-muted-foreground font-medium">Bosma usuli</span>
-                        <Badge
-                          variant="secondary"
-                          title="Bitta forma uchun CTP plastinalar"
-                          className="h-5 px-1.5 text-[10px] font-mono"
-                        >
-                          {kashirovkaPlates} CTP
-                        </Badge>
-                      </div>
-                      <div
-                        role="group"
-                        aria-label="Bosma usuli"
-                        className="inline-flex items-center gap-0.5 bg-muted p-0.5 rounded-md border border-border"
-                      >
-                        {strategyOptions.map((opt) => (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            disabled={isOperator || printedLinersCount < 2}
-                            aria-pressed={strategy === opt.value}
-                            title={opt.value === "split_half_sheet" ? "Yarim list" : "Alohida listlar"}
-                            onClick={() => {
-                              handleFieldChange("kashirovkaStrategy", opt.value);
-                              onMarkUnsaved();
-                            }}
-                            className={segmentClass(strategy === opt.value)}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })()}
             </>
           )}
         </div>
@@ -3889,6 +3636,259 @@ export function SpecificationsTab({
             </div>
           </div>
           )}
+
+          {/* Card 4: Kashirovka (Duplex / Triplex, offset only) */}
+          {isOffset && (() => {
+            const isKashirovkaOn = kashirovkaMode !== "none";
+            const printedLinersCount = kashirovkaLayers.filter(
+              (l) => l.role !== "core_board" && l.colors !== "0+0"
+            ).length;
+            const strategy = formData.kashirovkaStrategy || "split_half_sheet";
+            const kashirovkaPlates = kashirovkaPlatesPerForm(kashirovkaMode, kashirovkaLayers, strategy) ?? 0;
+            const segmentClass = (active: boolean) =>
+              cn(
+                "h-6 px-2 rounded text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
+                active
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
+              );
+            const modeOptions: { value: KashirovkaMode; label: string }[] = [
+              { value: "none", label: "Yo'q" },
+              { value: "duplex", label: "2 qavat" },
+              { value: "triplex", label: "3 qavat" },
+            ];
+            const strategyOptions = [
+              { value: "split_half_sheet", label: "1-CTP" },
+              { value: "separate_sheets", label: "2-CTP" },
+            ] as const;
+            const numberField = (
+              key: "kashirovkaGlueGsm" | "kashirovkaMakeReadySheets" | "kashirovkaCuringHours",
+              label: string,
+              unit: string,
+              step: number,
+              placeholder?: string
+            ) => (
+              <label className="flex flex-col gap-1 min-w-0">
+                <span className="text-[10px] uppercase font-semibold text-muted-foreground">{label}</span>
+                <div className="flex items-center gap-1">
+                  <Input
+                    type="number"
+                    min={0}
+                    step={step}
+                    disabled={isOperator}
+                    value={formData[key] || ""}
+                    placeholder={placeholder}
+                    onChange={(e) => {
+                      handleFieldChange(key, e.target.value === "" ? undefined : Number(e.target.value));
+                      onMarkUnsaved();
+                    }}
+                    className="h-7 text-xs font-mono text-right"
+                  />
+                  <span className="text-[10px] font-mono text-muted-foreground shrink-0">{unit}</span>
+                </div>
+              </label>
+            );
+
+            return (
+              <div className="p-3 bg-card border border-border rounded-lg shadow-2xs space-y-2.5">
+                <div
+                  className={cn(
+                    "flex items-center justify-between gap-2",
+                    isKashirovkaOn && "pb-1.5 border-b border-border"
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Layers className="size-3.5 text-primary shrink-0" />
+                    <span className="font-semibold text-xs text-foreground">Kashirovka</span>
+                    {isKashirovkaOn && (
+                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-mono">
+                        {kashirovkaTotals.netPaperGsm} g/m²
+                      </Badge>
+                    )}
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="Kashirovka turi"
+                    className="inline-flex items-center gap-0.5 bg-muted p-0.5 rounded-md border border-border"
+                  >
+                    {modeOptions.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        disabled={isOperator}
+                        aria-pressed={kashirovkaMode === opt.value}
+                        onClick={() => handleKashirovkaModeChange(opt.value)}
+                        className={segmentClass(kashirovkaMode === opt.value)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {isKashirovkaOn && (
+                  <>
+                    <div className="grid grid-cols-4 gap-2 text-[11px]">
+                      {[
+                        { label: "Qog'oz", value: `${kashirovkaTotals.netPaperGsm} g/m²` },
+                        { label: "Yelim", value: `+${kashirovkaTotals.totalGlueGsm} g/m²` },
+                        { label: "Jami", value: `${kashirovkaTotals.totalMountedGsm} g/m²` },
+                        { label: "Qalinlik", value: `~${kashirovkaTotals.estimatedCaliperMm} mm` },
+                      ].map((stat) => (
+                        <div key={stat.label} className="min-w-0">
+                          <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                            {stat.label}
+                          </span>
+                          <span className="font-mono font-semibold text-foreground">{stat.value}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="space-y-1 pt-2 border-t border-border">
+                      {kashirovkaLayers.map((layer, idx) => {
+                        const roleLabel = KASHIROVKA_LAYER_LABELS[layer.role] || `Qatlam ${idx + 1}`;
+                        return (
+                          <div
+                            key={layer.id || idx}
+                            className="grid grid-cols-[5.5rem_minmax(0,1fr)_4rem_4.25rem] items-center gap-1.5"
+                          >
+                            <span className="text-[11px] font-medium text-foreground truncate">{roleLabel}</span>
+                            <ComboboxSelect
+                              items={paperStockOptions}
+                              value={layer.paperStock}
+                              onValueChange={(val) => {
+                                const matched = warehouseStock.find(
+                                  (w) =>
+                                    w.name.toLowerCase() === val.toLowerCase() ||
+                                    w.sku.toLowerCase() === val.toLowerCase()
+                                );
+                                const gsm = matched?.grammage || parseGrammageFromStock(val, 0);
+                                updateKashirovkaLayer(idx, {
+                                  paperStock: val,
+                                  ...(gsm > 0 ? { grammage: gsm } : {}),
+                                });
+                              }}
+                              placeholder="Qog'oz"
+                              disabled={isOperator}
+                              allowCustom={!isOperator}
+                              className="h-7 text-xs font-mono"
+                            />
+                            <Input
+                              type="number"
+                              min={0}
+                              step={10}
+                              aria-label={`${roleLabel} zichligi`}
+                              disabled={isOperator}
+                              value={layer.grammage || ""}
+                              onChange={(e) =>
+                                updateKashirovkaLayer(idx, { grammage: Number(e.target.value) || 0 })
+                              }
+                              className="h-7 text-xs font-mono text-right"
+                            />
+                            <span
+                              aria-label={`${roleLabel} bosmasi`}
+                              title={
+                                layer.role === "top_liner"
+                                  ? "Old tomon ranglaridan"
+                                  : layer.role === "bottom_liner"
+                                    ? "Orqa tomon ranglaridan"
+                                    : "O'rta qatlam bosilmaydi"
+                              }
+                              className={cn(
+                                "h-7 flex items-center justify-center rounded-md border border-border bg-muted text-xs font-mono",
+                                layer.colors === "0+0" ? "text-muted-foreground" : "text-foreground"
+                              )}
+                            >
+                              {layer.colors}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_4rem_4.25rem] items-center gap-1.5 pt-2 border-t border-border">
+                      <span className="text-[11px] font-medium text-foreground truncate">Yelim</span>
+                      <ComboboxSelect
+                        items={glueStockOptions}
+                        value={formData.kashirovkaGlueStockSku || ""}
+                        onValueChange={(val) => {
+                          const matched = warehouseStock.find((w) => w.sku === val || w.name === val);
+                          handleFieldChange({
+                            kashirovkaGlueStockSku: matched ? matched.sku : val,
+                            kashirovkaGlueStockName: matched ? matched.name : val,
+                          });
+                          onMarkUnsaved();
+                        }}
+                        placeholder="Ombordan yelim"
+                        disabled={isOperator}
+                        className="h-7 text-xs font-mono"
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1}
+                        aria-label="Yelim normasi"
+                        disabled={isOperator}
+                        value={formData.kashirovkaGlueGsm || ""}
+                        placeholder={String(resolveKashirovkaGlueGsm())}
+                        onChange={(e) => {
+                          handleFieldChange(
+                            "kashirovkaGlueGsm",
+                            e.target.value === "" ? undefined : Number(e.target.value)
+                          );
+                          onMarkUnsaved();
+                        }}
+                        className="h-7 text-xs font-mono text-right"
+                      />
+                      <span className="h-7 flex items-center justify-center rounded-md border border-border bg-muted text-[10px] font-mono text-muted-foreground">
+                        g/m²
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
+                      {numberField("kashirovkaMakeReadySheets", "Priladka", "list", 5)}
+                      {numberField("kashirovkaCuringHours", "Quritish", "soat", 1)}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs text-muted-foreground font-medium">Bosma usuli</span>
+                        <Badge
+                          variant="secondary"
+                          title="Bitta forma uchun CTP plastinalar"
+                          className="h-5 px-1.5 text-[10px] font-mono"
+                        >
+                          {kashirovkaPlates} CTP
+                        </Badge>
+                      </div>
+                      <div
+                        role="group"
+                        aria-label="Bosma usuli"
+                        className="inline-flex items-center gap-0.5 bg-muted p-0.5 rounded-md border border-border"
+                      >
+                        {strategyOptions.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            disabled={isOperator || printedLinersCount < 2}
+                            aria-pressed={strategy === opt.value}
+                            title={opt.value === "split_half_sheet" ? "Yarim list" : "Alohida listlar"}
+                            onClick={() => {
+                              handleFieldChange("kashirovkaStrategy", opt.value);
+                              onMarkUnsaved();
+                            }}
+                            className={segmentClass(strategy === opt.value)}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </TabsContent>

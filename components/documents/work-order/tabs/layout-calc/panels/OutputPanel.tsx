@@ -95,7 +95,7 @@ export function OutputPanel({ c, readOnly }: { c: SheetImpositionController; rea
             title="Faqat qog'oz va listlar sonini buyurtmaga yozish"
           >
             {c.isPaperApplied ? <Check className="size-3.5" /> : <Layers className="size-3.5" />}
-            Faqat qog'oz
+            {"Faqat qog'oz"}
           </Button>
           <Button
             type="button"
