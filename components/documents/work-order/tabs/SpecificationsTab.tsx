@@ -6,7 +6,6 @@ import {
   Layers,
   Palette,
   CircleDot,
-  Plus,
   Trash2,
   Sparkles,
   ShieldCheck,
@@ -56,7 +55,7 @@ import { DieLinePreview } from "../DieLinePreview";
 import { DielineSourceCard } from "../dieline/DielineSourceCard";
 import { TextileLabelPreview } from "../TextileLabelPreview";
 import { PantoneColorPickerModal, SpotStationSelection } from "../dialogs/PantoneColorPickerModal";
-import { findPantoneByName, searchPantoneColors, UNKNOWN_SPOT_HEX } from "@/lib/pantone-catalog";
+import { findPantoneByName, UNKNOWN_SPOT_HEX } from "@/lib/pantone-catalog";
 import { extractSvgDimensions } from "../utils/svgContour";
 import { getOrderTechnology } from "../utils/orderTechnology";
 import { TermoSpecSection } from "./TermoSpecSection";
@@ -576,8 +575,6 @@ export function SpecificationsTab({
   }, [formData.embellishmentStockSku, formData.embellishment, warehouseStock]);
   const [isPantoneModalOpen, setIsPantoneModalOpen] = useState(false);
   const [pantoneTargetSide, setPantoneTargetSide] = useState<"front" | "back" | "both">("front");
-  const [frontQuickInput, setFrontQuickInput] = useState("");
-  const [backQuickInput, setBackQuickInput] = useState("");
   const [isSvgModalOpen, setIsSvgModalOpen] = useState(false);
   const [svgInputDraft, setSvgInputDraft] = useState(formData.customSvgPath || "");
   const detectedSvgDims = useMemo(() => extractSvgDimensions(svgInputDraft), [svgInputDraft]);
@@ -897,36 +894,6 @@ export function SpecificationsTab({
     onMarkUnsaved();
   };
 
-  const handleQuickAddPantone = (side: "front" | "back") => {
-    if (isOperator) return;
-    const raw = (side === "front" ? frontQuickInput : backQuickInput).trim();
-    if (!raw) return;
-
-    const matched = findPantoneByName(raw) ?? searchPantoneColors(raw, 5)[0];
-
-    const newItem: SpotColorItem = {
-      id: `spot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name: matched ? matched.name : (raw.toUpperCase().startsWith("PANTONE") ? raw : `PANTONE ${raw}`),
-      code: matched ? matched.code : raw,
-      hex: matched ? matched.hex : UNKNOWN_SPOT_HEX,
-      side,
-    };
-
-    const updated = [...spotColorItems, newItem];
-    const newFrontSpots = updated.filter((s) => s.side === "front" || s.side === "both");
-    const newBackSpots = updated.filter((s) => s.side === "back" || s.side === "both");
-    const newColorsConfig = `${frontProcessCount + newFrontSpots.length}+${backProcessCount + newBackSpots.length}`;
-
-    handleFieldChange({
-      spotColorItems: updated,
-      spotColors: updated.map((s) => s.name),
-      colorsConfig: newColorsConfig,
-    });
-    if (side === "front") setFrontQuickInput("");
-    else setBackQuickInput("");
-    onMarkUnsaved();
-  };
-
   // Kashirovka Mounting state and calculations
   const kashirovkaMode: KashirovkaMode = formData.kashirovkaMode || "none";
   const kashirovkaLayers: SubstrateLayer[] = useMemo(() => {
@@ -1174,7 +1141,6 @@ export function SpecificationsTab({
       </Dialog>
 
       {/* ── First Section: Model & O'lchamlar taqsimoti (Size & Model Matrix) ── */}
-      {!isTermo && (
       <SizeMatrixCard
         sizes={sizes}
         unit={formData.unit || "pcs"}
@@ -1245,7 +1211,6 @@ export function SpecificationsTab({
           onMarkUnsaved();
         }}
       />
-      )}
 
       {/* 2-Column Responsive Grid Layout */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 items-start">
@@ -3191,41 +3156,6 @@ export function SpecificationsTab({
               skuArtworks={skuArtworks || formData.skuArtworks}
               artworkBleedIncluded={formData.artworkBleedIncluded}
               artworkDielineOpacity={formData.artworkDielineOpacity}
-              onArtworkChange={(front, back, sourcePdf, detectedW, detectedH, rawFile) => {
-                const updates: Record<string, any> = { artworkFront: front };
-                if (back) updates.artworkBack = back;
-                if (sourcePdf) updates.artworkSourcePdf = sourcePdf;
-                if (detectedW && detectedH && detectedW > 0 && detectedH > 0) {
-                  updates.width = detectedW;
-                  updates.height = detectedH;
-                }
-                handleFieldChange(updates);
-                void triggerArtworkColorAnalysis(front, back);
-
-                // Keep photoUrl and production artwork cleanly separated
-                if (rawFile && setOrderAttachments) {
-                  setOrderAttachments((prev) => [
-                    {
-                      id: `att-art-${Date.now()}`,
-                      name: rawFile.name,
-                      size: `${(rawFile.size / 1024).toFixed(1)} KB`,
-                      type: rawFile.type || "application/pdf",
-                      date: new Date().toISOString().slice(0, 16).replace("T", " "),
-                      isImage: rawFile.type.startsWith("image/"),
-                      url: front,
-                    },
-                    ...prev,
-                  ]);
-                }
-                if (detectedW && detectedH && detectedW > 0 && detectedH > 0) {
-                  addNotification({
-                    severity: "success",
-                    title: "PDF o'lchami qo'llandi",
-                    description: `Yuklangan fayldan o'lchamlar aniqlandi: ${detectedW} × ${detectedH} mm`,
-                  });
-                }
-                onMarkUnsaved();
-              }}
               onFlipOrientation={!isOperator && formData.shapeType !== "circle" ? () => {
                 const currentW = formData.width ?? 50;
                 const currentH = formData.height ?? 90;
@@ -3326,14 +3256,14 @@ export function SpecificationsTab({
             <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
               {/* Front Colors (Old tomon) */}
               <div className="p-2.5 rounded-md border border-border bg-muted/10 space-y-2.5">
-                <div className="flex items-center justify-between text-xs pb-1 border-b border-border/60">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-semibold text-foreground">Old tomon (Front)</span>
-                    <Badge variant="secondary" className="text-[10px] font-mono h-4 px-1.5">
+                <div className="flex items-center justify-between gap-2 text-xs pb-1 border-b border-border/60">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-semibold text-foreground whitespace-nowrap">Old tomon</span>
+                    <Badge variant="secondary" className="text-[10px] font-mono h-4 px-1.5 shrink-0 whitespace-nowrap">
                       {frontTotalCount} ta rang
                     </Badge>
                   </div>
-                  <span className="font-mono text-[10px] text-muted-foreground">
+                  <span className="font-mono text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
                     {frontProcessCount > 0 ? `${frontProcessCount} CMYK` : "0 CMYK"}
                     {frontSpots.length > 0 ? ` + ${frontSpots.length} Spot` : ""}
                   </span>
@@ -3396,23 +3326,9 @@ export function SpecificationsTab({
 
                 {/* Front Pantone Spot Colors */}
                 <div className="pt-2 border-t border-border/60 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] uppercase font-semibold text-muted-foreground">
-                      Pantone / Spot ({frontSpots.length})
-                    </span>
-                    {!isOperator && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleOpenPantoneModal("front")}
-                        className="h-5 px-1.5 text-[11px] gap-1 text-primary hover:bg-primary/10 cursor-pointer"
-                      >
-                        <Palette className="w-3 h-3" />
-                        <span>Katalog (PMS)</span>
-                      </Button>
-                    )}
-                  </div>
+                  <span className="block text-[10px] uppercase font-semibold text-muted-foreground">
+                    Pantone / Spot ({frontSpots.length})
+                  </span>
 
                   {/* Active Front Spot Chips */}
                   {frontSpots.length > 0 && (
@@ -3449,46 +3365,30 @@ export function SpecificationsTab({
                     </div>
                   )}
 
-                  {/* Direct Input & Quick Add Row */}
                   {!isOperator && (
-                    <div className="flex items-center gap-1.5 pt-0.5">
-                      <Input
-                        value={frontQuickInput}
-                        onChange={(e) => setFrontQuickInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleQuickAddPantone("front");
-                          }
-                        }}
-                        placeholder="Old tomonga Pantone (021, Warm Red, 485)..."
-                        className="h-7 text-xs flex-1 bg-background"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => handleQuickAddPantone("front")}
-                        disabled={!frontQuickInput.trim()}
-                        className="h-7 px-2 text-xs gap-1 cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Qo&apos;shish</span>
-                      </Button>
-                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => handleOpenPantoneModal("front")}
+                      className="w-full h-8 text-xs gap-1.5 cursor-pointer"
+                    >
+                      <Palette className="size-4" />
+                      <span>Katalog (PMS)</span>
+                    </Button>
                   )}
                 </div>
               </div>
 
               {/* Back Colors (Orqa tomon) */}
               <div className="p-2.5 rounded-md border border-border bg-muted/10 space-y-2.5">
-                <div className="flex items-center justify-between text-xs pb-1 border-b border-border/60">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-semibold text-foreground">Orqa tomon (Back)</span>
-                    <Badge variant="secondary" className="text-[10px] font-mono h-4 px-1.5">
+                <div className="flex items-center justify-between gap-2 text-xs pb-1 border-b border-border/60">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-semibold text-foreground whitespace-nowrap">Orqa tomon</span>
+                    <Badge variant="secondary" className="text-[10px] font-mono h-4 px-1.5 shrink-0 whitespace-nowrap">
                       {backTotalCount} ta rang
                     </Badge>
                   </div>
-                  <span className="font-mono text-[10px] text-muted-foreground">
+                  <span className="font-mono text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
                     {backProcessCount > 0 ? `${backProcessCount} CMYK` : "0 CMYK"}
                     {backSpots.length > 0 ? ` + ${backSpots.length} Spot` : ""}
                   </span>
@@ -3551,23 +3451,9 @@ export function SpecificationsTab({
 
                 {/* Back Pantone Spot Colors */}
                 <div className="pt-2 border-t border-border/60 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] uppercase font-semibold text-muted-foreground">
-                      Pantone / Spot ({backSpots.length})
-                    </span>
-                    {!isOperator && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleOpenPantoneModal("back")}
-                        className="h-5 px-1.5 text-[11px] gap-1 text-primary hover:bg-primary/10 cursor-pointer"
-                      >
-                        <Palette className="w-3 h-3" />
-                        <span>Katalog (PMS)</span>
-                      </Button>
-                    )}
-                  </div>
+                  <span className="block text-[10px] uppercase font-semibold text-muted-foreground">
+                    Pantone / Spot ({backSpots.length})
+                  </span>
 
                   {/* Active Back Spot Chips */}
                   {backSpots.length > 0 && (
@@ -3604,32 +3490,16 @@ export function SpecificationsTab({
                     </div>
                   )}
 
-                  {/* Direct Input & Quick Add Row */}
                   {!isOperator && (
-                    <div className="flex items-center gap-1.5 pt-0.5">
-                      <Input
-                        value={backQuickInput}
-                        onChange={(e) => setBackQuickInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleQuickAddPantone("back");
-                          }
-                        }}
-                        placeholder="Orqa tomonga Pantone (021, Warm Red, 485)..."
-                        className="h-7 text-xs flex-1 bg-background"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => handleQuickAddPantone("back")}
-                        disabled={!backQuickInput.trim()}
-                        className="h-7 px-2 text-xs gap-1 cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Qo&apos;shish</span>
-                      </Button>
-                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => handleOpenPantoneModal("back")}
+                      className="w-full h-8 text-xs gap-1.5 cursor-pointer"
+                    >
+                      <Palette className="size-4" />
+                      <span>Katalog (PMS)</span>
+                    </Button>
                   )}
                 </div>
               </div>

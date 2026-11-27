@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useRef } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,17 +12,11 @@ import {
   AlertTriangle,
   Box,
   Layers,
-  UploadCloud,
   Eye,
   EyeOff,
   RefreshCw,
   Image as ImageIcon,
 } from "lucide-react";
-import {
-  extractPdfPagesToImages,
-  readFileAsDataUrl,
-  getImageDimensions,
-} from "./utils/artworkExtractor";
 import {
   ProductShapeType,
   ProductFoldType,
@@ -56,14 +50,6 @@ interface DieLinePreviewProps {
   artworkBleedIncluded?: boolean;
   artworkDielineOpacity?: number;
   skuArtworks?: SkuArtwork[];
-  onArtworkChange?: (
-    front: string, 
-    back?: string, 
-    sourcePdfName?: string, 
-    detectedW?: number, 
-    detectedH?: number,
-    rawFile?: File
-  ) => void;
   onFlipOrientation?: () => void;
   onOpenLayoutTab?: () => void;
   className?: string;
@@ -92,13 +78,11 @@ export function DieLinePreview({
   artworkBleedIncluded = true,
   artworkDielineOpacity = 0.85,
   skuArtworks,
-  onArtworkChange,
   onFlipOrientation,
   onOpenLayoutTab,
   className,
 }: DieLinePreviewProps) {
   const t = useTranslations("DieLine");
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeSkuIdx, setActiveSkuIdx] = useState<number>(0);
   const activeSku = skuArtworks && skuArtworks.length > 0 ? skuArtworks[activeSkuIdx] || skuArtworks[0] : null;
 
@@ -115,59 +99,6 @@ export function DieLinePreview({
     effectiveFront || artworkFront ? "proof" : "cad"
   );
   const [showDielineOverlay, setShowDielineOverlay] = useState<boolean>(true);
-  const [isProcessingFile, setIsProcessingFile] = useState(false);
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setIsProcessingFile(true);
-    try {
-      const isPdf = file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
-      if (isPdf) {
-        const extracted = await extractPdfPagesToImages(file, { scale: 2.8, maxPages: 2, autoTrim: true });
-        if (onArtworkChange) {
-          onArtworkChange(
-            extracted.front,
-            extracted.back,
-            file.name,
-            extracted.detectedWidthMm,
-            extracted.detectedHeightMm,
-            file
-          );
-        }
-        setViewMode("proof");
-      } else {
-        const imgInfo = await getImageDimensions(file);
-        if (onArtworkChange) {
-          if (viewMode === "back") {
-            onArtworkChange(
-              artworkFront || imgInfo.dataUrl,
-              imgInfo.dataUrl,
-              file.name,
-              imgInfo.widthMm,
-              imgInfo.heightMm,
-              file
-            );
-          } else {
-            onArtworkChange(
-              imgInfo.dataUrl,
-              artworkBack,
-              file.name,
-              imgInfo.widthMm,
-              imgInfo.heightMm,
-              file
-            );
-          }
-        }
-        setViewMode(viewMode === "back" ? "back" : "front");
-      }
-    } catch (err) {
-      console.error("Artwork extraction error:", err);
-    } finally {
-      setIsProcessingFile(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
 
   const safeW = Math.max(5, Number(width) || 50);
   const safeH = Math.max(5, Number(height) || 90);
@@ -1478,15 +1409,6 @@ export function DieLinePreview({
         )}
       </div>
 
-      {/* Hidden File Input for PDF / Image Artwork Upload */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,image/png,image/jpeg,image/webp,image/svg+xml"
-        className="hidden"
-        onChange={handleFileUpload}
-      />
-
       {/* Mode Switcher Tabs + Artwork Toolbar */}
       <div className="flex items-center justify-between gap-1.5 flex-wrap bg-muted/40 p-1 rounded-md border border-border text-[11px]">
         {/* Mode Toggle Pills */}
@@ -1591,19 +1513,6 @@ export function DieLinePreview({
               )}
             </Button>
           )}
-
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            disabled={isProcessingFile}
-            onClick={() => fileInputRef.current?.click()}
-            className="h-6 px-2 text-[10.5px] text-zinc-600 dark:text-zinc-300 hover:text-foreground gap-1 cursor-pointer bg-background"
-            title="2-sahifali PDF yoki rasm yuklash"
-          >
-            <UploadCloud className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
-            <span>{isProcessingFile ? "Yuklanmoqda..." : "PDF / Rasm yuklash"}</span>
-          </Button>
         </div>
       </div>
 
