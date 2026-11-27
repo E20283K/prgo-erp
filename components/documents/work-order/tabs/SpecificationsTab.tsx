@@ -3181,6 +3181,18 @@ export function SpecificationsTab({
               lurexColor={formData.lurexColor || "gold"}
               colorsConfig={formData.colorsConfig || "1+0"}
               brandName={formData.product || (isJacquard ? "DAMASK WOVEN" : "CARE INSTRUCTION")}
+              artworkFront={
+                (skuArtworks && (skuArtworks[0]?.frontArtworkThumb || skuArtworks[0]?.frontArtworkUrl)) ||
+                (formData.skuArtworks && (formData.skuArtworks[0]?.frontArtworkThumb || formData.skuArtworks[0]?.frontArtworkUrl)) ||
+                formData.artworkFront ||
+                undefined
+              }
+              artworkBack={
+                (skuArtworks && (skuArtworks[0]?.backArtworkThumb || skuArtworks[0]?.backArtworkUrl)) ||
+                (formData.skuArtworks && (formData.skuArtworks[0]?.backArtworkThumb || formData.skuArtworks[0]?.backArtworkUrl)) ||
+                formData.artworkBack ||
+                undefined
+              }
             />
           )}
 

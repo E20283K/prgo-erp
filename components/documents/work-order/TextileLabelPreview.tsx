@@ -13,6 +13,7 @@ import {
   Layers,
   RotateCw,
   Tag,
+  ImageOff,
 } from "lucide-react";
 
 interface TextileLabelPreviewProps {
@@ -29,8 +30,13 @@ interface TextileLabelPreviewProps {
   lurexColor?: string;
   colorsConfig?: string;
   brandName?: string;
+  artworkFront?: string;
+  artworkBack?: string;
   className?: string;
 }
+
+// A raw PDF URL cannot be drawn in an <img>; only raster previews are usable.
+const isImageUrl = (url?: string) => !!url && !/\.pdf(\?|#|$)/i.test(url);
 
 export function TextileLabelPreview({
   width = 30,
@@ -46,10 +52,15 @@ export function TextileLabelPreview({
   lurexColor = "gold",
   colorsConfig = "1+0",
   brandName = "PrintGoo Care",
+  artworkFront,
+  artworkBack,
   className,
 }: TextileLabelPreviewProps) {
   const [viewSide, setViewSide] = useState<"front" | "back">("front");
-  const [isFoldSimulated, setIsFoldSimulated] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  const sideUrl = viewSide === "back" ? artworkBack : artworkFront;
+  const artworkUrl = isImageUrl(sideUrl) && sideUrl !== failedUrl ? sideUrl : undefined;
 
   const safeW = Math.max(10, Number(width) || 30);
   const safeH = Math.max(15, Number(height) || 70);
@@ -188,43 +199,37 @@ export function TextileLabelPreview({
             </div>
           )}
 
-          {/* Label Main Body */}
-          <div className="flex-1 flex flex-col justify-between p-2 text-center text-[10px]">
-            {/* Upper Portion: Brand & Logo */}
-            <div className="space-y-0.5">
-              <div className="text-[12px] font-bold tracking-wider uppercase font-mono">
-                {brandName}
+          {/* Label Main Body: the uploaded artwork, or an empty placeholder */}
+          <div className="relative flex-1 min-h-0 flex items-center justify-center">
+            {artworkUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={artworkUrl}
+                alt={brandName}
+                onError={() => setFailedUrl(artworkUrl)}
+                className="absolute inset-0 w-full h-full object-contain"
+                draggable={false}
+              />
+            ) : (
+              <div
+                className={cn(
+                  "flex flex-col items-center gap-1 text-[9px] font-mono opacity-50",
+                  foldType === "center_fold" && "absolute top-1/4 -translate-y-1/2"
+                )}
+              >
+                <ImageOff className="w-4 h-4" />
+                <span>Dizayn yo&apos;q</span>
               </div>
-              <div className="text-[9px] opacity-75 font-mono">
-                {isJacquard ? `${weaveQuality.toUpperCase()} WOVEN` : "100% PREMIUM QUALITY"}
-              </div>
-            </div>
+            )}
 
             {/* Center Fold Line Indicator */}
             {foldType === "center_fold" && (
-              <div className="w-full my-1 border-t-2 border-dashed border-amber-500 flex items-center justify-center relative">
+              <div className="absolute left-0 right-0 top-1/2 border-t-2 border-dashed border-amber-500 flex items-center justify-center pointer-events-none">
                 <span className="absolute -top-2 bg-amber-500 text-white text-[7px] font-mono px-1 rounded-xs">
                   BUKLAMA CHIZIG&apos;I (FOLD)
                 </span>
               </div>
             )}
-
-            {/* Lower Portion: Care Instructions / Symbols */}
-            <div className="space-y-1">
-              {/* International Care Symbols */}
-              <div className="flex items-center justify-center gap-1.5 opacity-80 text-[10px]">
-                <span title="Wash at 40°C" className="border border-current px-0.5 rounded-xs text-[8px]">40°</span>
-                <span title="Do not bleach">△</span>
-                <span title="Iron low">☡</span>
-                <span title="Do not tumble dry">⨂</span>
-                <span title="Dry clean safe">℗</span>
-              </div>
-              <div className="text-[8px] opacity-70 leading-tight">
-                MADE IN UZBEKISTAN
-                <br />
-                {viewSide === "back" ? "RN #94820 · DRY FLAT" : "COTTON / POLY BLEND"}
-              </div>
-            </div>
           </div>
 
           {/* End Fold: Bottom fold tab indicator */}
