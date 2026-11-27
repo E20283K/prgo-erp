@@ -29,7 +29,23 @@ async function runMigrations() {
   }
 }
 
-runMigrations().catch((err) => {
-  console.error("❌ [DB Migrate] Migratsiya xatosi:", err);
-  process.exit(1);
-});
+/** One-time data fixes that follow a schema change; a failed one is retried next deploy, never fatal. */
+async function runDataTasksSafely() {
+  try {
+    const { runDataTasks, closeDataTaskConnection } = await import("./dataTasks");
+    try {
+      await runDataTasks();
+    } finally {
+      await closeDataTaskConnection();
+    }
+  } catch (err) {
+    console.error("❌ [Data task] Ishga tushmadi, keyingi deployda qayta uriniladi:", err);
+  }
+}
+
+runMigrations()
+  .then(runDataTasksSafely)
+  .catch((err) => {
+    console.error("❌ [DB Migrate] Migratsiya xatosi:", err);
+    process.exit(1);
+  });
