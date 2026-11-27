@@ -27,6 +27,7 @@ from app.schemas.documents import JobTicketPdfRequest
 from app.core.constants import DEFAULT_JOB_TICKET_LABELS, trunc
 from app.generators.artwork_utils import get_raw_artwork, probe_artwork_url
 from app.generators import job_ticket_profiles as profiles
+from app.generators.cut_plan_block import cut_block_body_h, cut_plan_badge, draw_cut_plan_block, pick_cut_plans
 
 _CORE_DIR = os.path.join(os.path.dirname(__file__), "..", "core")
 # Header logos the Telegram send dialog offers; "none" leaves the header without one
@@ -226,7 +227,7 @@ REPORT_OP_ROW_H = 9.0
 REPORT_MAT_ROW_H = 7.0
 REPORT_MAT_BLANK_ROWS = 2
 REPORT_SIGN_H = 27.0
-EMPTY_ROUTE_ROWS = 6
+EMPTY_ROUTE_ROWS = 3
 
 SAMPLE_PURPOSE_LABELS = {
     "color_proof": "Rang sinovi",
@@ -1205,6 +1206,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     imp_state = od.get("impositionState") or {}
     plates_data = imp_state.get("plateCalculations") or od.get("plateCalculations") or []
     eff_pieces = int(imp_state.get("effectivePieces") or yield_per_sheet or 1)
+    # Guillotine jobs carry the layout tab's cutting plan; the first form is printed
+    cut_plans = pick_cut_plans(od)
 
     def mass_plan(op) -> str:
         return f"{op.plannedQty:,.0f} {op.planUnit or ''}".replace(",", " ").strip() if op.plannedQty else ""
@@ -1221,7 +1224,7 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     sample_block = sample_on and sample_status != "approved"
     route_rows: List[Dict[str, Any]] = []
     # Without a route the blocks get blank rows to be written in by hand
-    blank_rows = [{"kind": "blank"}] * (EMPTY_ROUTE_ROWS // 2)
+    blank_rows = [{"kind": "blank"}] * EMPTY_ROUTE_ROWS
     if sample_block:
         route_rows.append({"kind": "banner", "color": "#b45309", "text": " • ".join(p for p in [
             "NAMUNA", f"{sample_qty} {unit}" if sample_qty else "",
@@ -1309,6 +1312,8 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
                      n_ops: int, n_mats: int) -> float:
         h = sku_block_h(op_h / REPORT_OP_ROW_H)
         h += REPORT_PANEL_H + REPORT_HEAD_H + (n_ops or EMPTY_ROUTE_ROWS) * op_h + REPORT_GAP_MM
+        if cut_plans:
+            h += REPORT_PANEL_H + cut_block_body_h(op_h / REPORT_OP_ROW_H) + REPORT_GAP_MM
         if plates:
             h += REPORT_PANEL_H + REPORT_HEAD_H + len(plates) * pl_h + REPORT_GAP_MM
         if n_mats or blank:
@@ -1443,6 +1448,13 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     draw_grid(cur + REPORT_PANEL_H, REPORT_OP_COLS, op_h, n_ops or EMPTY_ROUTE_ROWS, op_cell, font=row_font,
               shaded_rows=banner_rows, merge=(1, len(REPORT_OP_COLS) - 1))
     cur += REPORT_PANEL_H + REPORT_HEAD_H + (n_ops or EMPTY_ROUTE_ROWS) * op_h + REPORT_GAP_MM
+
+    # 1b. Guillotine cutting plan: knife order and back gauge settings for the cutter
+    if cut_plans:
+        cut_body = cut_block_body_h(s_used)
+        draw_panel_header(9.0, cur, full_w_mm, "KESISH REJASI", cut_plan_badge(cut_plans[0], len(cut_plans)))
+        draw_cut_plan_block(c, cur + REPORT_PANEL_H, 9.0, full_w_mm, cut_body, cut_plans[0], y_mm)
+        cur += REPORT_PANEL_H + cut_body + REPORT_GAP_MM
 
     # 2. Plates and the run split per SKU
     if plates_shown:
