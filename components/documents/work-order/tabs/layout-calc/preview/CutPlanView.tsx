@@ -4,7 +4,7 @@ import React, { useMemo, useState } from "react";
 import { AlertTriangle, Loader2, Paperclip, Printer, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { variantColor } from "../components/variantColor";
-import { buildCutPlan, type CutStep } from "../cutPlan";
+import { buildCutPlan, cutPlanDims, cutPlanEdges, type CutStep } from "../cutPlan";
 import { printCutPlans } from "../cutPlanSvg";
 import type { SheetImpositionController } from "../useSheetImposition";
 import { ZoomSvg } from "./ZoomSvg";
@@ -15,6 +15,10 @@ export function CutPlanView({ c, formIdx }: { c: SheetImpositionController; form
   const H = s.sheetH;
   const cells = useMemo(() => c.calc?.forms[formIdx]?.front_cells ?? [], [c.calc, formIdx]);
   const plan = useMemo(() => buildCutPlan(cells, W, H), [cells, W, H]);
+  const dims = useMemo(
+    () => cutPlanDims(cells.map((c2) => ({ x: c2.x_mm, y: c2.y_mm, w: c2.w_mm, h: c2.h_mm, v: c2.variant_index })), W, H),
+    [cells, W, H]
+  );
   const [active, setActive] = useState<number | null>(null);
 
   if (!plan) {
@@ -36,13 +40,14 @@ export function CutPlanView({ c, formIdx }: { c: SheetImpositionController; form
     );
   };
 
+  const edges = cutPlanEdges(plan.firstAxis);
   const stage1 = plan.steps.filter((st) => st.stage === 1);
   const stage2 = plan.steps.filter((st) => st.stage === 2);
 
   return (
     <div className="h-full min-h-0 grid grid-rows-[minmax(0,1fr)_auto] lg:grid-rows-1 lg:grid-cols-[minmax(0,1fr)_224px] gap-3">
       <div className="min-h-[240px]">
-        <ZoomSvg W={W} H={H} pad={0.06}>
+        <ZoomSvg W={W} H={H} pad={0.08}>
           {(stroke) => {
             const fs = Math.max(W, H) / 60;
             return (
@@ -66,19 +71,66 @@ export function CutPlanView({ c, formIdx }: { c: SheetImpositionController; form
                   <line x1={0} y1={H} x2={W} y2={H} />
                   <line x1={0} y1={0} x2={0} y2={H} />
                 </g>
-                <text x={W / 2} y={H + fs * 1.3} fontSize={fs * 0.8} textAnchor="middle" fill="var(--muted-foreground)">
-                  KLAPAN
-                </text>
-                <text
-                  x={-fs * 0.7}
-                  y={H / 2}
-                  fontSize={fs * 0.8}
-                  textAnchor="middle"
-                  fill="var(--muted-foreground)"
-                  transform={`rotate(-90 ${-fs * 0.7} ${H / 2})`}
-                >
-                  YON TIRGAK
-                </text>
+                {/* Which edge goes to the back gauge and which faces the knife, per stage */}
+                <g fontSize={fs * 0.75} textAnchor="middle" fill="var(--muted-foreground)">
+                  <text x={W / 2} y={H + fs * 1.3}>{edges.bottom}</text>
+                  <text x={W / 2} y={-fs * 0.6} fill="var(--foreground)" fontWeight={600}>
+                    {edges.top}
+                  </text>
+                  <text x={-fs * 0.7} y={H / 2} transform={`rotate(-90 ${-fs * 0.7} ${H / 2})`}>
+                    {edges.left}
+                  </text>
+                  <text
+                    x={W + fs * 3.9}
+                    y={H / 2}
+                    fill="var(--foreground)"
+                    fontWeight={600}
+                    transform={`rotate(90 ${W + fs * 3.9} ${H / 2})`}
+                  >
+                    {edges.right}
+                  </text>
+                </g>
+
+                {/* Piece size, gutter and edge waste */}
+                <g pointerEvents="none">
+                  {dims.map((d, i) => {
+                    const vertical = d.x1 === d.x2;
+                    const t = fs * 0.3;
+                    const color = d.kind === "piece" ? "var(--foreground)" : "var(--muted-foreground)";
+                    const mx = (d.x1 + d.x2) / 2;
+                    const my = (d.y1 + d.y2) / 2;
+                    return (
+                      <g key={i} stroke={color} strokeWidth={stroke}>
+                        <line x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2} />
+                        {vertical ? (
+                          <>
+                            <line x1={d.x1 - t} y1={d.y1} x2={d.x1 + t} y2={d.y1} />
+                            <line x1={d.x2 - t} y1={d.y2} x2={d.x2 + t} y2={d.y2} />
+                          </>
+                        ) : (
+                          <>
+                            <line x1={d.x1} y1={d.y1 - t} x2={d.x1} y2={d.y1 + t} />
+                            <line x1={d.x2} y1={d.y2 - t} x2={d.x2} y2={d.y2 + t} />
+                          </>
+                        )}
+                        <text
+                          x={vertical ? mx + (mx < W / 2 ? fs * 0.35 : -fs * 0.35) : mx}
+                          y={vertical ? my : my - fs * 0.3}
+                          fontSize={fs * 0.62}
+                          textAnchor={vertical ? (mx < W / 2 ? "start" : "end") : "middle"}
+                          dominantBaseline={vertical ? "central" : "auto"}
+                          fill={color}
+                          stroke="var(--background)"
+                          strokeWidth={fs * 0.12}
+                          paintOrder="stroke"
+                          className="font-mono"
+                        >
+                          {d.value}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </g>
 
                 {plan.steps.map((st) => {
                   const on = active === st.n;
@@ -100,7 +152,8 @@ export function CutPlanView({ c, formIdx }: { c: SheetImpositionController; form
                           strokeDasharray={st.stage === 2 ? `${stroke * 8} ${stroke * 4}` : undefined}
                         />
                       ))}
-                      {segs.map((sg, i) => {
+                      {segs.slice(0, 1).map((sg, i) => {
+                        // Stage 2 cuts the stacked strips in one stroke: one number, on the group's first strip
                         // Stage 1: outside the sheet (right / top); stage 2: inside the strip, at its start
                         // Waste cuts sit a gutter away from a product cut: their label moves one step along
                         const r = fs * 0.62;
@@ -170,8 +223,8 @@ export function CutPlanView({ c, formIdx }: { c: SheetImpositionController; form
           <MiniStat label="Kesish" value={plan.strokes} />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <StepTable title="Polosalar" steps={stage1} active={active} onHover={setActive} />
-          <StepTable title="Donalar" steps={stage2} active={active} onHover={setActive} groups={plan.groups.length} />
+          <StepTable title="1. Polosalar" steps={stage1} active={active} onHover={setActive} />
+          <StepTable title="2. Donalar" steps={stage2} active={active} onHover={setActive} groups={plan.groups.length} />
         </div>
       </div>
     </div>

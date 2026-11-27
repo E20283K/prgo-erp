@@ -221,3 +221,72 @@ export function snapshotCutPlans(
   }
   return out;
 }
+
+/** A dimension to draw on the plan, in sheet mm. */
+export interface CutDim {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  value: number;
+  kind: "piece" | "waste" | "gap";
+}
+
+/**
+ * What the operator checks after a cut: one piece's trim size (with the gutter to its
+ * neighbours chained on) and the waste on each sheet edge. Everything is placed along the
+ * first piece's column and row, off its edges, so no dimension lies on a knife line or under
+ * the cut numbers at the top of a strip.
+ */
+export function cutPlanDims(cells: CutPlanCell[], W: number, H: number): CutDim[] {
+  if (!cells.length) return [];
+  const minX = Math.min(...cells.map((c) => c.x));
+  const maxX = Math.max(...cells.map((c) => c.x + c.w));
+  const minY = Math.min(...cells.map((c) => c.y));
+  const maxY = Math.max(...cells.map((c) => c.y + c.h));
+  const dims: CutDim[] = [];
+  const add = (x1: number, y1: number, x2: number, y2: number, kind: CutDim["kind"]) => {
+    const value = r1(Math.abs(x2 - x1) + Math.abs(y2 - y1));
+    if (value > EPS) dims.push({ x1: r1(x1), y1: r1(y1), x2: r1(x2), y2: r1(y2), value, kind });
+  };
+
+  // Top-left piece
+  const s = [...cells].sort((a, b) => a.y - b.y || a.x - b.x)[0];
+  const dy = s.y + s.h * 0.35;
+  const dx = s.x + s.w * 0.3;
+  add(s.x, dy, s.x + s.w, dy, "piece");
+  add(dx, s.y, dx, s.y + s.h, "piece");
+  const right = cells
+    .filter((c) => Math.abs(c.y - s.y) < EPS && c.x > s.x + s.w - EPS)
+    .sort((a, b) => a.x - b.x)[0];
+  if (right) add(s.x + s.w, dy, right.x, dy, "gap");
+  const below = cells
+    .filter((c) => Math.abs(c.x - s.x) < EPS && c.y > s.y + s.h - EPS)
+    .sort((a, b) => a.y - b.y)[0];
+  if (below) add(dx, s.y + s.h, dx, below.y, "gap");
+
+  // Edge waste
+  const xc = s.x + s.w * 0.75;
+  const yc = s.y + s.h * 0.75;
+  add(xc, 0, xc, minY, "waste");
+  add(xc, maxY, xc, H, "waste");
+  add(0, yc, minX, yc, "waste");
+  add(maxX, yc, W, yc, "waste");
+  return dims;
+}
+
+/**
+ * Edge labels for the drawing. Each stage pushes one untouched edge against the back gauge
+ * and cuts from the opposite edge: the y stage uses the gripper (bottom), the x stage the
+ * side lay (left).
+ */
+export function cutPlanEdges(firstAxis: CutAxis) {
+  const yStage = firstAxis === "y" ? 1 : 2;
+  const xStage = firstAxis === "y" ? 2 : 1;
+  return {
+    top: `PICHOQ ${yStage}`,
+    bottom: `KLAPAN · TIRGAK ${yStage}`,
+    right: `PICHOQ ${xStage}`,
+    left: `YON TIRGAK · TIRGAK ${xStage}`,
+  };
+}

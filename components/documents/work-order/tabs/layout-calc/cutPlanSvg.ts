@@ -1,4 +1,4 @@
-import type { CutPlanSnapshot, CutStep } from "./cutPlan";
+import { cutPlanDims, cutPlanEdges, type CutPlanSnapshot, type CutStep } from "./cutPlan";
 
 /**
  * Printable cutting plan card: A4 landscape, mm units, plain black/grey so it survives a
@@ -74,18 +74,54 @@ export function renderCutPlanSvg(plan: CutPlanSnapshot, meta: CutPlanCardMeta = 
   // Reference edges
   push(`<line x1="${X(0)}" y1="${Y(H)}" x2="${X(W)}" y2="${Y(H)}" stroke="#000" stroke-width="1.2"/>`);
   push(`<line x1="${X(0)}" y1="${Y(0)}" x2="${X(0)}" y2="${Y(H)}" stroke="#000" stroke-width="1.2"/>`);
-  push(`<text x="${((ox + ox + W * k) / 2).toFixed(2)}" y="${(oy + H * k + 4.5).toFixed(2)}" font-size="3" text-anchor="middle" fill="#000">KLAPAN</text>`);
+  // Which edge goes to the back gauge and which faces the knife, per stage
+  const edges = cutPlanEdges(plan.firstAxis);
+  const midX = (ox + (W * k) / 2).toFixed(2);
+  const midY = (oy + (H * k) / 2).toFixed(2);
   const lx = (ox - 3.5).toFixed(2);
-  const ly = (oy + (H * k) / 2).toFixed(2);
-  push(`<text x="${lx}" y="${ly}" font-size="3" text-anchor="middle" fill="#000" transform="rotate(-90 ${lx} ${ly})">YON TIRGAK</text>`);
+  const rx = (ox + W * k + 12).toFixed(2);
+  push(`<text x="${midX}" y="${(oy + H * k + 4.5).toFixed(2)}" font-size="3" text-anchor="middle" fill="#000">${esc(edges.bottom)}</text>`);
+  push(`<text x="${midX}" y="${(oy - 2.5).toFixed(2)}" font-size="3" font-weight="700" text-anchor="middle" fill="#000">${esc(edges.top)}</text>`);
+  push(`<text x="${lx}" y="${midY}" font-size="3" text-anchor="middle" fill="#000" transform="rotate(-90 ${lx} ${midY})">${esc(edges.left)}</text>`);
+  push(`<text x="${rx}" y="${midY}" font-size="3" font-weight="700" text-anchor="middle" fill="#000" transform="rotate(90 ${rx} ${midY})">${esc(edges.right)}</text>`);
+
+  // Piece size, gutter and edge waste
+  for (const d of cutPlanDims(plan.cells, W, H)) {
+    const vertical = d.x1 === d.x2;
+    const t = 0.8;
+    const color = d.kind === "piece" ? "#000" : "#555";
+    const x1 = ox + d.x1 * k;
+    const y1 = oy + d.y1 * k;
+    const x2 = ox + d.x2 * k;
+    const y2 = oy + d.y2 * k;
+    const ticks = vertical
+      ? `M${x1 - t} ${y1}H${x1 + t}M${x2 - t} ${y2}H${x2 + t}`
+      : `M${x1} ${y1 - t}V${y1 + t}M${x2} ${y2 - t}V${y2 + t}`;
+    push(
+      `<path d="M${x1} ${y1}L${x2} ${y2}${ticks}" fill="none" stroke="${color}" stroke-width="0.2"/>`
+    );
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const left = d.x1 < W / 2;
+    const tx2 = vertical ? mx + (left ? 1 : -1) : mx;
+    const ty2 = vertical ? my + 0.9 : my - 0.8;
+    const anchor = vertical ? (left ? "start" : "end") : "middle";
+    push(
+      `<text x="${tx2.toFixed(2)}" y="${ty2.toFixed(2)}" font-size="2.5" text-anchor="${anchor}" fill="${color}" stroke="#fff" stroke-width="0.6" paint-order="stroke">${n1(d.value)}</text>`
+    );
+  }
 
   // Knife lines and numbers
   const r = 2;
   for (const st of plan.steps) {
     const color = st.drop === "product" ? "#000" : "#888";
     const dash = st.stage === 2 ? ` stroke-dasharray="1.6 0.8"` : "";
-    for (const sg of stepSegments(plan, st)) {
+    const segs = stepSegments(plan, st);
+    for (const sg of segs) {
       push(`<line x1="${X(sg.x1)}" y1="${Y(sg.y1)}" x2="${X(sg.x2)}" y2="${Y(sg.y2)}" stroke="${color}" stroke-width="0.4"${dash}/>`);
+    }
+    // Stage 2 cuts the stacked strips in one stroke: number it once, on the group's first strip
+    for (const sg of segs.slice(0, 1)) {
       // Waste cuts sit a gutter away from a product cut: move their label one step along the line
       const shift = st.drop === "waste" ? 2 * r + 0.6 : 0;
       const cx =
@@ -130,9 +166,9 @@ export function renderCutPlanSvg(plan: CutPlanSnapshot, meta: CutPlanCardMeta = 
   };
 
   const multi = plan.groups.length > 1;
-  header("Polosalar");
+  header("1. Polosalar");
   plan.steps.filter((s) => s.stage === 1).forEach((s) => row(s, multi));
-  header("Donalar");
+  header("2. Donalar");
   plan.steps.filter((s) => s.stage === 2).forEach((s) => row(s, multi));
 
   push(`</svg>`);
