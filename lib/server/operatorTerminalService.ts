@@ -62,6 +62,8 @@ export interface TerminalMachine {
   code: string;
   name: string;
   department: string;
+  /** Photo of the machine, when one was uploaded. */
+  imageUrl: string | null;
 }
 
 export async function listTerminalMachines(): Promise<TerminalMachine[]> {
@@ -71,6 +73,7 @@ export async function listTerminalMachines(): Promise<TerminalMachine[]> {
       code: productionMachines.code,
       name: productionMachines.name,
       department: productionMachines.department,
+      imageUrl: productionMachines.imageUrl,
     })
     .from(productionMachines);
   return rows.sort((a, b) => a.department.localeCompare(b.department) || a.name.localeCompare(b.name));
@@ -105,7 +108,13 @@ export async function getMachineQueue(machineId: string): Promise<{ machine: Ter
   if (!machine) throw new Error("Uskuna topilmadi.");
   const jobs = buildMachineJobs(machine, await loadFloorOrders(machine.companyId));
   return {
-    machine: { id: machine.id, code: machine.code, name: machine.name, department: machine.department },
+    machine: {
+      id: machine.id,
+      code: machine.code,
+      name: machine.name,
+      department: machine.department,
+      imageUrl: machine.imageUrl || null,
+    },
     jobs,
   };
 }
@@ -135,6 +144,7 @@ export async function getFloorOverview(): Promise<FloorMachine[]> {
         code: machine.code,
         name: machine.name,
         department: machine.department,
+        imageUrl: machine.imageUrl || null,
         active: active
           ? {
               workOrderNo: active.workOrderNo,
