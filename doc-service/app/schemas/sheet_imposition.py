@@ -30,6 +30,7 @@ class SheetSchema(BaseModel):
     margin_right_mm: float = Field(12.0, ge=0)
     margin_top_mm: float = Field(12.0, ge=0)
     margin_bottom_mm: float = Field(15.0, ge=0)
+    gripper_enabled: bool = True
 
 
 class BleedSchema(BaseModel):
@@ -42,6 +43,7 @@ class BleedSchema(BaseModel):
     gutter_y_mm: float = Field(3.0, ge=0)
     crop_length_mm: float = Field(4.0, ge=0)
     crop_gap_mm: float = Field(1.0, ge=0)
+    crop_line_width_mm: float = Field(0.12, gt=0, le=2)
     auto_extend_bleed: bool = True
     alignment: AlignmentLiteral = "center"
 

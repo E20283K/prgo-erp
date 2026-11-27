@@ -15,6 +15,7 @@ export interface SheetParams {
   margin_right_mm: number;
   margin_top_mm: number;
   margin_bottom_mm: number;
+  gripper_enabled?: boolean;
 }
 
 export interface BleedParams {
@@ -27,6 +28,7 @@ export interface BleedParams {
   gutter_y_mm: number;
   crop_length_mm: number;
   crop_gap_mm: number;
+  crop_line_width_mm?: number;
   auto_extend_bleed: boolean;
   alignment: SheetAlignment;
 }

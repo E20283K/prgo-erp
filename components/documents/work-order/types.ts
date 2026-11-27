@@ -1124,6 +1124,8 @@ export interface PersistedImpositionState {
   marginBottom: number;
   marginLeft: number;
   marginRight: number;
+  /** Gripper (klapan) on the bottom edge; undefined = on (older saved layouts) */
+  gripper?: boolean;
   alignment: "center" | "gripper";
   trimW: number;
   trimH: number;
@@ -1133,6 +1135,8 @@ export interface PersistedImpositionState {
   gutterX: number;
   gutterY: number;
   cropGap: number;
+  /** Crop mark stroke, mm; undefined = 0.12 */
+  cropLineWidth?: number;
   rotation: "auto" | 0 | 90;
   manualCols?: number;
   manualRows?: number;

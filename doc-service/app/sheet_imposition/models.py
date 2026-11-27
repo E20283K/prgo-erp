@@ -118,6 +118,7 @@ class SheetConfig:
     margin_right_mm: float = 12.0
     margin_top_mm: float = 12.0
     margin_bottom_mm: float = 15.0         # Klapan (gripper margin) odatda pastda yoki yon tomonda
+    gripper_enabled: bool = True           # False: klapan belgilari chizilmaydi, pastki hoshiya oddiy hoshiya
 
     @property
     def width_pt(self) -> float:
@@ -140,6 +141,7 @@ class BleedAndGutterConfig:
     auto_extend_bleed: bool = True         # Bleed yetishmasa avtomatik cho'zish
     crop_length_mm: float = 4.0            # Krop chiziqlari uzunligi
     crop_gap_mm: float = 1.0               # Krop chizig'ining tashqi fondan narida boshlanish bo'shlig'i
+    crop_line_width_mm: float = 0.12       # Krop chizig'i qalinligi
     crop_offset_mm: Optional[float] = None # Ixtiyoriy to'g'ridan-to'g'ri offset
     alignment: SheetAlignment = SheetAlignment.CENTER # Varaqda joylashuv (Markaz yoki Klapan)
 

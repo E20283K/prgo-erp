@@ -19,6 +19,15 @@ export function ProductPanel({ c, readOnly }: { c: SheetImpositionController; re
         <NumField label="Ichki fon" suffix="mm" step={0.5} value={s.innerBleed} disabled={readOnly} onChange={(v) => c.update({ innerBleed: n(v) })} />
         <NumField label="Tashqi fon" suffix="mm" step={0.5} value={s.outerBleed} disabled={readOnly} onChange={(v) => c.update({ outerBleed: n(v) })} />
         <NumField label="Krop oralig'i" suffix="mm" step={0.5} value={s.cropGap} disabled={readOnly} onChange={(v) => c.update({ cropGap: n(v) })} />
+        <NumField
+          label="Krop qalinligi"
+          suffix="mm"
+          step={0.05}
+          min={0.05}
+          value={s.cropLineWidth ?? 0.12}
+          disabled={readOnly}
+          onChange={(v) => c.update({ cropLineWidth: Math.min(2, n(v, 0.12)) })}
+        />
         <NumField label="Oraliq X" suffix="mm" step={0.5} value={s.gutterX} disabled={readOnly} onChange={(v) => c.update({ gutterX: n(v) })} />
         <NumField label="Oraliq Y" suffix="mm" step={0.5} value={s.gutterY} disabled={readOnly} onChange={(v) => c.update({ gutterY: n(v) })} />
         <SelectField

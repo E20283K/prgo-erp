@@ -96,6 +96,7 @@ def _sheet_config(p: LayoutParamsSchema) -> SheetConfig:
         margin_right_mm=s.margin_right_mm,
         margin_top_mm=s.margin_top_mm,
         margin_bottom_mm=s.margin_bottom_mm,
+        gripper_enabled=s.gripper_enabled,
     )
 
 
@@ -112,6 +113,7 @@ def _bleed_config(p: LayoutParamsSchema) -> BleedAndGutterConfig:
         auto_extend_bleed=b.auto_extend_bleed,
         crop_length_mm=b.crop_length_mm,
         crop_gap_mm=b.crop_gap_mm,
+        crop_line_width_mm=b.crop_line_width_mm,
         alignment=SheetAlignment(b.alignment),
     )
 

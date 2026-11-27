@@ -165,17 +165,21 @@ function SchemeView({ c, formIdx, side }: { c: SheetImpositionController; formId
           strokeWidth={stroke}
         />
         {/* Gripper band (bottom edge, as in the engine) */}
-        <rect x={0} y={H - s.marginBottom} width={W} height={s.marginBottom} fill="var(--muted-foreground)" fillOpacity={0.12} />
-        <text
-          x={W / 2}
-          y={H - s.marginBottom / 2}
-          fontSize={Math.min(s.marginBottom * 0.55, 8)}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill="var(--muted-foreground)"
-        >
-          KLAPAN {s.marginBottom} mm
-        </text>
+        {s.gripper !== false && (
+          <>
+            <rect x={0} y={H - s.marginBottom} width={W} height={s.marginBottom} fill="var(--muted-foreground)" fillOpacity={0.12} />
+            <text
+              x={W / 2}
+              y={H - s.marginBottom / 2}
+              fontSize={Math.min(s.marginBottom * 0.55, 8)}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill="var(--muted-foreground)"
+            >
+              KLAPAN {s.marginBottom} mm
+            </text>
+          </>
+        )}
 
         {/* Bleed (fon) behind each cell, as the engine extends artwork: outer edges of the block
             get the outer bleed, edges facing a neighbour get min(inner bleed, gutter / 2). */}
@@ -200,7 +204,7 @@ function SchemeView({ c, formIdx, side }: { c: SheetImpositionController; formId
 
         {/* Crop marks on the outer perimeter only (engine: offset = outer bleed + crop gap, 4 mm long) */}
         {block && (
-          <g stroke="var(--foreground)" strokeWidth={stroke} strokeOpacity={0.8}>
+          <g stroke="var(--foreground)" strokeWidth={Math.max(stroke, s.cropLineWidth ?? 0.12)} strokeOpacity={0.8}>
             {block.xs.map((x) => (
               <React.Fragment key={`cx-${x}`}>
                 <line x1={x} y1={block.minY - cropOff} x2={x} y2={block.minY - cropOff - CROP_LEN} />

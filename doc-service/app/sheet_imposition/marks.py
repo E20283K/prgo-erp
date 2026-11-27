@@ -101,7 +101,8 @@ class MarksGenerator:
         )
 
         # 5. Klapan (Gripper) va Verniy burchak texnik belgilarini chizish
-        MarksGenerator._draw_gripper_marks(canv, sheet, bg_config, zones)
+        if sheet.gripper_enabled:
+            MarksGenerator._draw_gripper_marks(canv, sheet, bg_config, zones)
 
         canv.save()
         packet.seek(0)
@@ -147,7 +148,7 @@ class MarksGenerator:
 
         canv.saveState()
         canv.setStrokeColor(REG_COLOR)
-        canv.setLineWidth(0.35) # ~0.12 mm ingichka aniq krop chizig'i
+        canv.setLineWidth(bg_config.crop_line_width_mm * MM_TO_PT)
 
         crop_len = bg_config.crop_length_mm * MM_TO_PT
         crop_off = bg_config.crop_offset_pt

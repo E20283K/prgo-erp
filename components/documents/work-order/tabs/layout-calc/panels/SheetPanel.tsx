@@ -10,6 +10,14 @@ import type { SheetImpositionController } from "../useSheetImposition";
 export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; readOnly?: boolean }) {
   const s = c.settings;
   const n = (v: number | undefined, fallback = 0) => v ?? fallback;
+  const gripperOn = s.gripper !== false;
+  // Off: the bottom edge becomes a plain margin like the top; on: back to the machine gripper
+  const setGripper = (on: boolean) =>
+    c.update(
+      on
+        ? { gripper: true, marginBottom: c.machine.defaultGripper }
+        : { gripper: false, marginBottom: s.marginTop, alignment: "center" }
+    );
 
   // Space for marks = margin minus outer bleed; doc-service shrinks or moves marks below ~8 mm
   const MARK_ZONE_MM = 8;
@@ -94,8 +102,21 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
         </div>
       )}
 
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted-foreground">Klapan</span>
+        <Segmented
+          value={gripperOn ? "on" : "off"}
+          disabled={readOnly}
+          onChange={(v) => setGripper(v === "on")}
+          options={[
+            { value: "on", label: "Bor" },
+            { value: "off", label: "Yo'q" },
+          ]}
+        />
+      </div>
+
       <div className="grid grid-cols-4 gap-2">
-        <NumField label="Klapan" suffix="mm" value={s.marginBottom} disabled={readOnly} onChange={(v) => c.update({ marginBottom: n(v) })} />
+        <NumField label={gripperOn ? "Klapan" : "Pastki"} suffix="mm" value={s.marginBottom} disabled={readOnly} onChange={(v) => c.update({ marginBottom: n(v) })} />
         <NumField label="Yuqori" suffix="mm" value={s.marginTop} disabled={readOnly} onChange={(v) => c.update({ marginTop: n(v) })} />
         <NumField label="Chap" suffix="mm" value={s.marginLeft} disabled={readOnly} onChange={(v) => c.update({ marginLeft: n(v) })} />
         <NumField label="O'ng" suffix="mm" value={s.marginRight} disabled={readOnly} onChange={(v) => c.update({ marginRight: n(v) })} />
@@ -110,18 +131,20 @@ export function SheetPanel({ c, readOnly }: { c: SheetImpositionController; read
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-muted-foreground">Joylashuv</span>
-        <Segmented
-          value={s.alignment}
-          disabled={readOnly}
-          onChange={(alignment) => c.update({ alignment })}
-          options={[
-            { value: "center", label: "Markaz" },
-            { value: "gripper", label: "Klapan" },
-          ]}
-        />
-      </div>
+      {gripperOn && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-muted-foreground">Joylashuv</span>
+          <Segmented
+            value={s.alignment}
+            disabled={readOnly}
+            onChange={(alignment) => c.update({ alignment })}
+            options={[
+              { value: "center", label: "Markaz" },
+              { value: "gripper", label: "Klapan" },
+            ]}
+          />
+        </div>
+      )}
     </Section>
   );
 }
