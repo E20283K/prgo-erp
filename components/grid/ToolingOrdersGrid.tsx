@@ -1337,12 +1337,24 @@ export function ToolingOrdersGrid() {
             // The order covers exactly one item: the one it was placed for (older orders: PO number, name, kind)
             const targetId = findDeliveryTarget(currentTools, order)?.id;
 
+            // A cancelled order that was the item's only placed one takes the purchase fact with it
+            const otherPlaced = orders.some(
+              (o) =>
+                o.id !== order.id &&
+                !!targetId &&
+                o.toolingItemId === targetId &&
+                o.status !== "Draft" &&
+                o.status !== "Cancelled"
+            );
+            const dropFact = newStatus === "Cancelled" && !otherPlaced;
+
             const updatedTools = currentTools.map((t) => {
               if (t.id !== targetId) return t;
               return {
                 ...t,
                 status: nextToolStatus,
                 ...(delivery ? { deliveryMethod: delivery.deliveryMethod, deliveryCost: delivery.deliveryCost } : {}),
+                ...(dropFact ? { actualCost: undefined } : {}),
               } as WorkOrderToolingItem;
             });
 

@@ -27,6 +27,9 @@ export interface ToolingOrderLink {
   supplierName?: string;
   deliveryMethod?: WorkOrderToolingItem["deliveryMethod"];
   deliveryCost?: number;
+  /** Order total and its currency: the item's purchase fact when the currency matches the item's */
+  amount?: number;
+  currency?: string;
 }
 
 const SIDE_NAME: Record<ToolingSide, string> = { front: "Oldi", back: "Orqa", set: "Komplekt" };
@@ -156,7 +159,9 @@ const SUPPLIER_TO_TOOLING_STATUS: Record<string, WorkOrderToolingItem["status"]>
 /**
  * Supplier orders (Tooling & CTP) are the source of truth for what was ordered from whom, how far it got
  * and what its delivery cost: fold them into the work order's tooling items. Cancelled and draft orders
- * are ignored; several orders landing on one item have their delivery summed.
+ * are ignored; several orders landing on one item have their delivery and amount summed. The summed
+ * amount is the item's actual cost (only orders in the item's currency count); an item whose orders
+ * were all cancelled loses the fact again.
  */
 export function applySupplierOrders(items: WorkOrderToolingItem[], orders: ToolingOrderLink[]): WorkOrderToolingItem[] {
   if (!items.length || !orders.length) return items;
@@ -164,10 +169,14 @@ export function applySupplierOrders(items: WorkOrderToolingItem[], orders: Tooli
   // Items with an order placed for them by id take only those orders; older orders match the rest.
   const linkedIds = new Set(orders.map((o) => o.toolingItemId).filter((id): id is string => !!id));
   const claimed = new Set<string>(linkedIds);
+  const cancelledIds = new Set<string>();
 
   for (const order of orders) {
     const nextStatus = order.status ? SUPPLIER_TO_TOOLING_STATUS[order.status] : undefined;
-    if (!nextStatus) continue;
+    if (!nextStatus) {
+      if (order.status === "Cancelled" && order.toolingItemId) cancelledIds.add(order.toolingItemId);
+      continue;
+    }
     const target = order.toolingItemId
       ? items.find((t) => t.id === order.toolingItemId)
       : findDeliveryTarget(items.filter((t) => !linkedIds.has(t.id)), order, claimed);
@@ -199,7 +208,16 @@ export function applySupplierOrders(items: WorkOrderToolingItem[], orders: Tooli
         prev.deliveryMethod && prev.deliveryMethod !== "included" ? prev.deliveryMethod : order.deliveryMethod;
       patch.deliveryCost = prevCost + cost;
     }
+    const amount = Number(order.amount) || 0;
+    const sameCurrency =
+      (order.currency || "UZS").toUpperCase() === (target.currency || "UZS").toUpperCase();
+    if (amount > 0 && sameCurrency) patch.actualCost = Math.round(((prev.actualCost || 0) + amount) * 100) / 100;
     patches.set(target.id, patch);
+  }
+  for (const id of cancelledIds) {
+    if (patches.has(id)) continue;
+    const item = items.find((t) => t.id === id);
+    if (item && item.actualCost !== undefined) patches.set(id, { actualCost: undefined });
   }
 
   if (patches.size === 0) return items;
@@ -216,6 +234,7 @@ const SUPPLIER_SOURCED_FIELDS = [
   "status",
   "deliveryMethod",
   "deliveryCost",
+  "actualCost",
 ] as const;
 
 /**

@@ -498,7 +498,7 @@ async function queryWorkOrders(companyCode: string, opts: WorkOrderQuery): Promi
     where: and(
       eq(supplierOrders.companyId, companyId),
       inArray(supplierOrders.orderType, ["ctp_plates", "die_tooling", "cliche"]),
-      inArray(supplierOrders.status, ["Ordered", "In_Production", "Ready", "Delivered"]),
+      inArray(supplierOrders.status, ["Ordered", "In_Production", "Ready", "Delivered", "Cancelled"]),
       scoped
         ? or(
             inArray(supplierOrders.workOrderId, pageIds),
@@ -522,6 +522,8 @@ async function queryWorkOrders(companyCode: string, opts: WorkOrderQuery): Promi
       supplierName: o.supplier?.name || undefined,
       deliveryMethod: (o.deliveryMethod as ToolingOrderLink["deliveryMethod"]) || undefined,
       deliveryCost: Number(o.deliveryCost) || 0,
+      amount: Number(o.amount) || 0,
+      currency: o.currency || undefined,
     };
     for (const key of new Set([o.workOrderId, o.workOrderNo?.trim().toLowerCase()].filter(Boolean) as string[])) {
       deliveryByWo.set(key, [...(deliveryByWo.get(key) || []), link]);

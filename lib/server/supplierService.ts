@@ -9,7 +9,8 @@ import {
   type SupplierOrderToolingSpec,
 } from "@/db/schema";
 import { registerDeliveredTooling } from "./toolingRegistrationService";
-import { eq, desc, and, or, sql, ilike } from "drizzle-orm";
+import { eq, desc, and, or, sql, ilike, notInArray } from "drizzle-orm";
+import { toolingOrderTypeOf } from "@/lib/deficits";
 import { getCompanyIdByCode } from "./crmService";
 import { emitNotification } from "./notificationService";
 import { syncPurchaseOrderKeyboard } from "./telegramService";
@@ -21,7 +22,7 @@ import {
 } from "./cashJournalService";
 import { CASH_CATEGORY } from "@/lib/finance/cashCategories";
 import { getInitialToolingItems } from "@/components/documents/work-order/toolingItems";
-import type { WorkOrderFormData, WorkOrderToolingItem } from "@/components/documents/work-order/types";
+import type { ToolingCategory, WorkOrderFormData, WorkOrderToolingItem } from "@/components/documents/work-order/types";
 
 export type SupplierCategory =
   | "raw_materials"
@@ -470,6 +471,86 @@ export async function getAllToolingOrders(
     };
   });
 }
+
+const TOOLING_CATEGORIES: ToolingCategory[] = [
+  "ctp_plates",
+  "die_cutting",
+  "foil_cliche",
+  "emboss_cliche",
+  "varnish_plate",
+  "flexo_polymer",
+];
+
+export interface LastToolingPrice {
+  unitPrice: number;
+  currency: string;
+  supplierId: string;
+  supplierName: string;
+  orderNo: string;
+  orderDate: string;
+}
+
+/**
+ * Unit price of the latest placed supplier order for this kind of tooling, in the same unit and currency.
+ * An order placed for a work-order item is matched by that item's exact category (foil vs emboss cliche,
+ * CTP vs flexo); a free order is used only when its order kind belongs to one category alone.
+ */
+export async function getLastToolingPrice(
+  companyCode: string,
+  query: { category: ToolingCategory; unit: string; currency: string }
+): Promise<LastToolingPrice | null> {
+  const companyId = await getCompanyIdByCode(companyCode);
+  const orderType = toolingOrderTypeOf({ category: query.category } as WorkOrderToolingItem);
+
+  const rows = await db
+    .select({
+      supplierId: supplierOrders.supplierId,
+      supplierName: suppliers.name,
+      orderNo: supplierOrders.orderNo,
+      orderDate: supplierOrders.orderDate,
+      quantity: supplierOrders.quantity,
+      amount: supplierOrders.amount,
+      currency: supplierOrders.currency,
+      toolingItemId: supplierOrders.toolingItemId,
+      dimensions: workOrders.dimensions,
+    })
+    .from(supplierOrders)
+    .innerJoin(suppliers, eq(suppliers.id, supplierOrders.supplierId))
+    .leftJoin(workOrders, eq(workOrders.id, supplierOrders.workOrderId))
+    .where(
+      and(
+        eq(supplierOrders.companyId, companyId),
+        eq(supplierOrders.orderType, orderType),
+        eq(supplierOrders.unit, query.unit),
+        eq(supplierOrders.currency, query.currency),
+        notInArray(supplierOrders.status, ["Draft", "Cancelled"]),
+        sql`${supplierOrders.amount} > 0`,
+        sql`${supplierOrders.quantity} > 0`
+      )
+    )
+    .orderBy(desc(supplierOrders.orderDate), desc(supplierOrders.createdAt))
+    .limit(30);
+
+  const sharedKind = TOOLING_CATEGORIES.filter((c) => toolingOrderTypeOf({ category: c } as WorkOrderToolingItem) === orderType).length > 1;
+  const hit = rows.find((r) => {
+    const items = (r.dimensions as { toolingItems?: WorkOrderToolingItem[] } | null)?.toolingItems;
+    const linked = r.toolingItemId && Array.isArray(items) ? items.find((t) => t.id === r.toolingItemId) : undefined;
+    if (linked) return linked.category === query.category;
+    // "outsourcing" also covers non-tooling work, so an unlinked one never prices a varnish plate
+    return !sharedKind && orderType !== "outsourcing";
+  });
+  if (!hit) return null;
+
+  return {
+    unitPrice: Math.round((Number(hit.amount) / Number(hit.quantity)) * 100) / 100,
+    currency: hit.currency,
+    supplierId: hit.supplierId,
+    supplierName: hit.supplierName,
+    orderNo: hit.orderNo,
+    orderDate: hit.orderDate,
+  };
+}
+
 
 export async function getNextSupplierOrderNo(companyId: string): Promise<string> {
   const currentYear = new Date().getFullYear();

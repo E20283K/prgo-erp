@@ -88,6 +88,7 @@ import {
   Download,
   Eye,
   X,
+  History,
 } from "lucide-react";
 import {
   WorkOrderToolingItem,
@@ -97,6 +98,7 @@ import {
   OrderAttachment,
 } from "../types";
 import { toolingDeliveryCost, toolingItemTotalCost } from "../toolingItems";
+import type { LastToolingPrice } from "@/lib/server/supplierService";
 import { ComboboxSelect, type ComboboxOption } from "@/components/ui/combobox";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useShallow } from "zustand/react/shallow";
@@ -287,6 +289,39 @@ export function PrepressToolingTab({
       setItemOrders([]);
     };
   }, [editingItemId, editingItemPo, docNo]);
+  // Latest supplier price for this kind of tooling; a new item takes it until the user types a price
+  const [lastPrice, setLastPrice] = useState<LastToolingPrice | null>(null);
+  const [priceTouched, setPriceTouched] = useState(false);
+  const editingIsNew = isAddEditOpen && !!editingItem && !editingItem.id;
+  const editingCategory = isAddEditOpen ? editingItem?.category : undefined;
+  const editingUnit = editingItem?.unit || "dona";
+  const editingCurrency = (editingItem?.currency || formData.currency || "UZS").toUpperCase();
+  useEffect(() => {
+    if (!editingCategory) return;
+    let cancelled = false;
+    const qs = new URLSearchParams({ category: editingCategory, unit: editingUnit, currency: editingCurrency });
+    fetch(`/api/v1/production/tooling-orders/last-price?${qs}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled || !json?.success) return;
+        setLastPrice(json.data || null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      setLastPrice(null);
+    };
+  }, [editingCategory, editingUnit, editingCurrency]);
+  useEffect(() => {
+    if (!editingIsNew || priceTouched || !lastPrice) return;
+    setEditingItem((prev) =>
+      prev ? { ...prev, estimatedCost: Math.round(lastPrice.unitPrice * Math.max(1, prev.quantity || 1) * 100) / 100 } : prev
+    );
+  }, [editingIsNew, priceTouched, lastPrice]);
+  useEffect(() => {
+    if (!isAddEditOpen) setPriceTouched(false);
+  }, [isAddEditOpen]);
+
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
   const imageFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const cadFileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -1726,7 +1761,9 @@ export function PrepressToolingTab({
                         ? Math.round(((editingItem.estimatedCost || 0) / editingItem.quantity) * 100) / 100
                         : 0
                     }
-                    onValueChange={(values) => {
+                    onValueChange={(values, info) => {
+                      if (info.source !== "event") return;
+                      setPriceTouched(true);
                       const uPrice = values.floatValue ?? 0;
                       const qty = editingItem.quantity || 1;
                       setEditingItem((prev) => ({
@@ -1749,16 +1786,50 @@ export function PrepressToolingTab({
                     thousandSeparator=" "
                     decimalScale={2}
                     value={editingItem.estimatedCost || 0}
-                    onValueChange={(values) =>
+                    onValueChange={(values, info) => {
+                      if (info.source !== "event") return;
+                      setPriceTouched(true);
                       setEditingItem((prev) => ({
                         ...prev,
                         estimatedCost: values.floatValue ?? 0,
-                      }))
-                    }
+                      }));
+                    }}
                     className="h-8 text-xs font-mono bg-background font-semibold"
                   />
                 </div>
               </div>
+
+              {lastPrice && (
+                <div className="flex items-center gap-1.5 -mt-1 text-[11px] text-muted-foreground min-w-0">
+                  <History className="size-3.5 shrink-0" />
+                  <span className="truncate" title={`${lastPrice.supplierName} · ${lastPrice.orderNo} · ${lastPrice.orderDate}`}>
+                    Oxirgi narx:{" "}
+                    <span className="font-mono text-foreground">
+                      {lastPrice.unitPrice.toLocaleString("uz-UZ")} {lastPrice.currency}
+                    </span>{" "}
+                    · {lastPrice.supplierName} · {lastPrice.orderNo} · {lastPrice.orderDate}
+                  </span>
+                  {Math.abs(
+                    lastPrice.unitPrice -
+                      (editingItem.estimatedCost || 0) / Math.max(1, editingItem.quantity || 1)
+                  ) >= 0.01 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPriceTouched(false);
+                        setEditingItem((prev) => ({
+                          ...prev,
+                          estimatedCost:
+                            Math.round(lastPrice.unitPrice * Math.max(1, prev?.quantity || 1) * 100) / 100,
+                        }));
+                      }}
+                      className="shrink-0 h-6 px-2 rounded border border-border bg-card hover:bg-muted text-foreground font-medium"
+                    >
+                      Qo&apos;llash
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Row 5: Storage Location */}
               <div className="space-y-1.5">
