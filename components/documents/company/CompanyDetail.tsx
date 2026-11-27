@@ -169,25 +169,23 @@ export function CompanyDetail({ tab }: CompanyDetailProps) {
     if (!currentCode || hasCollision) {
       const nextCode = generateNextPlantCode(companiesList.map((c) => c.code));
       if (nextCode !== plantData.code) {
-        setPlantData((prev) => {
-          const next = { ...prev, code: nextCode };
-          updateTabData(tab.id, next);
-          return next;
-        });
-      }
-    }
-  }, [companiesList, plantData.id, plantData.code, tab.id, updateTabData]);
-
-  const handleUpdate = (updated: Partial<PlantRecord>) => {
-    setPlantData((prev) => {
-      const next = { ...prev, ...updated };
-      if (updated.name && updated.name.trim()) {
-        updateTabData(tab.id, next, updated.name.trim());
-      } else {
+        const next = { ...plantData, code: nextCode };
+        setPlantData(next);
         updateTabData(tab.id, next);
       }
-      return next;
-    });
+    }
+  }, [companiesList, plantData, tab.id, updateTabData]);
+
+  const handleUpdate = (updated: Partial<PlantRecord>) => {
+    // The store is updated outside the state updater: React runs updaters during
+    // render, and a store write there re-renders other components mid-render.
+    const next = { ...plantData, ...updated };
+    setPlantData(next);
+    if (updated.name && updated.name.trim()) {
+      updateTabData(tab.id, next, updated.name.trim());
+    } else {
+      updateTabData(tab.id, next);
+    }
     setTabUnsaved(tab.id, true);
     setIsSaved(false);
   };
