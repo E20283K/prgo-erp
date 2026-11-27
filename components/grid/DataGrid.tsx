@@ -185,6 +185,30 @@ function previewSized(url: string, width: number): string {
   return url.startsWith("/api/v1/storage/file?") ? `${url}&w=${width}` : url;
 }
 
+const STATUS_FILTER_KEY = "printgoo.workOrders.statusFilter";
+const TECH_FILTER_KEY = "printgoo.workOrders.techFilter";
+const STATUS_FILTER_VALUES = ["ALL", "Active", "Draft", "In Production", "Completed", "Cancelled"];
+const TECH_FILTER_VALUES = ["ALL", "Offset", "Flexo", "Jacquard", "Termo", "Post-press"];
+
+function readStoredFilter(key: string, allowed: string[]): string {
+  if (typeof window === "undefined") return "ALL";
+  try {
+    const value = window.localStorage.getItem(key);
+    return value && allowed.includes(value) ? value : "ALL";
+  } catch {
+    return "ALL";
+  }
+}
+
+function writeStoredFilter(key: string, value: string) {
+  try {
+    if (value === "ALL") window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    // storage blocked: the filter still applies for this visit
+  }
+}
+
 export function DataGrid() {
   const tGrid = useTranslations("DataGrid");
   const tCommon = useTranslations("Common");
@@ -248,8 +272,17 @@ export function DataGrid() {
   const [calendarSubMode, setCalendarSubMode] = useState<"month" | "week" | "day">("month");
   const [searchFilter, setSearchFilter] = useState("");
   const searchInputRef = useFindShortcut();
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [techFilter, setTechFilter] = useState<string>("ALL");
+  // Status and route pills are remembered in this browser until the user picks others
+  const [statusFilter, setStatusFilter] = useState<string>(() => readStoredFilter(STATUS_FILTER_KEY, STATUS_FILTER_VALUES));
+  const [techFilter, setTechFilter] = useState<string>(() => readStoredFilter(TECH_FILTER_KEY, TECH_FILTER_VALUES));
+
+  useEffect(() => {
+    writeStoredFilter(STATUS_FILTER_KEY, statusFilter);
+  }, [statusFilter]);
+
+  useEffect(() => {
+    writeStoredFilter(TECH_FILTER_KEY, techFilter);
+  }, [techFilter]);
 
   // ── Registry pages: the server filters and returns 100 orders at a time, newest first ──
   const [pagedOrders, setPagedOrders] = useState<ProductionQueueItem[]>([]);
