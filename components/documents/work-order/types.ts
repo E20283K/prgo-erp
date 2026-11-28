@@ -1059,7 +1059,7 @@ export interface WorkOrderFormData {
   flexoColors?: number;
   // Textile & Flexo / Jacquard Ribbon Label Specifics
   labelFoldType?: "straight_cut" | "center_fold" | "end_fold" | "mitre_fold" | "manhattan_fold" | "roll";
-  labelCutType?: "ultrasonic" | "hot_knife" | "cold_knife" | "laser";
+  labelCutType?: "none" | "ultrasonic" | "hot_knife" | "cold_knife" | "laser";
   labelMaterialType?: string;
   labelEdgeType?: "woven_edge" | "hot_slit" | "ultrasonic_slit";
   labelWashResistance?: "40c" | "60c" | "90c_boil" | "dry_clean";

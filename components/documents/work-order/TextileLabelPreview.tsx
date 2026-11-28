@@ -109,6 +109,8 @@ export function TextileLabelPreview({
   // Cut Type Label
   const getCutLabel = () => {
     switch (cutType) {
+      case "none":
+        return "Kesilmaydi";
       case "ultrasonic":
         return "Ultrasonik (Yumshoq qirra)";
       case "hot_knife":

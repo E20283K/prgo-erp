@@ -68,6 +68,7 @@ FOLD_LABELS = {
     "roll": "Rulonda, kesilmagan",
 }
 CUT_LABELS = {
+    "none": "Kesilmaydi",
     "ultrasonic": "Ultrasonik",
     "hot_knife": "Issiq pichoq",
     "cold_knife": "Sovuq pichoq",
@@ -197,7 +198,7 @@ def kpis(tech: str, x: SimpleNamespace) -> List[Tuple[str, str, str]]:
         ]
     r = x.roll
     rolls = f"{_fmt_int(r.rolls)} rulon × {_fmt_int(r.per_roll)}" if r.rolls and r.per_roll else ""
-    across = f"{r.lanes} ruchey" + (f" × {r.around} aylanish" if r.around else "")
+    across = f"{r.lanes} qator" + (f" × {r.around} aylanish" if r.around else "")
     return [
         (net_label, net_val, "#1d4ed8"),
         ("Metraj", f"{_fmt_int(r.metres)} m" if r.metres else "—", "#0f172a"),
@@ -267,7 +268,7 @@ def spec_rows(tech: str, x: SimpleNamespace) -> List[Tuple[str, str]]:
         ("Ombordagi material", stock),
         ("Rulon eni", f"{r.web:g} mm" if r.web else "—"),
         ("Oraliq X / Y", f"{r.gap_x:g} / {r.gap_y:g} mm"),
-        ("Ruchey", f"{r.lanes}"),
+        ("Qator", f"{r.lanes}"),
         ("Rulonlar", rolls),
         ("Gilza", f"{r.core:g} mm" if r.core else "—"),
         ("O'rash", winding),

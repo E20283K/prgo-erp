@@ -208,6 +208,7 @@ const FOLD_TYPE_LABELS: Record<string, string> = {
 };
 
 const CUT_TYPE_LABELS: Record<string, string> = {
+  none: "Kesilmaydi",
   ultrasonic: "Ultrasonik (Soft edge)",
   laser: "Lazerli kesim",
   hot_knife: "Issiq pichoq (Hot cut)",

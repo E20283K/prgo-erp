@@ -178,6 +178,7 @@ const LABEL_FOLD_OPTIONS: ComboboxOption[] = [
 ];
 
 const LABEL_CUT_OPTIONS: ComboboxOption[] = [
+  { value: "none", label: "Kesilmaydi" },
   { value: "ultrasonic", label: "Ultrasonik kesim (Yumshoq, terini qichitmaydi)" },
   { value: "hot_knife", label: "Issiq pichoq (Hot knife - erigan qirra)" },
   { value: "cold_knife", label: "Sovuq pichoq (Cold knife)" },
@@ -1414,7 +1415,7 @@ export function SpecificationsTab({
 
               <div className="grid grid-cols-4 gap-2">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Ruchey</label>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">Qator</label>
                   <Input
                     type="number"
                     min={1}
