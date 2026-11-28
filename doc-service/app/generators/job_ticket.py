@@ -1188,11 +1188,15 @@ def generate_job_ticket_pdf(req: JobTicketPdfRequest):
     def draw_footer(page_num: int, title: str):
         c.setStrokeColor(colors.HexColor("#cbd5e1"))
         c.setLineWidth(0.5)
-        c.line(margin_x, y_mm(287.0), page_w - margin_x, y_mm(287.0))
+        c.line(margin_x, y_mm(285.6), page_w - margin_x, y_mm(285.6))
+        # Planning data can be wrong or stale: the shop floor checks with the planners, not guesses
+        c.setFillColor(colors.HexColor("#b45309"))
+        c.setFont(FONT_BOLD, 6.6)
+        c.drawCentredString(page_w / 2, y_mm(289.0), L["footerWarning"])
         c.setFillColor(colors.HexColor("#64748b"))
         c.setFont(FONT_REGULAR, 6.0)
-        c.drawString(margin_x, y_mm(291.0), f"{L['footerSystem']} • DOC: {doc_no} • {title}")
-        c.drawRightString(page_w - margin_x, y_mm(291.0),
+        c.drawString(margin_x, y_mm(292.4), f"{L['footerSystem']} • DOC: {doc_no} • {title}")
+        c.drawRightString(page_w - margin_x, y_mm(292.4),
                           f"{L['printDate']}: {datetime.now().strftime('%Y-%m-%d %H:%M')} • Sahifa {page_num} / 2")
 
     draw_footer(1, profiles.FOOTER_TITLES[tech])

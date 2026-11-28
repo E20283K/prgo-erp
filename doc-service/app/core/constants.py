@@ -87,6 +87,8 @@ DEFAULT_JOB_TICKET_LABELS = {
     "pass": "O'TDÍ",
     "footerSystem": "PrintGoo ERP Industrial Print OS",
     "printDate": "Chop etildi",
+    "footerWarning": "DIQQAT: hujjatda xatolik bo'lishi mumkin. Tushunmovchilik bo'lsa, "
+                     "rejalashtiruvchi menejerlardan aniqlashtiring.",
 }
 
 def trunc(text: Any, max_len: int) -> str:
