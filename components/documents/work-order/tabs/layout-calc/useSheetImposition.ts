@@ -719,6 +719,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
           cut_style: settings.cutStyle,
           style: settings.templateStyle,
           colors: colorChannels,
+          color_bar: !!settings.colorBar,
         },
         export_separate_files: settings.exportSeparate,
         include_proof_overlay: settings.category === "diecut",
@@ -744,7 +745,7 @@ export function useSheetImposition(props: LayoutCalcTabProps) {
     } finally {
       setBusy(null);
     }
-  }, [analysisStale, runAnalyze, analysis, effectiveParams, variantInputs, docNo, orderName, settings.category, settings.cutStyle, settings.templateStyle, settings.exportSeparate, colorChannels, onAddAttachment]);
+  }, [analysisStale, runAnalyze, analysis, effectiveParams, variantInputs, docNo, orderName, settings.category, settings.cutStyle, settings.templateStyle, settings.exportSeparate, settings.colorBar, colorChannels, onAddAttachment]);
 
   // ---------------------------------------------------------------- persist settings on the order
   useEffect(() => {

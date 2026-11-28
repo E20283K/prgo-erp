@@ -329,7 +329,8 @@ class ImpositionEngine:
                 colors=job.colors,
                 side_name="Orqa",
                 sheet_form_str=job.sheet_form_str,
-                custom_notes=job.custom_notes
+                custom_notes=job.custom_notes,
+                color_bar=job.color_bar
             )
             back_sheet_doc = self._create_sheet_page(
                 src_doc=back_doc,
@@ -362,7 +363,8 @@ class ImpositionEngine:
                 colors=job.colors,
                 side_name="Pichoq (Die-cut)",
                 sheet_form_str=job.sheet_form_str,
-                custom_notes=job.custom_notes
+                custom_notes=job.custom_notes,
+                color_bar=job.color_bar
             )
             die_sheet_doc = self._create_sheet_page(
                 src_doc=die_doc,
@@ -539,7 +541,8 @@ class ImpositionEngine:
                     colors=job.colors,
                     side_name=side_front_label,
                     sheet_form_str=job.sheet_form_str,
-                    custom_notes=summary_notes
+                    custom_notes=summary_notes,
+                    color_bar=job.color_bar
                 )
                 front_sheet_doc = self._create_multi_sheet_page(
                     source_resolver=resolve_front_source,
@@ -590,7 +593,8 @@ class ImpositionEngine:
                         colors=job.colors,
                         side_name=side_back_label,
                         sheet_form_str=job.sheet_form_str,
-                        custom_notes=summary_notes
+                        custom_notes=summary_notes,
+                        color_bar=job.color_bar
                     )
                     back_sheet_doc = self._create_multi_sheet_page(
                         source_resolver=resolve_back_source,
@@ -625,7 +629,8 @@ class ImpositionEngine:
                             colors=job.colors,
                             side_name="Pichoq (Die-cut)",
                             sheet_form_str=job.sheet_form_str,
-                            custom_notes=summary_notes
+                            custom_notes=summary_notes,
+                            color_bar=job.color_bar
                         )
                         die_sheet_doc = self._create_sheet_page(
                             src_doc=die_doc,
@@ -855,17 +860,7 @@ class ImpositionEngine:
                 is_dieline_overlay=is_dieline
             )
 
-        marks_pdf_bytes = MarksGenerator.create_marks_pdf_bytes(
-            sheet=sheet,
-            bg_config=bg_config,
-            items=items,
-            job=job,
-            style=style,
-            is_dieline_sheet=is_dieline
-        )
-        marks_doc = pymupdf.open(stream=marks_pdf_bytes, filetype="pdf")
-        sheet_page.show_pdf_page(sheet_page.rect, marks_doc, 0)
-        marks_doc.close()
+        MarksGenerator.apply_to_page(sheet_page, sheet, bg_config, items, job, style, is_dieline)
 
         return page_doc
 
@@ -938,19 +933,10 @@ class ImpositionEngine:
             colors=job.colors,
             side_name=side_title,
             sheet_form_str=job.sheet_form_str,
-            custom_notes=job.custom_notes
+            custom_notes=job.custom_notes,
+            color_bar=job.color_bar
         )
-        marks_bytes = MarksGenerator.create_marks_pdf_bytes(
-            sheet=sheet,
-            bg_config=bg_config,
-            items=items,
-            job=job_proof,
-            style=style,
-            is_dieline_sheet=False
-        )
-        marks_doc = pymupdf.open(stream=marks_bytes, filetype="pdf")
-        sheet_page.show_pdf_page(sheet_page.rect, marks_doc, 0)
-        marks_doc.close()
+        MarksGenerator.apply_to_page(sheet_page, sheet, bg_config, items, job_proof, style, False)
 
         return page_doc
 

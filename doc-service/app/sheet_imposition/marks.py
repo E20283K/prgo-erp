@@ -3,11 +3,15 @@ Marks Generator: Texnik belgilar, Krop chiziqlari, Rang shkalasi (Color Bar) va 
 """
 
 import io
+import json
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional, Tuple
 from reportlab.lib.colors import CMYKColor, CMYKColorSep
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
+import pymupdf
 
 from .models import (
     SheetConfig,
@@ -45,6 +49,30 @@ COLOR_BAR_SQ_H = 3.5 * MM_TO_PT
 COLOR_BAR_MIN_H = 1.5 * MM_TO_PT
 COLOR_BAR_CENTER_GAP = 12.0 * MM_TO_PT  # Yuqori markaziy krest atrofidagi toza zona (har tarafga)
 
+# Korxona rang shkalasi (CMYK vektor PDF, scripts/build_color_bar.py yasaydi)
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+COLOR_BAR_PDF = ASSETS_DIR / "color_bar.pdf"
+COLOR_BAR_META = ASSETS_DIR / "color_bar.json"
+
+
+@lru_cache(maxsize=1)
+def _color_bar_meta() -> Optional[dict]:
+    try:
+        return json.loads(COLOR_BAR_META.read_text(encoding="utf-8")) if COLOR_BAR_PDF.exists() else None
+    except (OSError, ValueError):
+        return None
+
+
+@dataclass
+class ColorBarPlacement:
+    """Shkalaning list ustidagi o'rni (pt, PyMuPDF koordinatasi: y yuqoridan)."""
+    x0: float        # shkala boshi (list chetidan chiqib ketishi mumkin)
+    y_top: float
+    width: float
+    height: float
+    clip_x0: float   # list ichida ko'rinadigan qism
+    clip_x1: float
+
 
 @dataclass
 class FreeZones:
@@ -79,8 +107,11 @@ class MarksGenerator:
         canv = canvas.Canvas(packet, pagesize=(sheet.width_pt, sheet.height_pt))
 
         zones = MarksGenerator._free_zones(sheet, bg_config, items)
+        bar = MarksGenerator.color_bar_placement(sheet, bg_config, zones, bool(items)) if job.color_bar and not is_dieline_sheet else None
+        # Korxona shkalasi joylashsa, eski kvadrat shkala chizilmaydi
         with_color_bar = (
-            style in (TemplateStyle.STANDARD_COLORBAR, TemplateStyle.PACKAGING_DIE_CUT, TemplateStyle.OFFSET_STANDARD)
+            bar is None
+            and style in (TemplateStyle.STANDARD_COLORBAR, TemplateStyle.PACKAGING_DIE_CUT, TemplateStyle.OFFSET_STANDARD)
             and not is_dieline_sheet
         )
 
@@ -88,7 +119,8 @@ class MarksGenerator:
         MarksGenerator._draw_crop_marks(canv, sheet, bg_config, items)
 
         # 2. Privodka krestlarini (Registration Marks) chizish
-        MarksGenerator._draw_registration_marks(canv, sheet, zones)
+        # Shkala yuqori tasmani to'liq egallaydi — yuqori markaziy krest uning ustiga tushmasligi uchun olib tashlanadi
+        MarksGenerator._draw_registration_marks(canv, sheet, zones, skip_top=bar is not None)
 
         # 3. Rang shkalasini (Color Bar) chizish (agar Standard yoki tegishli shablon bo'lsa)
         if with_color_bar:
@@ -97,7 +129,8 @@ class MarksGenerator:
         # 4. Yon tomondagi pasport yozuvlari (Metadata)
         MarksGenerator._draw_sheet_metadata(
             canv, sheet, bg_config, zones, job, style, is_dieline_sheet,
-            MarksGenerator._color_bar_span(sheet, zones, job.colors) if with_color_bar else None,
+            (bar.clip_x0, bar.clip_x1) if bar
+            else MarksGenerator._color_bar_span(sheet, zones, job.colors) if with_color_bar else None,
         )
 
         # 5. Klapan (Gripper) va Verniy burchak texnik belgilarini chizish
@@ -107,6 +140,74 @@ class MarksGenerator:
         canv.save()
         packet.seek(0)
         return packet.getvalue()
+
+    @staticmethod
+    def apply_to_page(
+        page: "pymupdf.Page",
+        sheet: SheetConfig,
+        bg_config: BleedAndGutterConfig,
+        items: List[PlacedItem],
+        job: JobMetadata,
+        style: TemplateStyle,
+        is_dieline_sheet: bool = False,
+    ) -> None:
+        """Texnik qatlamni va (so'ralgan bo'lsa) korxona shkalasini list sahifasiga qo'yadi."""
+        marks_bytes = MarksGenerator.create_marks_pdf_bytes(
+            sheet=sheet, bg_config=bg_config, items=items, job=job, style=style, is_dieline_sheet=is_dieline_sheet
+        )
+        with pymupdf.open(stream=marks_bytes, filetype="pdf") as marks_doc:
+            page.show_pdf_page(page.rect, marks_doc, 0)
+
+        if not job.color_bar or is_dieline_sheet:
+            return
+        bar = MarksGenerator.color_bar_placement(
+            sheet, bg_config, MarksGenerator._free_zones(sheet, bg_config, items), bool(items)
+        )
+        if bar is None:
+            return
+        with pymupdf.open(str(COLOR_BAR_PDF)) as bar_doc:
+            src = bar_doc[0].rect
+            k = src.width / bar.width
+            clip = pymupdf.Rect((bar.clip_x0 - bar.x0) * k, 0, (bar.clip_x1 - bar.x0) * k, src.height)
+            target = pymupdf.Rect(bar.clip_x0, bar.y_top, bar.clip_x1, bar.y_top + bar.height)
+            page.show_pdf_page(target, bar_doc, 0, clip=clip)
+
+    @staticmethod
+    def color_bar_placement(
+        sheet: SheetConfig, bg_config: BleedAndGutterConfig, zones: FreeZones, has_items: bool = True
+    ) -> Optional[ColorBarPlacement]:
+        """
+        Shkala qo'yish qoidalari:
+        1. Bosish yo'nalishiga perpendikulyar, klapan (gripper) chetiga parallel — klapanga qarama-qarshi
+           (orqa, yuqori) bo'sh tasmaga; klapan zonasiga hech qachon tushmaydi.
+        2. O'lchami o'zgartirilmaydi (densitometr/spektrofotometr kataklari 1:1 bo'lishi shart):
+           tasma tor bo'lsa shkala qo'yilmaydi.
+        3. Shkaladagi bosma markazi uchburchagi (▲) list markaziga — mashina o'qiga — to'g'rilanadi,
+           shunda bo'yoq zonalari raqamlari mashina zonalariga mos keladi.
+        4. List chetidan (gilotina xatoligi), montaj blokining tashqi fonidan va yuqori krop
+           chiziqlaridan xavfsiz masofada; listdan chiqqan qismi kesib tashlanadi.
+        """
+        meta = _color_bar_meta()
+        if not meta:
+            return None
+        w = meta["width_mm"] * MM_TO_PT
+        h = meta["height_mm"] * MM_TO_PT
+        # Krop chiziqlari tashqi fondan tashqariga chiqadigan qism ham band
+        crop_reach = (
+            max(0.0, bg_config.crop_offset_pt + bg_config.crop_length_mm * MM_TO_PT - bg_config.outer_bleed_pt)
+            if has_items else 0.0
+        )
+        lo, hi = EDGE_SAFE_PT, zones.top - max(crop_reach, 0.0) - BLEED_SAFE_PT
+        if hi - lo < h:
+            return None
+        x0 = sheet.width_pt / 2.0 - meta["press_center_mm"] * MM_TO_PT
+        clip_x0 = max(x0, EDGE_SAFE_PT)
+        clip_x1 = min(x0 + w, sheet.width_pt - EDGE_SAFE_PT)
+        if clip_x1 - clip_x0 <= 0:
+            return None
+        return ColorBarPlacement(
+            x0=x0, y_top=(lo + hi) / 2.0 - h / 2.0, width=w, height=h, clip_x0=clip_x0, clip_x1=clip_x1
+        )
 
     @staticmethod
     def _free_zones(sheet: SheetConfig, bg_config: BleedAndGutterConfig, items: List[PlacedItem]) -> FreeZones:
@@ -198,7 +299,7 @@ class MarksGenerator:
         canv.restoreState()
 
     @staticmethod
-    def _draw_registration_marks(canv: canvas.Canvas, sheet: SheetConfig, zones: FreeZones):
+    def _draw_registration_marks(canv: canvas.Canvas, sheet: SheetConfig, zones: FreeZones, skip_top: bool = False):
         """
         Qog'ozning 4 chetiga privodka krestlarini (doira + krest) chizish.
         Krest o'z tomonidagi bo'sh tasma markaziga qo'yiladi va unga sig'adigan qilib
@@ -214,7 +315,7 @@ class MarksGenerator:
         # (markaz x, markaz y, tasma kengligi) — tepa, past, chap, o'ng
         marks = [
             (w / 2.0, zones.bottom / 2.0, zones.bottom),
-            (w / 2.0, h - zones.top / 2.0, zones.top),
+            (w / 2.0, h - zones.top / 2.0, 0.0 if skip_top else zones.top),
             (zones.left / 2.0, h / 2.0, zones.left),
             (w - zones.right / 2.0, h / 2.0, zones.right),
         ]

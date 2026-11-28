@@ -6,10 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Section, SelectField } from "../components/fields";
 import type { SheetImpositionController } from "../useSheetImposition";
+import { colorBarMinBand, colorBarPlacement, cropReach, topFreeBand } from "../colorBar";
 
 export function OutputPanel({ c, readOnly }: { c: SheetImpositionController; readOnly?: boolean }) {
   const s = c.settings;
   const files = c.generated?.files ?? [];
+  const barCells = c.calc?.forms[0]?.front_cells ?? [];
+  const topBand = topFreeBand(barCells, s.marginTop, s.outerBleed);
+  const barReach = cropReach(s.cropGap, barCells.length > 0);
+  const barMissing = !!s.colorBar && !colorBarPlacement(s.sheetW, topBand, barReach);
 
   return (
     <Section title="Montaj" icon={FileOutput}>
@@ -31,7 +36,17 @@ export function OutputPanel({ c, readOnly }: { c: SheetImpositionController; rea
           <span className="text-muted-foreground">Alohida fayllar</span>
           <Switch size="sm" checked={s.exportSeparate} disabled={readOnly} onCheckedChange={(v) => c.update({ exportSeparate: v })} />
         </label>
+        <label className="h-7 flex items-center justify-between gap-2 text-xs col-span-2">
+          <span className="text-muted-foreground">CMYK shkala</span>
+          <Switch size="sm" checked={!!s.colorBar} disabled={readOnly} onCheckedChange={(v) => c.update({ colorBar: v })} />
+        </label>
       </div>
+
+      {barMissing && (
+        <div className="text-[11px] text-destructive font-mono">
+          Shkalaga joy yo&apos;q: {topBand.toFixed(1)} / {colorBarMinBand(barReach).toFixed(1)} mm
+        </div>
+      )}
 
       <div className="flex items-center gap-1.5">
         <Button

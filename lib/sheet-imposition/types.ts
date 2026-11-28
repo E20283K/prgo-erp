@@ -190,6 +190,8 @@ export interface JobInfo {
   cut_style: CutStyle;
   style: TemplateStyle;
   colors?: ColorChannel[] | null;
+  /** Korxona CMYK shkalasi (FOGRA/Prinect) — klapanga qarama-qarshi chetda */
+  color_bar?: boolean;
 }
 
 export interface GenerateRequest extends LayoutParams {

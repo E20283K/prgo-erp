@@ -222,6 +222,7 @@ class JobInfoSchema(BaseModel):
     cut_style: CutStyleLiteral = "double"
     style: StyleLiteral = "offset_standard"
     colors: Optional[List[ColorChannelSchema]] = None
+    color_bar: bool = False
 
 
 class GenerateRequest(LayoutParamsSchema):

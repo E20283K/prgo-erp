@@ -9,6 +9,7 @@ import { variantColor } from "../components/variantColor";
 import type { SheetImpositionController } from "../useSheetImposition";
 import { ZoomSvg } from "./ZoomSvg";
 import { CutPlanView } from "./CutPlanView";
+import { COLOR_BAR, colorBarPlacement, cropReach, topFreeBand } from "../colorBar";
 
 const PdfViewer = dynamic(() => import("@/components/file-viewer/PdfViewer"), { ssr: false });
 
@@ -51,6 +52,10 @@ function SchemeView({ c, formIdx, side }: { c: SheetImpositionController; formId
     };
   }, [cells]);
 
+  const bar = s.colorBar
+    ? colorBarPlacement(W, topFreeBand(cells, s.marginTop, s.outerBleed), cropReach(s.cropGap, cells.length > 0))
+    : null;
+
   return (
     <ZoomSvg W={W} H={H}>
       {(stroke) => (
@@ -83,6 +88,20 @@ function SchemeView({ c, formIdx, side }: { c: SheetImpositionController; formId
                   KLAPAN {s.marginBottom} mm
                 </text>
               </>
+            )}
+
+            {/* CMYK shkala: klapanga qarama-qarshi chetda, ▲ list markazida (engine bilan bir xil) */}
+            {bar && (
+              <svg x={bar.clipX0} y={bar.yTop} width={bar.clipX1 - bar.clipX0} height={COLOR_BAR.heightMm} overflow="hidden">
+                <image
+                  href={COLOR_BAR.src}
+                  x={bar.x0 - bar.clipX0}
+                  y={0}
+                  width={COLOR_BAR.widthMm}
+                  height={COLOR_BAR.heightMm}
+                  preserveAspectRatio="none"
+                />
+              </svg>
             )}
 
             {/* Bleed (fon) behind each cell, as the engine extends artwork: outer edges of the block

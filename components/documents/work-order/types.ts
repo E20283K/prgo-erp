@@ -1154,6 +1154,8 @@ export interface PersistedImpositionState {
   cutStyle: "single" | "double";
   templateStyle: "standard" | "compact" | "packaging" | "offset_standard" | "digital_compact";
   exportSeparate: boolean;
+  /** Korxona CMYK shkalasini (FOGRA/Prinect) klapanga qarama-qarshi chetga qo'yish */
+  colorBar?: boolean;
   jobId?: string;
   pdfUrl?: string;
   /** First page preview (PNG) of the generated montaj, doc-service cache URL */

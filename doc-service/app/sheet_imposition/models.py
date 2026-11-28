@@ -202,6 +202,7 @@ class JobMetadata:
     custom_notes: str = ""
     category: JobCategory = JobCategory.GUILLOTINE # Oddiy Gilotin yoki Pichoqli
     cut_style: GuillotineCutStyle = GuillotineCutStyle.DOUBLE_CUT # 1 ta yoki 2 ta pichoq
+    color_bar: bool = False                # Korxona shkalasi (FOGRA/Prinect) — klapanga qarama-qarshi chetda
 
 
 @dataclass

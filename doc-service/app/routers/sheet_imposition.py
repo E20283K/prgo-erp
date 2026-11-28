@@ -537,6 +537,7 @@ def generate_imposition(job_id: str, req: GenerateRequest):
         custom_notes=job_in.custom_notes,
         category=JobCategory(job_in.category),
         cut_style=GuillotineCutStyle(job_in.cut_style),
+        color_bar=job_in.color_bar,
     )
 
     out_dir = job_dir / "out"
