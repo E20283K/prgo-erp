@@ -4,6 +4,7 @@ Marks Generator: Texnik belgilar, Krop chiziqlari, Rang shkalasi (Color Bar) va 
 
 import io
 import json
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -64,14 +65,24 @@ def _color_bar_meta() -> Optional[dict]:
 
 
 @dataclass
+class ColorBarSegment:
+    """Shkalaning bitta nusxasi: boshlanishi va list ustida ko'rinadigan qismi (pt)."""
+    origin_x: float  # nusxa boshi (dizayn yoki list chetidan tashqarida bo'lishi mumkin)
+    clip_x0: float
+    clip_x1: float
+
+
+@dataclass
 class ColorBarPlacement:
     """Shkalaning list ustidagi o'rni (pt, PyMuPDF koordinatasi: y yuqoridan)."""
-    x0: float        # shkala boshi (list chetidan chiqib ketishi mumkin)
     y_top: float
-    width: float
+    width: float     # bitta nusxa kengligi
     height: float
-    clip_x0: float   # list ichida ko'rinadigan qism
-    clip_x1: float
+    segments: List[ColorBarSegment]
+
+    @property
+    def span(self) -> Tuple[float, float]:
+        return self.segments[0].clip_x0, self.segments[-1].clip_x1
 
 
 @dataclass
@@ -107,7 +118,7 @@ class MarksGenerator:
         canv = canvas.Canvas(packet, pagesize=(sheet.width_pt, sheet.height_pt))
 
         zones = MarksGenerator._free_zones(sheet, bg_config, items)
-        bar = MarksGenerator.color_bar_placement(sheet, bg_config, zones, bool(items)) if job.color_bar and not is_dieline_sheet else None
+        bar = MarksGenerator.color_bar_placement(sheet, bg_config, zones, items) if job.color_bar and not is_dieline_sheet else None
         # Korxona shkalasi joylashsa, eski kvadrat shkala chizilmaydi
         with_color_bar = (
             bar is None
@@ -129,7 +140,7 @@ class MarksGenerator:
         # 4. Yon tomondagi pasport yozuvlari (Metadata)
         MarksGenerator._draw_sheet_metadata(
             canv, sheet, bg_config, zones, job, style, is_dieline_sheet,
-            (bar.clip_x0, bar.clip_x1) if bar
+            bar.span if bar
             else MarksGenerator._color_bar_span(sheet, zones, job.colors) if with_color_bar else None,
         )
 
@@ -161,53 +172,79 @@ class MarksGenerator:
         if not job.color_bar or is_dieline_sheet:
             return
         bar = MarksGenerator.color_bar_placement(
-            sheet, bg_config, MarksGenerator._free_zones(sheet, bg_config, items), bool(items)
+            sheet, bg_config, MarksGenerator._free_zones(sheet, bg_config, items), items
         )
         if bar is None:
             return
         with pymupdf.open(str(COLOR_BAR_PDF)) as bar_doc:
             src = bar_doc[0].rect
             k = src.width / bar.width
-            clip = pymupdf.Rect((bar.clip_x0 - bar.x0) * k, 0, (bar.clip_x1 - bar.x0) * k, src.height)
-            target = pymupdf.Rect(bar.clip_x0, bar.y_top, bar.clip_x1, bar.y_top + bar.height)
-            page.show_pdf_page(target, bar_doc, 0, clip=clip)
+            for seg in bar.segments:
+                clip = pymupdf.Rect((seg.clip_x0 - seg.origin_x) * k, 0, (seg.clip_x1 - seg.origin_x) * k, src.height)
+                target = pymupdf.Rect(seg.clip_x0, bar.y_top, seg.clip_x1, bar.y_top + bar.height)
+                page.show_pdf_page(target, bar_doc, 0, clip=clip)
 
     @staticmethod
     def color_bar_placement(
-        sheet: SheetConfig, bg_config: BleedAndGutterConfig, zones: FreeZones, has_items: bool = True
+        sheet: SheetConfig, bg_config: BleedAndGutterConfig, zones: FreeZones, items: List[PlacedItem]
     ) -> Optional[ColorBarPlacement]:
         """
         Shkala qo'yish qoidalari:
         1. Bosish yo'nalishiga perpendikulyar, klapan (gripper) chetiga parallel — klapanga qarama-qarshi
            (orqa, yuqori) bo'sh tasmaga; klapan zonasiga hech qachon tushmaydi.
-        2. O'lchami o'zgartirilmaydi (densitometr/spektrofotometr kataklari 1:1 bo'lishi shart):
-           tasma tor bo'lsa shkala qo'yilmaydi.
-        3. Shkaladagi bosma markazi uchburchagi (▲) list markaziga — mashina o'qiga — to'g'rilanadi,
-           shunda bo'yoq zonalari raqamlari mashina zonalariga mos keladi.
-        4. List chetidan (gilotina xatoligi), montaj blokining tashqi fonidan va yuqori krop
-           chiziqlaridan xavfsiz masofada; listdan chiqqan qismi kesib tashlanadi.
+        2. Dizayn boshidan oxirigacha (montaj blokining tashqi foni bilan) — bo'yoq tushadigan har bir
+           zonada o'lchov kataklari bo'lishi shart. Shkala dizayndan qisqa bo'lsa, zonalar to'ri bo'yicha
+           (butun zonalar qadamida) takrorlanadi; dizayndan chiqqan qismi kesiladi.
+        3. O'lchami o'zgartirilmaydi (spektrofotometr kataklari 1:1): tasma tor bo'lsa shkala qo'yilmaydi.
+        4. Shkaladagi bosma markazi uchburchagi (▲) list markaziga — mashina o'qiga — to'g'rilanadi,
+           shunda shkala zonalari mashinaning bo'yoq zonalariga tushadi.
+        5. List chetidan (gilotina xatoligi), montaj blokining tashqi fonidan va yuqori krop
+           chiziqlaridan xavfsiz masofada.
         """
         meta = _color_bar_meta()
         if not meta:
             return None
         w = meta["width_mm"] * MM_TO_PT
         h = meta["height_mm"] * MM_TO_PT
-        # Krop chiziqlari tashqi fondan tashqariga chiqadigan qism ham band
+        period = meta.get("period_mm", meta["width_mm"]) * MM_TO_PT
+
+        # Vertikal: list cheti va krop chiziqlari (tashqi fondan tashqariga chiqadigan qismi) orasida
         crop_reach = (
             max(0.0, bg_config.crop_offset_pt + bg_config.crop_length_mm * MM_TO_PT - bg_config.outer_bleed_pt)
-            if has_items else 0.0
+            if items else 0.0
         )
-        lo, hi = EDGE_SAFE_PT, zones.top - max(crop_reach, 0.0) - BLEED_SAFE_PT
+        lo, hi = EDGE_SAFE_PT, zones.top - crop_reach - BLEED_SAFE_PT
         if hi - lo < h:
             return None
-        x0 = sheet.width_pt / 2.0 - meta["press_center_mm"] * MM_TO_PT
-        clip_x0 = max(x0, EDGE_SAFE_PT)
-        clip_x1 = min(x0 + w, sheet.width_pt - EDGE_SAFE_PT)
-        if clip_x1 - clip_x0 <= 0:
+
+        # Gorizontal: dizayn boshidan oxirigacha (tashqi fon bilan), list chetidan chiqmasdan
+        if items:
+            bleed = bg_config.outer_bleed_pt
+            span0 = min(it.trim_x for it in items) - bleed
+            span1 = max(it.trim_x + it.trim_w for it in items) + bleed
+        else:
+            span0 = sheet.margin_left_mm * MM_TO_PT
+            span1 = sheet.width_pt - sheet.margin_right_mm * MM_TO_PT
+        span0 = max(span0, EDGE_SAFE_PT)
+        span1 = min(span1, sheet.width_pt - EDGE_SAFE_PT)
+        if span1 <= span0:
             return None
-        return ColorBarPlacement(
-            x0=x0, y_top=(lo + hi) / 2.0 - h / 2.0, width=w, height=h, clip_x0=clip_x0, clip_x1=clip_x1
-        )
+
+        # Asosiy nusxa ▲ bilan list markazida, qolganlari zonalar qadamida chap/o'ngga
+        base = sheet.width_pt / 2.0 - meta["press_center_mm"] * MM_TO_PT
+        k_first = math.floor((span0 - base) / period)
+        k_last = math.floor((span1 - base) / period)
+        segments = []
+        for k in range(k_first, k_last + 1):
+            origin = base + k * period
+            # Oxirgi nusxa to'liq, oldingilari keyingi nusxa boshlanadigan joygacha
+            end = origin + (w if k == k_last else period)
+            c0, c1 = max(origin, span0), min(end, span1)
+            if c1 - c0 > 0.01:
+                segments.append(ColorBarSegment(origin_x=origin, clip_x0=c0, clip_x1=c1))
+        if not segments:
+            return None
+        return ColorBarPlacement(y_top=(lo + hi) / 2.0 - h / 2.0, width=w, height=h, segments=segments)
 
     @staticmethod
     def _free_zones(sheet: SheetConfig, bg_config: BleedAndGutterConfig, items: List[PlacedItem]) -> FreeZones:

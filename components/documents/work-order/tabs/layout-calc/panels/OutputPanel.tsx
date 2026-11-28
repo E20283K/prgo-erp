@@ -14,7 +14,7 @@ export function OutputPanel({ c, readOnly }: { c: SheetImpositionController; rea
   const barCells = c.calc?.forms[0]?.front_cells ?? [];
   const topBand = topFreeBand(barCells, s.marginTop, s.outerBleed);
   const barReach = cropReach(s.cropGap, barCells.length > 0);
-  const barMissing = !!s.colorBar && !colorBarPlacement(s.sheetW, topBand, barReach);
+  const barMissing = !!s.colorBar && !colorBarPlacement(barCells, s);
 
   return (
     <Section title="Montaj" icon={FileOutput}>
